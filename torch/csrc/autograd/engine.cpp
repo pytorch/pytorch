@@ -205,7 +205,7 @@ Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  at::DeviceGuard guard(at::kCUDA, device);
+  at::DeviceGuard guard(device);
   worker_device = device;
   thread_main(nullptr);
 }

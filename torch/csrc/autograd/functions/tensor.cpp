@@ -23,8 +23,8 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     grad_inputs[0] = at::zeros_like(grad);
   }
   if (should_compute_output(1)) {
-    at::DeviceGuard device_guard(at::kCUDA, src_device);
-    if (grad.is_cuda() && grad.get_device() != src_device.value_or(-1)) {
+    at::DeviceGuard device_guard(src_device);
+    if (grad.is_cuda() && grad.get_device() != src_device) {
       grad_inputs[1] = src_type->copy(grad);
     } else {
       grad_inputs[1] = grad.toType(*src_type);

@@ -227,7 +227,7 @@ static Value* createZerosLike(Value *v) {
   JIT_EXPECTM(v->isTensor(), "can't allocate zero gradient for a value without a type");
   Graph *graph = v->owningGraph();
   auto type = v->type()->expect<TensorType>();
-  at::DeviceGuard device_guard(at::kCUDA, type->device());
+  at::DeviceGuard device_guard(type->device());
 
   auto & at_type = type->device() == -1 ? at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
   auto zeros = at::zeros({}, at_type).expand(type->sizes());

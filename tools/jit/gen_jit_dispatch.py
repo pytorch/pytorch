@@ -43,12 +43,11 @@ CALL_NAMESPACE = CodeTemplate("""\
 auto result = at::${name}(${args});
 """)
 CALL_METHOD = CodeTemplate("""\
-DeviceGuard device_guard(at::kCUDA, deviceForInputs(stack, ${num_dynamic_inputs}));
+DeviceGuard device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
 auto result = (${first}).${name}(${args});
 """)
 CALL_TENSOR_OPTIONS = CodeTemplate("""\
-at::optional<int32_t> device_index;
-if (device[1] != -1) device_index = device[1];
+const auto device_index = static_cast<int32_t>(device[1]);
 const auto options = TensorOptions()
         .dtype(static_cast<at::ScalarType>(dtype))
         .layout(static_cast<at::Layout>(layout))

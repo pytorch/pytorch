@@ -1,7 +1,6 @@
 #include <ATen/Device.h>
 
 #include <ATen/Error.h>
-#include <ATen/optional.h>
 
 #include <exception>
 #include <ostream>
@@ -10,8 +9,7 @@
 
 namespace at {
 namespace {
-std::pair<optional<Device::Type>, size_t> parse_type(
-    const std::string& device_string) {
+std::pair<Device::Type, size_t> parse_type(const std::string& device_string) {
   auto position = device_string.find("cpu");
   if (position != std::string::npos) {
     return {Device::Type::CPU, 3};
@@ -20,33 +18,9 @@ std::pair<optional<Device::Type>, size_t> parse_type(
   if (position != std::string::npos) {
     return {Device::Type::CUDA, 4};
   }
-  return {nullopt, 0};
-}
-
-optional<int32_t> device_index_if_cuda_tensor(Tensor tensor) {
-  if (tensor.is_cuda()) {
-    return tensor.get_device();
-  }
-  return nullopt;
+  AT_ERROR("Expected 'cpu' or 'cuda' device type at start of device string");
 }
 } // namespace
-
-Device::Device(Tensor tensor)
-    : Device(tensor.type().backend(), device_index_if_cuda_tensor(tensor)) {}
-
-Device::Device(Type type, at::optional<int32_t> index)
-    : type_(type), index_(index) {
-  AT_CHECK(index.value_or(0) >= 0, "Device index must not be negative");
-  AT_CHECK(
-      !is_cpu() || index.value_or(0) == 0, "CPU device index must be zero");
-}
-
-Device::Device(Type type) : Device(type, nullopt) {}
-
-Device::Device(Backend backend, at::optional<int32_t> index)
-    : Device(backend_to_type(backend), index) {}
-
-Device::Device(Backend backend) : Device(backend, nullopt) {}
 
 // `std::regex` is still in a very incomplete state in GCC 4.8.x,
 // so we have to do our own parsing, like peasants.
@@ -72,28 +46,21 @@ Device::Device(Backend backend) : Device(backend, nullopt) {}
 //   index_ = std::stoi(match[3].str());
 // }
 Device::Device(const std::string& device_string) : Device(Type::CPU) {
-  at::optional<Device::Type> optional_type;
-  size_t position;
-  std::tie(optional_type, position) = parse_type(device_string);
-  if (optional_type.has_value()) {
-    type_ = optional_type.value();
-  }
+  AT_CHECK(!device_string.empty(), "Device string must not be empty");
 
-  // e.g. 'cuda', 'cpu' or the empty string.
+  size_t position;
+  std::tie(type_, position) = parse_type(device_string);
+
+  // e.g. 'cuda', 'cpu'.
   if (position == device_string.size()) {
     return;
   }
 
-  // e.g. 'cpu:1', 'cuda:123'
-  if (device_string[position] == ':') {
-    AT_CHECK(
-        optional_type.has_value(),
-        "Found ':' in device string '",
-        device_string,
-        "', but neither 'cpu' nor 'cuda' preceded it");
-    // Skip the colon.
-    position += 1;
-  }
+  AT_CHECK(
+      device_string[position] == ':',
+      "Expected ':' to separate device type from index in device string");
+  // Skip the colon.
+  position += 1;
 
   const auto index_string = device_string.substr(position);
   try {
@@ -106,14 +73,6 @@ Device::Device(const std::string& device_string) : Device(Type::CPU) {
         device_string,
         "'");
   }
-
-  // Now that we have a device index, the device type defaults to CUDA.
-  // e.g. '1', '123'
-  type_ = optional_type.value_or(Type::CUDA);
-}
-
-void Device::set_index(at::optional<int32_t> index) {
-  index_ = index;
 }
 
 } // namespace at
@@ -135,7 +94,7 @@ std::ostream& operator<<(std::ostream& stream, at::Device::Type type) {
 std::ostream& operator<<(std::ostream& stream, const at::Device& device) {
   stream << device.type();
   if (device.has_index()) {
-    stream << ":" << device.index().value();
+    stream << ":" << device.index();
   }
   return stream;
 }

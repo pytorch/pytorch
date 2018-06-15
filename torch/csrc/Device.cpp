@@ -7,7 +7,7 @@
 #include "torch/csrc/utils/pybind.h"
 
 #include <ATen/Device.h>
-#include <ATen/optional.h>
+#include <ATen/Error.h>
 
 #include <cstring>
 #include <structmember.h>
@@ -28,7 +28,7 @@ PyObject *THPDevice_repr(THPDevice *self)
   std::ostringstream oss;
   oss << "device(type=\'" << self->device.type() << "\'";
   if (self->device.has_index()) {
-    oss << ", index=" << *self->device.index();
+    oss << ", index=" << self->device.index();
   }
   oss << ")";
   return THPUtils_packString(oss.str().c_str());
@@ -60,11 +60,13 @@ PyObject *THPDevice_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
       throw std::runtime_error("type (string) must not include an index because index "
                                 "was passed explicitly: " + device_type);
     }
-    at::optional<int32_t> device_index;
+    int32_t device_index = -1;
     if (!r.isNone(1)) {
       device_index = r.toInt64(1);
+      // -1 is allowed in ATen/C++, to mean the default device, but not in
+      // Python.
+      AT_CHECK(device_index >= 0, "Device index must not be negative");
     }
-    // make sure this is constructible
     at::Device device(as_device.type(), device_index);
     return THPDevice_New(device);
   }
@@ -86,7 +88,7 @@ PyObject *THPDevice_index(THPDevice *self)
 {
   HANDLE_TH_ERRORS
   if (self->device.has_index()) {
-    return THPUtils_packInt64(*self->device.index());
+    return THPUtils_packInt64(self->device.index());
   } else {
     Py_RETURN_NONE;
   }
@@ -141,7 +143,7 @@ PyObject *THPDevice_reduce(THPDevice *self)
   std::ostringstream oss;
   oss << self->device.type();
   if (self->device.has_index()) {
-    args = THPObjectPtr{Py_BuildValue("(si)", oss.str().c_str(), *self->device.index())};
+    args = THPObjectPtr{Py_BuildValue("(si)", oss.str().c_str(), self->device.index())};
   } else {
     args = THPObjectPtr{Py_BuildValue("(s)", oss.str().c_str())};
   }

@@ -21,17 +21,9 @@ at::Tensor dispatch_type_conversion(
   }
   AutoNoGIL no_gil;
 
-  // See the documentation in tensor_conversion_dispatch.h to understand this.
-  if (!device_index.has_value() && self.is_cuda()) {
-    device_index = self.get_device();
-  }
-  if (*device_index == -1) {
-    device_index.reset();
-  }
-
-  at::DeviceGuard device_guard(at::kCUDA, device_index);
-
   const int32_t tensor_device = self.is_cuda() ? self.get_device() : -1;
+  at::DeviceGuard device_guard(device_index.value_or(tensor_device));
+
   if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);

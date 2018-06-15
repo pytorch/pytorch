@@ -28,7 +28,7 @@ void setDynamicType(Node * node) {
 
 at::Tensor representativeTensor(const TensorType * type) {
   auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
-  at::DeviceGuard device_guard(at::kCUDA, type->device());
+  at::DeviceGuard device_guard(type->device());
   auto & attype = at::getType(backend, type->scalarType());
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }

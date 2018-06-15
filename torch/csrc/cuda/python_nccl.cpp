@@ -146,8 +146,7 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
     at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_device({at::kCUDA, device});
+      device_guard.set_index(inputs[i].get_device());
       auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
       CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
            count, data_type, (ncclRedOp_t) op, root, comms[i], stream));
@@ -188,8 +187,7 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
     at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_device({at::kCUDA, device});
+      device_guard.set_index(inputs[i].get_device());
       auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
       CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
@@ -251,8 +249,7 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
     at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_device({at::kCUDA, device});
+      device_guard.set_index(inputs[i].get_device());
       auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
     #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
       CHECK(ncclAllGather(inputs[i].data_ptr(), outputs[i].data_ptr(),
@@ -296,8 +293,7 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
     at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
-      int device = inputs[i].get_device();
-      device_guard.set_device({at::kCUDA, device});
+      device_guard.set_index(inputs[i].get_device());
       auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
       CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));

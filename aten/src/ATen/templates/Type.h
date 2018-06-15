@@ -12,6 +12,7 @@
 #include "ATen/SparseTensorRef.h"
 #include "ATen/Tensor.h"
 #include "ATen/Deprecated.h"
+#include "ATen/Layout.h"
 
 #include <array>
 #include <cstddef>
@@ -47,6 +48,7 @@ struct AT_API Type {
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
+  Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;

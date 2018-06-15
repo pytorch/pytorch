@@ -181,7 +181,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
 
 static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_inds(indices.size());
-  int64_t device = self.is_cuda() ? self.get_device() : -1;
+  int32_t device = self.is_cuda() ? self.get_device() : -1;
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {

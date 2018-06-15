@@ -192,7 +192,7 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
   at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    device_guard.set_device({at::kCUDA, static_cast<int32_t>(tensors[i].get_device())});
+    device_guard.set_index(tensors[i].get_device());
     // TODO: use current stream
     const auto stream = (streams.empty() || !streams[i]) ? NULL : streams[i]->stream;
     CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));

@@ -15,7 +15,7 @@ using namespace at;
 
 TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
   TensorOptions options;
-  REQUIRE_OPTIONS(kCPU, nullopt, kFloat, kStrided);
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 }
 
 TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
@@ -25,10 +25,10 @@ TEST_CASE("TensorOptions/ReturnsTheCorrectType") {
 
 TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
   auto options = dtype(kInt);
-  REQUIRE_OPTIONS(kCPU, nullopt, kInt, kStrided);
+  REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
   options = layout(kSparse);
-  REQUIRE_OPTIONS(kCPU, nullopt, kFloat, kSparse);
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
 
   options = device({kCUDA, 1});
   REQUIRE_OPTIONS(kCUDA, 1, kFloat, kStrided);
@@ -42,24 +42,27 @@ TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
 
 TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
   auto options = TensorOptions();
-  REQUIRE_OPTIONS(kCPU, nullopt, kFloat, kStrided);
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
+
+  options = TensorOptions({kCPU, 0});
+  REQUIRE_OPTIONS(kCPU, 0, kFloat, kStrided);
 
   options = TensorOptions(kInt);
-  REQUIRE_OPTIONS(kCPU, nullopt, kInt, kStrided);
+  REQUIRE_OPTIONS(kCPU, -1, kInt, kStrided);
 
   options = TensorOptions(getType(kSparseCPU, kFloat));
-  REQUIRE_OPTIONS(kCPU, nullopt, kFloat, kSparse);
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kSparse);
 
   options = TensorOptions(getType(kSparseCPU, kByte));
-  REQUIRE_OPTIONS(kCPU, nullopt, kByte, kSparse);
+  REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
 TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
   auto options = TensorOptions(empty(5, kDouble));
-  REQUIRE_OPTIONS(kCPU, nullopt, kDouble, kStrided);
+  REQUIRE_OPTIONS(kCPU, -1, kDouble, kStrided);
 
   options = TensorOptions(empty(5, getType(kSparseCPU, kByte)));
-  REQUIRE_OPTIONS(kCPU, nullopt, kByte, kSparse);
+  REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
 }
 
 TEST_CASE("Device/ParsesCorrectlyFromString") {
@@ -75,14 +78,8 @@ TEST_CASE("Device/ParsesCorrectlyFromString") {
   device = Device("cuda");
   REQUIRE(device == Device(kCUDA));
 
-  device = Device("3");
-  REQUIRE(device == Device(kCUDA, 3));
-
-  device = Device("");
-  REQUIRE(device == Device(kCPU));
-
   std::vector<std::string> badnesses = {
-      "cud:1", "cuda:", "cpu::1", ":1", "tpu:4", "??"};
+      "", "cud:1", "cuda:", "cpu::1", ":1", "3", "tpu:4", "??"};
   for (const auto& badness : badnesses) {
     REQUIRE_THROWS(Device(badness));
   }

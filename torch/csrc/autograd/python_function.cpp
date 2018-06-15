@@ -53,7 +53,7 @@ VariableInfo::VariableInfo(const Variable& var)
 }
 
 Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
-  device_guard.set_device({at::kCUDA, device});
+  device_guard.set_index(device);
   return at::zeros(size, *type);
 }
 

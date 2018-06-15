@@ -509,7 +509,7 @@ void checkCUDAVersion(const cudaDeviceProp & prop) {
 struct CUDAFusionFunction : public CompiledFusionFunction {
   CUDAFusionFunction(const std::string & name, AnnotatedGraph & agraph)
   : CompiledFusionFunction(name, agraph) {
-    at::DeviceGuard device_guard(at::kCUDA, agraph.device);
+    at::DeviceGuard device_guard(agraph.device);
 
     TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
     checkCUDAVersion(prop);

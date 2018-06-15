@@ -337,7 +337,7 @@ static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwa
   }
   int32_t device_index = -1;
   if (device_obj.has_index() && device_obj.is_cuda()) {
-    device_index = device_obj.index().value();
+    device_index = device_obj.index();
   }
   return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, r.toBool(1)));
   END_HANDLE_TH_ERRORS
@@ -582,10 +582,7 @@ static PyObject * THPVariable_to(PyObject* self, PyObject* args, PyObject* kwarg
     auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
     auto& layout = *torch::getLayout(self_.type().backend());
     auto& type = torch::getType(scalarType.value_or(self_.type().scalarType()), layout, device->type());
-    at::optional<int32_t> device_index;
-    if (type.is_cuda()) {
-      device_index = device->index();
-    }
+    const int32_t device_index = type.is_cuda() ? device->index() : -1;
     return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, non_blocking));
   }
   Py_RETURN_NONE;

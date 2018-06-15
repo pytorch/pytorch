@@ -71,7 +71,7 @@ TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
 virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const;
 """)
 DEPRECATED_TYPE_METHOD_DECLARATION_CONCRETE = CodeTemplate("""\
-DEPRECATED(virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const);
+AT_DEPRECATED(virtual ${return_type} ${api_name}(${type_method_formals_with_defaults}) const);
 """)
 TYPE_METHOD_DEFINITION_CONCRETE = CodeTemplate("""\
 ${return_type} Type::${api_name}(${type_method_formals}) const {

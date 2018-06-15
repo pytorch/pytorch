@@ -6,9 +6,9 @@
 #include <ATen/ScalarType.h>
 #include <ATen/Tensor.h>
 #include <ATen/Type.h>
-#include <ATen/optional.h>
 
 #include <cstddef>
+#include <utility>
 
 namespace at {
 
@@ -23,15 +23,23 @@ struct TensorOptions {
   /// - dtype: float
   /// - device: CPU
   /// - layout: strided
+  /// - requires_grad: false
   TensorOptions() = default;
 
   /// Constructs the `TensorOptions` from the type of the given `Tensor`.
   /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
   /// tensor. See the constructor from `Type` for the semantics w.r.t. the
   /// `type()` method.
-  explicit TensorOptions(Tensor tensor, bool discard_runtime_type = false);
+  explicit TensorOptions(Tensor tensor, bool discard_runtime_type = false) {
+    if (!discard_runtime_type) {
+      type_ = &tensor.type();
+    }
+    this->dtype(tensor.type().scalarType());
+    this->device(Device(tensor));
+    this->layout(tensor.type().layout());
+  }
 
-  /// Constructs the `TensorOptions` from a type and optional `device_index`.
+  /// Constructs the `TensorOptions` from a type and a `device_index`.
   ///
   /// If `discard_runtime_type` is false (the default), the behavior of
   /// `TensorOptions::type()` is changed in that it will always return this
@@ -46,9 +54,15 @@ struct TensorOptions {
   /// type into its components and discard its runtime type.
   /* implicit */ TensorOptions(
       const Type& type,
-      at::optional<int32_t> device_index,
-      bool discard_runtime_type = false);
-  /* implicit */ TensorOptions(const Type& type);
+      int32_t device_index = -1,
+      bool discard_runtime_type = false) {
+    if (!discard_runtime_type) {
+      type_ = &type;
+    }
+    this->dtype(type.scalarType());
+    this->device({type.backend(), device_index});
+    this->layout(type.layout());
+  }
 
   /// Constructs a `TensorOptions` object with the given layout.
   /* implicit */ TensorOptions(Layout layout) : TensorOptions() {
@@ -56,11 +70,14 @@ struct TensorOptions {
   }
 
   /// Constructs a `TensorOptions` object with the given device.
-  /* implicit */ TensorOptions(Device device);
+  /* implicit */ TensorOptions(Device device) : TensorOptions() {
+    this->device(device);
+  }
 
   /// Constructs a `TensorOptions` object from a backend, forwarded to the
   /// `Device` constructor.
-  /* implicit */ TensorOptions(Backend backend);
+  /* implicit */ TensorOptions(Backend backend)
+      : TensorOptions(Device(backend)) {}
 
   /// Constructs a `TensorOptions` object with the given dtype.
   /* implicit */ TensorOptions(ScalarType dtype) : TensorOptions() {
@@ -81,11 +98,16 @@ struct TensorOptions {
   // header. Who knows why?
 
   /// Sets the device of the `TensorOptions`.
-  TensorOptions& device(Device device);
+  TensorOptions& device(Device device) {
+    device_ = std::move(device);
+    return *this;
+  }
 
   /// Sets the device of the `TensorOptions` to CUDA, and then sets the device
   /// index to the given one.
-  TensorOptions& device_index(int32_t device_index);
+  TensorOptions& device_index(int32_t device_index) {
+    return device({Device::Type::CUDA, device_index});
+  }
 
   /// Sets the dtype of the `TensorOptions`.
   TensorOptions& dtype(ScalarType dtype) {
@@ -110,8 +132,8 @@ struct TensorOptions {
     return device_;
   }
 
-  /// Returns the optional device index of the `TensorOptions`.
-  const at::optional<int32_t>& device_index() const noexcept {
+  /// Returns the device index of the `TensorOptions`.
+  int32_t device_index() const noexcept {
     return device_.index();
   }
 
@@ -146,7 +168,7 @@ struct TensorOptions {
 
  protected:
   ScalarType dtype_{kFloat};
-  Device device_{kCPU};
+  Device device_{Device::Type::CPU};
   Layout layout_{Layout::Strided};
   bool requires_grad_{false};
   // Not part of the observable API, so make `mutable` so we can set it to
