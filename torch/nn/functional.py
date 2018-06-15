@@ -719,6 +719,25 @@ In-place version of :func:`~selu`.
 """)
 
 
+def celu(input, alpha=1., inplace=False):
+    r"""celu(input, alpha=1., inplace=False) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`.
+
+    See :class:`~torch.nn.CELU` for more details.
+    """
+    if inplace:
+        return torch.celu_(input)
+    return torch.celu(input)
+
+celu_ = _add_docstr(torch.celu_, r"""
+celu(input, alpha=1.) -> Tensor
+
+In-place version of :func:`~celu`.
+""")
+
+
 def leaky_relu(input, negative_slope=0.01, inplace=False):
     r"""
     leaky_relu(input, negative_slope=0.01, inplace=False) -> Tensor

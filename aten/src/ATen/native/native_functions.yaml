@@ -908,6 +908,12 @@
 - func: selu_(Tensor self) -> Tensor
   variants: function
 
+- func: celu(Tensor self, Scalar alpha=1.0) -> Tensor
+  variants: function
+
+- func: celu_(Tensor self, Scalar alpha=1.0) -> Tensor
+  variants: function
+
 - func: sin(Tensor self) -> Tensor
 
 - func: sin_(Tensor self) -> Tensor

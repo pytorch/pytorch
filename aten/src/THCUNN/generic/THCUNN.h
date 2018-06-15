@@ -125,6 +125,7 @@ THC_API void THNN_(ELU_updateOutput)(
                   THCTensor *output,
                   accreal alpha,
                   accreal scale,
+                  accreal input_scale,
                   bool inplace);
 
 THC_API void THNN_(ELU_updateGradInput)(
@@ -133,7 +134,8 @@ THC_API void THNN_(ELU_updateGradInput)(
                   THCTensor *gradInput,
                   THCTensor *output,
                   accreal alpha,
-                  accreal scale);
+                  accreal scale,
+                  accreal input_scale);
 
 THC_API void THNN_(FeatureLPPooling_updateOutput)(
                   THCState* state,

@@ -299,6 +299,43 @@ class ELU(Module):
         return 'alpha={}{}'.format(self.alpha, inplace_str)
 
 
+class CELU(Module):
+    r"""Applies element-wise,
+    :math:`\text{CELU}(x) = \max(0,x) + \min(0, \alpha * (\exp(x/\alpha) - 1))`
+
+    More details can be found in the paper `Continuously Differentiable Exponential Linear Units`_ .
+
+    Args:
+        alpha: the :math:`\alpha` value for the CELU formulation. Default: 1.0
+        inplace: can optionally do the operation in-place. Default: ``False``
+
+    Shape:
+        - Input: :math:`(N, *)` where `*` means, any number of additional
+          dimensions
+        - Output: :math:`(N, *)`, same shape as the input
+
+    .. image:: scripts/activation_images/CELU.png
+
+    Examples::
+
+        >>> m = nn.CELU()
+        >>> input = torch.randn(2)
+        >>> output = m(input)
+    """
+
+    def __init__(self, alpha=1., inplace=False):
+        super(CELU, self).__init__()
+        self.alpha = alpha
+        self.inplace = inplace
+
+    def forward(self, input):
+        return F.celu(input, self.alpha, self.inplace)
+
+    def extra_repr(self):
+        inplace_str = ', inplace' if self.inplace else ''
+        return 'alpha={}{}'.format(self.alpha, inplace_str)
+
+
 class SELU(Module):
     r"""Applies element-wise,
     :math:`\text{SELU}(x) = \text{scale} * (\max(0,x) + \min(0, \alpha * (\exp(x) - 1)))`,

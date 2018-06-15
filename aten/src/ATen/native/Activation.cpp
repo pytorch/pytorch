@@ -18,11 +18,19 @@ Tensor & relu_(Tensor & self) {
 }
 
 Tensor selu(const Tensor & self) {
-  return at::elu(self, SELU_ALPHA, SELU_SCALE);
+  return at::elu(self, SELU_ALPHA, SELU_SCALE, 1.0);
 }
 
 Tensor & selu_(Tensor & self) {
-  return at::elu_(self, SELU_ALPHA, SELU_SCALE);
+  return at::elu_(self, SELU_ALPHA, SELU_SCALE, 1.0);
+}
+
+Tensor celu(const Tensor & self, Scalar alpha) {
+  return at::elu(self, 1.0, alpha, 1 / alpha);
+}
+
+Tensor & celu_(Tensor & self, Scalar alpha) {
+  return at::elu_(self, 1.0, alpha, 1 / alpha);
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
