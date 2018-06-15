@@ -3,6 +3,12 @@
 
 namespace caffe2 {
 
+const char* githubLinks = R"DOC(
+  Github Links:
+  - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/counter_ops.cc
+
+)DOC";
+
 const char* kCountExample = R"DOC(
 <details>
 
@@ -192,7 +198,7 @@ OPERATOR_SCHEMA(CreateCounter)
 Creates a count-down counter with initial value specified by the `init_count`
 argument.
 
-)DOC" + (string) kCountExample)
+)DOC" + (string) githubLinks + (string) kCountExample)
     .Output(
         0,
         "counter",
@@ -207,7 +213,7 @@ OPERATOR_SCHEMA(ResetCounter)
     .SetDoc(R"DOC(
 Resets a count-down counter with initial value specified by the `init_count`
 argument.
-)DOC" + (string) kCountExample)
+)DOC" + (string) githubLinks + (string) kCountExample)
     .Input(
         0,
         "counter",
@@ -226,7 +232,7 @@ OPERATOR_SCHEMA(CountDown)
     .SetDoc(R"DOC(
 If the internal count value > 0, decreases count value by 1 and outputs False,
 otherwise outputs True.
-)DOC" + (string) kCountExample)
+)DOC" + (string) githubLinks + (string) kCountExample)
     .Input(
         0,
         "counter",
@@ -241,7 +247,7 @@ OPERATOR_SCHEMA(CheckCounterDone)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 If the internal count value <= 0, outputs true, otherwise outputs false.
-)DOC" + (string) kCountExample)
+)DOC" + (string) githubLinks + (string) kCountExample)
     .Input(
         0,
         "counter",
@@ -256,7 +262,7 @@ OPERATOR_SCHEMA(CountUp)
     .NumOutputs(1)
     .SetDoc(R"DOC(
 Increases count value by 1 and outputs the previous value atomically.
-)DOC" + (string) kCountExample)
+)DOC" + (string) githubLinks + (string) kCountExample)
     .Input(
         0,
         "counter",
@@ -272,7 +278,7 @@ OPERATOR_SCHEMA(RetrieveCount)
     .ScalarType(TensorProto::INT64)
     .SetDoc(R"DOC(
 Retrieve the current value from the counter as an integer.
-)DOC" + (string) kCountExample)
+)DOC" + (string) githubLinks + (string) kCountExample)
     .Input(
         0,
         "counter",
