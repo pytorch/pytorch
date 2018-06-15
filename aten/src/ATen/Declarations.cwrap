@@ -3886,7 +3886,7 @@
 ]]
 
 [[
-  name: _th_dimI
+  name: _th_sparseDims
   cname: nDimensionI
   variants:
     - function
@@ -3899,7 +3899,7 @@
 ]]
 
 [[
-  name: _th_dimV
+  name: _th_denseDims
   cname: nDimensionV
   variants:
     - function

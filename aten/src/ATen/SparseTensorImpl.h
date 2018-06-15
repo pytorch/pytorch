@@ -11,8 +11,8 @@ struct SparseTensorImpl : public TensorImpl {
   std::vector<int64_t> size_;
   // INVARIANT: indices_.size(1) >= nnz_ && values_.size(0) >= nnz_
   int64_t nnz_ = 0;
-  int64_t dimI_ = 0; // number of sparse dimensions
-  int64_t dimV_ = 0; // number of dense dimensions
+  int64_t sparseDims_ = 0; // number of sparse dimensions
+  int64_t denseDims_ = 0; // number of dense dimensions
 
   // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
   // as buffer, so we keep track of both
@@ -30,8 +30,8 @@ public:
   explicit SparseTensorImpl(Type * type);
 
   int64_t nnz() const { return nnz_; }
-  int64_t dimI() const { return dimI_; }
-  int64_t dimV() const { return dimV_; }
+  int64_t sparseDims() const { return sparseDims_; }
+  int64_t denseDims() const { return denseDims_; }
   bool coalesced() const { return coalesced_; }
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
@@ -48,17 +48,17 @@ public:
   // TODO: Figure out a more safe way to provide this functionality
   std::vector<int64_t>& _sizes_mut() { return size_; }
 
-  // WARNING: This function does NOT preserve invariants of dimI/dimV with
+  // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with
   // respect to indices and values
-  void raw_resize_(int64_t dimI, int64_t dimV, ArrayRef<int64_t> size) {
+  void raw_resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
     // UGHHHHH.  Legacy special case
     if (size.size() == 0) {
       size_ = {0};
     } else {
       size_ = size;
     }
-    dimI_ = dimI;
-    dimV_ = dimV;
+    sparseDims_ = sparseDims;
+    denseDims_ = denseDims;
   }
 
   // TODO: I hate these two setters, please get rid of them!!!

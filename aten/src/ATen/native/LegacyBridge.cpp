@@ -366,11 +366,11 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values, Ar
 }
 
 
-Tensor& sparse_raw_resize_(Tensor& self, ArrayRef<int64_t> size, int64_t dimI, int64_t dimV) {
+Tensor& sparse_raw_resize_(Tensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
   if (_has_native(self)) {
-    return native_sparse_raw_resize_(self, size, dimI, dimV);
+    return native_sparse_raw_resize_(self, size, sparseDims, denseDims);
   } else {
-    return th_sparse_raw_resize_(self, size, dimI, dimV);
+    return th_sparse_raw_resize_(self, size, sparseDims, denseDims);
   }
 }
 
@@ -391,19 +391,19 @@ Tensor to_dense(const Tensor& self) {
   }
 }
 
-int64_t _dimI(const Tensor& self) {
+int64_t _sparseDims(const Tensor& self) {
   if (_has_native(self)) {
-    return _native_dimI(self);
+    return _native_sparseDims(self);
   } else {
-    return _th_dimI(self);
+    return _th_sparseDims(self);
   }
 }
 
-int64_t _dimV(const Tensor& self) {
+int64_t _denseDims(const Tensor& self) {
   if (_has_native(self)) {
-    return _native_dimV(self);
+    return _native_denseDims(self);
   } else {
-    return _th_dimV(self);
+    return _th_denseDims(self);
   }
 }
 

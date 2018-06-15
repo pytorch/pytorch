@@ -13,12 +13,12 @@ int THSTensor_(nDimension)(const THSTensor *self)
 
 int THSTensor_(nDimensionI)(const THSTensor *self)
 {
-  THError("Internal error! THSTensor_(nDimensionI)(self) shouldn't be called; use self._dimI() instead");
+  THError("Internal error! THSTensor_(nDimensionI)(self) shouldn't be called; use self._sparseDims() instead");
 }
 
 int THSTensor_(nDimensionV)(const THSTensor *self)
 {
-  THError("Internal error! THSTensor_(nDimensionV)(self) shouldn't be called; use self._dimV() instead");
+  THError("Internal error! THSTensor_(nDimensionV)(self) shouldn't be called; use self._denseDims() instead");
 }
 
 int64_t THSTensor_(size)(const THSTensor *self, int dim)
@@ -55,7 +55,7 @@ static void THSTensor_(rawInit)(THSTensor *self)
 }
 
 THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size) {
-  THError("Internal error! THSTensor_(rawResize)(self, nDimI, nDimV, size) shouldn't be called; use _get_sparse_impl(self)->raw_resize_(dimI, dimV, size) instead");
+  THError("Internal error! THSTensor_(rawResize)(self, nDimI, nDimV, size) shouldn't be called; use _get_sparse_impl(self)->raw_resize_(sparseDims, denseDims, size) instead");
 }
 
 // directly assign without cloning or retaining (internal method)

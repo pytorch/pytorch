@@ -28,7 +28,7 @@ namespace {
   }
 
   bool _is_same_density(const SparseTensor& self, const SparseTensor& src) {
-    return self._dimI() == src._dimI() && self._dimV() == src._dimV();
+    return self._sparseDims() == src._sparseDims() && self._denseDims() == src._denseDims();
   }
 
   // TODO: This is a temporary stop-gap, to allow us to perform some private
@@ -221,12 +221,12 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
   // saving those because they can be overwritten when doing in-place operations
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz(), max_nnz = t_nnz + s_nnz;
   bool t_coalesced = t.is_coalesced(), s_coalesced = src.is_coalesced();
-  int64_t dimI = src._dimI();
+  int64_t sparseDims = src._sparseDims();
   LongTensor t_indices = t._indices();
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
-  LongTensor r_indices = t_indices.type().tensor({dimI, max_nnz});
+  LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
   Tensor r_values = _new_values_with_size_of(s_values, max_nnz).zero_();
   r.resize_as_(src);
   _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);  // TODO: sigh
@@ -253,7 +253,7 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
             cmp = 1;
           } else {
             cmp = 0;
-            for (d = 0; d < dimI; d++) {
+            for (d = 0; d < sparseDims; d++) {
               if (t_indices_accessor[d][t_i] < src_indices_accessor[d][s_i]) {
                 cmp = 1;
                 break;
@@ -265,7 +265,7 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
             }
           }
           if (cmp >= 0) {
-            for (d = 0; d < dimI; d++) {
+            for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
             }
             thblas::axpy<scalar_t>(blockSize, 1,
@@ -274,7 +274,7 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
             t_i++;
           }
           if (cmp <= 0) {
-            for (d = 0; d < dimI; d++) {
+            for (d = 0; d < sparseDims; d++) {
               r_indices_accessor[d][r_i] = src_indices_accessor[d][s_i];
             }
             thblas::axpy<scalar_t>(blockSize, cast_value,
@@ -325,7 +325,7 @@ void add_dense_sparse_worker_cpu(Tensor& r, Scalar value, const SparseTensor& sp
   #pragma omp parallel for private(k)
   for (k = 0; k < sparse._nnz(); k++) {
     int64_t index = r.storage_offset();
-    for (int64_t d = 0; d < sparse._dimI(); d++) {
+    for (int64_t d = 0; d < sparse._sparseDims(); d++) {
       index += r.stride(d) * indices_accessor[d][k];
     }
     r_ptr[index] += cast_value * values_accessor[k];
@@ -344,7 +344,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
   LongTensor indices = sparse._indices();
   Tensor values = sparse._values();
   int64_t nDim = dense.dim();
-  int64_t nDimI = sparse._dimI();
+  int64_t nDimI = sparse._sparseDims();
 
   if (!isSameTensor(r, dense)) r.copy_(dense);
   if (sparse._nnz() == 0) return r;
@@ -354,7 +354,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, SparseTensorRef
     auto indices_accessor = indices.accessor<int64_t, 2>();
     for (int64_t k = 0; k < sparse._nnz(); k++) {
       Tensor dstBuffer = r;
-      for (int64_t d = 0; d < sparse._dimI(); d++) {
+      for (int64_t d = 0; d < sparse._sparseDims(); d++) {
         dstBuffer = dstBuffer.select(0, indices_accessor[d][k]);
       }
       Tensor srcBuffer = values.select(0, k);
@@ -423,12 +423,12 @@ SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, cons
   // saving those because they can be overwritten when doing in-place operations
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz();
   int64_t max_nnz = std::min(t_nnz, s_nnz);  // multiply by zero is zero, and can be dropped
-  int64_t dimI = src._dimI();
+  int64_t sparseDims = src._sparseDims();
   LongTensor t_indices = t._indices();
   Tensor t_values = t._values();
   LongTensor src_indices = src._indices();
   Tensor s_values = src._values();
-  LongTensor r_indices = t_indices.type().tensor({dimI, max_nnz});
+  LongTensor r_indices = t_indices.type().tensor({sparseDims, max_nnz});
   Tensor r_values = _new_values_with_size_of(t_values, max_nnz).zero_();
   r.resize_as_(src);
   _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);  // TODO: sigh
@@ -446,7 +446,7 @@ SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, cons
   // indices were found.
   auto index_preamble = [&]() {
     match = 1;
-    for (d = 0; d < dimI; d++) {
+    for (d = 0; d < sparseDims; d++) {
       if (t_indices_accessor[d][t_i] < src_indices_accessor[d][s_i]) {
         t_i++;
         match = 0;
@@ -459,7 +459,7 @@ SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, cons
       }
     }
     if (!match) return false;
-    for (d = 0; d < dimI; d++) {
+    for (d = 0; d < sparseDims; d++) {
       r_indices_accessor[d][r_i] = t_indices_accessor[d][t_i];
     }
     return true;
@@ -568,8 +568,8 @@ Tensor& s_addmm_out_sparse_dense_cpu(
     Scalar alpha
 ) {
   // TODO: This error message seems awfully opaque
-  AT_CHECK(sparse_._dimI() == 2, "matrices expected, got ", sparse_._dimI(), "D tensor");
-  AT_CHECK(sparse_._dimV() == 0, "scalar values expected, got ", sparse_._dimV(), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2, "matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0, "scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2, "matrices expected, got ", dense.dim(), "D tensor");
 
   SparseTensor sparse = sparse_.coalesce();
@@ -639,10 +639,10 @@ Tensor& s_addmm_sparse_dense_cpu_(
 SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_, const Tensor& dense) {
   // TODO: Make this a real argument
   Scalar alpha = 1;
-  AT_CHECK(sparse_._dimI() == 2,
-      "Argument #2: matrices expected, got ", sparse_._dimI(), "D tensor");
-  AT_CHECK(sparse_._dimV() == 0,
-      "Argument #2: scalar values expected, got ", sparse_._dimV(), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2,
+      "Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0,
+      "Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
       "Argument #2: matrices expected, got ", dense.dim(), "D tensor");
 
@@ -714,10 +714,10 @@ SparseTensor& _sspaddmm_out_cpu(
     Scalar beta,
     Scalar alpha
 ) {
-  AT_CHECK(sparse_._dimI() == 2,
-      "Argument #2: matrices expected, got ", sparse_._dimI(), "D tensor");
-  AT_CHECK(sparse_._dimV() == 0,
-      "Argument #2: scalar values expected, got ", sparse_._dimV(), "D values");
+  AT_CHECK(sparse_._sparseDims() == 2,
+      "Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0,
+      "Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
       "Argument #2: matrices expected, got ", dense.dim(), "D tensor");
 

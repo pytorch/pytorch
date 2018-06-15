@@ -6,13 +6,13 @@ namespace at {
 // SparseTensorImpl defaults to a [0] size tensor with one sparse dimension and
 // no dense dimensions.  This is kind of arbitrary but we want an empty tensor
 // to have one dimension (zero dimensions means its scalar), and we have
-// the invariant that dim == dimI + dimV, so *one* of the inner dimensions
+// the invariant that dim == sparseDims + denseDims, so *one* of the inner dimensions
 // has to be one.
 SparseTensorImpl::SparseTensorImpl(Type * type)
     : TensorImpl(type)
     , size_{0}
-    , dimI_(1)
-    , dimV_(0)
+    , sparseDims_(1)
+    , denseDims_(0)
     , indices_(type->toDense().toScalarType(ScalarType::Long).tensor())
     , values_(type->toDense().tensor()) {
       AT_ASSERT(type->is_sparse());
@@ -29,7 +29,7 @@ IntList SparseTensorImpl::strides() const {
   AT_ERROR("sparse tensors do not have strides");
 }
 int64_t SparseTensorImpl::dim() const {
-  return dimI_ + dimV_;
+  return sparseDims_ + denseDims_;
 }
 Scalar SparseTensorImpl::localScalar() {
   AT_ERROR("sparse tensors cannot be scalars");
@@ -52,8 +52,8 @@ void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tenso
   if (!empty) {
     AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz");
     AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz");
-    AT_CHECK(indices.size(0) == dimI_, "indices has incorrect first dimension, expected ", dimI_, ", got ", indices.size(0));
-    AT_CHECK(values.dim() == dimV_ + 1, "values has incorrect number of dimensions, expected ", dimV_ + 1, ", got ", values.dim());
+    AT_CHECK(indices.size(0) == sparseDims_, "indices has incorrect first dimension, expected ", sparseDims_, ", got ", indices.size(0));
+    AT_CHECK(values.dim() == denseDims_ + 1, "values has incorrect number of dimensions, expected ", denseDims_ + 1, ", got ", values.dim());
   } else {
     AT_CHECK(indices.numel() == 0, "if values is empty, indices must be empty too");
   }
