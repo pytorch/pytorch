@@ -7286,12 +7286,16 @@ new_module_tests = [
     dict(
         module_name='CELU',
         input_size=(3, 2, 5),
-        check_inplace=True
+        constructor_args=(2.,),
+        check_inplace=True,
+        reference_fn=lambda x, _: torch.where(x >= 0, x, 2. * ((.5 * x).exp() - 1))
     ),
     dict(
         module_name='CELU',
         input_size=(),
+        constructor_args=(2.,),
         check_inplace=True,
+        reference_fn=lambda x, _: torch.where(x >= 0, x, 2. * ((.5 * x).exp() - 1)),
         desc='scalar'
     ),
     dict(

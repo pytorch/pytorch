@@ -728,8 +728,8 @@ def celu(input, alpha=1., inplace=False):
     See :class:`~torch.nn.CELU` for more details.
     """
     if inplace:
-        return torch.celu_(input)
-    return torch.celu(input)
+        return torch.celu_(input, alpha)
+    return torch.celu(input, alpha)
 
 celu_ = _add_docstr(torch.celu_, r"""
 celu_(input, alpha=1.) -> Tensor
