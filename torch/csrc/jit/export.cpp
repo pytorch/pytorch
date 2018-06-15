@@ -389,7 +389,7 @@ std::string nlidt(size_t indent) {
   return std::string("\n") + idt(indent);
 }
 
-void dump(onnx::TensorProto tensor, std::ostream& stream) {
+void dump(const onnx::TensorProto& tensor, std::ostream& stream) {
   stream << "TensorProto shape: [";
   for (int i = 0; i < tensor.dims_size(); ++i) {
     stream << tensor.dims(i) << (i == tensor.dims_size() - 1 ? "" : " ");
@@ -397,7 +397,7 @@ void dump(onnx::TensorProto tensor, std::ostream& stream) {
   stream << "]";
 }
 
-void dump(onnx::TensorShapeProto shape, std::ostream& stream) {
+void dump(const onnx::TensorShapeProto& shape, std::ostream& stream) {
   for (int i = 0; i < shape.dim_size(); ++i) {
     auto &dim = shape.dim(i);
     if (dim.has_dim_value()) {
@@ -409,25 +409,25 @@ void dump(onnx::TensorShapeProto shape, std::ostream& stream) {
   }
 }
 
-void dump(onnx::TypeProto_Tensor tensor_type, std::ostream& stream) {
+void dump(const onnx::TypeProto_Tensor& tensor_type, std::ostream& stream) {
   stream << "Tensor dims: ";
   dump(tensor_type.shape(), stream);
 }
 
-void dump(onnx::TypeProto type, std::ostream& stream) {
+void dump(const onnx::TypeProto& type, std::ostream& stream) {
   dump(type.tensor_type(), stream);
 }
 
-void dump(onnx::ValueInfoProto value_info, std::ostream& stream) {
+void dump(const onnx::ValueInfoProto& value_info, std::ostream& stream) {
   stream << "{name: \"" << value_info.name()
          << "\", type:";
   dump(value_info.type(), stream);
   stream << "}";
 }
 
-void dump(onnx::GraphProto graph, std::ostream& stream, size_t indent);
+void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent);
 
-void dump(onnx::AttributeProto attr, std::ostream& stream, size_t indent) {
+void dump(const onnx::AttributeProto& attr, std::ostream& stream, size_t indent) {
   stream << "{ name: '" << attr.name() << "', type: ";
   if (attr.has_f()) {
     stream << "float, value: " << attr.f();
@@ -475,7 +475,7 @@ void dump(onnx::AttributeProto attr, std::ostream& stream, size_t indent) {
   stream << "}";
 }
 
-void dump(onnx::NodeProto node, std::ostream& stream, size_t indent) {
+void dump(const onnx::NodeProto& node, std::ostream& stream, size_t indent) {
   stream << "Node {type: \"" << node.op_type() << "\", inputs: [";
   for (int i = 0; i < node.input_size(); ++i) {
     stream << node.input(i) << (i == node.input_size() - 1 ? "" : ",");
@@ -492,7 +492,7 @@ void dump(onnx::NodeProto node, std::ostream& stream, size_t indent) {
   stream << "]}";
 }
 
-void dump(onnx::GraphProto graph, std::ostream& stream, size_t indent) {
+void dump(const onnx::GraphProto& graph, std::ostream& stream, size_t indent) {
   stream << idt(indent) << "GraphProto {" << nlidt(indent+1)
          << "name: \"" << graph.name() << "\"" << nlidt(indent+1)
          << "inputs: [";
@@ -521,11 +521,11 @@ void dump(onnx::GraphProto graph, std::ostream& stream, size_t indent) {
   stream << nlidt(indent+1) << "]\n" << idt(indent) << "}\n";
 }
 
-void dump(onnx::OperatorSetIdProto operator_set_id, std::ostream& stream) {
+void dump(const onnx::OperatorSetIdProto& operator_set_id, std::ostream& stream) {
   stream << "OperatorSetIdProto { domain: " << operator_set_id.domain() << "}";
 }
 
-void dump(onnx::ModelProto model, std::ostream& stream, size_t indent) {
+void dump(const onnx::ModelProto& model, std::ostream& stream, size_t indent) {
   stream << idt(indent)
          << "ModelProto {" << nlidt(indent+1)
          << "producer_name: \"" << model.producer_name() << "\"" << nlidt(indent+1)
@@ -546,7 +546,7 @@ void dump(onnx::ModelProto model, std::ostream& stream, size_t indent) {
 }
 } // namespace
 
-std::string prettyPrint(onnx::ModelProto model) {
+std::string prettyPrint(const onnx::ModelProto& model) {
   std::stringstream ss;
   dump(model, ss, 0);
   return ss.str();
