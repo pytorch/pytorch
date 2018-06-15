@@ -26,15 +26,14 @@ void Type::registerCPU(Context * context) {
 }
 
 Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const {
-  const DeviceGuard device_guard(self);
   Tensor b_src;
   std::tie(b_src) = expand_inplace(self, src, "copy");
   return s_copy_(self, b_src, non_blocking);
 }
 
 Tensor Type::copy(const Tensor & src, bool non_blocking) const {
+  // TODO(psag): have a DeviceGuard here
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
-  const DeviceGuard device_guard(src);
   if (is_sparse()) {
     auto indices = src._indices();
     auto values = src._values();

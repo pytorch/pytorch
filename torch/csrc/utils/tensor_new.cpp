@@ -92,6 +92,10 @@ Tensor new_with_type_conversion(const Type& type, Tensor other, int32_t device_i
 Tensor new_with_tensor_copy(const Type& type, Tensor other, int32_t device_index) {
   maybe_initialize_cuda(type);
   AutoNoGIL no_gil;
+  at::DeviceGuard device_guard;
+  if (type.is_cuda()) {
+    device_guard.set_index(device_index);
+  }
   return type.copy(other);
 }
 
