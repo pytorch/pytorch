@@ -20,18 +20,17 @@ kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType>
                           cuda::detail::TensorInfo<scalar_t, IndexType> out_tensor_info,
                           IndexType N,
                           int flip_dim,
-                          int64_t total_dims) {
+                          IndexType total_dims) {
   for (IndexType linear_index = blockIdx.x * blockDim.x + threadIdx.x; linear_index < N; linear_index += gridDim.x * blockDim.x) {
-    int64_t cur_indices = linear_index, rem = 0, dst_offset = 0;
-    for (int64_t i = 0; i < total_dims; i++) {
-      int64_t temp = cur_indices;
-      cur_indices = cur_indices / in_tensor_info.strides[i];
-      rem = temp - cur_indices * in_tensor_info.strides[i];
-      if (i == flip_dim) {
-        cur_indices = in_tensor_info.sizes[i] - 1 - cur_indices;
-      }
-      dst_offset += cur_indices * in_tensor_info.strides[i];
-      cur_indices = rem;
+    IndexType dst_offset = 0;
+    if (flip_dim == 0) {
+      // flip 1st dim
+      dst_offset = (in_tensor_info.sizes[0] - 1 - linear_index / in_tensor_info.strides[0]) * in_tensor_info.strides[0] + linear_index % in_tensor_info.strides[0];
+    }
+    else {
+      // flip last dim
+      IndexType i = total_dims - 1;
+      dst_offset = linear_index / in_tensor_info.strides[0] * in_tensor_info.strides[0] + (in_tensor_info.sizes[i] - 1 - linear_index % in_tensor_info.strides[0]);
     }
     out_tensor_info.data[dst_offset] = in_tensor_info.data[linear_index];
   }
