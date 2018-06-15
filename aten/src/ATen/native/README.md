@@ -74,7 +74,7 @@ signature.
 - `std::array<bool,N>` (where N is `1-4`).  NB: you MUST NOT put a space after the comma, otherwise
   this argument will not parse correctly.  (If you decide to fix this, make sure you fix the
   argument parser both in ATen and in PyTorch.)
-- `*` is a special sentinel argument, which doesn't translate into a real
+- `*` is a special sentinel argument, which doesn't translate into an actual
   argument, but indicates that in the Python bindings, any subsequent arguments
   must be specified as keyword arguments (and cannot be provided positionally).
 
