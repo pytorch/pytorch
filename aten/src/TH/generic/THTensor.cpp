@@ -155,30 +155,32 @@ THTensor *THTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride)
   return THTensor_(newWithStorage)(NULL, 0, size, stride);
 }
 
+THTensor *THTensor_(newWithSizeIntList)(at::IntList sizes) {
+  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
+  THTensor_(rawInit)(self);
+  THTensor_(resizeNd)(self, sizes.size(), const_cast<int64_t*>(sizes.data()), nullptr);
+
+  return self;
+}
+
 THTensor *THTensor_(newWithSize1d)(int64_t size0)
 {
-  return THTensor_(newWithSize4d)(size0, -1, -1, -1);
+  return THTensor_(newWithSizeIntList)({size0});
 }
 
 THTensor *THTensor_(newWithSize2d)(int64_t size0, int64_t size1)
 {
-  return THTensor_(newWithSize4d)(size0, size1, -1, -1);
+  return THTensor_(newWithSizeIntList)({size0, size1});
 }
 
 THTensor *THTensor_(newWithSize3d)(int64_t size0, int64_t size1, int64_t size2)
 {
-  return THTensor_(newWithSize4d)(size0, size1, size2, -1);
+  return THTensor_(newWithSizeIntList)({size0, size1, size2});
 }
 
 THTensor *THTensor_(newWithSize4d)(int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
-  int64_t size[4] = {size0, size1, size2, size3};
-
-  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
-  THTensor_(rawInit)(self);
-  THTensor_(resizeNdLegacy)(self, 4, size, NULL);
-
-  return self;
+  return THTensor_(newWithSizeIntList)({size0, size1, size2, size3});
 }
 
 THTensor *THTensor_(newClone)(THTensor *self)
@@ -287,6 +289,18 @@ THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
 }
 
 /* Resize */
+void THTensor_(resize)(THTensor *self, THLongStorage *size, THLongStorage *stride)
+{
+  THArgCheck(size != NULL, 2, "invalid size");
+  if(stride)
+    THArgCheck(stride->size == size->size, 3, "invalid stride");
+
+#ifdef DEBUG
+  THAssert(size->size <= INT_MAX);
+#endif
+  THTensor_(resizeNd)(self, size->size, THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
+}
+
 void THTensor_(resizeLegacy)(THTensor *self, THLongStorage *size, THLongStorage *stride)
 {
   THArgCheck(size != NULL, 2, "invalid size");
@@ -307,31 +321,32 @@ void THTensor_(resizeAs)(THTensor *self, THTensor *src)
 
 void THTensor_(resize1d)(THTensor *tensor, int64_t size0)
 {
-  THTensor_(resize4d)(tensor, size0, -1, -1, -1);
+  int64_t size[1] = {size0};
+  THTensor_(resizeNd)(tensor, 1, size, nullptr);
 }
 
 void THTensor_(resize2d)(THTensor *tensor, int64_t size0, int64_t size1)
 {
-  THTensor_(resize4d)(tensor, size0, size1, -1, -1);
+  int64_t size[2] = {size0, size1};
+  THTensor_(resizeNd)(tensor, 2, size, nullptr);
 }
 
 void THTensor_(resize3d)(THTensor *tensor, int64_t size0, int64_t size1, int64_t size2)
 {
-  THTensor_(resize4d)(tensor, size0, size1, size2, -1);
+  int64_t size[3] = {size0, size1, size2};
+  THTensor_(resizeNd)(tensor, 3, size, nullptr);
 }
 
 void THTensor_(resize4d)(THTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
   int64_t size[4] = {size0, size1, size2, size3};
-
-  THTensor_(resizeNdLegacy)(self, 4, size, NULL);
+  THTensor_(resizeNd)(self, 4, size, nullptr);
 }
 
 void THTensor_(resize5d)(THTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3, int64_t size4)
 {
-    int64_t size[5] = {size0, size1, size2, size3, size4};
-
-  THTensor_(resizeNdLegacy)(self, 5, size, NULL);
+  int64_t size[5] = {size0, size1, size2, size3, size4};
+  THTensor_(resizeNd)(self, 5, size, nullptr);
 }
 
 void THTensor_(set)(THTensor *self, THTensor *src)
@@ -764,6 +779,82 @@ void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t stora
 
   /* size and stride */
   THTensor_(resizeNdLegacy)(self, nDimension, size, stride);
+}
+
+
+void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t *stride)
+{
+  int d;
+  ptrdiff_t totalSize;
+  bool hascorrectsize = true;
+
+#ifndef USE_TH_SCALAR
+  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
+#else
+  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+#endif
+
+  for(d = 0; d < nDimension; d++)
+  {
+#ifndef USE_TH_SIZE_ZERO_DIM
+    // we can't support this unless we have arbitrary 0-sized dimensions, but some calls to this
+    // currently exist and expect a size [0] tensor to be returned.
+    if (d == 0 && size[d] == 0) {
+      nDimension = 1;
+      break;
+    }
+    AT_CHECK(size[d] > 0, "sizes must be non-negative");
+#endif
+    if((self->dim() > d) && (size[d] != self->size[d])) {
+      hascorrectsize = false;
+    }
+
+    // NB: this used to test that stride[d] was >= 0
+    if((self->dim() > d) && stride && (stride[d] != self->stride[d])) {
+      hascorrectsize = false;
+    }
+  }
+
+  if(nDimension != self->dim()) {
+    hascorrectsize = false;
+  }
+
+  if(hascorrectsize) {
+    return;
+  }
+
+  if(nDimension != self->dim())
+  {
+    self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*nDimension);
+    self->stride = (int64_t *)THRealloc(self->stride, sizeof(int64_t)*nDimension);
+    self->dim_ = nDimension;
+  }
+
+  totalSize = 1;
+  for(d = nDimension-1; d >= 0; d--)
+  {
+    self->size[d] = size[d];
+    if(stride && (stride[d] >= 0) ) {
+      self->stride[d] = stride[d];
+    } else {
+      if(d == nDimension-1) {
+        self->stride[d] = 1;
+      } else {
+        self->stride[d] = self->size[d+1]*self->stride[d+1];
+      }
+    }
+    totalSize += (self->size[d]-1)*self->stride[d];
+  }
+
+  if(totalSize+self->storageOffset > 0)
+  {
+    if(!self->storage) {
+      self->storage = THStorage_(new)();
+    }
+    if(totalSize+self->storageOffset > self->storage->size) {
+      THStorage_(resize)(self->storage, totalSize+self->storageOffset);
+    }
+  }
 }
 
 void THTensor_(resizeNdLegacy)(THTensor *self, int nDimension, int64_t *size, int64_t *stride)

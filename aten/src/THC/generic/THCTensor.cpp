@@ -146,30 +146,32 @@ THCTensor *THCTensor_(newWithSize)(THCState *state, THLongStorage *size, THLongS
   return THCTensor_(newWithStorage)(state, NULL, 0, size, stride);
 }
 
+THCTensor *THCTensor_(newWithSizeIntList)(THCState *state, at::IntList sizes) {
+  THCTensor *self = (THCTensor *)THAlloc(sizeof(THCTensor));
+  THCTensor_(rawInit)(state, self);
+  THCTensor_(resizeNd)(state, self, sizes.size(), const_cast<int64_t*>(sizes.data()), nullptr);
+
+  return self;
+}
+
 THCTensor *THCTensor_(newWithSize1d)(THCState *state, int64_t size0)
 {
-  return THCTensor_(newWithSize4d)(state, size0, -1, -1, -1);
+  return THCTensor_(newWithSizeIntList)(state, {size0});
 }
 
 THCTensor *THCTensor_(newWithSize2d)(THCState *state, int64_t size0, int64_t size1)
 {
-  return THCTensor_(newWithSize4d)(state, size0, size1, -1, -1);
+  return THCTensor_(newWithSizeIntList)(state, {size0, size1});
 }
 
 THCTensor *THCTensor_(newWithSize3d)(THCState *state, int64_t size0, int64_t size1, int64_t size2)
 {
-  return THCTensor_(newWithSize4d)(state, size0, size1, size2, -1);
+  return THCTensor_(newWithSizeIntList)(state, {size0, size1, size2});
 }
 
 THCTensor *THCTensor_(newWithSize4d)(THCState *state, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
-  int64_t size[4] = {size0, size1, size2, size3};
-
-  THCTensor *self = (THCTensor*)THAlloc(sizeof(THCTensor));
-  THCTensor_(rawInit)(state, self);
-  THCTensor_(resizeNdLegacy)(state, self, 4, size, NULL);
-
-  return self;
+  return THCTensor_(newWithSizeIntList)(state, {size0, size1, size2, size3});
 }
 
 THCTensor *THCTensor_(newClone)(THCState *state, THCTensor *self)
@@ -294,6 +296,11 @@ THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input) {
 }
 
 /* Resize */
+void THCTensor_(resize)(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride)
+{
+  THCTensor_resize(state, self, size, stride);
+}
+
 void THCTensor_(resizeLegacy)(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride)
 {
   THCTensor_resizeLegacy(state, self, size, stride);
@@ -306,31 +313,32 @@ void THCTensor_(resizeAs)(THCState *state, THCTensor *self, THCTensor *src)
 
 void THCTensor_(resize1d)(THCState *state, THCTensor *tensor, int64_t size0)
 {
-  THCTensor_(resize4d)(state, tensor, size0, -1, -1, -1);
+  int64_t size[1] = {size0};
+  THCTensor_resizeNd(state, tensor, 1, size, nullptr);
 }
 
 void THCTensor_(resize2d)(THCState *state, THCTensor *tensor, int64_t size0, int64_t size1)
 {
-  THCTensor_(resize4d)(state, tensor, size0, size1, -1, -1);
+  int64_t size[2] = {size0, size1};
+  THCTensor_resizeNd(state, tensor, 2, size, nullptr);
 }
 
 void THCTensor_(resize3d)(THCState *state, THCTensor *tensor, int64_t size0, int64_t size1, int64_t size2)
 {
-  THCTensor_(resize4d)(state, tensor, size0, size1, size2, -1);
+  int64_t size[3] = {size0, size1, size2};
+  THCTensor_resizeNd(state, tensor, 3, size, nullptr);
 }
 
 void THCTensor_(resize4d)(THCState *state, THCTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3)
 {
   int64_t size[4] = {size0, size1, size2, size3};
-
-  THCTensor_(resizeNdLegacy)(state, self, 4, size, NULL);
+  THCTensor_resizeNd(state, self, 4, size, nullptr);
 }
 
 void THCTensor_(resize5d)(THCState *state, THCTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3, int64_t size4)
 {
-    int64_t size[5] = {size0, size1, size2, size3, size4};
-
-  THCTensor_(resizeNdLegacy)(state, self, 5, size, NULL);
+  int64_t size[5] = {size0, size1, size2, size3, size4};
+  THCTensor_resizeNd(state, self, 5, size, nullptr);
 }
 
 void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src)
@@ -641,6 +649,11 @@ static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
 void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
 {
   THCTensor_setStorageNd(state, self, storage, storageOffset, nDimension, size, stride);
+}
+
+void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
+{
+  THCTensor_resizeNd(state, self, nDimension, size, stride);
 }
 
 void THCTensor_(resizeNdLegacy)(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
