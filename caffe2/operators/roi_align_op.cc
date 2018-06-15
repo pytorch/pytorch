@@ -136,9 +136,10 @@ void ROIAlignForward(
   DCHECK(roi_cols == 4 || roi_cols == 5);
 
   int n_rois = nthreads / channels / pooled_width / pooled_height;
-  // (n, c, ph, pw) is an element in the pooled output
-  // can be parallelized using omp
-  // #pragma omp parallel for num_threads(32)
+
+#ifdef _OPENMP
+#pragma omp parallel for
+#endif
   for (int n = 0; n < n_rois; n++) {
     int index_n = n * channels * pooled_width * pooled_height;
 
