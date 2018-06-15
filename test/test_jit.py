@@ -3755,6 +3755,11 @@ EXCLUDE_SCRIPT = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
+    'test_pow_scalar_constant',
+    'test_pow_constant',
+    'test_mul_constant',
+    'test_div_scalar_constant',
+    'test_div_constant',
 }
 
 
