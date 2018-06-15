@@ -19,7 +19,6 @@
 template<typename Dtype, typename Acctype>
 __global__ void nearest_neighbor_interp2_kernel(
 		const int n,
-		const bool align_corners,
 		const THCDeviceTensor<Dtype, 3> data1,
 		THCDeviceTensor<Dtype, 3> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -27,7 +26,7 @@ __global__ void nearest_neighbor_interp2_kernel(
   const int channels = data1.getSize(1);
   const int width1 = data1.getSize(2);
   const int width2 = data2.getSize(2);
-  const Acctype scale = width1 / width2;
+  const float scale = (float) width1 / (float) width2;
 
   if (index < n) {
     const int w2 = index % width2;
@@ -43,7 +42,7 @@ __global__ void nearest_neighbor_interp2_kernel(
       return;
     }
     //
-    const int w1 = nearest_neighbor_compute_source_index(scale, w2, width1, align_corners);
+    const int w1 = nearest_neighbor_compute_source_index(scale, w2, width1);
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
 	const Dtype val = data1[n][c][w1];
@@ -57,7 +56,6 @@ __global__ void nearest_neighbor_interp2_kernel(
 template <typename Dtype, typename Acctype>
 __global__ void nearest_neighbor_interp2_kernel_backward(
 		const int n, 
-		const bool align_corners,
 		THCDeviceTensor<Dtype, 3> data1,
 		const THCDeviceTensor<Dtype, 3> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -65,7 +63,7 @@ __global__ void nearest_neighbor_interp2_kernel_backward(
   const int channels = data1.getSize(1);
   const int width1 = data1.getSize(2);
   const int width2 = data2.getSize(2);
-  const Acctype scale = width1 / width2;
+  const float scale = (float) width1 / (float) width2;
 
   if (index < n) {
     const int w2 = index % width2;
@@ -81,7 +79,7 @@ __global__ void nearest_neighbor_interp2_kernel_backward(
       return;
     }
     //
-    const int w1 = nearest_neighbor_compute_source_index(scale, w2, width1, align_corners);
+    const int w1 = nearest_neighbor_compute_source_index(scale, w2, width1);
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
 	      const Dtype d2val = data2[n][c][w2];

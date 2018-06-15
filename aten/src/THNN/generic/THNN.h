@@ -732,8 +732,7 @@ TH_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int osizeW,
-	  bool align_corners);
+          int osizeW);
 TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
@@ -741,8 +740,7 @@ TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
           int isizeB,
 	  int isizeC,
 	  int isizeW,
-	  int osizeW,
-	  bool align_corners);
+	  int osizeW);
 
 TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
           THNNState *state,

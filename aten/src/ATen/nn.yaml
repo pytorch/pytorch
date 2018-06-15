@@ -202,7 +202,7 @@
   scalar_check:
     grad_input: 'false'
 
-- name: upsample_nearest1d(Tensor self, IntList[1] output_size, bool align_corners)
+- name: upsample_nearest1d(Tensor self, IntList[1] output_size)
   cname: TemporalUpSamplingNearest
   scalar_check:
     grad_input: 'false'

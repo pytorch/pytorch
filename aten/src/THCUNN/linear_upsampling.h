@@ -31,14 +31,11 @@ static Acctype linear_upsampling_compute_source_index(
   }
 }
 
-template<typename Acctype>
 __device__ __forceinline__
-static Acctype nearest_neighbor_compute_source_index(
-		Acctype scale, int dst_index, int inputSize, bool align_corners) {
-  const Acctype src_index = MIN(
-		 (align_corners) ? static_cast<int>(roundf(dst_index * scale))
-		: static_cast<int>(floorf(dst_index * scale)),
-	       inputSize - 1);	
+static int nearest_neighbor_compute_source_index(
+		const float scale, int dst_index, int inputSize) {
+  const int src_index = MIN(round(dst_index * scale),
+		  inputSize - 1);	
   return src_index;
 }
 #endif

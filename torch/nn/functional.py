@@ -1938,15 +1938,20 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         scale_factors = _ntuple(dim)(scale_factor)
         return [math.floor(input.size(i + 2) * scale_factors[i]) for i in range(dim)]
 
-    if align_corners is None:
-        warnings.warn("Default upsampling behavior when mode={} is changed "
-                      "to align_corners=False since 0.4.0. Please specify "
-                      "align_corners=True if the old behavior is desired. "
-                      "See the documentation of nn.Upsample for details.".format(mode))
-        align_corners = False
+    if mode == 'nearest':
+        if align_corners is not None:
+            raise ValueError("align_corners option can only be set with the "
+                             "interpolating modes: linear | bilinear | trilinear")
+    else:
+        if align_corners is None:
+            warnings.warn("Default upsampling behavior when mode={} is changed "
+                          "to align_corners=False since 0.4.0. Please specify "
+                          "align_corners=True if the old behavior is desired. "
+                          "See the documentation of nn.Upsample for details.".format(mode))
+            align_corners = False
 
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, _output_size(1), align_corners)
+        return torch._C._nn.upsample_nearest1d(input, _output_size(1))
     elif input.dim() == 4 and mode == 'nearest':
         return torch._C._nn.upsample_nearest2d(input, _scale_factor(2))
     elif input.dim() == 5 and mode == 'nearest':
