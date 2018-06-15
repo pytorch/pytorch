@@ -202,8 +202,10 @@
   scalar_check:
     grad_input: 'false'
 
-- name: upsample_nearest1d(Tensor self, int64_t scale_factor)
+- name: upsample_nearest1d(Tensor self, IntList[1] output_size, bool align_corners)
   cname: TemporalUpSamplingNearest
+  scalar_check:
+    grad_input: 'false'
 
 - name: upsample_nearest2d(Tensor self, int64_t scale_factor)
   cname: SpatialUpSamplingNearest

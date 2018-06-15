@@ -1307,16 +1307,20 @@ THC_API void THNN_(TemporalUpSamplingLinear_updateGradInput)(
 
 THC_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
                   THCState *state,
-                  THCTensor *input,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-                  int scale_factor);
+		  int nbatch,
+		  int nchannels,
+		  int inputWidth,
+                  int outputWidth,
+		  bool align_corners);
 
 THC_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-                  int scale_factor);
+                  int outputWidth,
+		  bool align_corners);
 
 THC_API void THNN_(Threshold_updateOutput)(
                   THCState *state,

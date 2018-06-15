@@ -1,6 +1,12 @@
 #ifndef THNN_LINEAR_UPSAMPLING_H
 #define THNN_LINEAR_UPSAMPLING_H
 
+#undef MIN
+#define MIN(a,b) ( ((a)<(b)) ? (a) : (b) )
+#undef MAX
+#define MAX(a,b) ( ((a)>(b)) ? (a) : (b) )
+
+
 template<typename T>
 static inline T linear_upsampling_compute_scale(
                           int inputSize, int outputSize, bool align_corners) {
@@ -33,6 +39,16 @@ static inline T linear_upsampling_compute_source_index(
     return src_idx < 0 ? T(0) : src_idx;
   }
 }
+
+static inline int nearest_neighbor_compute_source_index(
+		const float scale, int dst_index, int inputSize, bool align_corners) {
+  const int src_index = MIN(
+		 (align_corners) ? (roundf(dst_index * scale))
+		: (floorf(dst_index * scale)),
+	       inputSize - 1);	
+  printf("processed: %d, %f, %f\n", dst_index, scale, dst_index * scale);
+  return src_index;
+}	
 
 
 #endif
