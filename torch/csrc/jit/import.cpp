@@ -1,5 +1,5 @@
 #include "torch/csrc/jit/import.h"
-#include "onnx/onnx/onnx.pb.h"
+#include "onnx/onnx.pb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/jit/assertions.h"
