@@ -292,6 +292,10 @@ class ModuleDict(Module):
                 self[key] = module
         else:
             for j, m in enumerate(modules):
+                if not isinstance(m, Iterable):
+                    raise TypeError("ModuleDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(m).__name__)
                 if not len(m) == 2:
                     raise ValueError("ModuleDict update sequence element "
                                      "#" + str(j) + " has length " + len(m) +
@@ -492,9 +496,13 @@ class ParameterDict(Module):
                 self[key] = parameter
         else:
             for j, p in enumerate(parameters):
+                if not isinstance(p, Iterable):
+                    raise TypeError("ParameterDict update sequence element "
+                                    "#" + str(j) + " should be Iterable; is" +
+                                    type(p).__name__)
                 if not len(p) == 2:
                     raise ValueError("ParameterDict update sequence element "
-                                     "#" + str(j) + " has length " + len(p) +
+                                     "#" + str(j) + " has length " + str(len(p)) +
                                      "; 2 is required")
                 self[p[0]] = p[1]
 

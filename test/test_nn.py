@@ -1150,8 +1150,11 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             module_dict.update(nn.ReLU())
 
-        with self.assertRaises(ValueError):
+        with self.assertRaises(TypeError):
             module_dict.update([nn.ReLU()])
+
+        with self.assertRaises(ValueError):
+            module_dict.update([[nn.ReLU()]])
 
         s = nn.Sequential(modules)
         module_dict = nn.ModuleDict(s.named_children())
@@ -1285,6 +1288,9 @@ class TestNN(NNTestCase):
 
         with self.assertRaises(TypeError):
             parameter_dict.update(1)
+
+        with self.assertRaises(TypeError):
+            parameter_dict.update([1])
 
         with self.assertRaises(ValueError):
             parameter_dict.update(Parameter(torch.randn(10, 10)))
