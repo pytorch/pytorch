@@ -78,7 +78,7 @@ Tensor empty_like(const Tensor& self, const Type& dtype) {
   if (dtype.is_sparse() && self.type().is_sparse()) {
     auto res = dtype.tensor();
     // resize_as_ requires the same exact type.
-    res.sparse_raw_resize_(self.sizes(), self._dimI(), self._dimV());
+    res.sparse_raw_resize_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
   return at::native::empty(dtype, self.sizes());
@@ -323,7 +323,7 @@ Tensor zeros_like(const Tensor& self, const Type& dtype) {
   if (dtype.is_sparse() && self.type().is_sparse()) {
     auto res = dtype.tensor();
     // resize_as_ requires the same exact type.
-    res.sparse_raw_resize_(self.sizes(), self._dimI(), self._dimV());
+    res.sparse_raw_resize_(self.sizes(), self._sparseDims(), self._denseDims());
     return res;
   }
   return at::native::zeros(dtype, self.sizes());
