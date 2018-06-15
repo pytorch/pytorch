@@ -241,20 +241,6 @@ class TestDataLoader(TestCase):
         self.dataset = torch.randn(5, 3, 3, 2)
         self.batch_size = 3
 
-    def test_random_seed(self):
-        def run():
-            dataloader = torch.utils.data.DataLoader(RandomDatasetMock(),
-                                                     batch_size=2,
-                                                     num_workers=4,
-                                                     shuffle=True)
-            return next(iter(dataloader))
-
-        torch.manual_seed(2018)
-        x1 = run()
-        torch.manual_seed(2018)
-        x2 = run()
-        self.assertEqual(x1, x2)
-
     def test_single_keep(self):
         dataloader = torch.utils.data.DataLoader(self.dataset,
                                                  batch_size=self.batch_size,
