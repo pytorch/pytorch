@@ -1953,7 +1953,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     if input.dim() == 3 and mode == 'nearest':
         return torch._C._nn.upsample_nearest1d(input, _output_size(1))
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, _scale_factor(2))
+        return torch._C._nn.upsample_nearest2d(input, _output_size(2))
     elif input.dim() == 5 and mode == 'nearest':
         return torch._C._nn.upsample_nearest3d(input, _scale_factor(3))
     elif input.dim() == 3 and mode == 'linear':

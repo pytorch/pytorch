@@ -1194,13 +1194,18 @@ TH_API void THNN_(SpatialUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int scale_factor);
+	  int osizeH,
+	  int osizeW);
 TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int scale_factor);
+	  int isizeB,
+	  int isizeC,
+	  int isizeH,
+	  int isizeW,
+	  int osizeH,
+	  int osizeW);
 
 TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THNNState *state,

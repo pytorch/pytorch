@@ -207,8 +207,10 @@
   scalar_check:
     grad_input: 'false'
 
-- name: upsample_nearest2d(Tensor self, int64_t scale_factor)
+- name: upsample_nearest2d(Tensor self, IntList[2] output_size)
   cname: SpatialUpSamplingNearest
+  scalar_check:
+    grad_input: 'false'
 
 - name: upsample_nearest3d(Tensor self, int64_t scale_factor)
   cname: VolumetricUpSamplingNearest
