@@ -1375,6 +1375,7 @@ class TestNN(NNTestCase):
         test('relu6')
         test('elu')
         test('selu')
+        test('celu')
         test('rrelu')
         test('rrelu', inplace=True)
         test('hardtanh')
@@ -4062,7 +4063,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(output[:, c, h, w], input[:, channel_idx, height_idx, weight_idx])
 
     def test_inplace_thnn(self):
-        modules = [nn.ReLU, nn.ELU, nn.SELU, nn.RReLU]
+        modules = [nn.ReLU, nn.ELU, nn.SELU, nn.CELU, nn.RReLU]
         for mod in modules:
             r = mod(inplace=True)
             input = torch.randn(5, 5, requires_grad=True)
@@ -7278,6 +7279,17 @@ new_module_tests = [
     ),
     dict(
         module_name='SELU',
+        input_size=(),
+        check_inplace=True,
+        desc='scalar'
+    ),
+    dict(
+        module_name='CELU',
+        input_size=(3, 2, 5),
+        check_inplace=True
+    ),
+    dict(
+        module_name='CELU',
         input_size=(),
         check_inplace=True,
         desc='scalar'

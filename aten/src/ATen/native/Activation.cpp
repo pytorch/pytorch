@@ -26,11 +26,11 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
-  return at::elu(self, 1.0, alpha, 1 / alpha);
+  return at::elu(self, 1.0, alpha, 1.0 / alpha);
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
-  return at::elu_(self, 1.0, alpha, 1 / alpha);
+  return at::elu_(self, 1.0, alpha, 1.0 / alpha);
 }
 
 Tensor rrelu(const Tensor & self, Scalar lower, Scalar upper, bool training, Generator* generator) {
