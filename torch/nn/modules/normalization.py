@@ -72,7 +72,7 @@ class LayerNorm(Module):
     the paper `Layer Normalization`_ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The mean and standard-deviation are calculated separately over the last
     certain number dimensions with shape specified by :attr:`normalized_shape`.
@@ -155,7 +155,7 @@ class GroupNorm(Module):
     the paper `Group Normalization`_ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated
