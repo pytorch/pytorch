@@ -25,10 +25,14 @@ THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices,
 
 void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
   if (self->indices->_dim()) {
-    THCIndexTensor_(resizeNdLegacy)(state, self->indices, 0, NULL, NULL);
+#ifndef USE_TH_SIZE_ZERO_DIM
+    THCIndexTensor_(resizeNd)(state, self->indices, 1, {0}, NULL);
+#else
+    THCIndexTensor_(resizeNd)(state, self->indices, 2, {1, 0}, NULL);
+#endif
   }
   if (self->values->_dim()) {
-    THCTensor_(resizeNdLegacy)(state, self->values, 0, NULL, NULL);
+    THCTensor_(resizeNd)(state, self->values, 1, {0}, NULL);
   }
   self->nnz = 0;
 }

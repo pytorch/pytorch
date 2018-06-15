@@ -224,7 +224,7 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THArgCheck(!(THCTensor_(nDimension)(state, src) == 0 && THCudaLongTensor_nDimension(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
-  THCTensor_(resizeNdLegacy)(state, dst, index->_dim(), index->size, NULL);
+  THCTensor_(resizeNd)(state, dst, index->dim(), index->size, NULL);
 
   // dispatchTakePut only handles non-empty tensors;
   if (index->_dim() > 0) {
