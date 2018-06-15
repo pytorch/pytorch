@@ -24,11 +24,15 @@ OPERATOR_SCHEMA(Expand)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-	Write Me
+	Broadcast the input tensor to a materialized new tensor using given shape.
+	Broadcast rule is similar to "numpy.array(input) * numpy.ones(shape)":
+	Dimensions are right alignment;
+	Two corresponding dimensions must have the same value, or one of them
+	equals to 1.
 )DOC")
-    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
+    .Input(0, "X", "(*Tensor`<NumericType>`*): input tensor")
     .Input(1, "shape", "(*Tensor`<int>`*): expand shape")
-    .Output(0, "Y", "(*Tensor`<float>`*): expanded tensor");
+    .Output(0, "Y", "(*Tensor`<NumericType>`*): expanded tensor");
 
 OPERATOR_SCHEMA(ExpandGradient).NumInputs(2).NumOutputs(1);
 

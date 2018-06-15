@@ -1,8 +1,6 @@
 #ifndef CAFFE2_OPERATORS_REDUCE_OPS_H_
 #define CAFFE2_OPERATORS_REDUCE_OPS_H_
 
-#include <algorithm>
-#include <functional>
 #include <vector>
 
 #include "caffe2/core/context.h"

@@ -13,11 +13,14 @@ import itertools as it
 
 class TestExpandOp(hu.HypothesisTestCase):
     def run_expand_op_test(
-        self, op_name, X, gc, dc):
-        shape_length = np.random.randint(5)
+        self, op_name, X, random_flag, gc, dc):
+        if (random_flag):
+            shape_length = np.random.randint(5)
+        else:
+            shape_length = 4
         shape_list = []
-        j = shape_length-1
-        i = X.ndim-1
+        j = shape_length - 1
+        i = X.ndim - 1
         while i >= 0 or j >= 0:
             k = np.random.randint(5) + 1
             if i >= 0 and X.shape[i] != 1:
@@ -36,7 +39,7 @@ class TestExpandOp(hu.HypothesisTestCase):
             ["Y"],
         )
         def ref(X, shape):
-            return (np.array(X) * np.ones(shape),)
+            return (X * np.ones(shape),)
 
         self.assertReferenceChecks(gc, op, [X, shape], ref)
         self.assertDeviceChecks(dc, op, [X, shape], [0])
@@ -44,6 +47,12 @@ class TestExpandOp(hu.HypothesisTestCase):
 
     @given(X=hu.tensor(max_dim=5, dtype=np.float32),
            **hu.gcs)
-    def test_expand(self, X, gc, dc):
+    def test_expand_rand_shape(self, X, gc, dc):
         self.run_expand_op_test(
-            "Expand", X, gc, dc)
+            "Expand", X, True, gc, dc)
+
+    @given(X=hu.tensor(max_dim=5, dtype=np.float32),
+           **hu.gcs)
+    def test_expand_nonrand_shape(self, X, gc, dc):
+        self.run_expand_op_test(
+            "Expand", X, False, gc, dc)
