@@ -747,7 +747,7 @@
 - name: relu(Tensor self)
   self: threshold_backward(grad, self, 0, 0)
 
-- name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale, Scalar input_scale)
+- name: elu_forward(Tensor self, Scalar alpha, Scalar scale, Scalar input_scale)
   self: elu_backward(grad, alpha, scale, input_scale, output)
 
 - name: glu_forward(Tensor self, int64_t dim)

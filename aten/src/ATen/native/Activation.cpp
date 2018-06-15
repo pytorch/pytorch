@@ -18,11 +18,11 @@ Tensor & relu_(Tensor & self) {
 }
 
 Tensor selu(const Tensor & self) {
-  return at::elu(self, SELU_ALPHA, SELU_SCALE, 1.0);
+  return at::elu(self, SELU_ALPHA, SELU_SCALE);
 }
 
 Tensor & selu_(Tensor & self) {
-  return at::elu_(self, SELU_ALPHA, SELU_SCALE, 1.0);
+  return at::elu_(self, SELU_ALPHA, SELU_SCALE);
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
