@@ -1,7 +1,8 @@
 #include "ATen/ATen.h"
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/native/BlasUtils.h"
+
+#include "TH/THBlasUtils.h"
 
 #include <cstring>
 #include <iostream>
@@ -45,7 +46,7 @@ static void index_select_add(const Tensor &select_indices,
   auto numel = add_indices.numel();
   int64_t ddim = src.size(1);
   for (int64_t i = 0; i < numel; i++) {
-    thblas::axpy<T>(ddim, 1, src_data + ddim * select_indices_data[i], 1,
+    THBlas_axpy<T>(ddim, 1, src_data + ddim * select_indices_data[i], 1,
             output_data + ddim * add_indices_data[i], 1);
   }
 }
@@ -297,12 +298,12 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
           if (grad.type().scalarType() == kFloat) {
             auto igwd = index_grad_weight.data<float>();
             auto gd = grad.data<float>();
-            thblas::axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
+            THBlas_axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
                         igwd + ddim * index, 1);
           } else if (grad.type().scalarType() == kDouble) {
             auto igwd = index_grad_weight.data<double>();
             auto gd = grad.data<double>();
-            thblas::axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
+            THBlas_axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
                          igwd + ddim * index, 1);
           }
         }

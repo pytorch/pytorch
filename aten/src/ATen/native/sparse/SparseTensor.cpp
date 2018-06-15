@@ -2,8 +2,9 @@
 
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
-#include <ATen/native/BlasUtils.h>
 #include <ATen/NativeFunctions.h>
+
+#include <TH/THBlasUtils.h>
 
 namespace at { namespace native {
 
@@ -380,13 +381,13 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
           int64_t pos = indicesPermutationAccessor[j];
           int64_t curr = indicesBufferAccessor[j];
           if (curr == prev) {
-            thblas::axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            THBlas_axpy<scalar_t>(blockSize, 1, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
           } else {
             ++i;
             for (int64_t d = 0; d < sparseDims; d++) {
               newIndicesAccessor[d][i] = indicesAccessor[d][pos];
             }
-            thblas::copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
+            THBlas_copy<scalar_t>(blockSize, values_ptr + pos * blockSize, 1, newValues_ptr + i * blockSize, 1);
           }
           prev = curr;
         }
