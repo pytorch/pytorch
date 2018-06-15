@@ -39,12 +39,50 @@ OPERATOR_SCHEMA(Abs)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Calculates the absolute value of the given input tensor, element-wise.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/abs_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Abs",
+    ["X"],
+    ["Y"]
+)
+
+workspace.FeedBlob("X", np.random.randn(5).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X: [ 0.3005476   1.551666   -1.3591481   0.39191285 -0.21866608]
+Y: [0.3005476  1.551666   1.3591481  0.39191285 0.21866608]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "input", "Input tensor")
+    .Input(0, "X", "*(type: Tensor<float\>)* Input tensor.")
     .Output(
         0,
-        "output",
-        "The absolute value of the input tensor computed element-wise")
+        "Y",
+        "*(type: Tensor`<float>`)* Absolute value of input element-wise.")
     .InheritOnnxSchema("Abs");
 
 OPERATOR_SCHEMA(AbsGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
