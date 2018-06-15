@@ -42,7 +42,13 @@ int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
 }
 Scalar SparseTensorImpl::localScalar() {
-  AT_ERROR("sparse tensors cannot be scalars");
+  int64_t n = numel();
+  AT_CHECK(n == 1, "localScalar() called on a Tensor with ", n, " elements");
+  if (nnz_ == 0) return Scalar(0);
+  if (coalesced_) return values_.pImpl->localScalar();
+  // You have a non-coalesced scalar sparse tensor?!  Wow!  Have
+  // a cookie.
+  return values_.sum().pImpl->localScalar();
 }
 void * SparseTensorImpl::unsafeGetTH(bool retain) {
   AT_ERROR("unsafeGetTH not supported for new style TensorImpl");
@@ -74,7 +80,7 @@ void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tenso
   // tensors have size [0], and so you'll get 0 when empty is zero; but it's
   // more explicit this way.)
   nnz_ = empty ? 0 : values.size(0);
-  coalesced_ = 0;
+  coalesced_ = false;
 }
 
 

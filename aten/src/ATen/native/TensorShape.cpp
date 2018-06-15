@@ -604,5 +604,9 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }
 
+int64_t numel(const Tensor& self) {
+  return self.pImpl->numel();
+}
+
 }
 }

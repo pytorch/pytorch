@@ -28,18 +28,6 @@
     - CONSTANT NULL
 ]]
 [[
-  name: numel
-  return: long
-  cname: nElement
-  cpu_half: True
-  auto_gpu: False
-  variants:
-    - method
-    - function
-  arguments:
-    - THTensor* self
-]]
-[[
   name: set_
   cname: set
   cpu_half: True
