@@ -732,7 +732,7 @@ def celu(input, alpha=1., inplace=False):
     return torch.celu(input)
 
 celu_ = _add_docstr(torch.celu_, r"""
-celu(input, alpha=1.) -> Tensor
+celu_(input, alpha=1.) -> Tensor
 
 In-place version of :func:`~celu`.
 """)
