@@ -67,7 +67,7 @@ def rewrite_run_net_simple(net, ideep=True):
     # Fuse Conv-Relu for IDEEP
     if ideep:
         net.ParseFromString(
-                C.transform_optimizeForIDEEP(net.SerializeToString()))
+            C.transform_optimizeForIDEEP(net.SerializeToString()))
 
 
 def rewrite_model_helper_simple(model, ideep=True):

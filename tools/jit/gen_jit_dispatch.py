@@ -5,12 +5,6 @@ from ..autograd.utils import CodeTemplate, write, uninplace_api_name
 from ..autograd.gen_autograd import load_aten_declarations
 from collections import OrderedDict
 
-template_path = os.path.join(os.path.dirname(__file__), 'templates')
-
-ATEN_DISPATCH_CPP = CodeTemplate.from_file(template_path + '/aten_dispatch.cpp')
-ATEN_INTERNED_STRINGS_H = CodeTemplate.from_file(template_path + '/aten_interned_strings.h')
-ATEN_SCHEMA_CPP = CodeTemplate.from_file(template_path + '/aten_schema.cpp')
-
 ATTR_METHOD_MAP = {
     'int64_t': 'i',
     'IntList': 'is',
@@ -127,7 +121,10 @@ def is_sized_intlist_arg(arg):
     return (arg['simple_type'] == 'IntList') and ('size' in arg)
 
 
-def gen_jit_dispatch(declarations, out):
+def gen_jit_dispatch(declarations, out, template_path):
+    ATEN_DISPATCH_CPP = CodeTemplate.from_file(template_path + '/aten_dispatch.cpp')
+    ATEN_INTERNED_STRINGS_H = CodeTemplate.from_file(template_path + '/aten_interned_strings.h')
+
     ops = {}
 
     def get_invocation(decl, args, num_dynamic_inputs):
@@ -310,7 +307,7 @@ def gen_jit_dispatch(declarations, out):
     }
     write(out, 'aten_dispatch.cpp', ATEN_DISPATCH_CPP, env)
 
-    emit_schema(jit_decls, out)
+    emit_schema(jit_decls, out, template_path)
 
     # NB: Operate on aten_decls, not jit_decls, because VariableType is
     # a client for these symbols as well
@@ -331,7 +328,8 @@ def gen_jit_dispatch(declarations, out):
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
 
-def emit_schema(jit_decls, out):
+def emit_schema(jit_decls, out, template_path):
+    ATEN_SCHEMA_CPP = CodeTemplate.from_file(template_path + '/aten_schema.cpp')
 
     # see [aten_schema encoding] for how this gets translated to C++ object
 
@@ -414,8 +412,10 @@ def main():
                         help='path to Declarations.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
+    parser.add_argument('template-path', metavar='TEMPLATE_PATH',
+                        help='path to templates directory')
     args = parser.parse_args()
-    gen_jit_dispatch(args.declarations, args.out)
+    gen_jit_dispatch(args.declarations, args.out, args.template_path)
 
 
 if __name__ == '__main__':

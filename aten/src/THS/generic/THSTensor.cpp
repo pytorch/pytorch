@@ -66,7 +66,8 @@ THTensor *THSTensor_(newValues)(const THSTensor *self) {
 static void THSTensor_(rawInit)(THSTensor *self)
 {
   new (&self->refcount) std::atomic<int>(1);
-  self->size = NULL;
+  self->size = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
+  self->size[0] = 0;
   self->indices = THLongTensor_new();
   self->values = THTensor_(new)();
   self->nDimensionI = 0;
@@ -78,9 +79,10 @@ static void THSTensor_(rawInit)(THSTensor *self)
 
 THSTensor* THSTensor_(rawResize)(THSTensor *self, int nDimI, int nDimV, int64_t *size) {
   // Only resize valid sizes into tensor.
-  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
+  int64_t dims = nDimI + nDimV == 0 ? 1 : nDimI + nDimV; // FIXME: nDimI + nDimV should not be 0.
+  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(dims));
 
-  for (int64_t d = 0; d < nDimI + nDimV; d++) {
+  for (int64_t d = 0; d < dims; d++) {
     self->size[d] = size[d];
   }
   self->nDimensionI = nDimI;
@@ -296,7 +298,7 @@ int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
   return 1;
 }
 
-THSTensor *THSTensor_(resize)(THSTensor *self, THLongStorage *size)
+THSTensor *THSTensor_(resizeLegacy)(THSTensor *self, THLongStorage *size)
 {
   THSTensor_(rawResize)(self, size->size, 0, THLongStorage_data(size));
   return self;

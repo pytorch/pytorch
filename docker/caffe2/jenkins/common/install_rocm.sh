@@ -2,7 +2,24 @@
 
 set -ex
 
+# TODO: This script should install a SPECIFIC ROCM_VERSION, but actually
+# it ignores all values of ROCM_VERSION which are not nightly.  Ugh!
 [ -n "$ROCM_VERSION" ]
+
+install_hip_nightly() {
+    git clone https://github.com/ROCm-Developer-Tools/HIP.git
+    pushd HIP
+    export HIP_PLATFORM=hcc
+    yes | ./install.sh --install
+    popd
+    rm -rf HIP
+
+    git clone https://github.com/ROCmSoftwarePlatform/hipBLAS.git
+    pushd hipBLAS
+    yes | ./install.sh --install
+    popd
+    rm -rf hipBLAS
+}
 
 install_ubuntu() {
     apt-get update
@@ -41,6 +58,18 @@ install_hip_thrust() {
     cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
 }
 
+install_hcrng() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
+    dpkg -i /opt/rocm/debians/hcrng.deb
+}
+
+install_hcsparse() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
+    dpkg -i /opt/rocm/debians/hcsparse.deb
+}
+
 
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
@@ -52,4 +81,12 @@ else
   exit 1
 fi
 
+# NB: We first install the "wrong" version, but then use those dev tools
+# to install the newer version of HIP.
+if [ "$ROCM_VERSION" = "nightly" ]; then
+  install_hip_nightly
+fi
+
 install_hip_thrust
+install_hcrng
+install_hcsparse

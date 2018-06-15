@@ -5,7 +5,7 @@ if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
 fi
 
 # Add nccl2 for distributed test.
-apt-get install libnccl-dev libnccl2
+sudo apt-get install libnccl-dev libnccl2
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -23,6 +23,24 @@ gcc --version
 # TODO: Don't run this...
 pip install -r requirements.txt || true
 
+if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export HCC_AMDGPU_TARGET=gfx900
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
+
+  # TODO: Install pyHIPIFY in the docker image
+  rm -rf pyHIPIFY || true
+  git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
+  chmod a+x pyHIPIFY/*.py
+  sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
+  sudo chown -R jenkins:jenkins /usr/local
+  rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
+  python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
+  USE_ROCM=1 python setup.py install
+  exit
+fi
+
+# TODO: Don't install this here
 if ! which conda; then
   pip install mkl mkl-devel
 fi

@@ -359,7 +359,7 @@ void set_default_tensor_type(const at::Type& type) {
   if (!at::isFloatingType(type.scalarType())) {
     throw TypeError("only floating-point types are supported as the default type");
   }
-  if (!type.is_variable_or_undefined()) {
+  if (!type.is_variable() && !type.is_undefined()) {
     throw TypeError("only variable types are supported");
   }
   if (type.is_sparse()) {

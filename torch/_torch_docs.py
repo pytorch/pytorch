@@ -597,6 +597,42 @@ Example::
             [ 0.,  0.,  0.]])
 """)
 
+add_docstr(torch.bincount,
+           r"""
+bincount(self, weights=None, minlength=0) -> Tensor
+
+Count the frequency of each value in an array of non-negative ints.
+
+The number of bins (size 1) is one larger than the largest value in
+:attr:`input`. If :attr:`minlength` is specified, the number of bins is at least
+:attr:`minlength`. If ``n`` is the value at position ``i``,
+:math:`out[n] += weights[i]` if :attr:`weights` is specified else
+:math:`out[n] += 1`.
+
+Arguments:
+    input (Tensor): 1-d int tensor
+    weights (Tensor): optional, weight for each value in the input tensor.
+        Should be of same size as input tensor.
+    minlength (int): optional, min number of bins. Should be non-negative.
+
+Shape:
+    output (Tensor): ``Size([max(input) + 1])``
+
+Example::
+
+    >>> input = torch.randint(0, 8, (5,), dtype=torch.int64)
+    >>> weights = torch.linspace(0, 1, steps=5)
+    >>> input, weights
+    (tensor([4, 3, 6, 3, 4]),
+     tensor([ 0.0000,  0.2500,  0.5000,  0.7500,  1.0000])
+
+    >>> torch.bincount(input)
+    tensor([0, 0, 0, 2, 2, 0, 1])
+
+    >>> input.bincount(weights)
+    tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
+""")
+
 add_docstr(torch.bmm,
            r"""
 bmm(batch1, batch2, out=None) -> Tensor
@@ -2198,7 +2234,8 @@ stabilized.
 
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
-           :math:`\text{logsumexp}(x)_{i} = \log \sum_j \exp(x_ij).`
+    .. math::
+        \text{logsumexp}(x)_{i} = \log \sum_j \exp(x_{ij})
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -2724,7 +2761,8 @@ of tensor :attr:`input`.
 
 .. note::
     The rows of :attr:`input` do not need to sum to one (in which case we use
-    the values as weights), but must be non-negative and have a non-zero sum.
+    the values as weights), but must be non-negative, finite and have
+    a non-zero sum.
 
 Indices are ordered from left to right according to when each was sampled
 (first samples are placed in first column).

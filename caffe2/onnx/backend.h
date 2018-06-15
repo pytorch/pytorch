@@ -190,6 +190,8 @@ class Caffe2Backend {
 
   Caffe2Ops CreateUpsample(OnnxNode* onnx_node, int opset_version);
 
+  Caffe2Ops CreateDropout(OnnxNode* onnx_node, int opset_version);
+
   Caffe2Ops CreateLRN(OnnxNode* onnx_node, int opset_version);
 
 

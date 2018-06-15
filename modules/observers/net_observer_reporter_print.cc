@@ -40,9 +40,9 @@ void NetObserverReporterPrint::report(
     }
   }
 
-  std::stringstream buffer;
-  buffer << IDENTIFIER << "{";
   for (auto it = caffe2_perf.begin(); it != caffe2_perf.end(); it++) {
+    std::stringstream buffer;
+    buffer << IDENTIFIER << "{";
     buffer << "\"" << it->first << "\""
            << ": {";
     for (auto jt = it->second.begin(); jt != it->second.end(); jt++) {
@@ -63,13 +63,8 @@ void NetObserverReporterPrint::report(
         buffer << ", ";
       }
     }
-    buffer << "}";
-    auto lt = it;
-    if ((++lt) != caffe2_perf.end()) {
-      buffer << ", ";
-    }
+    buffer << "}}";
+    LOG(INFO) << buffer.str();
   }
-  buffer << "}";
-  LOG(INFO) << buffer.str();
 }
 }

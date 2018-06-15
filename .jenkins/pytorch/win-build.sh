@@ -34,12 +34,26 @@ cat >ci_scripts/build_pytorch.bat <<EOL
 set PATH=C:\\Program Files\\CMake\\bin;C:\\Program Files\\7-Zip;C:\\curl-7.57.0-win64-mingw\\bin;C:\\Program Files\\Git\\cmd;C:\\Program Files\\Amazon\\AWSCLI;%PATH%
 
 :: Install MKL
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet && 7z x -aoa mkl.7z -omkl )
+if "%REBUILD%"=="" (
+  if "%BUILD_ENVIRONMENT%"=="" (
+    curl -k https://s3.amazonaws.com/ossci-windows/mkl_2018.2.185.7z --output mkl.7z
+  ) else (
+    aws s3 cp s3://ossci-windows/mkl_2018.2.185.7z mkl.7z --quiet
+  )
+  7z x -aoa mkl.7z -omkl
+)
 set CMAKE_INCLUDE_PATH=%cd%\\mkl\\include
 set LIB=%cd%\\mkl\\lib;%LIB
 
 :: Install MAGMA
-if "%REBUILD%"=="" ( aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet && 7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma )
+if "%REBUILD%"=="" (
+  if "%BUILD_ENVIRONMENT%"=="" (
+    curl -k https://s3.amazonaws.com/ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z --output magma_cuda90_release_mkl_2018.2.185.7z
+  ) else (
+    aws s3 cp s3://ossci-windows/magma_cuda90_release_mkl_2018.2.185.7z magma_cuda90_release_mkl_2018.2.185.7z --quiet
+  )
+  7z x -aoa magma_cuda90_release_mkl_2018.2.185.7z -omagma
+)
 set MAGMA_HOME=%cd%\\magma
 
 :: Install sccache
@@ -49,7 +63,11 @@ if "%REBUILD%"=="" (
   %CD%\\tmp_bin\\sccache.exe --show-stats || (
     taskkill /im sccache.exe /f /t || ver > nul
     del %CD%\\tmp_bin\\sccache.exe
-    aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
+    if "%BUILD_ENVIRONMENT%"=="" (
+      curl -k https://s3.amazonaws.com/ossci-windows/sccache.exe --output %CD%\\tmp_bin\\sccache.exe
+    ) else (
+      aws s3 cp s3://ossci-windows/sccache.exe %CD%\\tmp_bin\\sccache.exe
+    )
     goto :check_sccache
   )
 )
@@ -57,7 +75,7 @@ if "%REBUILD%"=="" (
 :: Install Miniconda3
 if "%REBUILD%"=="" (
   IF EXIST C:\\Jenkins\\Miniconda3 ( rd /s /q C:\\Jenkins\\Miniconda3 )
-  curl https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
+  curl -k https://repo.continuum.io/miniconda/Miniconda3-latest-Windows-x86_64.exe -O
   .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 )
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3

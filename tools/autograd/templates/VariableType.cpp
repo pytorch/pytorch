@@ -91,7 +91,7 @@ template<std::size_t N>
 static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bool, N> v) { failPositionalAttr(); }
 
 VariableType::VariableType(Context* context, Type* baseType)
-  : Type(context, /*is_variable_or_undefined=*/true)
+  : Type(context, /*is_variable=*/true, /*is_undefined=*/false)
   , baseType(baseType) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
@@ -176,8 +176,7 @@ struct VariableTypeRegistry {
 static VariableTypeRegistry registry;
 
 bool VariableType::isVariableType(const at::Type& type) {
-  static const auto* undefined_ty = &globalContext().getType(at::Backend::Undefined, at::ScalarType::Undefined);
-  return type.is_variable_or_undefined() && &type != undefined_ty;
+  return type.is_variable();
 }
 
 at::Type* VariableType::getType(const at::Type& baseType) {

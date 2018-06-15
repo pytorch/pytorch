@@ -7,7 +7,7 @@
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
@@ -39,7 +39,7 @@ std::vector<bool> TensorDesc::findContiguous(
 
 namespace {
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 static int ceilDiv(int a, int b) {
   return (a + b - 1) / b;
@@ -60,7 +60,17 @@ std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
 
 namespace codegen {
 
+/*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
+Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
+so typedefs help it handle those cases*/
+
 auto type_declarations_template = CodeTemplate(R"(
+#if defined(__CUDACC_RTC__)
+typedef unsigned char uint8_t; 
+typedef signed char int8_t; 
+typedef short int  int16_t; 
+typedef long long int int64_t; 
+#endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {
@@ -206,10 +216,11 @@ std::string encodeRHS(Node * n) {
     {aten::div, "${0} / ${1}"},
     {aten::eq, "${0} == ${1}"},
     {aten::fmod, "fmodf(${0}, ${1})"},
-    {aten::ge, "${0} >= ${1})"},
+    {aten::ge, "(${0} >= ${1})"},
     {aten::gt, "${0} > ${1}"},
-    {aten::le, "${0} <= ${1})"},
+    {aten::le, "(${0} <= ${1})"},
     {aten::lt, "${0} < ${1}"},
+    {aten::type_as, "(${0})"}, //everything is implicitly convertible to float
     {aten::mul, "${0} * ${1}"},
     {aten::ne, "${0} != ${1}"},
     {aten::remainder, "remainderf(${0}, ${1})"},
@@ -481,7 +492,7 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
   launch_with_tensors(inputs, outputs);
 }
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 void checkCUDAVersion(const cudaDeviceProp & prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
@@ -736,7 +747,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
     std::string name = "kernel_" + std::to_string(cache.size());
     CompiledFusionFunction * raw_func;
     if(agraph.device != kCPUDevice) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
       raw_func = new CUDAFusionFunction(name, agraph);
 #else
       throw std::runtime_error("cannot compile a CUDA fusion group, CUDA is not enabled.");
@@ -823,7 +834,7 @@ FusionCompiler & sharedFusionCompiler() {
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>

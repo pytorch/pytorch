@@ -19,3 +19,4 @@
 /torch/lib/c10d/ @apaszke @pietern @teng-li
 /torch/csrc/distributed/ @apaszke @pietern @teng-li
 /torch/distributed/ @apaszke @pietern @teng-li
+/test/test_c10d.py @apaszke @pietern @teng-li

@@ -2,9 +2,7 @@
 
 #include <cmath>
 #include "ATen/Dispatch.h"
-#include "ATen/Parallel.h"
-#include "ATen/cpu/vec256/vec256.h"
-#include "ATen/cpu/vec256/functional.h"
+#include "ATen/cpu/vml.h"
 #include "ATen/native/cpu/CapabilityDispatch.h"
 
 namespace at { namespace native {
@@ -49,12 +47,7 @@ static void rsqrt_kernel(Tensor& result, const Tensor& self) {
       scalar_t* out = result.data<scalar_t>();                            \
       scalar_t* in = self.data<scalar_t>();                               \
       int64_t size = self.numel();                                        \
-      parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) { \
-        map([](const Vec256<scalar_t>& x) { return x.op(); },             \
-            out + begin,                                                  \
-            in + begin,                                                   \
-            end - begin);                                                 \
-      });                                                                 \
+      vml::v##op(out, in, size); \
     });                                                                   \
   }                                                                       \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)
@@ -65,20 +58,27 @@ static void rsqrt_kernel(Tensor& result, const Tensor& self) {
 REGISTER_DISPATCH(absImpl, &abs_kernel);
 REGISTER_DISPATCH(rsqrtImpl, &rsqrt_kernel);
 
+// IMPLEMENT_FLOAT_KERNEL(abs)
 IMPLEMENT_FLOAT_KERNEL(acos)
 IMPLEMENT_FLOAT_KERNEL(asin)
 IMPLEMENT_FLOAT_KERNEL(atan)
+IMPLEMENT_FLOAT_KERNEL(ceil)
+IMPLEMENT_FLOAT_KERNEL(cos)
+IMPLEMENT_FLOAT_KERNEL(cosh)
 IMPLEMENT_FLOAT_KERNEL(erf)
 IMPLEMENT_FLOAT_KERNEL(exp)
 IMPLEMENT_FLOAT_KERNEL(expm1)
+IMPLEMENT_FLOAT_KERNEL(floor)
 IMPLEMENT_FLOAT_KERNEL(log)
 IMPLEMENT_FLOAT_KERNEL(log10)
 IMPLEMENT_FLOAT_KERNEL(log1p)
 IMPLEMENT_FLOAT_KERNEL(log2)
-IMPLEMENT_FLOAT_KERNEL(ceil)
-IMPLEMENT_FLOAT_KERNEL(floor)
 IMPLEMENT_FLOAT_KERNEL(round)
+// IMPLEMENT_FLOAT_KERNEL(rsqrt)
+IMPLEMENT_FLOAT_KERNEL(sin)
+IMPLEMENT_FLOAT_KERNEL(sinh)
 IMPLEMENT_FLOAT_KERNEL(sqrt)
+IMPLEMENT_FLOAT_KERNEL(tan)
 IMPLEMENT_FLOAT_KERNEL(tanh)
 IMPLEMENT_FLOAT_KERNEL(trunc)
 

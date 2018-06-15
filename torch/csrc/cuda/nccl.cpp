@@ -152,7 +152,7 @@ void _check_inputs(TensorList inputs, TensorList outputs, int input_multiplier, 
 } // namespace detail
 
 bool is_available(TensorList tensors) {
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   device_set devices;
   for (auto & tensor : tensors) {
     auto & type = tensor.type();
@@ -174,7 +174,7 @@ bool is_available(TensorList tensors) {
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
   return NCCL_MAJOR * 1000 + NCCL_MINOR * 100 + NCCL_PATCH;
-#elif defined(WITH_NCCL)
+#elif defined(USE_NCCL)
   return 1000;
 #else
   return 0;
@@ -182,7 +182,7 @@ std::uint64_t version() {
 }
 
 void broadcast(TensorList tensors, const stream_list& streams, const comm_list& user_comms) {
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   _check_inputs(tensors, tensors, 1, 1);
   ncclDataType_t data_type = _get_data_type(tensors[0].type());

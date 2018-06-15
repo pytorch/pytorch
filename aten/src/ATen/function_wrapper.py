@@ -117,13 +117,17 @@ inline ${return_type} Tensor::${api_name}(${method_formals})${const_mark} {
 FUNCTION_DECLARATION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals_with_defaults});
 """)
-# 9. add method definition in Functions.h
+# 9. add a method declaration in Functions.h
+DEPRECATED_FUNCTION_DECLARATION = CodeTemplate("""\
+AT_DEPRECATED(static inline ${return_type} ${api_name}(${formals_with_defaults}));
+""")
+# 10. add method definition in Functions.h
 FUNCTION_DEFINITION = CodeTemplate("""\
 static inline ${return_type} ${api_name}(${formals}) {
     return ${inferred_type}.${api_name}(${type_method_actuals});
 }
 """)
-# 10. add a native declaration for a native function
+# 11. add a native declaration for a native function
 NATIVE_DECLARATION = CodeTemplate("""\
 ${return_type} ${native_type_method_dispatch}(${formals_with_defaults});
 """)
@@ -243,11 +247,7 @@ CHECKED_CAST = {
     # This is a cast done via direct-construction
     'THSize*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::SIZE);'),
     # This is a cast done via direct-construction
-    'THStride*':
-        CodeTemplate(
-            'THLongStorageView ${result_name}(${arg_name}, '
-            '${noelem_to_empty} ? '
-            'THLongStorageViewKind::STRIDE_EMPTY_TENSOR : THLongStorageViewKind::STRIDE_SCALAR);'),
+    'THStride*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::STRIDE);'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
     'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
@@ -286,7 +286,7 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView(static_cast<int64_t>(storage.size()), THLongStorageViewKind::LENGTH)'),
+     'THLongStorageView(static_cast<int64_t>(source.size()), THLongStorageViewKind::LENGTH)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 
@@ -393,57 +393,58 @@ NNBuffer = TypedDict('NNBuffer', {
 })
 
 FunctionOption = TypedDict('FunctionOption', {
-    'arguments': List[THFormal],
-    'mode': str,
-    'name': str,
-    'return': ReturnDecl,
-    'variants': str,
-    'type_method_definition_dispatch': str,
-    'type_method_formals': List[str],
-    'type_method_formals_with_defaults': List[str],
-    'type_method_actuals': List[str],
-    'cname': str,
-    'backends': List[str],
-    'api_name': str,
-    'backend_type_pairs': List[Tuple[str, str]],
-    'inplace': bool,
-    'aten_dense_sparse': bool,
-    'sparse': bool,
-    'scalar_check': str,
-    'aten_custom_call': str,
-    'type_definition_body': List[str],
-    # cimpls is really a List[FunctionOption]
-    'cimpls': List[Any],
-    'when_spares_dispatch': str,
     'actuals': List[str],
-    'buffers': List[NNBuffer],
-    'zero_dim_dispatch_when_scalar': str,
-    'zero_dim_tensor_only': bool,
-    'when_sparse_dispatch': str,
-    'formals_list': List[AtFormal],
-    'condition': str,
+    'api_name': str,
+    'arguments': List[THFormal],
+    'aten_custom_call': str,
+    'aten_dense_sparse': bool,
     'auto_gpu': bool,
-    'with_gil': bool,
-    'cpu_half': bool,
-    # options should be List[FunctionOption]
-    'options': Any,
-    'formals': List[str],
-    'formals_with_defaults': List[str],
-    'returns': List[ReturnType],
-    'return_type': str,
-    'return_call': str,
-    'method_formals': List[str],
-    'method_formals_with_defaults': List[str],
-    'method_actuals': List[str],
-    'const_mark': str,
-    'method_prefix_derived': str,
+    'backend_type_pairs': List[Tuple[str, str]],
+    'backends': List[str],
     'broadcast_actuals': List[str],
-    'broadcast_returns': List[str],
-    'inferred_type': str,
     'broadcast_function': str,
     'broadcast_modified_actuals': List[str],
-    'native_type_method_dispatch': str,
+    'broadcast_returns': List[str],
+    'buffers': List[NNBuffer],
+    # cimpls is really a List[FunctionOption]
+    'cimpls': List[Any],
+    'cname': str,
+    'condition': str,
+    'const_mark': str,
+    'cpu_half': bool,
+    'deprecated': bool,
+    'formals_list': List[AtFormal],
+    'formals_with_defaults': List[str],
+    'formals': List[str],
+    'inferred_type': str,
+    'inplace': bool,
+    'method_actuals': List[str],
+    'method_formals_with_defaults': List[str],
+    'method_formals': List[str],
+    'method_prefix_derived': str,
+    'mode': str,
+    'name': str,
     'native_actuals': List[str],
+    'native_type_method_dispatch': str,
+    # options should be List[FunctionOption]
+    'options': Any,
+    'return_call': str,
+    'return_type': str,
+    'return': ReturnDecl,
+    'returns': List[ReturnType],
+    'scalar_check': str,
+    'sparse': bool,
+    'type_definition_body': List[str],
+    'type_method_actuals': List[str],
+    'type_method_definition_dispatch': str,
+    'type_method_formals_with_defaults': List[str],
+    'type_method_formals': List[str],
+    'variants': str,
+    'when_spares_dispatch': str,
+    'when_sparse_dispatch': str,
+    'with_gil': bool,
+    'zero_dim_dispatch_when_scalar': str,
+    'zero_dim_tensor_only': bool,
 })
 
 OutputDeclaration = NamedTuple('OutputDeclaration', [
@@ -982,10 +983,9 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = dispatch_type['name']
             else:
                 option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
-            top_env['function_declarations'].append(
-                FUNCTION_DECLARATION.substitute(env))
-            top_env['function_definitions'].append(
-                FUNCTION_DEFINITION.substitute(env))
+            declaration = DEPRECATED_FUNCTION_DECLARATION if option.get('deprecated') else FUNCTION_DECLARATION
+            top_env['function_declarations'].append(declaration.substitute(env))
+            top_env['function_definitions'].append(FUNCTION_DEFINITION.substitute(env))
             method_of.append('namespace')
 
         output_options.append(OutputDeclaration(
@@ -1256,20 +1256,17 @@ def create_derived(backend_type_env, declarations):
                     if 'default_init' in arg:
                         default_init.append(arg['default_init'])
 
-                    noelem_to_empty = 'is_noelem_tensor_size(size)' if 'size' in seen_names else 'false'
                     if arg['type'] in DIRECT_CONSTRUCTION_CHECKED_CAST:
                         body.append(CHECKED_CAST[arg['type']].substitute(
                             env, arg_name=arg['name'], arg_pos=count,
                             null_okay=null_okay, default_init=default_init,
                             size=arg.get('size'),
-                            noelem_to_empty=noelem_to_empty,
                             result_name=arg['name'] + '_'))
                     else:
                         check_cast = CHECKED_CAST[arg['type']].substitute(
                             env, arg_name=arg['name'], arg_pos=count,
                             null_okay=null_okay, default_init=default_init,
-                            size=arg.get('size'),
-                            noelem_to_empty=noelem_to_empty)
+                            size=arg.get('size'))
                         body.append("auto {}_ = {};".format(
                             arg['name'], check_cast))
                 if drop_argument(arg, option) or replace_with_null(arg):

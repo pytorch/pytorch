@@ -34,25 +34,31 @@ void THNN_(LookupTable_accGradParameters)(
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   if (numel <= 768 && !scaleGradByFreq) {
-    dim3 grid(THCCeilDiv(stride, (int64_t) 4));
-    dim3 block(128);
+    const int WARP_SIZE = 32;
+    const int BLOCKDIMY = 32;
+    dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
+    dim3 block(WARP_SIZE, BLOCKDIMY);
 
-    cunn_LookupTable_accGradParametersKernelByFeature<<<grid, block, 0, stream>>>(
-      THCIndexTensor_(data)(state, input),
-      THCTensor_(data)(state, gradOutput),
-      THCTensor_(data)(state, gradWeight),
-      scale,
-      numel,
-      stride,
-      paddingValue);
+    cunn_LookupTable_accGradParametersKernelByFeature<real, accreal>
+    <<<grid, 
+       block, 
+       sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
+       stream>>>
+      (THCIndexTensor_(data)(state, input),
+       THCTensor_(data)(state, gradOutput),
+       THCTensor_(data)(state, gradWeight),
+       scale,
+       numel,
+       stride,
+       paddingValue);
     THCTensor_(free)(state, gradOutput);
     THCudaCheck(cudaGetLastError());
     return;
   }
 
   THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
-  THCIndexTensor_(resize)(state, origIndices, inputSize, NULL);
+  THCIndexTensor_(resizeLegacy)(state, sortedIndices, inputSize, NULL);
+  THCIndexTensor_(resizeLegacy)(state, origIndices, inputSize, NULL);
   THLongStorage_free(inputSize);
 
   // Sort the inputs into sorted with the corresponding indices; we
