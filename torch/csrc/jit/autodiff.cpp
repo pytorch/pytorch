@@ -16,14 +16,8 @@ bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as
+    aten::unsqueeze, aten::expand, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as
   };
-  // TODO: check this more generally via schema
-  // This check ensures that the `alpha` and `beta` attributes on this addmm
-  // node are constant and equivalent to 1.0
-  if (n->kind() == aten::addmm && n->inputs().size() > 3) {
-    return false;
-  }
   if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
     return false;
   }
