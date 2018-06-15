@@ -294,8 +294,8 @@ class ModuleDict(Module):
             for j, m in enumerate(modules):
                 if not len(m) == 2:
                     raise ValueError("ModuleDict update sequence element "
-                                    "#" + str(j) + " has length " + len(m) +
-                                    "; 2 is required")
+                                     "#" + str(j) + " has length " + len(m) +
+                                     "; 2 is required")
                 self[m[0]] = m[1]
 
 
@@ -494,8 +494,8 @@ class ParameterDict(Module):
             for j, p in enumerate(parameters):
                 if not len(p) == 2:
                     raise ValueError("ParameterDict update sequence element "
-                                    "#" + str(j) + " has length " + len(p) +
-                                    "; 2 is required")
+                                     "#" + str(j) + " has length " + len(p) +
+                                     "; 2 is required")
                 self[p[0]] = p[1]
 
     def extra_repr(self):
