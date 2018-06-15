@@ -293,7 +293,7 @@ SparseTensor& resize_as_sparse_(SparseTensor& self, const SparseTensor& src) {
 // NB: Dropped the resizeNd variants
 
 Tensor sparse_to_dense(const SparseTensor& self) {
-  Tensor dst = self.type().toDense().zeros(self.sizes());
+  Tensor dst = at::zeros(self.sizes(), self.type().toDense());
   return dst.add_(self);
 }
 
@@ -345,7 +345,7 @@ SparseTensor coalesce_sparse_cpu(const SparseTensor& self) {
   int64_t denseDims = self._denseDims();
   int64_t nnz = self._nnz();
 
-  LongTensor indices_scalar = at::CPU(kLong).zeros({nnz});
+  LongTensor indices_scalar = at::zeros({nnz}, kLong);
 
   int64_t factor = 1;
   for (int64_t d = sparseDims - 1; d >= 0; d--) {
