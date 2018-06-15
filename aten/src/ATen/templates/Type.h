@@ -40,7 +40,6 @@ enum class TypeID {
   NumOptions
 };
 
-
 struct AT_API Type {
   explicit Type(Context* context, bool is_variable, bool is_undefined)
       : context(context), is_variable_(is_variable), is_undefined_(is_undefined) {}
@@ -97,6 +96,7 @@ protected:
   Context* context;
   bool is_variable_;
   bool is_undefined_;
+
 };
 
 inline bool Tensor::is_variable() const noexcept {
