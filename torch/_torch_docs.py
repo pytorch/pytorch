@@ -4430,6 +4430,33 @@ Example::
             [-0.5872,  0.6932]])
 """)
 
+add_docstr(torch.flip,
+           r"""
+flip(input, dims) -> Tensor
+
+Reverse the order of a n-D tensor along given axis in dims.
+
+Args:
+    input (Tensor): the input tensor
+    dims (a list or tuple): axis to flip on
+
+Example::
+
+    >>> x = torch.arange(8).view(2, 2, 2)
+    >>> x
+    tensor([[[ 0,  1],
+             [ 2,  3]],
+
+            [[ 4,  5],
+             [ 6,  7]]])
+    >>> torch.flip(x, [0, 1])
+    tensor([[[ 6,  7],
+             [ 4,  5]],
+
+            [[ 2,  3],
+             [ 0,  1]]])
+""")
+
 add_docstr(torch.take,
            r"""
 take(input, indices) -> Tensor

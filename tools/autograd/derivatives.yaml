@@ -646,6 +646,9 @@
 - name: t(Tensor self)
   self: grad.t()
 
+- name: flip(Tensor self, IntList dims)
+  self: grad.flip(dims)
+
 - name: take(Tensor self, Tensor index)
   self: zeros_like(self).put_(index, grad, true)
 
