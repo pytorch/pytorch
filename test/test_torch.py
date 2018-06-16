@@ -7754,11 +7754,11 @@ class TestTorch(TestCase):
         a = torch.tensor(1)
         b = torch.tensor([1, 2, 3])
         c = torch.tensor([1, 2])
-        grid_a, grid_b, grid_c = torch.meshgrid(a, b, c)
+        grid_a, grid_b, grid_c = torch.meshgrid([a, b, c])
         self.assertEqual(grid_a.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_b.shape, torch.Size([1, 3, 2]))
         self.assertEqual(grid_c.shape, torch.Size([1, 3, 2]))
-        expected_grid_a = torch.ones(1, 3, 2)
+        expected_grid_a = torch.ones(1, 3, 2, dtype=torch.int64)
         expected_grid_b = torch.tensor([[[1, 1],
                                          [2, 2],
                                          [3, 3]]])

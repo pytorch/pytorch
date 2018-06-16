@@ -623,11 +623,11 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
       throw std::runtime_error("input tensor of meshgrid must be scalar or vector");
     }
   }
-  std::vector<Tensor> grids(size);
+  std::vector<Tensor> grids;
   for(int64_t i = 0; i < size; i++) {
     std::vector<int64_t> view_shape(size, 1);
     view_shape[i] = -1;
-    grids[i] = tensors[i].view(view_shape).expand(shape);
+    grids.push_back(tensors[i].view(view_shape).expand(shape));
   }
   return grids;
 }

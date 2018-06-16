@@ -5833,3 +5833,30 @@ Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
 
 """.format(**factory_common_args))
+
+
+add_docstr(torch.meshgrid,
+           r"""
+meshgrid(seq) -> seq
+
+Create N-dimensional grid coordinates with the ith coordinates defined by the ith vector.
+
+All tensors need to be either scalar or 1-dimensional vector.
+
+Arguments:
+    seq (sequence of Tensors): sequence of tensors to do grid mesh
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([4, 5, 6])
+    >>> grid_x, grid_y = torch.meshgrid([x, y])
+    >>> grid_x
+    tensor([[1, 1, 1],
+            [2, 2, 2],
+            [3, 3, 3]])
+    >>> grid_y
+    tensor([[4, 5, 6],
+            [4, 5, 6],
+            [4, 5, 6]])
+""")
