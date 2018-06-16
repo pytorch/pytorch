@@ -1910,19 +1910,19 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     return resize_images(input, size, scale_factor, mode, align_corners)
 
 def resize_images(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
-    r"""Upsamples the input to either the given :attr:`size` or the given
+    r"""Down/upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
-    The algorithm used for upsampling is determined by :attr:`mode`.
+    The algorithm used for interpolation is determined by :attr:`mode`.
 
-    Currently temporal, spatial and volumetric upsampling are supported, i.e.
+    Currently temporal, spatial and volumetric sampling are supported, i.e.
     expected inputs are 3-D, 4-D or 5-D in shape.
 
     The input dimensions are interpreted in the form:
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
-    The modes available for upsampling are: `nearest`, `linear` (3D-only),
-    `bilinear` (4D-only), `trilinear` (5D-only)
+    The modes available for resizing are: `nearest`, `linear` (3D-only),
+    `bilinear` (4D-only), `trilinear` (5D-only), `area`
 
     Args:
         input (Tensor): the input tensor
@@ -1930,7 +1930,7 @@ def resize_images(input, size=None, scale_factor=None, mode='nearest', align_cor
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple. 
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
+            'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
         align_corners (bool, optional): if True, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is `linear`,
@@ -1984,6 +1984,12 @@ def resize_images(input, size=None, scale_factor=None, mode='nearest', align_cor
         return torch._C._nn.upsample_nearest2d(input, _output_size(2))
     elif input.dim() == 5 and mode == 'nearest':
         return torch._C._nn.upsample_nearest3d(input, _output_size(3))
+    elif input.dim() == 3 and mode == 'area':
+        return adaptive_avg_pool1d(input, _output_size(1))
+    elif input.dim() == 4 and mode == 'area':
+        return adaptive_avg_pool2d(input, _output_size(2))
+    elif input.dim() == 5 and mode == 'area':
+        return adaptive_avg_pool3d(input, _output_size(3))
     elif input.dim() == 3 and mode == 'linear':
         return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners)
     elif input.dim() == 3 and mode == 'bilinear':
