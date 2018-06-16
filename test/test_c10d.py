@@ -171,6 +171,10 @@ class ProcessGroupNCCLTest(TestCase):
     MAIN_PROCESS_RANK = 0
 
     def setUp(self):
+        if not hasattr(c10d, "ProcessGroupNCCL"):
+            raise unittest.SkipTest("C10D is not built with NCCL process group,"
+                                    " skipping test")
+
         self.rank = self.MAIN_PROCESS_RANK
         self.size = 1
         self.file = tempfile.NamedTemporaryFile()
