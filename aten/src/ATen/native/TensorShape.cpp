@@ -600,6 +600,23 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
+Tensor flatten(const Tensor& self, int64_t start, int64_t end) {
+  start = maybe_wrap_dim(start, self.dim());
+  end = maybe_wrap_dim(end, self.dim());
+  AT_CHECK(start < end, "start dim must be before end dim");
+
+  std::vector<int64_t> shape;
+  for (int i = 0; i < start; i++) {
+    shape.push_back(self.sizes()[i]);
+  }
+  shape.push_back(-1);
+  for (int i = end + 1; i < self.dim(); i++) {
+    shape.push_back(self.sizes()[i]);
+  }
+
+  return self.view(IntList(shape));
+}
+
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }

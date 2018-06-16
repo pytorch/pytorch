@@ -556,6 +556,8 @@
   variants: function
   deprecated: true
 
+- func: flatten(Tensor self, int64_t start, int64_t end) -> Tensor
+
 - func: fill_(Tensor self, Scalar value) -> Tensor
 
 - func: fill_(Tensor self, Tensor value) -> Tensor

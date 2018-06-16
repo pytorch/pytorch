@@ -1591,6 +1591,18 @@ Example::
     array([-1,  2,  3])
 """)
 
+add_docstr(torch.flatten,
+           r"""
+flatten(input, start, end) -> Tensor
+
+Flattens a contiguous range of dims in a tensor.
+
+Args:
+    input (Tensor): the input tensor
+    start (int): the first dim to flatten
+    end (int): the last dim to flatten
+""")
+
 add_docstr(torch.gather,
            r"""
 gather(input, dim, index, out=None) -> Tensor

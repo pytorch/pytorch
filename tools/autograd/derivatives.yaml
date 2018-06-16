@@ -265,6 +265,9 @@
   self: zeros_like(grad)
   value: grad.sum()
 
+- name: flatten(Tensor self, int64_t start, int64_t end)
+  self: grad.view(self.sizes())
+
 - name: floor(Tensor self)
   self: zeros_like(grad)
 
