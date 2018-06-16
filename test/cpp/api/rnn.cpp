@@ -37,17 +37,13 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   while (running_loss > 1e-2) {
     auto bs = 16U;
     auto nlen = 5U;
-    auto inp =
-        at::CPU(at::kFloat).rand({nlen, bs, 1}).round().toType(at::kFloat);
+
+    const auto backend = cuda ? at::kCUDA : at::kCPU;
+    auto inp = at::rand({nlen, bs, 1}, backend).round().toType(at::kFloat);
     auto lab = inp.sum(0);
 
-    if (cuda) {
-      inp = inp.toBackend(at::kCUDA);
-      lab = lab.toBackend(at::kCUDA);
-    }
-
-    auto x = Var(inp);
-    auto y = Var(lab, false);
+    auto x = autograd::make_variable(inp, /*requires_grad=*/true);
+    auto y = autograd::make_variable(lab);
     x = forward_op(x);
     Variable loss = at::mse_loss(x, y);
 
@@ -90,7 +86,7 @@ TEST_CASE("rnn") {
   SECTION("lstm") {
     SECTION("sizes") {
       auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
-      Variable x = Var(at::CPU(at::kFloat).randn({10, 16, 128}));
+      auto x = torch::randn({10, 16, 128}, at::requires_grad());
       auto tup = model->forward({x});
       auto y = x.mean();
 
@@ -118,7 +114,7 @@ TEST_CASE("rnn") {
         }
       }
 
-      Variable x = Var(at::CPU(at::kFloat).tensor({3, 4, 2}));
+      auto x = torch::empty({3, 4, 2}, at::requires_grad());
       float size = x.data().numel();
       auto p = static_cast<float*>(x.data().storage()->data());
       for (size_t i = 0; i < size; i++) {
@@ -193,7 +189,7 @@ TEST_CASE("rnn_cuda", "[cuda]") {
   SECTION("sizes") {
     auto model = LSTM(128, 64).layers(3).dropout(0.2).build();
     model->cuda();
-    Variable x = Var(at::CUDA(at::kFloat).randn({10, 16, 128}));
+    auto x = torch::randn({10, 16, 128}, at::requires_grad().device(at::kCUDA));
     auto tup = model->forward({x});
     auto y = x.mean();
 

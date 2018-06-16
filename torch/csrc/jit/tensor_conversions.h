@@ -110,7 +110,7 @@ inline at::Tensor as_tensor(const at::Scalar& s) {
 
 template<size_t N>
 inline at::Tensor as_tensor(std::array<bool, N>&& bools) {
-  auto r = at::CPU(at::kByte).tensor({N});
+  auto r = at::empty({N}, at::kByte);
   auto accessor = r.accessor<uint8_t, 1>();
   for(size_t i = 0; i < N; ++i) {
     accessor[i] = bools[i];

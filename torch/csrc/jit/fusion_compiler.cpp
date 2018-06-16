@@ -66,10 +66,10 @@ so typedefs help it handle those cases*/
 
 auto type_declarations_template = CodeTemplate(R"(
 #if defined(__CUDACC_RTC__)
-typedef unsigned char uint8_t; 
-typedef signed char int8_t; 
-typedef short int  int16_t; 
-typedef long long int int64_t; 
+typedef unsigned char uint8_t;
+typedef signed char int8_t;
+typedef short int  int16_t;
+typedef long long int int64_t;
 #endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
@@ -424,7 +424,7 @@ void compressContiguous(
 } // anonymous namespace
 
 void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
-  AutoGPU gpu_guard(inputs);
+  at::DeviceGuard device_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
   size_t flat_outputs_size = 0;
@@ -484,7 +484,7 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
 }
 
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs) {
-  AutoGPU guard(inputs.back());
+  at::DeviceGuard guard(inputs.back());
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
@@ -509,7 +509,7 @@ void checkCUDAVersion(const cudaDeviceProp & prop) {
 struct CUDAFusionFunction : public CompiledFusionFunction {
   CUDAFusionFunction(const std::string & name, AnnotatedGraph & agraph)
   : CompiledFusionFunction(name, agraph) {
-    AutoGPU gpu_guard(agraph.device);
+    at::DeviceGuard device_guard(agraph.device);
 
     TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
     checkCUDAVersion(prop);

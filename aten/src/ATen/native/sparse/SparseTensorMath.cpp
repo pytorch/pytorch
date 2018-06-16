@@ -47,7 +47,7 @@ namespace {
 
   LongTensor _to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
     int64_t h, i, hp0, hp1;
-    LongTensor csr = at::CPU(kLong).zeros({dim + 1});
+    LongTensor csr = native::zeros({dim + 1}, kLong);
 
     // TODO: eliminate this conditional when zero-size dims supported correctly
     if (nnz > 0) {
@@ -746,8 +746,8 @@ SparseTensor& _sspaddmm_out_cpu(
 
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
-  LongTensor newi = at::CPU(kLong).tensor({2, r_nnz});
-  LongTensor newv = values.type().zeros({r_nnz});
+  LongTensor newi = native::empty({2, r_nnz}, kLong);
+  LongTensor newv = native::zeros({r_nnz}, TensorOptions(values));
 
   if (t_nnz != 0) {
     LongTensor narrowi = newi.narrow(1, 0, t_nnz);

@@ -168,11 +168,11 @@ void initJITBindings(PyObject *module) {
         if (outputs.size() == 0) {
           return py::none();
         } else if (outputs.size() == 1) {
-          return py::cast(static_cast<autograd::Variable&>(outputs[0]));
+          return py::cast(autograd::as_variable_ref(outputs[0]));
         } else {
           py::tuple tuple(outputs.size());
           for(size_t i = 0; i < outputs.size(); i++) {
-            tuple[i] = py::cast(static_cast<autograd::Variable&>(outputs[i]));
+            tuple[i] = py::cast(autograd::as_variable_ref(outputs[i]));
           }
           return tuple;
         }

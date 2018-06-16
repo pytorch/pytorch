@@ -2,7 +2,7 @@
   name: storageOffset
   python_name: storage_offset
   cpu_half: True
-  auto_gpu: False
+  device_guard: False
   return: long
   arguments:
     - THTensor* self
@@ -11,7 +11,7 @@
   name: nDimension
   python_name: ndimension
   cpu_half: True
-  auto_gpu: False
+  device_guard: False
   return: long
   arguments:
     - THTensor* self
@@ -31,7 +31,7 @@
   name: set_
   cname: set
   cpu_half: True
-  auto_gpu: False
+  device_guard: False
   return: argument 0
   options:
     - cname: set
@@ -78,7 +78,7 @@
   name: isContiguous
   python_name: is_contiguous
   cpu_half: True
-  auto_gpu: False
+  device_guard: False
   return: bool
   arguments:
     - THTensor* self
@@ -87,7 +87,7 @@
   name: isSetTo
   python_name: is_set_to
   cpu_half: True
-  auto_gpu: False
+  device_guard: False
   return: bool
   arguments:
     - THTensor* self
@@ -168,7 +168,7 @@
 [[
   name: view
   cname: newView
-  auto_gpu: False
+  device_guard: False
   return: THTensor*
   arguments:
     - THTensor* self
@@ -277,7 +277,7 @@
 [[
   name: unfold
   cpu_half: True
-  auto_gpu: False
+  device_guard: False
   return: argument 0
   arguments:
     - arg: THTensor* result
@@ -378,7 +378,7 @@
 [[
   name: data_ptr
   with_gil: True
-  auto_gpu: False
+  device_guard: False
   return: void*
   cpu_half: True
   cname: data
@@ -1037,6 +1037,7 @@
 [[
   name: getDevice
   python_name: get_device
+  device_guard: False
   backends:
     - CUDA
   aten_sparse: True
@@ -1713,7 +1714,7 @@
         // norm(value) for a sparse tensor returns a DENSE 0-dim tensor
         if (self.is_sparse()) {
           auto result = ${THTensor}_normall(${state,} self_->tensor, convert<${THScalarType}>(p_));
-          return toDense().tensor({}).fill_(result);
+          return at::native::full({}, result, toDense());
         }
         // aten_custom_call is followed by the generated call to normall
 ]]
@@ -3952,7 +3953,7 @@
   aten_custom_call: |
     if (self_->isScalar()) {
       // Empty tensor
-      return toDense().toScalarType(kLong).tensor({0});
+      return at::native::empty({0}, toDense().toScalarType(kLong));
     }
 ]]
 

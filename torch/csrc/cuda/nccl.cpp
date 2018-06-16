@@ -1,7 +1,6 @@
 #include "nccl.h"
 #include "torch/csrc/cuda/device_set.h"
 #include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/hash.h"
 
 #include <unordered_map>
@@ -190,10 +189,10 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
 
   std::lock_guard<std::mutex> free_mutex(*(THCCachingAllocator_getCudaFreeMutex()));
   const auto comms = user_comms.empty() ? _get_communicators(tensors) : ArrayRef<ncclComm_t>(user_comms);
-  AutoGPU gpu_guard;
+  at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    gpu_guard.setDevice(tensors[i].get_device());
+    device_guard.set_index(tensors[i].get_device());
     // TODO: use current stream
     const auto stream = (streams.empty() || !streams[i]) ? NULL : streams[i]->stream;
     CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));

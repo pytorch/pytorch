@@ -1,14 +1,21 @@
 #include "torch/csrc/jit/script/init.h"
-#include "torch/csrc/jit/script/compiler.h"
+
 #include "torch/csrc/Device.h"
+#include "torch/csrc/Dtype.h"
+#include "torch/csrc/Layout.h"
+#include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
-#include <functional>
+#include <ATen/ATen.h>
+
+#include <cstddef>
 #include <memory>
+#include <sstream>
 #include <string>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -174,14 +181,15 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
       return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
     } else if(THPDevice_Check(self.ptr())) {
       auto device = (THPDevice*) self.ptr();
-      auto t = as_tensor({static_cast<int64_t>(device->device.type), device->device.deviceInt64()});
+      auto t = as_tensor({static_cast<int64_t>(device->device.type()), device->device.index()});
       return createConstant(loc, m, t);
     } else if(THPLayout_Check(self.ptr())) {
       auto layout = (THPLayout*) self.ptr();
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(layout->is_strided));
+      const auto v = static_cast<int64_t>(layout->layout);
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
     } else if(THPDtype_Check(self.ptr())) {
       auto dtype = (THPDtype*)(self.ptr());
-      int64_t v = static_cast<int64_t>(dtype->scalar_type);
+      const auto v = static_cast<int64_t>(dtype->scalar_type);
       return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
     }
     return std::make_shared<ConstantPythonValue>(self);
@@ -327,11 +335,11 @@ py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
   if (outputs.size() == 0) {
     return py::none();
   } else if (outputs.size() == 1) {
-    return py::cast(static_cast<autograd::Variable&>(outputs[0]));
+    return py::cast(autograd::as_variable_ref(outputs[0]));
   } else {
     py::tuple tuple(outputs.size());
     for(size_t i = 0; i < outputs.size(); i++) {
-      tuple[i] = py::cast(static_cast<autograd::Variable&>(outputs[i]));
+      tuple[i] = py::cast(autograd::as_variable_ref(outputs[i]));
     }
     return tuple;
   }
@@ -399,7 +407,7 @@ void initJitScriptBindings(PyObject* module) {
           py::tuple r(3);
           result[i] = std::make_tuple(
             p.key,
-            static_cast<const autograd::Variable&>(*p->slot()),
+            autograd::as_variable_ref(*p->slot()),
             p->is_buffer);
 
         }
@@ -440,7 +448,7 @@ void initJitScriptBindings(PyObject* module) {
           std::vector<at::Tensor*> parameters;
           gatherParametersAndBuffers(parameters, self);
           for(at::Tensor* param : parameters) {
-            inputs.push_back(static_cast<autograd::Variable&>(*param));
+            inputs.push_back(autograd::as_variable_ref(*param));
           }
           auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
           self.create_method(name, std::move(graph), std::move(parameters));

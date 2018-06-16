@@ -40,16 +40,19 @@ auto ${name} = tensor_as<at::IntList>(std::move(${name}_tensor));\
 """)
 
 CALL_NAMESPACE = CodeTemplate("""\
-AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
 auto result = at::${name}(${args});
 """)
 CALL_METHOD = CodeTemplate("""\
-AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
+DeviceGuard device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
 auto result = (${first}).${name}(${args});
 """)
-CALL_DTYPE = CodeTemplate("""\
-AutoGPU device_guard(device[1]);
-auto result = resolveType(device[0], layout, (at::ScalarType)dtype).${name}(${args});
+CALL_TENSOR_OPTIONS = CodeTemplate("""\
+const auto device_index = static_cast<int32_t>(device[1]);
+const auto options = TensorOptions()
+        .dtype(static_cast<at::ScalarType>(dtype))
+        .layout(static_cast<at::Layout>(layout))
+        .device({static_cast<at::Device::Type>(device[0]), device_index});
+auto result = torch::${name}(${args}, options);
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
@@ -81,8 +84,7 @@ def is_jit_arg(i, arg):
         return False
     if simple_type in default_only_types and 'default' not in arg:
         return False
-    # allow 'Type dtype' as the first argument only
-    if simple_type == 'Type' and (i > 0 or arg['name'] != 'dtype'):
+    if simple_type == 'Type':
         return False
     return True
 
@@ -130,8 +132,8 @@ def gen_jit_dispatch(declarations, out, template_path):
     ops = {}
 
     def get_invocation(decl, args, num_dynamic_inputs):
-        if decl.get('has_dtype'):
-            return CALL_DTYPE.substitute(name=decl['name'], args=args[:-3])
+        if decl.get('has_tensor_options'):
+            return CALL_TENSOR_OPTIONS.substitute(name=decl['name'], args=args[:-3])
         elif 'namespace' in decl['method_of']:
             return CALL_NAMESPACE.substitute(name=decl['name'], args=args, num_dynamic_inputs=num_dynamic_inputs)
         else:
@@ -215,6 +217,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             else:
                 simple_type = arg['simple_type']
 
+                assert simple_type in ATTR_METHOD_MAP, (decl['name'], simple_type)
                 attr_method = ATTR_METHOD_MAP[simple_type]
                 assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(simple_type, simple_type),
                                                   name=arg['name'],
@@ -286,19 +289,19 @@ def gen_jit_dispatch(declarations, out, template_path):
     # add arguments dtype and device for functions like zeros
     for decl in jit_decls:
         arguments = decl['arguments']
-        if len(arguments) == 0 or arguments[0]['simple_type'] != 'Type':
-            continue
-        del arguments[0]
-        arguments.extend([
-            # dtype is specified as an int64_t of at::ScalarType
-            {'name': 'dtype', 'simple_type': 'int64_t', 'default': 'static_cast<int64_t>(at::kFloat)'},
-            # device is specified as an IntList of { torch::DeviceType, device_id }
-            {'name': 'device', 'simple_type': 'IntList',
-                'default': '{static_cast<int64_t>(torch::DeviceType::CPU), -1}'},
-            # layout is specified as an int64_t of Layouts's is_strided
-            {'name': 'layout', 'simple_type': 'int64_t', 'default': '1'}
-        ])
-        decl['has_dtype'] = True
+        for n, arg in enumerate(arguments):
+            if arg['simple_type'] == 'TensorOptions':
+                del arguments[n]
+                arguments.extend([
+                    # dtype is specified as an int64_t of at::ScalarType
+                    {'name': 'dtype', 'simple_type': 'int64_t', 'default': 'static_cast<int64_t>(at::kFloat)'},
+                    # device is specified as an IntList of { at::Device::Type, device_id }
+                    {'name': 'device', 'simple_type': 'IntList',
+                        'default': '{static_cast<int64_t>(at::Device::Type::CPU), -1}'},
+                    # layout is specified as an int64_t of at::Layout
+                    {'name': 'layout', 'simple_type': 'int64_t', 'default': 'static_cast<int64_t>(at::kStrided)'}
+                ])
+                decl['has_tensor_options'] = True
 
     for decl in jit_decls:
         emit_decl(decl)

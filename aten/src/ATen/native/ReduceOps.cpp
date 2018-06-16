@@ -94,7 +94,7 @@ Tensor sum(const Tensor &self) {
 
 Tensor _sum_cpu(const Tensor& self) {
   if (self.is_contiguous()) {
-    Tensor result = self.type().tensor({});
+    Tensor result = at::empty({}, self.type());
     sum_kernel(result, self, at::nullopt);
     return result;
   }
@@ -115,7 +115,7 @@ Tensor prod(const Tensor &self) {
 
 Tensor _prod_cpu(const Tensor &self) {
   if (self.is_contiguous()) {
-    Tensor result = self.type().tensor({});
+    Tensor result = at::empty({}, self.type());
     prod_kernel(result, self, at::nullopt);
     return result;
   }

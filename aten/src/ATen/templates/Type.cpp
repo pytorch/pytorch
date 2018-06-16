@@ -2,13 +2,16 @@
 
 // ${generated_comment}
 
-#include "ATen/Tensor.h"
-#include "ATen/Storage.h"
-#include "ATen/Scalar.h"
-#include "ATen/SparseTensorRef.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/Scalar.h"
+#include "ATen/SparseTensorRef.h"
+#include "ATen/Storage.h"
+#include "ATen/Tensor.h"
+#include "ATen/TensorOptions.h"
 #include "ATen/UndefinedType.h"
+#include "ATen/DeviceGuard.h"
+
 #include <ATen/detail/VariableHooksInterface.h>
 
 #include <iostream>
@@ -29,6 +32,7 @@ Tensor & Type::copy_(Tensor & self, const Tensor & src, bool non_blocking) const
 }
 
 Tensor Type::copy(const Tensor & src, bool non_blocking) const {
+  // TODO(psag): have a DeviceGuard here
   AT_CHECK(src.defined(), "attempt to copy an undefined tensor");
   if (is_sparse()) {
     auto indices = src._indices();

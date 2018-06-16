@@ -1,5 +1,10 @@
 #include "ATen/ATen.h"
 
+#include <ATen/Error.h>
+
+#include <algorithm>
+#include <vector>
+
 namespace at {
 namespace native {
 

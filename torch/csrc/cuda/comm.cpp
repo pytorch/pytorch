@@ -1,13 +1,14 @@
 #include "comm.h"
 
 #include "torch/csrc/utils/tensor_flatten.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/cuda/device_set.h"
 #ifdef USE_NCCL
 #include "torch/csrc/cuda/nccl.h"
 #endif
 
 #include <ATen/ATen.h>
+
+#include <cstddef>
 
 namespace torch { namespace cuda {
 
@@ -38,7 +39,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
-      AutoGPU _gpu_guard(device);
+      at::DeviceGuard _device_guard(device);
       tensors.push_back(type.tensor(tensor.sizes()));
     }
     nccl::broadcast(tensors);
@@ -48,7 +49,7 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
 #endif
     auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
     for (auto device : devices) {
-      AutoGPU _gpu_guard(device);
+      at::DeviceGuard _device_guard(device);
       tensors.push_back(gpu_type.copy(tensor, true));
     }
   }
@@ -77,7 +78,7 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
       std::vector<at::Tensor> broadcast_values = broadcast(flat_tuple.second, devices);
       results.reserve(devices.size());
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        AutoGPU auto_gpu(devices[i]);
+        at::DeviceGuard device_guard(devices[i]);
         auto & device_outputs = outputs[i];
         auto & inds = broadcast_indices[i];
         auto & vals = broadcast_values[i];
@@ -85,11 +86,11 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
           device_outputs.push_back(std::move(t));
       }
     } else {
-      AutoGPU auto_gpu(devices[0]);
+      at::DeviceGuard device_guard(devices[0]);
       std::vector<Tensor> results = broadcast(utils::flatten_dense_tensors(chunk.tensors),
                                               devices);
       for (size_t i = 1, num_devices = devices.size(); i < num_devices; ++i) {
-        auto_gpu.setDevice(devices[i]);
+        device_guard.set_index(devices[i]);
         auto & device_outputs = outputs[i];
         for (auto & t : utils::unflatten_dense_tensors(results[i], chunk.tensors))
           device_outputs.push_back(std::move(t));

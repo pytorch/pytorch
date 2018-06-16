@@ -1,5 +1,8 @@
 #include <torch/nn/modules/dropout.h>
 
+#include <torch/functions.h>
+#include <torch/tensor.h>
+
 namespace torch {
 namespace detail {
 
@@ -37,7 +40,8 @@ Variable Dropout::noise_mask(Variable input) const {
 }
 
 Variable Dropout2d::noise_mask(Variable input) const {
-  return input.type().empty({input.size(0), input.size(1), 1, 1});
+  return torch::empty(
+      {input.size(0), input.size(1), 1, 1}, at::TensorOptions(input));
 }
 } // namespace nn
 } // namespace torch

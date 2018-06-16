@@ -82,7 +82,7 @@ PY_VARIABLE_CALL_DISPATCH = CodeTemplate("""\
 ${dispatch_name}(${actuals})""")
 
 PY_VARIABLE_SET_REQUIRES_GRAD = CodeTemplate("""\
-set_requires_grad(${call_dispatch}, ${requires_grad})""")
+${call_dispatch}.set_requires_grad(${requires_grad})""")
 
 PY_VARIABLE_WRAP = CodeTemplate("""\
 return wrap(${call_dispatch});""")
@@ -91,7 +91,6 @@ PY_VARIABLE_DISPATCH = CodeTemplate("""\
 inline ${return_type} ${dispatch_name}(${formal_args}) {
   ${initialize_cuda}
   ${AutoNoGIL}
-  ${AutoGPU}
   return ${dispatch_call}(${dispatch_args});
 }
 """)
@@ -115,6 +114,14 @@ SUPPORTED_RETURN_TYPES = {
     'std::vector<Tensor>',
     'Scalar', 'bool', 'int64_t', 'void*'
 }
+
+TENSOR_OPTIONS = CodeTemplate("""\
+const auto options = TensorOptions()
+    .dtype(${dtype})
+    .device(${device})
+    .layout(${layout}.layout)
+    .requires_grad(${requires_grad});
+""")
 
 
 def should_generate_python_binding(declaration):
@@ -238,25 +245,6 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         'ScalarType': 'scalartypeWithDefault',
     }
 
-    def first_tensor_arg(arguments):
-        for arg in arguments:
-            if arg['simple_type'] in {'Tensor', 'TensorList'}:
-                return arg['name']
-        return None
-
-    def auto_gpu(option, has_device_bind):
-        if option['auto_gpu']:
-            tensor_arg = first_tensor_arg(option['arguments'])
-            if tensor_arg is not None:
-                if not has_device_bind:
-                    return 'AutoGPU auto_gpu({});'.format(tensor_arg)
-                else:  # e.g. for ones_like, the default is the device of the tensor arg
-                    device_to_use = '({}.type().is_cuda() ? {}.get_device() : -1)'.format(tensor_arg, tensor_arg)
-                    return 'AutoGPU auto_gpu(device == -1 ? {} : device);'.format(device_to_use)
-            elif has_device_bind:
-                return 'AutoGPU auto_gpu(device);'
-        return ''
-
     def emit_single_dispatch(declaration, out_idx, base_env):
         env = {}
         simple_return_type = declaration['return_type'].replace(' &', '')
@@ -273,6 +261,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
 
         inputs = [arg for arg in declaration['arguments'] if not is_output(arg)]
         outputs = [arg for arg in declaration['arguments'] if is_output(arg)]
+
+        has_tensor_options = any(arg['simple_type'] == 'TensorOptions' for arg in declaration['arguments'])
 
         def get_type_args(args):
             return [arg for arg in args if arg['simple_type'] == 'Type']
@@ -324,7 +314,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             elif dispatch_type == 'Tensor &':
                 dispatch_type = 'Tensor'
             elif dispatch_type == 'const Device &':
-                dispatch_type = 'int64_t'
+                dispatch_type = 'at::optional<int32_t>'
             formal = '{} {}'.format(dispatch_type, name)
             return expr, formal
 
@@ -332,9 +322,10 @@ def create_python_bindings(python_functions, has_self, is_module=False):
             actuals.append(actual)
             formal_args.append(formal)
 
-        unpack = any(arg.get('python_default_init') for arg in inputs)
+        # We always want to unpack when we have TensorOptions.
+        unpack = any(arg.get('python_default_init') for arg in inputs) or has_tensor_options
         for arg in inputs:
-            if arg['simple_type'] == 'Type':
+            if arg['simple_type'] in ['Type', 'TensorOptions']:
                 continue
             if has_self and arg['name'] == 'self':
                 formal_args.append('Tensor & self')
@@ -353,6 +344,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 actuals.append('results[{}]'.format(i))
 
         layout = None
+        parsed_type_args = None
         # type args go after the outputs to match the signature generation.
         arg_idx = arg_idx if out_idx is None else out_idx + 1
         for arg in type_args:
@@ -364,13 +356,15 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         requires_grad = None
         python_binding_arguments = declaration.get('python_binding_arguments', [])
         if 'dtype' in (a['name'] for a in python_binding_arguments):
-            arg_idx += 1  # we already handled this in type_dispatched_args
+            if not has_tensor_options:
+                arg_idx += 1
 
         if 'layout' in (a['name'] for a in python_binding_arguments):
             layout_idx, device_idx, requires_grad_idx = (arg_idx, arg_idx + 1, arg_idx + 2)
         else:
             device_idx, requires_grad_idx = (arg_idx, arg_idx + 1)
 
+        device = None
         for arg in python_binding_arguments:
             if arg['name'] == 'dtype' and arg['simple_type'] == 'Type':
                 pass  # already handled by type_dispatched_args
@@ -382,14 +376,17 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 if len(outputs) == 0:
                     assert parsed_type_args
                     assert layout
-                    device_arg = parse_arg(arg, device_idx, True)
-                    # add type, device formals and corresponding actuals.
-                    # The type actual isthe ATen type mapped from (ScalarType, Layout, Device)
-                    # The device actual is the corresponding AutoGPU index for the Device.
-                    formal_args.append(parsed_type_args[1])
-                    formal_args.append(device_arg[1])
-                    actuals.append("torch::getType({}, {}, {}.type)".format(parsed_type_args[0], layout, device_arg[0]))
-                    actuals.append('{}.deviceInt64()'.format(device_arg[0]))
+                    device, device_type = parse_arg(arg, device_idx, True)
+
+                    if not has_tensor_options:
+                        # add type, device formals and corresponding actuals.
+                        # The type actual isthe ATen type mapped from (ScalarType, Layout, Device)
+                        # The device actual is the corresponding AutoGPU index for the Device.
+                        formal_args.append(parsed_type_args[1])
+                        formal_args.append(device_type)
+                        actuals.append("torch::getType({}, {}, {})".format(parsed_type_args[0], layout, device))
+                        actuals.append('{}.index()'.format(device))
+
                     has_device_bind = True
             elif arg['name'] == 'requires_grad' and arg['simple_type'] == 'bool':
                 requires_grad = parse_arg(arg, requires_grad_idx)[0]
@@ -398,28 +395,45 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                                     "\"bool requires_grad\", \"ScalarType dtype\", \"Layout layout\", "
                                     "\"Device device\" are supported".format(arg)))
 
+        dtype = parsed_type_args[0] if parsed_type_args else None
+        if has_tensor_options and all([dtype, device, layout, requires_grad]):
+            body.append(TENSOR_OPTIONS.substitute({
+                'dtype': dtype,
+                'layout': layout,
+                'device': device,
+                'requires_grad': requires_grad
+            }))
+            formal_args.append('const TensorOptions & options')
+            actuals.append('options')
+
         env['unpack_args'] = []
         env['formal_args'] = formal_args
         env['actuals'] = actuals
-        maybe_init_cuda = type_args[0]['name'] if type_args else None
-        env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(maybe_init_cuda) if maybe_init_cuda else []
+
+        if has_tensor_options:
+            env['initialize_cuda'] = 'maybe_initialize_cuda(options.type());'
+        else:
+            env['initialize_cuda'] = 'maybe_initialize_cuda({});'.format(type_args[0]['name']) if type_args else ''
+
         if 'call_args' in declaration:
             env['dispatch_args'] = declaration['call_args']
         else:
             env['dispatch_args'] = [arg['name'] for arg in declaration['arguments']]
+
         if 'Tensor' in declaration['method_of']:
             env['dispatch_args'] = [arg for arg in env['dispatch_args'] if arg != 'self']
             env['dispatch_call'] = 'self.{}'.format(declaration['name'])
         elif 'namespace' in declaration['method_of']:
-            env['dispatch_call'] = 'at::{}'.format(declaration['name'])
+            namespace = 'torch' if (has_tensor_options or declaration['name'].endswith('_like')) else 'at'
+            env['dispatch_call'] = '{}::{}'.format(namespace, declaration['name'])
         else:
             raise RuntimeError('could not dispatch, neither namespace function nor Tensor method')
+
         env['AutoNoGIL'] = 'AutoNoGIL no_gil;' if not declaration['with_gil'] else ''
-        env['AutoGPU'] = auto_gpu(declaration, has_device_bind)
 
         env = nested_dict(env, nested_dict(base_env, declaration))
         call_dispatch = PY_VARIABLE_CALL_DISPATCH.substitute(env)
-        if requires_grad:
+        if requires_grad and not has_tensor_options:
             call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch,
                                                                      requires_grad=requires_grad)
         body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
@@ -450,6 +464,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         python_binding_arguments = []
         has_tensor_input_arg = False
         has_type_input_arg = False
+        has_options_arg = False
         for arg in declaration['arguments']:
             if arg.get('output', False):
                 continue
@@ -458,6 +473,8 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_tensor_input_arg = True
             if arg['simple_type'] == 'Type':
                 has_type_input_arg = True
+            elif arg['simple_type'] == 'TensorOptions':
+                has_options_arg = True
             if arg['name'] == 'requires_grad':
                 raise ValueError("argument named requires_grad not supported")
 
@@ -469,12 +486,13 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 has_tensor_return = True
 
         is_like_function = name.endswith('_like')
-        is_typed_like_function = is_like_function and has_type_input_arg
+        is_like_function_with_options = is_like_function and has_options_arg
         is_factory_function = has_tensor_return and not has_tensor_input_arg
         is_factory_or_like_function = has_tensor_return and (not has_tensor_input_arg or is_like_function)
 
-        if is_factory_function and not has_type_input_arg:
+        if (is_factory_function and not has_type_input_arg) or has_options_arg:
             default_type = get_type_default(declaration)
+            py_default_dtype = 'self.type()' if is_like_function_with_options else None
             dtype_arg = {
                 'default': default_type,
                 'dynamic_type': 'Type',
@@ -483,10 +501,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'type': 'const Type &',
                 'simple_type': 'Type',
                 'is_type_dispatched': True,
+                'python_default_init': py_default_dtype,
             }
             python_binding_arguments.append(dtype_arg)
-        if is_factory_function or is_typed_like_function:
-            py_default_layout = '*torch::getLayout(self.type().backend())' if is_typed_like_function else None
+        if is_factory_function or is_like_function_with_options:
+            py_default_layout = '*torch::getLayout(self.type().backend())' if is_like_function_with_options else None
             layout_arg = {
                 'default': 'torch.strided',
                 'dynamic_type': 'Layout',
@@ -497,7 +516,7 @@ def create_python_bindings(python_functions, has_self, is_module=False):
                 'python_default_init': py_default_layout,
             }
             python_binding_arguments.append(layout_arg)
-            py_default_device = 'torch::utils::getDevice(self)' if is_typed_like_function else None
+            py_default_device = 'self.device()' if is_like_function_with_options else None
             device_arg = {
                 'default': 'None',
                 'default_init': 'None',
@@ -606,7 +625,7 @@ def group_declarations(declarations):
     result = []
     for _, dictionary in sorted(grouped.items()):
         if 'base' not in dictionary:
-            raise RuntimeError('\'base\' not in dictionary', dictionary)
+            raise RuntimeError("'base' not in dictionary", dictionary)
         result.append(dictionary)
     return sort_declarations(result)
 
@@ -718,6 +737,9 @@ def get_python_signature(declaration, include_out):
             continue
         if arg['simple_type'] == 'Type':
             type_args.append(arg)
+            continue
+        # Skip `TensorOptions` in Python, as it is only used on the C++ side.
+        if arg['simple_type'] == 'TensorOptions':
             continue
         if arg.get('kwarg_only', False) and positional:
             py_formal_args.append('*')

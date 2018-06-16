@@ -11,6 +11,8 @@
 #include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/Utils.h"
+#include "ATen/Device.h"
+#include "ATen/Layout.h"
 
 namespace at {
 struct Type;
@@ -87,6 +89,15 @@ struct Tensor : public detail::TensorBase {
   /// Defined in Type.h because of include order issues.
   bool is_variable() const noexcept;
 
+  /// Returns a `Tensor`'s layout. Defined in Type.h
+  Layout layout() const noexcept;
+
+  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
+  ScalarType dtype() const noexcept;
+
+  /// Returns a `Tensor`'s device.
+  Device device() const;
+
   template<typename T>
   T * data() const;
 
@@ -135,8 +146,9 @@ struct Tensor : public detail::TensorBase {
 
   // ~~~~~ Autograd API ~~~~~
 
-  void set_requires_grad(bool requires_grad) {
+  Tensor& set_requires_grad(bool requires_grad) {
     pImpl->set_requires_grad(requires_grad);
+    return *this;
   }
   bool requires_grad() const {
     return pImpl->requires_grad();

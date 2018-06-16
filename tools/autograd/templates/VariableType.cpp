@@ -15,10 +15,16 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/variadic.h"
 
-#include <initializer_list>
-#include <iostream>
-#include <functional>
+#include <array>
 #include <cstddef>
+#include <functional>
+#include <initializer_list>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #ifdef _MSC_VER
 #ifdef Type
@@ -428,7 +434,9 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_type = &src.type();
-    grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
+    if (src.is_cuda()) {
+      grad_fn->src_device = src.get_device();
+    }
   }
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);
