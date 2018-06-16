@@ -22,7 +22,7 @@ public:
   Scalar() : Scalar(int64_t(0)) {}
 
   explicit Scalar(const detail::TensorBase & t)
-  : tag(Tag::HAS_t), v({.i = 0}), t(t) {
+  : tag(Tag::HAS_t), v({int64_t(0)}), t(t) {
     AT_CHECK(t.defined(), "Attempting to create a Scalar from an undefined tensor");
     AT_CHECK(t.dim() == 0, "Attempting to create a Scalar from a ", t.dim(), " dim tensor");
   }
@@ -79,8 +79,8 @@ private:
   enum class Tag { HAS_d, HAS_i, HAS_t };
   Tag tag;
   union {
-    double d;
     int64_t i;
+    double d;
   } v;
   detail::TensorBase t;
   friend struct Type;
