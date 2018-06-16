@@ -153,9 +153,7 @@ bool test_mnist(
     int image_rows = rd.read_int();
     int image_cols = rd.read_int();
 
-    auto data = torch::empty(
-        {image_count, 1, image_rows, image_cols},
-        useGPU ? at::kCUDA : at::kCPU);
+    auto data = torch::empty({image_count, 1, image_rows, image_cols});
     auto a_data = data.accessor<float, 4>();
 
     for (int c = 0; c < image_count; c++) {
@@ -166,7 +164,7 @@ bool test_mnist(
       }
     }
 
-    return data;
+    return data.toBackend(useGPU ? at::kCUDA : at::kCPU);
   };
 
   auto readLabels = [&](std::string fn) {
@@ -174,13 +172,13 @@ bool test_mnist(
     /* int label_magic = */ rd.read_int();
     int label_count = rd.read_int();
 
-    auto data = torch::empty({label_count}, useGPU ? at::kCUDA : at::kCPU);
+    auto data = torch::empty({label_count}, at::kLong);
     auto a_data = data.accessor<int64_t, 1>();
 
     for (int i = 0; i < label_count; ++i) {
       a_data[i] = static_cast<int64_t>(rd.read_byte());
     }
-    return data;
+    return data.toBackend(useGPU ? at::kCUDA : at::kCPU);
   };
 
   auto trdata = readData("test/cpp/api/mnist/train-images-idx3-ubyte");
@@ -205,7 +203,7 @@ bool test_mnist(
     const auto backend = useGPU ? at::kCUDA : at::kCPU;
     auto inp =
         torch::empty({batch_size, 1, trdata.size(2), trdata.size(3)}, backend);
-    auto lab = torch::empty({batch_size}, backend);
+    auto lab = torch::empty({batch_size}, at::device(backend).dtype(at::kLong));
     for (auto p = 0U; p < shuffled_inds.size() - batch_size; p++) {
       inp[p % batch_size] = trdata[shuffled_inds[p]];
       lab[p % batch_size] = trlabel[shuffled_inds[p]];
