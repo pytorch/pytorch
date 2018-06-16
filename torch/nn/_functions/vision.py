@@ -10,7 +10,10 @@ MODE_BORDER = 1
 
 
 def grid_sampler(input, grid, padding_mode):
-    if cudnn.is_acceptable(input.data) and padding_mode == 'zeros' and input.dim() == 4:
+    if (cudnn.is_acceptable(input.data) and
+        padding_mode == 'zeros' and
+        input.dim() == 4 and
+        input.size(1) <= 1024):  # as of cudnn 7102, will not work for larger than 1024
         return torch.cudnn_grid_sampler(input, grid)
     else:
         return GridSampler.apply(input, grid, padding_mode)
