@@ -1,6 +1,8 @@
 #include "torch/optimizers.h"
 
 #include <torch/nn/module.h>
+#include <torch/functions.h>
+#include <torch/tensor.h>
 
 namespace torch {
 
@@ -158,10 +160,10 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
 }
 
 void LBFGS::init_state() {
-  d = at::CPU(at::kFloat).empty({0});
+  d = torch::empty({0});
   t = 0;
-  H_diag = at::CPU(at::kFloat).empty({0});
-  prev_flat_grad = at::CPU(at::kFloat).empty({0});
+  H_diag = torch::empty({0});
+  prev_flat_grad = torch::empty({0});
   prev_loss = 0;
   ro.resize(history_size_);
   al.resize(history_size_);

@@ -360,7 +360,12 @@ if (TORCH_BUILD_TEST)
       ${TORCH_API_TEST_DIR}/sequential.cpp
       ${TORCH_API_TEST_DIR}/rnn.cpp
       ${TORCH_API_TEST_DIR}/serialization.cpp
-      ${TORCH_API_TEST_DIR}/static.cpp)
+      ${TORCH_API_TEST_DIR}/static.cpp
+      ${TORCH_API_TEST_DIR}/tensor.cpp
+      # Temporary until ATen tests are built with Caffe2
+      ${TORCH_API_TEST_DIR}/tensor_options.cpp
+      ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
+    )
 
       target_include_directories(test_api
         PUBLIC

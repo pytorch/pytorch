@@ -4,11 +4,10 @@
 #include <ATen/ATen.h>
 
 #include "torch/csrc/utils/python_arg_parser.h"
-#include "torch/csrc/utils/device.h"
 
 namespace torch { namespace autograd { namespace utils {
 
-inline std::tuple<at::optional<torch::Device>, at::optional<at::ScalarType>, bool>
+inline std::tuple<at::optional<at::Device>, at::optional<at::ScalarType>, bool>
 parse_to_conversion(PyObject *args, PyObject *kwargs) {
   static PythonArgParser parser({
     "to(Device device=None, ScalarType dtype=None, bool non_blocking=False)",

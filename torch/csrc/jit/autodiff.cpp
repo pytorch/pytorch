@@ -3,7 +3,6 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/auto_gpu.h"
 
 #include <algorithm>
 
@@ -228,10 +227,10 @@ static Value* createZerosLike(Value *v) {
   JIT_EXPECTM(v->isTensor(), "can't allocate zero gradient for a value without a type");
   Graph *graph = v->owningGraph();
   auto type = v->type()->expect<TensorType>();
-  AutoGPU gpu_guard(type->device());
+  at::DeviceGuard device_guard(type->device());
 
   auto & at_type = type->device() == -1 ? at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
-  auto zeros = at::zeros(at_type, {}).expand(type->sizes());
+  auto zeros = at::zeros({}, at_type).expand(type->sizes());
   Node *constant = graph->createConstant(zeros)
                         ->i_(attr::is_zero, 1);
   graph->insertNode(constant);

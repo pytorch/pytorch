@@ -11,6 +11,8 @@
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
 #include "ATen/Tensor.h"
+#include "ATen/Deprecated.h"
+#include "ATen/Layout.h"
 
 #include <array>
 #include <cstddef>
@@ -46,6 +48,7 @@ struct AT_API Type {
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
+  Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
@@ -101,6 +104,18 @@ protected:
 
 inline bool Tensor::is_variable() const noexcept {
   return type().is_variable();
+}
+
+inline ScalarType Tensor::dtype() const noexcept {
+  return type().scalarType();
+}
+
+inline Layout Tensor::layout() const noexcept {
+  return type().layout();
+}
+
+inline Device Tensor::device() const {
+  return Device(type().backend(), type().is_cuda() ? get_device() : -1);
 }
 
 } // namespace at

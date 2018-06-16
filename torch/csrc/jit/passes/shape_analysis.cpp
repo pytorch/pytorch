@@ -1,10 +1,10 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/aten_dispatch.h"
 
+#include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 
 #include <exception>
@@ -28,7 +28,7 @@ void setDynamicType(Node * node) {
 
 at::Tensor representativeTensor(const TensorType * type) {
   auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
-  AutoGPU gpu_guard(type->device());
+  at::DeviceGuard device_guard(type->device());
   auto & attype = at::getType(backend, type->scalarType());
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }

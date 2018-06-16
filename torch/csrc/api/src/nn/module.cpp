@@ -148,16 +148,14 @@ void Module::zero_grad() {
 
 autograd::Variable& Module::register_parameter(
     std::string name,
-    at::Tensor tensor) {
-  auto variable = autograd::make_variable(tensor, /*requires_grad=*/true);
-  return parameters_.insert(std::move(name), std::move(variable));
+    Variable tensor,
+    bool requires_grad) {
+  tensor.set_requires_grad(requires_grad);
+  return parameters_.insert(std::move(name), std::move(tensor));
 }
 
-autograd::Variable& Module::register_buffer(
-    std::string name,
-    at::Tensor tensor) {
-  auto variable = autograd::make_variable(tensor, /*requires_grad=*/false);
-  return parameters_.insert(std::move(name), std::move(variable));
+autograd::Variable& Module::register_buffer(std::string name, Variable tensor) {
+  return parameters_.insert(std::move(name), std::move(tensor));
 }
 
 void Module::clone_(Module& other) {}

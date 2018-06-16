@@ -16,11 +16,11 @@ void RecordFunction::pushFunctionRange(Function* fn) {
 
 #ifdef USE_CUDA
 static void onEachDevice(std::function<void(int)> op) {
-  AutoGPU gpu_guard;
+  at::DeviceGuard device_guard;
   int count;
   TORCH_CUDA_CHECK(cudaGetDeviceCount(&count));
   for(int i = 0; i < count; i++) {
-    gpu_guard.setDevice(i);
+    device_guard.set_index(i);
     op(i);
   }
 }

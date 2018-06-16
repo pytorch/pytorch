@@ -5,6 +5,9 @@
 #include "ATen/cuda/CUDATensorMethods.cuh"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
+#include <cstddef>
+#include <vector>
+
 namespace at {
 namespace native {
 
@@ -100,7 +103,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   auto out_tensor = at::empty_like(in_tensor);
 
   // stride_contiguous is the stride of non-contiguous tensor after called contiguous(), it is used to compute indices for each element in non-contiguous tensor
-  Tensor stride_contiguous = at::zeros(CPU(kLong), {total_dims});
+  Tensor stride_contiguous = at::zeros({total_dims}, kLong);
   int64_t* stride_contiguous_d = stride_contiguous.data<int64_t>();
   int64_t tmp = N;
   for (int64_t i = 0; i < total_dims; i++) {

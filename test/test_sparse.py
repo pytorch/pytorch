@@ -983,7 +983,7 @@ class TestSparse(TestCase):
         all_sparse_dtypes = [dtype for dtype in torch.testing.get_all_dtypes() if dtype != torch.float16]
         TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
-            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, -1)
+            TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, None)
             TestTorch._test_empty_full(self, all_sparse_dtypes, torch.sparse_coo, torch.device('cuda:0'))
 
     def test_is_sparse(self):

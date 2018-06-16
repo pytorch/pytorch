@@ -203,7 +203,7 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   }
   // pad zeros
   if (pad_end != 0) {
-    Tensor padded_input = at::zeros(self.type(), {batch, len + pad_end});
+    Tensor padded_input = at::zeros({batch, len + pad_end}, self.type());
     padded_input.narrow(1, 0, len).copy_(input);
     len += pad_end;
     input = padded_input;
@@ -236,8 +236,8 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   // build ft kernel
   // k[omega, t] = cos (2 pi omega t / N) - j sin (2 pi omega t / N)
   double N = static_cast<double>(fft_size);
-  auto freq_arange = at::arange(self.type(), 0, return_size).mul_(M_PI * 2. / N);
-  auto time_arange = at::arange(self.type(), 0, frame_length);
+  auto freq_arange = at::arange(0, return_size, self.type()).mul_(M_PI * 2. / N);
+  auto time_arange = at::arange(0, frame_length, self.type());
   auto arange_2d = at::ger(freq_arange, time_arange);
   auto re_kernel = arange_2d.cos();
   auto im_kernel = arange_2d.sin().neg_();
