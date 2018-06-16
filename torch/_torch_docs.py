@@ -5839,7 +5839,7 @@ add_docstr(torch.meshgrid,
            r"""
 meshgrid(seq) -> seq
 
-Create N-dimensional grid coordinates with the ith coordinates defined by the ith vector.
+Create N N-dimensional grid coordinates with the ith coordinates defined by the ith vector.
 
 All tensors need to be either scalar or 1-dimensional vector.
 
