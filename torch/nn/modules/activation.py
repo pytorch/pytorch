@@ -118,6 +118,7 @@ class RReLU(Module):
     .. _`Empirical Evaluation of Rectified Activations in Convolutional Network`:
         https://arxiv.org/abs/1505.00853
     """
+
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
         self.lower = lower
@@ -705,6 +706,7 @@ class Softmin(Module):
         >>> input = torch.randn(2, 3)
         >>> output = m(input)
     """
+
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
         self.dim = dim

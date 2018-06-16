@@ -1097,7 +1097,7 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
             assert padding_idx >= -weight.size(0), 'Padding_idx must be within num_embeddings'
             padding_idx = weight.size(0) + padding_idx
     elif padding_idx is None:
-            padding_idx = -1
+        padding_idx = -1
     if max_norm is not None:
         with torch.no_grad():
             torch.embedding_renorm_(weight, input, max_norm, norm_type)
