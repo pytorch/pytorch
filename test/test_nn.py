@@ -29,8 +29,10 @@ from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
     get_function_arglist, skipCUDAMemoryLeakCheckIf
-from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
-    TEST_CUDNN_VERSION
+from common_cuda_utils import skipIfNoCuda, skipIfNoMultiGpu, skipIfNoCudnn, skipIfCudnnVersionLessThan
+if __name__ == '__main__':
+    from common_cuda import TEST_CUDA, TEST_CUDNN
+
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_size_average, \
     get_weight, smoothl1loss_reference, kldivloss_reference
@@ -120,7 +122,7 @@ class PackedSequenceTest(TestCase):
                 unpacked, lengths_out = rnn_utils.pad_packed_sequence(masked)
                 self.assertEqual(unpacked.type(), expected_type_str)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_cuda_mask(self):
         tensor_type = torch.FloatTensor
         cuda_type_str = 'torch.cuda.FloatTensor'
@@ -1392,7 +1394,7 @@ class TestNN(NNTestCase):
     def test_nonlinearity_propagate_nan(self):
         self._test_nonlinearity_propagate_nan('cpu')
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_nonlinearity_propagate_nan_cuda(self):
         self._test_nonlinearity_propagate_nan('cuda')
 
@@ -1529,7 +1531,7 @@ class TestNN(NNTestCase):
         self.assertEqual(output[1], output[2])
         self.assertTrue(output.data.norm(p=2, dim=1).le(1).all())
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_embedding_max_norm_cuda(self, dtype=torch.float):
         embedding = nn.Embedding(22, 5, max_norm=1.0).to("cuda", dtype=dtype)
@@ -1616,7 +1618,7 @@ class TestNN(NNTestCase):
     def test_gumbel_softmax_st(self):
         self._test_gumbel_softmax_st(False)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_gumbel_softmax_st_cuda(self, dtype=torch.float):
         self._test_gumbel_softmax_st(True, dtype=dtype)
@@ -1750,7 +1752,7 @@ class TestNN(NNTestCase):
         offset[-1] = 100
         self.assertRaises(ValueError, lambda: es(input.view(-1), offset))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_pool3d_size_one_feature_dim(self):
         # Tests crazy strides for feature dim of size 1
         x = Variable(torch.randn(7, 1, 5, 3, 2, device="cuda"))
@@ -1769,7 +1771,7 @@ class TestNN(NNTestCase):
             out_x = fn(x)
             self.assertEqual(out_y, out_x.cuda(), test)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_AvgPool3d_backward_after_cat_dim1_cuda(self):
         # x has to have batch_size 1 to test contiguous checks
         x = torch.randn(1, 3, 4, 4, 4, device="cuda", requires_grad=True)
@@ -1784,7 +1786,7 @@ class TestNN(NNTestCase):
 
         y.backward(grad)
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfNoCudnn
     def test_contig_wrong_stride_cudnn(self):
         # x has to have batch_size 1 to test contiguous checks
         x = torch.randn(1, 16, 5, 5, device="cuda")
@@ -1804,7 +1806,7 @@ class TestNN(NNTestCase):
         self._test_EmbeddingBag(False, 'sum', True)
         self._test_EmbeddingBag(False, 'mean', True)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_embedding_bag_cuda(self, dtype=torch.float):
         self._test_EmbeddingBag(True, 'sum', False, dtype)
@@ -1952,7 +1954,7 @@ class TestNN(NNTestCase):
         input = torch.rand(b, c, d)
         self._test_InstanceNorm_general(nn.InstanceNorm1d, input, dtype=torch.float)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_InstanceNorm1d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -1971,7 +1973,7 @@ class TestNN(NNTestCase):
         input = torch.rand(b, c, h, w)
         self._test_InstanceNorm_general(nn.InstanceNorm2d, input, dtype=torch.float)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_InstanceNorm2d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(3, 5)
@@ -1992,7 +1994,7 @@ class TestNN(NNTestCase):
         input = torch.rand(b, c, h, w, d)
         self._test_InstanceNorm_general(nn.InstanceNorm3d, input, dtype=torch.float)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_InstanceNorm3d_general_cuda(self):
         b = random.randint(3, 5)
         c = random.randint(2, 5)
@@ -2056,7 +2058,7 @@ class TestNN(NNTestCase):
     def test_LayerNorm_general(self):
         self._test_LayerNorm_general()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_LayerNorm_general_cuda(self):
         self._test_LayerNorm_general("cuda")
         self._test_LayerNorm_cuda_half()
@@ -2120,7 +2122,7 @@ class TestNN(NNTestCase):
     def test_GroupNorm_general(self):
         self._test_GroupNorm_general(dtype=torch.float)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_GroupNorm_general_cuda(self):
         self._test_GroupNorm_general("cuda", torch.float)
         self._test_GroupNorm_cuda_half()
@@ -2211,7 +2213,7 @@ class TestNN(NNTestCase):
     def test_Conv2d_naive_groups(self):
         self._test_Conv2d_naive_groups()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_Conv2d_naive_groups_cuda(self, dtype=torch.float):
         self._test_Conv2d_naive_groups("cuda", dtype)
@@ -2219,21 +2221,21 @@ class TestNN(NNTestCase):
     def test_batchnorm_eval(self):
         self._test_batchnorm_eval()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_batchnorm_eval_cuda(self, dtype=torch.float):
         self._test_batchnorm_eval("cuda", dtype)
 
     def test_batchnorm_simple_average(self):
         self._test_batchnorm_simple_average()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_batchnorm_simple_average_cuda(self):
         self._test_batchnorm_simple_average(torch.cuda.FloatTensor)
 
     def test_MaxPool1d_indices(self):
         self._test_maxpool_indices(1)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_MaxPool1d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(1, device="cuda", dtype=dtype)
@@ -2241,7 +2243,7 @@ class TestNN(NNTestCase):
     def test_MaxPool2d_indices(self):
         self._test_maxpool_indices(2)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_MaxPool2d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(2, device="cuda", dtype=dtype)
@@ -2249,7 +2251,7 @@ class TestNN(NNTestCase):
     def test_MaxPool3d_indices(self):
         self._test_maxpool_indices(3)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_MaxPool3d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(3, device="cuda", dtype=dtype)
@@ -2257,7 +2259,7 @@ class TestNN(NNTestCase):
     def test_AdaptiveMaxPool1d_indices(self):
         self._test_maxpool_indices(1, adaptive=True)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_AdaptiveMaxPool1d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(1, adaptive=True, device="cuda", dtype=dtype)
@@ -2265,7 +2267,7 @@ class TestNN(NNTestCase):
     def test_AdaptiveMaxPool2d_indices(self):
         self._test_maxpool_indices(2, adaptive=True)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_AdaptiveMaxPool2d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(2, adaptive=True, device="cuda", dtype=dtype)
@@ -2273,7 +2275,7 @@ class TestNN(NNTestCase):
     def test_AdaptiveMaxPool3d_indices(self):
         self._test_maxpool_indices(3, adaptive=True)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_AdaptiveMaxPool3d_indices_cuda(self, dtype=torch.float):
         self._test_maxpool_indices(3, adaptive=True, device="cuda", dtype=dtype)
@@ -2288,7 +2290,7 @@ class TestNN(NNTestCase):
                 res = fn(x, 1 if adaptive else 3)
                 self.assertTrue(math.isnan(res.item()))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_max_pool_nan_cuda(self, dtype=torch.float):
         self._test_max_pool_nan(self, device="cuda", dtype=dtype)
@@ -2310,11 +2312,11 @@ class TestNN(NNTestCase):
         self.assertEqual(x.grad.data[2:], grad.clone().zero_())
         _assertGradAndGradgradChecks(self, lambda y: dp.scatter(y, (0, 1)), (x,))
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_scatter_cpu(self):
         self._test_scatter(torch.randn(4, 4))
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_scatter_gpu(self):
         self._test_scatter(torch.randn(4, 4).cuda())
 
@@ -2360,15 +2362,15 @@ class TestNN(NNTestCase):
         self.assertEqual(inputs[1].grad, grad[1])
         _assertGradAndGradgradChecks(self, lambda x, y: dp.gather((x, y), output_device), inputs)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_gather_cpu(self):
         self._test_gather(-1)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_gather_gpu(self):
         self._test_gather(0)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_gather_different_len_dicts(self):
         inputs = (
             {'a': Variable(torch.randn(1, 2).cuda(0), requires_grad=True)},
@@ -2384,13 +2386,13 @@ class TestNN(NNTestCase):
         variables = tuple(torch.tensor(t, requires_grad=True) for t in tensors)
         _assertGradAndGradgradChecks(self, lambda *i: Broadcast.apply((0, 1), *i), variables)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_broadcast_double_backwards_gpu(self):
         self._test_broadcast_double_backwards(torch.randn(4, 4).cuda(),
                                               torch.randn(4, 4).cuda(),
                                               torch.randn(4, 4).cuda())
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_broadcast_not_requiring_grad(self):
         variables = [
             Variable(torch.randn(1, 2).cuda(), requires_grad=True),
@@ -2404,7 +2406,7 @@ class TestNN(NNTestCase):
             input_var = variables[output_idx % len(variables)]
             self.assertEqual(input_var.requires_grad, broadcasted_var.requires_grad)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_broadcast_no_grad(self):
         x = torch.randn(1, 2, dtype=torch.float32, requires_grad=True, device='cuda')
         with torch.no_grad():
@@ -2413,7 +2415,7 @@ class TestNN(NNTestCase):
         for output in broadcasted:
             self.assertFalse(output.requires_grad)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_replicate(self):
         module = nn.Linear(10, 5).float().cuda()
         input = Variable(torch.randn(2, 10).float().cuda())
@@ -2425,7 +2427,7 @@ class TestNN(NNTestCase):
             replica_input = input.cuda(i)
             self.assertEqual(replica(replica_input).data, expected_output)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_replicate_buffers(self):
         net = nn.Module()
         net.bn = nn.BatchNorm2d(10)
@@ -2436,7 +2438,7 @@ class TestNN(NNTestCase):
             self.assertEqual(replica.bn.running_var.get_device(), i, 'buffer on wrong device')
             self.assertEqual(replica.bn.num_batches_tracked.get_device(), i, 'buffer on wrong device')
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_parallel_apply(self):
         l1 = nn.Linear(10, 5).to("cuda:0", torch.float)
         l2 = nn.Linear(10, 5).to("cuda:1", torch.float)
@@ -2454,7 +2456,7 @@ class TestNN(NNTestCase):
             for out, expected in zip(outputs, expected_outputs):
                 self.assertEqual(out.data, expected)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_data_parallel_multiple_input(self):
         class TestModule(nn.Module):
 
@@ -2520,14 +2522,15 @@ class TestNN(NNTestCase):
             m, (var1, var2, float1), (0,), module_kwargs=kwarg_wrap)
         local_test(out)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_data_parallel_small_back(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda())
         out = dp.data_parallel(l, i, (0, 1))
         self.assertEqual(out, l(i))
 
-    @unittest.skipIf(not TEST_MULTIGPU or not PY3, "multi-GPU not supported")
+    @skipIfNoMultiGpu
+    @unittest.skipIf(not PY3, "needs Python 3")
     def test_data_parallel_model_no_refcycles(self):
         # Python 2.7 will create reference cycles with the following
         # Module on multiple GPUs, but Python 3 shouldn't unless
@@ -2550,7 +2553,7 @@ class TestNN(NNTestCase):
         refcycles = gc.collect()
         self.assertEqual(refcycles, 0)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_data_parallel_no_grad(self):
         test = self
 
@@ -2565,7 +2568,7 @@ class TestNN(NNTestCase):
             dp.data_parallel(l, i, (0, 1))
         self.assertRaises(AssertionError, lambda: dp.data_parallel(l, i, (0, 1)))
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_data_parallel(self):
         l = nn.Linear(10, 5).float().cuda()
         i = Variable(torch.randn(20, 10).float().cuda(1))
@@ -2593,7 +2596,7 @@ class TestNN(NNTestCase):
         l = l.cuda()
         out = dp.data_parallel(l, i)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_data_parallel_sparse(self):
         l = nn.Embedding(10, 5, sparse=True).to("cuda:1")
         i = torch.randint(10, (20, 5), device="cuda:1", dtype=torch.long)
@@ -2620,7 +2623,7 @@ class TestNN(NNTestCase):
         l = l.cuda()
         out = dp.data_parallel(l, i)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_data_parallel_nested_output(self):
         def fn(input):
             return [
@@ -2651,7 +2654,7 @@ class TestNN(NNTestCase):
         self.assertIsInstance(output[3]['b'], list)
         self.assertIsInstance(output[3]['b'][0], torch.Tensor)
 
-    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
+    @skipIfNoMultiGpu
     def test_data_parallel_nested_input(self):
         def fn(input):
             return input[1][0]
@@ -2666,7 +2669,7 @@ class TestNN(NNTestCase):
         output = dp.data_parallel(Net(), input, gpus)
         self.assertEqual(output, fn(input))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_data_parallel_module(self, dtype=torch.float):
         l = nn.Linear(10, 5).to("cuda", dtype)
@@ -2677,7 +2680,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_data_parallel_module_kwargs_only(self, dtype=torch.float):
         class Net(nn.Module):
@@ -2696,7 +2699,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_data_parallel_module_kwargs_only_empty_list(self, dtype=torch.float):
         class Net(nn.Module):
@@ -2715,7 +2718,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_data_parallel_module_kwargs_only_empty_dict(self, dtype=torch.float):
         class Net(nn.Module):
@@ -2734,7 +2737,7 @@ class TestNN(NNTestCase):
         self.assertEqual(out.get_device(), 0)
         self.assertEqual(out.data, expected_out)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_data_parallel_module_kwargs_only_empty_tuple(self, dtype=torch.float):
         class Net(nn.Module):
@@ -2968,7 +2971,7 @@ class TestNN(NNTestCase):
         # but it should work with the same type
         nn.functional.conv2d(inputs.float(), weights.float())
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfNoCuda
     def test_Conv2d_inconsistent_types_on_GPU_without_cudnn(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
@@ -2982,8 +2985,8 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfNoCuda
+    @skipIfNoCudnn
     def test_Conv2d_inconsistent_types_on_GPU_with_cudnn(self):
         inputs = Variable(torch.randn(4, 1, 7, 7).float().cuda())
         weights = Variable(torch.randn(1, 1, 3, 3).double().cuda())
@@ -2997,8 +3000,8 @@ class TestNN(NNTestCase):
             # but it should work with the same type
             nn.functional.conv2d(inputs.float(), weights.float(), bias.float())
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
-    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfNoCuda
+    @skipIfNoCudnn
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_Conv2d_deterministic_cudnn(self, dtype=torch.float):
         inputs = torch.randn(2, 3, 5, 5, device="cuda", dtype=dtype, requires_grad=True)
@@ -3028,7 +3031,7 @@ class TestNN(NNTestCase):
         self.assertRaisesRegex(RuntimeError, 'Specify retain_graph=True',
                                lambda: o1.sum().backward())
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_Conv2d_large_workspace(self, dtype=torch.float):
         # These sizes require huge cuDNN workspaces. Make sure we choose a
@@ -3169,7 +3172,7 @@ class TestNN(NNTestCase):
 
     # Very similar to test_Conv2d_naive_groups but with special care to handle
     # the number of groups == number of input channels
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_Conv2d_depthwise_naive_groups_cuda(self, dtype=torch.float):
         for depth_multiplier in [1, 2]:
@@ -3502,7 +3505,7 @@ class TestNN(NNTestCase):
     def test_variable_sequence(self):
         self._test_variable_sequence()
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_variable_sequence_cuda(self, dtype=torch.float):
         self._test_variable_sequence("cuda", dtype)
@@ -3520,7 +3523,8 @@ class TestNN(NNTestCase):
 
             (hx + cx).sum().backward()
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_MULTIGPU), 'CUDNN or multi-gpu not available')
+    @skipIfNoCudnn
+    @skipIfNoMultiGpu
     def test_cudnn_rnn_dropout_states_device(self):
         rnn = nn.RNN(10, 20, num_layers=2, dropout=.5)
         device = 1
@@ -3529,7 +3533,7 @@ class TestNN(NNTestCase):
         hx = torch.randn(2, 4, 20).cuda(device)
         output = rnn(input, hx)
 
-    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfNoCudnn
     def test_cudnn_weight_format(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True),
@@ -3576,7 +3580,7 @@ class TestNN(NNTestCase):
             weight_data[:] = 4
             self.assertEqual(weight_data, all_vars[4].data)
 
-    @unittest.skipIf(not TEST_CUDNN, 'CUDNN not available')
+    @skipIfNoCudnn
     def test_cudnn_weight_tying(self):
         rnns = [
             nn.LSTM(10, 20, batch_first=True, bidirectional=True),
@@ -3608,7 +3612,7 @@ class TestNN(NNTestCase):
             output_cpu = rnn(input.cpu(), hx)
             self.assertEqual(output_cuda, output_cpu)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_cuda_rnn_fused(self, dtype=torch.float):
 
@@ -3771,7 +3775,7 @@ class TestNN(NNTestCase):
     def test_rnn_retain_variables(self):
         self._test_rnn_retain_variables()
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_rnn_retain_variables_cuda(self, dtype=torch.float):
         with torch.backends.cudnn.flags(enabled=False):
@@ -3918,18 +3922,18 @@ class TestNN(NNTestCase):
 
             compare_cpu_gpu(outputs_cpu, outputs_gpu)
 
-    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
+    @skipIfNoCudnn
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_no_dropout(self):
         self._test_RNN_cpu_vs_cudnn(0)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @skipIfCudnnVersionLessThan(5103)
     @default_tensor_type(torch.FloatTensor)  # FIXME: just until torch.cuda.DoubleTensor.sum() implemented
     def test_RNN_cpu_vs_cudnn_with_dropout(self):
         # Because of dropout randomness, can only compare dropout=0 and dropout=1
         self._test_RNN_cpu_vs_cudnn(1)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @skipIfCudnnVersionLessThan(5103)
     def test_RNN_dropout(self):
         # checking the assumption that cuDNN sticks dropout in between
         # RNN layers
@@ -3972,7 +3976,7 @@ class TestNN(NNTestCase):
                     self.assertEqual(hy.data[0][0][0], 10)
                     self.assertEqual(hy.data[1][0][0], output_val)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @skipIfCudnnVersionLessThan(5103)
     def test_RNN_dropout_state(self):
         import sys
         if sys.version_info[0] == 2:
@@ -4015,7 +4019,7 @@ class TestNN(NNTestCase):
                         self.assertNotEqual(hy1, hy2)
                         self.assertNotEqual(hy1, hy3)
 
-    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 5103), "needs cudnn >= 5.1")
+    @skipIfCudnnVersionLessThan(5103)
     def test_RNN_change_dropout(self):
         for train, cuda in product((True, False), repeat=2):
             rnn = nn.RNN(100, 100, 2, dropout=0, nonlinearity='relu')
@@ -4072,7 +4076,7 @@ class TestNN(NNTestCase):
             output.backward(grad_output)
             self.assertEqual(grad_output, grad_output_clone)
 
-    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    @skipIfNoCuda
     @repeat_test_for_types(ALL_TENSORTYPES)
     def test_noncontig_conv_grad_cuda(self, dtype=torch.float):
         # FIXME: remove after adding non-contiguous grad tests for all modules
@@ -4240,7 +4244,7 @@ class TestNN(NNTestCase):
         gradcheck(func, [v])
         gradgradcheck(func, [v])
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_batchnorm_cudnn_half(self):
         # THNN
         input = torch.randint(1, 10, (2, 3, 2, 2), dtype=torch.half, device="cuda", requires_grad=True)
@@ -4287,7 +4291,7 @@ class TestNN(NNTestCase):
     def test_batchnorm_update_stats(self):
         self._test_batchnorm_update_stats()
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_batchnorm_update_stats_cuda(self):
         self._test_batchnorm_update_stats("cuda", torch.float)
 
@@ -4899,7 +4903,7 @@ class TestNN(NNTestCase):
     def test_conv_noncontig_weights(self):
         self._test_conv_noncontig_weights(self, torch.device('cpu'))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_conv_noncontig_weights_cuda(self):
         self._test_conv_noncontig_weights(self, torch.device('cuda'))
 
@@ -5025,7 +5029,7 @@ class TestNN(NNTestCase):
                                                batch_size, inp_size, dilation,
                                                no_weight)
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     def test_cudnn_noncontiguous_weight(self):
         # Noncontiguous weights must be contiguous() before being
         # passed to cuDNN
@@ -5035,7 +5039,7 @@ class TestNN(NNTestCase):
         self.assertEqual(F.conv1d(input, weights1, bias=None, stride=2, dilation=2),
                          F.conv1d(input, weights2, bias=None, stride=2, dilation=2))
 
-    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    @skipIfNoCuda
     @repeat_test_for_types(DOUBLE_TENSORTYPES)
     def test_conv_double_backward_cuda(self, dtype=torch.double):
         # Double backward only runs with DoubleTensor due to precison reason
@@ -7517,53 +7521,6 @@ new_module_tests = [
 ]
 
 
-for test_params in module_tests + new_module_tests:
-    # TODO: CUDA is not implemented yet
-    if 'constructor' not in test_params:
-        name = test_params.pop('module_name')
-        test_params['constructor'] = getattr(nn, name)
-    decorator = test_params.pop('decorator', None)
-    test = NewModuleTest(**test_params)
-    add_test(test, decorator)
-    if 'check_eval' in test_params:
-        # create a new test that is identical but that sets module.training to False
-        desc = test_params.get('desc', None)
-        test_params['desc'] = 'eval' if desc is None else desc + '_eval'
-
-        def gen_eval_constructor(constructor):
-            def eval_constructor(*args, **kwargs):
-                cons = constructor(*args, **kwargs)
-                cons.training = False
-                return cons
-            eval_constructor.__name__ = constructor.__name__
-            return eval_constructor
-
-        test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
-        test = NewModuleTest(**test_params)
-        add_test(test, decorator)
-
-for test_params in criterion_tests + new_criterion_tests:
-    name = test_params.pop('module_name')
-    test_params['constructor'] = getattr(nn, name)
-    test = NewCriterionTest(**test_params)
-    decorator = test_params.pop('decorator', None)
-    add_test(test, decorator)
-    if 'check_no_size_average' in test_params:
-        desc = test_params.get('desc', None)
-        test_params['desc'] = 'no_size_average' if desc is None else desc + '_no_size_average'
-
-        def gen_no_size_average_constructor(constructor):
-            def no_size_average_constructor(*args, **kwargs):
-                cons = constructor(*args, size_average=False, **kwargs)
-                return cons
-            no_size_average_constructor.__name__ = constructor.__name__
-            return no_size_average_constructor
-
-        test_params['constructor'] = gen_no_size_average_constructor(test_params['constructor'])
-        test = NewCriterionTest(**test_params)
-        add_test(test, decorator)
-
-
 class UnpoolingNet(nn.Module):
     def __init__(self, pool, unpool):
         super(UnpoolingNet, self).__init__()
@@ -7574,38 +7531,82 @@ class UnpoolingNet(nn.Module):
         return self.unpool(*self.pool(input))
 
 
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool1d(2, return_indices=True),
-        nn.MaxUnpool1d(2)),
-    input_size=(1, 1, 4),
-    fullname='MaxUnpool1d_net',))
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool2d(2, return_indices=True),
-        nn.MaxUnpool2d(2)),
-    input_size=(1, 1, 2, 4),
-    fullname='MaxUnpool2d_net',))
-add_test(NewModuleTest(
-    constructor=lambda: UnpoolingNet(
-        nn.MaxPool3d(2, return_indices=True),
-        nn.MaxUnpool3d(2)),
-    input_size=(1, 1, 2, 4, 6),
-    fullname='MaxUnpool3d_net',
-    check_gradgrad=False,))
-
-
 class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
     def __call__(self, input):
         t = torch.tensor([0, 1, 4, 8]).to(input.device)
         return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
 
 
-add_test(NewModuleTest(
-    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
-    input_size=(4, 16),
-    fullname='AdaptiveLogSoftmax'))
-
-
 if __name__ == '__main__':
+    for test_params in module_tests + new_module_tests:
+        # TODO: CUDA is not implemented yet
+        if 'constructor' not in test_params:
+            name = test_params.pop('module_name')
+            test_params['constructor'] = getattr(nn, name)
+        decorator = test_params.pop('decorator', None)
+        test = NewModuleTest(**test_params)
+        add_test(test, decorator)
+        if 'check_eval' in test_params:
+            # create a new test that is identical but that sets module.training to False
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'eval' if desc is None else desc + '_eval'
+
+            def gen_eval_constructor(constructor):
+                def eval_constructor(*args, **kwargs):
+                    cons = constructor(*args, **kwargs)
+                    cons.training = False
+                    return cons
+                eval_constructor.__name__ = constructor.__name__
+                return eval_constructor
+
+            test_params['constructor'] = gen_eval_constructor(test_params['constructor'])
+            test = NewModuleTest(**test_params)
+            add_test(test, decorator)
+
+    for test_params in criterion_tests + new_criterion_tests:
+        name = test_params.pop('module_name')
+        test_params['constructor'] = getattr(nn, name)
+        test = NewCriterionTest(**test_params)
+        decorator = test_params.pop('decorator', None)
+        add_test(test, decorator)
+        if 'check_no_size_average' in test_params:
+            desc = test_params.get('desc', None)
+            test_params['desc'] = 'no_size_average' if desc is None else desc + '_no_size_average'
+
+            def gen_no_size_average_constructor(constructor):
+                def no_size_average_constructor(*args, **kwargs):
+                    cons = constructor(*args, size_average=False, **kwargs)
+                    return cons
+                no_size_average_constructor.__name__ = constructor.__name__
+                return no_size_average_constructor
+
+            test_params['constructor'] = gen_no_size_average_constructor(test_params['constructor'])
+            test = NewCriterionTest(**test_params)
+            add_test(test, decorator)
+
+    add_test(NewModuleTest(
+        constructor=lambda: UnpoolingNet(
+            nn.MaxPool1d(2, return_indices=True),
+            nn.MaxUnpool1d(2)),
+        input_size=(1, 1, 4),
+        fullname='MaxUnpool1d_net',))
+    add_test(NewModuleTest(
+        constructor=lambda: UnpoolingNet(
+            nn.MaxPool2d(2, return_indices=True),
+            nn.MaxUnpool2d(2)),
+        input_size=(1, 1, 2, 4),
+        fullname='MaxUnpool2d_net',))
+    add_test(NewModuleTest(
+        constructor=lambda: UnpoolingNet(
+            nn.MaxPool3d(2, return_indices=True),
+            nn.MaxUnpool3d(2)),
+        input_size=(1, 1, 2, 4, 6),
+        fullname='MaxUnpool3d_net',
+        check_gradgrad=False,))
+
+    add_test(NewModuleTest(
+        constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
+        input_size=(4, 16),
+        fullname='AdaptiveLogSoftmax'))
+
     run_tests()

@@ -5,7 +5,7 @@ import itertools
 import random
 import unittest
 from common import TestCase, run_tests
-from common_cuda import TEST_CUDA
+from common_cuda_utils import skipIfNoCuda
 from test_torch import TestTorch
 from numbers import Number
 
@@ -1019,7 +1019,7 @@ class TestUncoalescedSparse(TestSparse):
         self.is_uncoalesced = True
 
 
-@unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+@skipIfNoCuda
 class TestCudaSparse(TestSparse):
     def setUp(self):
         super(TestCudaSparse, self).setUp()
@@ -1029,7 +1029,7 @@ class TestCudaSparse(TestSparse):
         self.SparseTensor = torch.cuda.sparse.DoubleTensor
 
 
-@unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+@skipIfNoCuda
 class TestCudaUncoalescedSparse(TestCudaSparse):
     def setUp(self):
         super(TestCudaUncoalescedSparse, self).setUp()

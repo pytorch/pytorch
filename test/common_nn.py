@@ -7,7 +7,8 @@ from itertools import product
 import torch
 import torch.cuda
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
-from common_cuda import TEST_CUDA
+if __name__ == '__main__':
+    from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
 import torch.backends.cudnn
 
