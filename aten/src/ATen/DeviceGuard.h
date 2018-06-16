@@ -63,11 +63,13 @@ struct DeviceGuard {
     }
     AT_ASSERT(index >= 0);
     if (original_index_ == -1) {
-      int32_t previous_index = 0;
+      int32_t previous_index = -123;
       detail::DynamicCUDAInterface::get_device(&previous_index);
       original_index_ = previous_index;
-    }
-    if (index != original_index_) {
+      if (index != original_index_) {
+        detail::DynamicCUDAInterface::set_device(index);
+      }
+    } else {
       detail::DynamicCUDAInterface::set_device(index);
     }
     last_index_ = index;
