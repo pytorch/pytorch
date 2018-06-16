@@ -6,20 +6,23 @@
 #include <cxxabi.h>
 #endif
 
+using std::string;
+
 namespace caffe2 {
-std::map<CaffeTypeId, string>& gTypeNames() {
-  static std::map<CaffeTypeId, string> g_type_names;
+
+std::unordered_map<CaffeTypeId, string>& gTypeNames() {
+  static std::unordered_map<CaffeTypeId, string> g_type_names;
   return g_type_names;
 }
 
-std::set<string>& gRegisteredTypeNames() {
-  static std::set<string> g_registered_type_names;
+std::unordered_set<string>& gRegisteredTypeNames() {
+  static std::unordered_set<string> g_registered_type_names;
   return g_registered_type_names;
 }
 
-std::mutex& gCaffe2TypeRegistrationMutex() {
-  static std::mutex g_caffe2_type_registration_mutex;
-  return g_caffe2_type_registration_mutex;
+std::mutex& gTypeRegistrationMutex() {
+  static std::mutex g_type_registration_mutex;
+  return g_type_registration_mutex;
 }
 
 #if defined(_MSC_VER)
@@ -32,7 +35,7 @@ string Demangle(const char* name) {
   int status = 0;
   auto demangled = ::abi::__cxa_demangle(name, nullptr, nullptr, &status);
   if (demangled) {
-    auto guard = MakeGuard([demangled]() { free(demangled); });
+    auto guard = caffe2::MakeGuard([demangled]() { free(demangled); });
     return string(demangled);
   }
   return name;
@@ -58,9 +61,9 @@ namespace {
 // for unintializied blob. You should not use this struct yourself - it is
 // intended to be only instantiated once here.
 struct UninitializedTypeNameRegisterer {
-  UninitializedTypeNameRegisterer() {
-    gTypeNames()[0] = "nullptr (uninitialized)";
-  }
+    UninitializedTypeNameRegisterer() {
+      gTypeNames()[CaffeTypeId::uninitialized()] = "nullptr (uninitialized)";
+    }
 };
 static UninitializedTypeNameRegisterer g_uninitialized_type_name_registerer;
 

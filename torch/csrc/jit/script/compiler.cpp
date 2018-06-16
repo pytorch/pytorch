@@ -636,7 +636,17 @@ struct to_ir {
 
     // outputs
     if (has_return) {
-      auto results = getValues(Return(*stmts_end).values(), true);
+      auto return_stmt = Return(*stmts_end);
+      auto results = getValues(return_stmt.values(), true, identity);
+      // a single return value that is a tuple expands in place:
+      // return a
+      if (return_stmt.values().size() == 1 && results.size() == 1) {
+        auto result = results.at(0);
+        if(result->type()->cast<TupleType>()) {
+          results = createTupleUnpack(result);
+        }
+      }
+      ensureTensors(return_stmt.range(), results);
       for(auto r : results) {
         graph->registerOutput(r);
         returns.push_back({"", DynamicType::get(), at::nullopt, at::nullopt});
@@ -1297,7 +1307,7 @@ private:
     return emitNode(
                Symbol::aten("type_as"),
                input.range(),
-               {emitExpr(input), createConstant(*graph, input.range(), at::ones(at::CPU(t), {1}))},
+               {emitExpr(input), createConstant(*graph, input.range(), at::ones({1}, t))},
                1)
         ->output();
   }

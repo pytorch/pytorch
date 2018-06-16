@@ -57,7 +57,7 @@ static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
-  auto ipiv = b.type().toScalarType(kInt).tensor(n);
+  auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
 
   for (int64_t i = 0; i < batch_size; i++) {
     int info;

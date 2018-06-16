@@ -5,7 +5,7 @@ if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
 fi
 
 # Add nccl2 for distributed test.
-apt-get install libnccl-dev libnccl2
+sudo apt-get install libnccl-dev libnccl2
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
@@ -33,9 +33,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
   chmod a+x pyHIPIFY/*.py
   sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
+  sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
-  HIPCC_VERBOSE=1 VERBOSE=1 WITH_ROCM=1 python setup.py install
+  USE_ROCM=1 python setup.py install
   exit
 fi
 

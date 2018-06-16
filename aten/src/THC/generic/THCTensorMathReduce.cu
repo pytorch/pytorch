@@ -94,7 +94,7 @@ THCTensor_(std)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
       state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
+  THCTensor_(resizeLegacy)(state, self_, dim, NULL);
   THLongStorage_free(dim);
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
@@ -123,7 +123,7 @@ THCTensor_(var)(THCState *state, THCTensor *self_, THCTensor *src, int dimension
       state, self_, THCTensor_(nDimension)(state, src), dimension, keepdim);
   THLongStorage *dim = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resize)(state, self_, dim, NULL);
+  THCTensor_(resizeLegacy)(state, self_, dim, NULL);
   THLongStorage_free(dim);
 
   THCTensor *self = THCTensor_(newContiguous)(state, self_);

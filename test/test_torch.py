@@ -1810,6 +1810,7 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.device('cpu', 1))
         self.assertRaises(RuntimeError, lambda: torch.device('cuda:-1'))
         self.assertRaises(RuntimeError, lambda: torch.device('cuda', -1))
+        self.assertRaises(RuntimeError, lambda: torch.device(-1))
 
         self.assertRaises(TypeError, lambda: torch.device('other'))
         self.assertRaises(TypeError, lambda: torch.device('other:0'))
@@ -1891,7 +1892,7 @@ class TestTorch(TestCase):
             self.assertIs(dtype, tensor.dtype)
             self.assertIs(layout, tensor.layout)
             self.assertEqual(tensor.requires_grad, requires_grad)
-            if tensor.is_cuda and device != -1:
+            if tensor.is_cuda and device is not None:
                 self.assertEqual(device, tensor.device)
             if value is not None:
                 fill = tensor.new(shape).fill_(value)
@@ -1939,7 +1940,7 @@ class TestTorch(TestCase):
     def test_empty_full(self):
         self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cpu'))
         if torch.cuda.device_count() > 0:
-            self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, -1)
+            self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, None)
             self._test_empty_full(self, torch.testing.get_all_dtypes(), torch.strided, torch.device('cuda:0'))
 
     def test_dtype_out_match(self):
@@ -4684,6 +4685,12 @@ class TestTorch(TestCase):
         self.assertEqual(reference[None, 2, None, None], reference.unsqueeze(0)[:, 2].unsqueeze(0).unsqueeze(0))
         self.assertEqual(reference[None, 2:5, None, None], reference.unsqueeze(0)[:, 2:5].unsqueeze(2).unsqueeze(2))
 
+        # indexing 0-length slice
+        self.assertEqual(torch.tensor([]), reference[slice(0)])
+        self.assertEqual(torch.tensor([]), reference[slice(0), 2])
+        self.assertEqual(torch.tensor([]), reference[2, slice(0)])
+        self.assertEqual(torch.tensor([]), reference[2, 1:1, 2])
+
         # indexing with step
         reference = consec((10, 10, 10))
         self.assertEqual(reference[1:5:2], torch.stack([reference[1], reference[3]], 0))
@@ -5574,6 +5581,24 @@ class TestTorch(TestCase):
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
 
+    def test_hardshrink(self):
+        data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
+        float_types = [
+            'torch.DoubleTensor',
+            'torch.FloatTensor'
+        ]
+        for t in float_types:
+            data = data_original.type(t)
+            self.assertEqual(torch.tensor([1, 0.5, 0, 0.6]).view(2, 2), torch.nn.Hardshrink(0.3)(data))
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), torch.nn.Hardshrink(0.5)(data))
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), torch.nn.Hardshrink()(data))
+
+            # test non-contiguous case
+            self.assertEqual(torch.tensor([1, 0.3, 0.5, 0.6]).view(2, 2), torch.nn.Hardshrink(0.1)(data.t()))
+
+            # not supporting default lambd value for torch.hardshrink() due to a Scalar bug
+            self.assertRaises(TypeError, lambda: data.hardshrink())
+
     def test_unbiased(self):
         tensor = torch.randn(100)
         self.assertEqual(tensor.var(0), tensor.var(0, unbiased=True))
@@ -5966,6 +5991,51 @@ class TestTorch(TestCase):
         new = list(map(lambda x: x - 1, x.permute(*perm).size()))
         self.assertEqual(perm, new)
         self.assertEqual(x.size(), orig)
+
+    @staticmethod
+    def _test_flip(self, use_cuda=False):
+        if use_cuda:
+            cuda = torch.device("cuda")
+            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8], device=cuda).view(2, 2, 2)
+            # large data testing
+            large_data = torch.arange(0, 100000000, device=cuda).view(10000, 10000)
+            large_data.flip([0, 1])
+        else:
+            data = torch.tensor([1, 2, 3, 4, 5, 6, 7, 8]).view(2, 2, 2)
+
+        self.assertEqual(torch.tensor([5, 6, 7, 8, 1, 2, 3, 4]).view(2, 2, 2), data.flip(0))
+        self.assertEqual(torch.tensor([3, 4, 1, 2, 7, 8, 5, 6]).view(2, 2, 2), data.flip(1))
+        self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(2))
+        self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
+        self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
+
+        # check for permute
+        self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(0, 2))
+        self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(2, 0))
+
+        # not allow flip on the same dim more than once
+        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 1))
+        # not allow empty list as input
+        self.assertRaises(TypeError, lambda: data.flip())
+        # not allow size of flip dim > total dims
+        self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
+        # not allow dim < 0
+        self.assertRaises(RuntimeError, lambda: data.flip(-1))
+        # not allow dim > max dim
+        self.assertRaises(RuntimeError, lambda: data.flip(3))
+
+        # test for non-contiguous case
+        if use_cuda:
+            expanded_data = torch.arange(1, 4, device=cuda).view(3, 1).expand(3, 2)
+            tranposed_data = torch.arange(1, 9, device=cuda).view(2, 2, 2).transpose(0, 1)
+        else:
+            expanded_data = torch.arange(1, 4).view(3, 1).expand(3, 2)
+            tranposed_data = torch.arange(1, 9).view(2, 2, 2).transpose(0, 1)
+        self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
+        self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
+
+    def test_flip(self):
+        self._test_flip(self, use_cuda=False)
 
     def test_storage(self):
         v = torch.randn(3, 5)
@@ -7415,6 +7485,75 @@ class TestTorch(TestCase):
             RuntimeError,
             lambda: torch.unique(torch.cuda.FloatTensor([0., 1.])),
         )
+
+    @staticmethod
+    def _test_bincount(self, device):
+        # negative input throws
+        with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):
+            torch.bincount(torch.tensor([1, -1], device=device))
+        # n-d input, with n > 1 throws
+        with self.assertRaisesRegex(RuntimeError, '1-d non-negative integral'):
+            torch.bincount(torch.tensor([[1, 2], [3, 4]], device=device))
+        # floating input type throws
+        with self.assertRaisesRegex(RuntimeError, 'not implemented'):
+            torch.bincount(torch.tensor([1., 0.3], device=device))
+        # minlength < 0 throws
+        with self.assertRaisesRegex(RuntimeError, 'minlength should be >= 0'):
+            torch.bincount(torch.tensor([1, 3], device=device),
+                           torch.tensor([.2, .2], device=device),
+                           minlength=-1)
+        # input and weights dim mismatch
+        with self.assertRaisesRegex(RuntimeError, 'same length'):
+            torch.bincount(torch.tensor([1, 0], device=device),
+                           torch.tensor([1., 0.3, 0.5], device=device))
+
+        # test tensor method without weights
+        long_counts = torch.tensor(
+            [0, 3, 2, 1, 3], dtype=torch.uint8, device=device).bincount()
+        self.assertEqual(
+            torch.tensor([1, 1, 1, 2], dtype=torch.int64, device=device),
+            long_counts)
+        # test minlength functionality
+        int_counts = torch.bincount(
+            torch.tensor([1, 1, 1, 1], device=device), minlength=5)
+        self.assertEqual(
+            torch.tensor([0, 4, 0, 0, 0], dtype=torch.int64, device=device),
+            int_counts)
+        # test weights
+        byte_counts = torch.bincount(
+            torch.tensor([0, 1, 1, 1, 4], device=device),
+            torch.tensor([.1, .2, .3, .4, .5], device=device))
+        self.assertEqual(
+            torch.tensor([0.1, 0.9, 0, 0, 0.5], device=device), byte_counts)
+        byte_counts = torch.bincount(
+            torch.tensor([0, 1, 1, 1, 4], device=device),
+            torch.tensor([1, 2, 3, 4, 5], dtype=torch.int8, device=device))
+        self.assertEqual(
+            torch.tensor([1, 9, 0, 0, 5], device=device), byte_counts)
+        # test large number of bins - global memory use
+        big_exp = torch.zeros(10000000, device=device)
+        big_exp[-1] = 50.0
+        big_w = torch.tensor([.5] * 100, device=device)
+        big_out = torch.tensor([9999999] * 100, device=device).bincount(big_w)
+        self.assertEqual(big_exp, big_out)
+        # test large input size
+        big_exp = torch.zeros(2, device=device)
+        big_exp[1] = 1000000
+        big_out = torch.ones(1000000, dtype=torch.int8, device=device).bincount()
+        self.assertEqual(big_exp, big_out)
+
+    def test_bincount_cpu(self):
+        self._test_bincount(self, device='cpu')
+
+    def test_is_nonzero(self):
+        self.assertExpectedRaises(RuntimeError, lambda: torch.tensor([]).is_nonzero(), subname="empty")
+        self.assertExpectedRaises(RuntimeError, lambda: torch.tensor([0, 0]).is_nonzero(), subname="multiple")
+        self.assertFalse(torch.tensor(0).is_nonzero())
+        self.assertTrue(torch.tensor(1).is_nonzero())
+        self.assertFalse(torch.tensor([0]).is_nonzero())
+        self.assertTrue(torch.tensor([1]).is_nonzero())
+        self.assertFalse(torch.tensor([[0]]).is_nonzero())
+        self.assertTrue(torch.tensor([[1]]).is_nonzero())
 
 
 # Functions to test negative dimension wrapping

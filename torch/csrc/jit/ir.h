@@ -9,7 +9,6 @@
 #include "torch/csrc/jit/type.h"
 #include "torch/csrc/jit/variable_flags.h"
 
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -949,7 +948,6 @@ public:
   }
   Node * createConstant(const at::Tensor& ref) {
     JIT_ASSERT(ref.defined());
-    AutoGPU guard(ref.type().is_cuda() ? ref.get_device() : -1);
     auto n = create(prim::Constant);
     n->t_(attr::value, ref.clone());
     n->output()->inferTypeFrom(ref);

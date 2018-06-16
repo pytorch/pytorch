@@ -7,7 +7,7 @@
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
@@ -39,7 +39,7 @@ std::vector<bool> TensorDesc::findContiguous(
 
 namespace {
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 static int ceilDiv(int a, int b) {
   return (a + b - 1) / b;
@@ -66,10 +66,10 @@ so typedefs help it handle those cases*/
 
 auto type_declarations_template = CodeTemplate(R"(
 #if defined(__CUDACC_RTC__)
-typedef unsigned char uint8_t; 
-typedef signed char int8_t; 
-typedef short int  int16_t; 
-typedef long long int int64_t; 
+typedef unsigned char uint8_t;
+typedef signed char int8_t;
+typedef short int  int16_t;
+typedef long long int int64_t;
 #endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
@@ -174,6 +174,7 @@ std::string encodeRHS(Node * n) {
     // unary
     {aten::abs, "absf(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
+    {aten::relu, "${0} < 0 ? 0.f : ${0} "},
     {aten::log, "logf(${0})"},
     {aten::log10, "log10f(${0})"},
     {aten::log1p, "log1pf(${0})"},
@@ -423,7 +424,7 @@ void compressContiguous(
 } // anonymous namespace
 
 void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
-  AutoGPU gpu_guard(inputs);
+  at::DeviceGuard device_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
   size_t flat_outputs_size = 0;
@@ -483,7 +484,7 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
 }
 
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs) {
-  AutoGPU guard(inputs.back());
+  at::DeviceGuard guard(inputs.back());
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
@@ -492,7 +493,7 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
   launch_with_tensors(inputs, outputs);
 }
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 void checkCUDAVersion(const cudaDeviceProp & prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
@@ -508,7 +509,7 @@ void checkCUDAVersion(const cudaDeviceProp & prop) {
 struct CUDAFusionFunction : public CompiledFusionFunction {
   CUDAFusionFunction(const std::string & name, AnnotatedGraph & agraph)
   : CompiledFusionFunction(name, agraph) {
-    AutoGPU gpu_guard(agraph.device);
+    at::DeviceGuard device_guard(agraph.device);
 
     TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
     checkCUDAVersion(prop);
@@ -747,7 +748,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
     std::string name = "kernel_" + std::to_string(cache.size());
     CompiledFusionFunction * raw_func;
     if(agraph.device != kCPUDevice) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
       raw_func = new CUDAFusionFunction(name, agraph);
 #else
       throw std::runtime_error("cannot compile a CUDA fusion group, CUDA is not enabled.");
@@ -834,7 +835,7 @@ FusionCompiler & sharedFusionCompiler() {
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>

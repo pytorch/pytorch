@@ -350,7 +350,7 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration se
 endforeach()
 
 # Set C++11 support
-set(CUDA_PROPAGATE_HOST_FLAGS OFF)
+set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
@@ -377,6 +377,8 @@ if (MSVC)
   else()
     message(FATAL_ERROR "Unknown cmake build type: " ${CMAKE_BUILD_TYPE})
   endif()
+elseif (CUDA_DEVICE_DEBUG)
+  list(APPEND CUDA_NVCC_FLAGS "-g" "-G")  # -G enables device code debugging symbols
 endif()
 
 # Set expt-relaxed-constexpr to suppress Eigen warnings

@@ -3,7 +3,6 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/auto_gpu.h"
 
 #include <algorithm>
 
@@ -16,7 +15,8 @@ bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
-    aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as
+    aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as,
+    aten::relu, aten::exp
   };
   // TODO: check this more generally via schema
   // This check ensures that the `alpha` and `beta` attributes on this addmm
@@ -87,6 +87,10 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
       case aten::tanh:
         return {grads.at(0) * (1 - outputs.at(0) * outputs.at(0))};
+      case aten::relu:
+        return {grads.at(0) * (outputs.at(0) > at::Scalar(0)).type_as(outputs.at(0))};
+      case aten::exp:
+        return {grads.at(0) * (outputs.at(0))};
       case aten::chunk:
       case aten::split:
         return {SymbolicVariable::cat(grads, node->i(attr::dim))};
@@ -223,10 +227,10 @@ static Value* createZerosLike(Value *v) {
   JIT_EXPECTM(v->isTensor(), "can't allocate zero gradient for a value without a type");
   Graph *graph = v->owningGraph();
   auto type = v->type()->expect<TensorType>();
-  AutoGPU gpu_guard(type->device());
+  at::DeviceGuard device_guard(type->device());
 
   auto & at_type = type->device() == -1 ? at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
-  auto zeros = at::zeros(at_type, {1}).expand(type->sizes());
+  auto zeros = at::zeros({}, at_type).expand(type->sizes());
   Node *constant = graph->createConstant(zeros)
                         ->i_(attr::is_zero, 1);
   graph->insertNode(constant);
