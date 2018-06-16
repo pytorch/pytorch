@@ -26,12 +26,12 @@ Tensor & selu_(Tensor & self) {
 }
 
 Tensor celu(const Tensor & self, Scalar alpha) {
-  Tensor inv_alpha = self.type().scalarTensor(alpha).reciprocal();
+  Tensor inv_alpha = alpha.toTensor().reciprocal();
   return at::elu(self, 1.0, alpha, Scalar(inv_alpha));
 }
 
 Tensor & celu_(Tensor & self, Scalar alpha) {
-  Tensor inv_alpha = self.type().scalarTensor(alpha).reciprocal();
+  Tensor inv_alpha = alpha.toTensor().reciprocal();
   return at::elu_(self, 1.0, alpha, Scalar(inv_alpha));
 }
 
