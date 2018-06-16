@@ -38,11 +38,11 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/onnx/init.h"
 
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
 #include "cudnn.h"
 #endif
 
-#ifdef WITH_C10D
+#ifdef USE_C10D
 #include "torch/csrc/distributed/c10d/c10d.h"
 #endif
 
@@ -267,7 +267,7 @@ static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
 
 PyObject *THPModule_hasDistributed(PyObject *_unused)
 {
-#ifdef WITH_DISTRIBUTED
+#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
 #else
   Py_RETURN_FALSE;
@@ -423,7 +423,7 @@ bool THCPByteStorage_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
 namespace torch { namespace cuda {
 
@@ -435,7 +435,7 @@ void initModule(PyObject *module);
 namespace torch { namespace nn {
 
 void init__THNN(PyObject*);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 void init__THCUNN(PyObject*);
 #endif
 
@@ -452,12 +452,12 @@ bool THDPByteStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
-#ifdef WITH_DISTRIBUTED
+#ifdef USE_DISTRIBUTED
 PyMethodDef* THDPModule_methods();
 #endif
 
 // TODO: Refactor this in some less manual way
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
 static PyObject * THCUDNN_cudnn_version(PyObject *self, PyObject *args)
 {
   return PyLong_FromLong(CUDNN_VERSION);
@@ -482,16 +482,16 @@ static PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
   THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
-#ifdef WITH_DISTRIBUTED
+#ifdef USE_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
 #endif
-#ifdef WITH_C10D
+#ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
 
@@ -524,7 +524,7 @@ static PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
   ASSERT_TRUE(THPDoubleStorage_init(module));
@@ -536,7 +536,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
   // complete the process (but it defines Python classes before calling back into
@@ -553,7 +553,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THCPStream_init(module));
 #endif
 
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
@@ -561,7 +561,7 @@ static PyObject* initModule() {
   Py_INCREF(has_cudnn);
   ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
 
-#ifdef WITH_DISTRIBUTED_MW
+#ifdef USE_DISTRIBUTED_MW
   // See comment on CUDA objects
   ASSERT_TRUE(THDPDoubleStorage_init(module));
   ASSERT_TRUE(THDPFloatStorage_init(module));
@@ -584,12 +584,12 @@ static PyObject* initModule() {
     defaultGenerator);
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
-#ifdef WITH_NUMPY
+#ifdef USE_NUMPY
   if (_import_array() < 0) return NULL;
 #endif
 
   torch::nn::init__THNN(module);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   torch::nn::init__THCUNN(module);
 #endif
 

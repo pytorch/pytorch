@@ -40,6 +40,10 @@ case NNKind::Reshape:
   return "Reshape";
 case NNKind::Flatten:
   return "Flatten";
+case NNKind::NCHW2NHWC:
+  return "NCHW2NHWC";
+case NNKind::NHWC2NCHW:
+  return "NHWC2NCHW";
 case NNKind::Int8Quantize:
   return "Int8Quantize";
 case NNKind::Int8Dequantize:

@@ -5,6 +5,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/Scalar.h"
 #include "ATen/SparseTensorRef.h"
+#include "ATen/Type.h"
 
 namespace at {
 

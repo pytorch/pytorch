@@ -14,14 +14,6 @@ else()
       "USE_CUDA" OFF)
   option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 
-  # Legacy options, which we will eventually remove
-  cmake_dependent_option(
-      WITH_CUDNN "Legacy cuDNN" ON
-      "USE_CUDNN" OFF)
-  cmake_dependent_option(
-      NO_MKLDNN "Legacy no MKLDNN" OFF
-      "USE_MKLDNN" ON)
-
   # Flag for shared dependencies
   set(BUILD_ATEN ON)
 endif()

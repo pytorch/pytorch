@@ -258,7 +258,7 @@ class SkipIndices {
   }
   template <int First, int Second, int... Rest>
   static inline bool ContainsInternal(const int i) {
-    return (i == First) && ContainsInternal<Second, Rest...>(i);
+    return (i == First) || ContainsInternal<Second, Rest...>(i);
   }
 
  public:

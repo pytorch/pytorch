@@ -1,6 +1,5 @@
 #include "ATen/ATen.h"
 #include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
 #include "ATen/Error.h"
 
 #include "ATen/AccumulateType.h"
@@ -220,7 +219,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
-  auto grad_weight = at::zeros(grad_.type(), {num_weights, grad_.size(-1)});
+  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.type());
 
   int64_t stride = grad_weight.stride(0);
   cudaStream_t stream = globalContext().getCurrentCUDAStream();

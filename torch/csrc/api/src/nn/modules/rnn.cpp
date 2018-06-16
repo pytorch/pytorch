@@ -1,6 +1,8 @@
 #include <torch/nn/modules/rnn.h>
 
+#include <torch/functions.h>
 #include <torch/nn/modules/dropout.h>
+#include <torch/tensor.h>
 #include <torch/utils.h>
 
 #include <ATen/Error.h>
@@ -68,18 +70,16 @@ void RNNBase<Derived>::reset() {
     const int64_t input_size = (layer == 0) ? input_size_ : hidden_size_;
     ihw_[layer] = this->register_parameter(
         "weight_ih_l" + std::to_string(layer),
-        at::CPU(at::kFloat).empty({gate_size, input_size}));
+        torch::empty({gate_size, input_size}));
     hhw_[layer] = this->register_parameter(
         "weight_hh_l" + std::to_string(layer),
-        at::CPU(at::kFloat).empty({gate_size, hidden_size_}));
+        torch::empty({gate_size, hidden_size_}));
 
     if (with_bias_) {
       ihb_[layer] = this->register_parameter(
-          "bias_ih_l" + std::to_string(layer),
-          at::CPU(at::kFloat).empty({gate_size}));
+          "bias_ih_l" + std::to_string(layer), torch::empty({gate_size}));
       hhb_[layer] = this->register_parameter(
-          "bias_hh_l" + std::to_string(layer),
-          at::CPU(at::kFloat).empty({gate_size}));
+          "bias_hh_l" + std::to_string(layer), torch::empty({gate_size}));
     }
   }
   flatten_parameters_for_cudnn();
@@ -129,8 +129,8 @@ std::vector<Variable> RNNBase<Derived>::autograd_forward(
         has_hidden ? inputs[1].select(layer_dimension, layer) : Variable());
   }
 
-  auto output =
-      Variable(inp.type().zeros({inp.size(0), inp.size(1), hidden_size_}));
+  auto output = torch::zeros(
+      {inp.size(0), inp.size(1), hidden_size_}, at::TensorOptions(inp));
   for (int64_t t = 0; t < inp.size(0); t++) {
     auto x = inp.select(0, t);
     for (int64_t i = 0; i < layers_; i++) {
@@ -210,12 +210,13 @@ std::vector<Variable> RNNBase<Derived>::CUDNN_forward(
       hx = inputs[1];
     }
   } else {
-    hx = x.type().zeros({layers_, x.size(1), hidden_size_});
+    hx = torch::zeros({layers_, x.size(1), hidden_size_}, at::TensorOptions(x));
     if (has_cell_state_) {
-      cx = x.type().zeros({layers_, x.size(1), hidden_size_});
+      cx = torch::zeros(
+          {layers_, x.size(1), hidden_size_}, at::TensorOptions(x));
     }
   }
-  auto dropout_state = x.type().tensor();
+  auto dropout_state = torch::empty({}, x.type());
 
   std::vector<void*> weight_data_ptrs;
   auto params = this->parameters();
@@ -298,8 +299,9 @@ std::vector<Variable> LSTM::cell_forward(
     std::vector<Variable> inputs,
     int64_t layer) {
   auto x = inputs[0];
-  auto hid = inputs[1].defined() ? inputs[1]
-                                 : x.type().zeros({2, x.size(0), hidden_size_});
+  auto hid = inputs[1].defined()
+      ? inputs[1]
+      : torch::zeros({2, x.size(0), hidden_size_}, torch::TensorOptions(x));
   auto hx = hid[0];
   auto cx = hid[1];
 
@@ -327,8 +329,9 @@ std::vector<Variable> GRU::cell_forward(
     std::vector<Variable> inputs,
     int64_t layer) {
   auto x = inputs[0];
-  auto hx = inputs[1].defined() ? inputs[1]
-                                : x.type().zeros({x.size(0), hidden_size_});
+  auto hx = inputs[1].defined()
+      ? inputs[1]
+      : torch::zeros({x.size(0), hidden_size_}, torch::TensorOptions(x));
 
   auto gi = linear(x, ihw_[layer], ihb_[layer]);
   auto gh = linear(x, hhw_[layer], hhb_[layer]);
@@ -367,8 +370,9 @@ std::vector<Variable> RNN::cell_forward(
     std::vector<Variable> inputs,
     int64_t layer) {
   auto x = inputs[0];
-  auto hx = inputs[1].defined() ? inputs[1]
-                                : x.type().zeros({x.size(0), hidden_size_});
+  auto hx = inputs[1].defined()
+      ? inputs[1]
+      : torch::zeros({x.size(0), hidden_size_}, torch::TensorOptions(x));
 
   auto h = linear(x, ihw_[layer], ihb_[layer]) +
       linear(hx, hhw_[layer], hhb_[layer]);

@@ -1,8 +1,4 @@
-if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
-  if (NOT BUILD_TORCH)
-    return()
-  endif()
-else()
+if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
   include(CMakeDependentOption)
   option(USE_CUDA "Use CUDA" ON)
@@ -30,7 +26,7 @@ set(CAFFE2_BUILD_LIB_DIR "${CAFFE2_BUILD_PATH}/lib")
 set(CAFFE2_INSTALL_INCLUDE_DIR "${INSTALL_PREFIX}/include")
 set(CAFFE2_INSTALL_SHARE_DIR "${INSTALL_PREFIX}/share")
 set(CAFFE2_INSTALL_LIB_DIR "${INSTALL_PREFIX}/lib")
-set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../torch")
+set(TORCH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
 
 find_library(CAFFE2_LIBRARY caffe2
   NAMES libcaffe2.so libcaffe2.dylib caffe2.lib
@@ -55,7 +51,6 @@ if(USE_CUDA)
     ${TORCH_SRC_DIR}/../cmake/public
     ${TORCH_SRC_DIR}/../cmake/Modules_CUDA_fix
     /usr/lib/x86_64-linux-gnu/
-    ${CMAKE_CURRENT_SOURCE_DIR}/src/TH/cmake
     ${CMAKE_MODULE_PATH})
   set(CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/ ${CMAKE_LIBRARY_PATH})
 
@@ -107,7 +102,7 @@ if(NOT TORCH_INSTALL_LIB_DIR)
 endif()
 
 if(USE_CUDA)
-  add_definitions(-DWITH_CUDA)
+  add_definitions(-DUSE_CUDA)
 
   set(TORCH_CUDA_LIBRARIES
     ${CUDA_TOOLKIT_ROOT_DIR}/lib64/stubs/libcuda.so
@@ -306,7 +301,7 @@ target_include_directories(torch
   "${CAFFE2_INSTALL_INCLUDE_DIR}"
   "${CAFFE2_INSTALL_INCLUDE_DIR}/TH"
   "${TORCH_SRC_DIR}/.."
-  "${CMAKE_CURRENT_SOURCE_DIR}")
+  "${TORCH_SRC_DIR}")
 
 if (NOT NO_API)
   target_include_directories(torch PUBLIC
@@ -365,7 +360,12 @@ if (TORCH_BUILD_TEST)
       ${TORCH_API_TEST_DIR}/sequential.cpp
       ${TORCH_API_TEST_DIR}/rnn.cpp
       ${TORCH_API_TEST_DIR}/serialization.cpp
-      ${TORCH_API_TEST_DIR}/static.cpp)
+      ${TORCH_API_TEST_DIR}/static.cpp
+      ${TORCH_API_TEST_DIR}/tensor.cpp
+      # Temporary until ATen tests are built with Caffe2
+      ${TORCH_API_TEST_DIR}/tensor_options.cpp
+      ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
+    )
 
       target_include_directories(test_api
         PUBLIC

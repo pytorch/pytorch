@@ -9,6 +9,7 @@
 #include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <ATen/ATen.h>
+#include <ATen/Error.h>
 
 #include <list>
 #include <memory>
@@ -308,6 +309,9 @@ struct Variable::Impl : public at::TensorImpl {
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
   void set_requires_grad(bool requires_grad) override {
+    AT_CHECK(
+        !requires_grad || at::isFloatingType(type().scalarType()),
+        "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
   }
 

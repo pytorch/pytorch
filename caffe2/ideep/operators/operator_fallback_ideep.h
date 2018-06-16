@@ -52,11 +52,14 @@ class IDEEPFallbackOp final : public IDEEPOperator {
     // Create output blobs in parent workspace,
     // then forward output blobs to local workspace.
     std::unordered_map<string, string> forwarded_output_blobs;
-    for (const string& name : base_def_.output()) {
-      string parent_name(name + "_cpu_output_blob_" + base_def_.type());
+    for (int i = 0; i < base_def_.output_size(); i++) {
+      string parent_name(base_def_.output(i));
+      if (!SkipOutputCopy::Contains(i)) {
+        parent_name += "_cpu_output_blob_" + base_def_.type();
+      }
       local_output_blobs_.push_back(ws->CreateBlob(parent_name));
       CHECK_NOTNULL(local_output_blobs_.back());
-      forwarded_output_blobs[name] = parent_name;
+      forwarded_output_blobs[base_def_.output(i)] = parent_name;
     }
     local_ws_.reset(new Workspace(ws, forwarded_output_blobs));
     // Set up the symbols for the local workspace.

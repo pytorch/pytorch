@@ -224,7 +224,7 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THArgCheck(!(THCTensor_(nDimension)(state, src) == 0 && THCudaLongTensor_nDimension(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
-  THCTensor_(resizeNd)(state, dst, index->_dim(), index->size, NULL);
+  THCTensor_(resizeNdLegacy)(state, dst, index->_dim(), index->size, NULL);
 
   // dispatchTakePut only handles non-empty tensors;
   if (index->_dim() > 0) {
@@ -534,14 +534,14 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   if (numIndices == 0) {
     newSize = THCTensor_(newSizeOf)(state, src);
     THLongStorage_set(newSize, 0, numIndices);
-    THCTensor_(resize)(state, dst, newSize, NULL);
+    THCTensor_(resizeLegacy)(state, dst, newSize, NULL);
     THLongStorage_free(newSize);
     return;
   }
 
   newSize = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(newSize, dim, numIndices);
-  THCTensor_(resize)(state, dst, newSize, NULL);
+  THCTensor_(resizeLegacy)(state, dst, newSize, NULL);
   THLongStorage_free(newSize);
 
   int indContig = THCudaLongTensor_isContiguous(state, indices);

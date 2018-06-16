@@ -135,9 +135,13 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return pool_getter(cpu_pools_, CPU, -1, num_workers_);
   }
-  if (device_option.device_type() == CPU ||
-      device_option.device_type() == MKLDNN ||
-      device_option.device_type() == IDEEP) {
+  static const std::unordered_set<int> cpu_types{
+      CPU,
+      MKLDNN,
+      IDEEP,
+      ONLY_FOR_TEST,
+  };
+  if (cpu_types.find(device_option.device_type()) != cpu_types.end()) {
     auto numa_node_id = device_option.numa_node_id();
     CAFFE_ENFORCE(
         numa_node_id >= -1 &&

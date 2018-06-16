@@ -57,6 +57,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::neg,
   aten::pow,
   aten::reciprocal,
+  aten::relu,
   aten::remainder,
   aten::round,
   aten::rsqrt,

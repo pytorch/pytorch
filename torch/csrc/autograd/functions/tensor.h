@@ -5,6 +5,7 @@
 
 #include "ATen/Type.h"
 #include <ATen/TensorGeometry.h>
+#include <ATen/optional.h>
 
 #include <cstdint>
 #include <memory>
@@ -15,7 +16,7 @@ struct CopyBackwards : public Function {
   virtual variable_list apply(const variable_list& inputs) override;
 
   at::Type *src_type;
-  int64_t src_device;
+  int32_t src_device = -1;
 };
 
 // Performs grad[idx] = fn(grad[idx]), but out-of-place. The slicing operation
