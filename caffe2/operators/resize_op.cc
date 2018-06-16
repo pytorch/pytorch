@@ -16,32 +16,32 @@ void resizeNearest2x(
   const int output_width = input_width * 2;
   for (int n = 0; n < batch_size; ++n) {
     for (int c = 0; c < num_channels; ++c) {
-      for (int y = 0; y < output_height; ++y) {
-        const int in_y = y / 2;
+      for (int h = 0; h < output_height; ++h) {
+        const int in_h = h / 2;
 
 #if defined(__ARM_NEON__) || defined(__ARM_NEON)
         int vecW = (input_width / 4) * 4; // round down
-        int x = 0;
-        for (; x < vecW; x += 4) {
+        int w = 0;
+        for (; w < vecW; w += 4) {
           // load 0 1 2 3
-          float32x4_t v = vld1q_f32(input + in_y * input_width + x);
-          const int oidx = output_width * y + x * 2;
+          float32x4_t v = vld1q_f32(input + in_h * input_width + w);
+          const int oidx = output_width * h + w * 2;
           float32x4x2_t v2 = {{v, v}};
           // store 00 11 22 33
           vst2q_f32(output + oidx + 0, v2);
         }
 
         // handle remainder
-        for (; x < input_width; ++x) {
-          const float v = input[in_y * input_width + x];
-          const int oidx = output_width * y + x * 2;
+        for (; w < input_width; ++w) {
+          const float v = input[in_h * input_width + w];
+          const int oidx = output_width * h + w * 2;
           output[oidx + 0] = v;
           output[oidx + 1] = v;
         }
 #else
-        for (int x = 0; x < input_width; ++x) {
-          const float v = input[in_y * input_width + x];
-          const int oidx = output_width * y + x * 2;
+        for (int w = 0; w < input_width; ++w) {
+          const float v = input[in_h * input_width + w];
+          const int oidx = output_width * h + w * 2;
           output[oidx + 0] = v;
           output[oidx + 1] = v;
         }
@@ -54,14 +54,11 @@ void resizeNearest2x(
 }
 
 template <>
-bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
+bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
   auto* Y = Output(0);
-
-  const int batch_size = X.dim32(0),
-            num_channels = X.dim32(1),
-            input_height = X.dim32(2),
-            input_width = X.dim32(3);
+  const int batch_size = X.dim32(0), num_channels = X.dim32(1),
+            input_height = X.dim32(2), input_width = X.dim32(3);
   int output_width = input_width * width_scale_;
   int output_height = input_height * height_scale_;
   Y->Resize(batch_size, num_channels, output_height, output_width);
@@ -78,11 +75,11 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
 
   for (int n = 0; n < batch_size; ++n) {
     for (int c = 0; c < num_channels; ++c) {
-      for (int y = 0; y < output_height; ++y) {
-        const int in_y = std::min((int)(y / height_scale_), (input_height - 1));
-        for (int x = 0; x < output_width; ++x) {
-          const int in_x = std::min((int)(x / width_scale_), (input_width - 1));
-          Ydata[output_width * y + x] = Xdata[input_width * in_y + in_x];
+      for (int h = 0; h < output_height; ++h) {
+        const int in_h = std::min((int)(h / height_scale_), (input_height - 1));
+        for (int w = 0; w < output_width; ++w) {
+          const int in_w = std::min((int)(w / width_scale_), (input_width - 1));
+          Ydata[output_width * h + w] = Xdata[input_width * in_h + in_w];
         }
       }
       Xdata += input_height * input_width;
@@ -94,50 +91,51 @@ bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
 }
 
 template <>
-bool ResizeNearestGradientOp<float, CPUContext>::RunOnDevice() {
-  const auto& dY = Input(0);
-  const auto& X = Input(1);
-  auto* dX = Output(0);
+bool ResizeNearestOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
+  const auto& X = Input(0);
+  auto* Y = Output(0);
+  const int batch_size = X.dim32(0), input_height = X.dim32(1),
+            input_width = X.dim32(2), num_channels = X.dim32(3);
+  int output_width = input_width * width_scale_;
+  int output_height = input_height * height_scale_;
+  Y->Resize(batch_size, output_height, output_width, num_channels);
 
-  const auto& inputDims = dY.dims();
-  CAFFE_ENFORCE_EQ(4, inputDims.size());
-  const int batch_size = dY.dim32(0),
-            num_channels = dY.dim32(1),
-            input_height = dY.dim32(2),
-            input_width = dY.dim32(3);
-  const int output_height = X.dim32(2);
-  const int output_width = X.dim32(3);
-  dX->Resize(batch_size, num_channels, output_height, output_width);
-  math::Set<float, CPUContext>(dX->size(),
-                               0.0f,
-                               dX->mutable_data<float>(),
-                               &context_);
-
-  const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  const float* Xdata = X.data<float>();
+  float* Ydata = Y->mutable_data<float>();
 
   for (int n = 0; n < batch_size; ++n) {
-    for (int c = 0; c < num_channels; ++c) {
-      for (int y = 0; y < input_height; ++y) {
-        const int out_y = std::min((int)(y / height_scale_),
-                                   (output_height - 1));
-        for (int x = 0; x < input_width; ++x) {
-          const int out_x = std::min((int)(x / width_scale_),
-                                     (output_width - 1));
-          dXdata[output_width * out_y + out_x] += dYdata[input_width * y + x];
+    for (int h = 0; h < output_height; ++h) {
+      const int in_h = std::min((int)(h / height_scale_), (input_height - 1));
+      for (int w = 0; w < output_width; ++w) {
+        const int in_w = std::min((int)(w / width_scale_), (input_width - 1));
+        for (int c = 0; c < num_channels; ++c) {
+          const int y_idx =
+              ((n * output_height + h) * output_width + w) * num_channels + c;
+          const int x_idx =
+              ((n * input_height + in_h) * input_width + in_w) * num_channels +
+              c;
+          Ydata[y_idx] = Xdata[x_idx];
         }
       }
-      dYdata += input_height * input_width;
-      dXdata += output_height * output_width;
     }
   }
 
   return true;
 }
 
+template <>
+bool ResizeNearestOp<float, CPUContext>::RunOnDevice() {
+  switch (order_) {
+    case StorageOrder::NCHW:
+      return RunOnDeviceWithOrderNCHW();
+    case StorageOrder::NHWC:
+      return RunOnDeviceWithOrderNHWC();
+    default:
+      CAFFE_THROW("Unknown storage order: ", order_);
+  }
+}
+
 REGISTER_CPU_OPERATOR(ResizeNearest, ResizeNearestOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ResizeNearestGradient,
-                      ResizeNearestGradientOp<float, CPUContext>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(ResizeNearest)
@@ -145,6 +143,7 @@ OPERATOR_SCHEMA(ResizeNearest)
     .NumOutputs(1)
     .Arg("width_scale", "Scale along width dimension")
     .Arg("height_scale", "Scale along height dimension")
+    .Arg("order", "Order of the input, either NCHW or NHWC")
     .SetDoc(R"DOC(
 Resizes the spatial dimensions of the input using nearest neighbor
 interpolation. The `width_scale` and `height_scale` arguments
@@ -154,23 +153,5 @@ output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
     .Output(0, "Y", "Output tensor");
-
-// Input: dY, output: dX
-OPERATOR_SCHEMA(ResizeNearestGradient)
-    .NumInputs(2)
-    .NumOutputs(1)
-    .Arg("width_scale", "Scale along width dimension")
-    .Arg("height_scale", "Scale along height dimension");
-
-class GetResizeNearestGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
-    return SingleGradientDef("ResizeNearestGradient",
-                             "",
-                             vector<string>{GO(0), I(0)},
-                             vector<string>{GI(0)});
-  }
-};
-REGISTER_GRADIENT(ResizeNearest, GetResizeNearestGradient);
 
 } // namespace caffe2
