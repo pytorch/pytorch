@@ -1520,11 +1520,10 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     auto v = raw_v;
     auto vt = v.t();
     
-    Tensor F;
     Tensor result = at::zeros_like(self);
     if (gv.defined()) {
-        F = at::zeros(self.type(), {n, n});
-        F.add_(lambda.view({1, -1})).sub_(lambda.view({-1, 1}));
+        Tensor F = at::zeros_like(self);
+        F.add_(at::unsqueeze(lambda, 0)).sub_(at::unsqueeze(lambda, 1));
         F.as_strided({n}, {n + 1}).fill_(INFINITY);
         F.pow_(-1);
         
