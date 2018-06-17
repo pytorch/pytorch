@@ -1512,12 +1512,11 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
 
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
-                    bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& raw_v) {
+                    bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
     auto n = lambda.size(0);
     auto glambda = grads[0];
     auto gv = grads[1];
     
-    auto v = raw_v;
     auto vt = v.t();
     
     Tensor result = at::zeros_like(self);
