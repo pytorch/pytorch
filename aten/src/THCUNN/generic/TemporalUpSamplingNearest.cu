@@ -25,31 +25,6 @@ static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
     THCUNN_check_dim_size(state, gradOutput, 3, 2, outputWidth);
   }
 }
-	/*
-                        (THCState *state,THCTensor *input, THCTensor *gradOutput,
-                         int outputWidth) {
-  THArgCheck(input != NULL, 2, "3D input tensor expected but got NULL");
-  THCUNN_argCheck(state, input->_dim() == 2 || input->_dim() == 3, 2, input,
-                  "2D or 3D input tensor expected but got: %s");
-  if (input->_dim() == 2) {
-    int nChannels    = THCTensor_(size)(state, input, 0);
-    int inputWidth   = THCTensor_(size)(state, input, 1);
-    if (gradOutput != NULL) {
-      THCUNN_check_dim_size(state, gradOutput, 2, 0, nChannels);
-      THCUNN_check_dim_size(state, gradOutput, 2, 1, outputWidth);
-    }
-  } else {
-    int nBatch       = THCTensor_(size)(state, input, 0);
-    int nChannels    = THCTensor_(size)(state, input, 1);
-    int inputWidth   = THCTensor_(size)(state, input, 2);
-    if (gradOutput != NULL) {
-      THCUNN_check_dim_size(state, gradOutput, 3, 0, nBatch);
-      THCUNN_check_dim_size(state, gradOutput, 3, 1, nChannels);
-      THCUNN_check_dim_size(state, gradOutput, 3, 2, outputWidth);
-    }
-  }
-}
-*/
 
 void THNN_(TemporalUpSamplingNearest_updateOutput)(
            THCState *state,
@@ -94,7 +69,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
 	   int inputWidth,
 	   int outputWidth)
 {
-
+  gradInput = THCTensor_(newContiguous)(state, gradInput);
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(TemporalUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels, inputWidth, outputWidth);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -103,12 +78,15 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 3> data1 = toDeviceTensor<real, 3>(state, gradInput);
   THCDeviceTensor<real, 3> data2 = toDeviceTensor<real, 3>(state, gradOutput);
+
   const int num_kernels = outputWidth;
   const int num_threads = 
 	  THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
+
   nearest_neighbor_interp2_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),
 	  num_threads, 0, stream>>>(num_kernels, data1, data2);
+
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);

@@ -57,7 +57,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
                       outputWidth);
   channels = channels * nbatch; 
 
-  THAssert(inputDepth > 0 & inputHeight > 0 && inputWidth > 0 && outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
+  THAssert(inputDepth > 0 && inputHeight > 0 && inputWidth > 0 && outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
 
   input = THTensor_(newContiguous)(input);
   THTensor_(zero)(output);

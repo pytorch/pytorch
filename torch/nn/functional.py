@@ -1909,6 +1909,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.resize_images instead.")
     return resize_images(input, size, scale_factor, mode, align_corners)
 
+
 def resize_images(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
     r"""Down/upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
@@ -1928,7 +1929,7 @@ def resize_images(input, size=None, scale_factor=None, mode='nearest', align_cor
         input (Tensor): the input tensor
         size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
             output spatial size.
-        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple. 
+        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (string): algorithm used for upsampling:
             'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
         align_corners (bool, optional): if True, the corner pixels of the input
@@ -1966,7 +1967,7 @@ def resize_images(input, size=None, scale_factor=None, mode='nearest', align_cor
         scale_factors = _ntuple(dim)(scale_factor)
         return [math.floor(input.size(i + 2) * scale_factors[i]) for i in range(dim)]
 
-    if mode == 'nearest':
+    if mode in ('nearest', 'area'):
         if align_corners is not None:
             raise ValueError("align_corners option can only be set with the "
                              "interpolating modes: linear | bilinear | trilinear")

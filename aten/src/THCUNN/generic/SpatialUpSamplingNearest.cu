@@ -42,7 +42,9 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   int inputHeight = THCTensor_(size)(state, input, 2);
   int inputWidth  = THCTensor_(size)(state, input, 3);
 
-  THNN_(SpatialUpSamplingNearest_shapeCheck)(state, input, NULL, nbatch, channels, inputHeight, inputWidth, outputHeight, outputWidth);
+  THNN_(SpatialUpSamplingNearest_shapeCheck)(state, input, NULL, nbatch, channels,
+		  inputHeight, inputWidth,
+		  outputHeight, outputWidth);
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
 
   THCTensor_(resize4d)(state, output,
@@ -80,17 +82,21 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
 {
 
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
-  THNN_(SpatialUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels, inputHeight, inputWidth, outputHeight, outputWidth);
+  THNN_(SpatialUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels,
+		  inputHeight, inputWidth, outputHeight, outputWidth);
+  gradInput = THCTensor_(newContiguous)(state, gradInput);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resize4d)(state, gradInput, nbatch, nchannels, inputHeight, inputWidth);
 
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 4> data1 = toDeviceTensor<real, 4>(state, gradInput);
   THCDeviceTensor<real, 4> data2 = toDeviceTensor<real, 4>(state, gradOutput);
+
   const int num_kernels = outputHeight * outputWidth;
   const int num_threads = 
 	  THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
+
   nearest_neighbor_interp2_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),
 	  num_threads, 0, stream>>>(num_kernels, data1, data2);
   THCudaCheck(cudaGetLastError());

@@ -7,11 +7,6 @@
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
 
-#include <thrust/transform.h>
-#include <thrust/reduce.h>
-#include <thrust/transform_reduce.h>
-#include <thrust/functional.h>
-
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
@@ -82,14 +77,12 @@ __global__ void nearest_neighbor_interp2_kernel_backward(
     const int w1 = nearest_neighbor_compute_source_index(scale, w2, width1);
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
-	      const Dtype d2val = data2[n][c][w2];
-	      atomicAdd(data1[n][c][w1].data(), d2val);
+        const Dtype d2val = data2[n][c][w2];
+        atomicAdd(data1[n][c][w1].data(), d2val);
       }
     }
   }
 }
-
-
 
 
 #include "generic/TemporalUpSamplingNearest.cu"

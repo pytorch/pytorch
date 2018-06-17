@@ -127,8 +127,6 @@ class Resize_images(Module):
         return info
 
 
-
-
 class Upsample(Module):
     r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
 
@@ -240,7 +238,7 @@ class Upsample(Module):
         self.align_corners = align_corners
 
     def forward(self, input):
-        warnings.warn("nn.Upsamplingis deprecated. Use nn.Resize_images instead.")
+        warnings.warn("nn.Upsampling is deprecated. Use nn.Resize_images instead.")
         return F.resize_images(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):

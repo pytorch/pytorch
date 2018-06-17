@@ -40,17 +40,18 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   int channels = THTensor_(size)(input, 1);
   int inputHeight = THTensor_(size)(input, 2);
   int inputWidth = THTensor_(size)(input, 3);
-  const float height_scale = (float) inputHeight / (float)outputHeight;
-  const float width_scale = (float) inputWidth / (float)outputWidth;
+  const float height_scale = (float) inputHeight / (float) outputHeight;
+  const float width_scale = (float) inputWidth / (float) outputWidth;
 
-  THNN_(SpatialUpSamplingNearest_shapeCheck)(input, NULL, nbatch, channels, inputHeight, inputWidth, outputHeight, outputWidth);
+  THNN_(SpatialUpSamplingNearest_shapeCheck)(input, NULL, nbatch, channels,
+		  inputHeight, inputWidth, outputHeight, outputWidth);
 
-    THTensor_(resize4d)(output,
-			THTensor_(size)(input, 0),
-      THTensor_(size)(input, 1),
-      outputHeight,
-      outputWidth);
-    channels = channels * nbatch; 
+  THTensor_(resize4d)(output,
+      		THTensor_(size)(input, 0),
+      	        THTensor_(size)(input, 1),
+      	        outputHeight,
+      	        outputWidth);
+  channels = channels * nbatch; 
 
   THAssert(inputWidth > 0 && outputWidth > 0);
 
@@ -104,7 +105,8 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     int outputHeight,
     int outputWidth)
 {
-  THNN_(SpatialUpSamplingNearest_shapeCheck)(NULL, gradOutput, nbatch, channels, inputHeight, inputWidth, outputHeight, outputWidth);
+  THNN_(SpatialUpSamplingNearest_shapeCheck)(NULL, gradOutput, nbatch, channels,
+		  inputHeight, inputWidth, outputHeight, outputWidth);
   THTensor_(resize4d)(gradInput, nbatch, channels, inputHeight, inputWidth);
   THTensor_(zero)(gradInput);
   gradOutput = THTensor_(newContiguous)(gradOutput);

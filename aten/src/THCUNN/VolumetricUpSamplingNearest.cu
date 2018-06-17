@@ -7,11 +7,6 @@
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
 
-#include <thrust/transform.h>
-#include <thrust/reduce.h>
-#include <thrust/transform_reduce.h>
-#include <thrust/functional.h>
-
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
@@ -87,6 +82,7 @@ __global__ void nearest_neighbor_interp2_kernel_backward(
     const int w2 = (index % (height2*width2)) % width2; // 0:width2-1
     const int h2 = (index % (height2*width2)) / width2; // 0:height2-1
     const int d2 = index / (height2*width2);            // 0:depth2-1
+
     // special case: just copy
     if (depth1 == depth2 && height1 == height2 && width1 == width2) {
       const int d1 = d2;
@@ -106,13 +102,12 @@ __global__ void nearest_neighbor_interp2_kernel_backward(
     const int d1 = nearest_neighbor_compute_source_index(depth_scale, d2, depth1);
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
-	const Dtype val = data2[n][c][d1][h1][w1];
-	data1[n][c][d2][h2][w2] = val;
+	const Dtype val = data2[n][c][d2][h2][w2];
+	atomicAdd(data1[n][c][d1][h1][w1].data(), val);
       }
     }
   }
 }
-
 
 
 #include "generic/VolumetricUpSamplingNearest.cu"
