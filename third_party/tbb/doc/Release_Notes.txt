@@ -1,0 +1,137 @@
+------------------------------------------------------------------------
+Intel(R) Threading Building Blocks - Release Notes
+                   Version 2018
+------------------------------------------------------------------------
+
+
+System Requirements
+-------------------
+
+Intel(R) Threading Building Blocks (Intel(R) TBB) is available
+commercially (see http://software.intel.com/en-us/intel-tbb) as a
+binary distribution, and in open source, in both source and binary
+forms (see http://threadingbuildingblocks.org).
+
+When built from source, Intel(R) TBB is intended to be highly portable
+and so supports a wide variety of operating systems and platforms (see
+http://threadingbuildingblocks.org for more details).
+
+Binary distributions, including commercial distributions, are validated
+and officially supported for the hardware, software, operating systems
+and compilers listed here.
+
+Hardware - Recommended
+
+    Microsoft* Windows* Systems
+        Intel(R) Core(TM) processor family
+        Intel(R) Xeon(R) processor family
+        Intel(R) Xeon Phi(TM) processor family
+    Linux* Systems
+        Intel(R) Core(TM) processor family
+        Intel(R) Xeon(R) processor family
+        Intel(R) Xeon Phi(TM) processor family
+    macOS* Systems
+        Intel(R) Core(TM) processor family
+    Android* Systems
+        Intel(R) Atom(TM) processor family
+
+Hardware - Supported
+
+    Intel(R) Pentium(R) 4 processor family
+    Intel(R) Xeon Phi(TM) coprocessor
+    Intel(R) Atom(TM) processor family
+    Non Intel(R) processors compatible with the above processors
+
+Software - Minimum Requirements
+
+    Supported operating system (see below)
+    Supported compiler (see below)
+
+Software - Recommended
+
+    Intel(R) Parallel Studio XE 2017, 2018
+    Intel(R) System Studio 2017, 2018
+
+Software - Supported Operating Systems
+
+    Systems with Microsoft* Windows* operating systems
+        Microsoft* Windows* 10
+        Microsoft* Windows* 8.1
+        Microsoft* Windows* 7 SP1
+        Microsoft* Windows* Server 2016
+        Microsoft* Windows* Server 2012 R2
+        Microsoft* Windows* Server 2008 R2 SP1
+        Windows* Embedded 10
+        Windows* Embedded 8.1
+    Systems with Linux* operating systems
+        CentOS 7.1
+        Debian* 8, 9
+        Fedora* 24, 25, 26
+        Intel(R) Cluster Ready
+        Red Hat* Enterprise Linux* 6, 7
+        SuSE* Linux* Enterprise Server 11, 12
+        Ubuntu* 14.04 LTS, 16.04 LTS, 17.04
+        WindRiver* Linux 8, 9
+        Yocto 2.2, 2.3
+    Systems with OS X* or macOS* operating systems
+        OS X* 10.10, 10.11
+        macOS* 10.12, 10.13
+    Systems with Android* operating systems
+        Android* 5.x, 6.x, 7.x, 8.x
+
+Software - Supported Compilers
+
+    Intel(R) C++ Compiler 16, 17 and 18 version
+    Microsoft* Visual C++ 12.0 (Microsoft* Visual Studio* 2013,
+        Windows* OS only)
+    Microsoft* Visual C++ 14.0 (Microsoft* Visual Studio* 2015,
+        Windows* OS only)
+    Microsoft* Visual C++ 14.1 (Microsoft* Visual Studio* 2017,
+        Windows* OS only)
+    Microsoft* Windows* Software Development Kit for Windows* 8.1
+    Microsoft* Windows* Software Development Kit for Windows* 10
+    For each supported Linux* operating system, the standard gcc
+        version provided with that operating system is supported
+            GNU Compilers (gcc) 4.1 - 7.1
+            GNU C Library (glibc) version 2.4 - 2.19
+    Xcode* 6.3 - 9.1
+    Android* NDK r10e - r16
+
+Software - Supported Performance Analysis Tools
+
+    Intel(R) VTune(TM) Amplifier XE 2017, 2018.
+    Intel(R) Inspector XE 2017, 2018.
+    Intel(R) Advisor XE 2017, 2018.
+
+Known Issues
+------------
+
+Below is the list of known issues in this release of
+Intel(R) Threading Building Blocks (Intel(R) TBB).
+See the "Known Issues" appendix in the Intel(R) TBB Developer
+Reference for notes applicable to multiple releases of Intel(R) TBB.
+
+Library Issues
+
+    - If you build Intel(R) TBB from sources with GCC 6, specify
+        the -flifetime-dse=1 option to prevent crashes at runtime,
+        or use Intel(R) TBB makefiles that automatically set this option.
+
+    - The current implementation of gfx_factory does not allow memory
+        buffer objects to be used concurrently. As a result, several
+        streaming nodes customized with gfx_factory cannot be connected
+        with each other directly.
+
+------------------------------------------------------------------------
+(C) 2018 Intel Corporation
+
+Intel, the Intel logo, Intel Core, Intel Atom, Xeon, Intel Xeon Phi and
+Pentium are trademarks of Intel Corporation in the U.S. and/or other
+countries.
+
+* Other names and brands may be claimed as the property of others.
+
+Third Party and Open Source Licenses
+
+Content of some examples or binaries may be covered by various open-source
+licenses. See the index.html file in each respective folder for details.

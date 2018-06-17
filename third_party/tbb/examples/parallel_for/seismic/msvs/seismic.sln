@@ -1,0 +1,40 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2013
+VisualStudioVersion = 12.0.40629.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SeismicSimulation", "SeismicSimulation.vcxproj", "{3AA40693-F93D-4D4B-B32E-068F511A2527}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		_GDIRelease|Win32 = _GDIRelease|Win32
+		_GDIRelease|x64 = _GDIRelease|x64
+		DDDebug|Win32 = DDDebug|Win32
+		DDDebug|x64 = DDDebug|x64
+		DDRelease|Win32 = DDRelease|Win32
+		DDRelease|x64 = DDRelease|x64
+		GDIDebug|Win32 = GDIDebug|Win32
+		GDIDebug|x64 = GDIDebug|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}._GDIRelease|Win32.ActiveCfg = Release|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}._GDIRelease|Win32.Build.0 = Release|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}._GDIRelease|x64.ActiveCfg = Release|x64
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}._GDIRelease|x64.Build.0 = Release|x64
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDDebug|Win32.ActiveCfg = DDDebug|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDDebug|Win32.Build.0 = DDDebug|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDDebug|x64.ActiveCfg = DDDebug|x64
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDDebug|x64.Build.0 = DDDebug|x64
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDRelease|Win32.ActiveCfg = DDRelease|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDRelease|Win32.Build.0 = DDRelease|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDRelease|x64.ActiveCfg = DDRelease|x64
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.DDRelease|x64.Build.0 = DDRelease|x64
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.GDIDebug|Win32.ActiveCfg = Debug|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.GDIDebug|Win32.Build.0 = Debug|Win32
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.GDIDebug|x64.ActiveCfg = Debug|x64
+		{3AA40693-F93D-4D4B-B32E-068F511A2527}.GDIDebug|x64.Build.0 = Debug|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

@@ -1,0 +1,339 @@
+; Copyright (c) 2005-2018 Intel Corporation
+;
+; Licensed under the Apache License, Version 2.0 (the "License");
+; you may not use this file except in compliance with the License.
+; You may obtain a copy of the License at
+;
+;     http://www.apache.org/licenses/LICENSE-2.0
+;
+; Unless required by applicable law or agreed to in writing, software
+; distributed under the License is distributed on an "AS IS" BASIS,
+; WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+; See the License for the specific language governing permissions and
+; limitations under the License.
+;
+;
+;
+;
+
+// This file is organized with a section for each .cpp file.
+// Each of these sections is in alphabetical order.
+
+#include "tbb/tbb_config.h"
+
+// Assembly-language support that is called directly by clients
+__TBB_SYMBOL( __TBB_machine_cmpswp1 )
+__TBB_SYMBOL( __TBB_machine_fetchadd1 )
+__TBB_SYMBOL( __TBB_machine_fetchstore1 )
+__TBB_SYMBOL( __TBB_machine_cmpswp2 )
+__TBB_SYMBOL( __TBB_machine_fetchadd2 )
+__TBB_SYMBOL( __TBB_machine_fetchstore2 )
+__TBB_SYMBOL( __TBB_machine_pause )
+__TBB_SYMBOL( __TBB_machine_try_lock_elided )
+__TBB_SYMBOL( __TBB_machine_unlock_elided )
+__TBB_SYMBOL( __TBB_machine_is_in_transaction )
+
+// cache_aligned_allocator.cpp
+__TBB_SYMBOL( ?NFS_Allocate@internal@tbb@@YAPEAX_K0PEAX@Z )
+__TBB_SYMBOL( ?NFS_GetLineSize@internal@tbb@@YA_KXZ )
+__TBB_SYMBOL( ?NFS_Free@internal@tbb@@YAXPEAX@Z )
+__TBB_SYMBOL( ?allocate_via_handler_v3@internal@tbb@@YAPEAX_K@Z )
+__TBB_SYMBOL( ?deallocate_via_handler_v3@internal@tbb@@YAXPEAX@Z )
+__TBB_SYMBOL( ?is_malloc_used_v3@internal@tbb@@YA_NXZ )
+
+
+// task.cpp v3
+__TBB_SYMBOL( ?resize@affinity_partitioner_base_v3@internal@tbb@@AEAAXI@Z )
+__TBB_SYMBOL( ?allocate@allocate_additional_child_of_proxy@internal@tbb@@QEBAAEAVtask@3@_K@Z )
+__TBB_SYMBOL( ?allocate@allocate_child_proxy@internal@tbb@@QEBAAEAVtask@3@_K@Z )
+__TBB_SYMBOL( ?allocate@allocate_continuation_proxy@internal@tbb@@QEBAAEAVtask@3@_K@Z )
+__TBB_SYMBOL( ?allocate@allocate_root_proxy@internal@tbb@@SAAEAVtask@3@_K@Z )
+__TBB_SYMBOL( ?destroy@task_base@internal@interface5@tbb@@SAXAEAVtask@4@@Z )
+__TBB_SYMBOL( ?free@allocate_additional_child_of_proxy@internal@tbb@@QEBAXAEAVtask@3@@Z )
+__TBB_SYMBOL( ?free@allocate_child_proxy@internal@tbb@@QEBAXAEAVtask@3@@Z )
+__TBB_SYMBOL( ?free@allocate_continuation_proxy@internal@tbb@@QEBAXAEAVtask@3@@Z )
+__TBB_SYMBOL( ?free@allocate_root_proxy@internal@tbb@@SAXAEAVtask@3@@Z )
+__TBB_SYMBOL( ?internal_set_ref_count@task@tbb@@AEAAXH@Z )
+__TBB_SYMBOL( ?internal_decrement_ref_count@task@tbb@@AEAA_JXZ )
+__TBB_SYMBOL( ?is_owned_by_current_thread@task@tbb@@QEBA_NXZ )
+__TBB_SYMBOL( ?note_affinity@task@tbb@@UEAAXG@Z )
+__TBB_SYMBOL( ?self@task@tbb@@SAAEAV12@XZ )
+__TBB_SYMBOL( ?spawn_and_wait_for_all@task@tbb@@QEAAXAEAVtask_list@2@@Z )
+__TBB_SYMBOL( ?default_num_threads@task_scheduler_init@tbb@@SAHXZ )
+__TBB_SYMBOL( ?initialize@task_scheduler_init@tbb@@QEAAXH_K@Z )
+__TBB_SYMBOL( ?initialize@task_scheduler_init@tbb@@QEAAXH@Z )
+__TBB_SYMBOL( ?terminate@task_scheduler_init@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?internal_blocking_terminate@task_scheduler_init@tbb@@AEAA_N_N@Z )
+#if __TBB_SCHEDULER_OBSERVER
+__TBB_SYMBOL( ?observe@task_scheduler_observer_v3@internal@tbb@@QEAAX_N@Z )
+#endif /* __TBB_SCHEDULER_OBSERVER */
+
+/* arena.cpp */
+__TBB_SYMBOL( ?internal_max_concurrency@task_arena_base@internal@interface7@tbb@@KAHPEBVtask_arena@34@@Z )
+__TBB_SYMBOL( ?internal_current_slot@task_arena_base@internal@interface7@tbb@@KAHXZ )
+__TBB_SYMBOL( ?internal_initialize@task_arena_base@internal@interface7@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ?internal_terminate@task_arena_base@internal@interface7@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ?internal_attach@task_arena_base@internal@interface7@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ?internal_enqueue@task_arena_base@internal@interface7@tbb@@IEBAXAEAVtask@4@_J@Z )
+__TBB_SYMBOL( ?internal_execute@task_arena_base@internal@interface7@tbb@@IEBAXAEAVdelegate_base@234@@Z )
+__TBB_SYMBOL( ?internal_wait@task_arena_base@internal@interface7@tbb@@IEBAXXZ )
+#if __TBB_TASK_ISOLATION
+__TBB_SYMBOL( ?isolate_within_arena@internal@interface7@tbb@@YAXAEAVdelegate_base@123@_J@Z )
+#endif /* __TBB_TASK_ISOLATION */
+#if !TBB_NO_LEGACY
+// task_v2.cpp
+__TBB_SYMBOL( ?destroy@task@tbb@@QEAAXAEAV12@@Z )
+#endif
+
+// Exception handling in task scheduler
+#if __TBB_TASK_GROUP_CONTEXT
+__TBB_SYMBOL( ?allocate@allocate_root_with_context_proxy@internal@tbb@@QEBAAEAVtask@3@_K@Z )
+__TBB_SYMBOL( ?free@allocate_root_with_context_proxy@internal@tbb@@QEBAXAEAVtask@3@@Z )
+__TBB_SYMBOL( ?change_group@task@tbb@@QEAAXAEAVtask_group_context@2@@Z )
+__TBB_SYMBOL( ?is_group_execution_cancelled@task_group_context@tbb@@QEBA_NXZ )
+__TBB_SYMBOL( ?cancel_group_execution@task_group_context@tbb@@QEAA_NXZ )
+__TBB_SYMBOL( ?reset@task_group_context@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?capture_fp_settings@task_group_context@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?init@task_group_context@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ?register_pending_exception@task_group_context@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ??1task_group_context@tbb@@QEAA@XZ )
+#if __TBB_TASK_PRIORITY
+__TBB_SYMBOL( ?set_priority@task_group_context@tbb@@QEAAXW4priority_t@2@@Z )
+__TBB_SYMBOL( ?priority@task_group_context@tbb@@QEBA?AW4priority_t@2@XZ )
+#endif /* __TBB_TASK_PRIORITY */
+__TBB_SYMBOL( ?name@captured_exception@tbb@@UEBAPEBDXZ )
+__TBB_SYMBOL( ?what@captured_exception@tbb@@UEBAPEBDXZ )
+__TBB_SYMBOL( ??1captured_exception@tbb@@UEAA@XZ )
+__TBB_SYMBOL( ?move@captured_exception@tbb@@UEAAPEAV12@XZ )
+__TBB_SYMBOL( ?destroy@captured_exception@tbb@@UEAAXXZ )
+__TBB_SYMBOL( ?set@captured_exception@tbb@@QEAAXPEBD0@Z )
+__TBB_SYMBOL( ?clear@captured_exception@tbb@@QEAAXXZ )
+#endif /* __TBB_TASK_GROUP_CONTEXT */
+
+// Symbols for exceptions thrown from TBB
+__TBB_SYMBOL( ?throw_bad_last_alloc_exception_v4@internal@tbb@@YAXXZ )
+__TBB_SYMBOL( ?throw_exception_v4@internal@tbb@@YAXW4exception_id@12@@Z )
+__TBB_SYMBOL( ?what@bad_last_alloc@tbb@@UEBAPEBDXZ )
+__TBB_SYMBOL( ?what@missing_wait@tbb@@UEBAPEBDXZ )
+__TBB_SYMBOL( ?what@invalid_multiple_scheduling@tbb@@UEBAPEBDXZ )
+__TBB_SYMBOL( ?what@improper_lock@tbb@@UEBAPEBDXZ )
+__TBB_SYMBOL( ?what@user_abort@tbb@@UEBAPEBDXZ )
+
+// tbb_misc.cpp
+__TBB_SYMBOL( ?assertion_failure@tbb@@YAXPEBDH00@Z )
+__TBB_SYMBOL( ?get_initial_auto_partitioner_divisor@internal@tbb@@YA_KXZ )
+__TBB_SYMBOL( ?handle_perror@internal@tbb@@YAXHPEBD@Z )
+__TBB_SYMBOL( ?set_assertion_handler@tbb@@YAP6AXPEBDH00@ZP6AX0H00@Z@Z )
+__TBB_SYMBOL( ?runtime_warning@internal@tbb@@YAXPEBDZZ )
+__TBB_SYMBOL( TBB_runtime_interface_version )
+
+// tbb_main.cpp
+__TBB_SYMBOL( ?itt_load_pointer_with_acquire_v3@internal@tbb@@YAPEAXPEBX@Z )
+__TBB_SYMBOL( ?itt_store_pointer_with_release_v3@internal@tbb@@YAXPEAX0@Z )
+__TBB_SYMBOL( ?call_itt_notify_v5@internal@tbb@@YAXHPEAX@Z )
+__TBB_SYMBOL( ?itt_load_pointer_v3@internal@tbb@@YAPEAXPEBX@Z )
+__TBB_SYMBOL( ?itt_set_sync_name_v3@internal@tbb@@YAXPEAXPEB_W@Z )
+#if __TBB_ITT_STRUCTURE_API
+__TBB_SYMBOL( ?itt_make_task_group_v7@internal@tbb@@YAXW4itt_domain_enum@12@PEAX_K12W4string_index@12@@Z )
+__TBB_SYMBOL( ?itt_metadata_str_add_v7@internal@tbb@@YAXW4itt_domain_enum@12@PEAX_KW4string_index@12@PEBD@Z )
+__TBB_SYMBOL( ?itt_relation_add_v7@internal@tbb@@YAXW4itt_domain_enum@12@PEAX_KW4itt_relation@12@12@Z )
+__TBB_SYMBOL( ?itt_task_begin_v7@internal@tbb@@YAXW4itt_domain_enum@12@PEAX_K12W4string_index@12@@Z )
+__TBB_SYMBOL( ?itt_task_end_v7@internal@tbb@@YAXW4itt_domain_enum@12@@Z )
+__TBB_SYMBOL( ?itt_region_begin_v9@internal@tbb@@YAXW4itt_domain_enum@12@PEAX_K12W4string_index@12@@Z )
+__TBB_SYMBOL( ?itt_region_end_v9@internal@tbb@@YAXW4itt_domain_enum@12@PEAX_K@Z )
+#endif
+
+// pipeline.cpp
+__TBB_SYMBOL( ??_7pipeline@tbb@@6B@ )
+__TBB_SYMBOL( ??0pipeline@tbb@@QEAA@XZ )
+__TBB_SYMBOL( ??1filter@tbb@@UEAA@XZ )
+__TBB_SYMBOL( ??1pipeline@tbb@@UEAA@XZ )
+__TBB_SYMBOL( ?add_filter@pipeline@tbb@@QEAAXAEAVfilter@2@@Z )
+__TBB_SYMBOL( ?clear@pipeline@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?inject_token@pipeline@tbb@@AEAAXAEAVtask@2@@Z )
+__TBB_SYMBOL( ?run@pipeline@tbb@@QEAAX_K@Z )
+#if __TBB_TASK_GROUP_CONTEXT
+__TBB_SYMBOL( ?run@pipeline@tbb@@QEAAX_KAEAVtask_group_context@2@@Z )
+#endif
+__TBB_SYMBOL( ?process_item@thread_bound_filter@tbb@@QEAA?AW4result_type@12@XZ )
+__TBB_SYMBOL( ?try_process_item@thread_bound_filter@tbb@@QEAA?AW4result_type@12@XZ )
+__TBB_SYMBOL( ?set_end_of_input@filter@tbb@@IEAAXXZ )
+
+// queuing_rw_mutex.cpp
+__TBB_SYMBOL( ?internal_construct@queuing_rw_mutex@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?acquire@scoped_lock@queuing_rw_mutex@tbb@@QEAAXAEAV23@_N@Z )
+__TBB_SYMBOL( ?downgrade_to_reader@scoped_lock@queuing_rw_mutex@tbb@@QEAA_NXZ )
+__TBB_SYMBOL( ?release@scoped_lock@queuing_rw_mutex@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?upgrade_to_writer@scoped_lock@queuing_rw_mutex@tbb@@QEAA_NXZ )
+__TBB_SYMBOL( ?try_acquire@scoped_lock@queuing_rw_mutex@tbb@@QEAA_NAEAV23@_N@Z )
+
+// reader_writer_lock.cpp
+__TBB_SYMBOL( ?try_lock_read@reader_writer_lock@interface5@tbb@@QEAA_NXZ )
+__TBB_SYMBOL( ?try_lock@reader_writer_lock@interface5@tbb@@QEAA_NXZ )
+__TBB_SYMBOL( ?unlock@reader_writer_lock@interface5@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?lock_read@reader_writer_lock@interface5@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?lock@reader_writer_lock@interface5@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?internal_construct@reader_writer_lock@interface5@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_destroy@reader_writer_lock@interface5@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_construct@scoped_lock@reader_writer_lock@interface5@tbb@@AEAAXAEAV234@@Z )
+__TBB_SYMBOL( ?internal_destroy@scoped_lock@reader_writer_lock@interface5@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_construct@scoped_lock_read@reader_writer_lock@interface5@tbb@@AEAAXAEAV234@@Z )
+__TBB_SYMBOL( ?internal_destroy@scoped_lock_read@reader_writer_lock@interface5@tbb@@AEAAXXZ )
+
+#if !TBB_NO_LEGACY
+// spin_rw_mutex.cpp v2
+__TBB_SYMBOL( ?internal_itt_releasing@spin_rw_mutex@tbb@@CAXPEAV12@@Z )
+__TBB_SYMBOL( ?internal_acquire_writer@spin_rw_mutex@tbb@@CA_NPEAV12@@Z )
+__TBB_SYMBOL( ?internal_acquire_reader@spin_rw_mutex@tbb@@CAXPEAV12@@Z )
+__TBB_SYMBOL( ?internal_downgrade@spin_rw_mutex@tbb@@CAXPEAV12@@Z )
+__TBB_SYMBOL( ?internal_upgrade@spin_rw_mutex@tbb@@CA_NPEAV12@@Z )
+__TBB_SYMBOL( ?internal_release_reader@spin_rw_mutex@tbb@@CAXPEAV12@@Z )
+__TBB_SYMBOL( ?internal_release_writer@spin_rw_mutex@tbb@@CAXPEAV12@@Z )
+__TBB_SYMBOL( ?internal_try_acquire_writer@spin_rw_mutex@tbb@@CA_NPEAV12@@Z )
+__TBB_SYMBOL( ?internal_try_acquire_reader@spin_rw_mutex@tbb@@CA_NPEAV12@@Z )
+#endif
+
+// spin_rw_mutex v3
+__TBB_SYMBOL( ?internal_construct@spin_rw_mutex_v3@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_upgrade@spin_rw_mutex_v3@tbb@@AEAA_NXZ )
+__TBB_SYMBOL( ?internal_downgrade@spin_rw_mutex_v3@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_acquire_reader@spin_rw_mutex_v3@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_acquire_writer@spin_rw_mutex_v3@tbb@@AEAA_NXZ )
+__TBB_SYMBOL( ?internal_release_reader@spin_rw_mutex_v3@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_release_writer@spin_rw_mutex_v3@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_try_acquire_reader@spin_rw_mutex_v3@tbb@@AEAA_NXZ )
+__TBB_SYMBOL( ?internal_try_acquire_writer@spin_rw_mutex_v3@tbb@@AEAA_NXZ )
+
+// x86_rtm_rw_mutex.cpp
+__TBB_SYMBOL( ?internal_acquire_writer@x86_rtm_rw_mutex@internal@interface8@tbb@@AEAAXAEAVscoped_lock@1234@_N@Z )
+__TBB_SYMBOL( ?internal_acquire_reader@x86_rtm_rw_mutex@internal@interface8@tbb@@AEAAXAEAVscoped_lock@1234@_N@Z )
+__TBB_SYMBOL( ?internal_upgrade@x86_rtm_rw_mutex@internal@interface8@tbb@@AEAA_NAEAVscoped_lock@1234@@Z )
+__TBB_SYMBOL( ?internal_downgrade@x86_rtm_rw_mutex@internal@interface8@tbb@@AEAA_NAEAVscoped_lock@1234@@Z )
+__TBB_SYMBOL( ?internal_try_acquire_writer@x86_rtm_rw_mutex@internal@interface8@tbb@@AEAA_NAEAVscoped_lock@1234@@Z )
+__TBB_SYMBOL( ?internal_release@x86_rtm_rw_mutex@internal@interface8@tbb@@AEAAXAEAVscoped_lock@1234@@Z )
+__TBB_SYMBOL( ?internal_construct@x86_rtm_rw_mutex@internal@interface8@tbb@@AEAAXXZ )
+
+// spin_mutex.cpp
+__TBB_SYMBOL( ?internal_construct@spin_mutex@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?internal_acquire@scoped_lock@spin_mutex@tbb@@AEAAXAEAV23@@Z )
+__TBB_SYMBOL( ?internal_release@scoped_lock@spin_mutex@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_try_acquire@scoped_lock@spin_mutex@tbb@@AEAA_NAEAV23@@Z )
+
+// mutex.cpp
+__TBB_SYMBOL( ?internal_acquire@scoped_lock@mutex@tbb@@AEAAXAEAV23@@Z )
+__TBB_SYMBOL( ?internal_release@scoped_lock@mutex@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_try_acquire@scoped_lock@mutex@tbb@@AEAA_NAEAV23@@Z )
+__TBB_SYMBOL( ?internal_construct@mutex@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_destroy@mutex@tbb@@AEAAXXZ )
+
+// recursive_mutex.cpp
+__TBB_SYMBOL( ?internal_construct@recursive_mutex@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_destroy@recursive_mutex@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_acquire@scoped_lock@recursive_mutex@tbb@@AEAAXAEAV23@@Z )
+__TBB_SYMBOL( ?internal_try_acquire@scoped_lock@recursive_mutex@tbb@@AEAA_NAEAV23@@Z )
+__TBB_SYMBOL( ?internal_release@scoped_lock@recursive_mutex@tbb@@AEAAXXZ )
+
+// queuing_mutex.cpp
+__TBB_SYMBOL( ?internal_construct@queuing_mutex@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?acquire@scoped_lock@queuing_mutex@tbb@@QEAAXAEAV23@@Z )
+__TBB_SYMBOL( ?release@scoped_lock@queuing_mutex@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?try_acquire@scoped_lock@queuing_mutex@tbb@@QEAA_NAEAV23@@Z )
+
+//critical_section.cpp
+__TBB_SYMBOL( ?internal_construct@critical_section_v4@internal@tbb@@QEAAXXZ )
+
+#if !TBB_NO_LEGACY
+// concurrent_hash_map.cpp
+__TBB_SYMBOL( ?internal_grow_predicate@hash_map_segment_base@internal@tbb@@QEBA_NXZ )
+
+// concurrent_queue.cpp v2
+__TBB_SYMBOL( ??0concurrent_queue_base@internal@tbb@@IEAA@_K@Z )
+__TBB_SYMBOL( ??0concurrent_queue_iterator_base@internal@tbb@@IEAA@AEBVconcurrent_queue_base@12@@Z )
+__TBB_SYMBOL( ??1concurrent_queue_base@internal@tbb@@MEAA@XZ )
+__TBB_SYMBOL( ??1concurrent_queue_iterator_base@internal@tbb@@IEAA@XZ )
+__TBB_SYMBOL( ?advance@concurrent_queue_iterator_base@internal@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ?assign@concurrent_queue_iterator_base@internal@tbb@@IEAAXAEBV123@@Z )
+__TBB_SYMBOL( ?internal_pop@concurrent_queue_base@internal@tbb@@IEAAXPEAX@Z )
+__TBB_SYMBOL( ?internal_pop_if_present@concurrent_queue_base@internal@tbb@@IEAA_NPEAX@Z )
+__TBB_SYMBOL( ?internal_push@concurrent_queue_base@internal@tbb@@IEAAXPEBX@Z )
+__TBB_SYMBOL( ?internal_push_if_not_full@concurrent_queue_base@internal@tbb@@IEAA_NPEBX@Z )
+__TBB_SYMBOL( ?internal_set_capacity@concurrent_queue_base@internal@tbb@@IEAAX_J_K@Z )
+__TBB_SYMBOL( ?internal_size@concurrent_queue_base@internal@tbb@@IEBA_JXZ )
+#endif
+
+// concurrent_queue v3
+__TBB_SYMBOL( ??0concurrent_queue_iterator_base_v3@internal@tbb@@IEAA@AEBVconcurrent_queue_base_v3@12@@Z )
+__TBB_SYMBOL( ??0concurrent_queue_iterator_base_v3@internal@tbb@@IEAA@AEBVconcurrent_queue_base_v3@12@_K@Z )
+__TBB_SYMBOL( ??1concurrent_queue_iterator_base_v3@internal@tbb@@IEAA@XZ )
+__TBB_SYMBOL( ?assign@concurrent_queue_iterator_base_v3@internal@tbb@@IEAAXAEBV123@@Z )
+__TBB_SYMBOL( ?advance@concurrent_queue_iterator_base_v3@internal@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ??0concurrent_queue_base_v3@internal@tbb@@IEAA@_K@Z )
+__TBB_SYMBOL( ??1concurrent_queue_base_v3@internal@tbb@@MEAA@XZ )
+__TBB_SYMBOL( ?internal_push@concurrent_queue_base_v3@internal@tbb@@IEAAXPEBX@Z )
+__TBB_SYMBOL( ?internal_push_move@concurrent_queue_base_v8@internal@tbb@@IEAAXPEBX@Z )
+__TBB_SYMBOL( ?internal_push_if_not_full@concurrent_queue_base_v3@internal@tbb@@IEAA_NPEBX@Z )
+__TBB_SYMBOL( ?internal_push_move_if_not_full@concurrent_queue_base_v8@internal@tbb@@IEAA_NPEBX@Z )
+__TBB_SYMBOL( ?internal_pop@concurrent_queue_base_v3@internal@tbb@@IEAAXPEAX@Z )
+__TBB_SYMBOL( ?internal_pop_if_present@concurrent_queue_base_v3@internal@tbb@@IEAA_NPEAX@Z )
+__TBB_SYMBOL( ?internal_abort@concurrent_queue_base_v3@internal@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ?internal_size@concurrent_queue_base_v3@internal@tbb@@IEBA_JXZ )
+__TBB_SYMBOL( ?internal_empty@concurrent_queue_base_v3@internal@tbb@@IEBA_NXZ )
+__TBB_SYMBOL( ?internal_finish_clear@concurrent_queue_base_v3@internal@tbb@@IEAAXXZ )
+__TBB_SYMBOL( ?internal_set_capacity@concurrent_queue_base_v3@internal@tbb@@IEAAX_J_K@Z )
+__TBB_SYMBOL( ?internal_throw_exception@concurrent_queue_base_v3@internal@tbb@@IEBAXXZ )
+__TBB_SYMBOL( ?assign@concurrent_queue_base_v3@internal@tbb@@IEAAXAEBV123@@Z )
+__TBB_SYMBOL( ?move_content@concurrent_queue_base_v8@internal@tbb@@IEAAXAEAV123@@Z )
+
+#if !TBB_NO_LEGACY
+// concurrent_vector.cpp v2
+__TBB_SYMBOL( ?internal_assign@concurrent_vector_base@internal@tbb@@IEAAXAEBV123@_KP6AXPEAX1@ZP6AX2PEBX1@Z5@Z )
+__TBB_SYMBOL( ?internal_capacity@concurrent_vector_base@internal@tbb@@IEBA_KXZ )
+__TBB_SYMBOL( ?internal_clear@concurrent_vector_base@internal@tbb@@IEAAXP6AXPEAX_K@Z_N@Z )
+__TBB_SYMBOL( ?internal_copy@concurrent_vector_base@internal@tbb@@IEAAXAEBV123@_KP6AXPEAXPEBX1@Z@Z )
+__TBB_SYMBOL( ?internal_grow_by@concurrent_vector_base@internal@tbb@@IEAA_K_K0P6AXPEAX0@Z@Z )
+__TBB_SYMBOL( ?internal_grow_to_at_least@concurrent_vector_base@internal@tbb@@IEAAX_K0P6AXPEAX0@Z@Z )
+__TBB_SYMBOL( ?internal_push_back@concurrent_vector_base@internal@tbb@@IEAAPEAX_KAEA_K@Z )
+__TBB_SYMBOL( ?internal_reserve@concurrent_vector_base@internal@tbb@@IEAAX_K00@Z )
+#endif
+
+// concurrent_vector v3
+__TBB_SYMBOL( ??1concurrent_vector_base_v3@internal@tbb@@IEAA@XZ )
+__TBB_SYMBOL( ?internal_assign@concurrent_vector_base_v3@internal@tbb@@IEAAXAEBV123@_KP6AXPEAX1@ZP6AX2PEBX1@Z5@Z )
+__TBB_SYMBOL( ?internal_capacity@concurrent_vector_base_v3@internal@tbb@@IEBA_KXZ )
+__TBB_SYMBOL( ?internal_clear@concurrent_vector_base_v3@internal@tbb@@IEAA_KP6AXPEAX_K@Z@Z )
+__TBB_SYMBOL( ?internal_copy@concurrent_vector_base_v3@internal@tbb@@IEAAXAEBV123@_KP6AXPEAXPEBX1@Z@Z )
+__TBB_SYMBOL( ?internal_grow_by@concurrent_vector_base_v3@internal@tbb@@IEAA_K_K0P6AXPEAXPEBX0@Z2@Z )
+__TBB_SYMBOL( ?internal_grow_to_at_least@concurrent_vector_base_v3@internal@tbb@@IEAAX_K0P6AXPEAXPEBX0@Z2@Z )
+__TBB_SYMBOL( ?internal_push_back@concurrent_vector_base_v3@internal@tbb@@IEAAPEAX_KAEA_K@Z )
+__TBB_SYMBOL( ?internal_reserve@concurrent_vector_base_v3@internal@tbb@@IEAAX_K00@Z )
+__TBB_SYMBOL( ?internal_compact@concurrent_vector_base_v3@internal@tbb@@IEAAPEAX_KPEAXP6AX10@ZP6AX1PEBX0@Z@Z )
+__TBB_SYMBOL( ?internal_swap@concurrent_vector_base_v3@internal@tbb@@IEAAXAEAV123@@Z )
+__TBB_SYMBOL( ?internal_throw_exception@concurrent_vector_base_v3@internal@tbb@@IEBAX_K@Z )
+__TBB_SYMBOL( ?internal_resize@concurrent_vector_base_v3@internal@tbb@@IEAAX_K00PEBXP6AXPEAX0@ZP6AX210@Z@Z )
+__TBB_SYMBOL( ?internal_grow_to_at_least_with_result@concurrent_vector_base_v3@internal@tbb@@IEAA_K_K0P6AXPEAXPEBX0@Z2@Z )
+
+// tbb_thread
+__TBB_SYMBOL( ?allocate_closure_v3@internal@tbb@@YAPEAX_K@Z )
+__TBB_SYMBOL( ?detach@tbb_thread_v3@internal@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?free_closure_v3@internal@tbb@@YAXPEAX@Z )
+__TBB_SYMBOL( ?hardware_concurrency@tbb_thread_v3@internal@tbb@@SAIXZ )
+__TBB_SYMBOL( ?internal_start@tbb_thread_v3@internal@tbb@@AEAAXP6AIPEAX@Z0@Z )
+__TBB_SYMBOL( ?join@tbb_thread_v3@internal@tbb@@QEAAXXZ )
+__TBB_SYMBOL( ?move_v3@internal@tbb@@YAXAEAVtbb_thread_v3@12@0@Z )
+__TBB_SYMBOL( ?thread_get_id_v3@internal@tbb@@YA?AVid@tbb_thread_v3@12@XZ )
+__TBB_SYMBOL( ?thread_sleep_v3@internal@tbb@@YAXAEBVinterval_t@tick_count@2@@Z )
+__TBB_SYMBOL( ?thread_yield_v3@internal@tbb@@YAXXZ )
+
+// condition_variable
+__TBB_SYMBOL( ?internal_initialize_condition_variable@internal@interface5@tbb@@YAXAEATcondvar_impl_t@123@@Z )
+__TBB_SYMBOL( ?internal_condition_variable_wait@internal@interface5@tbb@@YA_NAEATcondvar_impl_t@123@PEAVmutex@3@PEBVinterval_t@tick_count@3@@Z )
+__TBB_SYMBOL( ?internal_condition_variable_notify_one@internal@interface5@tbb@@YAXAEATcondvar_impl_t@123@@Z )
+__TBB_SYMBOL( ?internal_condition_variable_notify_all@internal@interface5@tbb@@YAXAEATcondvar_impl_t@123@@Z )
+__TBB_SYMBOL( ?internal_destroy_condition_variable@internal@interface5@tbb@@YAXAEATcondvar_impl_t@123@@Z )
+
+// global parameter
+__TBB_SYMBOL( ?active_value@global_control@interface9@tbb@@CA_KH@Z )
+__TBB_SYMBOL( ?internal_create@global_control@interface9@tbb@@AEAAXXZ )
+__TBB_SYMBOL( ?internal_destroy@global_control@interface9@tbb@@AEAAXXZ )
+
+#undef __TBB_SYMBOL

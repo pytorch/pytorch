@@ -1,0 +1,76 @@
+<HTML>
+<BODY>
+
+<H2>Overview</H2>
+This directory contains the source code and unit tests for Intel&reg; Threading Building Blocks.
+
+<H2>Directories</H2>
+<DL>
+<DT><A HREF="tbb">tbb</A>
+<DD>Source code of the TBB library core.
+<DT><A HREF="tbbmalloc">tbbmalloc</A>
+<DD>Source code of the TBB scalable memory allocator.
+<DT><A HREF="test">test</A>
+<DD>Source code of the TBB unit tests.
+<DT><A HREF="rml">rml</A>
+<DD>Source code of the Resource Management Layer (RML).
+<DT><A HREF="perf">perf</A>
+<DD>Source code of microbenchmarks.
+<DT><A HREF="old">old</A>
+<DD>Source code of deprecated TBB entities that are still shipped as part of the TBB library for the sake of backward compatibility.
+</DL>
+
+<h2>Files</h2>
+<dl>
+<dt><a href="Makefile">Makefile</a>
+<dd>Advanced Makefile for developing and debugging of TBB. See the <a href="../build/index.html#build">basic build directions</a>. Additional targets and options:
+    <dt><tt>make test_{name} time_{name}</tt>
+    <dd>Make and run individual test or benchmark.
+    <dt><tt>make stress_{name}</tt>
+    <dd>Equivalent to 'make test_{name}' but runs until a failure detected or terminated by user.
+    <dt><tt>make run_cmd="{command}" [(above options or targets)]</tt>
+    <dd>Command prefix for tests execution. Also, "run_cmd=-" will ignore test execution failures. See also -k and -i options of the GNU make for more options to keep building and testing despite of failures.
+    <dt><tt>make debug_{name}</tt>
+    <dd>Equivalent to 'make test_{name}' but compiles in debug mode and runs under debugger ("run_cmd=$(debugger)").
+    <dt><tt>make args="{command-line arguments}" [(above options or targets)]</tt>
+    <dd>Additional arguments for the run.
+    <dt><tt>make repeat="{N}" [(above options or targets)]</tt>
+    <dd>Repeats execution N times.
+    <dt><tt>make clean_{filename}</tt>
+    <dd>Removes executable, object, and other intermediate files with specified filename ('*' also works).
+    <dt><tt>make cfg={debug|release} [(above options or targets)]</tt>
+    <dd>Specifies a build mode or corresponding directory to work in.
+    <dt><tt>make tbb_strict=1 [(above options or targets)]</tt>
+    <dd>Enables warnings as errors.
+    <dt><tt>make examples/{target}</tt>
+    <dd>Invokes examples/Makefile with specified target. Available in the open-source version only.
+        For the commercial version, you can download Intel TBB Samples at the <a href="https://software.intel.com/en-us/product-code-samples?topic=20828">Intel&reg; Software Product Samples and Tutorials</a> website.
+    <dt><tt>make python_{target} [compiler={icl, icc}]</tt>
+    <dd>Invokes Makefile with the specified target in <a href="../python/index.html">python</a> directory. E.g. 'python_install' target builds and installs the module into Python.
+    <dt><tt>make clean_release clean_debug clean_examples</tt>
+    <dd>Removes release or debug build directories, or cleans all examples. The target <tt>clean_examples</tt> is available in the open-source version only.
+    <dt><tt>make test_no_depends</tt>
+    <dd>Equivalent to 'make test' but does not check for libraries updates.
+    <dt><tt>make info</tt>
+    <dd>Output information about build configuration and directories.
+    <dt><tt>make cpp0x=1 [(above options or targets)]</tt>
+    <dd>Enables C++0x extensions like lambdas for compilers that implement them as experimental features.
+    <dt><tt>make CXXFLAGS={Flags} [(above options or targets)]</tt>
+    <dd>Specifies additional options for compiler.
+    <dt><tt>make target={name} [(above options or targets)]</tt>
+    <dd>Includes additional build/{name}.inc file after OS-specific one.
+    <dt><tt>make extra_inc={filename} [(above options or targets)]</tt>
+    <dd>Includes additional makefile.
+    </dl>
+
+<HR/>
+<A HREF="../index.html">Up to parent directory</A>
+<p></p>
+Copyright &copy; 2005-2018 Intel Corporation.  All Rights Reserved.
+<P></P>
+Intel is a registered trademark or trademark of Intel Corporation
+or its subsidiaries in the United States and other countries.
+<p></p>
+* Other names and brands may be claimed as the property of others.
+</BODY>
+</HTML>

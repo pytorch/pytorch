@@ -1,0 +1,42 @@
+<HTML>
+<BODY>
+<H2>Overview</H2>
+
+This directory has source code that must be statically linked into an RML client.
+
+<H2>Files</H2>
+
+<DL>
+<DT><A HREF="rml_factory.h">rml_factory.h</A>
+<DD>Text shared by <A HREF="rml_omp.cpp">rml_omp.cpp</A> and <A HREF="rml_tbb.cpp">rml_tbb.cpp</A>.
+       This is not an ordinary include file, so it does not have an #ifndef guard.</DD></DT>
+</DL>
+
+<H3> Specific to client=OpenMP</H3>
+<DL>
+<DT><A HREF="rml_omp.cpp">rml_omp.cpp</A>
+<DD>Source file for OpenMP client.</DD></DT>
+<DT><A HREF="omp_dynamic_link.h">omp_dynamic_link.h</A></DT>
+<DT><A HREF="omp_dynamic_link.cpp">omp_dynamic_link.cpp</A>
+<DD>Source files for dynamic linking support.  
+       The code is the code from the TBB source directory, but adjusted so that it 
+       appears in namespace <TT>__kmp</TT> instead of namespace <TT>tbb::internal</TT>.</DD></DT>
+</DL>
+<H3> Specific to client=TBB</H3>
+<DL>
+<DT><A HREF="rml_tbb.cpp">rml_tbb.cpp</A>
+<DD>Source file for TBB client.  It uses the dynamic linking support from the TBB source directory.</DD></DT>
+</DL>
+
+<HR/>
+<A HREF="../index.html">Up to parent directory</A>
+<p></p>
+Copyright &copy; 2005-2018 Intel Corporation.  All Rights Reserved.
+<P></P>
+Intel is a registered trademark or trademark of Intel Corporation
+or its subsidiaries in the United States and other countries.
+<p></p>
+* Other names and brands may be claimed as the property of others.
+</BODY>
+</HTML>
+

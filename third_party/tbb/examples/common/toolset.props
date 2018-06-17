@@ -1,0 +1,9 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project DefaultTargets="Build" ToolsVersion="4.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <PropertyGroup>
+    <PlatformToolset Condition="Exists('$(VCTargetsPath)\Platforms\$(Platform)\PlatformToolsets\Intel C++ Compiler 15.0 [Intel(R) System Studio]')">Intel C++ Compiler 15.0 [Intel(R) System Studio]</PlatformToolset>
+    <PlatformToolset Condition="Exists('$(VCTargetsPath)\Platforms\$(Platform)\PlatformToolsets\Intel C++ Compiler XE 15.0')">Intel C++ Compiler XE 15.0</PlatformToolset>
+    <PlatformToolset Condition="Exists('$(VCTargetsPath)\Platforms\$(Platform)\PlatformToolsets\Intel C++ Compiler 16.0')">Intel C++ Compiler 16.0</PlatformToolset>
+    <UseIntelTBB Condition="'$(UseIntelTBB)' == ''">true</UseIntelTBB>
+  </PropertyGroup>
+</Project>

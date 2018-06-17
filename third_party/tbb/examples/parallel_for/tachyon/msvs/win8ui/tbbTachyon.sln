@@ -1,0 +1,34 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio 2013
+VisualStudioVersion = 12.0.40629.0
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "tbbTachyon", "tbbTachyon.vcxproj", "{E20CB432-6730-4021-A372-1C81A333518A}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{E6DDEA39-7910-47F9-A0E3-56AD7E62ACBD}"
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Win32 = Debug|Win32
+		Debug|x64 = Debug|x64
+		Release|Win32 = Release|Win32
+		Release|x64 = Release|x64
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{E20CB432-6730-4021-A372-1C81A333518A}.Debug|Win32.ActiveCfg = Debug|Win32
+		{E20CB432-6730-4021-A372-1C81A333518A}.Debug|Win32.Build.0 = Debug|Win32
+		{E20CB432-6730-4021-A372-1C81A333518A}.Debug|Win32.Deploy.0 = Debug|Win32
+		{E20CB432-6730-4021-A372-1C81A333518A}.Debug|x64.ActiveCfg = Debug|x64
+		{E20CB432-6730-4021-A372-1C81A333518A}.Debug|x64.Build.0 = Debug|x64
+		{E20CB432-6730-4021-A372-1C81A333518A}.Debug|x64.Deploy.0 = Debug|x64
+		{E20CB432-6730-4021-A372-1C81A333518A}.Release|Win32.ActiveCfg = Release|Win32
+		{E20CB432-6730-4021-A372-1C81A333518A}.Release|Win32.Build.0 = Release|Win32
+		{E20CB432-6730-4021-A372-1C81A333518A}.Release|Win32.Deploy.0 = Release|Win32
+		{E20CB432-6730-4021-A372-1C81A333518A}.Release|x64.ActiveCfg = Release|x64
+		{E20CB432-6730-4021-A372-1C81A333518A}.Release|x64.Build.0 = Release|x64
+		{E20CB432-6730-4021-A372-1C81A333518A}.Release|x64.Deploy.0 = Release|x64
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+EndGlobal

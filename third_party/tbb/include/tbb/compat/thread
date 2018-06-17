@@ -1,0 +1,60 @@
+/*
+    Copyright (c) 2005-2018 Intel Corporation
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
+*/
+
+#ifndef __TBB_thread_H
+#define __TBB_thread_H
+
+#include "../tbb_config.h"
+
+#if TBB_IMPLEMENT_CPP0X
+
+#include "../tbb_thread.h"
+
+namespace std {
+
+typedef tbb::tbb_thread thread;
+
+namespace this_thread {
+    using tbb::this_tbb_thread::get_id;
+    using tbb::this_tbb_thread::yield;
+
+    inline void sleep_for(const tbb::tick_count::interval_t& rel_time) {
+        tbb::internal::thread_sleep_v3( rel_time );
+    }
+}
+
+} // namespace std
+
+#else /* TBB_IMPLEMENT_CPP0X */
+
+#define __TBB_COMPAT_THREAD_RECURSION_PROTECTOR 1
+#include <thread>
+#undef __TBB_COMPAT_THREAD_RECURSION_PROTECTOR
+
+#endif /* TBB_IMPLEMENT_CPP0X */
+
+#else /* __TBB_thread_H */
+
+#if __TBB_COMPAT_THREAD_RECURSION_PROTECTOR
+#error The tbb/compat/thread header attempts to include itself. \
+       Please make sure that {TBBROOT}/include/tbb/compat is NOT in include paths.
+#endif
+
+#endif /* __TBB_thread_H */

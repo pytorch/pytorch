@@ -1,0 +1,122 @@
+<HTML><BODY>
+<H2>time_hash_map_fill</H2>
+<P><a href=time_hash_map_fill.cpp>time_hash_map_fill.cpp</a> is a micro-benchmark specifically designed to highlight aspects of concurrent resizing algorithm of the hash tables.
+It was derived from the Count Strings example that counts the number of unique words. But to exclude synchronization on the counters from the picture,
+it was simplified to build just a set of unique numbers from an input array. The array is filled evenly by using a pseudo-random number generator from the standard C library for various proportions of unique numbers.
+For example, for 5% of unique numbers, the same number is repeated 20 times on average. Together, it gives 5% of actual insertions and 95% are just lookups. However, in the beginning, there are more new keys occur than in the end.
+In addition, a size of the source array correlates with input rates in order to produce the same number of unique keys at the end, and so exclude cache effects from the equation.
+</P>
+<H2>Diagram</H2><img src="time_hash_map_fill.gif"/>
+<H3>Prepare results</H3>
+<P>This benchmark outputs results in Excel* and html file formats by default. To generate text (CSV) file instead, specify STAT_FORMAT=pivot-csv evironment variable. To change the default table size, set TABLE_SIZE.
+<code><b><pre>src$    make time_hash_map_fill args=-v STAT_FORMAT=pivot-csv TABLE_SIZE=250000</pre></b></code>Or to get statistics from different runs:
+<code><b><pre>src$    make time_hash_map_fill TABLE_SIZE=50000 run_cmd="bash ../../src/perf/<a href=run_statistics.sh>run_statistics.sh</a>"</pre></b></code>
+</P>
+<H3>Build diagram</H3>You can use <a href="http://ploticus.sourceforge.net/">Ploticus</a> to build diagram from the prepared data using this html file as a script. But first, the input data file should be sorted to join lines from different runs together, e.g.:
+<code><b><pre>src$    sort -t , -k 1dr,2 -k 3n,4 -k 7n,7 ../build/<i>{scrambled_path}</i>/time_hash_map_fill.csv -o perf/time_hash_map_fill.csv</pre></b></code>Here, field 7 is "Column" field that contains input rates because run_statistics.sh adds hostname and number of the run as 5 and 6 fields. Now, to build gif diagram, run:
+<code><b><pre>perf$   pl -maxrows 200000 -maxfields 1500000 -maxvector 1200000 -gif -scale 1.8 time_hash_map_fill.html</pre></b></code>
+<H3>Script body</H3>
+<hr/><pre>
+
+#setifnotgiven NAMES = $makelist("1.CHMap 2.CUMap 3.OLD")
+#setifnotgiven LABLESIZE = 0.06
+
+#proc settings
+  encodenames: yes
+  units: cm
+
+#proc getdata
+  file: time_hash_map_fill.csv
+  fieldnameheader: yes
+  delim: comma
+  showdata: no
+  select: @@Mode = insert
+  pf_fieldnames: Name Mode Threads Value
+  filter:
+    ##print @@Name,"@@Items on @@Column",@@3,@@Value
+
+#endproc
+
+#proc page
+  pagesize: 70 50
+  tightcrop: yes
+#endproc
+
+#proc processdata
+  action: summary
+  fields: Name Mode Threads
+  valfield: Value
+  fieldnames: Name Mode Threads Average sd sem n_obs Min Max
+  showdata: no
+
+#proc categories
+  axis: x
+  datafield: Mode
+
+#proc areadef
+  title: Throughput on Insert operation
+  titledetails: size=14  align=C
+  areaname: slide
+  xscaletype: categories
+  xautorange: datafield=Mode
+  xaxis.stubs: usecategories
+  xaxis.label: Threads across table sizes and % of input rates
+//  yrange: 0 70
+  yautorange: datafield=Max,Min
+  yaxis.stubs: inc
+  yaxis.label: ops/ns
+//  yaxis.stubformat: %3.1f
+  autowidth: 1.1
+  autoheight: 0.07
+  frame: yes
+
+#for LABEL in @NAMES
+#set NLABEL = $arithl(@NLABEL+1)
+#set COLOR = $icolor( @NLABEL )
+#proc legendentry
+  label: @LABEL
+  sampletype: color
+  details: @COLOR
+
+#procdef catlines
+  select: @Name = @LABEL
+  catfield: Mode
+  subcatfield: Threads
+  subcats: auto
+  plotwidth: 0.8
+  #saveas C
+
+#proc catlines
+  #clone C
+  dpsymbol: shape=square radius=@LABLESIZE style=solid color=@COLOR
+  valfield: Average
+  errfield: sd
+
+#proc catlines
+  #clone C
+  valfield: Max
+  dpsymbol: shape=triangle radius=@LABLESIZE style=solid color=@COLOR
+
+#proc catlines
+  #clone C
+  valfield: Min
+  dpsymbol: shape=downtriangle radius=@LABLESIZE style=solid color=@COLOR
+
+#endloop
+
+#proc legend
+  location: 3.2 max
+  seglen: 0.2
+#endproc
+</pre>
+<HR/>
+<A HREF="../index.html">Up to parent directory</A>
+<p></p>
+Copyright &copy; 2005-2018 Intel Corporation.  All Rights Reserved.
+<P></P>
+Intel is a registered trademark or trademark of Intel Corporation
+or its subsidiaries in the United States and other countries.
+<p></p>
+* Other names and brands may be claimed as the property of others.
+</BODY>
+</HTML>

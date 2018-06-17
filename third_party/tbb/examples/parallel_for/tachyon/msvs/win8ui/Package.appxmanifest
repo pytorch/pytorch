@@ -1,0 +1,30 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Package xmlns="http://schemas.microsoft.com/appx/2010/manifest">
+  <Identity Name="36816596-d167-42e1-bcc0-cd3ec4577997" Publisher="CN=tbbtest" Version="1.0.0.18" />
+  <Properties>
+    <DisplayName>Tachyon Demo</DisplayName>
+    <PublisherDisplayName>test</PublisherDisplayName>
+    <Logo>Assets\StoreLogo.png</Logo>
+  </Properties>
+  <Prerequisites>
+    <OSMinVersion>6.2.0</OSMinVersion>
+    <OSMaxVersionTested>6.2.0</OSMaxVersionTested>
+  </Prerequisites>
+  <Resources>
+    <Resource Language="x-generate" />
+  </Resources>
+  <Applications>
+    <Application Id="App" Executable="$targetnametoken$.exe" EntryPoint="tbbTachyon.App">
+      <VisualElements DisplayName="Tachyon Demo" Logo="Assets\Logo.png" SmallLogo="Assets\SmallLogo.png" Description="Tachyon Demo demostrates how to use Intel(R) Threading Building Blocks library for Windows Store applications." ForegroundText="light" BackgroundColor="#464646">
+        <DefaultTile ShowName="allLogos" />
+        <SplashScreen Image="Assets\SplashScreen.png" />
+        <InitialRotationPreference>
+          <Rotation Preference="landscape" />
+        </InitialRotationPreference>
+      </VisualElements>
+    </Application>
+  </Applications>
+  <Capabilities>
+    <Capability Name="internetClient" />
+  </Capabilities>
+</Package>

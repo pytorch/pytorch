@@ -1,0 +1,59 @@
+/*
+    Copyright (c) 2005-2018 Intel Corporation
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
+*/
+
+{
+global:
+calloc;
+free;
+malloc;
+realloc;
+posix_memalign;
+memalign;
+aligned_alloc;
+valloc;
+pvalloc;
+mallinfo;
+mallopt;
+malloc_usable_size;
+__libc_malloc;
+__libc_realloc;
+__libc_calloc;
+__libc_free;
+__libc_memalign;
+__libc_pvalloc;
+__libc_valloc;
+__TBB_malloc_proxy;
+_ZdaPv;  /* next ones are new/delete */
+_ZdaPvRKSt9nothrow_t;
+_ZdlPv;
+_ZdlPvRKSt9nothrow_t;
+_Znam;
+_ZnamRKSt9nothrow_t;
+_Znwm;
+_ZnwmRKSt9nothrow_t;
+
+local:
+
+/* TBB symbols */
+*3rml8internal*;
+*3tbb*;
+*__TBB*;
+
+};

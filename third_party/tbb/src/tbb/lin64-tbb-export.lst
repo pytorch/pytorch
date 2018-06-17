@@ -1,0 +1,385 @@
+/*
+    Copyright (c) 2005-2018 Intel Corporation
+
+    Licensed under the Apache License, Version 2.0 (the "License");
+    you may not use this file except in compliance with the License.
+    You may obtain a copy of the License at
+
+        http://www.apache.org/licenses/LICENSE-2.0
+
+    Unless required by applicable law or agreed to in writing, software
+    distributed under the License is distributed on an "AS IS" BASIS,
+    WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+    See the License for the specific language governing permissions and
+    limitations under the License.
+
+
+
+
+*/
+
+#include "tbb/tbb_config.h"
+
+/* cache_aligned_allocator.cpp */
+__TBB_SYMBOL( _ZN3tbb8internal12NFS_AllocateEmmPv )
+__TBB_SYMBOL( _ZN3tbb8internal15NFS_GetLineSizeEv )
+__TBB_SYMBOL( _ZN3tbb8internal8NFS_FreeEPv )
+__TBB_SYMBOL( _ZN3tbb8internal23allocate_via_handler_v3Em )
+__TBB_SYMBOL( _ZN3tbb8internal25deallocate_via_handler_v3EPv )
+__TBB_SYMBOL( _ZN3tbb8internal17is_malloc_used_v3Ev )
+
+/* task.cpp v3 */
+__TBB_SYMBOL( _ZN3tbb4task13note_affinityEt )
+__TBB_SYMBOL( _ZN3tbb4task22internal_set_ref_countEi )
+__TBB_SYMBOL( _ZN3tbb4task28internal_decrement_ref_countEv )
+__TBB_SYMBOL( _ZN3tbb4task22spawn_and_wait_for_allERNS_9task_listE )
+__TBB_SYMBOL( _ZN3tbb4task4selfEv )
+__TBB_SYMBOL( _ZN3tbb10interface58internal9task_base7destroyERNS_4taskE )
+__TBB_SYMBOL( _ZNK3tbb4task26is_owned_by_current_threadEv )
+__TBB_SYMBOL( _ZN3tbb8internal19allocate_root_proxy4freeERNS_4taskE )
+__TBB_SYMBOL( _ZN3tbb8internal19allocate_root_proxy8allocateEm )
+__TBB_SYMBOL( _ZN3tbb8internal28affinity_partitioner_base_v36resizeEj )
+__TBB_SYMBOL( _ZNK3tbb8internal20allocate_child_proxy4freeERNS_4taskE )
+__TBB_SYMBOL( _ZNK3tbb8internal20allocate_child_proxy8allocateEm )
+__TBB_SYMBOL( _ZNK3tbb8internal27allocate_continuation_proxy4freeERNS_4taskE )
+__TBB_SYMBOL( _ZNK3tbb8internal27allocate_continuation_proxy8allocateEm )
+__TBB_SYMBOL( _ZNK3tbb8internal34allocate_additional_child_of_proxy4freeERNS_4taskE )
+__TBB_SYMBOL( _ZNK3tbb8internal34allocate_additional_child_of_proxy8allocateEm )
+__TBB_SYMBOL( _ZTIN3tbb4taskE )
+__TBB_SYMBOL( _ZTSN3tbb4taskE )
+__TBB_SYMBOL( _ZTVN3tbb4taskE )
+__TBB_SYMBOL( _ZN3tbb19task_scheduler_init19default_num_threadsEv )
+__TBB_SYMBOL( _ZN3tbb19task_scheduler_init10initializeEim )
+__TBB_SYMBOL( _ZN3tbb19task_scheduler_init10initializeEi )
+__TBB_SYMBOL( _ZN3tbb19task_scheduler_init9terminateEv )
+__TBB_SYMBOL( _ZN3tbb19task_scheduler_init27internal_blocking_terminateEb )
+#if __TBB_SCHEDULER_OBSERVER
+__TBB_SYMBOL( _ZN3tbb8internal26task_scheduler_observer_v37observeEb )
+#endif /* __TBB_SCHEDULER_OBSERVER */
+__TBB_SYMBOL( _ZN3tbb10empty_task7executeEv )
+__TBB_SYMBOL( _ZN3tbb10empty_taskD0Ev )
+__TBB_SYMBOL( _ZN3tbb10empty_taskD1Ev )
+__TBB_SYMBOL( _ZTIN3tbb10empty_taskE )
+__TBB_SYMBOL( _ZTSN3tbb10empty_taskE )
+__TBB_SYMBOL( _ZTVN3tbb10empty_taskE )
+
+/* arena.cpp */
+__TBB_SYMBOL( _ZN3tbb10interface78internal15task_arena_base19internal_initializeEv )
+__TBB_SYMBOL( _ZN3tbb10interface78internal15task_arena_base18internal_terminateEv )
+__TBB_SYMBOL( _ZN3tbb10interface78internal15task_arena_base15internal_attachEv )
+__TBB_SYMBOL( _ZNK3tbb10interface78internal15task_arena_base16internal_enqueueERNS_4taskEl )
+__TBB_SYMBOL( _ZNK3tbb10interface78internal15task_arena_base16internal_executeERNS1_13delegate_baseE )
+__TBB_SYMBOL( _ZNK3tbb10interface78internal15task_arena_base13internal_waitEv )
+__TBB_SYMBOL( _ZN3tbb10interface78internal15task_arena_base21internal_current_slotEv )
+__TBB_SYMBOL( _ZN3tbb10interface78internal15task_arena_base24internal_max_concurrencyEPKNS0_10task_arenaE )
+#if __TBB_TASK_ISOLATION
+__TBB_SYMBOL( _ZN3tbb10interface78internal20isolate_within_arenaERNS1_13delegate_baseEl )
+#endif
+
+#if !TBB_NO_LEGACY
+/* task_v2.cpp */
+__TBB_SYMBOL( _ZN3tbb4task7destroyERS0_ )
+#endif /* !TBB_NO_LEGACY */
+
+/* Exception handling in task scheduler */
+#if __TBB_TASK_GROUP_CONTEXT
+__TBB_SYMBOL( _ZNK3tbb8internal32allocate_root_with_context_proxy8allocateEm )
+__TBB_SYMBOL( _ZNK3tbb8internal32allocate_root_with_context_proxy4freeERNS_4taskE )
+__TBB_SYMBOL( _ZN3tbb4task12change_groupERNS_18task_group_contextE )
+__TBB_SYMBOL( _ZNK3tbb18task_group_context28is_group_execution_cancelledEv )
+__TBB_SYMBOL( _ZN3tbb18task_group_context22cancel_group_executionEv )
+__TBB_SYMBOL( _ZN3tbb18task_group_context26register_pending_exceptionEv )
+__TBB_SYMBOL( _ZN3tbb18task_group_context5resetEv )
+__TBB_SYMBOL( _ZN3tbb18task_group_context19capture_fp_settingsEv )
+__TBB_SYMBOL( _ZN3tbb18task_group_context4initEv )
+__TBB_SYMBOL( _ZN3tbb18task_group_contextD1Ev )
+__TBB_SYMBOL( _ZN3tbb18task_group_contextD2Ev )
+#if __TBB_TASK_PRIORITY
+__TBB_SYMBOL( _ZN3tbb18task_group_context12set_priorityENS_10priority_tE )
+__TBB_SYMBOL( _ZNK3tbb18task_group_context8priorityEv )
+#endif /* __TBB_TASK_PRIORITY */
+__TBB_SYMBOL( _ZNK3tbb18captured_exception4nameEv )
+__TBB_SYMBOL( _ZNK3tbb18captured_exception4whatEv )
+__TBB_SYMBOL( _ZN3tbb18captured_exception10throw_selfEv )
+__TBB_SYMBOL( _ZN3tbb18captured_exception3setEPKcS2_ )
+__TBB_SYMBOL( _ZN3tbb18captured_exception4moveEv )
+__TBB_SYMBOL( _ZN3tbb18captured_exception5clearEv )
+__TBB_SYMBOL( _ZN3tbb18captured_exception7destroyEv )
+__TBB_SYMBOL( _ZN3tbb18captured_exception8allocateEPKcS2_ )
+__TBB_SYMBOL( _ZN3tbb18captured_exceptionD0Ev )
+__TBB_SYMBOL( _ZN3tbb18captured_exceptionD1Ev )
+__TBB_SYMBOL( _ZN3tbb18captured_exceptionD2Ev )
+__TBB_SYMBOL( _ZTIN3tbb18captured_exceptionE )
+__TBB_SYMBOL( _ZTSN3tbb18captured_exceptionE )
+__TBB_SYMBOL( _ZTVN3tbb18captured_exceptionE )
+__TBB_SYMBOL( _ZN3tbb13tbb_exceptionD2Ev )
+__TBB_SYMBOL( _ZTIN3tbb13tbb_exceptionE )
+__TBB_SYMBOL( _ZTSN3tbb13tbb_exceptionE )
+__TBB_SYMBOL( _ZTVN3tbb13tbb_exceptionE )
+#endif /* __TBB_TASK_GROUP_CONTEXT */
+
+/* Symbols for exceptions thrown from TBB */
+__TBB_SYMBOL( _ZN3tbb8internal33throw_bad_last_alloc_exception_v4Ev )
+__TBB_SYMBOL( _ZN3tbb8internal18throw_exception_v4ENS0_12exception_idE )
+__TBB_SYMBOL( _ZN3tbb14bad_last_allocD0Ev )
+__TBB_SYMBOL( _ZN3tbb14bad_last_allocD1Ev )
+__TBB_SYMBOL( _ZNK3tbb14bad_last_alloc4whatEv )
+__TBB_SYMBOL( _ZTIN3tbb14bad_last_allocE )
+__TBB_SYMBOL( _ZTSN3tbb14bad_last_allocE )
+__TBB_SYMBOL( _ZTVN3tbb14bad_last_allocE )
+__TBB_SYMBOL( _ZN3tbb12missing_waitD0Ev )
+__TBB_SYMBOL( _ZN3tbb12missing_waitD1Ev )
+__TBB_SYMBOL( _ZNK3tbb12missing_wait4whatEv )
+__TBB_SYMBOL( _ZTIN3tbb12missing_waitE )
+__TBB_SYMBOL( _ZTSN3tbb12missing_waitE )
+__TBB_SYMBOL( _ZTVN3tbb12missing_waitE )
+__TBB_SYMBOL( _ZN3tbb27invalid_multiple_schedulingD0Ev )
+__TBB_SYMBOL( _ZN3tbb27invalid_multiple_schedulingD1Ev )
+__TBB_SYMBOL( _ZNK3tbb27invalid_multiple_scheduling4whatEv )
+__TBB_SYMBOL( _ZTIN3tbb27invalid_multiple_schedulingE )
+__TBB_SYMBOL( _ZTSN3tbb27invalid_multiple_schedulingE )
+__TBB_SYMBOL( _ZTVN3tbb27invalid_multiple_schedulingE )
+__TBB_SYMBOL( _ZN3tbb13improper_lockD0Ev )
+__TBB_SYMBOL( _ZN3tbb13improper_lockD1Ev )
+__TBB_SYMBOL( _ZNK3tbb13improper_lock4whatEv )
+__TBB_SYMBOL( _ZTIN3tbb13improper_lockE )
+__TBB_SYMBOL( _ZTSN3tbb13improper_lockE )
+__TBB_SYMBOL( _ZTVN3tbb13improper_lockE )
+__TBB_SYMBOL( _ZN3tbb10user_abortD0Ev )
+__TBB_SYMBOL( _ZN3tbb10user_abortD1Ev )
+__TBB_SYMBOL( _ZNK3tbb10user_abort4whatEv )
+__TBB_SYMBOL( _ZTIN3tbb10user_abortE )
+__TBB_SYMBOL( _ZTSN3tbb10user_abortE )
+__TBB_SYMBOL( _ZTVN3tbb10user_abortE )
+/* tbb_misc.cpp */
+__TBB_SYMBOL( _ZN3tbb17assertion_failureEPKciS1_S1_ )
+__TBB_SYMBOL( _ZN3tbb21set_assertion_handlerEPFvPKciS1_S1_E )
+__TBB_SYMBOL( _ZN3tbb8internal36get_initial_auto_partitioner_divisorEv )
+__TBB_SYMBOL( _ZN3tbb8internal13handle_perrorEiPKc )
+__TBB_SYMBOL( _ZN3tbb8internal15runtime_warningEPKcz )
+__TBB_SYMBOL( TBB_runtime_interface_version )
+
+/* tbb_main.cpp */
+__TBB_SYMBOL( _ZN3tbb8internal32itt_load_pointer_with_acquire_v3EPKv )
+__TBB_SYMBOL( _ZN3tbb8internal33itt_store_pointer_with_release_v3EPvS1_ )
+__TBB_SYMBOL( _ZN3tbb8internal18call_itt_notify_v5EiPv )
+__TBB_SYMBOL( _ZN3tbb8internal20itt_set_sync_name_v3EPvPKc )
+__TBB_SYMBOL( _ZN3tbb8internal19itt_load_pointer_v3EPKv )
+#if __TBB_ITT_STRUCTURE_API
+__TBB_SYMBOL( _ZN3tbb8internal23itt_metadata_str_add_v7ENS0_15itt_domain_enumEPvyNS0_12string_indexEPKc )
+__TBB_SYMBOL( _ZN3tbb8internal22itt_make_task_group_v7ENS0_15itt_domain_enumEPvyS2_yNS0_12string_indexE )
+__TBB_SYMBOL( _ZN3tbb8internal17itt_task_begin_v7ENS0_15itt_domain_enumEPvyS2_yNS0_12string_indexE )
+__TBB_SYMBOL( _ZN3tbb8internal19itt_relation_add_v7ENS0_15itt_domain_enumEPvyNS0_12itt_relationES2_y )
+__TBB_SYMBOL( _ZN3tbb8internal15itt_task_end_v7ENS0_15itt_domain_enumE )
+__TBB_SYMBOL( _ZN3tbb8internal19itt_region_begin_v9ENS0_15itt_domain_enumEPvyS2_yNS0_12string_indexE )
+__TBB_SYMBOL( _ZN3tbb8internal17itt_region_end_v9ENS0_15itt_domain_enumEPvy )
+#endif
+
+/* pipeline.cpp */
+__TBB_SYMBOL( _ZTIN3tbb6filterE )
+__TBB_SYMBOL( _ZTSN3tbb6filterE )
+__TBB_SYMBOL( _ZTVN3tbb6filterE )
+__TBB_SYMBOL( _ZN3tbb6filterD2Ev )
+__TBB_SYMBOL( _ZN3tbb8pipeline10add_filterERNS_6filterE )
+__TBB_SYMBOL( _ZN3tbb8pipeline12inject_tokenERNS_4taskE )
+__TBB_SYMBOL( _ZN3tbb8pipeline13remove_filterERNS_6filterE )
+__TBB_SYMBOL( _ZN3tbb8pipeline3runEm )
+#if __TBB_TASK_GROUP_CONTEXT
+__TBB_SYMBOL( _ZN3tbb8pipeline3runEmRNS_18task_group_contextE )
+#endif
+__TBB_SYMBOL( _ZN3tbb8pipeline5clearEv )
+__TBB_SYMBOL( _ZN3tbb19thread_bound_filter12process_itemEv )
+__TBB_SYMBOL( _ZN3tbb19thread_bound_filter16try_process_itemEv )
+__TBB_SYMBOL( _ZTIN3tbb8pipelineE )
+__TBB_SYMBOL( _ZTSN3tbb8pipelineE )
+__TBB_SYMBOL( _ZTVN3tbb8pipelineE )
+__TBB_SYMBOL( _ZN3tbb8pipelineC1Ev )
+__TBB_SYMBOL( _ZN3tbb8pipelineC2Ev )
+__TBB_SYMBOL( _ZN3tbb8pipelineD0Ev )
+__TBB_SYMBOL( _ZN3tbb8pipelineD1Ev )
+__TBB_SYMBOL( _ZN3tbb8pipelineD2Ev )
+__TBB_SYMBOL( _ZN3tbb6filter16set_end_of_inputEv )
+
+/* queuing_rw_mutex.cpp */
+__TBB_SYMBOL( _ZN3tbb16queuing_rw_mutex18internal_constructEv )
+__TBB_SYMBOL( _ZN3tbb16queuing_rw_mutex11scoped_lock17upgrade_to_writerEv )
+__TBB_SYMBOL( _ZN3tbb16queuing_rw_mutex11scoped_lock19downgrade_to_readerEv )
+__TBB_SYMBOL( _ZN3tbb16queuing_rw_mutex11scoped_lock7acquireERS0_b )
+__TBB_SYMBOL( _ZN3tbb16queuing_rw_mutex11scoped_lock7releaseEv )
+__TBB_SYMBOL( _ZN3tbb16queuing_rw_mutex11scoped_lock11try_acquireERS0_b )
+
+/* reader_writer_lock.cpp */
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock11scoped_lock16internal_destroyEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock11scoped_lock18internal_constructERS1_ )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock13try_lock_readEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock16scoped_lock_read16internal_destroyEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock16scoped_lock_read18internal_constructERS1_ )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock16internal_destroyEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock18internal_constructEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock4lockEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock6unlockEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock8try_lockEv )
+__TBB_SYMBOL( _ZN3tbb10interface518reader_writer_lock9lock_readEv )
+
+#if !TBB_NO_LEGACY
+/* spin_rw_mutex.cpp v2 */
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex16internal_upgradeEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex22internal_itt_releasingEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex23internal_acquire_readerEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex23internal_acquire_writerEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex18internal_downgradeEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex23internal_release_readerEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex23internal_release_writerEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex27internal_try_acquire_readerEPS0_ )
+__TBB_SYMBOL( _ZN3tbb13spin_rw_mutex27internal_try_acquire_writerEPS0_ )
+#endif
+
+// x86_rtm_rw_mutex.cpp
+#if __TBB_TSX_AVAILABLE
+__TBB_SYMBOL( _ZN3tbb10interface88internal16x86_rtm_rw_mutex18internal_constructEv )
+__TBB_SYMBOL( _ZN3tbb10interface88internal16x86_rtm_rw_mutex23internal_acquire_writerERNS2_11scoped_lockEb )
+__TBB_SYMBOL( _ZN3tbb10interface88internal16x86_rtm_rw_mutex27internal_try_acquire_writerERNS2_11scoped_lockE )
+__TBB_SYMBOL( _ZN3tbb10interface88internal16x86_rtm_rw_mutex23internal_acquire_readerERNS2_11scoped_lockEb )
+__TBB_SYMBOL( _ZN3tbb10interface88internal16x86_rtm_rw_mutex16internal_releaseERNS2_11scoped_lockE )
+__TBB_SYMBOL( _ZN3tbb10interface88internal16x86_rtm_rw_mutex16internal_upgradeERNS2_11scoped_lockE )
+__TBB_SYMBOL( _ZN3tbb10interface88internal16x86_rtm_rw_mutex18internal_downgradeERNS2_11scoped_lockE )
+#endif
+
+/* spin_rw_mutex v3 */
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v318internal_constructEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v316internal_upgradeEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v318internal_downgradeEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v323internal_acquire_readerEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v323internal_acquire_writerEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v323internal_release_readerEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v323internal_release_writerEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v327internal_try_acquire_readerEv )
+__TBB_SYMBOL( _ZN3tbb16spin_rw_mutex_v327internal_try_acquire_writerEv )
+
+/* spin_mutex.cpp */
+__TBB_SYMBOL( _ZN3tbb10spin_mutex11scoped_lock16internal_acquireERS0_ )
+__TBB_SYMBOL( _ZN3tbb10spin_mutex11scoped_lock16internal_releaseEv )
+__TBB_SYMBOL( _ZN3tbb10spin_mutex11scoped_lock20internal_try_acquireERS0_ )
+__TBB_SYMBOL( _ZN3tbb10spin_mutex18internal_constructEv )
+
+/* mutex.cpp */
+__TBB_SYMBOL( _ZN3tbb5mutex11scoped_lock16internal_acquireERS0_ )
+__TBB_SYMBOL( _ZN3tbb5mutex11scoped_lock16internal_releaseEv )
+__TBB_SYMBOL( _ZN3tbb5mutex11scoped_lock20internal_try_acquireERS0_ )
+__TBB_SYMBOL( _ZN3tbb5mutex16internal_destroyEv )
+__TBB_SYMBOL( _ZN3tbb5mutex18internal_constructEv )
+
+/* recursive_mutex.cpp */
+__TBB_SYMBOL( _ZN3tbb15recursive_mutex11scoped_lock16internal_acquireERS0_ )
+__TBB_SYMBOL( _ZN3tbb15recursive_mutex11scoped_lock16internal_releaseEv )
+__TBB_SYMBOL( _ZN3tbb15recursive_mutex11scoped_lock20internal_try_acquireERS0_ )
+__TBB_SYMBOL( _ZN3tbb15recursive_mutex16internal_destroyEv )
+__TBB_SYMBOL( _ZN3tbb15recursive_mutex18internal_constructEv )
+
+/* QueuingMutex.cpp */
+__TBB_SYMBOL( _ZN3tbb13queuing_mutex18internal_constructEv )
+__TBB_SYMBOL( _ZN3tbb13queuing_mutex11scoped_lock7acquireERS0_ )
+__TBB_SYMBOL( _ZN3tbb13queuing_mutex11scoped_lock7releaseEv )
+__TBB_SYMBOL( _ZN3tbb13queuing_mutex11scoped_lock11try_acquireERS0_ )
+
+/* critical_section.cpp */
+__TBB_SYMBOL( _ZN3tbb8internal19critical_section_v418internal_constructEv )
+
+#if !TBB_NO_LEGACY
+/* concurrent_hash_map */
+__TBB_SYMBOL( _ZNK3tbb8internal21hash_map_segment_base23internal_grow_predicateEv )
+
+/* concurrent_queue.cpp v2 */
+__TBB_SYMBOL( _ZN3tbb8internal21concurrent_queue_base12internal_popEPv )
+__TBB_SYMBOL( _ZN3tbb8internal21concurrent_queue_base13internal_pushEPKv )
+__TBB_SYMBOL( _ZN3tbb8internal21concurrent_queue_base21internal_set_capacityElm )
+__TBB_SYMBOL( _ZN3tbb8internal21concurrent_queue_base23internal_pop_if_presentEPv )
+__TBB_SYMBOL( _ZN3tbb8internal21concurrent_queue_base25internal_push_if_not_fullEPKv )
+__TBB_SYMBOL( _ZN3tbb8internal21concurrent_queue_baseC2Em )
+__TBB_SYMBOL( _ZN3tbb8internal21concurrent_queue_baseD2Ev )
+__TBB_SYMBOL( _ZTIN3tbb8internal21concurrent_queue_baseE )
+__TBB_SYMBOL( _ZTSN3tbb8internal21concurrent_queue_baseE )
+__TBB_SYMBOL( _ZTVN3tbb8internal21concurrent_queue_baseE )
+__TBB_SYMBOL( _ZN3tbb8internal30concurrent_queue_iterator_base6assignERKS1_ )
+__TBB_SYMBOL( _ZN3tbb8internal30concurrent_queue_iterator_base7advanceEv )
+__TBB_SYMBOL( _ZN3tbb8internal30concurrent_queue_iterator_baseC2ERKNS0_21concurrent_queue_baseE )
+__TBB_SYMBOL( _ZN3tbb8internal30concurrent_queue_iterator_baseD2Ev )
+__TBB_SYMBOL( _ZNK3tbb8internal21concurrent_queue_base13internal_sizeEv )
+#endif
+
+/* concurrent_queue v3 */
+/* constructors */
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v3C2Em )
+__TBB_SYMBOL( _ZN3tbb8internal33concurrent_queue_iterator_base_v3C2ERKNS0_24concurrent_queue_base_v3E )
+__TBB_SYMBOL( _ZN3tbb8internal33concurrent_queue_iterator_base_v3C2ERKNS0_24concurrent_queue_base_v3Em )
+/* destructors */
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v3D2Ev )
+__TBB_SYMBOL( _ZN3tbb8internal33concurrent_queue_iterator_base_v3D2Ev )
+/* typeinfo */
+__TBB_SYMBOL( _ZTIN3tbb8internal24concurrent_queue_base_v3E )
+__TBB_SYMBOL( _ZTSN3tbb8internal24concurrent_queue_base_v3E )
+/* vtable */
+__TBB_SYMBOL( _ZTVN3tbb8internal24concurrent_queue_base_v3E )
+/* methods */
+__TBB_SYMBOL( _ZN3tbb8internal33concurrent_queue_iterator_base_v36assignERKS1_ )
+__TBB_SYMBOL( _ZN3tbb8internal33concurrent_queue_iterator_base_v37advanceEv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v313internal_pushEPKv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v818internal_push_moveEPKv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v325internal_push_if_not_fullEPKv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v830internal_push_move_if_not_fullEPKv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v312internal_popEPv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v323internal_pop_if_presentEPv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v314internal_abortEv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v321internal_finish_clearEv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v321internal_set_capacityElm )
+__TBB_SYMBOL( _ZNK3tbb8internal24concurrent_queue_base_v313internal_sizeEv )
+__TBB_SYMBOL( _ZNK3tbb8internal24concurrent_queue_base_v314internal_emptyEv )
+__TBB_SYMBOL( _ZNK3tbb8internal24concurrent_queue_base_v324internal_throw_exceptionEv )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v36assignERKS1_ )
+__TBB_SYMBOL( _ZN3tbb8internal24concurrent_queue_base_v812move_contentERS1_ )
+
+#if !TBB_NO_LEGACY
+/* concurrent_vector.cpp v2 */
+__TBB_SYMBOL( _ZN3tbb8internal22concurrent_vector_base13internal_copyERKS1_mPFvPvPKvmE )
+__TBB_SYMBOL( _ZN3tbb8internal22concurrent_vector_base14internal_clearEPFvPvmEb )
+__TBB_SYMBOL( _ZN3tbb8internal22concurrent_vector_base15internal_assignERKS1_mPFvPvmEPFvS4_PKvmESA_ )
+__TBB_SYMBOL( _ZN3tbb8internal22concurrent_vector_base16internal_grow_byEmmPFvPvmE )
+__TBB_SYMBOL( _ZN3tbb8internal22concurrent_vector_base16internal_reserveEmmm )
+__TBB_SYMBOL( _ZN3tbb8internal22concurrent_vector_base18internal_push_backEmRm )
+__TBB_SYMBOL( _ZN3tbb8internal22concurrent_vector_base25internal_grow_to_at_leastEmmPFvPvmE )
+__TBB_SYMBOL( _ZNK3tbb8internal22concurrent_vector_base17internal_capacityEv )
+#endif
+
+/* concurrent_vector v3 */
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v313internal_copyERKS1_mPFvPvPKvmE )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v314internal_clearEPFvPvmE )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v315internal_assignERKS1_mPFvPvmEPFvS4_PKvmESA_ )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v316internal_grow_byEmmPFvPvPKvmES4_ )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v316internal_reserveEmmm )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v318internal_push_backEmRm )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v325internal_grow_to_at_leastEmmPFvPvPKvmES4_ )
+__TBB_SYMBOL( _ZNK3tbb8internal25concurrent_vector_base_v317internal_capacityEv )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v316internal_compactEmPvPFvS2_mEPFvS2_PKvmE )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v313internal_swapERS1_ )
+__TBB_SYMBOL( _ZNK3tbb8internal25concurrent_vector_base_v324internal_throw_exceptionEm )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v3D2Ev )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v315internal_resizeEmmmPKvPFvPvmEPFvS4_S3_mE )
+__TBB_SYMBOL( _ZN3tbb8internal25concurrent_vector_base_v337internal_grow_to_at_least_with_resultEmmPFvPvPKvmES4_ )
+
+/* tbb_thread */
+__TBB_SYMBOL( _ZN3tbb8internal13tbb_thread_v320hardware_concurrencyEv )
+__TBB_SYMBOL( _ZN3tbb8internal13tbb_thread_v36detachEv )
+__TBB_SYMBOL( _ZN3tbb8internal16thread_get_id_v3Ev )
+__TBB_SYMBOL( _ZN3tbb8internal15free_closure_v3EPv )
+__TBB_SYMBOL( _ZN3tbb8internal13tbb_thread_v34joinEv )
+__TBB_SYMBOL( _ZN3tbb8internal13tbb_thread_v314internal_startEPFPvS2_ES2_ )
+__TBB_SYMBOL( _ZN3tbb8internal19allocate_closure_v3Em )
+__TBB_SYMBOL( _ZN3tbb8internal7move_v3ERNS0_13tbb_thread_v3ES2_ )
+__TBB_SYMBOL( _ZN3tbb8internal15thread_yield_v3Ev )
+__TBB_SYMBOL( _ZN3tbb8internal15thread_sleep_v3ERKNS_10tick_count10interval_tE )
+
+/* global_parameter */
+__TBB_SYMBOL( _ZN3tbb10interface914global_control12active_valueEi )
+__TBB_SYMBOL( _ZN3tbb10interface914global_control15internal_createEv )
+__TBB_SYMBOL( _ZN3tbb10interface914global_control16internal_destroyEv )
+#undef __TBB_SYMBOL

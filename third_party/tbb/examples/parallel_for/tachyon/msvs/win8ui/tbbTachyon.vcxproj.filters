@@ -1,0 +1,215 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<Project ToolsVersion="12.0" xmlns="http://schemas.microsoft.com/developer/msbuild/2003">
+  <ItemGroup>
+    <Page Include="Common\StandardStyles.xaml">
+      <Filter>Resources\Common</Filter>
+    </Page>
+    <Image Include="Assets\Logo.png">
+      <Filter>Resources\Assets</Filter>
+    </Image>
+    <Image Include="Assets\SmallLogo.png">
+      <Filter>Resources\Assets</Filter>
+    </Image>
+    <Image Include="Assets\StoreLogo.png">
+      <Filter>Resources\Assets</Filter>
+    </Image>
+    <Image Include="Assets\SplashScreen.png">
+      <Filter>Resources\Assets</Filter>
+    </Image>
+    <Filter Include="Resources">
+      <UniqueIdentifier>{a5d732ac-1380-4b99-910c-c5685c48ec08}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Common">
+      <UniqueIdentifier>e20cb432-6730-4021-a372-1c81a333518a</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Resources\Assets">
+      <UniqueIdentifier>ac5c7e6e-0221-4a78-85c7-20768e92cf5a</UniqueIdentifier>
+    </Filter>
+    <Page Include="DirectXPage.xaml">
+      <Filter>Frontend</Filter>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="App.xaml.cpp" />
+    <ClCompile Include="DirectXPage.xaml.cpp" />
+    <ClCompile Include="..\..\src\api.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\apigeom.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\apitrigeom.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\bndbox.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\box.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\camera.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\coordsys.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\cylinder.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\extvol.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\global.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\grid.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\imageio.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\imap.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\intersect.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\jpeg.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\light.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\objbound.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\parse.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\plane.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ppm.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\pthread.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\quadric.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\render.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ring.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\shade.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\sphere.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\tachyon_video.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\texture.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\tgafile.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\trace.tbb.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\trace_rest.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\triangle.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\ui.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\util.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\vector.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\vol.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\..\..\common\gui\convideo.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="..\..\src\main.cpp">
+      <Filter>Backend</Filter>
+    </ClCompile>
+    <ClCompile Include="DirectXBase.cpp">
+      <Filter>Frontend</Filter>
+    </ClCompile>
+    <ClCompile Include=".\tbbTachyonRenderer.cpp">
+      <Filter>Frontend</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="App.xaml.h" />
+    <ClInclude Include="DirectXPage.xaml.h" />
+    <ClInclude Include="DirectXBase.h">
+      <Filter>Frontend</Filter>
+    </ClInclude>
+    <ClInclude Include=".\tbbTachyonRenderer.h">
+      <Filter>Frontend</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="Assets\balls.dat">
+      <Filter>Resources\Assets</Filter>
+    </None>
+    <None Include="tbb.dll">
+      <Filter>Libraries</Filter>
+    </None>
+    <None Include="tbbmalloc.dll">
+      <Filter>Libraries</Filter>
+    </None>
+    <None Include="tbb_debug.dll">
+      <Filter>Libraries</Filter>
+    </None>
+    <None Include="tbbmalloc_debug.dll">
+      <Filter>Libraries</Filter>
+    </None>
+    <None Include="tbbTachyon_TemporaryKey.pfx">
+      <Filter>Frontend</Filter>
+    </None>
+  </ItemGroup>
+  <ItemGroup>
+    <Filter Include="Libraries">
+      <UniqueIdentifier>{a70d1cf5-5cc8-4f50-a6d2-92d2b973df86}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Scripts">
+      <UniqueIdentifier>{eb414f7a-2d2d-4ff5-93fe-458cc3021423}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Backend">
+      <UniqueIdentifier>{77eb2f1c-7dec-4360-8989-e9ad18034e10}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Frontend">
+      <UniqueIdentifier>{d825a994-3d08-4764-9945-ec9aafc1f496}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <CustomBuild Include="copy_libraries_and_assets.bat">
+      <Filter>Scripts</Filter>
+    </CustomBuild>
+  </ItemGroup>
+  <ItemGroup>
+    <ApplicationDefinition Include="App.xaml">
+      <Filter>Frontend</Filter>
+    </ApplicationDefinition>
+  </ItemGroup>
+  <ItemGroup>
+    <AppxManifest Include="Package.appxmanifest">
+      <Filter>Frontend</Filter>
+    </AppxManifest>
+  </ItemGroup>
+</Project>
