@@ -5722,7 +5722,7 @@ Returns:
 
 
 add_docstr(torch.unbind,
-r"""
+           r"""
 unbind(tensor, dim=0) -> seq
 
 Removes a tensor dimension.
