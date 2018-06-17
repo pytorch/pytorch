@@ -5719,3 +5719,17 @@ Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
 
 """.format(**factory_common_args))
+
+
+add_docstr(torch.unbind,
+r"""
+unbind(tensor, dim=0) -> seq
+
+Removes a tensor dimension.
+
+Returns a tuple of all slices along a given dimension, already without it.
+
+Arguments:
+    tensor (Tensor): the tensor to unbind
+    dim (int): dimension to remove
+""")

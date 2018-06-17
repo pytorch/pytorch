@@ -1717,3 +1717,8 @@
   variants:
     - method
     - function
+
+- func: unbind(Tensor self, int64_t dim=0) -> TensorList
+  variants:
+    - method
+    - function

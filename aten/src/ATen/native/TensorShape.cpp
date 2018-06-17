@@ -608,5 +608,15 @@ int64_t numel(const Tensor& self) {
   return self.pImpl->numel();
 }
 
+std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
+  AT_CHECK(dim < self.dim(), "dim must be smaller than ", self.dim());
+  int64_t size = self.size(dim);
+  std::vector<Tensor> tensors(size);
+  for (int i = 0; i < size; i++) {
+    tensors[i] = self.select(dim, i);
+  }
+  return tensors;
+}
+
 }
 }

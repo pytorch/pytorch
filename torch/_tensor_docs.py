@@ -2498,3 +2498,10 @@ slogdet() -> (Tensor, Tensor)
 
 See :func:`torch.slogdet`
 """)
+
+add_docstr_all('unbind',
+               r"""
+unbind(dim=0) -> seq
+
+See :func:`torch.unbind`
+""")
