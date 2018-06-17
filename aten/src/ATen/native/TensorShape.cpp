@@ -607,7 +607,7 @@ int64_t numel(const Tensor& self) {
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();
-  AT_CHECK(size > 0, "meshgrid expects a non-empty TensorList")
+  AT_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
   std::vector<int64_t> shape(size);
   for(int64_t i = 0; i < size; i++) {
     switch (tensors[i].dim()) {
