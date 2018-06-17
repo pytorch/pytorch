@@ -674,7 +674,7 @@
   self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: not_implemented("symeig")
+  self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
 
 - name: t(Tensor self)
   self: grad.t()
