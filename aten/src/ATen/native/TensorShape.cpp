@@ -609,7 +609,7 @@ int64_t numel(const Tensor& self) {
 }
 
 std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
-  AT_CHECK(dim < self.dim(), "dim must be smaller than ", self.dim());
+  dim = maybe_wrap_dim(dim, self.dim());
   int64_t size = self.size(dim);
   std::vector<Tensor> tensors(size);
   for (int i = 0; i < size; i++) {

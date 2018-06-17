@@ -5732,4 +5732,11 @@ Returns a tuple of all slices along a given dimension, already without it.
 Arguments:
     tensor (Tensor): the tensor to unbind
     dim (int): dimension to remove
+
+Example::
+
+    >>> torch.unbind(torch.tensor([[1, 2, 3],
+    >>>                            [4, 5, 6],
+    >>>                            [7, 8, 9]]))
+    (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
 """)

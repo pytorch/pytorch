@@ -48,6 +48,15 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
+std::vector<Tensor> to_tensor_list(const variable_list& variables) {
+  int64_t size = variables.size();
+  std::vector<Tensor> out(size);
+  for (int i = 0; i < size; i++) {
+    out[i] = variables[i];
+  }
+  return out;
+}
+
 Tensor not_implemented(const char* name) {
   throw std::runtime_error(
       std::string("the derivative for '") + name + "' is not implemented");
