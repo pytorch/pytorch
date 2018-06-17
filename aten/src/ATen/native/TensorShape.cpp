@@ -607,9 +607,7 @@ int64_t numel(const Tensor& self) {
 
 std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();
-  if (size == 0) {
-    throw std::runtime_error("meshgrid expects a non-empty TensorList");
-  }
+  AT_CHECK(size > 0, "meshgrid expects a non-empty TensorList")
   std::vector<int64_t> shape(size);
   for(int64_t i = 0; i < size; i++) {
     switch (tensors[i].dim()) {
@@ -617,10 +615,10 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
       shape[i] = 1;
       break;
     case 1:
-      shape[i] = tensors[i].sizes()[0];
+      shape[i] = tensors[i].size(0);
       break;
     default:
-      throw std::runtime_error("input tensor of meshgrid must be scalar or vector");
+      AT_ERROR("input tensor of meshgrid must be scalar or vector");
     }
   }
   std::vector<Tensor> grids;
