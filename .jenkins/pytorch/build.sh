@@ -7,6 +7,10 @@ fi
 # Add nccl2 for distributed test.
 sudo apt-get install libnccl-dev libnccl2
 
+# Add mpich for mpi test
+sudo apt-get update
+sudo apt-get install -y mpich
+
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
 # need to set it yourself.
