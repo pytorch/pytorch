@@ -5,6 +5,7 @@
 #include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/cuda/SpectralOps.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
@@ -163,6 +164,22 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
   AT_ERROR(
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
 #endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize() const {
+  return at::native::__cufft_get_plan_cache_max_size_impl();
+}
+
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+  at::native::__cufft_set_plan_cache_max_size_impl(max_size);
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheSize() const {
+  return at::native::__cufft_get_plan_cache_size_impl();
+}
+
+void CUDAHooks::cuFFTClearPlanCache() const {
+  at::native::__cufft_clear_plan_cache_impl();
 }
 
 int CUDAHooks::getNumGPUs() const {

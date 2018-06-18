@@ -6,6 +6,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/SpectralOpsUtils.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
+#include "ATen/native/cuda/SpectralOps.h"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -219,22 +220,22 @@ static inline Tensor _run_cufft(
 struct CuFFTParamsLRUCache plan_cache;
 std::mutex plan_cache_mutex;
 
-int64_t _cufft_get_plan_cache_max_size() {
+int64_t __cufft_get_plan_cache_max_size_impl() {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   return plan_cache.max_size();
 }
 
-void _cufft_set_plan_cache_max_size(int64_t max_size) {
+void __cufft_set_plan_cache_max_size_impl(int64_t max_size) {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   plan_cache.resize(max_size);
 }
 
-int64_t _cufft_get_plan_cache_size() {
+int64_t __cufft_get_plan_cache_size_impl() {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   return plan_cache.size();
 }
 
-void _cufft_clear_plan_cache() {
+void __cufft_clear_plan_cache_impl() {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   return plan_cache.clear();
 }

@@ -6,8 +6,8 @@
 
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
-#include <ATen/cuda/CUDAConfig.h>
 #include "ATen/NativeFunctions.h"
+#include "ATen/detail/CUDAHooksInterface.h"
 #include "ATen/native/SpectralOpsUtils.h"
 
 #include <algorithm>
@@ -143,26 +143,23 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
   return output;
 }
 
-// The following methods are defined in native/cuda/SpectralOps.cu, which is not
-// built when WITH_CUDA=0. To prevent linker error, we need to provide these
-// dummy implementations.
-#if !AT_CUDA_ENABLED()
+// We call the following methods via CUDA hooks because they are really only
+// valid when CUDA is available. See native/cuda/SpectralOps.h for more details.
 int64_t _cufft_get_plan_cache_max_size() {
-  AT_ERROR("cuFFT plan cache can only be configured when ATen is built with CUDA");
+  return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize();
 }
 
 void _cufft_set_plan_cache_max_size(int64_t max_size) {
-  AT_ERROR("cuFFT plan cache can only be configured when ATen is built with CUDA");
+  detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(max_size);
 }
 
 int64_t _cufft_get_plan_cache_size() {
-  AT_ERROR("cuFFT plan cache can only be configured when ATen is built with CUDA");
+  return detail::getCUDAHooks().cuFFTGetPlanCacheSize();
 }
 
 void _cufft_clear_plan_cache() {
-  AT_ERROR("cuFFT plan cache can only be configured when ATen is built with CUDA");
+  detail::getCUDAHooks().cuFFTClearPlanCache();
 }
-#endif
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
   return _fft(self, signal_ndim, /* complex_input */ true,
