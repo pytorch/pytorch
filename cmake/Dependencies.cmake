@@ -326,10 +326,11 @@ if(BUILD_PYTHON)
     COMMAND "python" -c "import sys; sys.stdout.write('%s.%s' % (sys.version_info.major, sys.version_info.minor))"
     RESULT_VARIABLE _exitcode
     OUTPUT_VARIABLE _py_version)
+  set(Python_ADDITIONAL_VERSIONS)
   if(${_exitcode} EQUAL 0)
-    set(Python_ADDITIONAL_VERSIONS "${_py_version}" "${Python_ADDITIONAL_VERSIONS}")
+    list(APPEND Python_ADDITIONAL_VERSIONS "${_py_version}")
   endif()
-  set(Python_ADDITIONAL_VERSIONS "${Python_ADDITIONAL_VERSIONS}" 3.6 3.5 2.8 2.7 2.6)
+  list(APPEND Python_ADDITIONAL_VERSIONS 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
