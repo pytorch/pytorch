@@ -2,6 +2,8 @@
 #include "DataChannelNccl.hpp"
 #include "DataChannelUtils.hpp"
 
+#include <ATen/ATen.h>
+
 #include <cuda.h>
 #include <THC/THC.h>
 
@@ -189,7 +191,7 @@ void DataChannelNccl::_destroyNcclResources(THDGroup groupId) {
       // Destroy the CUDA events
       size_t idx = 0;
       for (auto& event : *(_groupNcclResources[groupId][i].ncclCudaEvents())) {
-        gpuGuard.setDevice(devices[idx++]);
+        gpuGuard.set_index(devices[idx++]);
         THCudaCheck(cudaEventSynchronize(event));
         THCudaCheck(cudaEventDestroy(event));
       }
@@ -304,14 +306,14 @@ NcclResourcePair DataChannelNccl::_getNcclResourcePair(
 
   // Now creating the CUDA events
   for (size_t i = 0; i < input.size(); ++i) {
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     THCudaCheck(cudaEventCreate(&((*events)[i])));
   }
   // Create the communicator on each device of the input
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
     int nRanks = int(_numProcesses) * input.size();
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     NCCL_CHECK(ncclCommInitRank(&((*comms)[i]),
                                 nRanks,
                                 ncclId,
@@ -429,7 +431,7 @@ void DataChannelNccl::allReduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllReduce(data[i].data_ptr(),
@@ -480,7 +482,7 @@ void DataChannelNccl::allGather(std::vector<at::Tensor>& output,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < input.size(); ++i) {
 
-    gpuGuard.setDevice(input[i].get_device());
+    gpuGuard.set_index(input[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclAllGather(input[i].data_ptr(),
@@ -532,7 +534,7 @@ void DataChannelNccl::reduce(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclReduce(data[i].data_ptr(),
@@ -584,7 +586,7 @@ void DataChannelNccl::broadcast(std::vector<at::Tensor>& data,
   NCCL_CHECK(ncclGroupStart());
   for (size_t i = 0; i < data.size(); ++i) {
 
-    gpuGuard.setDevice(data[i].get_device());
+    gpuGuard.set_index(data[i].get_device());
     auto stream = THCState_getCurrentStream(THDGetCudaState());
 
     NCCL_CHECK(ncclBcast(data[i].data_ptr(),
