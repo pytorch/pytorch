@@ -275,7 +275,7 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
 
   // If plan caching is enabled, we check the cache. Note that this accesses
   // plan_cache.max_size() and thus makes this function less functional.
-  // However, integrating a (bool cache) flag into the "public" level c++ APIs,
+  // However, integrating additional arguments into the "public" level c++ APIs,
   // e.g., irfft, is difficult as we have a long call sequence looking like
   //   irfft --> _fft --> _fft_with_size --dispatching-to-> _fft_cufft
 

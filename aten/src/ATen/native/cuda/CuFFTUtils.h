@@ -79,14 +79,14 @@ static void CUFFT_CHECK(cufftResult error)
 // It will be the **key** to the plan cache.
 struct CuFFTParams
 {
-  at::ScalarType scalar_type;
-  int64_t input_sizes[max_rank + 2];
-  int64_t input_strides[max_rank + 2];
-  uint8_t signal_ndim;  // between 1 and max_rank, i.e., 1 <= signal_ndim <= 3
-  bool complex_input;
-  bool complex_output;
-  int64_t signal_sizes[max_rank];
-  bool onesided;
+  at::ScalarType scalar_type_;
+  int64_t input_sizes_[max_rank + 2];
+  int64_t input_strides_[max_rank + 2];
+  uint8_t signal_ndim_;  // between 1 and max_rank, i.e., 1 <= signal_ndim <= 3
+  bool complex_input_;
+  bool complex_output_;
+  int64_t signal_sizes_[max_rank];
+  bool onesided_;
 };
 
 // NB: This can't be a constructor, because then CuFFTParams
@@ -96,20 +96,20 @@ static inline void setCuFFTParams(CuFFTParams* params,
     bool complex_output, IntList checked_signal_sizes, bool onesided) {
 
   memset(params, 0, sizeof(CuFFTParams));
-  params->scalar_type = input.type().scalarType();
+  params->scalar_type_ = input.type().scalarType();
   for (int i = 0; i != input.dim(); ++i) {
-    params->input_sizes[i] = input.size(i);
+    params->input_sizes_[i] = input.size(i);
     if (input.size(i) != 1) {
-      params->input_strides[i] = input.stride(i);
+      params->input_strides_[i] = input.stride(i);
     }
   }
-  params->signal_ndim = (uint8_t) signal_ndim;
-  params->complex_input = complex_input;
-  params->complex_output = complex_output;
+  params->signal_ndim_ = (uint8_t) signal_ndim;
+  params->complex_input_ = complex_input;
+  params->complex_output_ = complex_output;
   for (size_t i = 0; i != checked_signal_sizes.size(); ++i) {
-    params->signal_sizes[i] = checked_signal_sizes[i];
+    params->signal_sizes_[i] = checked_signal_sizes[i];
   }
-  params->onesided = onesided;
+  params->onesided_ = onesided;
 }
 
 struct CuFFTHandleDeleter {
