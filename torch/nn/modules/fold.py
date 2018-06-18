@@ -127,7 +127,7 @@ class Unfold(Module):
         >>> inp_unf = torch.nn.functional.unfold(inp, (4,5))
         >>> out_unf = torch.nn.functional.linear(inp_unf.transpose(1,2), w.view(w.size(0),-1)).transpose(1,2)
         >>> out = torch.nn.functional.fold(out_unf, (7,8), (1, 1))
-        >>> (torch.nn.functional.conv2d(inp, w)-out2).abs().max().item()
+        >>> (torch.nn.functional.conv2d(inp, w)-out).abs().max().item()
         0.0
 
     .. _link:
