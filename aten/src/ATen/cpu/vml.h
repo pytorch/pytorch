@@ -16,6 +16,7 @@
 
 #if AT_MKL_ENABLED()
 #include <mkl.h>
+#include <mkl_vml.h>
 #endif
 
 namespace at {

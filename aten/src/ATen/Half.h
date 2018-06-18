@@ -1,5 +1,12 @@
 #pragma once
 
+/// Defines the Half type (half-precision floating-point) including conversions
+/// to standard C types and basic arithmetic operations. Note that arithmetic
+/// operations are implemented by converting to floating point and
+/// performing the operation in float32, instead of using CUDA half intrinisics.
+/// Most uses of this type within ATen are memory bound, including the
+/// element-wise kernels, and the half intrinisics aren't efficient on all GPUs.
+
 #include "ATen/ATenGeneral.h"
 
 #include <limits>
@@ -8,8 +15,46 @@
 #include <stdexcept>
 #include <utility>
 #include <cmath>
+#include <iosfwd>
+
+#ifdef __CUDACC__
+#include <cuda.h>
+#include <cuda_fp16.h>
+#endif
+
+#ifndef AT_HOSTDEVICE
+  #ifdef __CUDACC__
+    #define AT_HOSTDEVICE __host__ __device__
+  #else
+    #define AT_HOSTDEVICE
+  #endif
+#endif
+
+struct __half;
 
 namespace at {
+
+namespace detail {
+
+float halfbits2float(unsigned short bits);
+unsigned short float2halfbits(float value);
+
+}
+
+struct alignas(2) Half {
+  unsigned short x;
+
+  struct from_bits_t {};
+  static constexpr from_bits_t from_bits = from_bits_t();
+
+  Half() = default;
+  constexpr AT_HOSTDEVICE Half(unsigned short bits, from_bits_t) : x(bits) {};
+  inline AT_HOSTDEVICE Half(const __half& value);
+  inline AT_HOSTDEVICE Half(float value);
+
+  inline AT_HOSTDEVICE operator float() const;
+  inline AT_HOSTDEVICE operator __half() const;
+};
 
 template<typename To, typename From> To convert(From f) {
   return static_cast<To>(f);
@@ -45,27 +90,15 @@ template<typename To, typename From> To checked_convert(From f, const char* name
   return convert<To, From>(f);
 }
 
-struct alignas(2) Half {
-  unsigned short x;
-  operator double();
-};
-
-template<> AT_API Half convert(float f);
-template<> AT_API float convert(Half f);
-template<> AT_API Half convert(double f);
-template<> AT_API double convert(Half f);
-template<> AT_API Half convert(int64_t f);
-template<> AT_API int64_t convert(Half f);
-
-inline Half::operator double() {
-  return convert<double, Half>(*this);
-}
-
-template<> bool overflows<Half, double>(double f);
-template<> bool overflows<Half, int64_t>(int64_t f);
-
 template<typename To, typename From>
 To HalfFix(From h) {
   return To { h.x };
 }
+
+AT_API std::ostream& operator<<(std::ostream & out, const Half& value);
+
 } // namespace at
+
+#include "Half-inl.h"
+
+#undef AT_HOSTDEVICE
