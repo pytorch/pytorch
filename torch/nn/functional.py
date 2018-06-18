@@ -2063,7 +2063,8 @@ def assert_int_or_pair(arg, arg_name, message):
 
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Creates array of convolution patches from :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Unfold` for details
     """
 
@@ -2081,7 +2082,8 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Combines array of convolution patches to :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Fold` for details
     """
     if input is not None and input.dim() == 3:
