@@ -3742,11 +3742,6 @@ EXCLUDE_SCRIPT = {
     'test_view_scalar_to_1d',
     'test_view_scalar_to_scalar',
     'test_view_size',
-    'test_where',
-    'test_where_broadcast_all',
-    'test_where_scalar',
-    'test_where_scalar_broadcast_mask',
-    'test_where_scalar_broadcast_non_mask',
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
@@ -3917,7 +3912,7 @@ def add_test(
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
                     return output_process_fn(output)
 
-                if not is_inplace and name not in EXCLUDE_GRADCHECK:
+                if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                     if test_name not in EXCLUDE_TRACED:
                         check_against_reference(self, create_traced_fn(fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
