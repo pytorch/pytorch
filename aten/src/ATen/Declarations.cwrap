@@ -43,7 +43,7 @@
       scalar_check: False
       arguments:
         - THTensor* self
-        - CONSTANT NULL, 0, NULL, NULL
+        - CONSTANT NULL, 0, THLongStorageView({0}, THLongStorageViewKind::SIZE), NULL
     - cname: setStorage
       scalar_check: False
       arguments:
