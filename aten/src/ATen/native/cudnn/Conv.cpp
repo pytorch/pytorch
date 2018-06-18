@@ -339,7 +339,6 @@ struct BenchmarkCache {
     std::lock_guard<std::mutex> guard(mutex);
     map[params] = results;
   }
-
 };
 
 BenchmarkCache<cudnnConvolutionFwdAlgo_t> fwd_algos;

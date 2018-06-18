@@ -21,7 +21,6 @@ CUDA_VERSION ?= $(shell ls $(CUDA_LIB)/libcudart.so.* | head -1 | rev | cut -d "
 CUDA_MAJOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 1)
 CUDA_MINOR = $(shell echo $(CUDA_VERSION) | cut -d "." -f 2)
 
-NVCC_GENCODE = -gencode=arch=compute_52,code=sm_52
 ifeq ($(CUDA_MAJOR), 7)
 NVCC_GENCODE ?= -gencode=arch=compute_30,code=sm_30 \
                 -gencode=arch=compute_35,code=sm_35 \

@@ -138,6 +138,9 @@ static bool is_pow_of_two(int64_t x) {
 class CuFFTConfig {
 public:
 
+  // Since only move semantics is enought for this class, Although we are
+  // already using unique_ptr, remove copy constructor and assignment op so we
+  // don't accidentally use them and take perf hit.
   CuFFTConfig(const CuFFTConfig&) = delete;
   CuFFTConfig& operator=(CuFFTConfig const&) = delete;
 
@@ -344,7 +347,8 @@ private:
 // TODO: When CUDA 10 comes out, check if the bug is fixed or if we need another
 //       number for CUDA 10.
 constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
-static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(), "CUFFT_MAX_PLAN_NUM not in size_t range");
+static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(),
+              "CUFFT_MAX_PLAN_NUM not in size_t range");
 
 // This cache assumes that the mapping from key to value never changes.
 // This is **NOT** thread-safe. Please use a mutex when using it **AND** the
@@ -352,9 +356,11 @@ static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limi
 class CuFFTParamsLRUCache {
 public:
   using kv_t = typename std::pair<CuFFTParams, CuFFTConfig>;
-  using kv_iter_t = typename std::list<kv_t>::iterator;
-  using map_t = typename std::unordered_map<std::reference_wrapper<CuFFTParams>, kv_iter_t, ParamsHash<CuFFTParams>, ParamsEqual<CuFFTParams>>;
-  using kkv_iter_t = typename map_t::iterator;
+  using map_t = typename std::unordered_map<std::reference_wrapper<CuFFTParams>,
+                                            typename std::list<kv_t>::iterator,
+                                            ParamsHash<CuFFTParams>,
+                                            ParamsEqual<CuFFTParams>>;
+  using map_kkv_iter_t = typename map_t::iterator;
 
 
   CuFFTParamsLRUCache() : CuFFTParamsLRUCache(CUFFT_MAX_PLAN_NUM) {}
@@ -372,7 +378,7 @@ public:
   const CuFFTConfig &try_emplace_value(K&& key, VArgs&&... value_args) {
     AT_ASSERT(_max_size > 0);
 
-    kkv_iter_t map_it = _cache_map.find(key);
+    map_kkv_iter_t map_it = _cache_map.find(key);
     // Hit, put to list front
     if (map_it != _cache_map.end()) {
       _usage_list.splice(_usage_list.begin(), _usage_list, map_it->second);
