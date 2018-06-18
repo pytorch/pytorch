@@ -6735,6 +6735,36 @@ class TestTorch(TestCase):
         val = torch.tensor(42)
         self.assertEqual(reversed(val), torch.tensor(42))
 
+    @staticmethod
+    def _test_rot90(self, use_cuda=False):
+        device = torch.device("cuda" if use_cuda else "cpu")
+        data = torch.arange(1, 5, device=device).view(2, 2)
+        self.assertEqual(torch.tensor([1, 2, 3, 4]).view(2, 2), data.rot90(0, [0, 1]))
+        self.assertEqual(torch.tensor([2, 4, 1, 3]).view(2, 2), data.rot90(1, [0, 1]))
+        self.assertEqual(torch.tensor([4, 3, 2, 1]).view(2, 2), data.rot90(2, [0, 1]))
+        self.assertEqual(torch.tensor([3, 1, 4, 2]).view(2, 2), data.rot90(3, [0, 1]))
+
+        # test for reversed order of dims
+        self.assertEqual(data.rot90(3, [0, 1]), data.rot90(1, [1, 0]))
+
+        # test for modulo of k
+        self.assertEqual(data.rot90(5, [0, 1]), data.rot90(1, [0, 1]))
+        self.assertEqual(data.rot90(3, [0, 1]), data.rot90(-1, [0, 1]))
+        self.assertEqual(data.rot90(-5, [0, 1]), data.rot90(-1, [0, 1]))
+
+        # test tensor with more than 2D
+        data = torch.arange(1, 9, device=device).view(2, 2, 2)
+        self.assertEqual(torch.tensor([2, 4, 1, 3, 6, 8, 5, 7]).view(2, 2, 2), data.rot90(1, [1, 2]))
+
+        # test for errors
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [-1, 0]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 3]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
+
+    def test_rot90(self):
+        self._test_rot90(self, use_cuda=False)
+
     def test_storage(self):
         v = torch.randn(3, 5)
         self.assertEqual(v.storage()[0], v.data[0][0])

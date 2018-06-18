@@ -685,6 +685,9 @@
 - name: flip(Tensor self, IntList dims)
   self: grad.flip(dims)
 
+- name: rot90(Tensor self, int64_t k, IntList dims)
+  self: grad.rot90(-k, dims)
+
 - name: take(Tensor self, Tensor index)
   self: zeros_like(self).put_(index, grad, true)
 

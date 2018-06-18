@@ -56,4 +56,40 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
   return out_tensor;
 }
 
+Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
+  const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
+
+  AT_CHECK(total_rot_dims == 2,
+    "expected total rotation dims == 2, but got dims = ", total_rot_dims);
+
+  AT_CHECK(dims[0] != dims[1],
+    "expected rotation dims to be different, but got both dims = ", dims[0]);
+
+  // check range of dims
+  auto rot_dims_v = std::vector<int64_t>(dims);
+  std::sort(rot_dims_v.begin(), rot_dims_v.end());
+
+  AT_CHECK(rot_dims_v[0] >= 0,
+    "expected rotation dims >= 0, but got dims=", rot_dims_v[0]);
+
+  AT_CHECK(rot_dims_v[1] <= total_dims - 1,
+    "expected rotation dims <= total_dims - 1, but got dims = ", rot_dims_v[1],
+    ", where total dims - 1 = ", total_dims - 1);
+
+  // handle modulo with negative k
+  k = (4 + (k % 4)) % 4;
+
+  switch(k) {
+    case 1:
+      return self.flip({dims[1]}).transpose_(dims[0], dims[1]);
+    case 2:
+      return self.flip({dims[0]}).flip({dims[1]});
+    case 3:
+      return self.transpose(dims[0], dims[1]).flip({dims[1]});
+    default:
+      return self.clone();
+  }
+
+}
+
 }} // namespace at::native
