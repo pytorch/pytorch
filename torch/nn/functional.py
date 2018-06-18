@@ -528,9 +528,9 @@ def adaptive_avg_pool2d(input, output_size):
     r"""
     Applies a 2D adaptive average pooling over an input signal composed of
     several input planes.
-    
+
     See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
-    
+
     Args:
         output_size: the target output size (single integer or
             double-integer tuple)
@@ -543,18 +543,18 @@ def adaptive_avg_pool3d(input, output_size):
     r"""
     Applies a 3D adaptive average pooling over an input signal composed of
     several input planes.
-    
+
     See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
-    
+
     Args:
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
     output_size = set_output_size(input.size()[2:], output_size)
-    return torch._C._nn.adaptive_avg_pool3d(input, output_size) 
+    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
+
 
 # Activation functions
-
 def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
