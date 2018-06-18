@@ -136,18 +136,20 @@ OpSchema::Cost CostInferenceForFCGradient(
     size_db *= db.dims(i);
   }
 
-  c.flops = 2 * (M * N * K + M * N);
+  // Compute dW and dB
+  c.flops = 2 * M * N * K + M * N;
   c.bytes_written = (size_dW + size_db) * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
 
   if (out.size() == 3) {
+    // Compute dX
     const TensorShape dX = out[2];
     uint64_t size_dX = 1;
     for (int i = 0; i < dX.dims().size(); i++) {
       size_dX *= dX.dims(i);
     }
 
-    c.flops += M * N * K;
+    c.flops += 2 * M * N * K;
     c.bytes_written += size_dX * sizeof(float);
   }
   return c;
