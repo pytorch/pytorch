@@ -18,6 +18,8 @@ from .gumbel import Gumbel
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
+from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
+                                          _batch_lowrank_mahalanobis, _batch_trtrs_lower)
 from .multivariate_normal import MultivariateNormal, _batch_mahalanobis, _batch_diag, _batch_inverse
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
@@ -282,6 +284,29 @@ def _kl_laplace_laplace(p, q):
     t2 = loc_abs_diff / q.scale
     t3 = scale_ratio * torch.exp(-loc_abs_diff / p.scale)
     return t1 + t2 + t3 - 1
+
+
+@register_kl(LowRankMultivariateNormal, LowRankMultivariateNormal)
+def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
+    if p.event_shape != q.event_shape:
+        raise ValueError("KL-divergence between two Low Rank Multivariate Normals with\
+                          different event shapes cannot be computed")
+
+    term1 = (_batch_lowrank_logdet(q.scale_factor, q.scale_diag, q._capacitance_tril)
+             - _batch_lowrank_logdet(p.scale_factor, p.scale_diag, p._capacitance_tril))
+    term3 = _batch_lowrank_mahalanobis(q.scale_factor, q.scale_diag, q.loc - p.loc,
+                                       q._capacitance_tril)
+    # Expands term2 according to
+    # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ (pW @ pW.T + pD)
+    term21 = p.covariance_matrix / q.scale_diag.unsqueeze(-1)
+    qWt_qDinv = q.scale_factor.tranpose(-1, -2) / q.scale_diag.unsqueeze(-2)
+    qWt_qDinv_pW = torch.matmul(qWt_qDinv, p.scale_factor)
+    qWt_qDinv_pDsqrt = qWt_qDinv * p.scale_diag.sqrt().unsqueeze(-2)
+    term221 = _batch_trtrs_lower(qWt_qDinv_pW, q._capacitance_tril)
+    term222 = _batch_trtrs_lower(qWt_qDinv_pDsqrt, q._capacitance_tril)
+    term22 = _batch_trace_XXT(term221) + _batch_trace_XXT(term22)
+    term2 = term21 - term22
+    return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
 
 @register_kl(MultivariateNormal, MultivariateNormal)
