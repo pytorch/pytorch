@@ -723,21 +723,25 @@ TEST(NetTest, RunAsyncFailure) {
         name: "example"
         type: "async_scheduling"
         op {
-          type: "ExecutorHelperDummy"
+          input: "in"
+          output: "out"
+          type: "NetTestDummy"
+          arg {
+            name: "fail"
+            i: 1
+          }
         }
   )DOC";
 
   Workspace ws;
+  ws.CreateBlob("in");
+
   NetDef net_def;
   CAFFE_ENFORCE(
       ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-    // set incorrect device option and trigger net run failure
-    DeviceOption& dev = const_cast<DeviceOption&>(
-        net->GetOperators()[0]->event().GetDeviceOption());
-    dev.set_device_type(ONLY_FOR_TEST);
 
     bool caught_exception = false;
     try {
@@ -745,7 +749,7 @@ TEST(NetTest, RunAsyncFailure) {
     } catch (const std::exception& e) {
       caught_exception = true;
     }
-    ASSERT_FALSE(caught_exception);
+    ASSERT_TRUE(caught_exception);
   }
 }
 

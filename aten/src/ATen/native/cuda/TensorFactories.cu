@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDATypeConversion.cuh"
 
@@ -10,17 +11,17 @@
 #include <thrust/sequence.h>
 
 #include <algorithm>
-#include <sstream>
+#include <cstddef>
 
 namespace at {
 namespace native {
 
+Tensor& eye_out_cuda(Tensor& result, int64_t n) {
+  return at::native::eye_out_cuda(result, n, /*m=*/-1);
+}
+
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
-  if (n <= 0) {
-    std::ostringstream oss;
-    oss << "n must be greater than 0, got: " << n;
-    std::runtime_error(oss.str());
-  }
+  AT_CHECK(n > 0, "n must be greater than zero, got", n);
   if(m <= 0) {
     m = n;
   }
@@ -37,14 +38,9 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
 }
 
 Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
-  if (n < 0) {
-    std::ostringstream oss;
-    oss << "n must be non-negative, got " << n;
-    throw std::runtime_error(oss.str());
-  }
-
+  AT_CHECK(n >= 0, "n must be non-negative, got", n);
   AT_CHECK(result.type().scalarTensor(n).defined(),
-    "n is too large for result tensor type: '", result.type().toString(), "'");
+  "n is too large for result tensor type: '", result.type().toString(), "'");
 
   result.resize_({n});
 

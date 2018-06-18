@@ -25,10 +25,10 @@ THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices,
 
 void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
   if (self->indices->_dim()) {
-    THCIndexTensor_(resizeNd)(state, self->indices, 0, NULL, NULL);
+    THCIndexTensor_(resizeNdLegacy)(state, self->indices, 0, NULL, NULL);
   }
   if (self->values->_dim()) {
-    THCTensor_(resizeNd)(state, self->values, 0, NULL, NULL);
+    THCTensor_(resizeNdLegacy)(state, self->values, 0, NULL, NULL);
   }
   self->nnz = 0;
 }
@@ -36,7 +36,7 @@ void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
 void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, THLongStorage *size)
 {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 1, r_));
-  THCSTensor_(resize)(state, r_, size);
+  THCSTensor_(resizeLegacy)(state, r_, size);
   THCSTensor_(zero)(state, r_);
 }
 

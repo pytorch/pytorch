@@ -1,7 +1,9 @@
 #include <catch.hpp>
 
+#include <torch/functions.h>
 #include <torch/nn/cursor.h>
 #include <torch/nn/module.h>
+#include <torch/tensor.h>
 
 #include <iostream>
 #include <iterator>
@@ -18,10 +20,8 @@ using Catch::StartsWith;
 
 struct TestModule : public torch::nn::Module {
   TestModule(int64_t size) {
-    tensor1 =
-        register_parameter("tensor1", at::randn(at::CPU(at::kFloat), {size}));
-    tensor2 =
-        register_parameter("tensor2", at::randn(at::CPU(at::kFloat), {size}));
+    tensor1 = register_parameter("tensor1", torch::randn({size}));
+    tensor2 = register_parameter("tensor2", torch::randn({size}));
   }
 
   autograd::Variable tensor1;

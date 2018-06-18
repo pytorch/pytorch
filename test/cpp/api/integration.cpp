@@ -1,5 +1,6 @@
 #include <catch.hpp>
 
+#include <torch/functions.h>
 #include <torch/nn/modules/batchnorm.h>
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
@@ -34,12 +35,12 @@ class CartPole {
   double x_threshold = 2.4;
   int steps_beyond_done = -1;
 
-  at::Tensor state;
+  Variable state;
   double reward;
   bool done;
   int step_ = 0;
 
-  at::Tensor getState() {
+  Variable getState() {
     return state;
   }
 
@@ -52,7 +53,7 @@ class CartPole {
   }
 
   void reset() {
-    state = at::CPU(at::kFloat).tensor({4}).uniform_(-0.05, 0.05);
+    state = torch::empty({4}).uniform_(-0.05, 0.05);
     steps_beyond_done = -1;
     step_ = 0;
   }
@@ -80,10 +81,10 @@ class CartPole {
     x_dot = x_dot + tau * xacc;
     theta = theta + tau * theta_dot;
     theta_dot = theta_dot + tau * thetaacc;
-    state[0] = x;
-    state[1] = x_dot;
-    state[2] = theta;
-    state[3] = theta_dot;
+    state.data()[0] = x;
+    state.data()[1] = x_dot;
+    state.data()[2] = theta;
+    state.data()[3] = theta_dot;
     done = x < -x_threshold || x > x_threshold ||
         theta < -theta_threshold_radians || theta > theta_threshold_radians ||
         step_ > 200;
@@ -152,8 +153,7 @@ bool test_mnist(
     int image_rows = rd.read_int();
     int image_cols = rd.read_int();
 
-    auto data =
-        at::CPU(at::kFloat).tensor({image_count, 1, image_rows, image_cols});
+    auto data = torch::empty({image_count, 1, image_rows, image_cols});
     auto a_data = data.accessor<float, 4>();
 
     for (int c = 0; c < image_count; c++) {
@@ -172,7 +172,7 @@ bool test_mnist(
     /* int label_magic = */ rd.read_int();
     int label_count = rd.read_int();
 
-    auto data = at::CPU(at::kLong).tensor({label_count});
+    auto data = torch::empty({label_count}, at::kLong);
     auto a_data = data.accessor<int64_t, 1>();
 
     for (int i = 0; i < label_count; ++i) {
@@ -200,17 +200,20 @@ bool test_mnist(
     }
     std::shuffle(shuffled_inds.begin(), shuffled_inds.end(), generator);
 
-    auto inp = (useGPU ? at::CUDA : at::CPU)(at::kFloat)
-                   .tensor({batch_size, 1, trdata.size(2), trdata.size(3)});
-    auto lab = (useGPU ? at::CUDA : at::CPU)(at::kLong).tensor({batch_size});
+    const auto backend = useGPU ? at::kCUDA : at::kCPU;
+    auto inp =
+        torch::empty({batch_size, 1, trdata.size(2), trdata.size(3)}, backend);
+    auto lab = torch::empty({batch_size}, at::device(backend).dtype(at::kLong));
     for (auto p = 0U; p < shuffled_inds.size() - batch_size; p++) {
       inp[p % batch_size] = trdata[shuffled_inds[p]];
       lab[p % batch_size] = trlabel[shuffled_inds[p]];
 
       if (p % batch_size != batch_size - 1)
         continue;
-      Variable x = forward_op(Var(inp));
-      Variable y = Var(lab, false);
+      inp.set_requires_grad(true);
+      Variable x = forward_op(inp);
+      inp.set_requires_grad(false);
+      Variable y = lab;
       Variable loss = at::nll_loss(x, y);
 
       optim->zero_grad();
@@ -220,8 +223,8 @@ bool test_mnist(
   }
 
   NoGradGuard guard;
-  auto result = std::get<1>(forward_op(Var(tedata, false)).max(1));
-  Variable correct = (result == Var(telabel)).toType(at::kFloat);
+  auto result = std::get<1>(forward_op(tedata).max(1));
+  Variable correct = (result == telabel).toType(at::kFloat);
   std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of"
             << telabel.size(0) << std::endl;
   return correct.data().sum().toCFloat() > telabel.size(0) * 0.8;
@@ -251,7 +254,7 @@ TEST_CASE("integration") {
 
     auto selectAction = [&](at::Tensor state) {
       // Only work on single state right now, change index to gather for batch
-      auto out = forward({Var(state, false)});
+      auto out = forward({state});
       auto probs = Variable(std::get<0>(out));
       auto value = Variable(std::get<1>(out));
       auto action = probs.data().multinomial(1)[0].toCInt();
@@ -281,10 +284,8 @@ TEST_CASE("integration") {
       for (auto i = 0U; i < saved_log_probs.size(); i++) {
         auto r = rewards[i] - saved_values[i].toCFloat();
         policy_loss.push_back(-r * saved_log_probs[i]);
-        value_loss.push_back(at::smooth_l1_loss(
-            saved_values[i],
-            Var(at::CPU(at::kFloat).scalarTensor(at::Scalar(rewards[i])),
-                false)));
+        value_loss.push_back(
+            at::smooth_l1_loss(saved_values[i], torch::ones({1}) * rewards[i]));
       }
       auto loss = at::stack(policy_loss).sum() + at::stack(value_loss).sum();
 

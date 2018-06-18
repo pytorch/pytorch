@@ -15,8 +15,8 @@ from .exp_family import ExponentialFamily
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .half_normal import HalfNormal
 from .laplace import Laplace
-from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
                                           _batch_lowrank_mahalanobis, _batch_trtrs_lower)
@@ -273,6 +273,11 @@ def _kl_gumbel_gumbel(p, q):
 @register_kl(Geometric, Geometric)
 def _kl_geometric_geometric(p, q):
     return -p.entropy() - torch.log1p(-q.probs) / p.probs - q.logits
+
+
+@register_kl(HalfNormal, HalfNormal)
+def _kl_halfnormal_halfnormal(p, q):
+    return _kl_normal_normal(p.base_dist, q.base_dist)
 
 
 @register_kl(Laplace, Laplace)

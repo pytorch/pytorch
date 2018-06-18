@@ -1,5 +1,6 @@
 #include <catch.hpp>
 
+#include <torch/functions.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
@@ -17,8 +18,8 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<Sequential> model) {
   int epoch = 0;
   while (running_loss > 0.1) {
     int64_t bs = 4;
-    auto inp = at::CPU(at::kFloat).tensor({bs, 2});
-    auto lab = at::CPU(at::kFloat).tensor({bs});
+    auto inp = torch::empty({bs, 2});
+    auto lab = torch::empty({bs});
     for (size_t i = 0; i < bs; i++) {
       const int64_t a = std::rand() % 2;
       const int64_t b = std::rand() % 2;
@@ -27,12 +28,12 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<Sequential> model) {
       inp[i][1] = b;
       lab[i] = c;
     }
+    inp.set_requires_grad(true);
     // forward
-    auto y = Var(lab, false);
     std::function<at::Scalar()> closure = [&]() -> at::Scalar {
       optim->zero_grad();
-      auto x = model->forward(Var(inp));
-      Variable loss = at::binary_cross_entropy(x, y);
+      auto x = model->forward(inp);
+      Variable loss = at::binary_cross_entropy(x, lab);
       loss.backward();
       return at::Scalar(loss.data());
     };

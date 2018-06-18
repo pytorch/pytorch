@@ -35,7 +35,7 @@ TEST_CASE("module/training-mode") {
 
 TEST_CASE("module/zero-grad") {
   auto module = Linear(3, 4).build();
-  auto weight = Var(at::ones(at::CPU(at::kFloat), {8, 3}));
+  auto weight = torch::ones({8, 3}, at::requires_grad());
   auto loss = module->forward({weight}).front().sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
@@ -154,8 +154,7 @@ TEST_CASE("module/clone") {
   SECTION("Cloning preserves external references") {
     struct TestModule : public CloneableModule<TestModule> {
       void reset() override {
-        weight =
-            register_parameter("weight", at::ones(at::CPU(at::kFloat), {4, 4}));
+        weight = register_parameter("weight", torch::ones({4, 4}));
       }
       Variable weight;
     };
@@ -176,8 +175,7 @@ TEST_CASE("module/clone") {
   SECTION("Cloning copies the values of variables of submodules") {
     struct TestModule : public CloneableModule<TestModule> {
       void reset() override {
-        weight =
-            register_parameter("weight", at::ones(at::CPU(at::kFloat), {4, 4}));
+        weight = register_parameter("weight", torch::ones({4, 4}));
       }
 
       Variable weight;
@@ -208,9 +206,9 @@ TEST_CASE("module/clone") {
 TEST_CASE("module/parameters") {
   struct TestModule : Module {
     TestModule() {
-      a = register_parameter("a", at::zeros(at::CPU(at::kFloat), {2, 2}));
-      b = register_parameter("b", at::ones(at::CPU(at::kFloat), {2, 2}));
-      c = register_parameter("c", at::ones(at::CPU(at::kFloat), {2, 2}) * 2);
+      a = register_parameter("a", torch::zeros({2, 2}));
+      b = register_parameter("b", torch::ones({2, 2}));
+      c = register_parameter("c", torch::ones({2, 2}) * 2);
     }
 
     Variable a, b, c;

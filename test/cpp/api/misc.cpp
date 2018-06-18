@@ -2,6 +2,7 @@
 
 #include <torch/detail/ordered_dict.h>
 #include <torch/expanding_array.h>
+#include <torch/functions.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/tensor.h>
 #include <torch/utils.h>
@@ -22,7 +23,7 @@ TEST_CASE("misc") {
   SECTION("no_grad") {
     NoGradGuard guard;
     auto model = Linear(5, 2).build();
-    auto x = Var(at::CPU(at::kFloat).randn({10, 5}), true);
+    auto x = torch::randn({10, 5}, at::requires_grad());
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 
@@ -33,9 +34,9 @@ TEST_CASE("misc") {
   SECTION("CPU random seed") {
     int size = 100;
     torch::manual_seed(7);
-    auto x1 = Var(at::CPU(at::kFloat).randn({size}));
+    auto x1 = torch::randn({size});
     torch::manual_seed(7);
-    auto x2 = Var(at::CPU(at::kFloat).randn({size}));
+    auto x2 = torch::randn({size});
 
     auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
     REQUIRE(l_inf < 1e-10);
@@ -46,9 +47,9 @@ TEST_CASE("misc_cuda", "[cuda]") {
   SECTION("CUDA random seed") {
     int size = 100;
     torch::manual_seed(7);
-    auto x1 = Var(at::CUDA(at::kFloat).randn({size}));
+    auto x1 = torch::randn({size}, at::kCUDA);
     torch::manual_seed(7);
-    auto x2 = Var(at::CUDA(at::kFloat).randn({size}));
+    auto x2 = torch::randn({size}, at::kCUDA);
 
     auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
     REQUIRE(l_inf < 1e-10);
@@ -56,10 +57,8 @@ TEST_CASE("misc_cuda", "[cuda]") {
 }
 
 TEST_CASE("autograd") {
-  auto x = autograd::make_variable(
-      at::randn(at::CPU(at::kFloat), {3, 3}), /*requires_grad=*/true);
-  auto y = autograd::make_variable(
-      at::randn(at::CPU(at::kFloat), {3, 3}), /*requires_grad=*/false);
+  auto x = torch::randn({3, 3}, at::requires_grad());
+  auto y = torch::randn({3, 3});
   auto z = x * y;
   SECTION("derivatives of zero-dim tensors") {
     z.sum().backward();
@@ -70,8 +69,7 @@ TEST_CASE("autograd") {
     REQUIRE(x.grad().allclose(y));
   }
   SECTION("custom gradient inputs") {
-    z.sum().backward(
-        autograd::make_variable(at::ones(at::CPU(at::kFloat), {}) * 2));
+    z.sum().backward(torch::ones({}) * 2);
     REQUIRE(x.grad().allclose(y * 2));
   }
   // Assume everything else is safe from PyTorch tests.

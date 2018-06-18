@@ -38,9 +38,52 @@ OPERATOR_SCHEMA(Sin)
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
 Calculates the sine of the given input tensor, element-wise.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sin_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Sin",
+    ["X"],
+    ["Y"]
+)
+
+workspace.FeedBlob("X", np.random.rand(5).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X: [0.8466114  0.1803606  0.5601509  0.04959291 0.64770824]
+Y: [0.74903965 0.17938434 0.5313141  0.04957259 0.60336035]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "input", "Input tensor")
-    .Output(0, "output", "The sine of the input tensor computed element-wise");
+.Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
+.Output(
+    0,
+    "Y",
+    "*(type: Tensor`<float>`)* Output tensor calculated as the sine of the input tensor, element-wise.");
 
 OPERATOR_SCHEMA(SinGradient).NumInputs(2).NumOutputs(1).IdenticalTypeAndShape();
 

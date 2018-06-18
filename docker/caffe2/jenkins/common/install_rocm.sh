@@ -53,11 +53,6 @@ install_centos() {
 install_hip_thrust() {
     # Needed for now, will be replaced soon
     git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
-    pushd /data/Thrust
-    curl https://patch-diff.githubusercontent.com/raw/ROCmSoftwarePlatform/Thrust/pull/12.patch -o 12.patch
-    patch -p1 < 12.patch
-    rm 12.patch
-    popd
     rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
     cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
