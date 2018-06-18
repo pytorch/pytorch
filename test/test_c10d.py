@@ -184,9 +184,15 @@ class ProcessGroupGlooTest(TestCase):
         for p in self.processes:
             p.join(timeout)
 
+    def opts(self):
+        opts = c10d.ProcessGroupGloo.Options()
+        opts.timeout = 1.0
+        opts.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        return opts
+
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.size, self.opts())
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
@@ -215,7 +221,7 @@ class ProcessGroupGlooTest(TestCase):
 
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.size)
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.size, self.opts())
 
         def allreduce(x, op):
             opts = c10d.AllreduceOptions()
