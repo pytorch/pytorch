@@ -11,6 +11,10 @@ namespace torch { namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
+bool hasOneValuedAttribute(Node *n, torch::jit::Symbol name) {
+  return n->hasAttribute(name) && at::Scalar(n->t(name)).toDouble() == 1.0;
+}
+
 bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
     aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
@@ -21,8 +25,11 @@ bool isDifferentiable(Node * n) {
   // TODO: check this more generally via schema
   // This check ensures that the `alpha` and `beta` attributes on this addmm
   // node are constant and equivalent to 1.0
-  if (n->kind() == aten::addmm && n->inputs().size() > 3) {
-    return false;
+  if (n->kind() == aten::addmm) {
+    if (n->inputs().size() > 3)
+      return false;
+    if (!hasOneValuedAttribute(n, attr::alpha) || !hasOneValuedAttribute(n, attr::beta))
+      return false;
   }
   if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
     return false;
