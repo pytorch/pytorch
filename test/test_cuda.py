@@ -1414,7 +1414,6 @@ class TestCuda(TestCase):
         with self.assertRaisesRegex(RuntimeError, r"read-only property"):
             torch.backends.cuda.cufft_plan_cache.size = -1
 
-
     def test_stft(self):
         TestTorch._test_stft(self, device=torch.device('cuda'))
 

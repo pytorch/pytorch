@@ -15,6 +15,7 @@ class ContextProp(object):
             raise RuntimeError(self.setter)
         self.setter(val)
 
+
 class cuFFTPlanCache(object):
     size = ContextProp(torch._cufft_get_plan_cache_size,
                        'cufft_plan_cache.size is a read-only property showing the current cache. '
