@@ -1116,7 +1116,7 @@ class TestNN(NNTestCase):
             for k in module_dict.keys():
                 self.assertIs(module_dict[k], modules[k])
             for k, v in module_dict.items():
-                self.assertIs(v, modules[k])
+                self.assertIs(modules[k], v)
             for k1, m2 in zip(modules, module_dict.values()):
                 self.assertIs(modules[k1], m2)
             for k in modules.keys():
