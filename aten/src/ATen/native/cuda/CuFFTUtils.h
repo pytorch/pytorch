@@ -2,13 +2,16 @@
 
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
+#include "ATen/native/utils/ParamsHash.h"
 
+#include <list>
+#include <unordered_map>
 #include <string>
 #include <stdexcept>
 #include <sstream>
+#include <limits>
 #include <cufft.h>
 #include <cufftXt.h>
-
 
 namespace at { namespace native {
 
@@ -61,12 +64,12 @@ static inline std::string _cudaGetErrorEnum(cufftResult error)
   }
 }
 
-static inline void CUFFT_CHECK(cufftResult error)
+static void CUFFT_CHECK(cufftResult error)
 {
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
     ss << "cuFFT error: " << _cudaGetErrorEnum(error);
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 }
 
@@ -135,6 +138,9 @@ static bool is_pow_of_two(int64_t x) {
 class CuFFTConfig {
 public:
 
+  CuFFTConfig(const CuFFTConfig&) = delete;
+  CuFFTConfig& operator=(CuFFTConfig const&) = delete;
+
   explicit CuFFTConfig(Tensor& input, int64_t signal_ndim, bool complex_input,
     bool complex_output, IntList checked_signal_sizes, bool onesided,
     IntList output_sizes) {
@@ -164,7 +170,7 @@ public:
            << "tensor only has SM_" << dev_prop->major << dev_prop->minor;
         throw std::runtime_error(ss.str());
       }
-      for (int64_t i = 0; i < signal_ndim; i--) {
+      for (int64_t i = 0; i < signal_ndim; i++) {
         auto signal_size = checked_signal_sizes[i];
         if (!is_pow_of_two(signal_size)) {
           std::ostringstream ss;
@@ -263,8 +269,9 @@ public:
     }
 
     // create plan
-    raw_plan_ptr.reset(new cufftHandle());
-    CUFFT_CHECK(cufftCreate(raw_plan_ptr.get()));
+    auto raw_plan_ptr = new cufftHandle();
+    CUFFT_CHECK(cufftCreate(raw_plan_ptr));
+    plan_ptr.reset(raw_plan_ptr);
 
     // disable auto allocation of workspace to use THC allocator
     CUFFT_CHECK(cufftSetAutoAllocation(plan(), /* autoAllocate */ 0));
@@ -315,16 +322,125 @@ public:
     ws_size = static_cast<int64_t>(ws_size_t);
   }
 
-  const cufftHandle &plan() const { return *raw_plan_ptr; }
+  const cufftHandle &plan() const { return *plan_ptr.get(); }
 
   bool should_clone_input() const { return clone_input; }
 
   int64_t workspace_size() const { return ws_size; }
 
 private:
-  std::unique_ptr<cufftHandle, CuFFTHandleDeleter> raw_plan_ptr;
+  std::unique_ptr<cufftHandle, CuFFTHandleDeleter> plan_ptr;
   bool clone_input;
   int64_t ws_size;
 };
+
+// NB: cuFFT allocates a starting plan array of size 1024. It should grow the
+//     array as more plans are created. However, a bug in cuFFT (at least
+//     present in CUDA 9.1) causes the cufftSetAutoAllocation call on the
+//     1024-th plan to fail with CUFFT_INVALID_PLAN. Therefore, we check that
+//     cache size is leq 1023. The initial plan array size is 1024 for
+//     CUDA 8.0 ~ 9.2 so setting this as a CUDA-version-agnostic constant should
+//     be fine for now.
+// TODO: When CUDA 10 comes out, check if the bug is fixed or if we need another
+//       number for CUDA 10.
+constexpr int64_t CUFFT_MAX_PLAN_NUM = 1023;
+static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limits<size_t>::max(), "CUFFT_MAX_PLAN_NUM not in size_t range");
+
+// This cache assumes that the mapping from key to value never changes.
+// This is **NOT** thread-safe. Please use a mutex when using it **AND** the
+// value returned from try_emplace_value.
+class CuFFTParamsLRUCache {
+public:
+  using kv_t = typename std::pair<CuFFTParams, CuFFTConfig>;
+  using kv_iter_t = typename std::list<kv_t>::iterator;
+  using map_t = typename std::unordered_map<std::reference_wrapper<CuFFTParams>, kv_iter_t, ParamsHash<CuFFTParams>, ParamsEqual<CuFFTParams>>;
+  using kkv_iter_t = typename map_t::iterator;
+
+
+  CuFFTParamsLRUCache() : CuFFTParamsLRUCache(CUFFT_MAX_PLAN_NUM) {}
+
+  CuFFTParamsLRUCache(int64_t max_size) {
+    _set_max_size(max_size);
+  }
+
+  // If key is in this cache, return the cached config. Otherwise, emplace the
+  // config in this cache using value_args and return it.
+  // This is similar to c++ 17 try_emplace.
+  template<typename K, class ...VArgs>
+  const CuFFTConfig &try_emplace_value(K&& key, VArgs&&... value_args) {
+    AT_ASSERT(_max_size > 0);
+
+    kkv_iter_t map_it = _cache_map.find(key);
+    // Hit, put to list front
+    if (map_it != _cache_map.end()) {
+      _usage_list.splice(_usage_list.begin(), _usage_list, map_it->second);
+      return map_it->second->second;
+    }
+
+    // Miss
+    // remove if needed
+    if (_usage_list.size() >= _max_size) {
+      auto last = _usage_list.end();
+      last--;
+      _cache_map.erase(last->first);
+      _usage_list.pop_back();
+    }
+
+    // construct new plan at list front, then insert into _cache_map
+    _usage_list.emplace_front(std::piecewise_construct,
+                       std::forward_as_tuple(key),
+                       std::forward_as_tuple(value_args...));
+    auto kv_it = _usage_list.begin();
+    _cache_map.emplace(std::piecewise_construct,
+                std::forward_as_tuple(kv_it->first),
+                std::forward_as_tuple(kv_it));
+    return kv_it->second;
+  }
+
+  void clear() {
+    _cache_map.clear();
+    _usage_list.clear();
+  }
+
+  void resize(int64_t new_size) {
+    _set_max_size(new_size);
+
+    auto cur_size = _usage_list.size();
+    if (cur_size > _max_size) {
+      auto delete_it = _usage_list.end();
+      for (size_t i = 0; i < cur_size - _max_size; i++) {
+        delete_it--;
+        _cache_map.erase(delete_it->first);
+      }
+      _usage_list.erase(delete_it, _usage_list.end());
+    }
+  }
+
+  size_t size() {
+    return _cache_map.size();
+  }
+
+  size_t max_size() noexcept {
+    return _max_size;
+  }
+
+private:
+
+  // Only sets size and does value check. Does not resize the data structures.
+  void _set_max_size(int64_t new_size) {
+    if (new_size > CUFFT_MAX_PLAN_NUM) {
+      AT_ERROR("cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
+    }
+    if (new_size < 0) {
+      AT_ERROR("cuFFT plan cache size must be non-negative, but got ", new_size);
+    }
+    _max_size = static_cast<size_t>(new_size);
+  }
+
+  std::list<kv_t> _usage_list;
+  map_t _cache_map;
+  size_t _max_size;
+};
+
 
 }} // at::native

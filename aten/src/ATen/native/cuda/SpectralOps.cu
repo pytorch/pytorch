@@ -6,7 +6,6 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/SpectralOpsUtils.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/third_party/ParamsMap.h"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -165,19 +164,16 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 // tensors being contiguous, and that the strides at the innermost signal
 // dimension being unit (1) w.r.t. the corresponding data type.
 
-// The cuFFT plan cache. CuFFTParams and CuFFTConfig are defined in CuFFTUtils.h
-struct ParamsMap<CuFFTParams, CuFFTConfig> plan_cache;
-
 static inline Tensor _run_cufft(
-    CuFFTConfig *config, Tensor& input, int64_t signal_ndim, bool complex_input,
+    const CuFFTConfig &config, Tensor& input, int64_t signal_ndim, bool complex_input,
     bool complex_output, bool inverse, IntList checked_signal_sizes,
     bool normalized, bool onesided, IntList output_sizes, bool input_was_cloned
 ) {
-  if (config->should_clone_input() && !input_was_cloned) {
+  if (config.should_clone_input() && !input_was_cloned) {
     input = input.clone();
   }
 
-  auto& plan = config->plan();
+  auto& plan = config.plan();
   auto& ctx = at::globalContext();
 
   // set output
@@ -186,7 +182,7 @@ static inline Tensor _run_cufft(
   // set to current stream
   CUFFT_CHECK(cufftSetStream(plan, ctx.getCurrentCUDAStream()));
 
-  auto ws = ctx.getType(at::Backend::CUDA, at::ScalarType::Byte).tensor({ config->workspace_size() });
+  auto ws = ctx.getType(at::Backend::CUDA, at::ScalarType::Byte).tensor({ config.workspace_size() });
   CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
@@ -217,6 +213,30 @@ static inline Tensor _run_cufft(
     _fft_fill_with_conjugate_symmetry_(output, size_last_signal_dim, start_slice);
   }
   return output;
+}
+
+// The cuFFT plan cache, defined in CuFFTUtils.h
+struct CuFFTParamsLRUCache plan_cache;
+std::mutex plan_cache_mutex;
+
+int64_t _cufft_get_plan_cache_max_size() {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  return plan_cache.max_size();
+}
+
+void _cufft_set_plan_cache_max_size(int64_t max_size) {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  plan_cache.resize(max_size);
+}
+
+int64_t _cufft_get_plan_cache_size() {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  return plan_cache.size();
+}
+
+void _cufft_clear_plan_cache() {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  return plan_cache.clear();
 }
 
 // cuFFT
@@ -251,38 +271,31 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
 
   // Now that we have done error check and data_ptr checks, we delegate all
   // futher cuFFT parameter computation and plan creation to the helper class
-  // CuFFTConfig in CuFFTUtils.h. N
+  // CuFFTConfig in CuFFTUtils.h.
 
   // If plan caching is enabled, we check the cache. Note that this accesses
-  // global context and thus makes this function less functional. However,
-  // integrating a (bool cache) flag into the "public" level c++ APIs,
+  // plan_cache.max_size() and thus makes this function less functional.
+  // However, integrating a (bool cache) flag into the "public" level c++ APIs,
   // e.g., irfft, is difficult as we have a long call sequence looking like
   //   irfft --> _fft --> _fft_with_size --dispatching-to-> _fft_cufft
-  if (at::globalContext().cachePlanCuFFT()) {
-    CuFFTConfig *config_ptr;
+
+  // This read is not locked for perf reason. Shouldn't matter too much.
+  if (plan_cache.max_size() > 0) {
     CuFFTParams params;
     setCuFFTParams(&params, input, signal_ndim, complex_input, complex_output,
       checked_signal_sizes, onesided);
-    if (!plan_cache.find(params, &config_ptr)) {
-      auto it_exists = plan_cache.emplace(std::piecewise_construct,
-                                          std::forward_as_tuple(params),
-                                          std::forward_as_tuple(input, signal_ndim, complex_input,
-                                                                complex_output, checked_signal_sizes,
-                                                                onesided, output_sizes));
-      // it_exists is a std::tuple<iterator to the pair,
-      //                           bool indicating whether the inplace insertion took place>
-      // it_exists[1] may be false if other threads constructed the pair between
-      //              the above .find(...) and .emplace(...) calls.
-      // it_exists[0] will point to the existing pair in this case.
-      config_ptr = &(std::get<0>(it_exists)->second);
-    }
-    return _run_cufft(config_ptr, input, signal_ndim, complex_input,
+    std::lock_guard<std::mutex> guard(plan_cache_mutex);
+    const CuFFTConfig &config = plan_cache.try_emplace_value(std::move(params),
+                                           input, signal_ndim, complex_input,
+                                           complex_output, checked_signal_sizes,
+                                           onesided, output_sizes);
+    return _run_cufft(config, input, signal_ndim, complex_input,
                       complex_output, inverse, checked_signal_sizes, normalized,
                       onesided, output_sizes, input_was_cloned);
   } else {
     CuFFTConfig config(input, signal_ndim, complex_input, complex_output,
                        checked_signal_sizes, onesided, output_sizes);
-    return _run_cufft(&config, input, signal_ndim, complex_input,
+    return _run_cufft(config, input, signal_ndim, complex_input,
                       complex_output, inverse, checked_signal_sizes, normalized,
                       onesided, output_sizes, input_was_cloned);
   }

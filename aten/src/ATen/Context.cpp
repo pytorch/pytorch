@@ -69,14 +69,6 @@ void Context::setBenchmarkCuDNN(bool b) {
   benchmark_cudnn = b;
 }
 
-bool Context::cachePlanCuFFT() const {
-  return caching_plan_cufft;
-}
-
-void Context::setCachePlanCuFFT(bool e) {
-  caching_plan_cufft = e;
-}
-
 bool Context::hasMKL() const {
 #if AT_MKL_ENABLED()
   return true;

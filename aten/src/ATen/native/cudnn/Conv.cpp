@@ -76,11 +76,11 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 
 #include "THC/THC.h"
 
-#include <ATen/third_party/ParamsMap.h>
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include "ATen/native/utils/ParamsHash.h"
 
 #include <ATen/TensorUtils.h>
 
@@ -319,8 +319,28 @@ struct ConvolutionArgs {
 //
 // ---------------------------------------------------------------------
 
+// TODO: Use something less heavy duty than a big honking mutex
 template <typename T>
-using BenchmarkCache = ParamsMap<ConvolutionParams, T>;
+struct BenchmarkCache {
+  std::mutex mutex;
+  std::unordered_map<ConvolutionParams, T, ParamsHash<ConvolutionParams>, ParamsEqual<ConvolutionParams>> map;
+
+  bool find(const ConvolutionParams& params, T* results) {
+    std::lock_guard<std::mutex> guard(mutex);
+    auto it = map.find(params);
+    if (it == map.end()) {
+      return false;
+    }
+    *results = it->second;
+    return true;
+  }
+
+  void insert(const ConvolutionParams& params, const T& results) {
+    std::lock_guard<std::mutex> guard(mutex);
+    map[params] = results;
+  }
+
+};
 
 BenchmarkCache<cudnnConvolutionFwdAlgo_t> fwd_algos;
 BenchmarkCache<cudnnConvolutionBwdDataAlgo_t> bwd_data_algos;
