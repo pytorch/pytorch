@@ -1536,6 +1536,31 @@ class TestDistributions(TestCase):
         self.assertEqual(batched_prob.shape, unbatched_prob.shape)
         self.assertAlmostEqual(0.0, (batched_prob - unbatched_prob).abs().max(), places=3)
 
+    @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
+    def test_lowrank_multivariate_normal_sample(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        scale_factor = torch.randn(3, 1, requires_grad=True)
+        scale_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
+        cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
+
+        self._check_sampler_sampler(LowRankMultivariateNormal(mean, scale_factor, scale_diag),
+                                    scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
+                                    'LowRankMultivariateNormal(loc={}, scale_factor={}, scale_diag={})'
+                                    .format(mean, scale_factor, scale_diag), multivariate=True)
+
+    def test_lowrank_multivariate_normal_properties(self):
+        loc = torch.randn(5)
+        scale_factor = torch.randn(5, 2, requires_grad=True)
+        scale_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
+        cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
+        m1 = LowRankMultivariateNormal(loc=loc, scale_tril=scale_tril)
+        m2 = MultivariateNormal(loc=loc, covariance_matrix=cov)
+        self.assertEqual(m1.mean, m2.mean)
+        self.assertEqual(m1.variance, m2.variance)
+        self.assertEqual(m1.covariance_matrix, m2.covariance_matrix)
+        self.assertEqual(m1.scale_tril, m2.scale_tril)
+        self.assertEqual(m1.precision_matrix, m2.precision_matrix)
+
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
         mean_no_batch = torch.randn(3, requires_grad=True)
@@ -3378,6 +3403,10 @@ class TestAgainstScipy(TestCase):
                 scipy.stats.lognorm(s=positive_var.clamp(max=3), scale=random_var.exp())
             ),
             (
+                LowRankMultivariateNormal(random_var, torch.zeros(20, 1), positive_var2),
+                scipy.stats.multivariate_normal(random_var, torch.diag(positive_var2))
+            ),
+            (
                 Multinomial(10, simplex_tensor),
                 scipy.stats.multinomial(10, simplex_tensor)
             ),
@@ -3416,7 +3445,7 @@ class TestAgainstScipy(TestCase):
             if isinstance(pytorch_dist, (Cauchy, HalfCauchy)):
                 # Cauchy, HalfCauchy distributions' mean is nan, skipping check
                 continue
-            elif isinstance(pytorch_dist, MultivariateNormal):
+            elif isinstance(pytorch_dist, (LowRankMultivariateNormal, MultivariateNormal)):
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean, allow_inf=True, message=pytorch_dist)
             else:
                 self.assertEqual(pytorch_dist.mean, scipy_dist.mean(), allow_inf=True, message=pytorch_dist)
@@ -3429,7 +3458,7 @@ class TestAgainstScipy(TestCase):
             elif isinstance(pytorch_dist, (Multinomial, OneHotCategorical)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov()), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov()) ** 0.5, message=pytorch_dist)
-            elif isinstance(pytorch_dist, MultivariateNormal):
+            elif isinstance(pytorch_dist, (LowRankMultivariateNormal, MultivariateNormal)):
                 self.assertEqual(pytorch_dist.variance, np.diag(scipy_dist.cov), message=pytorch_dist)
                 self.assertEqual(pytorch_dist.stddev, np.diag(scipy_dist.cov) ** 0.5, message=pytorch_dist)
             else:
