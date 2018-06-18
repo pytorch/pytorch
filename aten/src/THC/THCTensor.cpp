@@ -53,6 +53,14 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
   }
 }
 
+void THCTensor_resize(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride) {
+  THArgCheck(size != NULL, 2, "invalid size");
+  if(stride)
+    THArgCheck(stride->size == size->size, 3, "invalid stride");
+
+  THCTensor_resizeNd(state, self, size->size, THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
+}
+
 void THCTensor_resizeLegacy(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride) {
   THArgCheck(size != NULL, 2, "invalid size");
   if(stride)
@@ -79,6 +87,81 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
 
   if(!isSame)
     THCTensor_resizeNdLegacy(state, self, src->_dim(), src->size, NULL);
+}
+
+void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
+{
+  int d;
+  ptrdiff_t totalSize;
+  bool hascorrectsize = true;
+
+#ifndef USE_TH_SCALAR
+  AT_CHECK(nDimension > 0, "resizeNd nDimension must be greater than 0");
+#else
+  AT_CHECK(nDimension >= 0, "resizeNd nDimension must be non-negative");
+#endif
+
+  for(d = 0; d < nDimension; d++)
+  {
+#ifndef USE_TH_SIZE_ZERO_DIM
+    // we can't support this unless we have arbitrary 0-sized dimensions, but some calls to this
+    // currently exist and expect a size [0] tensor to be returned.
+    if (d == 0 && size[d] == 0) {
+      nDimension = 1;
+      break;
+    }
+    AT_CHECK(size[d] > 0, "sizes must be non-negative");
+#endif
+    if((self->dim() > d) && (size[d] != self->size[d])) {
+      hascorrectsize = false;
+    }
+
+    // NB: this used to test that stride[d] was >= 0
+    if((self->dim() > d) && stride && (stride[d] != self->stride[d])) {
+      hascorrectsize = false;
+    }
+  }
+
+  if(nDimension != self->dim()) {
+    hascorrectsize = false;
+  }
+
+  if(hascorrectsize) {
+    return;
+  }
+
+  if(nDimension != self->dim())
+  {
+    self->size = (int64_t*)THRealloc(self->size, sizeof(int64_t)*nDimension);
+    self->stride = (int64_t*)THRealloc(self->stride, sizeof(int64_t)*nDimension);
+    self->dim_ = nDimension;
+  }
+
+  totalSize = 1;
+  for(d = nDimension-1; d >= 0; d--)
+  {
+    self->size[d] = size[d];
+    if(stride && (stride[d] >= 0) ) {
+      self->stride[d] = stride[d];
+    } else {
+      if(d == nDimension-1) {
+        self->stride[d] = 1;
+      } else {
+        self->stride[d] = self->size[d+1]*self->stride[d+1];
+      }
+    }
+    totalSize += (self->size[d]-1)*self->stride[d];
+  }
+
+  if(totalSize+self->storageOffset > 0)
+  {
+    if(!self->storage) {
+      THError("Tensor: invalid null storage");
+    }
+    if(totalSize+self->storageOffset > self->storage->size) {
+      THCStorage_resize(state, self->storage, totalSize+self->storageOffset);
+    }
+  }
 }
 
 void THCTensor_resizeNdLegacy(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
