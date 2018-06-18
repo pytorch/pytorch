@@ -348,7 +348,7 @@ bool THC_reduceDim(THCState* state,
   // Resize out
   THLongStorage* sizes = THCTensor_newSizeOf(state, in);
   THLongStorage_set(sizes, dim, 1);
-  THCTensor_resizeLegacy(state, out, sizes, NULL);
+  THCTensor_resize(state, out, sizes, NULL);
   THLongStorage_free(sizes);
 
   // It is possible that the tensor dimensions are able to be collapsed,

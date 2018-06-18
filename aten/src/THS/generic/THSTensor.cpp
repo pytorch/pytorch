@@ -137,11 +137,6 @@ int THSTensor_(isSameSizeAs)(const THSTensor *self, const THSTensor* src)
   THError("Internal error! This API is deprecated. Shout if you need it.");
 }
 
-THSTensor *THSTensor_(resizeLegacy)(THSTensor *self, THLongStorage *size)
-{
-  THError("Internal error! This API is deprecated. Shout if you need it.");
-}
-
 THSTensor *THSTensor_(resizeAs)(THSTensor *self, THSTensor *src)
 {
   THError("Internal error! This API is deprecated. Shout if you need it.");

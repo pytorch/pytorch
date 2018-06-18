@@ -320,13 +320,13 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
 
   numel = THLongTensor_nElement(index);
 
-  newSize = THLongStorage_newWithSize(src->_dim());
+  newSize = THLongStorage_newWithSize(src->dim());
   THLongStorage_rawCopy(newSize,src->size);
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
   THLongStorage_data(newSize)[dim] = numel;
-  THTensor_(resizeLegacy)(tensor,newSize,NULL);
+  THTensor_(resize)(tensor,newSize,NULL);
   THLongStorage_free(newSize);
 
   index = THLongTensor_newContiguous(index);
@@ -2352,8 +2352,8 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(values_, dim, NULL);
-  THLongTensor_resizeLegacy(indices_, dim, NULL);
+  THTensor_(resize)(values_, dim, NULL);
+  THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
   // two implementations optimized for data locality
@@ -2436,8 +2436,8 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(values_, dim, NULL);
-  THLongTensor_resizeLegacy(indices_, dim, NULL);
+  THTensor_(resize)(values_, dim, NULL);
+  THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
   // two implementations optimized for data locality
@@ -2518,7 +2518,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimension)(t), dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(r_, dim, NULL);
+  THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
   int serial_path = 0;
@@ -2598,7 +2598,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimension)(t), dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(r_, dim, NULL);
+  THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
   int serial_path = 0;
@@ -2812,12 +2812,6 @@ void THTensor_(cminValue)(THTensor *r, THTensor *t, real value) {
                    *r_data = *t_data > value ? value : *t_data;);  // this order propagates NaN
 }
 
-void THTensor_(zeros)(THTensor *r_, THLongStorage *size)
-{
-  THTensor_(resizeLegacy)(r_, size, NULL);
-  THTensor_(zero)(r_);
-}
-
 void THTensor_(zerosLike)(THTensor *r_, THTensor *input)
 {
   THTensor_(resizeAs)(r_, input);
@@ -2827,12 +2821,6 @@ void THTensor_(zerosLike)(THTensor *r_, THTensor *input)
 void THTensor_(onesLike)(THTensor *r_, THTensor *input)
 {
   THTensor_(resizeAs)(r_, input);
-  THTensor_(fill)(r_, 1);
-}
-
-void THTensor_(ones)(THTensor *r_, THLongStorage *size)
-{
-  THTensor_(resizeLegacy)(r_, size, NULL);
   THTensor_(fill)(r_, 1);
 }
 
@@ -2963,12 +2951,6 @@ void THTensor_(randperm)(THTensor *r_, THGenerator *_generator, int64_t n)
     r__data[i*r__stride_0] = r__data[(z+i)*r__stride_0];
     r__data[(z+i)*r__stride_0] = sav;
   }
-}
-
-void THTensor_(reshape)(THTensor *r_, THTensor *t, THLongStorage *size)
-{
-  THTensor_(resizeLegacy)(r_, size, NULL);
-  THTensor_(copy)(r_, t);
 }
 
 /* I cut and pasted (slightly adapted) the quicksort code from
@@ -3192,7 +3174,7 @@ void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimensio
 
   {
     THLongStorage *size = THTensor_(newSizeOf)(t);
-    THLongTensor_resizeLegacy(ri_, size, NULL);
+    THLongTensor_resize(ri_, size, NULL);
     THLongStorage_free(size);
   }
 
@@ -3329,8 +3311,8 @@ void THTensor_(mode)(THTensor *values_, THLongTensor *indices_, THTensor *t, int
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(values_, dim, NULL);
-  THLongTensor_resizeLegacy(indices_, dim, NULL);
+  THTensor_(resize)(values_, dim, NULL);
+  THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
   t_size_dim = THTensor_(size)(t, dimension);
@@ -3398,8 +3380,8 @@ void THTensor_(kthvalue)(THTensor *values_, THLongTensor *indices_, THTensor *t,
   THLongTensor_preserveReduceDimSemantics(indices_, in_dims, dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(values_, dim, NULL);
-  THLongTensor_resizeLegacy(indices_, dim, NULL);
+  THTensor_(resize)(values_, dim, NULL);
+  THLongTensor_resize(indices_, dim, NULL);
   THLongStorage_free(dim);
 
   t_size_dim = THTensor_(size)(t, dimension);
@@ -3461,8 +3443,8 @@ void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, i
 
   THLongStorage *topKSize = THTensor_(newSizeOf)(t);
   THLongStorage_set(topKSize, dim, k);
-  THTensor_(resizeLegacy)(rt_, topKSize, NULL);
-  THLongTensor_resizeLegacy(ri_, topKSize, NULL);
+  THTensor_(resize)(rt_, topKSize, NULL);
+  THLongTensor_resize(ri_, topKSize, NULL);
   THLongStorage_free(topKSize);
 
   if (dir) {
@@ -3916,7 +3898,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimension)(t), dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(r_, dim, NULL);
+  THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
   int serial_path = 0;
@@ -3996,7 +3978,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimension)(t), dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(r_, dim, NULL);
+  THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
   int serial_path = 0;
@@ -4150,7 +4132,7 @@ void THTensor_(std)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimension)(t), dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(r_, dim, NULL);
+  THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
   TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
@@ -4194,7 +4176,7 @@ void THTensor_(var)(THTensor *r_, THTensor *t, int dimension, int biased, int ke
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimension)(t), dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(r_, dim, NULL);
+  THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
   TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
@@ -4238,7 +4220,7 @@ void THTensor_(norm)(THTensor *r_, THTensor *t, real value, int dimension, int k
   THTensor_(preserveReduceDimSemantics)(r_, THTensor_(nDimension)(t), dimension, keepdim);
   dim = THTensor_(newSizeOf)(t);
   THLongStorage_set(dim, dimension, 1);
-  THTensor_(resizeLegacy)(r_, dim, NULL);
+  THTensor_(resize)(r_, dim, NULL);
   THLongStorage_free(dim);
 
   #define DIM_REDUCE(reduce, transform) \
@@ -4421,18 +4403,6 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, int64_t n)
         i++;
         );
   }
-}
-
-void THTensor_(rand)(THTensor *r_, THGenerator *_generator, THLongStorage *size)
-{
-  THTensor_(resizeLegacy)(r_, size, NULL);
-  THTensor_(uniform)(r_, _generator, 0, 1);
-}
-
-void THTensor_(randn)(THTensor *r_, THGenerator *_generator, THLongStorage *size)
-{
-  THTensor_(resizeLegacy)(r_, size, NULL);
-  THTensor_(normal)(r_, _generator, 0, 1);
 }
 
 void THTensor_(histc)(THTensor *hist, THTensor *tensor, int64_t nbins, real minvalue, real maxvalue)

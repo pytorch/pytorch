@@ -668,8 +668,8 @@ THC_reduceDimIndex(THCState *state,
 
   THLongStorage *dim = THCTensor_newSizeOf(state, src);
   THLongStorage_set(dim, dimension, 1);
-  THCTensor_resizeLegacy(state, tgt1_, dim, NULL);
-  THCTensor_resizeLegacy(state, tgt2_, dim, NULL);
+  THCTensor_resize(state, tgt1_, dim, NULL);
+  THCTensor_resize(state, tgt2_, dim, NULL);
   THLongStorage_free(dim);
 
   TensorTypeK *tgt1 = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, tgt1_);
