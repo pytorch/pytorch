@@ -1593,14 +1593,26 @@ Example::
 
 add_docstr(torch.flatten,
            r"""
-flatten(input, start, end) -> Tensor
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
 Flattens a contiguous range of dims in a tensor.
 
 Args:
     input (Tensor): the input tensor
-    start (int): the first dim to flatten
-    end (int): the last dim to flatten
+    start_dim (int): the first dim to flatten
+    end_dim (int): the last dim to flatten
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+                           [3, 4]],
+                          [[5, 6],
+                           [7, 8]]])
+    >>> torch.flatten(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+    >>> torch.flatten(t, start_dim=1)
+    tensor([[1, 2, 3, 4],
+            [5, 6, 7, 8]])
 """)
 
 add_docstr(torch.gather,

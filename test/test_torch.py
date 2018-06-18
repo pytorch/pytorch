@@ -5430,7 +5430,7 @@ class TestTorch(TestCase):
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
     def test_flatten(self):
-        src = torch.randn(5,5,5,5)
+        src = torch.randn(5, 5, 5, 5)
         flat = src.flatten(0, -1)
         self.assertEqual(flat.shape, torch.Size([625]))
         self.assertEqual(src.view(-1), flat.view(-1))
@@ -5460,7 +5460,7 @@ class TestTorch(TestCase):
             src.flatten(5, 10)
 
         # invalid start and end
-        with self.assertRaisesRegex(RuntimeError, 'start dim must be before end dim'):
+        with self.assertRaisesRegex(RuntimeError, 'start_dim must be before end_dim'):
             src.flatten(2, 0)
 
     @staticmethod
