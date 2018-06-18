@@ -186,8 +186,8 @@ THC_API void THCTensor_(mode)(THCState *state,
       state, indices, ndim, dimension, keepdim);
   dim = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(dim, dimension, 1);
-  THCTensor_(resizeLegacy)(state, values, dim, NULL);
-  THCudaLongTensor_resizeLegacy(state, indices, dim, NULL);
+  THCTensor_(resize)(state, values, dim, NULL);
+  THCudaLongTensor_resize(state, indices, dim, NULL);
   THLongStorage_free(dim);
 
   // If sliceSize is 1, copy input to values and set indices
