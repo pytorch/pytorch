@@ -243,7 +243,7 @@ OnnxAttributes::OnnxAttrToCaffe2Arg(
   ::google::protobuf::RepeatedPtrField<caffe2::Argument> args;
   for (const auto& kv : onnx_attrs_) {
     // If the attribute was rewritten, we use it instead. Note that the
-    // rewritten attibute still has the unmapped name
+    // rewritten attribute still has the unmapped name
     const auto& attr = rewritten_onnx_attrs_.count(kv.first)
         ? rewritten_onnx_attrs_.at(kv.first)
         : (*kv.second);
