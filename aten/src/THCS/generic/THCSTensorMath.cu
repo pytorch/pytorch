@@ -33,13 +33,6 @@ void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
   self->nnz = 0;
 }
 
-void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, THLongStorage *size)
-{
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 1, r_));
-  THCSTensor_(resizeLegacy)(state, r_, size);
-  THCSTensor_(zero)(state, r_);
-}
-
 void THCSTensor_(zerosLike)(THCState *state, THCSTensor *r_, THCSTensor *input)
 {
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 2, 2, r_, input));

@@ -18,7 +18,7 @@ void THNN_(GatedLinear_updateOutput)(
   const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
   THLongStorage *newSizes = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(newSizes, dim, inputSize);
-  THCTensor_(resizeLegacy)(state, output, newSizes, NULL);
+  THCTensor_(resize)(state, output, newSizes, NULL);
 
   // halve tensor
   THCTensor *firstHalf = THCTensor_(newNarrow)(state, input, dim, 0, inputSize);

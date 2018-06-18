@@ -534,14 +534,14 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   if (numIndices == 0) {
     newSize = THCTensor_(newSizeOf)(state, src);
     THLongStorage_set(newSize, 0, numIndices);
-    THCTensor_(resizeLegacy)(state, dst, newSize, NULL);
+    THCTensor_(resize)(state, dst, newSize, NULL);
     THLongStorage_free(newSize);
     return;
   }
 
   newSize = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(newSize, dim, numIndices);
-  THCTensor_(resizeLegacy)(state, dst, newSize, NULL);
+  THCTensor_(resize)(state, dst, newSize, NULL);
   THLongStorage_free(newSize);
 
   int indContig = THCudaLongTensor_isContiguous(state, indices);

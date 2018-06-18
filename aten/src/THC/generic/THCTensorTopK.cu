@@ -24,8 +24,8 @@ THC_API void THCTensor_(topk)(THCState* state,
   // size k
   THLongStorage* topKSize = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(topKSize, dim, k);
-  THCTensor_(resizeLegacy)(state, topK, topKSize, NULL);
-  THCudaLongTensor_resizeLegacy(state, indices, topKSize, NULL);
+  THCTensor_(resize)(state, topK, topKSize, NULL);
+  THCudaLongTensor_resize(state, indices, topKSize, NULL);
   THLongStorage_free(topKSize);
 
 #define RUN_K(INDEX_T, DIM, DIR)                                        \

@@ -21,7 +21,7 @@ inline int GET_BLOCKS(const int N)
   THLongStorage *size2 = THCTensor_(newSizeOf)(STATE, I2);  \
   if (!THCIndexTensor_(isSize)(STATE, I1, size2))           \
   { \
-    THCudaLongTensor_resizeLegacy(STATE, I1, size2, NULL);        \
+    THCudaLongTensor_resize(STATE, I1, size2, NULL);        \
   } \
   THLongStorage_free(size2);
 
