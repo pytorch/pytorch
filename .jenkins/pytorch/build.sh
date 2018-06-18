@@ -7,7 +7,7 @@ fi
 # Add nccl2 for distributed test.
 sudo apt-get install libnccl-dev libnccl2
 
-# Add mpich for mpi test
+# Add openmpi for mpi test
 sudo apt-get update
 sudo apt-get install openmpi-bin libopenmpi-dev
 
