@@ -365,6 +365,8 @@ public:
 
   // If key is in this cache, return the cached config. Otherwise, emplace the
   // config in this cache using value_args and return it.
+  // Return const reference because CuFFTConfig shouldn't be tampered with once
+  // created.
   // This is similar to c++ 17 try_emplace.
   template<typename K, class ...VArgs>
   const CuFFTConfig &try_emplace_value(K&& key, VArgs&&... value_args) {

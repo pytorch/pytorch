@@ -279,26 +279,28 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // e.g., irfft, is difficult as we have a long call sequence looking like
   //   irfft --> _fft --> _fft_with_size --dispatching-to-> _fft_cufft
 
-  // This read is not locked for perf reason. Shouldn't matter too much.
+  // This read is not locked for perf reason. Shouldn't matter too much because
+  // we check again after acquiring the lock.
   if (plan_cache.max_size() > 0) {
     CuFFTParams params;
     setCuFFTParams(&params, input, signal_ndim, complex_input, complex_output,
       checked_signal_sizes, onesided);
     std::lock_guard<std::mutex> guard(plan_cache_mutex);
-    const CuFFTConfig &config = plan_cache.try_emplace_value(std::move(params),
-                                           input, signal_ndim, complex_input,
-                                           complex_output, checked_signal_sizes,
-                                           onesided, output_sizes);
-    return _run_cufft(config, input, signal_ndim, complex_input,
-                      complex_output, inverse, checked_signal_sizes, normalized,
-                      onesided, output_sizes, input_was_cloned);
-  } else {
-    CuFFTConfig config(input, signal_ndim, complex_input, complex_output,
-                       checked_signal_sizes, onesided, output_sizes);
-    return _run_cufft(config, input, signal_ndim, complex_input,
-                      complex_output, inverse, checked_signal_sizes, normalized,
-                      onesided, output_sizes, input_was_cloned);
+    if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
+      const CuFFTConfig &config = plan_cache.try_emplace_value(std::move(params),
+                                             input, signal_ndim, complex_input,
+                                             complex_output, checked_signal_sizes,
+                                             onesided, output_sizes);
+      return _run_cufft(config, input, signal_ndim, complex_input,
+                        complex_output, inverse, checked_signal_sizes, normalized,
+                        onesided, output_sizes, input_was_cloned);
+    }
   }
+  CuFFTConfig config(input, signal_ndim, complex_input, complex_output,
+                     checked_signal_sizes, onesided, output_sizes);
+  return _run_cufft(config, input, signal_ndim, complex_input,
+                    complex_output, inverse, checked_signal_sizes, normalized,
+                    onesided, output_sizes, input_was_cloned);
 }
 
 }} // at::native
