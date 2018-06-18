@@ -49,12 +49,7 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
 }
 
 std::vector<Tensor> to_tensor_list(const variable_list& variables) {
-  int64_t size = variables.size();
-  std::vector<Tensor> out(size);
-  for (int i = 0; i < size; i++) {
-    out[i] = variables[i];
-  }
-  return out;
+  return fmap(variables, [](torch::autograd::Variable v) { return static_cast<Tensor>(v); } );
 }
 
 Tensor not_implemented(const char* name) {
