@@ -64,7 +64,7 @@ function(copy_header file)
 endfunction()
 
 if(DISTRIBUTED_NCCL_FOUND)
-  option(WITH_C10D_NCCL "With c10d NCCL" ON)
+  option(USE_C10D_NCCL "USE C10D NCCL" ON)
 endif()
 configure_file(cmake/Def.hpp.in ${CMAKE_BINARY_DIR}/include/c10d/Def.hpp @ONLY)
 

@@ -161,15 +161,9 @@ ProcessGroupNCCL::ProcessGroupNCCL(
   // Generate the Process Group ID for current PG, this needs to be identical
   // for all processes
   std::unique_lock<std::mutex> lock(pgTrackingLock_);
-  while (true) {
-    ++processGroupCounter_;
-    if (pgUniqueNCCLIDCnt_.find(processGroupCounter_) ==
-        pgUniqueNCCLIDCnt_.end()) {
-      pgUniqueNCCLIDCnt_[processGroupCounter_] = -1;
-      processGroupID_ = std::to_string(processGroupCounter_);
-      return;
-    }
-  }
+  ++processGroupCounter_;
+  pgUniqueNCCLIDCnt_[processGroupCounter_] = -1;
+  processGroupID_ = std::to_string(processGroupCounter_);
 }
 
 ProcessGroupNCCL::~ProcessGroupNCCL() {

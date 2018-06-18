@@ -5,7 +5,7 @@
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
 
-#ifdef WITH_C10D_NCCL
+#ifdef USE_C10D_NCCL
 #include <c10d/ProcessGroupNCCL.hpp>
 #endif
 
@@ -86,7 +86,7 @@ PyObject* c10d_init(PyObject* _unused) {
       module, "ProcessGroupGloo", processGroup)
       .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
 
-#ifdef WITH_C10D_NCCL
+#ifdef USE_C10D_NCCL
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(
       module, "ProcessGroupNCCL", processGroup)
       .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
