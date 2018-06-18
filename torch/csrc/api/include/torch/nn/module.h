@@ -2,9 +2,8 @@
 
 #include <torch/detail/ordered_dict.h>
 #include <torch/nn/cursor.h>
+#include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
-
-#include <torch/csrc/autograd/variable.h>
 
 #include <ATen/optional.h>
 
@@ -116,7 +115,9 @@ class Module {
       bool requires_grad = true);
   Variable& register_buffer(std::string name, Variable tensor);
 
-  template <typename ModuleType>
+  template <
+      typename ModuleType,
+      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
   std::shared_ptr<ModuleType> register_module(
       std::string name,
       std::shared_ptr<ModuleType> module) {
@@ -124,12 +125,20 @@ class Module {
     return std::static_pointer_cast<ModuleType>(base_module);
   }
 
+  template <typename ModuleHolderType>
+  ModuleHolderType register_module(
+      std::string name,
+      ModuleHolderType module_holder) {
+    register_module(std::move(name), module_holder.get());
+    return module_holder;
+  }
+
  private:
   template <typename T>
   using OrderedDict = torch::detail::OrderedDict<std::string, T>;
 
   template <typename Derived>
-  friend class CloneableModule;
+  friend class Cloneable;
   template <typename T>
   friend class detail::CursorBase;
 
@@ -145,72 +154,5 @@ class Module {
   /// Whether the module is in training mode.
   bool is_training_{true};
 };
-
-/// The `clone()` method in the base `Module` class does not have knowledge of
-/// the concrete runtime type of its subclasses. Therefore, `clone()` must
-/// either be called from within the subclass, or from a base class that has
-/// knowledge of the concrete type. `CloneableModule` uses the CRTP to gain
-/// knowledge of the subclass' static type and provide an implementation of the
-/// `clone()` method. We do not want to use this pattern in the base class,
-/// because then storing a module would always require templatizing it.
-template <typename Derived>
-class CloneableModule : public Module {
- public:
-  using Module::Module;
-
-  virtual void reset() = 0;
-
-  /// Moves the `Module` into a `shared_ptr` and calls `reset()` on it.
-  std::shared_ptr<Derived> build() {
-    auto module = std::make_shared<Derived>(static_cast<Derived&&>(*this));
-    module->reset();
-    return module;
-  }
-
-  /// Performs a recursive "deep copy" of the `Module`, such that all parameters
-  /// and submodules in the cloned module are different from those in the
-  /// original module.
-  std::shared_ptr<Module> clone() const override {
-    const auto& self = static_cast<const Derived&>(*this);
-    auto copy = std::make_shared<Derived>(self);
-    copy->parameters_.clear();
-    copy->children_.clear();
-    copy->reset();
-    for (const auto& parameter : parameters_) {
-      copy->parameters_[parameter.key].data().copy_(parameter->data());
-    }
-    for (const auto& child : children_) {
-      copy->children_[child.key]->clone_(*child.value);
-    }
-    return copy;
-  }
-
- private:
-  void clone_(Module& other) final override {
-    // Here we are *pretty* certain that `other's` type is `Derived` (because it
-    // was registered under the same name as `this`), but you never know what
-    // crazy things `reset()` does, so `dynamic_cast` just to be safe.
-    auto clone = std::dynamic_pointer_cast<Derived>(other.clone());
-    AT_CHECK(
-        clone != nullptr,
-        "Attempted to clone submodule, but it is of a "
-        "different type than the submodule it was to be cloned into");
-    static_cast<Derived&>(*this) = std::move(*clone);
-  }
-};
 } // namespace nn
 } // namespace torch
-
-#define TORCH_ATTR(T, name)                         \
-  auto name(const T& new_##name)->decltype(*this) { \
-    this->name##_ = new_##name;                     \
-    return *this;                                   \
-  }                                                 \
-  auto name(T&& new_##name)->decltype(*this) {      \
-    this->name##_ = std::move(new_##name);          \
-    return *this;                                   \
-  }                                                 \
-  const T& name() const noexcept {                  \
-    return this->name##_;                           \
-  }                                                 \
-  T name##_

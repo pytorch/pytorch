@@ -236,9 +236,9 @@ TEST_CASE("integration") {
         << "Training episodic policy gradient with a critic for up to 3000"
            " episodes, rest your eyes for a bit!\n";
     auto model = std::make_shared<SimpleContainer>();
-    auto linear = model->add(Linear(4, 128).build(), "linear");
-    auto policyHead = model->add(Linear(128, 2).build(), "policy");
-    auto valueHead = model->add(Linear(128, 1).build(), "action");
+    auto linear = model->add(Linear(4, 128), "linear");
+    auto policyHead = model->add(Linear(128, 2), "policy");
+    auto valueHead = model->add(Linear(128, 1), "action");
     auto optim = Adam(model, 1e-3).make();
 
     std::vector<Variable> saved_log_probs;
@@ -333,12 +333,12 @@ TEST_CASE("integration") {
 
 TEST_CASE("integration/mnist", "[cuda]") {
   auto model = std::make_shared<SimpleContainer>();
-  auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
-  auto conv2 = model->add(Conv2d(10, 20, 5).build(), "conv2");
-  auto drop = Dropout(0.3).build();
-  auto drop2d = Dropout2d(0.3).build();
-  auto linear1 = model->add(Linear(320, 50).build(), "linear1");
-  auto linear2 = model->add(Linear(50, 10).build(), "linear2");
+  auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
+  auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
+  auto drop = Dropout(0.3);
+  auto drop2d = Dropout2d(0.3);
+  auto linear1 = model->add(Linear(320, 50), "linear1");
+  auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](Variable x) {
     x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
@@ -368,14 +368,14 @@ TEST_CASE("integration/mnist", "[cuda]") {
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto model = std::make_shared<SimpleContainer>();
-  auto conv1 = model->add(Conv2d(1, 10, 5).build(), "conv1");
-  auto batchnorm2d =
-      model->add(BatchNorm(10).stateful(true).build(), "batchnorm2d");
-  auto conv2 = model->add(Conv2d(10, 20, 5).build(), "conv2");
-  auto linear1 = model->add(Linear(320, 50).build(), "linear1");
-  auto batchnorm1 =
-      model->add(BatchNorm(50).stateful(true).build(), "batchnorm1");
-  auto linear2 = model->add(Linear(50, 10).build(), "linear2");
+  auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
+  auto batchnorm2d = model->add(
+      BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
+  auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
+  auto linear1 = model->add(Linear(320, 50), "linear1");
+  auto batchnorm1 = model->add(
+      BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
+  auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](Variable x) {
     x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))

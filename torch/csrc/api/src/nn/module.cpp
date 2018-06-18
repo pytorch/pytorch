@@ -39,7 +39,7 @@ std::shared_ptr<Module> Module::clone() const {
       "clone() has not been implemented for ",
       name(),
       ". Use the copy constructor if you don't require polymorphic cloning. "
-      "Otherwise, subclass torch::nn::CloneableModule<",
+      "Otherwise, subclass torch::nn::Cloneable<",
       name(),
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
