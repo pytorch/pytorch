@@ -812,9 +812,9 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
     // currently exist and expect a size [0] tensor to be returned.
     if (d == 0 && size[d] == 0) {
       nDimension = 1;
-      break;
+    } else {
+      AT_CHECK(size[d] > 0, "sizes must be non-negative");
     }
-    AT_CHECK(size[d] > 0, "sizes must be non-negative");
 #endif
     if((self->dim() > d) && (size[d] != self->size[d])) {
       hascorrectsize = false;
