@@ -110,7 +110,7 @@ AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
 #undef DEFINE_CAST_OP
 
 Tensor empty_like(const Tensor& self) {
-  return native::empty_like(self, TensorOptions(self));
+  return native::empty_like(self, self.options());
 }
 
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
@@ -178,7 +178,7 @@ Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
 }
 
 Tensor full_like(const Tensor& self, Scalar fill_value) {
-  return native::full_like(self, fill_value, TensorOptions(self));
+  return native::full_like(self, fill_value, self.options());
 }
 
 Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
@@ -240,7 +240,7 @@ Tensor& ones_out(Tensor& result, IntList size) {
 }
 
 Tensor ones_like(const Tensor& self) {
-  return native::ones(self.sizes(), TensorOptions(self));
+  return native::ones(self.sizes(), self.options());
 }
 
 Tensor ones_like(const Tensor& self, const TensorOptions& options) {
@@ -268,7 +268,7 @@ Tensor& rand_out(Tensor& result, IntList size, Generator* generator) {
 }
 
 Tensor rand_like(const Tensor& self) {
-  return native::rand_like(self, TensorOptions(self));
+  return native::rand_like(self, self.options());
 }
 
 Tensor rand_like(const Tensor& self, const TensorOptions& options) {
@@ -335,11 +335,11 @@ Tensor& randint_out(
 }
 
 Tensor randint_like(const Tensor& self, int64_t high) {
-  return native::randint_like(self, high, TensorOptions(self));
+  return native::randint_like(self, high, self.options());
 }
 
 Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
-  return native::randint_like(self, low, high, TensorOptions(self));
+  return native::randint_like(self, low, high, self.options());
 }
 
 Tensor randint_like(
@@ -378,7 +378,7 @@ Tensor& randn_out(Tensor& result, IntList size, Generator* generator) {
 }
 
 Tensor randn_like(const Tensor& self) {
-  return native::randn_like(self, TensorOptions(self));
+  return native::randn_like(self, self.options());
 }
 
 Tensor randn_like(const Tensor& self, const TensorOptions& options) {
@@ -479,7 +479,7 @@ Tensor& zeros_out(Tensor& result, IntList size) {
 }
 
 Tensor zeros_like(const Tensor& self) {
-  return native::zeros_like(self, TensorOptions(self));
+  return native::zeros_like(self, self.options());
 }
 
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {

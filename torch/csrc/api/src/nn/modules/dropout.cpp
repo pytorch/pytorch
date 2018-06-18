@@ -53,8 +53,7 @@ Variable DropoutImpl::noise_mask(Variable input) const {
 }
 
 Variable Dropout2dImpl::noise_mask(Variable input) const {
-  return torch::empty(
-      {input.size(0), input.size(1), 1, 1}, at::TensorOptions(input));
+  return torch::empty({input.size(0), input.size(1), 1, 1}, input.options());
 }
 } // namespace nn
 } // namespace torch
