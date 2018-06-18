@@ -20,7 +20,7 @@ EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options)
 
 void EmbeddingImpl::reset() {
   table_ = register_parameter(
-      "table", torch::empty({options.count_, options.dimension_}));
+      "table", torch::empty({options_.count_, options_.dimension_}));
   table_.data().normal_(0, 1);
 }
 

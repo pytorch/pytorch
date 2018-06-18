@@ -51,11 +51,10 @@ void ConvImpl<D, Derived>::reset() {
       options_.kernel_size_->end());
   AT_ASSERT(weights_size.size() == 2 + options_.kernel_size_->size());
 
-  weight_ =
-      this->register_parameter("weight", torch::empty(options.weights_size));
-  if (with_bias_) {
+  weight_ = this->register_parameter("weight", torch::empty(weights_size));
+  if (options_.with_bias_) {
     bias_ = this->register_parameter(
-        "bias", torch::empty(options.output_channels_));
+        "bias", torch::empty(options_.output_channels_));
   }
 
   const auto number_of_features = std::accumulate(

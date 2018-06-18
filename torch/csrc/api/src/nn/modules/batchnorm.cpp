@@ -22,15 +22,15 @@ BatchNormImpl::BatchNormImpl(BatchNormOptions options)
 void BatchNormImpl::reset() {
   if (options_.affine_) {
     weight_ = register_parameter(
-        "weight", torch::empty({options.features_}).uniform_());
-    bias_ = register_parameter("bias", torch::zeros({options.features_}));
+        "weight", torch::empty({options_.features_}).uniform_());
+    bias_ = register_parameter("bias", torch::zeros({options_.features_}));
   }
 
-  if (stateful_) {
+  if (options_.stateful_) {
     running_mean_ =
-        register_buffer("running_mean", torch::zeros({options.features_}));
+        register_buffer("running_mean", torch::zeros({options_.features_}));
     running_variance_ =
-        register_buffer("running_variance", torch::ones({options.features_}));
+        register_buffer("running_variance", torch::ones({options_.features_}));
   }
 }
 

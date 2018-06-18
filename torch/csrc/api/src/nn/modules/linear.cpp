@@ -18,10 +18,9 @@ LinearImpl::LinearImpl(LinearOptions options) : options_(std::move(options)) {
 
 void LinearImpl::reset() {
   weight_ =
-      register_parameter("weight", torch::empty({options.out_, options.in_}));
-  bias_ = register_parameter("bias", torch::empty(options.out_));
+      register_parameter("weight", torch::empty({options_.out_, options_.in_}));
   if (options_.with_bias_) {
-    bias_ = register_parameter("bias", torch::empty(options.out_));
+    bias_ = register_parameter("bias", torch::empty(options_.out_));
   }
 
   const auto stdv = 1.0 / std::sqrt(weight_.size(1));

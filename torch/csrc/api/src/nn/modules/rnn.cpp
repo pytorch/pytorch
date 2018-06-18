@@ -55,7 +55,7 @@ RNNImplBase<Derived>::RNNImplBase(
     : options_(options),
       number_of_gates_(number_of_gates),
       has_cell_state_(has_cell_state),
-      cudnn_mode_(std::move(cudnn_mode)) {
+      cudnn_mode_(cudnn_mode) {
   reset();
 }
 
@@ -72,28 +72,26 @@ void RNNImplBase<Derived>::reset() {
 
   const int64_t gate_size = options_.hidden_size_ * number_of_gates_;
 
-  for (int64_t layer = 0; layer < layers_; ++layer) {
+  for (int64_t layer = 0; layer < options_.layers_; ++layer) {
     const int64_t input_size =
         (layer == 0) ? options_.input_size_ : options_.hidden_size_;
     ihw_[layer] = this->register_parameter(
         "weight_ih_l" + std::to_string(layer),
-        torch::empty({options_.gate_size, input_size}));
+        torch::empty({gate_size, input_size}));
     hhw_[layer] = this->register_parameter(
         "weight_hh_l" + std::to_string(layer),
-        torch::empty({options_.gate_size, hidden_size_}));
+        torch::empty({gate_size, options_.hidden_size_}));
 
-    if (with_bias_) {
+    if (options_.with_bias_) {
       ihb_[layer] = this->register_parameter(
-          "bias_ih_l" + std::to_string(layer),
-          torch::empty({options_.gate_size}));
+          "bias_ih_l" + std::to_string(layer), torch::empty({gate_size}));
       hhb_[layer] = this->register_parameter(
-          "bias_hh_l" + std::to_string(layer),
-          torch::empty({options_.gate_size}));
+          "bias_hh_l" + std::to_string(layer), torch::empty({gate_size}));
     }
   }
   flatten_parameters_for_cudnn();
 
-  auto stdv = 1.0 / std::sqrt(options_.hidden_size_);
+  const auto stdv = 1.0 / std::sqrt(options_.hidden_size_);
   for (auto& p : this->parameters()) {
     p->data().uniform_(-stdv, stdv);
   }
@@ -140,7 +138,8 @@ std::vector<Variable> RNNImplBase<Derived>::autograd_forward(
   }
 
   auto output = torch::zeros(
-      {inp.size(0), inp.size(1), options.hidden_size_}, at::TensorOptions(inp));
+      {inp.size(0), inp.size(1), options_.hidden_size_},
+      at::TensorOptions(inp));
   for (int64_t t = 0; t < inp.size(0); t++) {
     auto x = inp.select(0, t);
     for (int64_t i = 0; i < options_.layers_; i++) {
@@ -168,7 +167,7 @@ std::vector<Variable> RNNImplBase<Derived>::autograd_forward(
 template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   data_ptrs_.clear();
-  const auto any_parameter = ihw_[0];
+  const auto any_parameter = ihw_.at(0);
   if (!cudnn_mode_.has_value() || !any_parameter.is_cuda() ||
       !at::cudnn_is_acceptable(any_parameter) || options_.dropout_ == 0) {
     return;
@@ -178,14 +177,11 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   for (auto& p : params) {
     unique_data_ptrs.insert(p->data().data_ptr());
   }
-  // TODO PyTorch says:
-  // If any parameters alias, we fall back to the slower, copying code path.
-  // This is
-  // a sufficient check, because overlapping parameter buffers that don't
-  // completely
-  // alias would break the assumptions of the uniqueness check in
-  // Module.named_parameters().
-  // But I'm not sure if this is the case for us
+  // TODO PyTorch says: If any parameters alias, we fall back to the slower,
+  // copying code path. This is a sufficient check, because overlapping
+  // parameter buffers that don't completely alias would break the assumptions
+  // of the uniqueness check in Module.named_parameters(). But I'm not sure if
+  // this is the case for us
   if (unique_data_ptrs.size() != params.size()) {
     return;
   }
@@ -338,7 +334,8 @@ std::vector<Variable> RNNImpl::cell_forward(
   auto x = inputs[0];
   auto hx = inputs[1].defined()
       ? inputs[1]
-      : torch::zeros({x.size(0), hidden_size_}, torch::TensorOptions(x));
+      : torch::zeros(
+            {x.size(0), options_.hidden_size_}, torch::TensorOptions(x));
 
   auto h = linear(x, ihw_[layer], ihb_[layer]) +
       linear(hx, hhw_[layer], hhb_[layer]);
