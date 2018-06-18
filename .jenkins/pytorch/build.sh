@@ -9,7 +9,7 @@ sudo apt-get install libnccl-dev libnccl2
 
 # Add mpich for mpi test
 sudo apt-get update
-sudo apt-get install -y mpich
+sudo apt-get install openmpi-bin libopenmpi-dev
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
