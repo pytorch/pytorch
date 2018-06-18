@@ -9,16 +9,12 @@ from hypothesis import given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
-import itertools as it
 
 
 class TestExpandOp(hu.HypothesisTestCase):
-    def run_expand_op_test(
-        self, op_name, X, random_flag, gc, dc):
-        if (random_flag):
-            shape_length = np.random.randint(5)
-        else:
-            shape_length = 4
+    def run_expand_op_test_rand(
+        self, op_name, X, gc, dc):
+        shape_length = np.random.randint(5)
         shape_list = []
         j = shape_length - 1
         i = X.ndim - 1
@@ -46,14 +42,40 @@ class TestExpandOp(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, shape], [0])
         self.assertGradientChecks(gc, op, [X, shape], 0, [0])
 
-    @given(X=hu.tensor(max_dim=5, dtype=np.float32),
-           **hu.gcs)
-    def test_expand_rand_shape(self, X, gc, dc):
-        self.run_expand_op_test(
-            "Expand", X, True, gc, dc)
+    def run_expand_op_test_nonrand(
+        self, op_name, X, gc, dc, shape):
+        shape = np.array(shape)
+        op = core.CreateOperator(
+            op_name,
+            ["X", "shape"],
+            ["Y"],
+        )
+        def ref(X, shape):
+            return (X * np.ones(shape),)
+
+        self.assertReferenceChecks(gc, op, [X, shape], ref)
+        self.assertDeviceChecks(dc, op, [X, shape], [0])
+        self.assertGradientChecks(gc, op, [X, shape], 0, [0])
 
     @given(X=hu.tensor(max_dim=5, dtype=np.float32),
            **hu.gcs)
-    def test_expand_nonrand_shape(self, X, gc, dc):
-        self.run_expand_op_test(
-            "Expand", X, False, gc, dc)
+    def test_expand_rand_shape(self, X, gc, dc):
+        self.run_expand_op_test_rand(
+            "Expand", X, gc, dc)
+
+    @given(X=st.sampled_from([np.ones([1, 3, 1]),
+                             np.ones([3, 1, 3]),
+                             np.ones([1, 3])]),
+           **hu.gcs)
+    def test_expand_nonrand_shape1(self, X, gc, dc):
+        self.run_expand_op_test_nonrand(
+            "Expand", X, gc, dc, [3, 1, 3])
+
+
+    @given(X=st.sampled_from([np.ones([4, 4, 2, 1]),
+                             np.ones([1, 4, 1, 2]),
+                             np.ones([4, 1, 2])]),
+           **hu.gcs)
+    def test_expand_nonrand_shape2(self, X, gc, dc):
+        self.run_expand_op_test_nonrand(
+            "Expand", X, gc, dc, [4, 1, 2, 2])

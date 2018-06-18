@@ -37,7 +37,7 @@ class ExpandOp final : public Operator<Context> {
     std::vector<int> Y_dims;
     Y_dims.reserve(std::max(ndim, X.ndim()));
     // ndim, X.ndim() might equal to 0
-    for (int i = ndim - 1, j = X.ndim() - 1; i >= 0 || j >= 0; i--, j--) {
+    for (int i = ndim - 1, j = X.ndim() - 1; i >= 0 || j >= 0; --i, --j) {
       const int shape_x = (j >= 0 ? X_dims[j] : 1);
       const int shape_y = (i >= 0 ? shape_dims[i] : 1);
       CAFFE_ENFORCE(
