@@ -61,7 +61,7 @@ struct tensor_as_impl<at::IntList> {
   at::IntList operator()(at::Tensor&& t) {
     if (t.type().scalarType() != at::ScalarType::Long)
       throw tensor_conversion_error("Expected a LongTensor");
-    if (t.dim() != 1)
+    if (t.dim() > 1)
       throw tensor_conversion_error("Expected a 1D LongTensor");
     if (!t.is_contiguous())
       throw tensor_conversion_error("Expected a contiguous LongTensor");

@@ -3572,9 +3572,6 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_var',
     'test_add_scalar',
     'test_add_scalar_constant',
-    'test_addmm_broadcast_lhs_coef',
-    'test_addmm_coef',
-    'test_addmm_scalar_broadcast_lhs_coef',
     'test_expand_scalar_to_scalar',
     'test_index_add_dim',
     'test_index_add_dim_neg0',
@@ -3721,11 +3718,8 @@ EXCLUDE_SCRIPT = {
     'test_permute_scalar',
     'test_repeat',
     'test_repeat_scalar',
-    'test_repeat_single_number',
     'test_repeat_unsqueeze',
     'test_reshape',
-    'test_reshape_1d',
-    'test_reshape_scalar_to_1d',
     'test_reshape_scalar_to_scalar',
     'test_reshape_size',
     'test_scatter_add_dim0',
@@ -3741,15 +3735,8 @@ EXCLUDE_SCRIPT = {
     'test_scatter_scalar_all_dim0',
     'test_scatter_scalar_all_dim0_neg0',
     'test_view',
-    'test_view_1d',
-    'test_view_scalar_to_1d',
     'test_view_scalar_to_scalar',
     'test_view_size',
-    'test_where',
-    'test_where_broadcast_all',
-    'test_where_scalar',
-    'test_where_scalar_broadcast_mask',
-    'test_where_scalar_broadcast_non_mask',
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
@@ -3920,7 +3907,7 @@ def add_test(
                     output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
                     return output_process_fn(output)
 
-                if not is_inplace and name not in EXCLUDE_GRADCHECK:
+                if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
                     if test_name not in EXCLUDE_TRACED:
                         check_against_reference(self, create_traced_fn(fn),
                                                 fn, (self_variable,) + args_variable, kwargs_variable)
