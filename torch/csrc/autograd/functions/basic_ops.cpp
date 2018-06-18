@@ -3,7 +3,6 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/utils.h"
-#include "torch/csrc/utils/auto_gpu.h"
 
 #include <ATen/ATen.h>
 

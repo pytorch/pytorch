@@ -1,12 +1,14 @@
 #include "torch/optimizers.h"
 
 #include <torch/nn/module.h>
+#include <torch/functions.h>
+#include <torch/tensor.h>
 
 namespace torch {
 
 void OptimizerImpl::zero_grad() {
-  for (auto p : model_->parameters()) {
-    auto& grad = p.second.grad();
+  for (auto& p : model_->parameters()) {
+    auto& grad = p->grad();
     if (grad.defined()) {
       grad = grad.detach();
       torch::autograd::as_variable_ref(grad).data().zero_();
@@ -24,17 +26,17 @@ void OptimizerImpl::set_model(std::shared_ptr<nn::Module> model) {
 
 at::Tensor LBFGS::gather_flat_grad() {
   std::vector<at::Tensor> views;
-  for(auto& pair : model_->parameters()) {
-    views.push_back(torch::autograd::as_variable_ref(pair.second.grad()).data().view(-1));
+  for(auto& parameter : model_->parameters()) {
+    views.push_back(torch::autograd::as_variable_ref(parameter->grad()).data().view(-1));
   }
   return at::cat(views);
 }
 
 void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
   int offset = 0;
-  for(auto& pair : model_->parameters()) {
-    int numel = pair.second.numel();
-    at::Tensor& pd = pair.second.data();
+  for(auto& parameter : model_->parameters()) {
+    int numel = parameter->numel();
+    at::Tensor& pd = parameter->data();
     pd.add_(update.slice(0, offset, offset + numel, 1).view_as(pd), step_size);
     offset += numel;
   }
@@ -158,10 +160,10 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
 }
 
 void LBFGS::init_state() {
-  d = at::CPU(at::kFloat).empty({0});
+  d = torch::empty({0});
   t = 0;
-  H_diag = at::CPU(at::kFloat).empty({0});
-  prev_flat_grad = at::CPU(at::kFloat).empty({0});
+  H_diag = torch::empty({0});
+  prev_flat_grad = torch::empty({0});
   prev_loss = 0;
   ro.resize(history_size_);
   al.resize(history_size_);
@@ -171,10 +173,10 @@ void LBFGS::init_state() {
 
 at::Scalar SGD::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
-  for (auto& pair : model_->parameters()) {
-    auto& name = pair.first;
-    auto& grad = pair.second.grad();
-    auto& p = pair.second.data();
+  for (auto& parameter : model_->parameters()) {
+    auto& name = parameter.key;
+    auto& grad = parameter->grad();
+    auto& p = parameter->data();
     if (!grad.defined())
       continue;
 
@@ -213,10 +215,10 @@ void SGD::init_state() {
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
-  for (auto& pair : model_->parameters()) {
-    auto& name = pair.first;
-    auto& grad = pair.second.grad();
-    auto& p = pair.second.data();
+  for (auto& parameter : model_->parameters()) {
+    auto& name = parameter.key;
+    auto& grad = parameter->grad();
+    auto& p = parameter->data();
     if (!grad.defined())
       continue;
 
@@ -250,10 +252,10 @@ void Adagrad::init_state() {
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
 at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
-  for (auto& pair : model_->parameters()) {
-    auto& name = pair.first;
-    auto& grad = pair.second.grad();
-    auto& p = pair.second.data();
+  for (auto& parameter : model_->parameters()) {
+    auto& name = parameter.key;
+    auto& grad = parameter->grad();
+    auto& p = parameter->data();
     if (!grad.defined())
       continue;
 
@@ -303,10 +305,10 @@ void RMSprop::init_state() {
 
 at::Scalar Adam::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
-  for (auto& pair : model_->parameters()) {
-    auto& name = pair.first;
-    auto& grad = pair.second.grad();
-    auto& p = pair.second.data();
+  for (auto& parameter : model_->parameters()) {
+    auto& name = parameter.key;
+    auto& grad = parameter->grad();
+    auto& p = parameter->data();
     if (!grad.defined())
       continue;
 

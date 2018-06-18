@@ -16,6 +16,7 @@
 #include "torch/csrc/jit/passes/onnx/fixup_onnx_loop.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -76,6 +77,7 @@ void initJITBindings(PyObject *module) {
      auto tensor_inputs = createVariableTensorList(inputs);
      PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
    })
+   .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
      // initialize the autograd engine in these tests, the newly spawned worker threads will
@@ -130,7 +132,7 @@ void initJITBindings(PyObject *module) {
       return s.autograd_fallback_graph;
     });
 
-  py::class_<GraphExecutor>(m, "GraphExecutor")
+  py::class_<GraphExecutor>(m, "GraphExecutor", py::dynamic_attr())
       .def(
           py::init([](py::function func,
                       variable_list inputs,
@@ -166,11 +168,11 @@ void initJITBindings(PyObject *module) {
         if (outputs.size() == 0) {
           return py::none();
         } else if (outputs.size() == 1) {
-          return py::cast(static_cast<autograd::Variable&>(outputs[0]));
+          return py::cast(autograd::as_variable_ref(outputs[0]));
         } else {
           py::tuple tuple(outputs.size());
           for(size_t i = 0; i < outputs.size(); i++) {
-            tuple[i] = py::cast(static_cast<autograd::Variable&>(outputs[i]));
+            tuple[i] = py::cast(autograd::as_variable_ref(outputs[i]));
           }
           return tuple;
         }

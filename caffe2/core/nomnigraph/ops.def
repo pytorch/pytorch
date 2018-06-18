@@ -61,6 +61,9 @@ Add
 Reshape
 Flatten
 
+NCHW2NHWC
+NHWC2NCHW
+
 Int8Quantize
 Int8Dequantize
 Int8AveragePool : AveragePool

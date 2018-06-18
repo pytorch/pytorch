@@ -17,7 +17,8 @@ using at::Context;
 using at::Generator;
 using at::IntList;
 using at::Scalar;
-using at::SparseTensor;
+using at::SparseTensorRef;
+using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
@@ -25,7 +26,7 @@ using at::Type;
 using at::ScalarType;
 using at::optional;
 
-void register_variable_type_for(Context*, at::Backend, at::ScalarType);
+void register_variable_type_for(at::Type* baseType);
 
 struct VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
@@ -62,12 +63,13 @@ private:
   // checks that t is actually a Variable
   static Variable & checked_cast_variable(const Tensor & t, const char * name, int pos);
   static at::Tensor & unpack(const Tensor & t, const char * name, int pos);
-  static at::SparseTensor unpack(SparseTensor t, const char * name, int pos);
+  static at::SparseTensorRef unpack(SparseTensorRef t, const char * name, int pos);
   static at::Tensor unpack_opt(const Tensor & t, const char * name, int pos);
   static std::vector<at::Tensor> unpack(at::TensorList tl, const char *name, int pos);
 
   at::Type* baseType;
   std::string str;
+  size_t id_;
 };
 
 }} // namespace torch::autograd

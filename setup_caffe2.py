@@ -219,6 +219,9 @@ ext_modules = [
     setuptools.Extension(
         name=str('caffe2.python.caffe2_pybind11_state_gpu'),
         sources=[]),
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state_hip'),
+        sources=[]),
 ]
 
 ################################################################################
@@ -261,4 +264,10 @@ setuptools.setup(
     author='jiayq',
     author_email='jiayq@fb.com',
     url='https://caffe2.ai',
+    entry_points={
+        'console_scripts': [
+            'convert-caffe2-to-onnx = caffe2.python.onnx.bin.conversion:caffe2_to_onnx',
+            'convert-onnx-to-caffe2 = caffe2.python.onnx.bin.conversion:onnx_to_caffe2',
+        ]
+    },
 )

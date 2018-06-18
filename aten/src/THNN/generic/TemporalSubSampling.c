@@ -16,7 +16,7 @@ static inline void THNN_(TemporalSubSampling_shapeCheck)(
   THArgCheck(dW > 0, 7,
              "stride should be greater than zero, but got dW: %d", dW);
 
-  THNN_ARGCHECK(input->nDimension == 2, 2, input,
+  THNN_ARGCHECK(input->_dim() == 2, 2, input,
                   "2D or 3D (batch mode) tensor expected for input, but got: %s");
   if (inputFrameSize != NULL) {
     THArgCheck( input->size[1] == *inputFrameSize, 2,
@@ -31,9 +31,9 @@ static inline void THNN_(TemporalSubSampling_shapeCheck)(
   nOutputFrame = (nInputFrame - kW) / dW + 1;
 
   if (gradOutput != NULL) {
-    THNN_CHECK_DIM_SIZE(gradOutput, input->nDimension, 0, nOutputFrame);
+    THNN_CHECK_DIM_SIZE(gradOutput, input->_dim(), 0, nOutputFrame);
     if (inputFrameSize != NULL) {
-      THNN_CHECK_DIM_SIZE(gradOutput, input->nDimension, 1, *inputFrameSize);
+      THNN_CHECK_DIM_SIZE(gradOutput, input->_dim(), 1, *inputFrameSize);
     }
   }
 }

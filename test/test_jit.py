@@ -8,6 +8,7 @@ import torch.jit.frontend
 from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
+from torch.onnx import OperatorExportTypes
 from common import TestCase, run_tests, IS_WINDOWS
 from textwrap import dedent
 import os
@@ -20,6 +21,10 @@ import numpy as np
 import tempfile
 import shutil
 import warnings
+from test_autograd import method_tests, create_input, unpack_variables, \
+    exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
+from copy import deepcopy
+
 
 from torch.jit.frontend import NotSupportedError
 
@@ -79,7 +84,7 @@ def get_lstm_inputs(device):
     input = torch.randn(3, 10, dtype=torch.float, device=device)
     hx = torch.randn(3, 20, dtype=torch.float, device=device)
     cx = torch.randn(3, 20, dtype=torch.float, device=device)
-    module = nn.LSTMCell(10, 20).to(torch.float, device)  # Just to allocate weights with correct sizes
+    module = nn.LSTMCell(10, 20).to(device, torch.float)  # Just to allocate weights with correct sizes
     return (input, hx, cx) + tuple(p.requires_grad_(False) for p in module.parameters())
 
 
@@ -92,9 +97,9 @@ def get_fn(file_name, script_path):
     return fn
 
 
-class TestJit(TestCase):
+class JitTestCase(TestCase):
     def assertExpectedONNXGraph(self, trace, *args, **kwargs):
-        torch.onnx._optimize_trace(trace, aten=False)
+        torch.onnx._optimize_trace(trace, operator_export_type=OperatorExportTypes.ONNX)
         self.assertExpectedGraph(trace, *args, **kwargs)
 
     def assertExpectedGraph(self, trace, *args, **kwargs):
@@ -109,21 +114,6 @@ class TestJit(TestCase):
         graph = torch._C._jit_pass_canonicalize(graph)
         torch._C._jit_pass_lint(graph)
         self.assertExpected(str(graph), *args, **kwargs)
-
-    def assertExportImport(self, trace, inputs):
-        initializers = []
-
-        def run(graph):
-            return torch._C.GraphExecutor(graph, False)(*inputs)
-
-        proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
-                                        defer_weight_export=False, export_raw_ir=True)
-        self.assertFalse(initializers)
-
-        imported_graph, initializers = torch._C._jit_import_graph(proto)
-        self.assertFalse(initializers)
-
-        self.assertEqual(run(trace.graph()), run(imported_graph))
 
     def run_pass(self, name, trace):
         if isinstance(trace, torch._C.Graph):
@@ -143,6 +133,108 @@ class TestJit(TestCase):
             trace.set_graph(graph)
         return graph
 
+    def checkTrace(self, func, reference_tensors, input_tensors=None,
+                   optimize=True, drop=None, allow_unused=False,
+                   verbose=False, inputs_require_grads=True):
+        # TODO: check gradients for parameters, not just inputs
+        def allSum(vs):
+            # drop allows us to remove some values from ever being used
+            # to test unused outputs
+            if drop is not None:
+                vs = vs[:-drop]
+            # we don't want all the grad for all the outputs to be the same
+            # so we multiply each by a constant
+            return sum([(i + 1) * v.sum() for i, v in enumerate(vs) if v is not None])
+        if input_tensors is None:
+            input_tensors = reference_tensors
+
+        nograd_inputs = reference_tensors
+        if inputs_require_grads:
+            recording_inputs = [t.clone().requires_grad_() for t in reference_tensors]
+        else:
+            recording_inputs = reference_tensors
+
+        if isinstance(func, torch._C.Graph):
+            ge = torch._C.GraphExecutor(func, optimize)
+        else:
+            ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
+
+        if verbose:
+            print(ge.__getattr__('forward').graph)
+
+        # test no gradients case
+
+        outputs = func(*nograd_inputs)
+        outputs_ge = ge(*nograd_inputs)
+        self.assertEqual(outputs, outputs_ge)
+
+        # test single grad case
+        outputs = func(*recording_inputs)
+        if inputs_require_grads:
+            grads = torch.autograd.grad(allSum(outputs), recording_inputs,
+                                        allow_unused=allow_unused)
+
+        outputs_ge = ge(*recording_inputs)
+        if inputs_require_grads:
+            grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs,
+                                           allow_unused=allow_unused)
+        self.assertEqual(outputs, outputs_ge)
+        if inputs_require_grads:
+            self.assertEqual(grads, grads_ge)
+
+        # test the grad grad case
+
+        outputs = func(*recording_inputs)
+        l1 = allSum(outputs)
+        if inputs_require_grads:
+            grads = torch.autograd.grad(l1, recording_inputs, create_graph=True,
+                                        allow_unused=allow_unused)
+        if inputs_require_grads:
+            l2 = (allSum(grads) * l1)
+            grads2 = torch.autograd.grad(l2, recording_inputs, allow_unused=allow_unused)
+
+        if inputs_require_grads:
+            recording_inputs = [Variable(t, requires_grad=True)
+                                for t in reference_tensors]
+
+        outputs_ge = ge(*recording_inputs)
+        l1_ge = allSum(outputs_ge)
+        if inputs_require_grads:
+            grads_ge = torch.autograd.grad(
+                l1_ge, recording_inputs, create_graph=True, allow_unused=allow_unused)
+
+        if inputs_require_grads:
+            l2_ge = (allSum(grads_ge) * l1_ge)
+            grads2_ge = torch.autograd.grad(l2_ge, recording_inputs, allow_unused=allow_unused)
+
+        self.assertEqual(outputs, outputs_ge)
+        if inputs_require_grads:
+            self.assertEqual(grads, grads_ge)
+            for g2, g2_ge in zip(grads2, grads2_ge):
+                if g2 is None and g2_ge is None:
+                    continue
+                self.assertTrue(torch.allclose(g2, g2_ge, atol=5e-4, rtol=1e-4))
+
+        return ge
+
+
+class TestJit(JitTestCase):
+    def assertExportImport(self, trace, inputs):
+        initializers = []
+
+        def run(graph):
+            return torch._C.GraphExecutor(graph, False)(*inputs)
+
+        proto, _ = trace.graph().export(initializers, onnx_opset_version=0,
+                                        defer_weight_export=False,
+                                        operator_export_type=OperatorExportTypes.RAW)
+        self.assertFalse(initializers)
+
+        imported_graph, initializers = torch._C._jit_import_graph(proto)
+        self.assertFalse(initializers)
+
+        self.assertEqual(run(trace.graph()), run(imported_graph))
+
     def test_simple(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0.7], requires_grad=True)
@@ -154,17 +246,16 @@ class TestJit(TestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
-    # index-2 is not implemented in interpreter
-    @unittest.expectedFailure
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
-        y = torch.tensor([0], dtype=torch.int64, requires_grad=True)
+        y = torch.tensor([0], dtype=torch.int64)
 
-        @torch.jit.compile(nderivs=0)
         def fn(x, y):
             return x[y]
 
-        fn(x, y)  # Fails
+        fn_traced = torch.jit.trace(x, y)(fn)
+
+        self.assertEqual(fn(x, y), fn_traced(x, y))
 
     # Backwards tracing was broken for indexing by a constant,
     # because it's internally implemented using as_strided,
@@ -295,6 +386,58 @@ class TestJit(TestCase):
         ge = self.checkTrace(f, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
 
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_comparison_gt_lt(self):
+        def f(x, y):
+            mask = (x > 0).type_as(x)
+            z = x * mask + y
+            mask = (x < 0).type_as(x)
+            z = z * mask + y
+            return z
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(f, (x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_comparison_ge_le(self):
+        def f(x, y):
+            mask = (x >= 0).type_as(x)
+            z = x * mask + y
+            mask = (x <= 0).type_as(x)
+            z = z * mask + y
+            return z
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(f, (x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_relu(self):
+        def f(x, y):
+            return F.relu(x + .5 * y)
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(f, (x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_exp(self):
+        def f(x, y):
+            return (x + .5 * y).exp()
+
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(f, (x, y))
+
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
     def test_arg_configurations(self):
@@ -354,6 +497,15 @@ class TestJit(TestCase):
         self.run_pass('cse', trace)
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
+
+    def test_scalar(self):
+        # NB: must not require grad; if it requires grad, it's always a Tensor
+        x = torch.tensor(2.)
+        y = torch.tensor(3.)
+
+        def fn(x, y):
+            return x - y
+        trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
 
     def test_shape_analysis_broadcast(self):
         def broadcast(a, b):
@@ -585,6 +737,8 @@ class TestJit(TestCase):
             return torch.sigmoid(torch.tanh(x * (x + y)))
 
         trace, _ = torch.jit.get_trace_graph(doit, (x, y))
+        self.run_pass('dce', trace)
+        self.run_pass('canonicalize', trace)
         g = trace.graph()
         g2 = torch._C.Graph()
         g_to_g2 = {}
@@ -687,70 +841,6 @@ class TestJit(TestCase):
         trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
-
-    def checkTrace(self, func, reference_tensors, input_tensors=None,
-                   optimize=True, drop=None, allow_unused=False):
-        def allSum(vs):
-            # drop allows us to remove some values from ever being used
-            # to test unused outputs
-            if drop is not None:
-                vs = vs[:-drop]
-            # we don't want all the grad for all the outputs to be the same
-            # so we multiply each by a constant
-            return sum([(i + 1) * v.sum() for i, v in enumerate(vs) if v is not None])
-        if input_tensors is None:
-            input_tensors = reference_tensors
-
-        nograd_inputs = reference_tensors
-        recording_inputs = [t.clone().requires_grad_() for t in reference_tensors]
-
-        ge = torch.jit.trace(*input_tensors, optimize=optimize)(func)
-
-        # test no gradients case
-
-        outputs = func(*nograd_inputs)
-        outputs_ge = ge(*nograd_inputs)
-        self.assertEqual(outputs, outputs_ge)
-
-        # test single grad case
-
-        outputs = func(*recording_inputs)
-        grads = torch.autograd.grad(allSum(outputs), recording_inputs,
-                                    allow_unused=allow_unused)
-
-        outputs_ge = ge(*recording_inputs)
-        grads_ge = torch.autograd.grad(allSum(outputs_ge), recording_inputs,
-                                       allow_unused=allow_unused)
-        self.assertEqual(outputs, outputs_ge)
-        self.assertEqual(grads, grads_ge)
-
-        # test the grad grad case
-
-        outputs = func(*recording_inputs)
-        l1 = allSum(outputs)
-        grads = torch.autograd.grad(l1, recording_inputs, create_graph=True,
-                                    allow_unused=allow_unused)
-        l2 = (allSum(grads) * l1)
-        grads2 = torch.autograd.grad(l2, recording_inputs, allow_unused=allow_unused)
-
-        recording_inputs = [Variable(t, requires_grad=True)
-                            for t in reference_tensors]
-
-        outputs_ge = ge(*recording_inputs)
-        l1_ge = allSum(outputs_ge)
-        grads_ge = torch.autograd.grad(
-            l1_ge, recording_inputs, create_graph=True, allow_unused=allow_unused)
-        l2_ge = (allSum(grads_ge) * l1_ge)
-        grads2_ge = torch.autograd.grad(l2_ge, recording_inputs, allow_unused=allow_unused)
-
-        self.assertEqual(outputs, outputs_ge)
-        self.assertEqual(grads, grads_ge)
-        for g2, g2_ge in zip(grads2, grads2_ge):
-            if g2 is None and g2_ge is None:
-                continue
-            self.assertTrue(torch.allclose(g2, g2_ge, atol=5e-4, rtol=1e-4))
-
-        return ge
 
     def run_ge_tests(self, optimize, use_cuda):
         def rand(*args):
@@ -925,8 +1015,23 @@ class TestJit(TestCase):
         self.assertEqual(out_ref, out_test)
         self.assertExpected(canonical(addmm.graph))
 
+    def test_index_put(self):
+        ten = torch.zeros(3, 3)
+        mask = torch.Tensor([[True, True, True],
+                             [True, False, False],
+                             [True, True, False]]).byte()
 
-class TestScript(TestCase):
+        def test_fn(ten, mask):
+            ten[mask] = torch.ones(6)
+            return ten
+
+        traced_test_fn = torch.jit.trace(ten, mask)(test_fn)
+
+        ten = torch.rand(3, 3)
+        self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
+
+
+class TestScript(JitTestCase):
 
     @contextmanager
     def capture_stdout(self):
@@ -982,7 +1087,7 @@ class TestScript(TestCase):
             source = textwrap.dedent(inspect.getsource(script))
             self.checkScript(source, inputs, optimize, outputs, script.__name__, capture_output, frames_up=2)
             # Continue checking the Python frontend
-            ge = torch.jit.script(script, _frames_up=1)
+            ge = torch.jit.script(script, optimize, _frames_up=1)
 
         if capture_output:
             with self.capture_stdout() as captured:
@@ -1133,7 +1238,7 @@ class TestScript(TestCase):
         out = func(x, y)
         self.assertEqual(func(x, y), x + y)
 
-        grad = torch.randn(2, 3)
+        grad = torch.randn(2, 3, dtype=torch.float)
         out.backward(grad)
         self.assertEqual(x.grad, grad)
         self.assertEqual(y.grad, grad.sum(dim=0))
@@ -1164,6 +1269,24 @@ class TestScript(TestCase):
             @torch.jit.script
             def func(x):
                 return torch.cat((x, x), x, dim=0)
+
+    def test_cat_lifts(self):
+        @torch.jit.script
+        def foo(x):
+            return torch.cat([x, x], dim=1)
+
+        @torch.jit.script
+        def foo2(x):
+            return torch.cat([], dim=1)
+
+        @torch.jit.script
+        def foo3(x):
+            return torch.cat([x], dim=1)
+
+        self.assertExpected(
+            canonical(foo.graph) +
+            canonical(foo2.graph) +
+            canonical(foo3.graph))
 
     def test_func_call(self):
         script = '''
@@ -1385,18 +1508,15 @@ class TestScript(TestCase):
         self.checkScript(func, inputs, optimize=True)
 
     def test_script_for_in_range(self):
-        script = '''
-        def test_for_in_range():
+        def fn():
             c = 0
             for i in range(100):
                 c += i
             return c
-        '''
-        self.checkScript(script, [], outputs=[4950], optimize=True, name='test_for_in_range')
+        self.checkScript(fn, (), outputs=4950, optimize=True)
 
     def test_script_for_in_range_dynamic(self):
-        script = '''
-        def test_script_for_in_range_dynamic():
+        def fn():
             c = 0
             for i in range(100):
                 acc = 0
@@ -1404,8 +1524,7 @@ class TestScript(TestCase):
                     acc += j
                 c += acc
             return c
-        '''
-        self.checkScript(script, [], outputs=[161700], optimize=True, name='test_script_for_in_range_dynamic')
+        self.checkScript(fn, (), optimize=False)
 
     def test_script_for_in_range_ast(self):
         @torch.jit.script
@@ -1603,6 +1722,26 @@ class TestScript(TestCase):
         x = torch.arange(-3., 4)
         slope = torch.tensor([0.5])
         self.checkScript(fn, [x, slope], optimize=True)
+
+    def test_script_docstring(self):
+        @torch.jit.script
+        def with_docstring(x):
+            """test str"""
+            y = x
+            """y is the same as x"""
+            return y
+        self.assertEqual(with_docstring.__doc__, 'test str')
+
+    def test_script_method_docstring(self):
+        class A(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def with_docstring(self, x):
+                """test str"""
+                y = x
+                """y is the same as x"""
+                return y
+        a = A()
+        self.assertEqual(a.with_docstring.__doc__, 'test str')
 
     def test_script_module(self):
         class M1(torch.jit.ScriptModule):
@@ -2478,7 +2617,7 @@ class TestScript(TestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2527,7 +2666,7 @@ class TestScript(TestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2552,7 +2691,7 @@ class TestScript(TestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2569,7 +2708,7 @@ class TestScript(TestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2586,7 +2725,7 @@ class TestScript(TestCase):
 
         mte = ModuleToExport()
         outputs = mte(torch.zeros(1, 2, 3, dtype=torch.long))
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.zeros(1, 2, 3),), None, verbose=False,
             example_outputs=outputs))
 
@@ -2616,7 +2755,7 @@ class TestScript(TestCase):
         result = mte(torch.zeros(2, 3))
         reference = torch.mm(torch.mm(torch.zeros(2, 3), torch.ones(3, 3)), torch.ones(3, 4))
         self.assertEqual(result, reference)
-        self.assertExpected(torch.onnx._export_to_pretty_string(
+        self.assertExpected(torch.onnx.export_to_pretty_string(
             mte, (torch.ones(2, 3),), None, verbose=False,
             example_outputs=result, propagate=True))
 
@@ -2675,12 +2814,12 @@ class TestScript(TestCase):
         f2 = Foo(linear)
         outputs_f2 = f2(torch.ones(1, 10, dtype=torch.float))
 
-        onnx_ish = torch.onnx._export_to_pretty_string(
+        onnx_ish = torch.onnx.export_to_pretty_string(
             f1,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f1)
         self.assertExpected(onnx_ish, subname='f1')
-        onnx_ish = torch.onnx._export_to_pretty_string(
+        onnx_ish = torch.onnx.export_to_pretty_string(
             f2,
             (torch.ones(1, 10, dtype=torch.float), ),
             None, verbose=False, example_outputs=outputs_f2)
@@ -2698,8 +2837,8 @@ class TestScript(TestCase):
         foo = torch.jit.trace(torch.zeros(1, 2, 3))(Foo())
         outputs = foo(torch.zeros(1, 2, 3))
         f = io.BytesIO()
-        s = torch.onnx._export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
-                                                example_outputs=outputs)
+        s = torch.onnx.export_to_pretty_string(foo, (torch.zeros(1, 2, 3)), f,
+                                               example_outputs=outputs)
         self.assertExpected(s)
 
     def test_shape_analysis_loop(self):
@@ -2719,7 +2858,7 @@ class TestScript(TestCase):
                 b = x
             return a
 
-        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), False)
+        self.checkScript(foo, (torch.zeros(1), torch.zeros(4), torch.zeros(5)), optimize=False)
 
     def test_intlist_args(self):
         def func_1(x):
@@ -2900,9 +3039,473 @@ class TestScript(TestCase):
 
         self.checkScript(test_rand, ())
 
+    def test_loop_unrolling(self):
+        def fn(x):
+            y = 0
+            for i in range(x):
+                y += i
+            return y
+
+        graph = torch.jit._script_graph(fn)
+        self.run_pass('loop_unrolling', graph)
+        self.assertExpectedGraph(graph)
+        self.checkScript(fn, (torch.tensor(10),))
+
+    def test_loop_unrolling_const(self):
+        def fn():
+            y = 0
+            for i in range(10):
+                y += 1
+            return y
+
+        def fn2():
+            y = 0
+            for i in range(10):
+                y += i
+            return y
+
+        def check(fn, name):
+            graph = torch.jit._script_graph(fn)
+            self.run_pass('loop_unrolling', graph)
+            self.assertExpectedGraph(graph, subname=name)
+            self.checkScript(fn, ())
+
+        check(fn, 'add_const')
+        check(fn2, 'add_iter')
+
+    def test_loop_unrolling_nested(self):
+        def fn(x):
+            y = 0
+            for i in range(10):
+                for j in range(x):
+                    y += j
+            return y
+
+        graph = torch.jit._script_graph(fn)
+        self.run_pass('loop_unrolling', graph)
+        self.assertExpectedGraph(graph)
+        self.checkScript(fn, (torch.tensor(10),))
+
+    def test_loop_unroll_unused_counter(self):
+        def fn(x):
+            y = 0
+            for i in range(x):
+                y += 1
+            return y
+
+        graph = torch.jit._script_graph(fn)
+        self.run_pass('loop_unrolling', graph)
+        self.assertExpectedGraph(graph)
+
+    def test_loop_unroll_negative(self):
+        def fn(x):
+            y = 0
+            for i in range(x):
+                y += 1
+            return y
+
+        self.checkScript(fn, (torch.tensor(-20),))
+        self.checkScript(fn, (torch.tensor(-2),))
+        self.checkScript(fn, (torch.tensor(-1),))
+        self.checkScript(fn, (torch.tensor(0),))
+        self.checkScript(fn, (torch.tensor(1),))
+        self.checkScript(fn, (torch.tensor(2),))
+
+    def test_where(self):
+        def fn(x, y):
+            return torch.where(x > 0.0, x, y)
+
+        self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
+
+
+class TestEndToEndHybridFrontendModels(JitTestCase):
+
+    def test_dcgan_models(self):
+        class DCGANGenerator(nn.Module):
+            def __init__(self, nz, ngf, nc):
+                super(DCGANGenerator, self).__init__()
+                self.main = nn.Sequential(
+                    # input is Z, going into a convolution
+                    nn.ConvTranspose2d(nz, ngf * 8, 4, 1, 0, bias=False),
+                    nn.BatchNorm2d(ngf * 8),
+                    nn.ReLU(True),
+                    # state size. (ngf*8) x 4 x 4
+                    nn.ConvTranspose2d(ngf * 8, ngf * 4, 4, 2, 1, bias=False),
+                    nn.BatchNorm2d(ngf * 4),
+                    nn.ReLU(True),
+                    # state size. (ngf*4) x 8 x 8
+                    nn.ConvTranspose2d(ngf * 4, ngf * 2, 4, 2, 1, bias=False),
+                    nn.BatchNorm2d(ngf * 2),
+                    nn.ReLU(True),
+                    # state size. (ngf*2) x 16 x 16
+                    nn.ConvTranspose2d(ngf * 2, ngf, 4, 2, 1, bias=False),
+                    nn.BatchNorm2d(ngf),
+                    nn.ReLU(True),
+                    # state size. (ngf) x 32 x 32
+                    nn.ConvTranspose2d(ngf, nc, 4, 2, 1, bias=False),
+                    nn.Tanh()
+                    # state size. (nc) x 64 x 64
+                )
+
+            def forward(self, input):
+                return self.main(input)
+
+        class DCGANDiscriminator(nn.Module):
+            def __init__(self, nc, ndf):
+                super(DCGANDiscriminator, self).__init__()
+                self.main = nn.Sequential(
+                    # input is (nc) x 64 x 64
+                    nn.Conv2d(nc, ndf, 4, 2, 1, bias=False),
+                    nn.LeakyReLU(0.2, inplace=True),
+                    # state size. (ndf) x 32 x 32
+                    nn.Conv2d(ndf, ndf * 2, 4, 2, 1, bias=False),
+                    nn.BatchNorm2d(ndf * 2),
+                    nn.LeakyReLU(0.2, inplace=True),
+                    # state size. (ndf*2) x 16 x 16
+                    nn.Conv2d(ndf * 2, ndf * 4, 4, 2, 1, bias=False),
+                    nn.BatchNorm2d(ndf * 4),
+                    nn.LeakyReLU(0.2, inplace=True),
+                    # state size. (ndf*4) x 8 x 8
+                    nn.Conv2d(ndf * 4, ndf * 8, 4, 2, 1, bias=False),
+                    nn.BatchNorm2d(ndf * 8),
+                    nn.LeakyReLU(0.2, inplace=True),
+                    # state size. (ndf*8) x 4 x 4
+                    nn.Conv2d(ndf * 8, 1, 4, 1, 0, bias=False),
+                    nn.Sigmoid()
+                )
+
+            def forward(self, input):
+                return self.main(input).view(-1, 1).squeeze(1)
+
+        bs, nz, ngf, nc, ndf = 5, 6, 9, 3, 10
+        self.checkTrace(DCGANGenerator(nz, ngf, nc), (torch.rand(bs, nz, 1, 1),))
+        example_input = DCGANGenerator(nz, ngf, nc)(torch.rand(bs, nz, 1, 1))
+        self.checkTrace(DCGANDiscriminator(nc, ndf), (example_input,))
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/8439 InstanceNormalization bug')
+    def test_neural_style(self):
+        class TransformerNet(torch.nn.Module):
+            def __init__(self):
+                super(TransformerNet, self).__init__()
+                # Initial convolution layers
+                self.conv1 = ConvLayer(3, 32, kernel_size=9, stride=1)
+                self.in1 = torch.nn.InstanceNorm2d(32, affine=True)
+                self.conv2 = ConvLayer(32, 64, kernel_size=3, stride=2)
+                self.in2 = torch.nn.InstanceNorm2d(64, affine=True)
+                self.conv3 = ConvLayer(64, 128, kernel_size=3, stride=2)
+                self.in3 = torch.nn.InstanceNorm2d(128, affine=True)
+                # Residual layers
+                self.res1 = ResidualBlock(128)
+                self.res2 = ResidualBlock(128)
+                self.res3 = ResidualBlock(128)
+                self.res4 = ResidualBlock(128)
+                self.res5 = ResidualBlock(128)
+                # Upsampling Layers
+                self.deconv1 = UpsampleConvLayer(128, 64, kernel_size=3, stride=1, upsample=2)
+                self.in4 = torch.nn.InstanceNorm2d(64, affine=True)
+                self.deconv2 = UpsampleConvLayer(64, 32, kernel_size=3, stride=1, upsample=2)
+                self.in5 = torch.nn.InstanceNorm2d(32, affine=True)
+                self.deconv3 = ConvLayer(32, 3, kernel_size=9, stride=1)
+                # Non-linearities
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, X):
+                y = self.relu(self.in1(self.conv1(X)))
+                y = self.relu(self.in2(self.conv2(y)))
+                y = self.relu(self.in3(self.conv3(y)))
+                y = self.res1(y)
+                y = self.res2(y)
+                y = self.res3(y)
+                y = self.res4(y)
+                y = self.res5(y)
+                y = self.relu(self.in4(self.deconv1(y)))
+                y = self.relu(self.in5(self.deconv2(y)))
+                y = self.deconv3(y)
+                return y
+
+        class ConvLayer(torch.nn.Module):
+            def __init__(self, in_channels, out_channels, kernel_size, stride):
+                super(ConvLayer, self).__init__()
+                reflection_padding = kernel_size // 2
+                self.reflection_pad = torch.nn.ReflectionPad2d(reflection_padding)
+                self.conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride)
+
+            def forward(self, x):
+                out = self.reflection_pad(x)
+                out = self.conv2d(out)
+                return out
+
+        class ResidualBlock(torch.nn.Module):
+            """ResidualBlock
+            introduced in: https://arxiv.org/abs/1512.03385
+            recommended architecture: http://torch.ch/blog/2016/02/04/resnets.html
+            """
+
+            def __init__(self, channels):
+                super(ResidualBlock, self).__init__()
+                self.conv1 = ConvLayer(channels, channels, kernel_size=3, stride=1)
+                self.in1 = torch.nn.InstanceNorm2d(channels, affine=True)
+                self.conv2 = ConvLayer(channels, channels, kernel_size=3, stride=1)
+                self.in2 = torch.nn.InstanceNorm2d(channels, affine=True)
+                self.relu = torch.nn.ReLU()
+
+            def forward(self, x):
+                residual = x
+                out = self.relu(self.in1(self.conv1(x)))
+                out = self.in2(self.conv2(out))
+                out = out + residual
+                return out
+
+        class UpsampleConvLayer(torch.nn.Module):
+            """UpsampleConvLayer
+            Upsamples the input and then does a convolution. This method gives better results
+            compared to ConvTranspose2d.
+            ref: http://distill.pub/2016/deconv-checkerboard/
+            """
+
+            def __init__(self, in_channels, out_channels, kernel_size, stride, upsample=None):
+                super(UpsampleConvLayer, self).__init__()
+                self.upsample = upsample
+                if upsample:
+                    self.upsample_layer = torch.nn.Upsample(mode='nearest', scale_factor=upsample)
+                reflection_padding = kernel_size // 2
+                self.reflection_pad = torch.nn.ReflectionPad2d(reflection_padding)
+                self.conv2d = torch.nn.Conv2d(in_channels, out_channels, kernel_size, stride)
+
+            def forward(self, x):
+                x_in = x
+                if self.upsample:
+                    x_in = self.upsample_layer(x_in)
+                out = self.reflection_pad(x_in)
+                out = self.conv2d(out)
+                return out
+
+        self.checkTrace(TransformerNet(), (torch.rand(5, 3, 224, 224),))
+
+    def test_mnist(self):
+        class Net(nn.Module):
+            def __init__(self):
+                super(Net, self).__init__()
+                self.conv1 = nn.Conv2d(1, 10, kernel_size=5)
+                self.conv2 = nn.Conv2d(10, 20, kernel_size=5)
+                self.conv2_drop = nn.Dropout2d()
+                self.fc1 = nn.Linear(320, 50)
+                self.fc2 = nn.Linear(50, 10)
+
+            def forward(self, x):
+                x = F.relu(F.max_pool2d(self.conv1(x), 2))
+                x = F.relu(F.max_pool2d(self.conv2_drop(self.conv2(x)), 2))
+                x = x.view(-1, 320)
+                x = F.relu(self.fc1(x))
+                x = F.dropout(x, training=self.training)
+                x = self.fc2(x)
+                return F.log_softmax(x, dim=1)
+
+        # FIXME: eval() is present because it works around the issue described
+        # in https://github.com/pytorch/pytorch/issues/8448
+        self.checkTrace(Net().eval(), (torch.rand(5, 1, 28, 28),))
+
+    def test_reinforcement_learning(self):
+        class Policy(nn.Module):
+            def __init__(self):
+                super(Policy, self).__init__()
+                self.affine1 = nn.Linear(4, 128)
+                self.affine2 = nn.Linear(128, 2)
+
+            def forward(self, x):
+                x = F.relu(self.affine1(x))
+                action_scores = self.affine2(x)
+                return F.softmax(action_scores, dim=1)
+
+        self.checkTrace(Policy(), (torch.rand(1, 4),))
+
+    def test_snli(self):
+        # TODO:
+        #   1) nn.LSTM is called as a Python function https://github.com/pytorch/pytorch/issues/8449
+        #   2) Dropout is called as a Python function https://github.com/pytorch/pytorch/issues/8450
+        class Bottle(nn.Module):
+
+            def forward(self, input):
+                if len(input.size()) <= 2:
+                    return super(Bottle, self).forward(input)
+                size = input.size()[:2]
+                out = super(Bottle, self).forward(input.view(size[0] * size[1], -1))
+                return out.view(size[0], size[1], -1)
+
+        class Linear(Bottle, nn.Linear):
+            pass
+
+        class Encoder(nn.Module):
+
+            def __init__(self, config):
+                super(Encoder, self).__init__()
+                self.config = config
+                input_size = config.d_proj if config.projection else config.d_embed
+                dropout = 0 if config.n_layers == 1 else config.dp_ratio
+                self.rnn = nn.LSTM(input_size=input_size, hidden_size=config.d_hidden,
+                                   num_layers=config.n_layers, dropout=dropout,
+                                   bidirectional=config.birnn)
+
+            def forward(self, inputs):
+                batch_size = inputs.size()[1]
+                state_shape = self.config.n_cells, batch_size, self.config.d_hidden
+                h0 = c0 = inputs.new_zeros(state_shape)
+                outputs, (ht, ct) = self.rnn(inputs, (h0, c0))
+                return ht[-1] if not self.config.birnn else ht[-2:].transpose(0, 1).contiguous().view(batch_size, -1)
+
+        class SNLIClassifier(nn.Module):
+
+            def __init__(self, config):
+                super(SNLIClassifier, self).__init__()
+                self.config = config
+                self.embed = nn.Embedding(config.n_embed, config.d_embed)
+                self.projection = Linear(config.d_embed, config.d_proj)
+                self.encoder = Encoder(config)
+                self.dropout = nn.Dropout(p=config.dp_ratio)
+                self.relu = nn.ReLU()
+                seq_in_size = 2 * config.d_hidden
+                if self.config.birnn:
+                    seq_in_size *= 2
+                lin_config = [seq_in_size] * 2
+                self.out = nn.Sequential(
+                    Linear(*lin_config),
+                    self.relu,
+                    self.dropout,
+                    Linear(*lin_config),
+                    self.relu,
+                    self.dropout,
+                    Linear(*lin_config),
+                    self.relu,
+                    self.dropout,
+                    Linear(seq_in_size, config.d_out))
+
+            def forward(self, premise, hypothesis):
+                prem_embed = self.embed(premise)
+                hypo_embed = self.embed(hypothesis)
+                if self.config.fix_emb:
+                    prem_embed = prem_embed.detach()
+                    hypo_embed = hypo_embed.detach()
+                if self.config.projection:
+                    prem_embed = self.relu(self.projection(prem_embed))
+                    hypo_embed = self.relu(self.projection(hypo_embed))
+                premise = self.encoder(prem_embed)
+                hypothesis = self.encoder(hypo_embed)
+                scores = self.out(torch.cat([premise, hypothesis], 1))
+                return scores
+
+        class Config:
+            n_embed = 100
+            d_embed = 100
+            d_proj = 300
+            dp_ratio = 0.0  # For deterministic testing TODO: change by fixing seed in checkTrace?
+            d_hidden = 300
+            birnn = True
+            d_out = 300
+            fix_emb = True
+            projection = True
+            n_layers = 2
+            n_cells = 4  # 2 * n_layers because birnn = True
+
+        premise = torch.LongTensor(48, 128).random_(0, 100)
+        hypothesis = torch.LongTensor(24, 128).random_(0, 100)
+
+        self.checkTrace(SNLIClassifier(Config()), (premise, hypothesis), inputs_require_grads=False)
+
+    def test_super_resolution(self):
+        import torch.nn.init as init
+
+        class Net(nn.Module):
+
+            def __init__(self, upscale_factor):
+                super(Net, self).__init__()
+
+                self.relu = nn.ReLU()
+                self.conv1 = nn.Conv2d(1, 64, (5, 5), (1, 1), (2, 2))
+                self.conv2 = nn.Conv2d(64, 64, (3, 3), (1, 1), (1, 1))
+                self.conv3 = nn.Conv2d(64, 32, (3, 3), (1, 1), (1, 1))
+                self.conv4 = nn.Conv2d(32, upscale_factor ** 2, (3, 3), (1, 1), (1, 1))
+                self.pixel_shuffle = nn.PixelShuffle(upscale_factor)
+
+            def forward(self, x):
+                x = self.relu(self.conv1(x))
+                x = self.relu(self.conv2(x))
+                x = self.relu(self.conv3(x))
+                x = self.pixel_shuffle(self.conv4(x))
+                return x
+
+        net = Net(upscale_factor=4)
+        self.checkTrace(net, (torch.rand(5, 1, 64, 64),))
+
+    @unittest.skip('This needs to be re-written into a script module')
+    def test_time_sequence_prediction(self):
+        class Sequence(nn.Module):
+            def __init__(self):
+                super(Sequence, self).__init__()
+                self.lstm1 = nn.LSTMCell(1, 51)
+                self.lstm2 = nn.LSTMCell(51, 51)
+                self.linear = nn.Linear(51, 1)
+
+            def forward(self, input, future=0):
+                outputs = []
+                h_t = torch.zeros(input.size(0), 51, dtype=torch.double)
+                c_t = torch.zeros(input.size(0), 51, dtype=torch.double)
+                h_t2 = torch.zeros(input.size(0), 51, dtype=torch.double)
+                c_t2 = torch.zeros(input.size(0), 51, dtype=torch.double)
+
+                for _, input_t in enumerate(input.chunk(input.size(1), dim=1)):
+                    h_t, c_t = self.lstm1(input_t, (h_t, c_t))
+                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+                    output = self.linear(h_t2)
+                    outputs += [output]
+                for _ in range(future):  # if we should predict the future
+                    h_t, c_t = self.lstm1(output, (h_t, c_t))
+                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+                    output = self.linear(h_t2)
+                    outputs += [output]
+                outputs = torch.stack(outputs, 1).squeeze(2)
+                return outputs
+
+        self.checkTrace(Sequence(), (torch.rand(97, 999),), verbose=True)
+
+    def test_vae(self):
+        class VAE(nn.Module):
+            def __init__(self):
+                super(VAE, self).__init__()
+
+                self.fc1 = nn.Linear(784, 400)
+                self.fc21 = nn.Linear(400, 20)
+                self.fc22 = nn.Linear(400, 20)
+                self.fc3 = nn.Linear(20, 400)
+                self.fc4 = nn.Linear(400, 784)
+
+            def encode(self, x):
+                h1 = F.relu(self.fc1(x))
+                return self.fc21(h1), self.fc22(h1)
+
+            def reparameterize(self, mu, logvar):
+                if self.training:
+                    std = torch.exp(0.5 * logvar)
+                    eps = torch.randn_like(std)
+                    return eps.mul(std).add_(mu)
+                else:
+                    return mu
+
+            def decode(self, z):
+                h3 = F.relu(self.fc3(z))
+                return F.sigmoid(self.fc4(h3))
+
+            def forward(self, x):
+                mu, logvar = self.encode(x.view(-1, 784))
+                z = self.reparameterize(mu, logvar)
+                return self.decode(z), mu, logvar
+
+        # FIXME: this fails under training because of the call to `randn_like`
+        # https://github.com/pytorch/pytorch/issues/8443
+        self.checkTrace(VAE().eval(), (torch.rand(128, 1, 28, 28),))
+
 
 # Smoke tests for export methods
-class TestPytorchExportModes(unittest.TestCase):
+class TestPytorchExportModes(JitTestCase):
     class MyModel(nn.Module):
         def __init__(self):
             super(TestPytorchExportModes.MyModel, self).__init__()
@@ -2939,6 +3542,419 @@ class TestPytorchExportModes(unittest.TestCase):
                            export_type=torch.onnx.ExportTypes.DIRECTORY)
         shutil.rmtree(d)
 
+    def test_aten_fallback(self):
+        class ModelWithAtenNotONNXOp(nn.Module):
+            def forward(self, x, y):
+                abcd = x + y
+                defg = torch.qr(abcd)
+                return defg
+
+        x = torch.rand(3, 4)
+        y = torch.rand(3, 4)
+        f = io.BytesIO()
+        exported = torch.onnx.export_to_pretty_string(
+            ModelWithAtenNotONNXOp(), (x, y), f,
+            operator_export_type=OperatorExportTypes.ONNX_ATEN_FALLBACK)
+        self.assertExpected(exported)
+
+
+# known to be failing in tracer
+EXCLUDE_TRACED = {
+    'test___getitem___adv_index',
+    'test___getitem___adv_index_beg',
+    'test___getitem___adv_index_comb',
+    'test___getitem___adv_index_dup',
+    'test___getitem___adv_index_end',
+    'test___getitem___adv_index_mid',
+    'test___getitem___adv_index_sub',
+    'test___getitem___adv_index_sub_2',
+    'test___getitem___adv_index_sub_3',
+    'test___getitem___adv_index_var',
+    'test_add_scalar',
+    'test_add_scalar_constant',
+    'test_expand_scalar_to_scalar',
+    'test_index_add_dim',
+    'test_index_add_dim_neg0',
+    'test_index_add_scalar_all_dim',
+    'test_index_add_scalar_all_dim_neg0',
+    'test_index_add_scalar_input_dim',
+    'test_index_add_scalar_input_dim_neg0',
+    'test_index_copy_dim',
+    'test_index_copy_dim_neg0',
+    'test_index_copy_scalar_all_dim',
+    'test_index_copy_scalar_all_dim_neg0',
+    'test_index_copy_scalar_input_dim',
+    'test_index_copy_scalar_input_dim_neg0',
+    'test_index_fill_dim',
+    'test_index_fill_dim_neg0',
+    'test_index_fill_scalar_both_dim',
+    'test_index_fill_scalar_both_dim_neg0',
+    'test_index_fill_scalar_index_dim',
+    'test_index_fill_scalar_index_dim_neg0',
+    'test_index_fill_scalar_input_dim',
+    'test_index_fill_scalar_input_dim_neg0',
+    'test_index_fill_variable_dim',
+    'test_index_fill_variable_dim_neg0',
+    'test_masked_fill',
+    'test_masked_fill_broadcast_rhs',
+    'test_masked_fill_scalar',
+    'test_masked_fill_scalar_broadcast_rhs',
+    'test_masked_fill_scalar_variable',
+    'test_masked_fill_tensor',
+    'test_masked_scatter',
+    'test_masked_scatter_broadcast_rhs',
+    'test_masked_scatter_scalar',
+    'test_masked_scatter_scalar_broadcast_rhs',
+    'test_scatter_add_dim0',
+    'test_scatter_add_dim0_neg0',
+    'test_scatter_add_dim1',
+    'test_scatter_add_dim1_neg0',
+    'test_scatter_add_scalar_all_dim0',
+    'test_scatter_add_scalar_all_dim0_neg0',
+    'test_scatter_dim0',
+    'test_scatter_dim0_neg0',
+    'test_scatter_dim1',
+    'test_scatter_dim1_neg0',
+    'test_scatter_scalar_all_dim0',
+    'test_scatter_scalar_all_dim0_neg0',
+    'test_tanh_scalar',
+    'test_unsqueeze_last_neg0',
+    'test_unsqueeze_middle_neg0',
+    'test_split_dim',
+    'test_split_dim_neg0',
+    'test_gesv',
+    'test_inverse',
+}
+
+# known to be failing in script
+EXCLUDE_SCRIPT = {
+    'test_add',
+    'test_add_broadcast_all',
+    'test_add_broadcast_lhs',
+    'test_add_broadcast_rhs',
+    'test_add_scalar',
+    'test_add_scalar_broadcast_lhs',
+    'test_add_scalar_broadcast_rhs',
+    'test_clamp_max',
+    'test_clamp_max_scalar',
+    'test_clamp_min',
+    'test_clamp_min_scalar',
+    'test_max_elementwise',
+    'test_max_elementwise_broadcast_all',
+    'test_max_elementwise_broadcast_lhs',
+    'test_max_elementwise_broadcast_rhs',
+    'test_max_scalar_elementwise_broadcast_lhs',
+    'test_min_elementwise',
+    'test_min_elementwise_broadcast_all',
+    'test_min_elementwise_broadcast_lhs',
+    'test_min_elementwise_broadcast_rhs',
+    'test_min_scalar_elementwise_broadcast_lhs',
+    'test_mul_scalar',
+    'test_mul_scalar_constant',
+    'test_norm_inf',
+    'test_renorm_norm_inf',
+    'test_sigmoid_scalar',
+    'test_split',
+    'test_split_size_list',
+    'test_split_size_list_dim',
+    'test_split_size_list_dim_neg0',
+    'test_sub',
+    'test_sub_broadcast_all',
+    'test_sub_broadcast_lhs',
+    'test_sub_broadcast_rhs',
+    'test_sub_scalar_broadcast_lhs',
+    'test_sub_scalar_broadcast_rhs',
+    'test_sub_scalar_constant',
+    'test_unsqueeze_last_neg0',
+    'test_unsqueeze_middle_neg0',
+    'test_addmm_broadcast_lhs_coef',
+    'test_addmm_coef',
+    'test_addmm_scalar_broadcast_lhs_coef',
+    'test_expand',
+    'test_expand_1_element',
+    'test_expand_new_dim',
+    'test_expand_new_dim_front_old_front_1',
+    'test_expand_scalar_to_dims',
+    'test_expand_scalar_to_scalar',
+    'test_expand_size',
+    'test_index_add_dim',
+    'test_index_add_dim_neg0',
+    'test_index_add_scalar_all_dim',
+    'test_index_add_scalar_all_dim_neg0',
+    'test_index_add_scalar_input_dim',
+    'test_index_add_scalar_input_dim_neg0',
+    'test_index_copy_dim',
+    'test_index_copy_dim_neg0',
+    'test_index_copy_scalar_all_dim',
+    'test_index_copy_scalar_all_dim_neg0',
+    'test_index_copy_scalar_input_dim',
+    'test_index_copy_scalar_input_dim_neg0',
+    'test_index_fill_dim',
+    'test_index_fill_dim_neg0',
+    'test_index_fill_scalar_both_dim',
+    'test_index_fill_scalar_both_dim_neg0',
+    'test_index_fill_scalar_index_dim',
+    'test_index_fill_scalar_index_dim_neg0',
+    'test_index_fill_scalar_input_dim',
+    'test_index_fill_scalar_input_dim_neg0',
+    'test_index_fill_variable_dim',
+    'test_index_fill_variable_dim_neg0',
+    'test_masked_fill',
+    'test_masked_fill_broadcast_rhs',
+    'test_masked_fill_scalar',
+    'test_masked_fill_scalar_broadcast_rhs',
+    'test_masked_fill_scalar_variable',
+    'test_masked_fill_tensor',
+    'test_masked_scatter',
+    'test_masked_scatter_broadcast_rhs',
+    'test_masked_scatter_scalar',
+    'test_masked_scatter_scalar_broadcast_rhs',
+    'test_max_scalar_elementwise',
+    'test_max_scalar_elementwise_broadcast_rhs',
+    'test_min_scalar_elementwise',
+    'test_min_scalar_elementwise_broadcast_rhs',
+    'test_permute',
+    'test_permute_neg_dim',
+    'test_permute_scalar',
+    'test_repeat',
+    'test_repeat_scalar',
+    'test_repeat_single_number',
+    'test_repeat_unsqueeze',
+    'test_reshape',
+    'test_reshape_1d',
+    'test_reshape_scalar_to_1d',
+    'test_reshape_scalar_to_scalar',
+    'test_reshape_size',
+    'test_scatter_add_dim0',
+    'test_scatter_add_dim0_neg0',
+    'test_scatter_add_dim1',
+    'test_scatter_add_dim1_neg0',
+    'test_scatter_add_scalar_all_dim0',
+    'test_scatter_add_scalar_all_dim0_neg0',
+    'test_scatter_dim0',
+    'test_scatter_dim0_neg0',
+    'test_scatter_dim1',
+    'test_scatter_dim1_neg0',
+    'test_scatter_scalar_all_dim0',
+    'test_scatter_scalar_all_dim0_neg0',
+    'test_view',
+    'test_view_1d',
+    'test_view_scalar_to_1d',
+    'test_view_scalar_to_scalar',
+    'test_view_size',
+    'test_split_dim',
+    'test_split_dim_neg0',
+    'test_gesv',
+    'test_inverse',
+    'test_pow_scalar_constant',
+    'test_pow_constant',
+    'test_mul_constant',
+    'test_div_scalar_constant',
+    'test_div_constant',
+}
+
+
+# make a new function where all non-tensor arguments in 'args' have been partially
+# applied, and all tensor arguments remain.
+# used to trace functions when some arguments are not tensors
+def partial_apply_nontensors(fn, args, **kwargs):
+    source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
+
+    def new_fn(*tensors_):
+        tensors = iter(tensors_)
+        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
+
+    return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
+
+
+def create_traced_fn(fn):
+    def traced_fn(*inputs, **kwargs):
+        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
+        traced = torch.jit.trace(*inputs_tensors)(fn_tensors)
+        return traced(*inputs_tensors)
+    return traced_fn
+
+script_template = '''
+def the_method({}):
+    return {}
+'''
+
+
+def create_script_fn(method_name, is_functional, output_process_fn):
+    def script_fn(*args, **kwargs):
+        formals = []
+        tensors = []
+        actuals = []
+        for arg in args:
+            if isinstance(arg, torch.Tensor):
+                name = 'i{}'.format(len(formals))
+                formals.append(name)
+                actuals.append(name)
+                tensors.append(arg)
+            else:
+                actuals.append(str(arg))
+        kwargs_str = ''
+        for k, v in kwargs.items():
+            kwargs_str += ', ' + k + '=' + str(v)
+        if is_functional:
+            call = 'torch.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
+        else:
+            call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
+        script = script_template.format(', '.join(formals), call)
+        CU = torch.jit.CompilationUnit(script)
+        return output_process_fn(CU.the_method(*tensors))
+    return script_fn
+
+
+def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True):
+    kwargs = kwargs if kwargs else {}
+
+    def allSum(vs):
+        if isinstance(vs, torch.Tensor):
+            vs = (vs,)
+        return sum([(i + 1) * v.sum()
+                    for i, v in enumerate(vs)
+                    if v is not None and v.dtype.is_floating_point])
+
+    def clone_inputs(requires_grad):
+        inputs = [
+            arg.detach().clone().requires_grad_(requires_grad and arg.requires_grad)
+            if isinstance(arg, torch.Tensor) else arg for arg in args
+        ]
+        return inputs, [input for input in inputs if isinstance(input, torch.Tensor) and input.requires_grad]
+
+    nograd_inputs, nograd_tensors = clone_inputs(False)
+    recording_inputs, recording_tensors = clone_inputs(True)
+
+    # test no gradients case
+    outputs = reference_func(*nograd_inputs, **kwargs)
+    outputs_test = func(*nograd_inputs, **kwargs)
+    self.assertEqual(outputs, outputs_test)
+
+    # test single grad case
+    outputs = reference_func(*recording_inputs, **kwargs)
+    grads = torch.autograd.grad(allSum(outputs), recording_tensors,
+                                allow_unused=allow_unused)
+
+    outputs_test = func(*recording_inputs, **kwargs)
+    grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
+                                     allow_unused=allow_unused)
+    self.assertEqual(outputs, outputs_test)
+    self.assertEqual(grads, grads_test)
+
+    # test the grad grad case
+
+    outputs = reference_func(*recording_inputs, **kwargs)
+    l1 = allSum(outputs)
+    grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
+                                allow_unused=allow_unused)
+    l2 = (allSum(grads) * l1)
+    grads2 = torch.autograd.grad(l2, recording_tensors, allow_unused=allow_unused)
+
+    recording_inputs, recording_tensors = clone_inputs(True)
+
+    outputs_test = func(*recording_inputs, **kwargs)
+    l1_test = allSum(outputs_test)
+    grads_test = torch.autograd.grad(
+        l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
+    l2_test = (allSum(grads_test) * l1_test)
+    grads2_test = torch.autograd.grad(l2_test, recording_tensors, allow_unused=allow_unused)
+
+    self.assertEqual(outputs, outputs_test)
+    self.assertEqual(grads, grads_test)
+    for g2, g2_test in zip(grads2, grads2_test):
+        if g2 is None and g2_ge is None:
+            continue
+        self.assertTrue(torch.allclose(g2, g2_test, atol=5e-4, rtol=1e-4))
+
+
+class TestJitGenerated(TestCase):
+    pass
+
+
+def add_test(
+        name,
+        self_size,
+        args,
+        variant_name='',
+        dim_args_idx=(),
+        skipTestIf=(),
+        output_process_fn=lambda x: x,
+        kwargs=None):
+    basic_test_name = 'test_' + name
+    if variant_name != '':
+        basic_test_name += '_' + variant_name
+
+    for dim_perm in product([-1, 1], repeat=len(dim_args_idx)):
+        test_name = basic_test_name
+        new_args = [arg * dim_perm[dim_args_idx.index(i)] if i in dim_args_idx else arg for i, arg in enumerate(args)]
+        test_name = basic_test_name + ''.join('_neg' + str(i) for i, idx in enumerate(dim_perm) if idx < 0)
+        new_args = tuple(new_args)
+
+        # for-loop bodies don't define scopes, so we have to save the variables
+        # we want to close over in some way
+        def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
+                    output_process_fn=output_process_fn):
+            def check(name):
+                is_magic_method = name[:2] == '__' and name[-2:] == '__'
+                is_inplace = name[-1] == "_" and not is_magic_method
+                self_variable = create_input((self_size,))[0][0]
+                # FixMe: run grad checks on inplace self
+                if is_inplace:
+                    self_variable.requires_grad = False
+                # need to record this because methods can change the szie (e.g. unsqueeze)
+                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
+                self_tensor = deepcopy(self_variable.data)
+                args_tensor = deepcopy(unpack_variables(args_variable))
+                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
+
+                def fn(*inputs, **kwargs):
+                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
+                    return output_process_fn(output)
+
+                if not is_inplace and name not in EXCLUDE_GRADCHECK and not exclude_tensor_method(name, test_name):
+                    if test_name not in EXCLUDE_TRACED:
+                        check_against_reference(self, create_traced_fn(fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
+
+                    if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
+                        check_against_reference(self,
+                                                create_script_fn(name, False, output_process_fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
+
+                # functional interface tests
+                if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
+                    def fn(*inputs, **kwargs):
+                        output = getattr(torch, name)(*inputs, **kwargs)
+                        return output_process_fn(output)
+
+                    f_args_variable = (self_variable,) + args_variable
+                    f_args_tensor = (self_tensor,) + args_tensor
+
+                    if not is_inplace and test_name not in EXCLUDE_TRACED:
+                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
+
+                    if not is_inplace and test_name not in EXCLUDE_SCRIPT:
+                        check_against_reference(self,
+                                                create_script_fn(name, True, output_process_fn),
+                                                fn, f_args_variable, kwargs_variable)
+
+            check(name)
+            inplace_name = name + '_'
+            # can't broadcast inplace to left hand side
+            broadcast_skip_inplace = 'broadcast_lhs' in test_name or 'broadcast_all' in test_name
+            if hasattr(torch.ones(1), inplace_name) and not broadcast_skip_inplace:
+                check(inplace_name)
+
+        assert not hasattr(TestJitGenerated, test_name), 'Two tests have the same name: ' + test_name
+
+        for skip in skipTestIf:
+            do_test = skip(do_test)
+
+        setattr(TestJitGenerated, test_name, do_test)
+
+for test in method_tests:
+    add_test(*test)
 
 if __name__ == '__main__':
     run_tests()

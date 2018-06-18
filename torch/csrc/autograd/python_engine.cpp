@@ -14,6 +14,7 @@
 #endif
 
 #include <unordered_set>
+#include <memory> // for unique_ptr
 
 using namespace torch::autograd;
 
@@ -44,6 +45,10 @@ void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
     python_err->persist();
   }
   Engine::thread_on_exception(task, e);
+}
+
+std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
+  return std::unique_ptr<AnomalyMetadata>(new PyAnomalyMetadata());
 }
 
 variable_list PythonEngine::execute(
@@ -134,7 +139,7 @@ PyObject *THPEngine_run_backward(THPEngine *self, PyObject *args, PyObject *kwar
     }
   }
 
-  edge_list output_edges;
+  std::vector<Edge> output_edges;
   if (inputs != nullptr) {
     int num_inputs = PyTuple_GET_SIZE(inputs);
     output_edges.reserve(num_inputs);

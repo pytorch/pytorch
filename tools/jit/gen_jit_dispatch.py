@@ -5,12 +5,6 @@ from ..autograd.utils import CodeTemplate, write, uninplace_api_name
 from ..autograd.gen_autograd import load_aten_declarations
 from collections import OrderedDict
 
-template_path = os.path.join(os.path.dirname(__file__), 'templates')
-
-ATEN_DISPATCH_CPP = CodeTemplate.from_file(template_path + '/aten_dispatch.cpp')
-ATEN_INTERNED_STRINGS_H = CodeTemplate.from_file(template_path + '/aten_interned_strings.h')
-ATEN_SCHEMA_CPP = CodeTemplate.from_file(template_path + '/aten_schema.cpp')
-
 ATTR_METHOD_MAP = {
     'int64_t': 'i',
     'IntList': 'is',
@@ -46,16 +40,19 @@ auto ${name} = tensor_as<at::IntList>(std::move(${name}_tensor));\
 """)
 
 CALL_NAMESPACE = CodeTemplate("""\
-AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
 auto result = at::${name}(${args});
 """)
 CALL_METHOD = CodeTemplate("""\
-AutoGPU device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
+DeviceGuard device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
 auto result = (${first}).${name}(${args});
 """)
-CALL_DTYPE = CodeTemplate("""\
-AutoGPU device_guard(device[1]);
-auto result = resolveType(device[0], layout, (at::ScalarType)dtype).${name}(${args});
+CALL_TENSOR_OPTIONS = CodeTemplate("""\
+const auto device_index = static_cast<int32_t>(device[1]);
+const auto options = TensorOptions()
+        .dtype(static_cast<at::ScalarType>(dtype))
+        .layout(static_cast<at::Layout>(layout))
+        .device({static_cast<at::Device::Type>(device[0]), device_index});
+auto result = torch::${name}(${args}, options);
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
@@ -77,7 +74,7 @@ def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
 
-blacklisted_types = {'SparseTensor', 'Storage', 'ScalarType', 'optional<ScalarType>'}
+blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string'}
 default_only_types = {'Generator'}
 
 
@@ -87,8 +84,7 @@ def is_jit_arg(i, arg):
         return False
     if simple_type in default_only_types and 'default' not in arg:
         return False
-    # allow 'Type dtype' as the first argument only
-    if simple_type == 'Type' and (i > 0 or arg['name'] != 'dtype'):
+    if simple_type == 'Type':
         return False
     return True
 
@@ -97,9 +93,8 @@ def is_jit_op(decl):
     # we currently only support vararg tensor lists when they are the _first_ argument
     # and the only tensor argument
     arguments = decl['arguments']
-    has_tensorlist = any(arg['simple_type'] == 'TensorList' for arg in arguments)
-    num_tensor_args = sum(map(is_tensor_arg, arguments))
-    if has_tensorlist and (num_tensor_args != 1 or arguments[0]['simple_type'] != 'TensorList'):
+    # Only support a single TensorList arg
+    if sum(arg['simple_type'] == 'TensorList' for arg in arguments) > 1:
         return False
 
     return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
@@ -111,7 +106,9 @@ def is_jit_op(decl):
 # TODO: Why are they not supported?
 skip_scalar_overload = {
     'lt-2': [1], 'gt-2': [1], 'le-2': [1], 'ge-2': [1], 'eq-2': [1], 'ne-2': [1],
-    'pow-2': [0, 1], 'add-3': [1], 'sub-3': [1], 'mul-2': [1], 'div-2': [1],
+    'pow-2': [0, 1], 'add-3': [1], 'sub-3': [1],
+    'mul-2': [1], 'th_mul-2': [1], 'native_mul-2': [1],
+    'div-2': [1], 'th_div-2': [1], 'native_div-2': [1],
     'fmod-2': [1], 'remainder-2': [1], '__and__-2': [1], '__or__-2': [1],
     '__iand__-2': [1], '__ior__-2': [1], '__xor__-2': [1], '__ixor__-2': [1],
     '__lshift__-2': [1], '__ilshift__-2': [1], '__rshift__-2': [1], '__irshift__-2': [1],
@@ -128,12 +125,15 @@ def is_sized_intlist_arg(arg):
     return (arg['simple_type'] == 'IntList') and ('size' in arg)
 
 
-def gen_jit_dispatch(declarations, out):
+def gen_jit_dispatch(declarations, out, template_path):
+    ATEN_DISPATCH_CPP = CodeTemplate.from_file(template_path + '/aten_dispatch.cpp')
+    ATEN_INTERNED_STRINGS_H = CodeTemplate.from_file(template_path + '/aten_interned_strings.h')
+
     ops = {}
 
     def get_invocation(decl, args, num_dynamic_inputs):
-        if decl.get('has_dtype'):
-            return CALL_DTYPE.substitute(name=decl['name'], args=args[:-3])
+        if decl.get('has_tensor_options'):
+            return CALL_TENSOR_OPTIONS.substitute(name=decl['name'], args=args[:-3])
         elif 'namespace' in decl['method_of']:
             return CALL_NAMESPACE.substitute(name=decl['name'], args=args, num_dynamic_inputs=num_dynamic_inputs)
         else:
@@ -157,25 +157,54 @@ def gen_jit_dispatch(declarations, out):
             # from the end of the stack
             static_inputs = sum(is_positional_arg) - 1
             num_dynamic_inputs = 'varargs_length'
+            tensorlist_idx = [i for i, arg in enumerate(decl['arguments']) if arg['simple_type'] == 'TensorList'][0]
         else:
             static_inputs = sum(is_positional_arg)
             num_dynamic_inputs = static_inputs
 
-        real_inputs = count()
+        real_inputs = 0
         for i, arg in enumerate(decl['arguments']):
-            # XXX: we currently support only TensorList ops that have a TensorList as
-            # the first argument, that is then followed by a number of positional args.
+            # This conditional allows us to process argument lists with a flattened argument list
+            # with a single TensorList. Given the sequence of arguments:
+            # a b c [d e f g] h i # [] is the list
+            #
+            # 1. For the section where we are processing positional inputs before the
+            #    TensorList:
+            #    a b c [d e f g] h i # [] is the list
+            #    ~~~~~~~~~~~~ <- N
+            #   we set this view_length to the total number of varargs inputs (i.e. the length)
+            #   of the whole argument list. This means that indexing into the list using peek()
+            #   we will retrieve arguments ar their true indices (i.e. peek at 0 points to a,
+            #   1 points to b, etc...). Similarly, we can use peekSlice() to index into the
+            #   list itself this way.
+            # 2. After the list:
+            #    a b c [d e f g] h i # [] is the list
+            #                 ~~~~~~ <- N
+            #   Here we set the view length to static_inputs. In our example,
+            #   we effectively ignore the fact that we have a list here. What is
+            #   significant is that our index i is equivalent when the view length
+            #   is right-justified, whether we have the list or not. Concretely,
+            #   indexing h or i from `a b c [d e f g] h i` is equvalent to indexing
+            #   h or i from `a b c h i`.
+            view_length = 'varargs_length' if has_tensorlist and i < tensorlist_idx else static_inputs
+
             if arg['simple_type'] == 'TensorList':
-                arguments.append('peekSlice(stack, 0, varargs_length - {}, varargs_length)'.format(static_inputs))
+                # NOTE: don't advance real_inputs here. After this we are going
+                # to switch over to indexing from the end as if we only had
+                # the static arguments.
+                arguments.append('peekSlice(stack, {}, varargs_length - {}, varargs_length)'
+                                 .format(real_inputs, static_inputs))
             elif arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
             elif is_tensor_arg(arg):
-                arguments.append('std::move(peek(stack, {}, {}))'.format(next(real_inputs), static_inputs))
+                arguments.append('std::move(peek(stack, {}, {}))'.format(real_inputs, view_length))
+                real_inputs += 1
             elif is_positional_arg[i]:
                 template_kwargs = dict(type=arg['simple_type'],
                                        name=arg['name'],
-                                       i=next(real_inputs),
-                                       N=static_inputs)
+                                       i=real_inputs,
+                                       N=view_length)
+                real_inputs += 1
 
                 if is_sized_intlist_arg(arg):
                     assign = POS_INTLIST_ASSIGNMENT.substitute(size=arg['size'],
@@ -188,6 +217,7 @@ def gen_jit_dispatch(declarations, out):
             else:
                 simple_type = arg['simple_type']
 
+                assert simple_type in ATTR_METHOD_MAP, (decl['name'], simple_type)
                 attr_method = ATTR_METHOD_MAP[simple_type]
                 assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(simple_type, simple_type),
                                                   name=arg['name'],
@@ -259,19 +289,19 @@ def gen_jit_dispatch(declarations, out):
     # add arguments dtype and device for functions like zeros
     for decl in jit_decls:
         arguments = decl['arguments']
-        if len(arguments) == 0 or arguments[0]['simple_type'] != 'Type':
-            continue
-        del arguments[0]
-        arguments.extend([
-            # dtype is specified as an int64_t of at::ScalarType
-            {'name': 'dtype', 'simple_type': 'int64_t', 'default': 'static_cast<int64_t>(at::kFloat)'},
-            # device is specified as an IntList of { torch::DeviceType, device_id }
-            {'name': 'device', 'simple_type': 'IntList',
-                'default': '{static_cast<int64_t>(torch::DeviceType::CPU), -1}'},
-            # layout is specified as an int64_t of Layouts's is_strided
-            {'name': 'layout', 'simple_type': 'int64_t', 'default': '1'}
-        ])
-        decl['has_dtype'] = True
+        for n, arg in enumerate(arguments):
+            if arg['simple_type'] == 'TensorOptions':
+                del arguments[n]
+                arguments.extend([
+                    # dtype is specified as an int64_t of at::ScalarType
+                    {'name': 'dtype', 'simple_type': 'int64_t', 'default': 'static_cast<int64_t>(at::kFloat)'},
+                    # device is specified as an IntList of { at::Device::Type, device_id }
+                    {'name': 'device', 'simple_type': 'IntList',
+                        'default': '{static_cast<int64_t>(at::Device::Type::CPU), -1}'},
+                    # layout is specified as an int64_t of at::Layout
+                    {'name': 'layout', 'simple_type': 'int64_t', 'default': 'static_cast<int64_t>(at::kStrided)'}
+                ])
+                decl['has_tensor_options'] = True
 
     for decl in jit_decls:
         emit_decl(decl)
@@ -282,7 +312,7 @@ def gen_jit_dispatch(declarations, out):
     }
     write(out, 'aten_dispatch.cpp', ATEN_DISPATCH_CPP, env)
 
-    emit_schema(jit_decls, out)
+    emit_schema(jit_decls, out, template_path)
 
     # NB: Operate on aten_decls, not jit_decls, because VariableType is
     # a client for these symbols as well
@@ -303,7 +333,8 @@ def gen_jit_dispatch(declarations, out):
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
 
-def emit_schema(jit_decls, out):
+def emit_schema(jit_decls, out, template_path):
+    ATEN_SCHEMA_CPP = CodeTemplate.from_file(template_path + '/aten_schema.cpp')
 
     # see [aten_schema encoding] for how this gets translated to C++ object
 
@@ -358,12 +389,13 @@ def emit_schema(jit_decls, out):
     def emit(decl):
         arguments = [a for a in decl['arguments'] if a['simple_type'] not in default_only_types]
         n = get_name(decl['name'])
+        n_args = len(arguments)
+        n_returns = len(decl['returns'])
+        env['arguments'].append('// Arguments for {} ({} args, {} returns)'.format(decl['name'], n_args, n_returns))
         for a in arguments:
             emit_arg(a, False)
         for a in decl['returns']:
             emit_arg(a, True)
-        n_args = len(arguments)
-        n_returns = len(decl['returns'])
         env['operators'].append('{{ {}, {}, {} }}, // FunctionSchema("{}", <{} arguments>, <{} returns>) '.format(
             n, n_args, n_returns, decl['name'], n_args, n_returns))
 
@@ -385,8 +417,10 @@ def main():
                         help='path to Declarations.yaml')
     parser.add_argument('out', metavar='OUT',
                         help='path to output directory')
+    parser.add_argument('template-path', metavar='TEMPLATE_PATH',
+                        help='path to templates directory')
     args = parser.parse_args()
-    gen_jit_dispatch(args.declarations, args.out)
+    gen_jit_dispatch(args.declarations, args.out, args.template_path)
 
 
 if __name__ == '__main__':

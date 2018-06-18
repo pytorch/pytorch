@@ -165,6 +165,10 @@ The following operators are supported:
 * max
 * min
 * eq
+* gt
+* lt
+* ge
+* le
 * exp
 * permute
 * Conv

@@ -61,16 +61,20 @@ private:
     auto& ten = const_cast<Tensor<Context>&>(ten_);
     return typeFor(ten).tensorFromBlob(ten.raw_mutable_data(), ten.dims());
   }
-  at::Tensor loadInput(size_t i) {
-    return tensorWrapping(Input(i));
+
+  at::Tensor peek(size_t i, size_t N) {
+    auto real_idx = InputSize() - N + i;
+    return tensorWrapping(Input(real_idx));
   }
-  std::vector<at::Tensor> loadInputsAtOffset(size_t s) {
+
+  std::vector<at::Tensor> peekSlice(size_t i, size_t len, size_t N) {
     std::vector<at::Tensor> results;
-    for (size_t i = s; i < InputSize(); i++) {
-      results.push_back(loadInput(i));
+    for (size_t ii = i; ii < i + len; ++ii) {
+      results.push_back(peek(ii, N));
     }
     return results;
   }
+
   at::ScalarType atScalarTypeFor(const TypeMeta & meta) {
     #define DEFINE_IF(ctype,aten_name,_) \
     if(meta.Match<ctype>()) { \
@@ -78,6 +82,10 @@ private:
     }
     AT_FORALL_SCALAR_TYPES(DEFINE_IF)
     #undef DEFINE_IF
+    // Special case for bool, since the type in ATen is actually Byte
+    if (meta.Match<bool>()) {
+      return at::kByte;
+    }
     CAFFE_THROW("Unknown type meta"); // TODO: improve error message...
   }
   void assignTo(Tensor<Context> * dst, const at::Tensor & src_) {

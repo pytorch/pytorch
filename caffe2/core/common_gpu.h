@@ -298,84 +298,124 @@ struct SimpleArray {
 
 constexpr int kCUDATensorMaxDims = 8;
 
-#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(val, func, T, ...) \
+#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(val, Func, T, ...) \
   do {                                                            \
     CAFFE_ENFORCE_LE(val, kCUDATensorMaxDims);                    \
     switch (val) {                                                \
       case 1: {                                                   \
-        func<T, 1>(__VA_ARGS__);                                  \
+        Func<T, 1>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       case 2: {                                                   \
-        func<T, 2>(__VA_ARGS__);                                  \
+        Func<T, 2>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       case 3: {                                                   \
-        func<T, 3>(__VA_ARGS__);                                  \
+        Func<T, 3>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       case 4: {                                                   \
-        func<T, 4>(__VA_ARGS__);                                  \
+        Func<T, 4>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       case 5: {                                                   \
-        func<T, 5>(__VA_ARGS__);                                  \
+        Func<T, 5>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       case 6: {                                                   \
-        func<T, 6>(__VA_ARGS__);                                  \
+        Func<T, 6>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       case 7: {                                                   \
-        func<T, 7>(__VA_ARGS__);                                  \
+        Func<T, 7>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       case 8: {                                                   \
-        func<T, 8>(__VA_ARGS__);                                  \
+        Func<T, 8>(__VA_ARGS__);                                  \
         break;                                                    \
       }                                                           \
       default: { break; }                                         \
     }                                                             \
   } while (false)
 
-#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(val, func, T1, T2, ...) \
+#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(val, Func, T1, T2, ...) \
   do {                                                                 \
     CAFFE_ENFORCE_LE(val, kCUDATensorMaxDims);                         \
     switch (val) {                                                     \
       case 1: {                                                        \
-        func<T1, T2, 1>(__VA_ARGS__);                                  \
+        Func<T1, T2, 1>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       case 2: {                                                        \
-        func<T1, T2, 2>(__VA_ARGS__);                                  \
+        Func<T1, T2, 2>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       case 3: {                                                        \
-        func<T1, T2, 3>(__VA_ARGS__);                                  \
+        Func<T1, T2, 3>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       case 4: {                                                        \
-        func<T1, T2, 4>(__VA_ARGS__);                                  \
+        Func<T1, T2, 4>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       case 5: {                                                        \
-        func<T1, T2, 5>(__VA_ARGS__);                                  \
+        Func<T1, T2, 5>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       case 6: {                                                        \
-        func<T1, T2, 6>(__VA_ARGS__);                                  \
+        Func<T1, T2, 6>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       case 7: {                                                        \
-        func<T1, T2, 7>(__VA_ARGS__);                                  \
+        Func<T1, T2, 7>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       case 8: {                                                        \
-        func<T1, T2, 8>(__VA_ARGS__);                                  \
+        Func<T1, T2, 8>(__VA_ARGS__);                                  \
         break;                                                         \
       }                                                                \
       default: { break; }                                              \
     }                                                                  \
+  } while (false)
+
+#define DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(val, Func, T1, T2, T3, ...) \
+  do {                                                                     \
+    CAFFE_ENFORCE_LE(val, kCUDATensorMaxDims);                             \
+    switch (val) {                                                         \
+      case 1: {                                                            \
+        Func<T1, T2, T3, 1>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 2: {                                                            \
+        Func<T1, T2, T3, 2>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 3: {                                                            \
+        Func<T1, T2, T3, 3>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 4: {                                                            \
+        Func<T1, T2, T3, 4>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 5: {                                                            \
+        Func<T1, T2, T3, 5>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 6: {                                                            \
+        Func<T1, T2, T3, 6>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 7: {                                                            \
+        Func<T1, T2, T3, 7>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      case 8: {                                                            \
+        Func<T1, T2, T3, 8>(__VA_ARGS__);                                  \
+        break;                                                             \
+      }                                                                    \
+      default: { break; }                                                  \
+    }                                                                      \
   } while (false)
 
 } // namespace caffe2

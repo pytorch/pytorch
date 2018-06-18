@@ -65,7 +65,8 @@ def generate_code_ninja(w):
 
 def generate_code(ninja_global=None,
                   declarations_path=None,
-                  nn_path=None):
+                  nn_path=None,
+                  install_dir=None):
     # if ninja is enabled, we just register this file as something
     # ninja will need to call if needed
     if ninja_global is not None:
@@ -80,16 +81,16 @@ def generate_code(ninja_global=None,
 
     # Build THNN/THCUNN.cwrap and then THNN/THCUNN.cpp. These are primarily
     # used by the legacy NN bindings.
-    generate_nn_wrappers(nn_path)
+    generate_nn_wrappers(nn_path, install_dir, 'tools/cwrap/plugins/templates')
 
     # Build ATen based Variable classes
-    autograd_gen_dir = 'torch/csrc/autograd/generated'
-    jit_gen_dir = 'torch/csrc/jit/generated'
+    autograd_gen_dir = install_dir or 'torch/csrc/autograd/generated'
+    jit_gen_dir = install_dir or 'torch/csrc/jit/generated'
     for d in (autograd_gen_dir, jit_gen_dir):
         if not os.path.exists(d):
-            os.mkdir(d)
-    gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir)
-    gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir)
+            os.makedirs(d)
+    gen_autograd(declarations_path or DECLARATIONS_PATH, autograd_gen_dir, 'tools/autograd')
+    gen_jit_dispatch(declarations_path or DECLARATIONS_PATH, jit_gen_dir, 'tools/jit/templates')
 
 
 def main():
@@ -97,10 +98,12 @@ def main():
     parser.add_argument('--declarations-path')
     parser.add_argument('--nn-path')
     parser.add_argument('--ninja-global')
+    parser.add_argument('--install_dir')
     options = parser.parse_args()
     generate_code(options.ninja_global,
                   options.declarations_path,
-                  options.nn_path)
+                  options.nn_path,
+                  options.install_dir)
 
 
 if __name__ == "__main__":

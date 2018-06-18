@@ -247,6 +247,12 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   FormatGuard guard(stream);
   if(!tensor_.defined()) {
     stream << "[ Tensor (undefined) ]";
+  } else if (tensor_.is_sparse()) {
+    stream << "[ " << tensor_.pImpl->toString() << "{}\n";
+    stream << "indices:\n" << tensor_._indices() << "\n";
+    stream << "values:\n" << tensor_._values() << "\n";
+    stream << "size:\n" << tensor_.sizes() << "\n";
+    stream << "]";
   } else {
     Type& cpudouble = tensor_.type().toBackend(kCPU).toScalarType(kDouble);
     Tensor tensor = tensor_.toType(cpudouble).contiguous();

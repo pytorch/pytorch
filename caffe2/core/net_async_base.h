@@ -48,6 +48,10 @@ class AsyncNetBase : public NetBase {
 
   bool RunAsync() override;
 
+  const dag_utils::ExecutionChains& TEST_execution_chains() const {
+    return execution_chains_;
+  }
+
  protected:
   bool canSchedule(
       int chain_id,
@@ -85,6 +89,7 @@ class AsyncNetBase : public NetBase {
   std::vector<dag_utils::OperatorNode> operator_nodes_;
   std::vector<std::vector<int>> chains_;
   std::vector<dag_utils::OpGraphNode> chain_nodes_; // chains' parents/children
+  dag_utils::ExecutionChains execution_chains_; // for testing
 
   // Pools and streams
   std::mutex pools_mutex_;
@@ -114,6 +119,7 @@ class AsyncNetBase : public NetBase {
   bool check_stream_status_;
   bool use_single_pool_;
   bool use_per_net_pools_;
+  bool is_blocking_;
 
   DISABLE_COPY_AND_ASSIGN(AsyncNetBase);
 

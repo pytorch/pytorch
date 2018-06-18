@@ -186,25 +186,25 @@ class AsyncBroadcastTest : public AsyncInputIsOutputTest {
 
 void runAsyncAllreduceTest(
     const std::string& path,
-    int numProcesses,
-    int numTensors) {
+    size_t numProcesses,
+    size_t numTensors) {
   auto tests = initialize<AsyncAllreduceTest>(path, numProcesses, numTensors);
   std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
-  for (auto i = 0; i < numProcesses; i++) {
+  for (size_t i = 0; i < numProcesses; i++) {
     work[i] = tests[i].run();
   }
 
   // Wait for work to complete
-  for (auto i = 0; i < numProcesses; i++) {
+  for (size_t i = 0; i < numProcesses; i++) {
     tests[i].wait(work[i]);
   }
 
   // Check results
-  for (auto i = 0; i < numProcesses; i++) {
+  for (size_t i = 0; i < numProcesses; i++) {
     const auto size = numProcesses * numTensors;
     const auto expected = (size * (size - 1)) / 2;
     auto tensors = tests[i].getTensors();
-    for (auto j = 0; j < tensors.size(); j++) {
+    for (size_t j = 0; j < tensors.size(); j++) {
       auto& tensor = tensors[j];
       auto data = tensor.data<float>();
       for (auto k = 0; k < tensor.numel(); k++) {
@@ -218,28 +218,28 @@ void runAsyncAllreduceTest(
 
 void runAsyncBroadcastTest(
     const std::string& path,
-    int numProcesses,
-    int numTensors) {
+    size_t numProcesses,
+    size_t numTensors) {
   auto tests = initialize<AsyncBroadcastTest>(path, numProcesses, numTensors);
 
   // Try every permutation of root rank and root tensor
-  for (auto rootRank = 0; rootRank < numProcesses; rootRank++) {
-    for (auto rootTensor = 0; rootTensor < numTensors; rootTensor++) {
+  for (size_t rootRank = 0; rootRank < numProcesses; rootRank++) {
+    for (size_t rootTensor = 0; rootTensor < numTensors; rootTensor++) {
       std::vector<std::shared_ptr<c10d::ProcessGroup::Work>> work(numProcesses);
-      for (auto i = 0; i < numProcesses; i++) {
+      for (size_t i = 0; i < numProcesses; i++) {
         work[i] = tests[i].run(rootRank, rootTensor);
       }
 
       // Wait for work to complete
-      for (auto i = 0; i < numProcesses; i++) {
+      for (size_t i = 0; i < numProcesses; i++) {
         tests[i].wait(work[i]);
       }
 
       // Check results
       const auto expected = (rootRank * numTensors + rootTensor);
-      for (auto i = 0; i < numProcesses; i++) {
+      for (size_t i = 0; i < numProcesses; i++) {
         auto tensors = tests[i].getTensors();
-        for (auto j = 0; j < tensors.size(); j++) {
+        for (size_t j = 0; j < tensors.size(); j++) {
           auto& tensor = tensors[j];
           auto data = tensor.data<float>();
           for (auto k = 0; k < tensor.numel(); k++) {

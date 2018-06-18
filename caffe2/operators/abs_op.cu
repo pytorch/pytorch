@@ -1,61 +1,60 @@
-#include <cmath>
+#include "caffe2/operators/abs_op.h"
+
+#include <algorithm>
+#include <functional>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/elementwise_op.h"
 
 namespace caffe2 {
 
-template <typename T>
-__global__ void AbsKernel(const int N, const T* X, T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    Y[i] = fabs(X[i]);
-  }
-}
+namespace {
 
 template <typename T>
-__global__ void AbsGradientKernel(const int N, const T* X, const T* dY, T* dX) {
+__global__ void
+AbsGradientCUDAKernel(const int N, const T* dY, const T* X, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    dX[i] = __ldg(X + i) == T(0)
+        ? T(0)
+        : (__ldg(X + i) > T(0) ? __ldg(dY + i) : -__ldg(dY + i));
+#else
     dX[i] = X[i] == T(0) ? T(0) : (X[i] > T(0) ? dY[i] : -dY[i]);
+#endif
   }
 }
 
-struct AbsCUDAFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CUDAContext* device_context) {
-    AbsKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, y);
-    return;
-  }
-};
+} // namespace
 
-struct AbsGradientCUDAFunctor {
-  template <typename T>
-  inline void Run(
-      const int n,
-      const T* x,
-      const T* dy,
-      T* dx,
-      CUDAContext* device_context) {
-    AbsGradientKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, dy, dx);
-    return;
-  }
-};
+template <>
+template <typename T>
+bool AbsGradientFunctor<CUDAContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* X_dims */,
+    const T* dY,
+    const T* X,
+    T* dX,
+    CUDAContext* context) const {
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+  AbsGradientCUDAKernel<T>
+      <<<CAFFE_GET_BLOCKS(size),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(size, dY, X, dX);
+  return true;
+}
 
 REGISTER_CUDA_OPERATOR(
     Abs,
-    UnaryElementwiseOp<TensorTypes<float>, CUDAContext, AbsCUDAFunctor>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CUDAContext,
+        AbsFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     AbsGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CUDAContext,
-        WithoutBroadcast<AbsGradientCUDAFunctor>>);
+        AbsGradientFunctor<CUDAContext>>);
+
 } // namespace caffe2

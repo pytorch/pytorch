@@ -14,15 +14,13 @@
 // compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
 // Glibc2.23 See https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280
 //
-// On grainsize: The grainsize is chosen to roughly get TBB_GRAIN_SIZE number of
+// On grainsize: The grainsize is chosen to roughly get GRAIN_SIZE number of
 // computations per task. Each task works across dim_size elements. 16 should be
 // a very rough approximation of the number of computations per dim_size element
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
 
 namespace at { namespace native {
 namespace {
-
-static default_partitioner_type ap;
 
 template <typename scalar_t>
 inline void _vec_log_softmax_lastdim(
@@ -32,19 +30,21 @@ inline void _vec_log_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
   static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size;
-  int64_t grain_size = internal::TBB_GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   if (grain_size < CHUNK_SIZE)
     grain_size = CHUNK_SIZE;
 
-  tbb::parallel_for(
-      tbb::blocked_range<int64_t>(0, outer_size, grain_size),
-      [&](const tbb::blocked_range<int64_t>& r) {
-        for (int64_t ii = r.begin(); ii < r.end(); ii += CHUNK_SIZE) {
+  parallel_for(
+      0,
+      outer_size,
+      grain_size,
+      [&](int64_t begin, int64_t end) {
+        for (int64_t ii = begin; ii < end; ii += CHUNK_SIZE) {
           scalar_t tmp_sum_scalar[CHUNK_SIZE];
           scalar_t max_input_arr[CHUNK_SIZE];
           int64_t loop_end = CHUNK_SIZE;
-          if (ii + CHUNK_SIZE > r.end())
-            loop_end = r.end() - ii;
+          if (ii + CHUNK_SIZE > end)
+            loop_end = end - ii;
           for (int64_t j = 0; j < loop_end; j++) {
             int64_t i = ii + j;
             scalar_t* input_data = input_data_base + i * dim_size;
@@ -83,8 +83,7 @@ inline void _vec_log_softmax_lastdim(
                 dim_size);
           }
         }
-      },
-      ap);
+      });
 }
 
 template <typename scalar_t>
@@ -94,14 +93,16 @@ inline void _vec_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  int64_t grain_size = internal::TBB_GRAIN_SIZE / (16 * dim_size);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
 
-  tbb::parallel_for(
-      tbb::blocked_range<int64_t>(0, outer_size, grain_size),
-      [&](const tbb::blocked_range<int64_t>& r) {
-        for (int64_t i = r.begin(); i < r.end(); i++) {
+  parallel_for(
+      0,
+      outer_size,
+      grain_size,
+      [&](int64_t begin, int64_t end) {
+        for (int64_t i = begin; i < end; i++) {
           scalar_t* input_data = input_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
           scalar_t max_input = vec256::reduce_all<scalar_t>(
@@ -122,8 +123,7 @@ inline void _vec_softmax_lastdim(
               output_data,
               dim_size);
         }
-      },
-      ap);
+      });
 }
 
 template <typename scalar_t, bool log_softmax>
@@ -134,14 +134,16 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  int64_t grain_size = internal::TBB_GRAIN_SIZE / (16 * dim_size);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
 
-  tbb::parallel_for(
-      tbb::blocked_range<int64_t>(0, outer_size, grain_size),
-      [&](const tbb::blocked_range<int64_t>& r) {
-        for (int64_t i = r.begin(); i < r.end(); i++) {
+  parallel_for(
+      0,
+      outer_size,
+      grain_size,
+      [&](int64_t begin, int64_t end) {
+        for (int64_t i = begin; i < end; i++) {
           scalar_t* grad_input_data = grad_input_data_base + i * dim_size;
           scalar_t* grad_data = grad_data_base + i * dim_size;
           scalar_t* output_data = output_data_base + i * dim_size;
@@ -173,14 +175,12 @@ inline void _vec_host_softmax_backward_lastdim(
                 dim_size);
           }
         }
-      },
-      ap);
+      });
 }
 
 template <typename scalar_t, bool LogSoftMax>
 struct vec_host_softmax_lastdim {
   static void apply(Tensor& output, const Tensor& input) {
-    internal::init_tbb_num_threads();
     int64_t outer_size = 1;
     int64_t dim_size = input.size(input.ndimension() - 1);
     for (int64_t i = 0; i < input.ndimension() - 1; ++i)
@@ -201,7 +201,6 @@ template <typename scalar_t, bool LogSoftMax>
 struct vec_host_softmax_backward_lastdim {
   static void
   apply(Tensor& grad_input, const Tensor& grad, const Tensor& output) {
-    internal::init_tbb_num_threads();
     int64_t outer_size = 1;
     int64_t dim_size = grad.size(grad.ndimension() - 1);
     for (int64_t i = 0; i < grad.ndimension() - 1; ++i)

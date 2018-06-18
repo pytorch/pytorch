@@ -72,11 +72,6 @@
   scalar_check:
     output: 'false'
 
-- name: hardshrink(Tensor self, Scalar lambd=0.5)
-  cname: HardShrink
-  scalar_check:
-    output: self_->isScalar()
-
 - name: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
   cname: HardTanh
   has_inplace: True

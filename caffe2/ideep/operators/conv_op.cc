@@ -40,15 +40,20 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
         (cached_weights_descriptor_ != filter.get_descriptor());
     if (weights_changed && !training_mode_) {
       cached_weights_descriptor_ = filter.get_descriptor();
-      filter_ = filter;
+      auto filter_in = filter;
+      filter_in.make_group(group_);
       auto expected_descriptor =
           ideep::convolution_forward::expected_weights_descriptor(
-              filter.get_dims());
-      if (filter_.get_descriptor() != expected_descriptor) {
-        filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
-            expected_descriptor);
-        ideep::reorder::compute(filter, filter_);
-      }
+              filter_in.get_dims(),
+              filter_in.get_data_type(),
+              stride_,
+              pad_tl(),
+              pad_br(),
+              dilation_,
+              group_);
+      filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
+          expected_descriptor);
+      ideep::reorder::compute(filter_in, filter_);
     }
 
     // NB: actually, in the case when `group_ > 1`, IDEEP will create
