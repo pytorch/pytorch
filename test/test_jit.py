@@ -3638,18 +3638,6 @@ EXCLUDE_SCRIPT = {
     'test_add_scalar',
     'test_add_scalar_broadcast_lhs',
     'test_add_scalar_broadcast_rhs',
-    'test_addcdiv_scalar_scale',
-    'test_addcdiv_scalar_scale_broadcast_lhs',
-    'test_addcdiv_scalar_scale_broadcast_rhs',
-    'test_addcdiv_scale',
-    'test_addcdiv_scale_broadcast_all',
-    'test_addcdiv_scale_broadcast_rhs',
-    'test_addcmul_scalar_scale',
-    'test_addcmul_scalar_scale_broadcast_lhs',
-    'test_addcmul_scalar_scale_broadcast_rhs',
-    'test_addcmul_scale',
-    'test_addcmul_scale_broadcast_all',
-    'test_addcmul_scale_broadcast_rhs',
     'test_clamp_max',
     'test_clamp_max_scalar',
     'test_clamp_min',
@@ -3682,20 +3670,9 @@ EXCLUDE_SCRIPT = {
     'test_sub_scalar_constant',
     'test_unsqueeze_last_neg0',
     'test_unsqueeze_middle_neg0',
-    'test_addbmm_broadcast_lhs_coef',
-    'test_addbmm_coef',
-    'test_addbmm_scalar_broadcast_lhs_coef',
     'test_addmm_broadcast_lhs_coef',
     'test_addmm_coef',
     'test_addmm_scalar_broadcast_lhs_coef',
-    'test_addmv_broadcast_lhs_coef',
-    'test_addmv_coef',
-    'test_addmv_scalar_broadcast_lhs_coef',
-    'test_addr_broadcast_lhs_coef',
-    'test_addr_coef',
-    'test_baddbmm_broadcast_lhs_coef',
-    'test_baddbmm_coef',
-    'test_baddbmm_scalar_broadcast_lhs_coef',
     'test_expand',
     'test_expand_1_element',
     'test_expand_new_dim',
@@ -3788,19 +3765,19 @@ EXCLUDE_SCRIPT = {
 # make a new function where all non-tensor arguments in 'args' have been partially
 # applied, and all tensor arguments remain.
 # used to trace functions when some arguments are not tensors
-def partial_apply_nontensors(fn, args):
+def partial_apply_nontensors(fn, args, **kwargs):
     source = ['t' if isinstance(arg, torch.Tensor) else 's' for arg in args]
 
     def new_fn(*tensors_):
         tensors = iter(tensors_)
-        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)))
+        return fn(*(args[i] if s == 's' else next(tensors) for i, s in enumerate(source)), **kwargs)
 
     return new_fn, [arg for arg in args if isinstance(arg, torch.Tensor)]
 
 
 def create_traced_fn(fn):
-    def traced_fn(*inputs):
-        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs)
+    def traced_fn(*inputs, **kwargs):
+        fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(*inputs_tensors)(fn_tensors)
         return traced(*inputs_tensors)
     return traced_fn
@@ -3812,7 +3789,7 @@ def the_method({}):
 
 
 def create_script_fn(method_name, is_functional, output_process_fn):
-    def script_fn(*args):
+    def script_fn(*args, **kwargs):
         formals = []
         tensors = []
         actuals = []
@@ -3824,17 +3801,22 @@ def create_script_fn(method_name, is_functional, output_process_fn):
                 tensors.append(arg)
             else:
                 actuals.append(str(arg))
+        kwargs_str = ''
+        for k, v in kwargs.items():
+            kwargs_str += ', ' + k + '=' + str(v)
         if is_functional:
-            call = 'torch.{}({})'.format(method_name, ', '.join(actuals))
+            call = 'torch.{}({}{})'.format(method_name, ', '.join(actuals), kwargs_str)
         else:
-            call = '{}.{}({})'.format(actuals[0], method_name, ', '.join(actuals[1:]))
+            call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
         return output_process_fn(CU.the_method(*tensors))
     return script_fn
 
 
-def check_against_reference(self, func, reference_func, args, allow_unused=True):
+def check_against_reference(self, func, reference_func, args, kwargs=None, allow_unused=True):
+    kwargs = kwargs if kwargs else {}
+
     def allSum(vs):
         if isinstance(vs, torch.Tensor):
             vs = (vs,)
@@ -3853,16 +3835,16 @@ def check_against_reference(self, func, reference_func, args, allow_unused=True)
     recording_inputs, recording_tensors = clone_inputs(True)
 
     # test no gradients case
-    outputs = reference_func(*nograd_inputs)
-    outputs_test = func(*nograd_inputs)
+    outputs = reference_func(*nograd_inputs, **kwargs)
+    outputs_test = func(*nograd_inputs, **kwargs)
     self.assertEqual(outputs, outputs_test)
 
     # test single grad case
-    outputs = reference_func(*recording_inputs)
+    outputs = reference_func(*recording_inputs, **kwargs)
     grads = torch.autograd.grad(allSum(outputs), recording_tensors,
                                 allow_unused=allow_unused)
 
-    outputs_test = func(*recording_inputs)
+    outputs_test = func(*recording_inputs, **kwargs)
     grads_test = torch.autograd.grad(allSum(outputs_test), recording_tensors,
                                      allow_unused=allow_unused)
     self.assertEqual(outputs, outputs_test)
@@ -3870,7 +3852,7 @@ def check_against_reference(self, func, reference_func, args, allow_unused=True)
 
     # test the grad grad case
 
-    outputs = reference_func(*recording_inputs)
+    outputs = reference_func(*recording_inputs, **kwargs)
     l1 = allSum(outputs)
     grads = torch.autograd.grad(l1, recording_tensors, create_graph=True,
                                 allow_unused=allow_unused)
@@ -3879,7 +3861,7 @@ def check_against_reference(self, func, reference_func, args, allow_unused=True)
 
     recording_inputs, recording_tensors = clone_inputs(True)
 
-    outputs_test = func(*recording_inputs)
+    outputs_test = func(*recording_inputs, **kwargs)
     l1_test = allSum(outputs_test)
     grads_test = torch.autograd.grad(
         l1_test, recording_tensors, create_graph=True, allow_unused=allow_unused)
@@ -3905,7 +3887,8 @@ def add_test(
         variant_name='',
         dim_args_idx=(),
         skipTestIf=(),
-        output_process_fn=lambda x: x):
+        output_process_fn=lambda x: x,
+        kwargs=None):
     basic_test_name = 'test_' + name
     if variant_name != '':
         basic_test_name += '_' + variant_name
@@ -3923,45 +3906,46 @@ def add_test(
             def check(name):
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
-                self_variable = create_input((self_size,))[0]
+                self_variable = create_input((self_size,))[0][0]
                 # FixMe: run grad checks on inplace self
                 if is_inplace:
                     self_variable.requires_grad = False
                 # need to record this because methods can change the szie (e.g. unsqueeze)
-                args_variable = create_input(args, requires_grad=not is_inplace)
+                args_variable, kwargs_variable = create_input(args, requires_grad=not is_inplace, call_kwargs=kwargs)
                 self_tensor = deepcopy(self_variable.data)
                 args_tensor = deepcopy(unpack_variables(args_variable))
-                output_variable = getattr(self_variable, name)(*args_variable)
+                output_variable = getattr(self_variable, name)(*args_variable, **kwargs_variable)
 
-                def fn(*inputs):
-                    output = getattr(inputs[0], name)(*inputs[1:])
+                def fn(*inputs, **kwargs):
+                    output = getattr(inputs[0], name)(*inputs[1:], **kwargs)
                     return output_process_fn(output)
 
                 if not is_inplace and name not in EXCLUDE_GRADCHECK:
                     if test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn), fn, (self_variable,) + args_variable)
+                        check_against_reference(self, create_traced_fn(fn),
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
 
                     if not is_magic_method and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
                                                 create_script_fn(name, False, output_process_fn),
-                                                fn, (self_variable,) + args_variable)
+                                                fn, (self_variable,) + args_variable, kwargs_variable)
 
                 # functional interface tests
                 if hasattr(torch, name) and name not in EXCLUDE_FUNCTIONAL:
-                    def fn(*inputs):
-                        output = getattr(torch, name)(*inputs)
+                    def fn(*inputs, **kwargs):
+                        output = getattr(torch, name)(*inputs, **kwargs)
                         return output_process_fn(output)
 
                     f_args_variable = (self_variable,) + args_variable
                     f_args_tensor = (self_tensor,) + args_tensor
 
                     if not is_inplace and test_name not in EXCLUDE_TRACED:
-                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable)
+                        check_against_reference(self, create_traced_fn(fn), fn, f_args_variable, kwargs_variable)
 
                     if not is_inplace and test_name not in EXCLUDE_SCRIPT:
                         check_against_reference(self,
                                                 create_script_fn(name, True, output_process_fn),
-                                                fn, f_args_variable)
+                                                fn, f_args_variable, kwargs_variable)
 
             check(name)
             inplace_name = name + '_'
