@@ -2387,6 +2387,21 @@ def prod_single_zero(dim_size):
     return result
 
 
+def mean_zeros(dim_size, dim_select):
+    assert len(dim_select) == 2
+    result = torch.randn(dim_size, dim_size, dim_size)
+    result.narrow(dim_select[0], 0, 1).narrow(dim_select[1], 1, 1).zero_()
+    result.narrow(dim_select[0], 2, 1).narrow(dim_select[1], 3, 1).zero_()
+    result.narrow(dim_select[0], 4, 1).narrow(dim_select[1], 3, 1).zero_()
+    return result
+
+
+def mean_single_zero(dim_size):
+    result = torch.randn(dim_size, dim_size)
+    result[0, 1] = 0
+    return result
+
+
 def random_square_matrix_of_rank(l, rank):
     assert rank <= l
     A = torch.randn(l, l)
@@ -2668,6 +2683,19 @@ method_tests = [
     ('mean', (), NO_ARGS, 'scalar'),
     ('mean', (), (0,), 'scalar_dim', [0]),
     ('mean', (), (0, True,), 'scalar_keepdim_dim', [0]),
+    ('mean', mean_zeros(S, [0, 1]), NO_ARGS, 'zerodims2'),
+    ('mean', mean_zeros(S, [0, 2]), NO_ARGS, 'zerodims1'),
+    ('mean', mean_zeros(S, [1, 2]), NO_ARGS, 'zerodims0'),
+    ('mean', mean_zeros(S, [0, 1]), (1,), 'zeros_dims2', [0]),
+    ('mean', mean_zeros(S, [0, 2]), (1,), 'zeros_dims1', [0]),
+    ('mean', mean_zeros(S, [1, 2]), (1,), 'zeros_dims0', [0]),
+    ('mean', mean_zeros(S, [0, 1]), (1, True), 'keepdim_zeros_dims2', [0]),
+    ('mean', mean_zeros(S, [0, 2]), (1, True), 'keepdim_zeros_dims1', [0]),
+    ('mean', mean_zeros(S, [1, 2]), (1, True), 'keepdim_zeros_dims0', [0]),
+    ('mean', mean_single_zero(S), NO_ARGS, 'single_zero'),
+    ('mean', (torch.tensor(0., requires_grad=True)), NO_ARGS, 'scalar_zero'),
+    ('mean', (torch.tensor(0., requires_grad=True)), (0,), 'scalar_dim_zero', [0]),
+    ('mean', (torch.tensor(0., requires_grad=True)), (0, True,), 'scalar_keepdim_dim_zero', [0]),
     ('kthvalue', (S, S, S), (2,)),
     ('kthvalue', (), (1,), 'scalar'),
     ('kthvalue', (S, S, S), (2, 1,), 'dim', [1]),

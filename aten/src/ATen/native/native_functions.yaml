@@ -794,6 +794,26 @@
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: mean(Tensor self, *, ScalarType dtype) -> Tensor
+
+- func: mean(Tensor self) -> Tensor
+
+- func: mean(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
+- func: mean(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: mean(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: mean_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation) -> Tensor
