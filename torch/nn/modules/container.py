@@ -298,7 +298,7 @@ class ModuleDict(Module):
                                     type(m).__name__)
                 if not len(m) == 2:
                     raise ValueError("ModuleDict update sequence element "
-                                     "#" + str(j) + " has length " + len(m) +
+                                     "#" + str(j) + " has length " + str(len(m)) +
                                      "; 2 is required")
                 self[m[0]] = m[1]
 
@@ -513,5 +513,5 @@ class ParameterDict(Module):
             device_str = '' if not p.is_cuda else ' (GPU {})'.format(p.get_device())
             parastr = 'Parameter containing: [{} of size {}{}]'.format(
                 torch.typename(p.data), size_str, device_str)
-            tmpstr = tmpstr + '  (' + k + '): ' + parastr + '\n'
+            tmpstr = tmpstr + '  (' + str(k) + '): ' + parastr + '\n'
         return tmpstr

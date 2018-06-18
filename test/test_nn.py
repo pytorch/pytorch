@@ -1309,9 +1309,6 @@ class TestNN(NNTestCase):
             ('conv', nn.Conv2d(10, 10, 3)),
             ('fc', nn.Linear(10, 10)),
         ]))
-        parameter_dict = nn.ParameterDict(s.named_parameters())
-        parameters = s.named_parameters()
-        check()
 
     def test_add_module(self):
         l = nn.Linear(10, 20)
