@@ -1496,39 +1496,38 @@ class TestDistributions(TestCase):
                          .sample((2, 7)).size(), (2, 7, 6, 5, 3))
 
         # check gradients
-        self._gradcheck_log_prob(MultivariateNormal, (mean, scale_factor, scale_diag))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, scale_factor, scale_diag))
-        self._gradcheck_log_prob(MultivariateNormal, (mean_multi_batch, scale_factor_batched, scale_diag_batched))
+        self._gradcheck_log_prob(LowRankMultivariateNormal,
+                                 (mean, scale_factor, scale_diag))
+        self._gradcheck_log_prob(LowRankMultivariateNormal,
+                                 (mean_multi_batch, scale_factor, scale_diag))
+        self._gradcheck_log_prob(LowRankMultivariateNormal,
+                                 (mean_multi_batch, scale_factor_batched, scale_diag_batched))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_lowrank_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
-        tmp = torch.randn(3, 10)
-        cov = torch.tensor(torch.matmul(tmp, tmp.t()) / tmp.shape[-1], requires_grad=True)
-        prec = torch.tensor(cov.inverse(), requires_grad=True)
-        scale_tril = torch.tensor(torch.potrf(cov, upper=False), requires_grad=True)
+        scale_factor = torch.randn(3, 1, requires_grad=True)
+        scale_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
+        cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
 
         # check that logprob values match scipy logpdf,
         # and that covariance and scale_tril parameters are equivalent
-        dist1 = MultivariateNormal(mean, cov)
-        dist2 = MultivariateNormal(mean, precision_matrix=prec)
-        dist3 = MultivariateNormal(mean, scale_tril=scale_tril)
+        dist1 = LowRankMultivariateNormal(mean, scale_factor, scale_diag)
         ref_dist = scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy())
 
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.numpy())
 
         self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), places=3)
-        self.assertAlmostEqual(0.0, np.mean((dist2.log_prob(x).detach().numpy() - expected)**2), places=3)
-        self.assertAlmostEqual(0.0, np.mean((dist3.log_prob(x).detach().numpy() - expected)**2), places=3)
 
         # Double-check that batched versions behave the same as unbatched
         mean = torch.randn(5, 3, requires_grad=True)
-        tmp = torch.randn(5, 3, 10)
-        cov = torch.tensor((tmp.unsqueeze(-2) * tmp.unsqueeze(-3)).mean(-1), requires_grad=True)
+        scale_factor = torch.randn(5, 3, 2, requires_grad=True)
+        scale_diag = torch.tensor(torch.randn(5, 3).abs(), requires_grad=True)
 
-        dist_batched = MultivariateNormal(mean, cov)
-        dist_unbatched = [MultivariateNormal(mean[i], cov[i]) for i in range(mean.size(0))]
+        dist_batched = LowRankMultivariateNormal(mean, scale_factor, scale_diag)
+        dist_unbatched = [LowRankMultivariateNormal(mean[i], scale_factor[i], scale_diag[i])
+                          for i in range(mean.size(0))]
 
         x = dist_batched.sample((10,))
         batched_prob = dist_batched.log_prob(x)
