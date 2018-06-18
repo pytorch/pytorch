@@ -149,7 +149,6 @@ inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   for (auto& t : tensors)
     if (t.sizes().equals({0}))
       return false;
-  internal::init_tbb_num_threads();
   return true;
 }
 
@@ -351,7 +350,7 @@ template <typename scalar1, typename Op>
 inline void CPU_tensor_parallel_apply1(
     Tensor tensor1,
     const Op op,
-    int64_t grain_size = internal::TBB_GRAIN_SIZE) {
+    int64_t grain_size = internal::GRAIN_SIZE) {
   if (!_apply_preamble({tensor1}))
     return;
   if (tensor1.ndimension() < 8) {
@@ -383,7 +382,7 @@ inline void CPU_tensor_parallel_apply2(
     Tensor tensor1,
     Tensor tensor2,
     const Op op,
-    int64_t grain_size = internal::TBB_GRAIN_SIZE) {
+    int64_t grain_size = internal::GRAIN_SIZE) {
   if (!_apply_preamble({tensor1, tensor2}))
     return;
   if (tensor1.ndimension() < 8 && tensor2.ndimension() < 8) {

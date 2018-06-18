@@ -89,24 +89,6 @@ IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
 
-# Unset our restrictive C++ flags here and reset them later.
-# Remove this once we use proper target_compile_options.
-set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-set(CMAKE_CXX_FLAGS)
-
-set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/tbb")
-set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
-set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-add_subdirectory(cpu/tbb)
-set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
-list(APPEND ATen_THIRD_PARTY_INCLUDE ${TBB_ROOT_DIR}/include)
-list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb_static)
-
-set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
-
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
     MESSAGE(STATUS "TH_BINARY_BUILD detected. Enabling special linkage.")

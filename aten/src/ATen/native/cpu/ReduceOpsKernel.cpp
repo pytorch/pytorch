@@ -9,12 +9,6 @@
 #include "ATen/cpu/vec256/vec256.h"
 #include "ATen/optional.h"
 
-#ifdef __PPC64__
-using default_partitioner_type = tbb::simple_partitioner;
-#else
-using default_partitioner_type = tbb::affinity_partitioner;
-#endif
-
 namespace at { namespace native { namespace {
 
 using namespace vec256;
@@ -23,18 +17,21 @@ static inline int64_t round_down(int64_t a, int64_t m) {
   return a - (a % m);
 }
 
-template<typename F>
-static void parallel_for(int64_t end, int64_t step, bool parallelize, F func) {
+template <typename F>
+static void _parallel_for(int64_t size, int64_t step, bool parallelize, F func) {
   if (parallelize) {
-    tbb::parallel_for<int64_t>(0, end, step, func);
+    parallel_for(0, size / step, 1, [func, step](int64_t begin, int64_t end) {
+      int64_t k = begin * step;
+      for (int64_t i = begin; i < end; i++, k += step) {
+        func(k);
+      }
+    });
   } else {
-    for (int64_t i = 0; i != end; i += step) {
+    for (int64_t i = 0; i != size; i += step) {
       func(i);
     }
   }
 }
-
-static default_partitioner_type ap;
 
 // Vectorized reduction defined by reduce operation `Op` with identity `ident`.
 // The reduction is built on top of reduce128, which reduces down a column
@@ -50,8 +47,6 @@ struct Reduction {
   using ReduceScalar = Op<scalar_t>;
 
   static void apply(Tensor& res, const Tensor& self, at::optional<int64_t> dim) {
-    internal::init_tbb_num_threads();
-
     auto out = res.data<scalar_t>();
     auto data = self.data<scalar_t>();
     auto numel = self.numel();
@@ -71,8 +66,8 @@ struct Reduction {
       }
     }
     int64_t batch = numel / (n * stride);
-    bool paralellize = batch * n > internal::TBB_GRAIN_SIZE;
-    parallel_for(batch, 1, paralellize, [=](int64_t b) {
+    bool paralellize = batch * n > internal::GRAIN_SIZE;
+    _parallel_for(batch, 1, paralellize, [=](int64_t b) {
       if (stride == 1) {
         out[b] = reduce_all(&data[b * n], n);
       } else {
@@ -84,23 +79,17 @@ struct Reduction {
   static scalar_t reduce_all(const scalar_t* data, int64_t size) {
     int64_t k = size / WIDTH;
 
-    scalar_t sum;
-    if (size > internal::TBB_GRAIN_SIZE) {
-      sum = tbb::parallel_reduce(
-          tbb::blocked_range<int64_t>(0, k, internal::TBB_GRAIN_SIZE / WIDTH),
-          scalar_t(ident),
-          [=](const tbb::blocked_range<int64_t>& r, scalar_t init) {
-            scalar_t buf[WIDTH];
-            reduce128(&data[r.begin() * WIDTH], buf, r.end() - r.begin(), WIDTH);
-            return std::accumulate(buf, buf + WIDTH, init, ReduceScalar());
-          },
-          ReduceScalar(),
-          ap);
-    } else {
-      scalar_t buf[WIDTH];
-      reduce128(data, buf, k, WIDTH);
-      sum = std::accumulate(buf, buf + WIDTH, scalar_t(ident), ReduceScalar());
-    }
+    scalar_t sum = parallel_reduce(
+        0,
+        k,
+        internal::GRAIN_SIZE / WIDTH,
+        (scalar_t)ident,
+        [data](int64_t begin, int64_t end, scalar_t init) {
+          scalar_t buf[WIDTH];
+          reduce128(&data[begin * WIDTH], buf, end - begin, WIDTH);
+          return std::accumulate(buf, buf + WIDTH, init, ReduceScalar());
+        },
+        ReduceScalar());
 
     for (int64_t i = k * WIDTH; i != size; i++) {
       sum = ReduceScalar()(sum, data[i]);
@@ -127,8 +116,8 @@ struct Reduction {
   // Reduce a 2d matrix down each column. Stores the results in out[0 ... cols-1]
   static void reduce2d(const scalar_t* data, scalar_t* out, int64_t rows, int64_t cols, int64_t stride) {
     int64_t cols_rounded = round_down(cols, WIDTH);
-    bool paralellize = cols * rows > internal::TBB_GRAIN_SIZE;
-    parallel_for(cols_rounded, WIDTH, paralellize, [=](int64_t col) {
+    bool paralellize = cols * rows > internal::GRAIN_SIZE;
+    _parallel_for(cols_rounded, WIDTH, paralellize, [=](int64_t col) {
       reduce128(&data[col], &out[col], rows, stride);
     });
 
