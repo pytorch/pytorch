@@ -1599,33 +1599,6 @@
     - THTensor* self
 ]]
 [[
-  name: mean
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  options:
-    - cname: meanall
-      return: accreal
-      arguments:
-        - THTensor* self
-    - cname: mean
-      return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: long dim
-          wrap_dim: self
-        - arg: bool keepdim
-          default: "false"
-]]
-[[
   name: var
   types:
     - floating_point
