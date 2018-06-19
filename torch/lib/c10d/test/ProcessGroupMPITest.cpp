@@ -40,7 +40,7 @@ void testAllreduce(int iter = 1000) {
   auto worldSize = pg->getSize();
 
   // Verify outputs
-  for (size_t i = 0; i < iter; ++i) {
+  for (int i = 0; i < iter; ++i) {
     const auto expected = worldSize * i;
     auto data = allTensors[i][0].data<float>();
     for (auto i = 0; i < allTensors[i][0].numel(); ++i) {
@@ -83,7 +83,7 @@ void testBroadcast(int iter = 10000) {
   }
 
   // Verify outputs
-  for (size_t i = 0; i < iter; ++i) {
+  for (int i = 0; i < iter; ++i) {
     const auto expected = i;
     auto data = allTensors[i][0].data<float>();
     for (auto i = 0; i < allTensors[i][0].numel(); ++i) {
