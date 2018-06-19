@@ -19,7 +19,7 @@
 [[
   name: resize_
   return: self
-  cname: resizeLegacy
+  cname: resize
   cpu_half: True
   arguments:
     - THTensor* self
@@ -43,7 +43,7 @@
       scalar_check: False
       arguments:
         - THTensor* self
-        - CONSTANT NULL, 0, NULL, NULL
+        - CONSTANT NULL, 0, THLongStorageView({0}, THLongStorageViewKind::SIZE), NULL
     - cname: setStorage
       scalar_check: False
       arguments:
