@@ -9,6 +9,7 @@
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
 #include "torch/csrc/jit/passes/peephole.h"
@@ -294,6 +295,7 @@ private:
     auto local_graph = this->graph;
     if(all_dynamic(local_graph->inputs()) && all_dynamic(local_graph->outputs())) {
       local_graph = this->graph->copy();
+      EraseNumberTypes(local_graph);
       PropagateInputShapes(*local_graph, spec);
     }
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
@@ -369,6 +371,8 @@ private:
     // we remove the implicitly created ones, and have shape analysis
     // add valid expand nodes when the shapes are stable
     RemoveExpands(g);
+    // Erase NumberType info that should never reach the interpreter
+    EraseNumberTypes(g);
   }
   const Code & getOrCreateAutogradFallback() {
     std::lock_guard<std::mutex> lock(compile_mutex);

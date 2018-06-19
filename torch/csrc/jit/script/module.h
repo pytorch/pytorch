@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/named_value.h"
@@ -108,6 +109,7 @@ struct Method {
     for (auto inp : member_inputs) {
       inputs.push_back(*inp);
     }
+    EraseNumberTypes(retval);
     if (propagate) {
       auto inputs_copy = inputs;
       PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
