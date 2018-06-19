@@ -36,9 +36,13 @@ Tensor cumsum(const Tensor& self, int64_t dim) {
 
 static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in cumsum.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in cumsum. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_cumsum_out(result, self.toType(result.type().scalarType()), dim);
 }
 
@@ -64,9 +68,13 @@ Tensor cumprod(const Tensor& self, int64_t dim) {
 
 static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in cumprod.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in cumprod. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_cumprod_out(result, self.toType(result.type().scalarType()), dim);
 }
 
@@ -79,6 +87,27 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim) {
 }
 
 // ALL REDUCE #################################################################
+
+static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
+  ScalarType scalarType = self.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      at::toString(scalarType),
+      " instead.");
+  Tensor result = at::native::sum(self);
+  if (self.numel() > 0)
+    result.div_(self.numel());
+  return result;
+}
+
+Tensor mean(const Tensor &self, ScalarType dtype) {
+  return at::native::mean(self, optional<ScalarType>(dtype));
+}
+
+Tensor mean(const Tensor &self) {
+  return at::native::mean(self, nullopt);
+}
 
 static inline Tensor sum(const Tensor &self, optional<ScalarType> dtype) {
   return at::_sum(integer_upcast(self, dtype));
@@ -152,12 +181,44 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
   return result;
 }
 
+static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
+                 bool keepdim, optional<ScalarType> dtype) {
+  ScalarType scalarType = result.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      at::toString(scalarType),
+      " instead.");
+  at::native::sum_out(
+      result, self.toType(result.type().scalarType()), dim, keepdim);
+  if (result.numel() > 0 && self.ndimension() > 0) {
+    int64_t numel = self.size(dim);
+    result.div_(numel);
+  }
+  return result;
+}
+
+Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
+  return at::native::mean_out(result, self, dim, keepdim, at::optional<ScalarType>(dtype));
+}
+Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, bool keepdim) {
+  return at::native::mean_out(result, self, dim, keepdim, nullopt);
+}
+
+Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dtype) {
+  return at::native::mean_out(result, self, dim, false, dtype);
+}
+
 static inline Tensor &sum_out(Tensor &result, const Tensor &self, IntList dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in sum.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in sum. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_sum_out(result, self.toType(result.type().scalarType()), dim, keepdim);
 }
 
@@ -189,9 +250,13 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
 static inline Tensor &prod_out(Tensor &result, const Tensor &self, int64_t dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in prod.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in prod. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_prod_out(result, self.toType(result.type().scalarType()), dim, keepdim);
 }
 
@@ -218,6 +283,33 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
     return result;
   }
   return at::_th_prod_out(result, self, dim, keepdim);
+}
+
+static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
+  ScalarType scalarType = self.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the mean of floating types. Got ",
+      at::toString(scalarType),
+      " instead.");
+  Tensor result = at::native::sum(self, dim, keepdim);
+  if (result.numel() > 0 && self.ndimension() > 0) {
+    int64_t numel = self.size(dim);
+    result.div_(numel);
+  }
+  return result;
+}
+
+Tensor mean(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
+  return at::native::mean(self, dim, keepdim, at::optional<ScalarType>(dtype));
+}
+
+Tensor mean(const Tensor& self, int64_t dim, bool keepdim) {
+  return at::native::mean(self, dim, keepdim, nullopt);
+}
+
+Tensor mean(const Tensor& self, int64_t dim, ScalarType dtype) {
+  return at::native::mean(self, dim, false, dtype);
 }
 
 static inline Tensor sum(const Tensor &self, IntList dim_, bool keepdim, optional<ScalarType> dtype) {
