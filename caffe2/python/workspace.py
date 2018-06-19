@@ -226,7 +226,8 @@ def RunPlan(plan_or_step):
     return C.run_plan(StringifyProto(plan_or_step))
 
 
-def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False):
+def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False,
+                        blob_types=None):
     """Infers the shapes and types for the specified nets.
 
     Inputs:
@@ -243,10 +244,15 @@ def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False):
     else:
         net_protos = [StringifyProto(n.Proto()) for n in nets]
     if blob_dimensions is None:
+        assert blob_types is None
         blobdesc_prototxt = C.infer_shapes_and_types_from_workspace(net_protos)
-    else:
+    elif blob_types is None:
         blobdesc_prototxt = C.infer_shapes_and_types_from_map(
             net_protos, blob_dimensions
+        )
+    else:
+        blobdesc_prototxt = C.infer_shapes_and_types_from_map(
+            net_protos, blob_dimensions, blob_types
         )
     blobdesc_proto = caffe2_pb2.TensorShapes()
     blobdesc_proto.ParseFromString(blobdesc_prototxt)
