@@ -323,24 +323,7 @@ elseif (CUDA_VERSION VERSION_EQUAL 8.0)
 endif()
 
 # setting nvcc arch flags
-if ((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-  message(WARNING
-      "In the future we will require one to explicitly pass "
-      "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
-      "env variable. This will become a FATAL_ERROR in future version of "
-      "pytorch.")
-  set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-endif()
-if (EXISTS ${CUDA_ARCH_NAME})
-  message(WARNING
-      "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
-      "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
-      "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
-  set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
-endif()
-
-# Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
-cuda_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA ${TORCH_CUDA_ARCH_LIST})
+torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
