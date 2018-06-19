@@ -36,14 +36,6 @@ THCTensor_(zero)(THCState *state, THCTensor *self_)
 }
 
 THC_API void
-THCTensor_(zeros)(THCState *state, THCTensor *r_, THLongStorage *size)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THCTensor_(resize)(state, r_, size, NULL);
-  THCTensor_(zero)(state, r_);
-}
-
-THC_API void
 THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
@@ -52,27 +44,11 @@ THCTensor_(zerosLike)(THCState *state, THCTensor *r_, THCTensor *input)
 }
 
 THC_API void
-THCTensor_(ones)(THCState *state, THCTensor *r_, THLongStorage *size)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THCTensor_(resize)(state, r_, size, NULL);
-  THCTensor_(fill)(state, r_, ScalarConvert<int, real>::to(1));
-}
-
-THC_API void
 THCTensor_(onesLike)(THCState *state, THCTensor *r_, THCTensor *input)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, input));
   THCTensor_(resizeAs)(state, r_, input);
   THCTensor_(fill)(state, r_, ScalarConvert<int, real>::to(1));
-}
-
-THC_API void
-THCTensor_(reshape)(THCState *state, THCTensor *r_, THCTensor *t, THLongStorage *size)
-{
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, r_, t));
-  THCTensor_(resize)(state, r_, size, NULL);
-  THCTensor_(copy)(state, r_, t);
 }
 
 ptrdiff_t
@@ -176,7 +152,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     }
     THLongStorage_data(size)[dim] = result_dim_size;
   }
-  THCTensor_(resize)(state, result, size, NULL);
+  THCTensor_(resizeLegacy)(state, result, size, NULL);
   THLongStorage_free(size);
 
   // We parallelize the copy if all 6 conditions pass:
@@ -192,10 +168,10 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   if (numInputs > 1 &&
       !hasEmptyInput &&
       THCTensor_(nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, result) &&
-      TensorUtils<THCTensor>::allContiguous(state, inputs, numInputs) &&
-      TensorUtils<THCTensor>::all32BitIndexable(state, inputs, numInputs) &&
-      TensorUtils<THCTensor>::allSameDevice(state, inputs, numInputs)) {
+      THCTensor_canUse32BitIndexMath(state, result) &&
+      THCTensor_allContiguous(state, inputs, numInputs) &&
+      THCTensor_all32BitIndexable(state, inputs, numInputs) &&
+      THCTensor_allSameDevice(state, inputs, numInputs)) {
 
     // First, let's set up our kernel parameters. We start with a raw pointer to the storage
     // for the output Tensor.
@@ -424,7 +400,7 @@ void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
 
 accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, src_));
-  THArgCheck((src_->nDimension == 2), 1, "expected a matrix");
+  THArgCheck((src_->_dim() == 2), 1, "expected a matrix");
   THCTensor *diag = THCTensor_(new)(state);
   THCTensor_(diag)(state, diag, src_, 0);
   accreal trace = THCTensor_(sumall)(state, diag);

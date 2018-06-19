@@ -12,7 +12,7 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->nDimension;
+  int ndim = input->_dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -102,7 +102,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   THNN_(SpatialAveragePooling_shapeCheck)
     (input, NULL, kH, kW, dH, dW, padH, padW, ceil_mode);
 
-  if (input->nDimension == 4) {
+  if (input->_dim() == 4) {
     nbatch = input->size[0];
     dimw++;
     dimh++;
@@ -133,7 +133,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
       --outputWidth;
   }
 
-  if (input->nDimension == 3)
+  if (input->_dim() == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
     THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
@@ -231,7 +231,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     (input, gradOutput, kH, kW, dH, dW, padH, padW, ceil_mode);
 
 
-  if (input->nDimension == 4) {
+  if (input->_dim() == 4) {
     nbatch = input->size[0];
     dimw++;
     dimh++;

@@ -1,6 +1,9 @@
 #include <torch/nn/modules/dropout.h>
 
-namespace torch { namespace nn {
+#include <torch/functions.h>
+#include <torch/tensor.h>
+
+namespace torch {
 namespace detail {
 
 template <typename T>
@@ -27,16 +30,18 @@ std::vector<Variable> DropoutBase<T>::forward(std::vector<Variable> input) {
   return output;
 }
 
-template class DropoutBase<Dropout>;
-template class DropoutBase<Dropout2d>;
+template class detail::DropoutBase<nn::Dropout>;
+template class detail::DropoutBase<nn::Dropout2d>;
 } // namespace detail
 
+namespace nn {
 Variable Dropout::noise_mask(Variable input) const {
   return at::empty_like(input);
 }
 
 Variable Dropout2d::noise_mask(Variable input) const {
-  return input.type().empty({input.size(0), input.size(1), 1, 1});
+  return torch::empty(
+      {input.size(0), input.size(1), 1, 1}, at::TensorOptions(input));
 }
-
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

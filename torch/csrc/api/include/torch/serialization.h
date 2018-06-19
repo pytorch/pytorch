@@ -2,6 +2,9 @@
 
 #include <fstream>
 
+#include <torch/functions.h>
+#include <torch/tensor.h>
+
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
 
@@ -208,13 +211,13 @@ void load(Archive& archive, at::Tensor& tensor) {
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
   if (!tensor.defined() || tensor.type().scalarType() != type) {
-    tensor = at::getType(backend, type).tensor();
+    tensor = at::empty({}, at::getType(backend, type));
   }
   tensor.resize_(sizes);
 
   if (tensor.type().is_cuda()) {
     // should actually use cudamemcpy probably
-    auto cputensor = at::CPU(tensor.type().scalarType()).tensor(sizes);
+    auto cputensor = at::empty(sizes, tensor.type().scalarType());
     agimpl::loadBinary(
         archive,
         cputensor.data_ptr(),

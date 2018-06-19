@@ -17,22 +17,50 @@ set LINK_FLAGS=/DEBUG:FULL
 
 mkdir torch/lib/tmp_install
 
-IF "%~1"=="--with-cuda" (
-  set /a NO_CUDA=0
+IF "%~1"=="--use-cuda" (
   set /a USE_CUDA=1
   shift
 ) ELSE (
-  set /a NO_CUDA=1
   set /a USE_CUDA=0
 )
 
-IF "%~1"=="--with-nnpack" (
+IF "%~1"=="--use-rocm" (
+  set /a USE_ROCM=1
+  shift
+) ELSE (
+  set /a USE_ROCM=0
+)
+
+IF "%~1"=="--use-nnpack" (
   set /a NO_NNPACK=0
   set /a USE_NNPACK=1
   shift
 ) ELSE (
   set /a NO_NNPACK=1
   set /a USE_NNPACK=0
+)
+
+IF "%~1"=="--use-mkldnn" (
+  set /a NO_MKLDNN=0
+  shift
+) ELSE (
+  set /a NO_MKLDNN=1
+)
+
+IF "%~1"=="--use-gloo-ibverbs" (
+  set /a USE_GLOO_IBVERBS=1
+  echo Warning: gloo iverbs is enabled but build is not yet implemented 1>&2
+  shift
+) ELSE (
+  set /a USE_GLOO_IBVERBS=0
+)
+
+IF "%~1"=="--use-distributed-mw" (
+  set /a USE_DISTRIBUTED_MW=1
+  echo Warning: distributed mw is enabled but build is not yet implemented 1>&2
+  shift
+) ELSE (
+  set /a USE_DISTRIBUTED_MW=0
 )
 
 set BUILD_TYPE=Release
@@ -126,13 +154,14 @@ goto:eof
                   -DTHC_SO_VERSION=1 ^
                   -DTHNN_SO_VERSION=1 ^
                   -DTHCUNN_SO_VERSION=1 ^
-                  -DNO_CUDA=%NO_CUDA% ^
+                  -DUSE_CUDA=%USE_CUDA% ^
                   -DNO_NNPACK=%NO_NNPACK% ^
                   -Dnanopb_BUILD_GENERATOR=0 ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
 
   %MAKE_COMMAND%
-  IF NOT %ERRORLEVEL%==0 exit 1
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
   cd ../..
   @endlocal
 
@@ -144,20 +173,33 @@ goto:eof
   mkdir build
   cd build
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
-                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
                   -DBUILD_CAFFE2=OFF ^
                   -DBUILD_ATEN=ON ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=OFF ^
+                  -DONNX_NAMESPACE=%ONNX_NAMESPACE% ^
                   -DUSE_CUDA=%USE_CUDA% ^
                   -DUSE_NNPACK=%USE_NNPACK% ^
                   -DCUDNN_INCLUDE_DIR="%CUDNN_INCLUDE_DIR%" ^
                   -DCUDNN_LIB_DIR="%CUDNN_LIB_DIR%" ^
                   -DCUDNN_LIBRARY="%CUDNN_LIBRARY%" ^
-                  -DCMAKE_BUILD_TYPE=%BUILD_TYPE%
+                  -DNO_MKLDNN=%NO_MKLDNN% ^
+                  -DMKLDNN_INCLUDE_DIR="%MKLDNN_INCLUDE_DIR%" ^
+                  -DMKLDNN_LIB_DIR="%MKLDNN_LIB_DIR%" ^
+                  -DMKLDNN_LIBRARY="%MKLDNN_LIBRARY%" ^
+                  -DATEN_NO_CONTRIB=1 ^
+                  -DCMAKE_INSTALL_PREFIX="%INSTALL_DIR%" ^
+                  -DCMAKE_EXPORT_COMPILE_COMMANDS=1 ^
+                  -DCMAKE_C_FLAGS="%USER_CFLAGS%" ^
+                  -DCMAKE_CXX_FLAGS="/EHa %USER_CFLAGS%" ^
+                  -DCMAKE_EXE_LINKER_FLAGS="%USER_LDFLAGS%" ^
+                  -DCMAKE_SHARED_LINKER_FLAGS="%USER_LDFLAGS%" ^
+                  -DUSE_ROCM=%USE_ROCM%
 
   %MAKE_COMMAND%
-  IF NOT %ERRORLEVEL%==0 exit 1
+  IF ERRORLEVEL 1 exit 1
+  IF NOT ERRORLEVEL 0 exit 1
   cd ..
   @endlocal
 

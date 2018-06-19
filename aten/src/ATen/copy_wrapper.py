@@ -96,12 +96,12 @@ Tensor & ${Type}::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocki
 }
 """)
 
-# Technically, no code should actually call _s_copy_from with a CPU self (this
-# only can happen when the src is CUDA from a CPU kernel) but for
-# completeness we fill out with a swap.
+# NB: Hypothetically, someone could call s_copy_from directly and get an error
+# message which claims something is not supported, when it actually is.  But
+# the correct fix in this case was to NOT call copy_from
 FUNCTION_FROM_SWAP = CodeTemplate("""\
 Tensor & ${Type}::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocking) const {
-  return dst.type().s_copy_(dst, src, non_blocking);
+  AT_ERROR("copy does not support ", src.type().toString(), " to ", dst.type().toString(), " copy (s_copy_from case).");
 }
 """)
 

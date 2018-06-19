@@ -39,7 +39,7 @@ inline vector<TIndex> ToVectorTIndex(const std::vector<int>& src) {
  */
 inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
   TIndex r = 1;
-  for (int i = k; i < dims.size(); ++i) {
+  for (size_t i = k; i < dims.size(); ++i) {
     r *= dims[i];
   }
   return r;
@@ -47,7 +47,7 @@ inline TIndex size_from_dim_(int k, const vector<TIndex>& dims) {
 
 // Product of all dims up to
 inline TIndex size_to_dim_(int k, const vector<TIndex>& dims) {
-  CAFFE_ENFORCE(k <= dims.size());
+  CAFFE_ENFORCE((unsigned)k <= dims.size());
   TIndex r = 1;
   for (int i = 0; i < k; ++i) {
     r *= dims[i];
@@ -57,7 +57,7 @@ inline TIndex size_to_dim_(int k, const vector<TIndex>& dims) {
 
 // Product of all dims between k and l (not including dims[k] and dims[l])
 inline TIndex size_between_dim_(int k, int l, const vector<TIndex>& dims) {
-  CAFFE_ENFORCE(l < dims.size());
+  CAFFE_ENFORCE((unsigned)l < dims.size());
   TIndex r = 1;
   if (k < l) {
     for (int i = k + 1; i < l; ++i) {
@@ -437,7 +437,7 @@ class Tensor {
       Deleter d = nullptr) {
     meta_ = meta;
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id(),
+        meta_.id() != CaffeTypeId::uninitialized(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
     CAFFE_ENFORCE_WITH_CALLER(
@@ -562,7 +562,7 @@ class Tensor {
    */
   inline void* raw_mutable_data() {
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id() != 0,
+        meta_.id() != CaffeTypeId::uninitialized(),
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(meta_);
@@ -579,6 +579,11 @@ class Tensor {
       if ((size_ == 0 || data_.get()) && IsType<T>()) {
         return static_cast<T*>(data_.get());
       }
+      // Check it here statically - otherwise TypeMeta would throw the runtime
+      // error in attempt to invoke TypeMeta::ctor()
+      static_assert(
+          std::is_default_constructible<T>::value,
+          "Tensor can't hold non-default-constructible types");
       return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
     }
 
@@ -694,7 +699,7 @@ class Tensor {
     auto old_size = size_;
     dims_.resize(src.size());
     TIndex new_size = 1;
-    for (unsigned int i = 0; i < src.size(); ++i) {
+    for (size_t i = 0; i < src.size(); ++i) {
       new_size *= src[i];
       dims_[i] = src[i];
     }

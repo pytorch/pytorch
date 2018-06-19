@@ -516,6 +516,11 @@ clone() -> Tensor
 
 Returns a copy of the :attr:`self` tensor. The copy has the same size and data
 type as :attr:`self`.
+
+.. note::
+
+    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
+    propagating to the cloned tensor will propagate to the original tensor.
 """)
 
 add_docstr_all('contiguous',
@@ -1558,6 +1563,13 @@ Repeats this tensor along the specified dimensions.
 
 Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
 
+.. warning::
+
+    :func:`torch.repeat` behaves differently from
+    `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
+    but is more similar to
+    `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
+
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
         dimension
@@ -2003,15 +2015,20 @@ Here are the ways to call ``to``:
 
     Returns a Tensor with the specified :attr:`dtype`
 
-.. function:: to(device, dtype=None) -> Tensor
+.. function:: to(device=None, dtype=None, non_blocking=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
+    When :attr:`non_blocking`, tries to convert asynchronously with respect to
+    the host if possible, e.g., converting a CPU Tensor with pinned memory to a
+    CUDA Tensor.
 
-.. function:: to(other) -> Tensor
+.. function:: to(other, non_blocking=False) -> Tensor
 
-    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as the Tensor
-    :attr:`other`.
+    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
+    the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
+    asynchronously with respect to the host if possible, e.g., converting a CPU
+    Tensor with pinned memory to a CUDA Tensor.
 
 Example::
 
@@ -2030,7 +2047,7 @@ Example::
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
     >>> other = torch.randn((), dtype=torch.float64, device=cuda0)
-    >>> tensor.to(other)
+    >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 

@@ -557,10 +557,18 @@ inline Value* Value::setUniqueName(const std::string & name) {
   auto old_owner_of_name = names.find(name);
   if(old_owner_of_name != names.end()) {
     size_t suffix = 1;
+    std::string name_base = name;
+    auto last_dot_pos = name.find_last_of('.');
+    if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+      if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        name_base = name.substr(0, last_dot_pos);
+      }
+    }
     std::string replacement_name;
     do {
       std::stringstream ss;
-      ss << name << "." << suffix++;
+      ss << name_base << "." << suffix++;
       replacement_name = ss.str();
     } while(names.count(replacement_name) > 0);
     old_owner_of_name->second->setUniqueName(replacement_name);

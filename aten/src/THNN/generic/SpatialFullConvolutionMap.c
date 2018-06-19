@@ -10,7 +10,7 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
   THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
   THArgCheck(
-    weight != NULL && weight->nDimension == 3
+    weight != NULL && weight->_dim() == 3
     && connTable != NULL && connTable->size[0] == weight->size[0], 4,
     "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
@@ -18,7 +18,7 @@ void THNN_(SpatialFullConvolutionMap_updateOutput)(
   const int kH = (int)weight->size[1];
   const int kW = (int)weight->size[2];
 
-  THArgCheck(input != NULL && input->nDimension == 3, 2, "3D tensor expected");
+  THArgCheck(input != NULL && input->_dim() == 3, 2, "3D tensor expected");
   THArgCheck(input->size[0] >= nInputPlane, 2, "invalid number of input planes");
 
   THTensor_(resize3d)(
@@ -91,7 +91,7 @@ void THNN_(SpatialFullConvolutionMap_updateGradInput)(
   int dW, int dH)
 {
   THArgCheck(
-    weight != NULL && weight->nDimension == 3
+    weight != NULL && weight->_dim() == 3
     && connTable != NULL && connTable->size[0] == weight->size[0], 5,
     "3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
@@ -162,7 +162,7 @@ void THNN_(SpatialFullConvolutionMap_accGradParameters)(
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   THArgCheck(
-    gradWeight != NULL && gradWeight->nDimension == 3
+    gradWeight != NULL && gradWeight->_dim() == 3
     && connTable != NULL && connTable->size[0] == gradWeight->size[0], 5,
     "3D gradWeight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );

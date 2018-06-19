@@ -11,6 +11,7 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/thread_name.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_disable_chaining,
@@ -51,7 +52,7 @@ DAGNetBase::DAGNetBase(
 
   // Figure out the initial frontier - this is the one we will feed into the job
   // queue to start a run.
-  for (int idx = 0; idx < operator_nodes_.size(); ++idx) {
+  for (size_t idx = 0; idx < operator_nodes_.size(); ++idx) {
     if (operator_nodes_[idx].parents_.size() == 0) {
       initial_frontier_.push_back(idx);
     }
@@ -66,7 +67,7 @@ DAGNetBase::DAGNetBase(
   }
   num_workers_ = num_workers;
 
-  for (int idx = 0; idx < operator_nodes_.size(); ++idx) {
+  for (size_t idx = 0; idx < operator_nodes_.size(); ++idx) {
     if (operator_nodes_[idx].is_chain_start_) {
       task_timers_[idx] = caffe2::make_unique<Timer>();
     }
@@ -112,11 +113,11 @@ bool DAGNetBase::DoRunAsync() {
     job_queue_ = caffe2::make_unique<SimpleQueue<int>>();
   }
   // Figure out number of workers to start.
-  auto num_workers_to_start = num_workers_ - workers_.size();
+  size_t num_workers_to_start = num_workers_ - workers_.size();
 
   // Ensure the number of workers matches the defined in case
   // any of the previously started threads terminated.
-  for (auto i = 0; i < num_workers_to_start; i++) {
+  for (size_t i = 0; i < num_workers_to_start; i++) {
     VLOG(1) << "Start worker #" << workers_.size();
     workers_.push_back(std::thread(&DAGNetBase::WorkerFunction, this));
   }
@@ -200,6 +201,8 @@ void DAGNetBase::HandleException(
 }
 
 void DAGNetBase::WorkerFunction() {
+  setThreadName("CaffeDAGNet");
+
   // WorkerFunctions() is an infinite loop until there are no more jobs to run.
   while (true) {
     int idx = 0;

@@ -1,6 +1,6 @@
 #!/bin/bash
 
-COMPACT_JOB_NAME=pytorch-macos-10.13-py3-build-test
+COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-test"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 export PATH="/usr/local/bin:$PATH"
@@ -21,7 +21,14 @@ rm -rf ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch*
 git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
-# Build and test PyTorch
+# Test PyTorch
+if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
+  # Eigen gives "explicit specialization of class must precede its first use" error
+  # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
+  export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+else
+  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
+fi
 export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang

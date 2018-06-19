@@ -92,8 +92,9 @@ Predictor::Predictor(
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   }
-
+#if CAFFE2_MOBILE
   GlobalInit();
+#endif
 
   if (optimization) {
 #ifdef CAFFE2_OPTIMIZER
@@ -122,8 +123,8 @@ Predictor::Predictor(
 }
 
 bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
-  CAFFE_ENFORCE(inputs.size() <= run_net_.external_input_size());
-  for (auto i = 0; i < inputs.size(); ++i) {
+  CAFFE_ENFORCE(inputs.size() <= (unsigned)run_net_.external_input_size());
+  for (size_t i = 0; i < inputs.size(); ++i) {
     shareInputTensor(&ws_, run_net_.external_input(i), inputs[i]);
   }
 
@@ -132,7 +133,7 @@ bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
   }
 
   outputs->resize(run_net_.external_output_size());
-  for (auto i = 0; i < outputs->size(); ++i) {
+  for (size_t i = 0; i < outputs->size(); ++i) {
     (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
   }
   return true;
@@ -158,7 +159,7 @@ bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
   }
 
   outputs->resize(run_net_.external_output_size());
-  for (auto i = 0; i < outputs->size(); ++i) {
+  for (size_t i = 0; i < outputs->size(); ++i) {
     (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
   }
   return true;
