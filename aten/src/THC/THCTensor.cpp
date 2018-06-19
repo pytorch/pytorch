@@ -23,7 +23,7 @@ int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim) {
   return self->stride[dim];
 }
 THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self) {
-  THLongStorage *size = THLongStorage_newWithSize(self->_dim());
+  THLongStorage *size = THLongStorage_newWithSize(self->dim());
   THLongStorage_rawCopy(size, self->size);
   return size;
 }
@@ -86,7 +86,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
   }
 
   if(!isSame)
-    THCTensor_resizeNdLegacy(state, self, src->_dim(), src->size, NULL);
+    THCTensor_resizeNd(state, self, src->dim(), src->size, NULL);
 }
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
@@ -108,9 +108,9 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
     // currently exist and expect a size [0] tensor to be returned.
     if (d == 0 && size[d] == 0) {
       nDimension = 1;
-      break;
+    } else {
+      AT_CHECK(size[d] > 0, "sizes must be non-negative");
     }
-    AT_CHECK(size[d] > 0, "sizes must be non-negative");
 #endif
     if((self->dim() > d) && (size[d] != self->size[d])) {
       hascorrectsize = false;
@@ -244,7 +244,7 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
                            self,
                            src->storage,
                            src->storageOffset,
-                           src->_dim(),
+                           src->dim(),
                            src->size,
                            src->stride);
 }
@@ -275,9 +275,8 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
   self->storageOffset = storageOffset;
 
   /* size and stride */
-  THCTensor_resizeNdLegacy(state, self, nDimension, size, stride);
+  THCTensor_resizeNd(state, self, nDimension, size, stride);
 }
-
 
 void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int dimension)
 {
