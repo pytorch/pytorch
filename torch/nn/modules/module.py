@@ -632,9 +632,10 @@ class Module(object):
 
                 if input_param.shape != param.shape:
                     # local shape should match the one in checkpoint
-                    error_msgs.append('Size mismatch: copying a param of {} from checkpoint, '
+                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
                                       'where the shape is {} in current model.'
-                                      .format(param.shape, input_param.shape))
+                                      .format(key, param.shape, input_param.shape))
+                    continue
 
                 if isinstance(input_param, Parameter):
                     # backwards compatibility for serialized parameters
