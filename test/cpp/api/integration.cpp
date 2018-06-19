@@ -172,7 +172,7 @@ bool test_mnist(
     /* int label_magic = */ rd.read_int();
     int label_count = rd.read_int();
 
-    auto data = torch::empty({label_count}, at::kLong);
+    auto data = torch::empty({label_count}, torch::kInt64);
     auto a_data = data.accessor<int64_t, 1>();
 
     for (int i = 0; i < label_count; ++i) {
@@ -203,7 +203,7 @@ bool test_mnist(
     const auto backend = useGPU ? at::kCUDA : at::kCPU;
     auto inp =
         torch::empty({batch_size, 1, trdata.size(2), trdata.size(3)}, backend);
-    auto lab = torch::empty({batch_size}, at::device(backend).dtype(at::kLong));
+    auto lab = torch::empty({batch_size}, at::device(backend).dtype(torch::kInt64));
     for (auto p = 0U; p < shuffled_inds.size() - batch_size; p++) {
       inp[p % batch_size] = trdata[shuffled_inds[p]];
       lab[p % batch_size] = trlabel[shuffled_inds[p]];
@@ -224,7 +224,7 @@ bool test_mnist(
 
   NoGradGuard guard;
   auto result = std::get<1>(forward_op(tedata).max(1));
-  Variable correct = (result == telabel).toType(at::kFloat);
+  Variable correct = (result == telabel).toType(torch::kFloat32);
   std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of"
             << telabel.size(0) << std::endl;
   return correct.data().sum().toCFloat() > telabel.size(0) * 0.8;
@@ -274,7 +274,7 @@ TEST_CASE("integration") {
         rewards[i] = R;
       }
       auto r_t =
-          at::CPU(at::kFloat)
+          at::CPU(torch::kFloat32)
               .tensorFromBlob(
                   rewards.data(), {static_cast<int64_t>(rewards.size())});
       r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);

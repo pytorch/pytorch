@@ -155,7 +155,7 @@ TEST_CASE("modules") {
       Embedding model(dict_size, 2);
       // Cannot get gradients to change indices (input) - only for embedding
       // params
-      auto x = torch::full({10}, dict_size - 1, at::kLong);
+      auto x = torch::full({10}, dict_size - 1, torch::kInt64);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
@@ -170,7 +170,7 @@ TEST_CASE("modules") {
 
     SECTION("list") {
       Embedding model(6, 4);
-      auto x = torch::full({2, 3}, 5, at::kLong);
+      auto x = torch::full({2, 3}, 5, torch::kInt64);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
 
