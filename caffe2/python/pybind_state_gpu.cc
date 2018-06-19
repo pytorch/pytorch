@@ -151,6 +151,9 @@ PYBIND11_MODULE(caffe2_pybind11_state_gpu, m) {
   addCUDAGlobalMethods(m);
   addObjectMethods(m);
   addCUDAObjectMethods(m);
+#ifdef WITH_PRIVATE_PYBIND_STATE
+  addPrivateMethods(m);
+#endif
 }
 } // namespace python
 } // namespace caffe2
