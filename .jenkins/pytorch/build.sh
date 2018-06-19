@@ -4,14 +4,11 @@ if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
   exec "$(dirname "${BASH_SOURCE[0]}")/build-asan.sh" $*
 fi
 
-# Add nccl2 for distributed test.
 # TODO: move this to Docker
-sudo apt-get update
-sudo apt-get install libnccl-dev libnccl2
-
-# Add openmpi for mpi test
-sudo apt-get update
-sudo apt-get install openmpi-bin libopenmpi-dev
+# TODO: add both NCCL and MPI in CI test by fixing these test first 
+# sudo apt-get update
+# sudo apt-get install libnccl-dev libnccl2
+# sudo apt-get install openmpi-bin libopenmpi-dev
 
 # Required environment variable: $BUILD_ENVIRONMENT
 # (This is set by default in the Docker images we build, so you don't
