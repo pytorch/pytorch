@@ -1517,6 +1517,7 @@ class TestDistributions(TestCase):
 
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.numpy())
+        print(dist1.log_prob(x), MultivariateNormal(mean, cov).log_prob(x))
 
         self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), places=3)
 
@@ -1539,6 +1540,7 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lowrank_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = torch.randn(3, requires_grad=True)
         scale_factor = torch.randn(3, 1, requires_grad=True)
         scale_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
         cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
@@ -1553,7 +1555,7 @@ class TestDistributions(TestCase):
         scale_factor = torch.randn(5, 2, requires_grad=True)
         scale_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
         cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
-        m1 = LowRankMultivariateNormal(loc=loc, scale_tril=scale_tril)
+        m1 = LowRankMultivariateNormal(loc, scale_factor, scale_diag)
         m2 = MultivariateNormal(loc=loc, covariance_matrix=cov)
         self.assertEqual(m1.mean, m2.mean)
         self.assertEqual(m1.variance, m2.variance)

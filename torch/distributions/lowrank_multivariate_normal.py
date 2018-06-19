@@ -3,7 +3,8 @@ import math
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.multivariate_normal import (_batch_diag, _batch_mv, _batch_potrf_lower,
+from torch.distributions.multivariate_normal import (_batch_diag, _batch_mahalanobis, _batch_mv,
+                                                     _batch_potrf_lower, _batch_trtrs_lower,
                                                      _get_batch_shape)
 from torch.distributions.utils import lazy_property
 
@@ -18,16 +19,6 @@ def _batch_vector_diag(bvec):
     return flat_bmat.reshape(bvec.shape + (n,))
 
 
-def _batch_trtrs_lower(bb, bA):
-    """
-    Applies `torch.trtrs` for batches of matrices.
-    """
-    flat_b = bb.reshape((-1,) + b.shape[-2:])
-    flat_A = bA.reshape((-1,) + A.shape[-2:])
-    flat_X = torch.stack([torch.trtrs(b, A, upper=False)[0] for b, A in zip(flat_b, flat_A)])
-    return flat_X.reshape(bb.shape)
-
-
 def _batch_capacitance_tril(W, D):
     r"""
     Computes Cholesky of :math:`I + W.T @ inv(D) @ W` for a batch of matrices :math:`W`
@@ -36,7 +27,7 @@ def _batch_capacitance_tril(W, D):
     m = W.shape[-1]
     identity = torch.eye(m, out=W.new(m, m))
     Wt_Dinv = W.transpose(-1, -2) / D.unsqueeze(-2)
-    K = identity + torch.matmul(Wt_Dinv, W) 
+    K = identity + torch.matmul(Wt_Dinv, W)
     return _batch_potrf_lower(K)
 
 
@@ -49,7 +40,7 @@ def _batch_lowrank_logdet(W, D, capacitance_tril=None):
     """
     if capacitance_tril is None:
         capacitance_tril = _batch_capacitance_tril(W, D)
-    return 2 * _batch_diag(capacitance_tril).log().sum(-1) + D.log.sum(-1)
+    return 2 * _batch_diag(capacitance_tril).log().sum(-1) + D.log().sum(-1)
 
 
 def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril=None):
@@ -62,12 +53,10 @@ def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril=None):
     if capacitance_tril is None:
         capacitance_tril = _batch_capacitance_tril(W, D)
     Wt_Dinv = W.transpose(-1, -2) / D.unsqueeze(-2)
-    Wt_Dinv_x = (Wt_Dinv * x.unsqueeze(-2)).sum(-1)
+    Wt_Dinv_x = _batch_mv(Wt_Dinv, x)
     mahalanobis_term1 = (x.pow(2) / D).sum(-1)
-    capacitance_tril = capacitance_tril.expand(Wt_Dinv_x.shape + (x.shape[-1],))
-    mahalanobis_term2 = _batch_trtrs_lower(Wt_Dinv_x.unsqueeze(-1),
-                                           capacitance_tril).squeeze(-1).pow(2).sum(-1)
-    return mahalanobis_term1 + mahalanobis_term2
+    mahalanobis_term2 = _batch_mahalanobis(capacitance_tril, Wt_Dinv_x)
+    return mahalanobis_term1 - mahalanobis_term2
 
 
 class LowRankMultivariateNormal(Distribution):  # TODO: docs, tests
@@ -124,7 +113,7 @@ class LowRankMultivariateNormal(Distribution):  # TODO: docs, tests
         self.scale_diag = scale_diag.expand(loc_shape)
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
-        self._capacitance_tril  = _batch_capacitance_tril(self.scale_factor, self.scale_tril)
+        self._capacitance_tril  = _batch_capacitance_tril(self.scale_factor, self.scale_diag)
 
     @property
     def mean(self):
@@ -132,7 +121,7 @@ class LowRankMultivariateNormal(Distribution):  # TODO: docs, tests
 
     @property
     def variance(self):
-        return (self.scale_factor ** 2).sum(-1) + self.scale_diag
+        return self.scale_factor.pow(2).sum(-1) + self.scale_diag
 
     @lazy_property
     def scale_tril(self):
@@ -141,12 +130,12 @@ class LowRankMultivariateNormal(Distribution):  # TODO: docs, tests
         #     W @ W.T + D = D1/2 @ (I + D-1/2 @ W @ W.T @ D-1/2) @ D1/2
         # The matrix "I + D-1/2 @ W @ W.T @ D-1/2" has eigenvalues bounded from below by 1,
         # hence it is well-conditioned and safe to take Cholesky decomposition.
-        n = self.scale_factor.shape[-2]
+        n = self._event_shape[0]
         identity = torch.eye(n, out=self.scale_factor.new(n, n))
-        scale_diag_mat_sqrt = self.scale_diag.sqrt().unsqueeze(-1)
-        Dinvsqrt_W = self.scale_factor / scale_diag_mat_sqrt
+        scale_diag_sqrt_unsqueeze = self.scale_diag.sqrt().unsqueeze(-1)
+        Dinvsqrt_W = self.scale_factor / scale_diag_sqrt_unsqueeze
         K = identity + torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2))
-        return scale_diag_mat_sqrt * _batch_potrf_lower(K)
+        return scale_diag_sqrt_unsqueeze * _batch_potrf_lower(K)
 
     @lazy_property
     def covariance_matrix(self):
@@ -159,8 +148,8 @@ class LowRankMultivariateNormal(Distribution):  # TODO: docs, tests
         #     inv(W @ W.T + D) = inv(D) - inv(D) @ W @ inv(C) @ W.T @ inv(D)
         # where :math:`C` is the capacitance matrix.
         Wt_Dinv = self.scale_factor.transpose(-1, -2) / self.scale_diag.unsqueeze(-2)
-        A = _batch_trtrs(Wt_Dinv, self._capacitance_tril)
-        return _batch_vector_diag(D.reciprocal()) - torch.matmul(A.tranpose(-1, -2), A)
+        A = _batch_trtrs_lower(Wt_Dinv, self._capacitance_tril)
+        return _batch_vector_diag(self.scale_diag.reciprocal()) - torch.matmul(A.transpose(-1, -2), A)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
@@ -171,16 +160,16 @@ class LowRankMultivariateNormal(Distribution):  # TODO: docs, tests
         if self._validate_args:
             self._validate_sample(value)
         diff = value - self.loc
-        M = _batch_lowrank_mahalonobis(self.scale_factor, self.scale_diag, diff,
+        M = _batch_lowrank_mahalanobis(self.scale_factor, self.scale_diag, diff,
                                        self._capacitance_tril)
         log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag,
                                         self._capacitance_tril)
-        return -0.5 * (M + self._event_shape[0] * math.log(2 * math.pi) + log_det)
+        return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + log_det + M)
 
     def entropy(self):
         log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag,
                                         self._capacitance_tril)
-        H = 0.5 * (self._event_shape[0] * (1.0 + math.log(2 * math.pi)) *  log_det)
+        H = 0.5 * (self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + log_det)
         if len(self._batch_shape) == 0:
             return H
         else:
