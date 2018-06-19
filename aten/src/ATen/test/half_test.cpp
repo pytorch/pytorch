@@ -79,14 +79,3 @@ TEST_CASE( "half numeric limits", "[]" ) {
   REQUIRE(limits::quiet_NaN() != limits::quiet_NaN());
   REQUIRE(limits::signaling_NaN() != limits::signaling_NaN());
 }
-
-TEST_CASE( "half cmath ", "[]" ) {
-  // Relies on implicit conversion to float
-  using limits = std::numeric_limits<Half>;
-  REQUIRE(std::isnan(limits::quiet_NaN()));
-  REQUIRE(std::isnan(limits::signaling_NaN()));
-  REQUIRE(!std::isinf(limits::quiet_NaN()));
-  REQUIRE(!std::isinf(limits::signaling_NaN()));
-  REQUIRE(std::isinf(limits::infinity()));
-  REQUIRE(!std::isnan(limits::infinity()));
-}

@@ -13,7 +13,7 @@ namespace at {
 /// Constructors
 
 inline AT_HOSTDEVICE Half::Half(const __half& value) {
-  std::memcpy(&x, &value, sizeof(unsigned short));
+  x = *reinterpret_cast<const unsigned short*>(&value);
 }
 
 inline AT_HOSTDEVICE Half::Half(float value) {
