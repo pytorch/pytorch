@@ -23,7 +23,7 @@ from .sparse import Embedding, EmbeddingBag
 from .rnn import RNNBase, RNN, LSTM, GRU, \
     RNNCell, LSTMCell, GRUCell
 from .pixelshuffle import PixelShuffle
-from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d, Upsample, Resize_images
+from .upsampling import UpsamplingNearest2d, UpsamplingBilinear2d, Upsample, ResizeImages
 from .distance import PairwiseDistance, CosineSimilarity
 from .fold import Fold, Unfold
 from .adaptive import AdaptiveLogSoftmaxWithLoss
@@ -43,7 +43,7 @@ __all__ = [
     'InstanceNorm2d', 'InstanceNorm3d', 'LayerNorm', 'GroupNorm', 'Dropout', 'Dropout2d', 'Dropout3d', 'AlphaDropout',
     'ReflectionPad1d', 'ReflectionPad2d', 'ReplicationPad2d', 'ReplicationPad1d', 'ReplicationPad3d',
     'CrossMapLRN2d', 'Embedding', 'EmbeddingBag', 'RNNBase', 'RNN', 'LSTM', 'GRU', 'RNNCell', 'LSTMCell', 'GRUCell',
-    'PixelShuffle', 'Resize_images', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
+    'PixelShuffle', 'ResizeImages', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
     'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
     'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',

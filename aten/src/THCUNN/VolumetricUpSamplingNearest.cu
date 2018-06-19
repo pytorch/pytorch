@@ -12,7 +12,7 @@
 #include "THCAtomics.cuh"
 
 template<typename Dtype, typename Acctype>
-__global__ void nearest_neighbor_interp2_kernel(
+__global__ void nearest_neighbor_5d_kernel(
 		const int n,
 		const THCDeviceTensor<Dtype, 5> data1,
 		THCDeviceTensor<Dtype, 5> data2) {
@@ -61,7 +61,7 @@ __global__ void nearest_neighbor_interp2_kernel(
 
 // Backward operation
 template <typename Dtype, typename Acctype>
-__global__ void nearest_neighbor_interp2_kernel_backward(
+__global__ void nearest_neighbor_5d_kernel_backward(
 		const int n, 
 		THCDeviceTensor<Dtype, 5> data1,
 		const THCDeviceTensor<Dtype, 5> data2) {

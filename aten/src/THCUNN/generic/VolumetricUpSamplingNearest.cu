@@ -66,7 +66,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   const int num_kernels = outputDepth * outputHeight * outputWidth;
   const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
-  nearest_neighbor_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
+  nearest_neighbor_5d_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
 	 0, stream>>>(num_kernels, idata, odata);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, input);
@@ -103,7 +103,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   const int num_threads = 
 	  THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
-  nearest_neighbor_interp2_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),
+  nearest_neighbor_5d_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),
 	  num_threads, 0, stream>>>(num_kernels, data1, data2);
   THCudaCheck(cudaGetLastError());
   THCTensor_(free)(state, gradInput);
