@@ -350,7 +350,7 @@ if (TORCH_BUILD_TEST)
 
     add_executable(test_api
       ${TORCH_API_TEST_DIR}/any.cpp
-      ${TORCH_API_TEST_DIR}/container.cpp
+      ${TORCH_API_TEST_DIR}/modules.cpp
       ${TORCH_API_TEST_DIR}/cursor.cpp
       ${TORCH_API_TEST_DIR}/integration.cpp
       ${TORCH_API_TEST_DIR}/main.cpp

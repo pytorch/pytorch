@@ -1,47 +1,49 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/cloneable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
-
-#include <cstdint>
+#include <cstddef>
+#include <vector>
 
 namespace torch {
-namespace detail {
-template <typename T>
-class DropoutBase : public torch::nn::CloneableModule<T> {
- public:
-  using nn::Module::is_training;
+namespace nn {
+struct DropoutOptions {
+  DropoutOptions(double rate);
+  TORCH_ARG(double, rate) = 0.5;
+};
 
-  explicit DropoutBase(double rate);
+namespace detail {
+template <typename Derived>
+class DropoutImplBase : public torch::nn::Cloneable<Derived> {
+ public:
+  explicit DropoutImplBase(DropoutOptions options);
 
   void reset() override;
-
   std::vector<Variable> forward(std::vector<Variable> input);
-
-  TORCH_ATTR(double, rate) = 0.5;
+  const DropoutOptions& options() const noexcept;
 
  protected:
   virtual Variable noise_mask(Variable input) const = 0;
+
+  DropoutOptions options_;
 };
 } // namespace detail
 
-namespace nn {
-class Dropout : public detail::DropoutBase<Dropout> {
+class DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
  public:
-  using detail::DropoutBase<Dropout>::DropoutBase;
-
- private:
+  using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
   Variable noise_mask(Variable input) const override;
 };
 
-class Dropout2d : public detail::DropoutBase<Dropout2d> {
+class Dropout2dImpl : public detail::DropoutImplBase<Dropout2dImpl> {
  public:
-  using detail::DropoutBase<Dropout2d>::DropoutBase;
-
- private:
+  using detail::DropoutImplBase<Dropout2dImpl>::DropoutImplBase;
   Variable noise_mask(Variable input) const override;
 };
 
+TORCH_MODULE(Dropout);
+TORCH_MODULE(Dropout2d);
 } // namespace nn
 } // namespace torch

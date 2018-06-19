@@ -53,7 +53,7 @@ TEST_CASE("optim") {
   std::srand(0);
   torch::manual_seed(0);
   auto model = std::make_shared<Sequential>(
-      SigmoidLinear(Linear(2, 8).build()), SigmoidLinear(Linear(8, 1).build()));
+      SigmoidLinear(Linear(2, 8)), SigmoidLinear(Linear(8, 1)));
 
   // Flaky
   // SECTION("lbfgs") {
