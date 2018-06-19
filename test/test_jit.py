@@ -1510,6 +1510,42 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_math_schema(self):
+        # This should use the add(Tensor, Tensor) schema.
+        # Also tests to see if alpha={1} is lifted correctly.
+        def fn(x, y):
+            return x + y
+
+        graph = torch.jit._script_graph(fn)
+        self.assertExpectedGraph(graph)
+
+    def test_math_tensor_number(self):
+        # Test that 7 is casted to tensor, then casted to the
+        # correct type, and finally added to x.
+        def fn(x):
+            return x + 7
+
+        graph = torch.jit._script_graph(fn)
+        self.assertExpectedGraph(graph)
+
+    def test_math_numbers(self):
+        # Test that the numbers are casted to tensor,
+        # added, and then casted back.
+        def fn1(x):
+            c = 7 + 8
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        def fn2(x):
+            c = 1.1 + 3.1
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        graph1 = torch.jit._script_graph(fn1)
+        self.assertExpectedGraph(graph1, subname="int")
+        graph2 = torch.jit._script_graph(fn2)
+        self.assertExpectedGraph(graph2, subname="float")
+
     def test_if_nest_while(self):
         def func(a, b):
             c = 0
@@ -1661,6 +1697,113 @@ class TestScript(JitTestCase):
             def binop(x, y):
                 # Replace this with another unsupported op when/if it gets supported
                 return x << y
+
+    def test_number_math(self):
+        template = ('''
+# int, int -> int
+def func1():
+    c = 8 {op} 2
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+
+def func2():
+    c = 2 {op} 2
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+
+# float, float -> float
+def func3():
+    c = 3.14 {op} 0.125
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+
+def func4():
+    c = 3.14 {op} 3.14
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+''')
+        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        # TODO: turn this on for py3 (and add PY3 division semantics)
+        ops_py2_only = ['/']
+        if PY2:
+            ops.extend(ops_py2_only)
+
+        for op in ops:
+            code = template.format(op=op)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func1(), scope['func1']())
+            self.assertEqual(cu.func2(), scope['func2']())
+            self.assertEqual(cu.func3(), scope['func3']())
+            self.assertEqual(cu.func4(), scope['func4']())
+
+    def test_number_neg(self):
+        # int -> int
+        def func1():
+            c = -8
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        # float -> float
+        def func2():
+            c = -3.14
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        self.checkScript(func1, (), optimize=True)
+        self.checkScript(func2, (), optimize=True)
+
+    def _test_tensor_number_math(self, device='cpu'):
+        template = ('''
+def func(t):
+    return {lhs} {op} {rhs}
+''')
+
+        def test(op, const, swap_args):
+            args = ('t', const)
+            if swap_args:
+                args = (const, 't')
+
+            code = template.format(lhs=args[0], rhs=args[1], op=op)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func(tensor), scope['func'](tensor))
+
+        var_int = 2
+        var_float = 1.4321
+
+        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        # TODO: turn this on for py3 (and add PY3 division semantics)
+        ops_py2_only = ['/']
+        if PY2:
+            ops.extend(ops_py2_only)
+
+        float_tensor = torch.randn(5, 5, device=device)
+        double_tensor = torch.randn(5, 5, dtype=torch.double, device=device)
+        long_tensor = torch.randint(-5, 5, (5, 5), dtype=torch.long, device=device)
+        long_tensor[long_tensor == 0] = 2
+
+        tensors = [float_tensor, double_tensor, long_tensor]
+        consts = [var_int, var_float]
+
+        for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
+            # FIXME: things like 2 / long_tensor are not implemented correctly
+            # Look in torch/tensor.py to see how pytorch implements it.
+            if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
+                continue
+
+            test(op, const, swap_args)
+
+    def test_tensor_number_math(self):
+        self._test_tensor_number_math()
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_tensor_number_math_cuda(self):
+        self._test_tensor_number_math(device='cuda')
 
     def test_python_call(self):
         def pyfunc(a):
@@ -3067,6 +3210,17 @@ class TestScript(JitTestCase):
             return a + 1.0 - a
 
         self.checkScript(test_rand, ())
+
+    def test_erase_number_types(self):
+        def func(a):
+            b = 7 + 1 + 3
+            c = a + b
+            c += b
+            return c
+
+        graph = torch.jit._script_graph(func)
+        self.run_pass('erase_number_types', graph)
+        self.assertExpectedGraph(graph)
 
     def test_loop_unrolling(self):
         def fn(x):
