@@ -12,25 +12,25 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 4,
+  THArgCheck(THCudaLongTensor__nDimension(state, index) == THCTensor_(_nDimension)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
   THLongStorage *indexSize = THCudaLongTensor_newSizeOf(state, index);
   THArgCheck(THCTensor_(isSize)(state, tensor, indexSize), 4,
              "Index tensor must have the same size as output tensor.");
   THLongStorage_free(indexSize);
-  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 3,
+  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 3,
              "Index dimension is out of bounds");
-  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 2,
+  THArgCheck(THCTensor_(_nDimension)(state, src) == THCTensor_(_nDimension)(state, tensor), 2,
              "Input tensor must have same dimensions as output tensor");
 
-  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
     if (d != dim) {
       THArgCheck(THCTensor_(size)(state, tensor, d) == THCTensor_(size)(state, src, d), 2,
                  "Input tensor must have same size as output tensor apart from the specified dimension");
     }
   }
 
-  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
 
@@ -107,14 +107,14 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 2,
+  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 3,
+  THArgCheck(THCudaLongTensor__nDimension(state, index) == THCTensor_(_nDimension)(state, src), 3,
              "Index tensor must have same dimensions as input tensor");
-  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 4,
+  THArgCheck(THCTensor_(_nDimension)(state, src) == THCTensor_(_nDimension)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
 
-  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
     int64_t indexSizeD = THCudaLongTensor_size(state, index, d);
     if (d != dim) {
       THArgCheck(indexSizeD <= THCTensor_(size)(state, tensor, d), 3,
@@ -126,7 +126,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
                THCudaLongTensor_sizeDesc(state, index).str, THCTensor_(sizeDesc)(state, src).str);
   }
 
-  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
@@ -197,25 +197,25 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 2,
+  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 3,
+  THArgCheck(THCudaLongTensor__nDimension(state, index) == THCTensor_(_nDimension)(state, src), 3,
              "Index tensor must have same dimensions as input tensor");
-  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 4,
+  THArgCheck(THCTensor_(_nDimension)(state, src) == THCTensor_(_nDimension)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
   THLongStorage *indexDims = THCudaLongTensor_newSizeOf(state, index);
   THArgCheck(THCTensor_(isSize)(state, src, indexDims), 3,
              "Index tensor must have the same size as input tensor.");
   THLongStorage_free(indexDims);
 
-  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
     if (d != dim) {
       THArgCheck(THCTensor_(size)(state, tensor, d) == THCTensor_(size)(state, src, d), 4,
                  "Input tensor must have same size as output tensor apart from the specified dimension");
     }
   }
 
-  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
@@ -288,13 +288,13 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 2,
+  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor_nDimension(state, index) ==
-             THCTensor_(nDimension)(state, tensor), 3,
+  THArgCheck(THCudaLongTensor__nDimension(state, index) ==
+             THCTensor_(_nDimension)(state, tensor), 3,
              "Index tensor must have same dimensions as output tensor");
 
-  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
     if (d != dim) {
       THArgCheck(THCTensor_(size)(state, tensor, d) ==
                  THCudaLongTensor_size(state, index, d), 4,
@@ -302,7 +302,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
     }
   }
 
-  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
