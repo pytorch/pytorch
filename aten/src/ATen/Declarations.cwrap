@@ -1054,6 +1054,7 @@
     - Int
     - Short
   backends:
+    - CPU
     - CUDA
   variants:
     - method

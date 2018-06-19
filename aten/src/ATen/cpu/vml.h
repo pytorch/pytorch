@@ -25,16 +25,6 @@ namespace {
 using namespace vec256;
 
 template <typename scalar_t>
-inline void vabs(scalar_t* out, scalar_t* in, int64_t size) {
-  parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
-    map([](const Vec256<scalar_t>& x) { return x.abs(); },
-        out + begin,
-        in + begin,
-        end - begin);
-  });
-}
-
-template <typename scalar_t>
 inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
     map(
@@ -72,7 +62,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
     vmd##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_DEFAULT); \
   }
 
-// NB: cosh and sinh were temporarily disabled due to issues with Apple clang
+// NB: abs, cosh and sinh were temporarily disabled due to issues with Apple clang
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 IMPLEMENT_FLOAT_MKL_VML(acos, Acos)

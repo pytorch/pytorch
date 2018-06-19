@@ -68,7 +68,9 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
     return at::_##op##_out(result, self);                       \
   }
 
-IMPLEMENT_UNARY_OP_VEC(abs)
+// NB: Temp. defaulting to TH implementation of abs due to issues with Apple
+
+IMPLEMENT_UNARY_OP_TH(abs)
 IMPLEMENT_UNARY_OP_VEC(acos)
 IMPLEMENT_UNARY_OP_VEC(asin)
 IMPLEMENT_UNARY_OP_VEC(atan)
