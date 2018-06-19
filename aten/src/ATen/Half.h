@@ -18,7 +18,6 @@
 #include <iosfwd>
 
 #ifdef __CUDACC__
-#include <cuda.h>
 #include <cuda_fp16.h>
 #endif
 
@@ -30,7 +29,7 @@
   #endif
 #endif
 
-struct __half;
+// struct __half;
 
 namespace at {
 
@@ -49,11 +48,13 @@ struct alignas(2) Half {
 
   Half() = default;
   constexpr AT_HOSTDEVICE Half(unsigned short bits, from_bits_t) : x(bits) {};
-  inline AT_HOSTDEVICE Half(const __half& value);
   inline AT_HOSTDEVICE Half(float value);
-
   inline AT_HOSTDEVICE operator float() const;
+
+#ifdef __CUDACC__
+  inline AT_HOSTDEVICE Half(const __half& value);
   inline AT_HOSTDEVICE operator __half() const;
+#endif
 };
 
 template<typename To, typename From> To convert(From f) {

@@ -12,10 +12,6 @@ namespace at {
 
 /// Constructors
 
-inline AT_HOSTDEVICE Half::Half(const __half& value) {
-  x = *reinterpret_cast<const unsigned short*>(&value);
-}
-
 inline AT_HOSTDEVICE Half::Half(float value) {
 #ifdef __CUDA_ARCH__
   x = __half_as_short(__float2half(value));
@@ -28,19 +24,18 @@ inline AT_HOSTDEVICE Half::Half(float value) {
 
 inline AT_HOSTDEVICE Half::operator float() const {
 #ifdef __CUDA_ARCH__
-  return __half2float(*this);
+  return __half2float(*reinterpret_cast<const __half*>(x));
 #else
   return detail::halfbits2float(x);
 #endif
 }
 
 #ifdef __CUDACC__
+inline AT_HOSTDEVICE Half::Half(const __half& value) {
+  x = *reinterpret_cast<const unsigned short*>(&value);
+}
 inline AT_HOSTDEVICE Half::operator __half() const {
-#if CUDA_VERSION < 9000
-  return __half{x};
-#else
-  return __half(__half_raw{x});
-#endif
+  return *reinterpret_cast<const __half*>(this);
 }
 #endif
 

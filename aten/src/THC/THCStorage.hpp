@@ -9,6 +9,13 @@
 #include "ATen/ScalarTypeUtils.h"
 #include <atomic>
 
+namespace at {
+
+template <>
+struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
+
+}
+
 typedef struct THCStorage
 {
     at::ScalarType scalar_type;

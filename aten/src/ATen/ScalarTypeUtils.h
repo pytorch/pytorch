@@ -2,12 +2,6 @@
 
 #include "ATen/ScalarType.h"
 
-#ifdef __CUDACC__
-#include <cuda_fp16.h>
-#endif
-
-struct __half;
-
 namespace at {
 
 template <typename T>
@@ -21,10 +15,5 @@ struct CTypeToScalarType<ct> {                                     \
 };
 AT_FORALL_SCALAR_TYPES(DEFINE_TO_SCALAR_TYPE)
 #undef DEFINE_TO_SCALAR_TYPE
-
-template <>
-struct CTypeToScalarType<__half> {
-  static inline at::ScalarType to() { return at::ScalarType::Half; }
-};
 
 } // namespace at

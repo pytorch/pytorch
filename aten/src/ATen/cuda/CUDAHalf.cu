@@ -14,7 +14,7 @@ half convert(Half aten_half) {
 
 template <> AT_CUDA_API
 half convert(double value) {
-  return half(Half(value).x);
+  return half{Half(value).x};
 }
 
 template <> AT_CUDA_API
