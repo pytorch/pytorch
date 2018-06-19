@@ -1,5 +1,6 @@
 set(LIB_SOURCES
-        dummy.cpp
+        TensorTypeId.cpp
+        TensorTypeIdRegistration.cpp
 )
 
 set(TEST_SOURCES
@@ -8,6 +9,7 @@ set(TEST_SOURCES
 
 add_library(dispatch OBJECT ${LIB_SOURCES})
 target_enable_style_warnings(dispatch)
+target_include_directories(dispatch SYSTEM PUBLIC ${PROJECT_SOURCE_DIR}/third_party/flat_hash_map)
 
 if(BUILD_TEST)
     add_executable(dispatch_test ${TEST_SOURCES} $<TARGET_OBJECTS:dispatch>)
