@@ -11,7 +11,7 @@
 #include "caffe2/core/dispatch/TensorTypeId.h"
 #include "caffe2/core/common.h"
 #include <atomic>
-#include "flat_hash_map/flat_hash_map.h"
+#include "caffe2/utils/flat_hash_map/flat_hash_map.h"
 
 namespace c10 {
 
