@@ -1260,6 +1260,187 @@ private:
     return post_process(tree.range(), emitSugaredExpr(tree, 1)->asValue(tree.range(), method));
   }
 
+  NodeKind reverseComparision(NodeKind kind) {
+    if (kind == aten::lt) {
+      return aten::gt;
+    } else if (kind == aten::le) {
+      return aten::ge;
+    } else if (kind == aten::gt) {
+      return aten::lt;
+    } else if (kind == aten::ge) {
+      return aten::le;
+    }
+    throw std::runtime_error("reverseComparision: unsupported NodeKind. File a bug");
+  }
+
+  std::vector<NamedValue> toNamedValues(
+      const SourceRange& loc,
+      ArrayRef<Value*> inputs) {
+    std::vector<NamedValue> result;
+    for (Value* inp : inputs) {
+      result.push_back(NamedValue(loc, "", inp));
+    }
+    return result;
+  }
+
+  std::shared_ptr<SugaredValue> emitBasicMath(
+      const SourceRange& loc,
+      Method& method,
+      NodeKind kind,
+      at::ArrayRef<Value*> inputs) {
+    return emitBuiltinCall(
+        loc,
+        method,
+        kind.toUnqualString(),
+        toNamedValues(loc, inputs),
+        /*attributes=*/{},
+        /*required=*/true);
+  }
+
+  // Handles binary python math ops.
+  std::shared_ptr<SugaredValue> emitPythonMath(
+      const SourceRange& loc,
+      Method& method,
+      NodeKind kind,
+      Value* lhs,
+      Value* rhs) {
+    // Assume lhs, rhs are either IntType or FloatType.
+    bool lhs_is_float = lhs->type()->kind() == TypeKind::FloatType;
+    bool rhs_is_float = rhs->type()->kind() == TypeKind::FloatType;
+    JIT_ASSERT(lhs_is_float || lhs->type()->kind() == TypeKind::IntType);
+    JIT_ASSERT(rhs_is_float || rhs->type()->kind() == TypeKind::IntType);
+
+    auto out_type = lhs->type();
+    if (kind == aten::ge || kind == aten::le || kind == aten::eq ||
+        kind == aten::gt || kind == aten::lt || kind == aten::ne) {
+      // Stand-in for bool type.
+      out_type = NumberType::get();
+    } else {
+      // If the types are different, one must be FloatType.
+      // We should promote the other value to FloatType.
+      if (lhs_is_float != rhs_is_float) {
+        out_type = FloatType::get();
+      }
+    }
+
+    // Strategy: cast inputs to tensor, perform op, recast to number
+    lhs = numToTensor(loc, *graph, lhs);
+    rhs = numToTensor(loc, *graph, rhs);
+
+    // FIXME: support (python) math between IntType and FloatType.
+    // Here, without loss of generality, let's say lhs is a float and rhs is an
+    // int. We should insert an aten::type_as(lhs, rhs) node into the graph.
+    // However, the graph fuser generally has problems working with scalar tensors
+    // (#8560), so we don't support this right now.
+    if (lhs_is_float != rhs_is_float) {
+      throw std::runtime_error("NYI: math between float and int. See #8560.");
+    }
+
+    auto* out = emitBasicMath(loc, method, kind, { lhs, rhs })
+                  ->asValue(loc, method);
+    return std::make_shared<SimpleValue>(tensorToNum(loc, *graph, out, out_type));
+  }
+
+  // math ops between a tensor and a number require that the number be the
+  // the same type (ScalarType and Backend) as the tensor, because numbers
+  // in the JIT are represented as scalar tensors.
+  // This function casts the number to the same type as the tensor.
+  std::shared_ptr<SugaredValue> emitTensorNumberMath(
+      const SourceRange& loc,
+      Method& method,
+      NodeKind kind,
+      Value* lhs,
+      Value* rhs) {
+    auto rhs_kind = rhs->type()->kind();
+    JIT_ASSERT(rhs_kind == TypeKind::FloatType || rhs_kind == TypeKind::IntType);
+    JIT_ASSERT(lhs->type()->isSubtypeOf(*DynamicType::get()));
+
+    rhs = numToTensor(loc, *graph, rhs);
+    auto args = { rhs, lhs };
+    rhs = graph->insertNode(graph->create(aten::type_as, args))
+               ->output();
+    return emitBasicMath(loc, method, kind, { lhs, rhs });
+  }
+
+  // Handles binary math ops.
+  std::shared_ptr<SugaredValue> emitMath(
+      const SourceRange& loc,
+      Method& method,
+      NodeKind kind,
+      ArrayRef<Value*> inputs) {
+    JIT_ASSERT(inputs.size() == 2);
+    auto& lhs = inputs[0];
+    auto& rhs = inputs[1];
+    bool lhs_is_number = lhs->type()->isSubtypeOf(*NumberType::get());
+    bool lhs_is_tensor = lhs->type()->isSubtypeOf(*DynamicType::get());
+    bool rhs_is_number = rhs->type()->isSubtypeOf(*NumberType::get());
+    bool rhs_is_tensor = rhs->type()->isSubtypeOf(*DynamicType::get());
+    JIT_ASSERT(lhs_is_tensor || lhs_is_number);
+    JIT_ASSERT(rhs_is_tensor || rhs_is_number);
+
+    if (lhs_is_number && rhs_is_number) {
+      return emitPythonMath(loc, method, kind, lhs, rhs);
+    }
+
+    if (lhs_is_number && rhs_is_tensor) {
+
+      // commutative operations: just swap the args
+      if (kind == aten::mul || kind == aten::add ||
+          kind == aten::ne || kind == aten::eq) {
+        return emitTensorNumberMath(loc, method, kind, rhs, lhs);
+
+      // rsub
+      } else if (kind == aten::sub) {
+        auto* node = emitNode(aten::neg, loc, { rhs }, 1);
+        return emitTensorNumberMath(loc, method, aten::add, node->output(), lhs);
+
+      // rdiv
+      } else if (kind == aten::div) {
+        auto* node = emitNode(aten::reciprocal, loc, { rhs }, 1);
+        return emitTensorNumberMath(loc, method, aten::mul, node->output(), lhs);
+
+      // Comparision ops: swap args and use reverse comparison
+      } else if (kind == aten::lt || kind == aten::le ||
+                 kind == aten::gt || kind == aten::ge) {
+        return emitTensorNumberMath(loc, method,
+                                    reverseComparision(kind),
+                                    rhs, lhs);
+      } else {
+        throw std::runtime_error("Unknown node kind, please file a bug report");
+      }
+    }
+
+    if (lhs_is_tensor && rhs_is_number) {
+      return emitTensorNumberMath(loc, method, kind, lhs, rhs);
+    }
+
+    return emitBasicMath(loc, method, kind, inputs);
+  }
+
+  // Handles unary math ops.
+  std::shared_ptr<SugaredValue> emitUnaryMath(
+      const SourceRange& loc,
+      Method& method,
+      NodeKind kind,
+      ArrayRef<Value*> inputs) {
+    JIT_ASSERT(inputs.size() == 1);
+    auto* in = inputs[0];
+    bool in_is_number = in->type()->isSubtypeOf(*NumberType::get());
+    bool in_is_tensor = in->type()->isSubtypeOf(*DynamicType::get());
+    JIT_ASSERT(in_is_number || in_is_tensor);
+
+    if (in_is_tensor) {
+      return emitBasicMath(loc, method, kind, inputs);
+    }
+
+    // Cast to tensor, perform op, recast to number
+    auto out_type = in->type();
+    in = numToTensor(loc, *graph, in);
+    auto* out = emitBasicMath(loc, method, kind, { in })
+                  ->asValue(loc, method);
+    return std::make_shared<SimpleValue>(tensorToNum(loc, *graph, out, out_type));
+  }
+
   // any expression that can produce a SugaredValue is handled here
   // expressions that only return a single Value* are handled in emitSimpleExpr
   std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders) {
@@ -1283,14 +1464,6 @@ private:
         }
         return emitApplyExpr(apply.callee(), inputs, attributes, n_binders);
       } break;
-      default:
-        return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
-    }
-  }
-
-  Value* emitSimpleExpr(
-      const TreeRef& tree) {
-    switch (tree->kind()) {
       case TK_NE:
       case TK_EQ:
       case '<':
@@ -1299,6 +1472,27 @@ private:
       case TK_GE:
       case '*':
       case '/':
+      case '+':
+      case '-': {
+        const auto& inputs = tree.tree()->trees();
+        auto kind = getNodeKind(tree.tree()->kind(), inputs.size());
+        auto input_vals = getValues(inputs, /*maybe_unpack*/false, ensureTensorOrNumber);
+        return emitMath(tree.range(), method, kind, input_vals);
+      }
+      case TK_UNARY_MINUS: {
+        const auto& inputs = tree.tree()->trees();
+        auto kind = getNodeKind(tree.tree()->kind(), inputs.size());
+        auto input_vals = getValues(inputs, /*maybe_unpack*/false, ensureTensorOrNumber);
+        return emitUnaryMath(tree.range(), method, kind, input_vals);
+      }
+      default:
+        return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
+    }
+  }
+
+  Value* emitSimpleExpr(
+      const TreeRef& tree) {
+    switch (tree->kind()) {
       case '@':
       case TK_POW:
       case TK_AND:
@@ -1309,14 +1503,6 @@ private:
         auto kind = getNodeKind(tree->kind(), inputs.size());
         return emitNode(kind, tree->range(), getValues(inputs), 1)->output();
       } break;
-      case '+':
-      case '-': {
-        const auto& inputs =tree->trees();
-        auto kind = getNodeKind(tree->kind(), inputs.size());
-        auto* node = emitNode(kind, tree->range(), getValues(inputs), 1);
-        node->t_(Symbol::attr("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
-        return node->output();
-      }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
       }
