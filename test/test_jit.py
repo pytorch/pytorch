@@ -221,7 +221,7 @@ class JitTestCase(TestCase):
             for g2, g2_ge in zip(grads2, grads2_ge):
                 if g2 is None and g2_ge is None:
                     continue
-                self.assertTrue(torch.allclose(g2, g2_ge, atol=5e-4, rtol=1e-4))
+                self.assertTrue(torch.allclose(g2, g2_ge, atol=7e-4, rtol=1e-4))
 
         return ge
 
