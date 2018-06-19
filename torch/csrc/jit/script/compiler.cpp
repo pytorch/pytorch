@@ -241,28 +241,6 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
   return std::make_shared<SimpleValue>(g.insertNode(g.createTuple(values))->output());
 }
 
-at::Tensor getConstantValue(const SourceRange& loc, Value* v) {
-  if(v->node()->kind() == prim::Constant) {
-    auto t = v->node()->t(attr::value);
-    if(t.ndimension() > 0) {
-      throw ErrorReport(loc) << "attributes must be scalars or lists of scalars";
-    }
-    return t;
-  }
-  throw ErrorReport(loc) << "attributes must be constant expressions";
-}
-
-at::Tensor getAttributeValue(const NamedValue& nv) {
-  auto v = nv.value;
-  if(v->node()->kind() == prim::TupleConstruct) {
-    auto ts = fmap(v->node()->inputs(), [&](Value* input) {
-      return getConstantValue(nv.loc, input);
-    });
-    return at::stack(ts);
-  }
-  return getConstantValue(nv.loc, v);
-}
-
 Value* createConstant(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   auto n = g.createConstant(val);
   n->setSourceLocation(std::make_shared<SourceRange>(loc));
