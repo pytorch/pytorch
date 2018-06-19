@@ -99,6 +99,7 @@ def skipIfNoZeroSize(fn):
             raise unittest.SkipTest('Compiled without arbitrary zero size dimension support')
     return wrapper
 
+
 def get_cuda_memory_usage():
     # we don't need CUDA synchronize because the statistics are not tracked at
     # actual freeing, but at when marking the block as free.
