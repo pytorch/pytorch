@@ -8,10 +8,8 @@ namespace torch {
 // TODO: Rename to `Tensor`.
 using Variable = autograd::Variable;
 
-/// Special "raw data" dtype.
-constexpr auto kByte = at::kByte;
-
 /// Fixed width dtypes.
+constexpr auto kUInt8 = at::kByte;
 constexpr auto kInt8 = at::kChar;
 constexpr auto kInt16 = at::kShort;
 constexpr auto kInt32 = at::kInt;
@@ -20,11 +18,12 @@ constexpr auto kFloat32 = at::kFloat;
 constexpr auto kFloat64 = at::kDouble;
 
 /// Rust-style short dtypes.
-constexpr auto kI8 = at::kChar;
-constexpr auto kI16 = at::kShort;
-constexpr auto kI32 = at::kInt;
-constexpr auto kI64 = at::kLong;
-constexpr auto kF32 = at::kFloat;
-constexpr auto kF64 = at::kDouble;
+constexpr auto kU8 = kUInt8;
+constexpr auto kI8 = kInt8;
+constexpr auto kI16 = kInt16;
+constexpr auto kI32 = kInt32;
+constexpr auto kI64 = kInt64;
+constexpr auto kF32 = kFloat32;
+constexpr auto kF64 = kFloat64;
 
 } // namespace torch
