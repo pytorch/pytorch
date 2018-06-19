@@ -36,7 +36,7 @@ int64_t THTensor_(stride)(const THTensor *self, int dim)
 
 THLongStorage *THTensor_(newSizeOf)(THTensor *self)
 {
-  THLongStorage *size = THLongStorage_newWithSize(self->_dim());
+  THLongStorage *size = THLongStorage_newWithSize(self->dim());
   THLongStorage_rawCopy(size, self->size);
   return size;
 }
