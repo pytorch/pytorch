@@ -88,6 +88,18 @@ struct TensorOptions {
     this->dtype(dtype);
   }
 
+  /// True if all elements of the `TensorOptions` match that of the other.
+  bool operator==(const TensorOptions& other) const noexcept {
+    return dtype_ == other.dtype_ && layout_ == other.layout_ &&
+        device_ == other.device_ && requires_grad_ == other.requires_grad_;
+  }
+
+  /// True if any of the elements of this `TensorOptions` do not match that of
+  /// the other.
+  bool operator!=(const TensorOptions& other) const noexcept {
+    return !(*this == other);
+  }
+
   /// Discards the runtime type stored if the `TensorOptions` was constructed
   /// from a `Tensor` or a `Type`. See the documentation of the constructor from
   /// a `Type` for implications on the behavior of the `type()` method on
@@ -226,21 +238,21 @@ inline TensorOptions Tensor::options() const {
   return TensorOptions(*this);
 }
 
-inline Tensor Tensor::to(TensorOptions options, bool non_blocking) {
-  DeviceGuard guard(options.device());
-  auto copy = options.type().copy(*this, non_blocking);
-  if (copy.is_variable()) {
-    copy.set_requires_grad(options.requires_grad());
+inline Tensor Tensor::to(const TensorOptions& options, bool non_blocking) {
+  // Don't copy if the options match.
+  if (this->options() == options) {
+    return *this;
   }
-  return copy;
+  DeviceGuard guard(options.device());
+  return options.type().copy(*this, non_blocking);
+}
+
+inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking) {
+  return to(options().device(device).dtype(dtype), non_blocking);
 }
 
 inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) {
   return to(options().dtype(dtype), non_blocking);
-}
-
-inline Tensor Tensor::to(Layout layout, bool non_blocking) {
-  return to(options().layout(layout), non_blocking);
 }
 
 inline Tensor Tensor::to(Device device, bool non_blocking) {

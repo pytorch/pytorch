@@ -24,21 +24,17 @@ TEST_CASE("Tensor/ToDtype") {
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kDouble, at::kStrided);
 }
 
-TEST_CASE("Tensor/ToLayout") {
-  // TODO: failing due to unexpected exception with message:
-  // _th_indices is not implemented for type CPUFloatType (_th_indices at /home/
-  // psag/pytorch/pytorch/tools/cpp_build/build/caffe2/aten/src/ATen/Type.cpp:1986)
-  // 1986)
-
-  // auto tensor = at::empty({3, 4});
-  // REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-  //
-  // tensor = tensor.to(at::kSparse);
-  // REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kSparse);
-  //
-  // tensor = tensor.to(at::kStrided);
-  // REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
-}
+// Not currently supported.
+// TEST_CASE("Tensor/ToLayout") {
+//   auto tensor = at::empty({3, 4});
+//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+//
+//   tensor = tensor.to(at::kSparse);
+//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kSparse);
+//
+//   tensor = tensor.to(at::kStrided);
+//   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
+// }
 
 TEST_CASE("Tensor/ToDevice", "[cuda]") {
   auto tensor = at::empty({3, 4});
@@ -57,24 +53,33 @@ TEST_CASE("Tensor/ToDevice", "[cuda]") {
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 }
 
-TEST_CASE("Tensor/ToOptions", "[cuda]") {
+TEST_CASE("Tensor/ToDeviceAndDtype", "[cuda]") {
   auto tensor = at::empty({3, 4});
   REQUIRE_TENSOR_OPTIONS(at::kCPU, -1, at::kFloat, at::kStrided);
 
-  tensor = tensor.to(at::dtype(at::kInt).device({at::kCUDA, 1}));
+  tensor = tensor.to({at::kCUDA, 1}, at::kInt);
   REQUIRE_TENSOR_OPTIONS(at::kCUDA, 1, at::kInt, at::kStrided);
 }
 
 TEST_CASE("Tensor/ToOptionsRespectsRequiresGrad") {
-  auto tensor = torch::empty({3, 4});
-  REQUIRE(!tensor.requires_grad());
+  {
+    auto tensor = torch::empty({3, 4}, at::requires_grad());
+    REQUIRE(tensor.requires_grad());
 
-  // `requires_grad` will subsequently always be true because it results from a
-  // copy operation, which gives it a `CopyBackwards` gradient function.
+    tensor = tensor.to(at::kDouble);
+    REQUIRE(tensor.requires_grad());
+  }
+  {
+    auto tensor = torch::empty({3, 4});
+    REQUIRE(!tensor.requires_grad());
 
-  tensor = tensor.to(at::TensorOptions(tensor).requires_grad(true));
-  REQUIRE(tensor.requires_grad());
+    tensor = tensor.to(at::kDouble);
+    REQUIRE(!tensor.requires_grad());
+  }
+}
 
-  tensor = tensor.to(at::TensorOptions(tensor).requires_grad(false));
-  REQUIRE(tensor.requires_grad());
+TEST_CASE("Tensor/ToDoesNotCopyWhenOptionsAreAllTheSame") {
+  auto tensor = at::empty({3, 4}, at::kFloat);
+  auto hopefully_not_copy = tensor.to(at::kFloat);
+  REQUIRE(hopefully_not_copy.data<float>() == tensor.data<float>());
 }

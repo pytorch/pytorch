@@ -87,9 +87,8 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toBackend(Backend b) const;
 
   /// New-style `to()` methods.
-  Tensor to(TensorOptions options, bool non_blocking = false);
+  Tensor to(Device device, ScalarType dtype, bool non_blocking = false);
   Tensor to(ScalarType dtype, bool non_blocking = false);
-  Tensor to(Layout layout, bool non_blocking = false);
   Tensor to(Device device, bool non_blocking = false);
 
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
@@ -198,6 +197,9 @@ struct Tensor : public detail::TensorBase {
   auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
     return func(*this, std::forward<Args>(params)...);
   }
+
+ private:
+  Tensor to(const TensorOptions& options, bool non_blocking = false);
 };
 
 namespace detail {
