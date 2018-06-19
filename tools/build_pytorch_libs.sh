@@ -144,7 +144,7 @@ function build() {
   # TODO: The *_LIBRARIES cmake variables should eventually be
   # deprecated because we are using .cmake files to handle finding
   # installed libraries instead
-  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -197,7 +197,7 @@ function build() {
 function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
-  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
+  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
               ${CMAKE_GENERATOR} \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
