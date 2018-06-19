@@ -4,6 +4,7 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/any.h>
 #include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -43,7 +44,7 @@ class Sequential : public Cloneable<Sequential> {
 
   /// Feeds the `inputs` to the first module, then chains the output of each
   /// module with the input of the next, in order of construction.
-  template <typename ReturnType = autograd::Variable, typename... ArgumentTypes>
+  template <typename ReturnType = Tensor, typename... ArgumentTypes>
   ReturnType forward(ArgumentTypes&&... arguments) {
     AT_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
 

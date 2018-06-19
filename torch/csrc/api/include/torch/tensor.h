@@ -2,11 +2,11 @@
 
 #include <ATen/ATen.h>
 
+#include <torch/csrc/autograd/generated/variable_factories.h>
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
-// TODO: Rename to `Tensor`.
-using Variable = autograd::Variable;
+using Tensor = autograd::Variable;
 
 /// Fixed width dtypes.
 constexpr auto kUInt8 = at::kByte;
@@ -25,5 +25,4 @@ constexpr auto kI32 = kInt32;
 constexpr auto kI64 = kInt64;
 constexpr auto kF32 = kFloat32;
 constexpr auto kF64 = kFloat64;
-
 } // namespace torch

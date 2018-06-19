@@ -1,7 +1,6 @@
 #include <torch/nn/modules/batchnorm.h>
 
 #include <torch/cuda.h>
-#include <torch/functions.h>
 #include <torch/tensor.h>
 
 #include <ATen/Error.h>
@@ -34,7 +33,7 @@ void BatchNormImpl::reset() {
   }
 }
 
-std::vector<Variable> BatchNormImpl::forward(std::vector<Variable> inputs) {
+std::vector<Tensor> BatchNormImpl::forward(std::vector<Tensor> inputs) {
   auto& input = inputs[0];
   auto& running_mean_ = (options_.stateful_ ? this->running_mean_ : inputs[1]);
   auto& running_variance_ =
@@ -58,7 +57,7 @@ std::vector<Variable> BatchNormImpl::forward(std::vector<Variable> inputs) {
       options_.eps_,
       torch::cuda::cudnn_is_available());
 
-  return std::vector<Variable>({output});
+  return std::vector<Tensor>({output});
 }
 
 const BatchNormOptions& BatchNormImpl::options() const noexcept {

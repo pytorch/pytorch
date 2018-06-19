@@ -90,13 +90,13 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
  private:
   friend class cereal::access;
   LBFGS() {}
-  at::Tensor gather_flat_grad();
-  void add_grad(const at::Scalar& step_size, const at::Tensor& update);
+  Tensor gather_flat_grad();
+  void add_grad(const at::Scalar& step_size, const Tensor& update);
 
-  at::Tensor d, H_diag, prev_flat_grad;
+  Tensor d, H_diag, prev_flat_grad;
   at::Scalar t, prev_loss;
-  std::vector<at::Tensor> ro, al;
-  std::deque<at::Tensor> old_dirs, old_stps;
+  std::vector<Tensor> ro, al;
+  std::deque<Tensor> old_dirs, old_stps;
   int func_evals, state_n_iter;
 };
 
@@ -128,7 +128,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(SGD) {
  private:
   friend class cereal::access;
   SGD() {}
-  std::unordered_map<std::string, at::Tensor> momentum_buffers_;
+  std::unordered_map<std::string, Tensor> momentum_buffers_;
 };
 
 TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
@@ -156,7 +156,7 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
  private:
   friend class cereal::access;
   Adagrad() {}
-  std::unordered_map<std::string, at::Tensor> sum_;
+  std::unordered_map<std::string, Tensor> sum_;
   std::unordered_map<std::string, double> step_;
 };
 
@@ -190,9 +190,9 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
  private:
   friend class cereal::access;
   RMSprop() {}
-  std::unordered_map<std::string, at::Tensor> square_avg_buffer_;
-  std::unordered_map<std::string, at::Tensor> momentum_buffer_;
-  std::unordered_map<std::string, at::Tensor> grad_avg_buffer_;
+  std::unordered_map<std::string, Tensor> square_avg_buffer_;
+  std::unordered_map<std::string, Tensor> momentum_buffer_;
+  std::unordered_map<std::string, Tensor> grad_avg_buffer_;
 };
 
 TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
@@ -226,9 +226,9 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
   friend class cereal::access;
   Adam() {}
   std::unordered_map<std::string, int> step_buffer_;
-  std::unordered_map<std::string, at::Tensor> exp_avg_buffer_;
-  std::unordered_map<std::string, at::Tensor> exp_avg_sq_buffer_;
-  std::unordered_map<std::string, at::Tensor> max_exp_avg_sq_buffer_;
+  std::unordered_map<std::string, Tensor> exp_avg_buffer_;
+  std::unordered_map<std::string, Tensor> exp_avg_sq_buffer_;
+  std::unordered_map<std::string, Tensor> max_exp_avg_sq_buffer_;
 };
 
 using Optimizer = std::shared_ptr<OptimizerImpl>;

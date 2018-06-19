@@ -38,8 +38,8 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
   const ConvOptions<D>& options() const noexcept;
 
  protected:
-  Variable weight_;
-  Variable bias_;
+  Tensor weight_;
+  Tensor bias_;
   ConvOptions<D> options_;
 };
 
@@ -47,7 +47,7 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
   class Conv##D##dImpl : public ConvImpl<D, Conv##D##dImpl> {   \
    public:                                                      \
     using ConvImpl<D, Conv##D##dImpl>::ConvImpl;                \
-    std::vector<Variable> forward(std::vector<Variable> input); \
+    std::vector<Tensor> forward(std::vector<Tensor> input); \
   };                                                            \
   using Conv##D##dOptions = ConvOptions<D>;                     \
   TORCH_MODULE(Conv##D##d)

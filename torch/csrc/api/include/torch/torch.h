@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/functions.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/modules.h>
 #include <torch/tensor.h>

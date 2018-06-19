@@ -1,9 +1,6 @@
 #include <torch/nn/modules/linear.h>
 
-#include <torch/functions.h>
 #include <torch/tensor.h>
-
-#include <ATen/ATen.h>
 
 #include <cmath>
 #include <cstdint>
@@ -29,7 +26,7 @@ void LinearImpl::reset() {
   }
 }
 
-std::vector<Variable> LinearImpl::forward(std::vector<Variable> input) {
+std::vector<Tensor> LinearImpl::forward(std::vector<Tensor> input) {
   auto x = input[0];
   if (x.ndimension() == 2 && options_.with_bias_) {
     // Fused op is marginally faster

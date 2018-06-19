@@ -1,6 +1,5 @@
 #include <torch/nn/modules/embedding.h>
 
-#include <torch/functions.h>
 #include <torch/tensor.h>
 
 #include <cstddef>
@@ -24,7 +23,7 @@ void EmbeddingImpl::reset() {
   table_.data().normal_(0, 1);
 }
 
-std::vector<Variable> EmbeddingImpl::forward(std::vector<Variable> input) {
+std::vector<Tensor> EmbeddingImpl::forward(std::vector<Tensor> input) {
   return {at::embedding(table_, /*indices=*/input[0])};
 }
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/tensor.h>
 
 #include <cstddef>
 #include <iterator>
@@ -169,25 +170,24 @@ class ConstModuleCursor : public detail::CursorBase<const Module> {
 
 // Parameter cursors (`.parameters()`)
 
-class ParameterCursor : public detail::CursorBase<autograd::Variable> {
+class ParameterCursor : public detail::CursorBase<Tensor> {
  public:
   explicit ParameterCursor(Module& module);
 };
 
-class ConstParameterCursor
-    : public detail::CursorBase<const autograd::Variable> {
+class ConstParameterCursor : public detail::CursorBase<const Tensor> {
  public:
   explicit ConstParameterCursor(const Module& module);
 };
 
 // Buffer cursors (`.buffers()`)
 
-class BufferCursor : public detail::CursorBase<autograd::Variable> {
+class BufferCursor : public detail::CursorBase<Tensor> {
  public:
   explicit BufferCursor(Module& module);
 };
 
-class ConstBufferCursor : public detail::CursorBase<const autograd::Variable> {
+class ConstBufferCursor : public detail::CursorBase<const Tensor> {
  public:
   explicit ConstBufferCursor(const Module& module);
 };
