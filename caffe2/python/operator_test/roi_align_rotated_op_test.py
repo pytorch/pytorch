@@ -29,17 +29,13 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
         C=st.integers(min_value=1, max_value=5),
         num_rois=st.integers(min_value=0, max_value=10),
         pooled_size=st.sampled_from([7, 14]),
-        order=st.sampled_from(["NCHW", "NHWC"]),
-        **hu.gcs_cpu_only
+        **hu.gcs
     )
-    def test_horizontal_rois(self, H, W, C, num_rois, pooled_size, order, gc, dc):
+    def test_horizontal_rois(self, H, W, C, num_rois, pooled_size, gc, dc):
         """
         Test that results match with RoIAlign when angle=0.
         """
-        if order == "NCHW":
-            X = np.random.randn(1, C, H, W).astype(np.float32)
-        else:
-            X = np.random.randn(1, H, W, C).astype(np.float32)
+        X = np.random.randn(1, C, H, W).astype(np.float32)
         R = np.zeros((num_rois, 6)).astype(np.float32)
         angle = 0.0
         for i in range(num_rois):
@@ -55,7 +51,6 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
             ["Y"],
             pooled_h=pooled_size,
             pooled_w=pooled_size,
-            order=order,
             sampling_ratio=0,
         )
 
@@ -71,7 +66,6 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
                 ["Y_ref"],
                 pooled_h=pooled_size,
                 pooled_w=pooled_size,
-                order=order,
                 sampling_ratio=0,
             )
             workspace.FeedBlob("X_ref", X)
@@ -89,20 +83,16 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
         C=st.integers(min_value=1, max_value=5),
         num_rois=st.integers(min_value=0, max_value=10),
         pooled_size=st.sampled_from([7, 14]),
-        order=st.sampled_from(["NCHW", "NHWC"]),
         angle=st.sampled_from([-270, -180, -90, 90, 180, 270]),
-        **hu.gcs_cpu_only
+        **hu.gcs
     )
     def test_simple_rotations(
-        self, H, W, C, num_rois, pooled_size, order, angle, gc, dc
+        self, H, W, C, num_rois, pooled_size, angle, gc, dc
     ):
         """
         Test with right-angled rotations that don't need interpolation.
         """
-        if order == "NCHW":
-            X = np.random.randn(1, C, H, W).astype(np.float32)
-        else:
-            X = np.random.randn(1, H, W, C).astype(np.float32)
+        X = np.random.randn(1, C, H, W).astype(np.float32)
         R = np.zeros((num_rois, 6)).astype(np.float32)
         for i in range(num_rois):
             x = np.random.uniform(1, W - 1)
@@ -117,7 +107,6 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
             ["Y"],
             pooled_h=pooled_size,
             pooled_w=pooled_size,
-            order=order,
             sampling_ratio=0,
         )
 
@@ -126,8 +115,7 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
             # feature map in the opposite (clockwise) direction and perform
             # standard RoIAlign. We assume all RoIs have the same angle.
             norm_angle = (angle + 360) % 360
-            axes = (2, 3) if order == "NCHW" else (1, 2)
-            X_ref = np.rot90(X, k=-norm_angle / 90, axes=axes)
+            X_ref = np.rot90(X, k=-norm_angle / 90, axes=(2, 3))
 
             # Rotate RoIs clockwise wrt the center of the input feature
             # map to make them horizontal and convert from
@@ -154,7 +142,6 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
                 ["Y_ref"],
                 pooled_h=pooled_size,
                 pooled_w=pooled_size,
-                order=order,
                 sampling_ratio=0,
             )
             workspace.FeedBlob("X_ref", X_ref)
