@@ -492,6 +492,11 @@ class TestCWorkspace(htu.HypothesisTestCase):
         with self.assertRaises(TypeError):
             ws.create_net("...")
 
+    def test_get_blob(self):
+        workspace.C.create_blob("b")
+        blob = workspace.C.get_blob("b")
+        self.assertIsInstance(blob, workspace.C.Blob)
+
 
 class TestPredictor(unittest.TestCase):
     def _create_model(self):
