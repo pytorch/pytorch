@@ -54,7 +54,7 @@ TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
 }
 
 TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
-  auto options = TensorOptions();
+  TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 
   options = TensorOptions({kCPU, 0});
@@ -111,7 +111,7 @@ TEST_CASE("Device/ParsesCorrectlyFromString") {
 TEST_CASE("DefaultTensorOptions/OptionsGuard") {
   Tensor tensor;
   {
-    OptionsGuard guard(TensorOptions());
+    OptionsGuard guard();
     tensor = at::empty({10});
   }
   REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
