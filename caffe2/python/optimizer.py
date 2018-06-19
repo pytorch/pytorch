@@ -621,6 +621,107 @@ class AdagradOptimizer(Optimizer):
         self.alpha *= scale
         return
 
+class AdadeltaOptimizer(Optimizer):
+    def __init__(
+        self,
+        epsilon=1e-4,
+        decay=1,
+        policy="fixed",
+        sparse_dedup_aggregator=None,
+        rowWise=False,
+        engine="",
+        **kwargs
+    ):
+        super(AdadeltaOptimizer, self).__init__()
+        self.epsilon = epsilon
+        self.decay = decay
+        self.policy = policy
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.engine = engine
+        self.init_kwargs = kwargs
+        self.rowWise = rowWise
+
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
+        if self.rowWise:
+            shapes, types = workspace.InferShapesAndTypes([param_init_net])
+            if str(param) not in shapes:
+                # Type/shape inference is not available for this param, fallback
+                # on Shape/Slice logic
+                shape = param_init_net.Shape(param, str(param) + "_shape")
+                num_rows = param_init_net.Slice(
+                    [shape], str(shape) + "_numrows", starts=[0], ends=[1]
+                )
+                param_squared_sum = param_init_net.ConstantFill(
+                    num_rows,
+                    str(param) + "_avg_squared_sum",
+                    input_as_shape=1,
+                    value=0.0,
+                )
+                param_squared_sum2 = param_init_net.ConstantFill(
+                    num_rows,
+                    str(param) + "_avg_squared_sum2",
+                    input_as_shape=1,
+                    value=0.0,
+                )
+            else:
+                param_squared_sum = param_init_net.ConstantFill(
+                    [],
+                    str(param) + "_avg_squared_sum",
+                    shape=[shapes[str(param)][0]],
+                    value=0.0,
+                )
+                param_squared_sum2 = param_init_net.ConstantFill(
+                    [],
+                    str(param) + "_avg_squared_sum2",
+                    shape=[shapes[str(param)][0]],
+                    value=0.0,
+                )
+
+        else:
+            param_squared_sum = param_init_net.ConstantFill(
+                [param], str(param) + "_squared_sum", value=0.0
+            )
+            param_squared_sum2 = param_init_net.ConstantFill(
+                [param], str(param) + "_squared_sum2", value=0.0
+            )
+
+        self._aux_params.local.append(param_squared_sum)
+        self._aux_params.local.append(param_squared_sum2)
+
+        if self.rowWise:
+            assert isinstance(
+                grad, core.GradientSlice
+            ), "If SparseAdadelta with rowWise=True, gradient must be " "a gradientslice. PLease ensure that rowWise is not enabled " "for the dense Adadelta optimizer, as it is not supported."
+        if isinstance(grad, core.GradientSlice):
+            grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
+            if self.rowWise:
+                op = "RowWiseSparseAdadelta"
+            else:
+                op = "SparseAdadelta"
+            net.__getattr__(op)(
+                [
+                    param,
+                    param_squared_sum,
+                    param_squared_sum2,
+                    grad.indices,
+                    grad.values,
+                ],
+                [param, param_squared_sum, param_squared_sum],
+                epsilon=self.epsilon,
+                decay=float(self.decay),
+                engine=self.engine,
+            )
+        else:
+            net.Adadelta(
+                [param, param_squared_sum, param_squared_sum2, grad],
+                [param, param_squared_sum, param_squared_sum2],
+                epsilon=self.epsilon,
+                decay=float(self.decay),
+                engine=self.engine,
+            )
 
 class FtrlOptimizer(Optimizer):
     def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
@@ -1258,6 +1359,21 @@ def build_adagrad(
         allow_lr_injection=allow_lr_injection,
     )
 
+def build_adadelta(
+    model,
+    base_learning_rate,
+    parameters=None,
+    max_gradient_norm=None,
+    allow_lr_injection=False,
+    **kwargs
+):
+    adadelta_optimizer = AdadeltaOptimizer(**kwargs)
+    return _build(
+        model,
+        adadelta_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection,
+    )
 
 def build_adam(
     model,
