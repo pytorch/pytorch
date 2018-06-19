@@ -393,15 +393,15 @@ class ConvPoolOpBase : public Operator<Context> {
     ArgumentHelper helper(def);
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
-    unsigned long long N;
-    unsigned long long Y_t = 1;
-    unsigned long long Y_h;
-    unsigned long long Y_w;
-    unsigned long long kernel_t = 1;
-    unsigned long long kernel_h;
-    unsigned long long kernel_w;
-    unsigned long long in_channels;
-    unsigned long long out_channels;
+    uint64_t N;
+    uint64_t Y_t = 1;
+    uint64_t Y_h;
+    uint64_t Y_w;
+    uint64_t kernel_t = 1;
+    uint64_t kernel_h;
+    uint64_t kernel_w;
+    uint64_t in_channels;
+    uint64_t out_channels;
 
     if (X.dims_size() == 0 || W.dims_size() == 0) {
       return c;
