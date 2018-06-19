@@ -166,8 +166,10 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
         if isinstance(inp, torch.Tensor):
             if inp.requires_grad and inp.dtype != torch.float64:
                 warnings.warn(
-                    'At least one of the inputs is of single precision. '
-                    'This check will likely fail if the inputs are of single precision. ')
+                    'At least one of the inputs that requires gradient \
+                     is not of double precision floating point. '
+                    'This check will likely fail if all the inputs are not of \
+                     double precision floating point. ')
             inp.retain_grad()
 
     output = _differentiable_outputs(func(*inputs))
