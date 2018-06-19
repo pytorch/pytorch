@@ -33,7 +33,7 @@ Tensor _bincount_cpu_template(
 
   const input_t* self_p = self.contiguous().data<input_t>();
   if (has_weights) {
-    output = native::zeros({nbins}, TensorOptions(weights));
+    output = native::zeros({nbins}, weights.options());
     weights_t* output_p = output.data<weights_t>();
     const weights_t* weights_p = weights.contiguous().data<weights_t>();
     for (int64_t i = 0; i < self.size(0); i++) {
