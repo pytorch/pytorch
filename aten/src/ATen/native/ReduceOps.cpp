@@ -84,7 +84,8 @@ static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
-      "Can only calculate the average of floating types");
+      "Can only calculate the mean of floating types. Got " +
+          std::string(at::toString(scalarType)) + " instead.");
   Tensor result = at::native::sum(self);
   if (self.numel() > 0)
     result.div_(self.numel());
@@ -176,7 +177,8 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
   ScalarType scalarType = result.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
-      "Can only calculate the average of floating types");
+      "Can only calculate the mean of floating types. Got " +
+          std::string(at::toString(scalarType)) + " instead.");
   at::native::sum_out(
       result, self.toType(result.type().scalarType()), dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
@@ -269,7 +271,8 @@ static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optiona
   ScalarType scalarType = self.type().scalarType();
   AT_CHECK(
       at::isFloatingType(scalarType),
-      "Can only calculate the average of floating types");
+      "Can only calculate the mean of floating types. Got " +
+          std::string(at::toString(scalarType)) + " instead.");
   Tensor result = at::native::sum(self, dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
     int64_t numel = self.size(dim);
