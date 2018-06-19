@@ -22,7 +22,7 @@ using Catch::StartsWith;
 TEST_CASE("misc") {
   SECTION("no_grad") {
     NoGradGuard guard;
-    auto model = Linear(5, 2).build();
+    Linear model(5, 2);
     auto x = torch::randn({10, 5}, at::requires_grad());
     auto y = model->forward({x})[0];
     Variable s = y.sum();

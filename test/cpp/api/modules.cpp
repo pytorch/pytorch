@@ -18,22 +18,22 @@ using namespace torch::nn;
 class TestModel : public Module {
  public:
   TestModel() {
-    l1 = register_module("l1", Linear(10, 3).build());
-    l2 = register_module("l2", Linear(3, 5).build());
-    l3 = register_module("l3", Linear(5, 100).build());
+    l1 = register_module("l1", Linear(10, 3));
+    l2 = register_module("l2", Linear(3, 5));
+    l3 = register_module("l3", Linear(5, 100));
   }
 
   std::vector<Variable> forward(std::vector<Variable> input) {
     return input;
   }
 
-  std::shared_ptr<Linear> l1, l2, l3;
+  Linear l1, l2, l3;
 };
 
 class NestedModel : public Module {
  public:
   NestedModel() {
-    l1 = register_module("l1", Linear(5, 20).build());
+    l1 = register_module("l1", Linear(5, 20));
     t = register_module("test", std::make_shared<TestModel>());
     param_ = register_parameter("param", torch::empty({3, 2, 21}));
   }
@@ -43,14 +43,14 @@ class NestedModel : public Module {
   };
 
   Variable param_;
-  std::shared_ptr<Linear> l1;
+  Linear l1;
   std::shared_ptr<TestModel> t;
 };
 
-TEST_CASE("containers") {
+TEST_CASE("modules") {
   SECTION("conv") {
     SECTION("1d") {
-      auto model = Conv1d(3, 2, 3).stride(2).build();
+      Conv1d model(Conv1dOptions(3, 2, 3).stride(2));
       auto x = torch::randn({2, 3, 5}, at::requires_grad());
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -66,7 +66,7 @@ TEST_CASE("containers") {
     }
     SECTION("2d") {
       SECTION("even") {
-        auto model = Conv2d(3, 2, 3).stride(2).build();
+        Conv2d model(Conv2dOptions(3, 2, 3).stride(2));
         auto x = torch::randn({2, 3, 5, 5}, at::requires_grad());
         auto y = model->forward({x})[0];
         Variable s = y.sum();
@@ -82,7 +82,7 @@ TEST_CASE("containers") {
       }
 
       SECTION("uneven") {
-        auto model = Conv2d(3, 2, {3, 2}).stride({2, 2}).build();
+        Conv2d model(Conv2dOptions(3, 2, {3, 2}).stride({2, 2}));
         auto x = torch::randn({2, 3, 5, 4}, at::requires_grad());
         auto y = model->forward({x})[0];
         Variable s = y.sum();
@@ -98,7 +98,7 @@ TEST_CASE("containers") {
       }
     }
     SECTION("3d") {
-      auto model = Conv3d(3, 2, 3).stride(2).build();
+      Conv3d model(Conv3dOptions(3, 2, 3).stride(2));
       auto x = torch::randn({2, 3, 5, 5, 5}, at::requires_grad());
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -116,7 +116,7 @@ TEST_CASE("containers") {
   }
   SECTION("linear") {
     SECTION("basic1") {
-      auto model = Linear(5, 2).build();
+      Linear model(5, 2);
       auto x = torch::randn({10, 5}, at::requires_grad());
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -133,9 +133,9 @@ TEST_CASE("containers") {
 
   SECTION("simple") {
     auto model = std::make_shared<SimpleContainer>();
-    auto l1 = model->add(Linear(10, 3).build(), "l1");
-    auto l2 = model->add(Linear(3, 5).build(), "l2");
-    auto l3 = model->add(Linear(5, 100).build(), "l3");
+    auto l1 = model->add(Linear(10, 3), "l1");
+    auto l2 = model->add(Linear(3, 5), "l2");
+    auto l3 = model->add(Linear(5, 100), "l3");
 
     auto x = torch::randn({1000, 10}, at::requires_grad());
     x = l1->forward({x})[0].clamp_min(0);
@@ -152,7 +152,7 @@ TEST_CASE("containers") {
   SECTION("embedding") {
     SECTION("basic") {
       int dict_size = 10;
-      auto model = Embedding(dict_size, 2).build();
+      Embedding model(dict_size, 2);
       // Cannot get gradients to change indices (input) - only for embedding
       // params
       auto x = torch::full({10}, dict_size - 1, at::kLong);
@@ -169,7 +169,7 @@ TEST_CASE("containers") {
     }
 
     SECTION("list") {
-      auto model = Embedding(6, 4).build();
+      Embedding model(6, 4);
       auto x = torch::full({2, 3}, 5, at::kLong);
       auto y = model->forward({x})[0];
       Variable s = y.sum();
@@ -183,7 +183,7 @@ TEST_CASE("containers") {
   }
 
   SECTION("dropout") {
-    auto dropout = Dropout(0.5).build();
+    Dropout dropout(0.5);
     Variable x = torch::ones(100, at::requires_grad());
     Variable y = dropout->forward({x})[0];
 
@@ -226,7 +226,7 @@ TEST_CASE("containers") {
     auto functional = Functional([&was_called](std::vector<Variable> input) {
       was_called = true;
       return input;
-    }).build();
+    });
     // clang-format on
     auto output = functional->forward({torch::ones(5, at::requires_grad())});
     REQUIRE(was_called);
@@ -235,9 +235,9 @@ TEST_CASE("containers") {
   }
 }
 
-TEST_CASE("containers_cuda", "[cuda]") {
+TEST_CASE("modules_cuda", "[cuda]") {
   SECTION("1") {
-    auto model = Linear(5, 2).build();
+    Linear model(5, 2);
     model->cuda();
     auto x = torch::randn({10, 5}, at::device(at::kCUDA).requires_grad());
     auto y = model->forward({x})[0];
@@ -253,7 +253,7 @@ TEST_CASE("containers_cuda", "[cuda]") {
   }
 
   SECTION("2") {
-    auto model = Linear(5, 2).build();
+    Linear model(5, 2);
     model->cuda();
     model->cpu();
     auto x = torch::randn({10, 5}, at::requires_grad());
