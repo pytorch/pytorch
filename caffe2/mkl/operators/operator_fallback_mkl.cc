@@ -11,6 +11,8 @@
 #include "caffe2/operators/loss_op.h"
 #include "caffe2/operators/order_switch_ops.h"
 #include "caffe2/operators/reshape_op.h"
+#include "caffe2/operators/roi_align_op.h"
+#include "caffe2/operators/roi_align_rotated_op.h"
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/utility_ops.h"
 
@@ -80,5 +82,8 @@ REGISTER_MKL_OPERATOR(
 REGISTER_MKL_OPERATOR(
     NHWC2NCHW,
     mkl::MKLFallbackOp<NHWC2NCHWOp<float, CPUContext>>);
+REGISTER_MKL_OPERATOR(
+    RoIAlignRotated,
+    mkl::MKLFallbackOp<RoIAlignRotatedOp<float, CPUContext>>);
 
 } // namespace caffe2
