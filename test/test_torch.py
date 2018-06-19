@@ -5455,12 +5455,15 @@ class TestTorch(TestCase):
         self.assertEqual(flat.shape, torch.Size([5, 5, 25]))
         self.assertEqual(src.view(-1), flat.view(-1))
 
+        flat = src.flatten(2, 2)
+        self.assertEqual(flat, src)
+
         # out of bounds index
         with self.assertRaisesRegex(RuntimeError, 'dimension out of range'):
             src.flatten(5, 10)
 
         # invalid start and end
-        with self.assertRaisesRegex(RuntimeError, 'start_dim must be before end_dim'):
+        with self.assertRaisesRegex(RuntimeError, 'start_dim cannot come after end_dim'):
             src.flatten(2, 0)
 
     @staticmethod

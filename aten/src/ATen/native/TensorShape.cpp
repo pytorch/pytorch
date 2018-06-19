@@ -603,7 +603,11 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
   start_dim = maybe_wrap_dim(start_dim, self.dim());
   end_dim = maybe_wrap_dim(end_dim, self.dim());
-  AT_CHECK(start_dim < end_dim, "start_dim must be before end_dim");
+  AT_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
+
+  if (start_dim == end_dim) {
+    return self;
+  }
 
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
