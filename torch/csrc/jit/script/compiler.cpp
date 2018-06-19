@@ -889,7 +889,7 @@ private:
     // TODO: start, stop, step loop
     if (args.size() != 1) {
       throw ErrorReport(range)
-          << "range() expects one argument but got" << args.size();
+          << "range() expects 1 argument but got " << args.size();
     }
     emitLoopCommon(range, {args[0]}, {}, body, target);
   }
@@ -908,10 +908,6 @@ private:
       throw ErrorReport(stmt) << "Iteration variable unpacking is not supported";
     }
 
-    if (targets[0].kind() != TK_VAR) {
-      throw ErrorReport(targets[0]) << "Starred unpacking is currently not"
-          << " supported for for loops.";
-    }
     auto target = Var(targets[0]).name();
 
     // match range(<expr>) style loops
