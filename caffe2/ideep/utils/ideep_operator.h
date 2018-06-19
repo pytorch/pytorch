@@ -51,7 +51,10 @@ class IDEEPOperator : public OperatorBase {
     // FinishDeviceComputation,
     // it is always just a re-route to RunOnDevice().
     try {
-      return RunOnDevice();
+      StartAllObservers();
+      bool result =  RunOnDevice();
+      StopAllObservers();
+      return result;
     } catch (EnforceNotMet& err) {
       err.AppendMessage(getErrorMsg());
       throw;
