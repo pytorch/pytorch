@@ -1332,7 +1332,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor. Must be a `ByteTensor` or the same type as `input`.
+    out (Tensor, optional): the output tensor. Must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1599,7 +1599,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1825,7 +1825,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1986,7 +1986,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -2230,7 +2230,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A `torch.ByteTensor` containing a 1 at each location where comparison is true
@@ -2794,7 +2794,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as `input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
