@@ -41,6 +41,9 @@ class GridSampler(Function):
     def forward(ctx, input, grid, padding_mode='zeros'):
         ctx.save_for_backward(input, grid)
 
+        if input.device != grid.device:
+            raise RuntimeError(("input (device {}) and grid (device {}) must be on the same device" +
+                                "for grid_sampler").format(input.device, grid.device))
         if padding_mode == 'zeros':
             ctx.padding_mode = MODE_ZEROS
         elif padding_mode == 'border':

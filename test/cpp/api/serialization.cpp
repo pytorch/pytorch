@@ -213,16 +213,16 @@ TEST_CASE("serialization") {
   }
 
   SECTION("optim") {
-    auto model1 = Linear(5, 2).build();
-    auto model2 = Linear(5, 2).build();
-    auto model3 = Linear(5, 2).build();
+    auto model1 = Linear(5, 2);
+    auto model2 = Linear(5, 2);
+    auto model3 = Linear(5, 2);
 
     // Models 1, 2, 3 will have the same params
     std::stringstream ss;
-    save(ss, model1);
-    load(ss, model2);
+    save(ss, model1.get());
+    load(ss, model2.get());
     ss.seekg(0, std::ios::beg);
-    load(ss, model3);
+    load(ss, model3.get());
 
     // Make some optimizers with momentum (and thus state)
     auto optim1 = SGD(model1, 1e-1).momentum(0.9).make();
@@ -233,7 +233,7 @@ TEST_CASE("serialization") {
 
     auto x = torch::ones({10, 5}, at::requires_grad());
 
-    auto step = [&](Optimizer optim, std::shared_ptr<Linear> model) {
+    auto step = [&](Optimizer optim, Linear model) {
       optim->zero_grad();
       auto y = model->forward({x})[0].sum();
       y.backward();

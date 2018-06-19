@@ -439,7 +439,7 @@ static inline int64_t THTensor_(wrapLinearIndex)(int64_t linearIndex, int64_t nu
 
 void THTensor_(take)(THTensor *r_, THTensor *src, THLongTensor *index)
 {
-  THTensor_(resizeNdLegacy)(r_, index->_dim(), index->size, NULL);
+  THTensor_(resizeNd)(r_, index->dim(), index->size, NULL);
   THTensor* dst = THTensor_(newContiguous)(r_);
 
   index = THLongTensor_newContiguous(index);
@@ -3704,25 +3704,25 @@ int THTensor_(equal)(THTensor *ta, THTensor* tb)
 #define TENSOR_IMPLEMENT_LOGICAL(NAME,OP)				\
   void THTensor_(NAME##Value)(THByteTensor *r_, THTensor* t, real value)	\
   {									\
-    THByteTensor_resizeNdLegacy(r_, t->_dim(), t->size, NULL);		\
+    THByteTensor_resizeNd(r_, t->dim(), t->size, NULL);		\
     TH_TENSOR_APPLY2(unsigned char, r_, real, t,			\
 		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##ValueT)(THTensor* r_, THTensor* t, real value)	\
   {									\
-    THTensor_(resizeNdLegacy)(r_, t->_dim(), t->size, NULL);		\
+    THTensor_(resizeNd)(r_, t->dim(), t->size, NULL);		\
     TH_TENSOR_APPLY2(real, r_, real, t,					\
 		     *r__data = (*t_data OP value) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##Tensor)(THByteTensor *r_, THTensor *ta, THTensor *tb) \
   {									\
-    THByteTensor_resizeNdLegacy(r_, ta->_dim(), ta->size, NULL);		\
+    THByteTensor_resizeNd(r_, ta->dim(), ta->size, NULL);		\
     TH_TENSOR_APPLY3(unsigned char, r_, real, ta, real, tb,		\
 		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }									\
   void THTensor_(NAME##TensorT)(THTensor *r_, THTensor *ta, THTensor *tb) \
   {									\
-    THTensor_(resizeNdLegacy)(r_, ta->_dim(), ta->size, NULL);		\
+    THTensor_(resizeNd)(r_, ta->dim(), ta->size, NULL);		\
     TH_TENSOR_APPLY3(real, r_, real, ta, real, tb,			\
 		     *r__data = (*ta_data OP *tb_data) ? 1 : 0;); \
   }									\

@@ -202,12 +202,29 @@ TEST_CASE("any-module") {
     REQUIRE(any.forward(5.0f).get<int>() == 8);
   }
   SECTION("has reference semantics") {
-    Sequential first(
-        Linear(2, 3).build(), Linear(4, 4).build(), Linear(4, 5).build());
+    Sequential first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
     Sequential second(first);
 
     REQUIRE(first.size() == second.size());
     REQUIRE(std::equal(first.begin(), first.end(), second.begin()));
+  }
+  SECTION("constructs from ModuleHolder") {
+    struct MImpl : nn::Module {
+      explicit MImpl(int value_) : nn::Module("M"), value(value_) {}
+      int value;
+      int forward(float x) {
+        return x;
+      }
+    };
+
+    struct M : torch::nn::ModuleHolder<MImpl> {
+      using torch::nn::ModuleHolder<MImpl>::ModuleHolder;
+      using torch::nn::ModuleHolder<MImpl>::get;
+    };
+
+    AnyModule any(M{5});
+    REQUIRE(any.get<MImpl>().value == 5);
+    REQUIRE(any.get<M>()->value == 5);
   }
 }
 

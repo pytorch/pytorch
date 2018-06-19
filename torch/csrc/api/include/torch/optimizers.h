@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/module.h>
+#include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
 #include "cereal/access.hpp"
@@ -41,6 +42,11 @@ template <class Derived>
 class Optimizer_CRTP : public OptimizerImpl {
  public:
   Optimizer_CRTP(std::shared_ptr<nn::Module> model) : OptimizerImpl(model) {}
+
+  template <typename ModuleType>
+  Optimizer_CRTP(nn::ModuleHolder<ModuleType> module)
+      : Optimizer_CRTP(module.get()) {}
+
   std::shared_ptr<Derived> make() const {
     auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
     ptr->init_state();
@@ -55,6 +61,11 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
  public:
   LBFGS(std::shared_ptr<nn::Module> model, double lr)
       : Optimizer_CRTP(model), lr_(lr) {}
+
+  template <typename ModuleType>
+  LBFGS(nn::ModuleHolder<ModuleType> module_holder, double lr)
+      : LBFGS(module_holder.get(), lr) {}
+
   TORCH_AUTOGRAD_KWARG(LBFGS, int, max_iter, 20, 20);
   TORCH_AUTOGRAD_KWARG(LBFGS, int, max_eval, 25, 25);
   TORCH_AUTOGRAD_KWARG(LBFGS, float, tolerance_grad, 1e-5, 1e-5);
@@ -93,6 +104,11 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(SGD) {
  public:
   SGD(std::shared_ptr<nn::Module> model, double lr)
       : Optimizer_CRTP(model), lr_(lr) {}
+
+  template <typename ModuleType>
+  SGD(nn::ModuleHolder<ModuleType> module_holder, double lr)
+      : SGD(module_holder.get(), lr) {}
+
   TORCH_AUTOGRAD_KWARG(SGD, double, momentum, 0, 0);
   TORCH_AUTOGRAD_KWARG(SGD, double, dampening, 0, 0);
   TORCH_AUTOGRAD_KWARG(SGD, double, weight_decay, 0, 0);
@@ -119,6 +135,11 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adagrad) {
  public:
   Adagrad(std::shared_ptr<nn::Module> model, double lr)
       : Optimizer_CRTP(model), lr_(lr) {}
+
+  template <typename ModuleType>
+  Adagrad(nn::ModuleHolder<ModuleType> module_holder, double lr)
+      : Adagrad(module_holder.get(), lr) {}
+
   TORCH_AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
   TORCH_AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
   double lr_;
@@ -143,6 +164,11 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(RMSprop) {
  public:
   RMSprop(std::shared_ptr<nn::Module> model, double lr)
       : Optimizer_CRTP(model), lr_(lr) {}
+
+  template <typename ModuleType>
+  RMSprop(nn::ModuleHolder<ModuleType> module_holder, double lr)
+      : RMSprop(module_holder.get(), lr) {}
+
   TORCH_AUTOGRAD_KWARG(RMSprop, double, alpha, 0.99, 0.99);
   TORCH_AUTOGRAD_KWARG(RMSprop, double, eps, 1e-8, 1e-8);
   TORCH_AUTOGRAD_KWARG(RMSprop, double, weight_decay, 0, 0);
@@ -173,6 +199,11 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
  public:
   Adam(std::shared_ptr<nn::Module> model, double lr)
       : Optimizer_CRTP(model), lr_(lr) {}
+
+  template <typename ModuleType>
+  Adam(nn::ModuleHolder<ModuleType> module_holder, double lr)
+      : Adam(module_holder.get(), lr) {}
+
   TORCH_AUTOGRAD_KWARG(Adam, double, beta1, 0.9, 0.9);
   TORCH_AUTOGRAD_KWARG(Adam, double, beta2, 0.999, 0.999);
   TORCH_AUTOGRAD_KWARG(Adam, double, weight_decay, 0, 0);

@@ -21,7 +21,7 @@ bool pointer_equal(at::Tensor first, at::Tensor second) {
 }
 
 TEST_CASE("module/training-mode") {
-  auto module = Linear(3, 4).build();
+  Linear module(3, 4);
   REQUIRE(module->is_training());
   SECTION("Enable eval mode") {
     module->eval();
@@ -34,7 +34,7 @@ TEST_CASE("module/training-mode") {
 }
 
 TEST_CASE("module/zero-grad") {
-  auto module = Linear(3, 4).build();
+  Linear module(3, 4);
   auto weight = torch::ones({8, 3}, at::requires_grad());
   auto loss = module->forward({weight}).front().sum();
   loss.backward();
@@ -65,7 +65,7 @@ TEST_CASE("module/name") {
 }
 
 TEST_CASE("module/conversions", "[cuda]") {
-  auto module = LSTM(128, 64).layers(3).dropout(0.2).build();
+  auto module = LSTM(LSTMOptions(128, 64).layers(3).dropout(0.2));
   SECTION("starts as float on CPU") {
     for (auto& parameter : module->parameters()) {
       REQUIRE(parameter->type().backend() == at::kCPU);
@@ -126,14 +126,14 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning creates distinct parameters") {
-    struct TestModule : public CloneableModule<TestModule> {
+    struct TestModule : public Cloneable<TestModule> {
       void reset() override {
-        l1 = register_module("l1", Linear(10, 3).build());
-        l2 = register_module("l2", Linear(3, 5).build());
-        l3 = register_module("l3", Linear(5, 100).build());
+        l1 = register_module("l1", Linear(10, 3));
+        l2 = register_module("l2", Linear(3, 5));
+        l3 = register_module("l3", Linear(5, 100));
       }
 
-      std::shared_ptr<Linear> l1, l2, l3;
+      Linear l1, l2, l3;
     };
 
     auto module = TestModule().build();
@@ -152,7 +152,7 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning preserves external references") {
-    struct TestModule : public CloneableModule<TestModule> {
+    struct TestModule : public Cloneable<TestModule> {
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
@@ -173,7 +173,7 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning copies the values of variables of submodules") {
-    struct TestModule : public CloneableModule<TestModule> {
+    struct TestModule : public Cloneable<TestModule> {
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
@@ -181,7 +181,7 @@ TEST_CASE("module/clone") {
       Variable weight;
       int value = 0;
     };
-    struct NestedModule : public CloneableModule<NestedModule> {
+    struct NestedModule : public Cloneable<NestedModule> {
       void reset() override {
         module = register_module("module", TestModule().build());
       }

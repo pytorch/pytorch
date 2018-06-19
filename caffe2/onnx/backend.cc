@@ -856,7 +856,7 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(
 
   if (opset_version > 6) {
     auto& attributes = onnx_node->attributes;
-    auto* attr = attributes.AddRewrittenAttibute("is_test");
+    auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
   }
 
@@ -916,7 +916,7 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
 Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {
   if (opset_version > 6) {
     auto& attributes = onnx_node->attributes;
-    auto* attr = attributes.AddRewrittenAttibute("is_test");
+    auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
   }
 
