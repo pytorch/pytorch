@@ -1,15 +1,18 @@
 set(LIB_SOURCES
+        DeviceId.cpp
+        DispatchKey.cpp
+        LayoutId.cpp
+        OpSchema.cpp
         TensorTypeId.cpp
         TensorTypeIdRegistration.cpp
 )
 
 set(TEST_SOURCES
-        dummy_test.cpp
+        OpSchema_test.cpp
 )
 
 add_library(dispatch OBJECT ${LIB_SOURCES})
 target_enable_style_warnings(dispatch)
-target_include_directories(dispatch SYSTEM PUBLIC ${PROJECT_SOURCE_DIR}/third_party/flat_hash_map)
 
 if(BUILD_TEST)
     add_executable(dispatch_test ${TEST_SOURCES} $<TARGET_OBJECTS:dispatch>)
