@@ -92,7 +92,9 @@ template<typename To, typename From> To checked_convert(From f, const char* name
 
 template<typename To, typename From>
 To HalfFix(From h) {
-  return To { h.x };
+  To ret;
+  ret.x = h.x;
+  return ret;
 }
 
 AT_API std::ostream& operator<<(std::ostream & out, const Half& value);
