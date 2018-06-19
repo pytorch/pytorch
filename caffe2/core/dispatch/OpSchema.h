@@ -25,13 +25,13 @@ template<class TensorType, class Enable = void> struct tensor_to_dispatch_key_ f
 template<class TensorType>
 struct tensor_to_dispatch_key_<TensorType, guts::enable_if_t<std::is_same<TensorType, caffe2::Tensor<caffe2::CPUContext>>::value>> final {
     static TensorParameterDispatchKey call(const TensorType& tensor) {
-      return TensorParameterDispatchKey{DeviceId::CPU, LayoutId(0), tensor.meta().id()};
+      return TensorParameterDispatchKey{DeviceTypeId::CPU, LayoutId(0), tensor.meta().id()};
     }
 };
 template<class TensorType>
 struct tensor_to_dispatch_key_<TensorType, guts::enable_if_t<std::is_same<TensorType, caffe2::Tensor<caffe2::CUDAContext>>::value>> final {
     static TensorParameterDispatchKey call(const TensorType& tensor) {
-      return TensorParameterDispatchKey{DeviceId::CUDA, LayoutId(0), tensor.meta().id()};
+      return TensorParameterDispatchKey{DeviceTypeId::CUDA, LayoutId(0), tensor.meta().id()};
     }
 };
 struct tensor_to_dispatch_key final {

@@ -12,13 +12,14 @@ namespace c10 {
 
 namespace details {
 struct TensorParameterDispatchKey final {
-  DeviceId deviceId;
+  // note: This dispatch key structure is not final yet and will change. Don't rely on it.
+  DeviceTypeId deviceTypeId;
   LayoutId layoutId;
   // TODO Move this CaffeTypeId to c10 namespace
   caffe2::CaffeTypeId dataType;
 };
 inline constexpr bool operator==(const TensorParameterDispatchKey& lhs, const TensorParameterDispatchKey& rhs) {
-  return lhs.deviceId == rhs.deviceId && lhs.layoutId == rhs.layoutId && lhs.dataType == rhs.dataType;
+  return lhs.deviceTypeId == rhs.deviceTypeId && lhs.layoutId == rhs.layoutId && lhs.dataType == rhs.dataType;
 }
 }  // namespace details
 }  // namespace c10
@@ -28,7 +29,7 @@ namespace std {
   struct hash<c10::details::TensorParameterDispatchKey> {
     // TODO constexpr hashing
     size_t operator()(const c10::details::TensorParameterDispatchKey& obj) const {
-      return std::hash<c10::DeviceId>()(obj.deviceId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::CaffeTypeId>()(obj.dataType);
+      return std::hash<c10::DeviceTypeId>()(obj.deviceTypeId) ^ std::hash<c10::LayoutId>()(obj.layoutId) ^ std::hash<caffe2::CaffeTypeId>()(obj.dataType);
     }
   };
 }  // namespace std
@@ -47,11 +48,9 @@ namespace c10 {
  *
  * @tparam num_dispatch_args The number of dispatchable arguments
  */
-// ezyang to smessmer: You originally called this num_dispatch_args, but we might
-// include things like dtype in this dispatch key, so I renamed it
-template<size_t num_tensor_args>
+template<size_t num_dispatch_args>
 struct DispatchKey final {
-  guts::array<details::TensorParameterDispatchKey, num_tensor_args> argTypes;
+  guts::array<details::TensorParameterDispatchKey, num_dispatch_args> argTypes;
 };
 
 template<size_t num_dispatch_args>
