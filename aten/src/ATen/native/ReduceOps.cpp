@@ -36,9 +36,13 @@ Tensor cumsum(const Tensor& self, int64_t dim) {
 
 static inline Tensor& cumsum_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in cumsum.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in cumsum. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_cumsum_out(result, self.toType(result.type().scalarType()), dim);
 }
 
@@ -64,9 +68,13 @@ Tensor cumprod(const Tensor& self, int64_t dim) {
 
 static inline Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in cumprod.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in cumprod. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_cumprod_out(result, self.toType(result.type().scalarType()), dim);
 }
 
@@ -204,9 +212,13 @@ Tensor& mean_out(Tensor& result, const Tensor& self, int64_t dim, ScalarType dty
 static inline Tensor &sum_out(Tensor &result, const Tensor &self, IntList dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in sum.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in sum. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_sum_out(result, self.toType(result.type().scalarType()), dim, keepdim);
 }
 
@@ -238,9 +250,13 @@ Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
 static inline Tensor &prod_out(Tensor &result, const Tensor &self, int64_t dim,
                  bool keepdim, optional<ScalarType> dtype) {
   // result type is favored over dtype; check that they match if provided (NumPy doesn't check)
-  AT_CHECK(!dtype.has_value() || (result.type().scalarType() == dtype.value()),
-            "provided dtype must match dtype of result in prod.  Got %s and %s.",
-            at::toString(result.type().scalarType()), at::toString(dtype.value()));
+  AT_CHECK(
+      !dtype.has_value() || (result.type().scalarType() == dtype.value()),
+      "provided dtype must match dtype of result in prod. Got ",
+      at::toString(result.type().scalarType()),
+      " and ",
+      at::toString(dtype.value()),
+      ".");
   return at::_prod_out(result, self.toType(result.type().scalarType()), dim, keepdim);
 }
 
