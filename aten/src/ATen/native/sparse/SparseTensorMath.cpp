@@ -747,7 +747,7 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
   LongTensor newi = native::empty({2, r_nnz}, kLong);
-  LongTensor newv = native::zeros({r_nnz}, TensorOptions(values));
+  LongTensor newv = native::zeros({r_nnz}, values.options());
 
   if (t_nnz != 0) {
     LongTensor narrowi = newi.narrow(1, 0, t_nnz);

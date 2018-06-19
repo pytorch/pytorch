@@ -35,11 +35,12 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
                              "first on devices list");
   std::vector<Tensor> tensors;
   tensors.reserve(devices.size());
+  at::DeviceGuard _device_guard;
 #ifdef USE_NCCL
   if (nccl::is_available({tensor})) {
     tensors.push_back(tensor);
     for (auto device : devices.slice(1)) {
-      at::DeviceGuard _device_guard(device);
+      _device_guard.set_index(device);
       tensors.push_back(type.tensor(tensor.sizes()));
     }
     nccl::broadcast(tensors);
@@ -48,8 +49,12 @@ std::vector<Tensor> broadcast(const Tensor& tensor, IntList devices) {
   {
 #endif
     auto & gpu_type = type.toBackend(type.is_sparse() ? at::kSparseCUDA : at::kCUDA);
-    for (auto device : devices) {
-      at::DeviceGuard _device_guard(device);
+    if (type.is_cuda()) {
+      tensors.push_back(tensor);
+    }
+    IntList loop_devices = type.is_cuda() ? devices.slice(1) : devices;
+    for (auto device : loop_devices) {
+      _device_guard.set_index(device);
       tensors.push_back(gpu_type.copy(tensor, true));
     }
   }

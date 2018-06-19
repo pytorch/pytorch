@@ -205,4 +205,9 @@ inline TensorOptions device_index(int32_t device_index) {
 inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
 }
+
+/// From Tensor.h
+inline TensorOptions Tensor::options() const {
+  return TensorOptions(*this);
+ }
 } // namespace at

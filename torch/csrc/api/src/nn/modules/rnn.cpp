@@ -138,8 +138,7 @@ std::vector<Variable> RNNImplBase<Derived>::autograd_forward(
   }
 
   auto output = torch::zeros(
-      {inp.size(0), inp.size(1), options_.hidden_size_},
-      at::TensorOptions(inp));
+      {inp.size(0), inp.size(1), options_.hidden_size_}, inp.options());
   for (int64_t t = 0; t < inp.size(0); t++) {
     auto x = inp.select(0, t);
     for (int64_t i = 0; i < options_.layers_; i++) {
@@ -217,12 +216,10 @@ std::vector<Variable> RNNImplBase<Derived>::CUDNN_forward(
     }
   } else {
     hx = torch::zeros(
-        {options_.layers_, x.size(1), options_.hidden_size_},
-        at::TensorOptions(x));
+        {options_.layers_, x.size(1), options_.hidden_size_}, x.options());
     if (has_cell_state_) {
       cx = torch::zeros(
-          {options_.layers_, x.size(1), options_.hidden_size_},
-          at::TensorOptions(x));
+          {options_.layers_, x.size(1), options_.hidden_size_}, x.options());
     }
   }
   auto dropout_state = torch::empty({}, x.type());
@@ -334,8 +331,7 @@ std::vector<Variable> RNNImpl::cell_forward(
   auto x = inputs[0];
   auto hx = inputs[1].defined()
       ? inputs[1]
-      : torch::zeros(
-            {x.size(0), options_.hidden_size_}, torch::TensorOptions(x));
+      : torch::zeros({x.size(0), options_.hidden_size_}, x.options());
 
   auto h = linear(x, ihw_[layer], ihb_[layer]) +
       linear(hx, hhw_[layer], hhb_[layer]);
@@ -362,8 +358,7 @@ std::vector<Variable> LSTMImpl::cell_forward(
   auto x = inputs[0];
   auto hid = inputs[1].defined()
       ? inputs[1]
-      : torch::zeros(
-            {2, x.size(0), options_.hidden_size_}, torch::TensorOptions(x));
+      : torch::zeros({2, x.size(0), options_.hidden_size_}, x.options());
   auto hx = hid[0];
   auto cx = hid[1];
 
@@ -400,8 +395,7 @@ std::vector<Variable> GRUImpl::cell_forward(
   auto x = inputs[0];
   auto hx = inputs[1].defined()
       ? inputs[1]
-      : torch::zeros(
-            {x.size(0), options_.hidden_size_}, torch::TensorOptions(x));
+      : torch::zeros({x.size(0), options_.hidden_size_}, x.options());
 
   auto gi = linear(x, ihw_[layer], ihb_[layer]);
   auto gh = linear(x, hhw_[layer], hhb_[layer]);
@@ -419,6 +413,5 @@ std::vector<Variable> GRUImpl::cell_forward(
 const GRUOptions& GRUImpl::options() const noexcept {
   return options_;
 }
-
 } // namespace nn
 } // namespace torch

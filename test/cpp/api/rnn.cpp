@@ -39,7 +39,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     auto nlen = 5U;
 
     const auto backend = cuda ? at::kCUDA : at::kCPU;
-    auto inp = at::rand({nlen, bs, 1}, backend).round().toType(at::kFloat);
+    auto inp = at::rand({nlen, bs, 1}, backend).round().toType(torch::kFloat32);
     auto lab = inp.sum(0);
 
     auto x = autograd::make_variable(inp, /*requires_grad=*/true);

@@ -17,6 +17,7 @@
 namespace at {
 struct Type;
 struct Tensor;
+struct TensorOptions;
 namespace detail {
 void set_data(Tensor& tensor, Tensor new_data);
 } // namespace detail
@@ -97,6 +98,10 @@ struct Tensor : public detail::TensorBase {
 
   /// Returns a `Tensor`'s device.
   Device device() const;
+
+  /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
+  /// TensorOptions.h.
+  TensorOptions options() const;
 
   template<typename T>
   T * data() const;
