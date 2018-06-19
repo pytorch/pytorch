@@ -122,7 +122,8 @@ struct Environment {
 
     // recursively create the captured input if it is the loop block
     if (from_parent && getBlockOwningKind() == prim::Loop) {
-      from_parent = createCapturedInput(from_parent->asValue(loc, method), ident);
+      if (Value* simple_val = asSimple(from_parent))
+        from_parent = createCapturedInput(simple_val, ident);
     }
     return from_parent;
   }
