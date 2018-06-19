@@ -11,6 +11,8 @@ from itertools import repeat, product
 from functools import wraps, reduce
 from operator import mul
 from collections import OrderedDict
+import hashlib
+import argparse
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -51,6 +53,8 @@ DOUBLE_TENSORTYPES = [torch.double]
 dtype2prec = {torch.float: 1e-5,
               torch.double: 1e-5,
               torch.half: 1e-2}
+
+NUM_SHARDS = 30
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -7608,5 +7612,34 @@ add_test(NewModuleTest(
     fullname='AdaptiveLogSoftmax'))
 
 
+def disable_tests_not_in_shard(module, shard):
+    all_methods = dir(module())
+    all_tests = [x for x in all_methods if x.startswith("test_")]
+    for test_name in all_tests:
+        if int(hashlib.sha256(test_name.encode('utf-8')).hexdigest(), 16) % NUM_SHARDS != shard:
+            delattr(module, test_name)
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(
+        description='Run only a portion of test_nn')
+    parser.add_argument(
+        '--shard',
+        type=int,
+        required=False,
+        help='the shard number to run')
+    parser.add_argument(
+        '--verbose',
+        action='store_true',
+        required=False,
+        help='verbose mode')
+    return parser.parse_args()
+
+
 if __name__ == '__main__':
+    options = parse_args()
+    if options.shard:
+        disable_tests_not_in_shard(TestNN, options.shard)
+        disable_tests_not_in_shard(TestNNInit, options.shard)
+        disable_tests_not_in_shard(PackedSequenceTest, options.shard)
     run_tests()
