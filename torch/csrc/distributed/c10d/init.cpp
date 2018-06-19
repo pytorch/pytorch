@@ -1,8 +1,14 @@
 #include "torch/csrc/python_headers.h"
 
+#include <c10d/Def.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
+
+#ifdef USE_C10D_NCCL
+#include <c10d/ProcessGroupNCCL.hpp>
+#endif
+
 #include <c10d/TCPStore.hpp>
 
 #include "torch/csrc/Exceptions.h"
@@ -118,6 +124,12 @@ PyObject* c10d_init(PyObject* _unused) {
   shared_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup)
       .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+
+#ifdef USE_C10D_NCCL
+  shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+      module, "ProcessGroupNCCL", processGroup)
+      .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+#endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)

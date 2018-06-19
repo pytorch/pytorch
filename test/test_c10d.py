@@ -250,5 +250,105 @@ class ProcessGroupGlooTest(TestCase):
         self.assertEqual(torch.Tensor([float(self.size * (self.size + 1) / 2)]), x)
 
 
+class ProcessGroupNCCLTest(TestCase):
+    MAIN_PROCESS_RANK = 0
+
+    def setUp(self):
+        if not hasattr(c10d, "ProcessGroupNCCL"):
+            raise unittest.SkipTest("C10D is not built with NCCL process group,"
+                                    " skipping test")
+
+        self.rank = self.MAIN_PROCESS_RANK
+        self.size = 1
+        self.file = tempfile.NamedTemporaryFile()
+
+        if not torch.cuda.is_available():
+            raise unittest.SkipTest("torch.cuda not available, skipping test")
+
+        self.num_gpus = torch.cuda.device_count()
+
+        if self.num_gpus < 2:
+            raise unittest.SkipTest("Requires at least 2 GPUs, skipping test")
+
+    def tearDown(self):
+        self.file.close()
+
+    def test_broadcast_ops(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+
+        def broadcast(xs, rootRank, rootTensor):
+            opts = c10d.BroadcastOptions()
+            opts.rootRank = rootRank
+            opts.rootTensor = rootTensor
+            work = pg.broadcast(xs, opts)
+            work.wait()
+
+        # for every root tensor
+        for rt in range(self.num_gpus):
+            tensors = []
+            for i in range(self.num_gpus):
+                tensors.append(torch.Tensor([i]).cuda(i))
+
+            broadcast(tensors, self.rank, rt)
+
+            for i in range(self.num_gpus):
+                self.assertEqual(tensors[i], tensors[rt])
+
+    def test_allreduce_ops(self):
+        store = c10d.FileStore(self.file.name)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+
+        def allreduce(tensors, op):
+            opts = c10d.AllreduceOptions()
+            opts.reduceOp = op
+            work = pg.allreduce(tensors, opts)
+            work.wait()
+
+        # Sum
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.Tensor([i + 1]).cuda(i))
+
+        allreduce(tensors, c10d.ReduceOp.SUM)
+
+        for i in range(self.num_gpus):
+            self.assertEqual(
+                torch.Tensor([float(self.num_gpus * (self.num_gpus + 1) / 2)]),
+                tensors[i])
+
+        # Product
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.Tensor([i + 1]).cuda(i))
+
+        allreduce(tensors, c10d.ReduceOp.PRODUCT)
+
+        for i in range(self.num_gpus):
+            self.assertEqual(
+                torch.Tensor([float(math.factorial(self.num_gpus))]),
+                tensors[i])
+
+        # Min
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.Tensor([i + 1]).cuda(i))
+
+        allreduce(tensors, c10d.ReduceOp.MIN)
+
+        for i in range(self.num_gpus):
+            self.assertEqual(torch.Tensor([1.0]), tensors[i])
+
+        # Max
+        tensors = []
+        for i in range(self.num_gpus):
+            tensors.append(torch.Tensor([i + 1]).cuda(i))
+
+        allreduce(tensors, c10d.ReduceOp.MAX)
+
+        for i in range(self.num_gpus):
+            self.assertEqual(torch.Tensor([self.num_gpus]), tensors[i])
+
+
 if __name__ == '__main__':
     unittest.main()
