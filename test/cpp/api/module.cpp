@@ -69,7 +69,7 @@ TEST_CASE("module/conversions", "[cuda]") {
   SECTION("starts as float on CPU") {
     for (auto& parameter : module->parameters()) {
       REQUIRE(parameter->type().backend() == at::kCPU);
-      REQUIRE(parameter->type().scalarType() == at::kFloat);
+      REQUIRE(parameter->type().scalarType() == torch::kFloat32);
     }
   }
   SECTION("to(CUDA)") {
@@ -85,22 +85,22 @@ TEST_CASE("module/conversions", "[cuda]") {
     }
   }
   SECTION("to(Int)") {
-    module->to(at::kInt);
+    module->to(torch::kInt32);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().scalarType() == at::kInt);
+      REQUIRE(parameter->type().scalarType() == torch::kInt32);
     }
   }
   SECTION("to(Double)") {
-    module->to(at::kDouble);
+    module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().scalarType() == at::kDouble);
+      REQUIRE(parameter->type().scalarType() == torch::kFloat64);
     }
   }
   SECTION("to(CUDA(Float))") {
-    module->to(at::CUDA(at::kFloat));
+    module->to(at::CUDA(torch::kFloat32));
     for (auto& parameter : module->parameters()) {
       REQUIRE(parameter->type().backend() == at::kCUDA);
-      REQUIRE(parameter->type().scalarType() == at::kFloat);
+      REQUIRE(parameter->type().scalarType() == torch::kFloat32);
     }
   }
 }
