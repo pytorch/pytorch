@@ -81,7 +81,11 @@ Tensor& cumprod_out(Tensor& result, const Tensor& self, int64_t dim) {
 // ALL REDUCE #################################################################
 
 static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
-  Tensor result = at::sum(integer_upcast(self, dtype));
+  ScalarType scalarType = self.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the average of floating types");
+  Tensor result = at::native::sum(self);
   if (self.numel() > 0)
     result.div_(self.numel());
   return result;
@@ -169,7 +173,12 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
 
 static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
                  bool keepdim, optional<ScalarType> dtype) {
-  at::_sum_out(result, self.toType(result.type().scalarType()), dim, keepdim);
+  ScalarType scalarType = result.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the average of floating types");
+  at::native::sum_out(
+      result, self.toType(result.type().scalarType()), dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
     int64_t numel = self.size(dim);
     result.div_(numel);
@@ -256,10 +265,14 @@ Tensor &_prod_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
   return at::_th_prod_out(result, self, dim, keepdim);
 }
 
-static inline Tensor mean(const Tensor &self, int64_t dim_, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result = at::_sum(integer_upcast(self, dtype), dim_, keepdim);
+static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optional<ScalarType> dtype) {
+  ScalarType scalarType = self.type().scalarType();
+  AT_CHECK(
+      at::isFloatingType(scalarType),
+      "Can only calculate the average of floating types");
+  Tensor result = at::native::sum(self, dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
-    int64_t numel = self.size(dim_);
+    int64_t numel = self.size(dim);
     result.div_(numel);
   }
   return result;
@@ -300,8 +313,7 @@ Tensor _sum(const Tensor &self, int64_t dim_, bool keepdim) {
 }
 
 static inline Tensor prod(const Tensor &self, int64_t dim_, bool keepdim, optional<ScalarType> dtype) {
-  Tensor result = at::_prod(integer_upcast(self, dtype), dim_, keepdim);
-  return result;
+  return at::_prod(integer_upcast(self, dtype), dim_, keepdim);
 }
 
 Tensor prod(const Tensor& self, int64_t dim, bool keepdim, ScalarType dtype) {
