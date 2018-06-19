@@ -353,6 +353,8 @@ static_assert(CUFFT_MAX_PLAN_NUM >= 0 && CUFFT_MAX_PLAN_NUM <= std::numeric_limi
 // This cache assumes that the mapping from key to value never changes.
 // This is **NOT** thread-safe. Please use a mutex when using it **AND** the
 // value returned from try_emplace_value.
+// The contract of using this cache is that try_emplace_value should only be
+// used when the max_size is positive.
 class CuFFTParamsLRUCache {
 public:
   using kv_t = typename std::pair<CuFFTParams, CuFFTConfig>;
@@ -436,12 +438,10 @@ private:
 
   // Only sets size and does value check. Does not resize the data structures.
   void _set_max_size(int64_t new_size) {
-    if (new_size > CUFFT_MAX_PLAN_NUM) {
-      AT_ERROR("cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
-    }
-    if (new_size < 0) {
-      AT_ERROR("cuFFT plan cache size must be non-negative, but got ", new_size);
-    }
+    AT_CHECK(new_size <= CUFFT_MAX_PLAN_NUM,
+             "cuFFT plan cache size can not be larger than ", CUFFT_MAX_PLAN_NUM, ", but got ", new_size);
+    AT_CHECK(new_size >= 0,
+             "cuFFT plan cache size must be non-negative, but got ", new_size);
     _max_size = static_cast<size_t>(new_size);
   }
 

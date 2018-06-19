@@ -5299,9 +5299,13 @@ The inverse of this function is :func:`~torch.ifft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 .. note::
-    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
-    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
-    methods on tensors of same shape and strides with same figurations.
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_plan_cache.max_size``
+    to a positive integer turns on cuFFT plan caching, and thus speed up
+    repeatedly running FFT methods on tensors of same shape and strides with
+    same configurations. Some cuFFT plans may allocation GPU memory. Use
+    ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of cached
+    plans, and ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the
+    cache.
 
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
@@ -5393,9 +5397,13 @@ The inverse of this function is :func:`~torch.fft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 .. note::
-    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
-    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
-    methods on tensors of same shape and strides with same figurations.
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_plan_cache.max_size``
+    to a positive integer turns on cuFFT plan caching, and thus speed up
+    repeatedly running FFT methods on tensors of same shape and strides with
+    same configurations. Some cuFFT plans may allocation GPU memory. Use
+    ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of cached
+    plans, and ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the
+    cache.
 
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
@@ -5476,9 +5484,13 @@ The inverse of this function is :func:`~torch.irfft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 .. note::
-    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
-    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
-    methods on tensors of same shape and strides with same figurations.
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_plan_cache.max_size``
+    to a positive integer turns on cuFFT plan caching, and thus speed up
+    repeatedly running FFT methods on tensors of same shape and strides with
+    same configurations. Some cuFFT plans may allocation GPU memory. Use
+    ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of cached
+    plans, and ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the
+    cache.
 
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` dimensions
@@ -5551,9 +5563,13 @@ The inverse of this function is :func:`~torch.rfft`.
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 .. note::
-    For CUDA tensors, setting ``torch.backends.cuda.cufft_cache_plan = True``
-    turns on cuFFT plan caching, and thus speed up repeatedly running FFT
-    methods on tensors of same shape and strides with same figurations.
+    For CUDA tensors, setting ``torch.backends.cuda.cufft_plan_cache.max_size``
+    to a positive integer turns on cuFFT plan caching, and thus speed up
+    repeatedly running FFT methods on tensors of same shape and strides with
+    same configurations. Some cuFFT plans may allocation GPU memory. Use
+    ``torch.backends.cuda.cufft_plan_cache.size`` to query the number of cached
+    plans, and ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the
+    cache.
 
 Arguments:
     input (Tensor): the input tensor of at least :attr:`signal_ndim` ``+ 1``
