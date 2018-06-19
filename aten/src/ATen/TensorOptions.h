@@ -2,6 +2,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/Device.h>
+#include <ATen/DeviceGuard.h>
 #include <ATen/Layout.h>
 #include <ATen/ScalarType.h>
 #include <ATen/Tensor.h>
@@ -37,6 +38,9 @@ struct TensorOptions {
     this->dtype(tensor.dtype());
     this->device(tensor.device());
     this->layout(tensor.layout());
+    if (tensor.is_variable()) {
+      this->requires_grad(tensor.requires_grad());
+    }
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
@@ -93,13 +97,10 @@ struct TensorOptions {
     return *this;
   }
 
-  // NOTE: These methods are defined in TensorOptions.cpp because I get funny
-  // linker errors for their missing definition if they're defined in the
-  // header. Who knows why?
-
   /// Sets the device of the `TensorOptions`.
   TensorOptions& device(Device device) {
     device_ = std::move(device);
+    update_underlying_type();
     return *this;
   }
 
@@ -112,17 +113,19 @@ struct TensorOptions {
   /// Sets the dtype of the `TensorOptions`.
   TensorOptions& dtype(ScalarType dtype) {
     dtype_ = dtype;
+    update_underlying_type();
     return *this;
   }
 
   /// Sets the layout of the `TensorOptions`.
   TensorOptions& layout(Layout layout) {
     layout_ = layout;
+    update_underlying_type();
     return *this;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
-  TensorOptions& requires_grad(bool requires_grad = true) {
+  TensorOptions& requires_grad(bool requires_grad) {
     requires_grad_ = requires_grad;
     return *this;
   }
@@ -157,16 +160,28 @@ struct TensorOptions {
     if (type_ != nullptr) {
       return *type_;
     }
+    return getType(backend(), dtype_);
+  }
+
+ private:
+  /// Updates any stored underlying type to the current construction axes.
+  void update_underlying_type() {
+    if (type_) {
+      type_ = &type_->toScalarType(dtype_).toBackend(backend());
+    }
+  }
+
+  // Resolves the ATen backend specified by the current construction axes.
+  Backend backend() const noexcept {
     Backend backend;
     if (device_.type() == Device::Type::CPU) {
       backend = (layout_ == kStrided) ? kCPU : kSparseCPU;
     } else {
       backend = (layout_ == kStrided) ? kCUDA : kSparseCUDA;
     }
-    return getType(backend, dtype_);
+    return backend;
   }
 
- protected:
   ScalarType dtype_{kFloat};
   Device device_{Device::Type::CPU};
   Layout layout_{Layout::Strided};
@@ -209,5 +224,26 @@ inline TensorOptions requires_grad(bool requires_grad = true) {
 /// From Tensor.h
 inline TensorOptions Tensor::options() const {
   return TensorOptions(*this);
- }
+}
+
+inline Tensor Tensor::to(TensorOptions options, bool non_blocking) {
+  DeviceGuard guard(options.device());
+  auto copy = options.type().copy(*this, non_blocking);
+  if (copy.is_variable()) {
+    copy.set_requires_grad(options.requires_grad());
+  }
+  return copy;
+}
+
+inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) {
+  return to(options().dtype(dtype), non_blocking);
+}
+
+inline Tensor Tensor::to(Layout layout, bool non_blocking) {
+  return to(options().layout(layout), non_blocking);
+}
+
+inline Tensor Tensor::to(Device device, bool non_blocking) {
+  return to(options().device(device), non_blocking);
+}
 } // namespace at

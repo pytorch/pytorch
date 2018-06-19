@@ -86,6 +86,12 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
+  /// New-style `to()` methods.
+  Tensor to(TensorOptions options, bool non_blocking = false);
+  Tensor to(ScalarType dtype, bool non_blocking = false);
+  Tensor to(Layout layout, bool non_blocking = false);
+  Tensor to(Device device, bool non_blocking = false);
+
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
   bool is_variable() const noexcept;
