@@ -161,13 +161,15 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     """
     tupled_inputs = _as_tuple(inputs)
 
-    typecheck = [inputs.dtype != torch.float64 for inputs in tupled_inputs]
+    prec_flag = False
+    for inp in tupled_inputs:
+        if inp.dtype != torch.float64:
+            prec_flag = True
     if any(typecheck):
         warnings.warn(
-            'At least one argument is of single precision. '
+            'At least one of the inputs is of single precision. '
             'The default values are designed for :attr:`input` of double precision. '
             'This check will likely fail if :attr:`input` is of single precision. ')
-
 
     # Make sure that gradients are saved for all inputs
     for inp in tupled_inputs:
