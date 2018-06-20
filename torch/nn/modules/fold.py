@@ -5,7 +5,7 @@ from .. import functional as F
 class Fold(Module):
     """
     De-interleaves vectors of length :math:`\prod(kernel\_size)` from the "channel"
-    dimension of the input tensor to generate blocks of size :math:`kernel_size`
+    dimension of the input tensor to generate blocks of size :math:`kernel\_size`
     of the output.  These blocks populate the "spatial" dimensions [2:]
     of the output via a sliding window with positions determined by the
     padding, stride and dilation values.  The "channel" dimension 1 of the output
@@ -42,7 +42,7 @@ class Fold(Module):
     Shape:
         - Input: :math:`(N, C, L_{in})`
         - Output: :math:`(N * C * \prod(kernel\_size), L_{out},)` where
-          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1)`
+          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel\_size - 1) - 1) / stride + 1)`
 
     Examples::
 
@@ -113,7 +113,7 @@ class Unfold(Module):
     Shape:
         - Input: :math:`(N, C, L_{in})`
         - Output: :math:`(N, C * \prod(kernel\_size), L_{out},)` where
-          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1)`
+          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel\_size - 1) - 1) / stride + 1)`
 
     Examples::
 
