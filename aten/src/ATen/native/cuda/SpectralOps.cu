@@ -2,11 +2,10 @@
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
 #include "ATen/Utils.h"
-#include <ATen/optional.h>
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/SpectralOpsUtils.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/native/cuda/SpectralOps.h"
+#include "ATen/native/cuda/CuFFTPlanCache.h"
 
 #include <THC/THCDeviceUtils.cuh>
 #include <THC/THCTensorMathReduce.cuh>
@@ -20,6 +19,8 @@
 #include <cmath>
 
 namespace at { namespace native {
+
+using namespace at::native::detail;
 
 // In real-to-complex transform, cuFFT only fills half of the values due to
 // conjugate symmetry. See native/SpectralUtils.h for more details.
@@ -166,9 +167,10 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
 // dimension being unit (1) w.r.t. the corresponding data type.
 
 static inline Tensor _run_cufft(
-    const CuFFTConfig &config, Tensor& input, int64_t signal_ndim, bool complex_input,
-    bool complex_output, bool inverse, IntList checked_signal_sizes,
-    bool normalized, bool onesided, IntList output_sizes, bool input_was_cloned
+    const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
+    bool complex_input, bool complex_output, bool inverse,
+    IntList checked_signal_sizes, bool normalized, bool onesided,
+    IntList output_sizes, bool input_was_cloned
 ) {
   if (config.should_clone_input() && !input_was_cloned) {
     input = input.clone();
@@ -220,25 +222,29 @@ static inline Tensor _run_cufft(
 struct CuFFTParamsLRUCache plan_cache;
 std::mutex plan_cache_mutex;
 
-int64_t __cufft_get_plan_cache_max_size_impl() {
+namespace detail {
+
+int64_t cufft_get_plan_cache_max_size_impl() {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   return plan_cache.max_size();
 }
 
-void __cufft_set_plan_cache_max_size_impl(int64_t max_size) {
+void cufft_set_plan_cache_max_size_impl(int64_t max_size) {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   plan_cache.resize(max_size);
 }
 
-int64_t __cufft_get_plan_cache_size_impl() {
+int64_t cufft_get_plan_cache_size_impl() {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   return plan_cache.size();
 }
 
-void __cufft_clear_plan_cache_impl() {
+void cufft_clear_plan_cache_impl() {
   std::lock_guard<std::mutex> guard(plan_cache_mutex);
   return plan_cache.clear();
 }
+
+} // namespace at::native::detail
 
 // cuFFT
 // Currently not utilizing multi GPUs so this can be potentially sped up.
@@ -284,8 +290,8 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
   // we check again after acquiring the lock.
   if (plan_cache.max_size() > 0) {
     CuFFTParams params;
-    setCuFFTParams(&params, input, signal_ndim, complex_input, complex_output,
-      checked_signal_sizes, onesided);
+    setCuFFTParams(&params, input, signal_ndim, complex_input,
+      complex_output, checked_signal_sizes, onesided);
     std::lock_guard<std::mutex> guard(plan_cache_mutex);
     if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
       const CuFFTConfig &config = plan_cache.try_emplace_value(std::move(params),
