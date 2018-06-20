@@ -13,6 +13,7 @@ import common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
+TEST_CUDNN = TEST_CUDA and torch._C.has_cudnn
 
 
 class TestCppExtension(common.TestCase):
@@ -99,6 +100,28 @@ class TestCppExtension(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not found")
+    def test_jit_cudnn_extension(self):
+        # implementation of CuDNN ReLU
+        module = torch.utils.cpp_extension.load(
+            name='torch_test_cudnn_extension',
+            sources=[
+                'cpp_extensions/cudnn_extension.cpp'
+            ],
+            extra_cuda_cflags=['-O2'],
+            verbose=True,
+            with_cuda=True)
+
+        x = torch.randn(100, device='cuda', dtype=torch.float32)
+        y = torch.zeros(100, device='cuda', dtype=torch.float32)
+        module.cudnn_relu(x, y) # y=relu(x)
+        self.assertEqual(torch.nn.functional.relu(x), y)
+        with self.assertRaisesRegex(
+          RuntimeError,
+          "same size") as cm:
+            y_incorrect = torch.zeros(20, device='cuda', dtype=torch.float32)
+            module.cudnn_relu(x, y_incorrect)
 
     def test_optional(self):
         has_value = cpp_extension.function_taking_optional(torch.ones(5))

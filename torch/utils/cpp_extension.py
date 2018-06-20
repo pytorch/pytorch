@@ -416,7 +416,8 @@ def load(name,
          extra_ldflags=None,
          extra_include_paths=None,
          build_directory=None,
-         verbose=False):
+         verbose=False,
+         with_cuda=False):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
@@ -464,6 +465,8 @@ def load(name,
             to the build.
         build_directory: optional path to use as build workspace.
         verbose: If ``True``, turns on verbose logging of load steps.
+        with_cuda: If ``sources`` includes ``.cu`` or ``.cuh`` files, CUDA will always be
+            enabled. Use this flag for pure CPP extensions that require CUDA.
 
     Returns:
         The loaded PyTorch extension as a Python module.
@@ -484,7 +487,8 @@ def load(name,
         extra_ldflags,
         extra_include_paths,
         build_directory or _get_build_directory(name, verbose),
-        verbose)
+        verbose,
+        with_cuda=with_cuda)
 
 
 def load_inline(name,
@@ -496,7 +500,8 @@ def load_inline(name,
                 extra_ldflags=None,
                 extra_include_paths=None,
                 build_directory=None,
-                verbose=False):
+                verbose=False,
+                with_cuda=False):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -538,6 +543,8 @@ def load_inline(name,
         functions: A list of function names for which to generate function
             bindings. If a dictionary is given, it should map function names to
             docstrings (which are otherwise just the function names).
+        with_cuda: If ``cuda_sources`` is provided, CUDA will always be
+            enabled. Use this flag for pure CPP extensions that require CUDA.
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
@@ -606,7 +613,8 @@ def load_inline(name,
         extra_ldflags,
         extra_include_paths,
         build_directory,
-        verbose)
+        verbose,
+        with_cuda=with_cuda)
 
 
 def _jit_compile(name,
@@ -616,13 +624,14 @@ def _jit_compile(name,
                  extra_ldflags,
                  extra_include_paths,
                  build_directory,
-                 verbose):
+                 verbose,
+				 with_cuda=False):
     baton = FileBaton(os.path.join(build_directory, 'lock'))
     if baton.try_acquire():
         try:
             verify_ninja_availability()
             check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
-            with_cuda = any(map(_is_cuda_file, sources))
+            with_cuda = any(map(_is_cuda_file, sources)) or with_cuda
             extra_ldflags = _prepare_ldflags(
                 extra_ldflags or [],
                 with_cuda,
