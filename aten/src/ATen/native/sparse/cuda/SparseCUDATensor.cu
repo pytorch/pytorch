@@ -92,8 +92,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
         apply::coalesceValuesKernel<cuda_scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
           uniqueOffsets.data<int64_t>(),
           origIndices.data<int64_t>(),
-          values.data<cuda_scalar_t>(),
-          newValues.data<cuda_scalar_t>(),
+          values.data<scalar_t>(),
+          newValues.data<scalar_t>(),
           nnz,
           newNnz,
           stride
