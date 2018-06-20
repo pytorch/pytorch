@@ -17,20 +17,25 @@ ptrdiff_t THTensor_(storageOffset)(const THTensor *self)
 
 int THTensor_(nDimension)(const THTensor *self)
 {
+  return self->dim();
+}
+
+int THTensor_(_nDimension)(const THTensor *self)
+{
   return self->_dim();
 }
 
 int64_t THTensor_(size)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->_dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
+      dim+TH_INDEX_BASE, THTensor_(_nDimension)(self));
   return self->size[dim];
 }
 
 int64_t THTensor_(stride)(const THTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->_dim()), 2, "dimension %d out of range of %dD tensor",
-      dim+TH_INDEX_BASE, THTensor_(nDimension)(self));
+      dim+TH_INDEX_BASE, THTensor_(_nDimension)(self));
   return self->stride[dim];
 }
 
