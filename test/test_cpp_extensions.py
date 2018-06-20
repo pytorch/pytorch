@@ -106,9 +106,9 @@ class TestCppExtension(common.TestCase):
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
         if sys.platform == 'win32':
-            extra_ldflags=['cudnn.lib']
+            extra_ldflags = ['cudnn.lib']
         else:
-            extra_ldflags=['-lcudnn']
+            extra_ldflags = ['-lcudnn']
         module = torch.utils.cpp_extension.load(
             name='torch_test_cudnn_extension',
             sources=[
