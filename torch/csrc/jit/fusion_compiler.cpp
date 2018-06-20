@@ -7,13 +7,15 @@
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "ATen/ATen.h"
+
 #ifdef USE_CUDA
-#include "THC/THC.h"
-#include "torch/csrc/cuda/cuda_check.h"
-#include <nvrtc.h>
-#include <cuda.h>
-#include <cuda_runtime.h>
+  #include "THC/THC.h"
+  #include "torch/csrc/cuda/cuda_check.h"
+  #include <nvrtc.h>
+  #include <cuda.h>
+  #include <cuda_runtime.h>
 #endif
+
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -66,11 +68,12 @@ so typedefs help it handle those cases*/
 
 auto type_declarations_template = CodeTemplate(R"(
 #if defined(__CUDACC_RTC__)
-typedef unsigned char uint8_t;
-typedef signed char int8_t;
-typedef short int  int16_t;
-typedef long long int int64_t;
+  typedef unsigned char uint8_t;
+  typedef signed char int8_t;
+  typedef short int  int16_t;
+  typedef long long int int64_t;
 #endif
+${HalfHeader}
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {
@@ -121,6 +124,42 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 }
 )");
 
+auto half_support_literal  = R"(    
+#define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
+#define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
+#if defined(__cplusplus)
+  struct __align__(2) __half {
+    __host__ __device__ __half() { }
+
+  protected:
+    unsigned short __x;
+  };
+
+  /* All intrinsic functions are only available to nvcc compilers */
+  #if defined(__CUDACC__)
+    /* Definitions of intrinsics */
+    __device__ __half __float2half(const float f) {
+      __half val;
+      asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(__HALF_TO_US(val)) : "f"(f));
+      return val;
+    }
+
+    __device__ float __half2float(const __half h) {
+      float val;
+      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(h)));
+      return val;
+    }
+  #endif /* defined(__CUDACC__) */
+#endif /* defined(__cplusplus) */
+#undef __HALF_TO_US
+#undef __HALF_TO_CUS
+
+typedef __half half;
+)";
+
+
+// typedef __half half;
+
 // curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
 // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
 // linearId /= sizes[i];
@@ -158,7 +197,11 @@ std::string valueName(Value * n) {
     (std::to_string(s.toDouble()) + "f");
 }
 
-const char * scalarTypeName(at::ScalarType type) {
+const char* scalarTypeName(at::ScalarType type) {
+  if (type == at::ScalarType::Half) {
+    return "half";
+  }
+
   switch(type) {
     #define DEFINE_CASE(ctype,name,_) \
       case at::ScalarType::name: return #ctype;
@@ -266,10 +309,11 @@ std::string encodeRHS(Node * n) {
   return format(str, env);
 }
 
-std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
-                                            const std::string & name,
-                                            AnnotatedGraph & agraph,
-                                            bool use_cuda) {
+std::vector<ConcatDesc> emitCompilationUnit(
+  std::ostream& out
+, const std::string& name
+, AnnotatedGraph& agraph
+, bool use_cuda) {
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -280,22 +324,23 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   std::stringstream tensorOffsets;
   std::vector<std::string> formals;
   std::vector<std::string> argument_loads;
-  auto emitFormal = [&](Value * n, const TensorDesc & desc) {
+  auto emitFormal = [&](Value* n, const TensorDesc& desc) {
     std::string tensor = "t" + std::to_string(formals.size()); //can't be unique() because Param may be an output
     size_t nDim = desc.nDim();
     emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
     env.s("tensor",tensor);
     env.d("formal_index", formals.size() + 1); // + 1 because the first argument is the linearIndex
     env.d("nDim",nDim);
-    env.s("scalar_type",scalarTypeName(desc.scalar_type));
+    env.s("scalar_type", scalarTypeName(desc.scalar_type));
     formals.push_back(format("TensorInfo<${scalar_type},${nDim}> ${tensor}",env));
     argument_loads.push_back(format("*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",env));
   };
   {
     size_t i = 0;
-    for(auto p : subgraph.inputs())
-      emitFormal(p,agraph.input_desc[i++]);
+    for (auto p : subgraph.inputs())
+      emitFormal(p, agraph.input_desc[i++]);
   }
+  
   std::vector<ConcatDesc> concat_desc;
   std::vector<Value*> flat_output_nodes;
   {
@@ -317,14 +362,28 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
       }
     }
   }
+
+  bool has_half_tensor = false;
   size_t formal_count = 0;
   for(auto p : subgraph.inputs()) {
-    env.s("node",valueName(p));
+    env.s("node", valueName(p));
     env.d("formal",formal_count++);
-    env.s("access",format("t${formal}.data[t${formal}_offset]",env));
+
+    // Acquires and converts (if needed) inputs
+    auto pt = p->type()->cast<TensorType>();
+    if (use_cuda && pt && pt->scalarType() == at::ScalarType::Half) {
+      env.s(
+        "access"
+      , format("__half2float(t${formal}.data[t${formal}_offset])", env));
+      has_half_tensor = true;
+    } else {
+      env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+    }
+    
     //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }
+
   for(auto n : subgraph.nodes()) {
     if(n->kind() == aten::cat)
       continue; // Concat nodes by narrowing the output Tensors before the kernel runs
@@ -332,22 +391,40 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
   }
+
   for(auto o : flat_output_nodes) {
     env.d("formal",formal_count++);
     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
     env.s("node",valueName(o));
-    body << format("${access} = ${node};\n",env);
+
+    // Acquires and converts (if needed) outputs
+    auto ot = o->type()->cast<TensorType>();
+    if (use_cuda && ot && ot->scalarType() == at::ScalarType::Half) {
+      body << format("${access} = __float2half(${node});\n",env);
+      has_half_tensor = true;
+    } else {
+      body << format("${access} = ${node};\n",env);
+    }
   }
+
+  // Includes half support if any half tensors are involved
+  if (has_half_tensor) {
+    env.s("HalfHeader", half_support_literal);
+  } else {
+    env.s("HalfHeader", "");
+  }
+
   env.s("tensorOffsets",tensorOffsets.str());
   env.s("kernelBody",body.str());
   env.v("formals",formals);
   env.v("argument_loads",argument_loads);
   env.s("type_declarations", type_declarations_template.format(env));
-  if(use_cuda) {
+  if (use_cuda) {
     out << cuda_compilation_unit_template.format(env);
   } else {
     out << cpu_compilation_unit_template.format(env);
   }
+
   return concat_desc;
 }
 
@@ -521,7 +598,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
     std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
-    std::vector<const char *> args = {"--std=c++11", compute.c_str()};
+    const std::vector<const char*> args = {"--std=c++11", compute.c_str()};
     nvrtcResult result = nvrtcCompileProgram(program, args.size(), args.data());
     if (result == NVRTC_ERROR_COMPILATION) {
       size_t logsize;
