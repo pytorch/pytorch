@@ -69,7 +69,6 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
 	   int inputWidth,
 	   int outputWidth)
 {
-  gradInput = THCTensor_(newContiguous)(state, gradInput);
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(TemporalUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels, inputWidth, outputWidth);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
@@ -88,7 +87,6 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
 	  num_threads, 0, stream>>>(num_kernels, data1, data2);
 
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);
 }
 

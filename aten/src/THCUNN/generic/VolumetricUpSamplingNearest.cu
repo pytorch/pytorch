@@ -87,12 +87,10 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
 	   int outputHeight,
 	   int outputWidth)
 {
-
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels,
 		  inputDepth, inputHeight, inputWidth,
 		  outputDepth, outputHeight, outputWidth);
-  gradInput = THCTensor_(newContiguous)(state, gradInput);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resize5d)(state, gradInput, nbatch, nchannels, inputDepth, inputHeight, inputWidth);
 
@@ -106,7 +104,6 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   nearest_neighbor_5d_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),
 	  num_threads, 0, stream>>>(num_kernels, data1, data2);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);
 }
 
