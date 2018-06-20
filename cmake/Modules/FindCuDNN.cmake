@@ -17,26 +17,26 @@ set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
 
 if(DEFINED ENV{CUDNN_INCLUDE_DIR})
   SET(CUDNN_INCLUDE_DIR $ENV{CUDNN_INCLUDE_DIR})
-else(DEFINED ENV{CUDNN_INCLUDE_DIR})
+else()
   find_path(CUDNN_INCLUDE_DIR cudnn.h
     HINTS ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES cuda/include include)
-endif(DEFINED ENV{CUDNN_INCLUDE_DIR})
+endif()
 
-IF (DEFINED ENV{USE_STATIC_CUDNN})
-  MESSAGE(STATUS "USE_STATIC_CUDNN detected. Linking against static CUDNN library")
-  SET(CUDNN_LIBNAME "libcudnn_static.a")
-ELSE()
-  SET(CUDNN_LIBNAME "cudnn")
-ENDIF()
+if(DEFINED ENV{USE_STATIC_CUDNN})
+  message(STATUS "USE_STATIC_CUDNN detected. Linking against static CUDNN library")
+  set(CUDNN_LIBNAME "libcudnn_static.a")
+else()
+  set(CUDNN_LIBNAME "cudnn")
+endif()
 
 if(DEFINED ENV{CUDNN_LIBRARY})
   SET(CUDNN_LIBRARY $ENV{CUDNN_LIBRARY})
-else(DEFINED ENV{CUDNN_LIBRARY})
+else()
   find_library(CUDNN_LIBRARY ${CUDNN_LIBNAME}
     HINTS ${CUDNN_LIB_DIR} ${CUDNN_ROOT_DIR} ${CUDA_TOOLKIT_ROOT_DIR}
     PATH_SUFFIXES lib lib64 cuda/lib cuda/lib64 lib/x64)
-endif(DEFINED ENV{CUDNN_LIBRARY})
+endif()
 
 find_package_handle_standard_args(
     CUDNN DEFAULT_MSG CUDNN_INCLUDE_DIR CUDNN_LIBRARY)
