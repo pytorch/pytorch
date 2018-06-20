@@ -55,8 +55,8 @@ void cudnn_relu(const at::Tensor& inputs, const at::Tensor& outputs) {
   at::native::TensorDescriptor input_tensor_desc(inputs, 4);
   cudnnActivationDescriptor_t activationDesc;
   // Note: Always check return value of cudnn functions using CUDNN_CHECK
-  CUDNN_CHECK(cudnnCreateActivationDescriptor(&activationDesc));
-  CUDNN_CHECK(cudnnSetActivationDescriptor(
+  at::native::CUDNN_CHECK(cudnnCreateActivationDescriptor(&activationDesc));
+  at::native::CUDNN_CHECK(cudnnSetActivationDescriptor(
       activationDesc,
       /*mode=*/CUDNN_ACTIVATION_RELU,
       /*reluNanOpt=*/CUDNN_PROPAGATE_NAN,
@@ -64,7 +64,7 @@ void cudnn_relu(const at::Tensor& inputs, const at::Tensor& outputs) {
   // Step 3: Apply CuDNN function
   float alpha = 1.;
   float beta = 0.;
-  CUDNN_CHECK(cudnnActivationForward(
+  at::native::CUDNN_CHECK(cudnnActivationForward(
       cuDnn,
       activationDesc,
       &alpha,
@@ -74,7 +74,7 @@ void cudnn_relu(const at::Tensor& inputs, const at::Tensor& outputs) {
       input_tensor_desc.desc(), // output descriptor same as input
       outputs.data_ptr()));
   // Step 4: Destroy descriptors
-  CUDNN_CHECK(cudnnDestroyActivationDescriptor(activationDesc));
+  at::native::CUDNN_CHECK(cudnnDestroyActivationDescriptor(activationDesc));
   // Step 5: Return something (optional)
 }
 
