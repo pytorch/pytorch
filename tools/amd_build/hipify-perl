@@ -428,7 +428,7 @@ while (@ARGV) {
         #C2 Specific
         #
         #
-        $ft{'other'} += s/\bcontext_gpu\b/context_hip/g;
+        $ft{'other'} += s/\bcontext_gpu\b/hip\/context_hip/g;
         $ft{'other'} += s/\bcuda_stream\b/context_hip/g;
         $ft{'other'} += s/CUDA/HIP/g;
 
