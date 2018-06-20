@@ -140,7 +140,7 @@ def eye_(tensor):
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     with torch.no_grad():
-        torch.eye(*tensor.shape, out=tensor)
+        torch.eye(*tensor.shape, out=tensor, requires_grad=tensor.requires_grad)
     return tensor
 
 

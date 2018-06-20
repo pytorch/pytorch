@@ -184,7 +184,8 @@ void FunctionParameter::set_default_str(const std::string& str) {
     } else {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
       const auto as_integer = parse_as_integer(str);
-      default_scalar = at::Scalar(as_integer.value_or(atof(str.c_str())));
+      default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value()) :
+                                                at::Scalar(atof(str.c_str()));
     }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {

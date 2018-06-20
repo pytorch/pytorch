@@ -1,8 +1,13 @@
 #include "catch.hpp"
 
+#include <torch/functions.h>
+
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
 #include <ATen/TensorOptions.h>
+
+#include <vector>
+#include <string>
 
 using namespace at;
 
@@ -63,6 +68,16 @@ TEST_CASE("TensorOptions/ConstructsWellFromCPUTensors") {
 
   options = TensorOptions(empty(5, getType(kSparseCPU, kByte)));
   REQUIRE_OPTIONS(kCPU, -1, kByte, kSparse);
+}
+
+TEST_CASE("TensorOptions/ConstructsWellFromVariables") {
+  auto options = TensorOptions(torch::empty(5));
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
+  REQUIRE(!options.requires_grad());
+
+  options = TensorOptions(torch::empty(5, at::requires_grad()));
+  REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
+  REQUIRE(!options.requires_grad());
 }
 
 TEST_CASE("Device/ParsesCorrectlyFromString") {

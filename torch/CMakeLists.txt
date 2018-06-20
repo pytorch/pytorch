@@ -137,6 +137,10 @@ configure_file("${CAFFE2_PATH}/aten/src/ATen/common_with_cwrap.py"
                "${TOOLS_PATH}/shared/cwrap_common.py"
                COPYONLY)
 
+configure_file("${CAFFE2_PATH}/torch/_utils_internal.py"
+               "${TOOLS_PATH}/shared/_utils_internal.py"
+               COPYONLY)
+
 add_custom_command(
   OUTPUT
   "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
@@ -362,6 +366,7 @@ if (TORCH_BUILD_TEST)
       ${TORCH_API_TEST_DIR}/serialization.cpp
       ${TORCH_API_TEST_DIR}/static.cpp
       ${TORCH_API_TEST_DIR}/tensor.cpp
+      ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
       # Temporary until ATen tests are built with Caffe2
       ${TORCH_API_TEST_DIR}/tensor_options.cpp
       ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp

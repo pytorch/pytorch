@@ -10,6 +10,8 @@
 #endif
 
 #include <c10d/TCPStore.hpp>
+#include <gloo/transport/tcp/device.h>
+#include <pybind11/chrono.h>
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/object_ptr.h"
@@ -121,9 +123,62 @@ PyObject* c10d_init(PyObject* _unused) {
               py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>());
 
-  shared_ptr_class_<::c10d::ProcessGroupGloo>(
-      module, "ProcessGroupGloo", processGroup)
-      .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+  auto processGroupGloo = shared_ptr_class_<::c10d::ProcessGroupGloo>(
+      module, "ProcessGroupGloo", processGroup);
+
+  shared_ptr_class_<::gloo::transport::Device>(processGroupGloo, "Device");
+
+  shared_ptr_class_<::c10d::ProcessGroupGloo::Options>(
+      processGroupGloo, "Options")
+      .def(py::init<>())
+      .def_readwrite("timeout", &::c10d::ProcessGroupGloo::Options::timeout)
+      .def_readwrite("threads", &::c10d::ProcessGroupGloo::Options::threads)
+      .def_readwrite("devices", &::c10d::ProcessGroupGloo::Options::devices);
+
+  processGroupGloo.def_static(
+      "create_tcp_device",
+      [](const std::string& hostname, const std::string& interface)
+          -> std::shared_ptr<::gloo::transport::Device> {
+        ::gloo::transport::tcp::attr attr;
+        if (!hostname.empty()) {
+          attr.hostname = hostname;
+        } else if (!interface.empty()) {
+          attr.iface = interface;
+        } else {
+          // Neither argument is specified; Gloo itself will use the hostname
+          // Nothing specified, default to something useful
+        }
+        return ::gloo::transport::tcp::CreateDevice(attr);
+      },
+      py::arg("hostname") = "",
+      py::arg("interface") = "");
+
+  processGroupGloo
+      .def(py::init<
+           const std::shared_ptr<::c10d::Store>&,
+           int,
+           int,
+           ::c10d::ProcessGroupGloo::Options>())
+      .def(py::init(
+          [](const std::shared_ptr<::c10d::Store>& store, int rank, int size) {
+            ::c10d::ProcessGroupGloo::Options options;
+
+            // By default, use the hostname to resolve the network address to
+            // use. Note: if the hostname does not resolve to an address (e.g.
+            // because of misconfigured /etc/hosts file), this will not work.
+            std::array<char, HOST_NAME_MAX> hostname;
+            auto rv = gethostname(hostname.data(), hostname.size());
+            if (rv != 0) {
+              throw std::system_error(errno, std::system_category());
+            }
+
+            ::gloo::transport::tcp::attr attr;
+            attr.hostname = hostname.data();
+            options.devices.push_back(
+                ::gloo::transport::tcp::CreateDevice(attr));
+            return std::make_shared<::c10d::ProcessGroupGloo>(
+                store, rank, size, options);
+          }));
 
 #ifdef USE_C10D_NCCL
   shared_ptr_class_<::c10d::ProcessGroupNCCL>(

@@ -12,6 +12,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
 #include "ATen/Deprecated.h"
+#include "ATen/TensorOptions.h"
 #include "TH/THRandom.h"
 
 #include <algorithm>
@@ -593,5 +594,32 @@ Tensor hann_window(
   return native::hamming_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
 }
+
+template <typename T>
+Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
+  auto result = at::empty(values.size(), options);
+  AT_ASSERT(result.is_contiguous());
+  AT_DISPATCH_ALL_TYPES(result.type(), "tensor_cpu", [&] {
+    std::copy(values.begin(), values.end(), result.template data<scalar_t>());
+  });
+  return result;
+}
+
+template <typename T>
+Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
+  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(at::kCPU));
+  return cpu_tensor.to(options.device());
+}
+
+#define TENSOR(T, _1, _2)                                           \
+  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
+    if (options.device().is_cuda()) {                               \
+      return tensor_cuda(values, options);                          \
+    } else {                                                        \
+      return tensor_cpu(values, options);                           \
+    }                                                               \
+  }
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+#undef TENSOR
 } // namespace native
 } // namespace at

@@ -239,7 +239,7 @@ TEST_CASE("modules_cuda", "[cuda]") {
   SECTION("1") {
     Linear model(5, 2);
     model->cuda();
-    auto x = torch::randn({10, 5}, at::device(at::kCUDA).requires_grad());
+    auto x = torch::randn({10, 5}, at::device(at::kCUDA).requires_grad(true));
     auto y = model->forward({x})[0];
     Variable s = y.sum();
 

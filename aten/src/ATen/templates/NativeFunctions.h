@@ -38,6 +38,28 @@ inline Tensor from_blob(
   return native::from_blob(data, sizes, [](void*) {}, options);
 }
 
+// These functions are defined in native/TensorFactories.cpp.
+#define TENSOR(T, S, _1)                                               \
+  Tensor tensor(ArrayRef<T> values, const TensorOptions& options);     \
+  inline Tensor tensor(                                                \
+      std::initializer_list<T> values, const TensorOptions& options) { \
+    return native::tensor(ArrayRef<T>(values), options);               \
+  }                                                                    \
+  inline Tensor tensor(T value, const TensorOptions& options) {        \
+    return native::tensor(ArrayRef<T>(value), options);                \
+  }                                                                    \
+  inline Tensor tensor(ArrayRef<T> values) {                           \
+    return native::tensor(std::move(values), at::dtype(k##S));         \
+  }                                                                    \
+  inline Tensor tensor(std::initializer_list<T> values) {              \
+    return native::tensor(ArrayRef<T>(values));                        \
+  }                                                                    \
+  inline Tensor tensor(T value) {                                      \
+    return native::tensor(ArrayRef<T>(value));                         \
+  }
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+#undef TENSOR
+
 ${native_function_declarations}
 
 } // namespace native
