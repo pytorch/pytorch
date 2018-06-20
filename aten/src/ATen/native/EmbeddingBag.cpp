@@ -2,13 +2,13 @@
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
+#include "TH/THBlasUtils.h"
+
 #include <cstring>
 #include <iostream>
 #include <memory>
 #include <sstream>
 #include <vector>
-
-#include <TH/THBlas.h>
 
 #ifdef _OPENMP
 #include <omp.h>
@@ -31,19 +31,6 @@ static void make_offset2bag(const Tensor &offsets, const Tensor &indices,
   offset2bag = offset2bag.cumsum(0);     // offset2bag = [0 0 1 1 2]
 }
 
-template<typename T>
-static void axpy(int64_t n, T a, T *x, int64_t incx, T *y, int64_t incy);
-template<>
-void axpy<float>(int64_t n, float a, float *x, int64_t incx,
-                 float *y, int64_t incy) {
-  THFloatBlas_axpy(n, a, x, incx, y, incy);
-}
-template<>
-void axpy<double>(int64_t n, double a, double *x, int64_t incx,
-                  double *y, int64_t incy) {
-  THDoubleBlas_axpy(n, a, x, incx, y, incy);
-}
-
 // This function combines index_select (using select_indices as the index) and
 // index_add (using add_indices as the index), without creating an intermediary
 // tensor to hold the selected embeddings
@@ -59,7 +46,7 @@ static void index_select_add(const Tensor &select_indices,
   auto numel = add_indices.numel();
   int64_t ddim = src.size(1);
   for (int64_t i = 0; i < numel; i++) {
-    axpy<T>(ddim, 1, src_data + ddim * select_indices_data[i], 1,
+    THBlas_axpy<T>(ddim, 1, src_data + ddim * select_indices_data[i], 1,
             output_data + ddim * add_indices_data[i], 1);
   }
 }
@@ -120,7 +107,7 @@ template <typename scalar_t>
 std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
   const Tensor& weight, const Tensor &indices, const Tensor& offset2bag, const Tensor& output, const Tensor& bag_size, const Tensor& offsets) {
 
-    auto max_indices = at::zeros(indices.type(), {offsets.size(0), weight.size(1)});
+    auto max_indices = at::zeros({offsets.size(0), weight.size(1)}, indices.type());
 
     int64_t numel = indices.numel();
     int64_t dims = weight.size(1);
@@ -169,7 +156,7 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkScalarTypes("embedding_bag", weight_arg, {kFloat, kDouble});
 
-  auto bag_size = at::zeros(indices.type(), offsets.sizes());
+  auto bag_size = at::zeros(offsets.sizes(), indices.type());
   make_bag_size(offsets, indices, mode, bag_size);
 
   // If the last entries are empty, that the last offsets are irrelevant as they
@@ -177,13 +164,13 @@ embedding_bag_cpu(const Tensor &weight, const Tensor &indices__,
   // throw out of bounds error. So to keep it simple we just add one more
   // entry to the end then get rid of it after make_offset2bag.
   auto offset2bag = at::zeros(
-     indices__.type(), {indices.sizes()[0] + 1}); // offset2bag = [0 0 0 0 0]
+     {indices.sizes()[0] + 1}, indices__.type()); // offset2bag = [0 0 0 0 0]
 
   make_offset2bag(offsets, indices, offset2bag);
 
   offset2bag.resize_({indices.sizes()[0]});
 
-  auto output = at::zeros(weight.type(), {offsets.size(0), weight.size(1)});
+  auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.type());
 
   if (mode == MODE_MEAN || mode == MODE_SUM) {
     if (weight.type().scalarType() == kFloat) {
@@ -271,7 +258,7 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
   }
 
   auto index_grad_weight =
-      at::zeros(grad.type(), {num_weights, grad.size(1)}).contiguous();
+      at::zeros({num_weights, grad.size(1)}, grad.type()).contiguous();
 
   std::vector<int64_t> counts_uniq;
   counts_uniq.reserve(num_weights);
@@ -311,12 +298,12 @@ Tensor embedding_bag_backward_cpu(const Tensor &grad_, const Tensor &indices__,
           if (grad.type().scalarType() == kFloat) {
             auto igwd = index_grad_weight.data<float>();
             auto gd = grad.data<float>();
-            axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
+            THBlas_axpy<float>(ddim, (float)scale, gd + ddim * source, 1,
                         igwd + ddim * index, 1);
           } else if (grad.type().scalarType() == kDouble) {
             auto igwd = index_grad_weight.data<double>();
             auto gd = grad.data<double>();
-            axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
+            THBlas_axpy<double>(ddim, (double)scale, gd + ddim * source, 1,
                          igwd + ddim * index, 1);
           }
         }

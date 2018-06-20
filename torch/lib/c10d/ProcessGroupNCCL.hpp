@@ -5,6 +5,9 @@
 #include "ProcessGroup.hpp"
 #include "Store.hpp"
 
+#include <mutex>
+#include <unordered_map>
+
 // forward declaration
 struct THCState;
 
@@ -108,9 +111,7 @@ class ProcessGroupNCCL : public ProcessGroup {
 
  protected:
   // Helper that broadcasts nccl unique ID to all ranks through the store
-  void broadcastUniqueNCCLId(
-      const std::string& devicesKey,
-      ncclUniqueId* ncclId);
+  void broadcastUniqueNCCLID(ncclUniqueId* ncclID);
 
   // Helper that either looks up the cached NCCL communicators or creates
   // a new set of NCCL communicators as a cache entry
@@ -155,11 +156,16 @@ class ProcessGroupNCCL : public ProcessGroup {
   // The CUDA events used to sync NCCL streams
   std::unordered_map<std::string, std::vector<CUDAEvent>> ncclEvents_;
 
-  // Caches the number of GPUs available in the current system
-  int numGPUs_;
-
   // Store copy of pointer to THCState retrieved from ::at::globalContext().
   THCState* thcState_;
+
+  // ID of this process group
+  std::string processGroupID_;
+
+  // processGroupID tracking
+  static std::mutex pgTrackingLock_;
+  static std::unordered_map<ssize_t, ssize_t> pgUniqueNCCLIDCnt_;
+  static ssize_t processGroupCounter_;
 };
 
 } // namespace c10d

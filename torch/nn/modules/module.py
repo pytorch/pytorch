@@ -587,7 +587,7 @@ class Module(object):
                 destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
-                destination[prefix + name] = buf
+                destination[prefix + name] = buf if keep_vars else buf.data
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
@@ -629,6 +629,14 @@ class Module(object):
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+
+                if input_param.shape != param.shape:
+                    # local shape should match the one in checkpoint
+                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
+                                      'where the shape is {} in current model.'
+                                      .format(key, param.shape, input_param.shape))
+                    continue
+
                 if isinstance(input_param, Parameter):
                     # backwards compatibility for serialized parameters
                     input_param = input_param.data

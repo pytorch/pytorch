@@ -1,8 +1,14 @@
 #include "torch/csrc/python_headers.h"
 
+#include <c10d/Def.hpp>
 #include <c10d/FileStore.hpp>
 #include <c10d/ProcessGroup.hpp>
 #include <c10d/ProcessGroupGloo.hpp>
+
+#ifdef USE_C10D_NCCL
+#include <c10d/ProcessGroupNCCL.hpp>
+#endif
+
 #include <c10d/TCPStore.hpp>
 
 #include "torch/csrc/Exceptions.h"
@@ -19,12 +25,28 @@ template <typename T>
 using shared_ptr_class_ = py::class_<T, std::shared_ptr<T>>;
 
 PyObject* c10d_init(PyObject* _unused) {
-  auto c10d_module = THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
+  auto c10d_module =
+      THPObjectPtr(PyImport_ImportModule("torch.distributed.c10d"));
   if (!c10d_module) {
     throw python_error();
   }
 
   auto module = py::handle(c10d_module).cast<py::module>();
+
+  py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
+    .def(py::init<>())
+    .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
+    .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor);
+
+  py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
+    .def(py::init<>())
+    .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp);
+
+  py::enum_<::c10d::ReduceOp>(module, "ReduceOp")
+    .value("SUM", ::c10d::ReduceOp::SUM)
+    .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
+    .value("MIN", ::c10d::ReduceOp::MIN)
+    .value("MAX", ::c10d::ReduceOp::MAX);
 
   auto store =
       shared_ptr_class_<::c10d::Store>(module, "Store")
@@ -72,13 +94,42 @@ PyObject* c10d_init(PyObject* _unused) {
               &::c10d::ProcessGroup::broadcast,
               py::call_guard<py::gil_scoped_release>())
           .def(
+              "broadcast",
+              [](::c10d::ProcessGroup& pg, at::Tensor& x, int rootRank) {
+                ::c10d::BroadcastOptions opts;
+                opts.rootRank = rootRank;
+                std::vector<at::Tensor> xs = {x};
+                return pg.broadcast(xs, opts);
+              },
+              py::arg("tensor"),
+              py::arg("root"),
+              py::call_guard<py::gil_scoped_release>())
+          .def(
               "allreduce",
               &::c10d::ProcessGroup::allreduce,
+              py::call_guard<py::gil_scoped_release>())
+
+          .def(
+              "allreduce",
+              [](::c10d::ProcessGroup& pg, at::Tensor& x, ::c10d::ReduceOp op) {
+                ::c10d::AllreduceOptions opts;
+                opts.reduceOp = op;
+                std::vector<at::Tensor> xs = {x};
+                return pg.allreduce(xs, opts);
+              },
+              py::arg("tensor"),
+              py::arg("op") = ::c10d::ReduceOp::SUM,
               py::call_guard<py::gil_scoped_release>());
 
   shared_ptr_class_<::c10d::ProcessGroupGloo>(
       module, "ProcessGroupGloo", processGroup)
       .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+
+#ifdef USE_C10D_NCCL
+  shared_ptr_class_<::c10d::ProcessGroupNCCL>(
+      module, "ProcessGroupNCCL", processGroup)
+      .def(py::init<const std::shared_ptr<::c10d::Store>&, int, int>());
+#endif
 
   shared_ptr_class_<::c10d::ProcessGroup::Work>(module, "Work")
       .def("isCompleted", &::c10d::ProcessGroup::Work::isCompleted)
@@ -89,22 +140,6 @@ PyObject* c10d_init(PyObject* _unused) {
           "wait",
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
-
-  // Algorithm specific option structs and enums
-  py::class_<::c10d::BroadcastOptions>(module, "BroadcastOptions")
-    .def(py::init<>())
-      .def_readwrite("rootRank", &::c10d::BroadcastOptions::rootRank)
-      .def_readwrite("rootTensor", &::c10d::BroadcastOptions::rootTensor);
-
-  py::class_<::c10d::AllreduceOptions>(module, "AllreduceOptions")
-      .def(py::init<>())
-      .def_readwrite("reduceOp", &::c10d::AllreduceOptions::reduceOp);
-
-  py::enum_<::c10d::ReduceOp>(module, "ReduceOp")
-      .value("SUM", ::c10d::ReduceOp::SUM)
-      .value("PRODUCT", ::c10d::ReduceOp::PRODUCT)
-      .value("MIN", ::c10d::ReduceOp::MIN)
-      .value("MAX", ::c10d::ReduceOp::MAX);
 
   Py_RETURN_TRUE;
 }

@@ -38,7 +38,6 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const int input_image_size = H * W;
   const int output_image_size = Y->dim32(2) * Y->dim32(3);
 
-#if !defined(__ARM_NEON__) && !defined(__ARM_NEON)
   if (InputSize() == 3) {
     auto& bias = Input(BIAS);
     CAFFE_ENFORCE(bias.ndim() == 1, "bias must be 1D tensor");
@@ -55,7 +54,6 @@ bool ConvTransposeOp<T, Context>::RunOnDeviceWithOrderNCHW() {
           &context_);
     }
   }
-#endif // !defined(__ARM_NEON__) && !defined(__ARM_NEON)
 
   const T* Xdata = X.template data<T>();
   const T* filter_data = filter.template data<T>();

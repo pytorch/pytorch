@@ -487,4 +487,4 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
   return predictNet;
 }
 
-} // namespace caffe2
+} // namespace caffe2 

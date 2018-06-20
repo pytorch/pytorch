@@ -68,9 +68,9 @@ AsyncNetBase::AsyncNetBase(
     operators_.push_back(op_ptr);
   }
 
-  const auto& execution_chains = dag_utils::computeChains(operator_nodes_);
-  chains_.reserve(execution_chains.size());
-  for (const auto& kv : execution_chains) {
+  execution_chains_ = dag_utils::computeChains(operator_nodes_);
+  chains_.reserve(execution_chains_.size());
+  for (const auto& kv : execution_chains_) {
     chains_.push_back(kv.second);
   }
   chain_nodes_ = dag_utils::prepareChainGraphNodes(operator_nodes_, chains_);
@@ -135,9 +135,13 @@ TaskThreadPool* AsyncNetBase::pool(const DeviceOption& device_option) {
   if (use_single_pool_) {
     return pool_getter(cpu_pools_, CPU, -1, num_workers_);
   }
-  if (device_option.device_type() == CPU ||
-      device_option.device_type() == MKLDNN ||
-      device_option.device_type() == IDEEP) {
+  static const std::unordered_set<int> cpu_types{
+      CPU,
+      MKLDNN,
+      IDEEP,
+      ONLY_FOR_TEST,
+  };
+  if (cpu_types.find(device_option.device_type()) != cpu_types.end()) {
     auto numa_node_id = device_option.numa_node_id();
     CAFFE_ENFORCE(
         numa_node_id >= -1 &&
@@ -455,6 +459,7 @@ void AsyncNetBase::computeExecutionModeFlags() {
     check_stream_status_ = false;
     use_single_pool_ = true;
     use_per_net_pools_ = true;
+    is_blocking_ = true;
   } else if (net_type == kAsyncDag) {
     streams_per_gpu_ = 1;
     finish_chain_ = false;
@@ -462,6 +467,7 @@ void AsyncNetBase::computeExecutionModeFlags() {
     check_stream_status_ = false;
     use_single_pool_ = true;
     use_per_net_pools_ = true;
+    is_blocking_ = true;
   } else {
     streams_per_gpu_ = FLAGS_caffe2_streams_per_gpu;
     finish_chain_ = FLAGS_caffe2_net_async_finish_chain;
@@ -469,6 +475,7 @@ void AsyncNetBase::computeExecutionModeFlags() {
     check_stream_status_ = FLAGS_caffe2_net_async_check_stream_status;
     use_single_pool_ = FLAGS_caffe2_net_async_use_single_pool;
     use_per_net_pools_ = FLAGS_caffe2_net_async_use_per_net_pools;
+    is_blocking_ = false;
   }
 }
 

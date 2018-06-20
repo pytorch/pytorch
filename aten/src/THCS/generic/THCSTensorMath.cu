@@ -24,20 +24,20 @@ THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices,
 }
 
 void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
-  if (self->indices->nDimension) {
-    THCIndexTensor_(resizeNd)(state, self->indices, 0, NULL, NULL);
+  if (self->indices->_dim()) {
+#ifndef USE_TH_SIZE_ZERO_DIM
+    int64_t size[] = {0};
+    THCIndexTensor_(resizeNd)(state, self->indices, 1, size, NULL);
+#else
+    int64_t size[] = {1, 0};
+    THCIndexTensor_(resizeNd)(state, self->indices, 2, size, NULL);
+#endif
   }
-  if (self->values->nDimension) {
-    THCTensor_(resizeNd)(state, self->values, 0, NULL, NULL);
+  if (self->values->_dim()) {
+    int64_t size[] = {0};
+    THCTensor_(resizeNd)(state, self->values, 1, size, NULL);
   }
   self->nnz = 0;
-}
-
-void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, THLongStorage *size)
-{
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 1, r_));
-  THCSTensor_(resize)(state, r_, size);
-  THCSTensor_(zero)(state, r_);
 }
 
 void THCSTensor_(zerosLike)(THCState *state, THCSTensor *r_, THCSTensor *input)
@@ -66,8 +66,8 @@ void THCSTensor_(spaddmm)(THCState *state, THCTensor *r_, real beta, THCTensor *
       "matrices expected, got %dD tensor", sparse_->nDimensionI);
   THArgCheck(sparse_->nDimensionV == 0, 2,
       "scalar values expected, got %dD values", sparse_->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 2,
-      "matrices expected, got %dD tensor", dense->nDimension);
+  THArgCheck(dense->_dim() == 2, 2,
+      "matrices expected, got %dD tensor", dense->_dim());
 
   int64_t m = THCSTensor_(size)(state, sparse_, 0);
   int64_t k = THCSTensor_(size)(state, sparse_, 1);
@@ -186,8 +186,8 @@ void THCSTensor_(hspmm)(THCState *state, THCSTensor *r_, real alpha, THCSTensor 
       "matrices expected, got %dD tensor", sparse_->nDimensionI);
   THArgCheck(sparse_->nDimensionV == 0, 3,
       "scalar values expected, got %dD values", sparse_->nDimensionV);
-  THArgCheck(dense->nDimension == 2, 4,
-      "matrices expected, got %dD tensor", dense->nDimension);
+  THArgCheck(dense->_dim() == 2, 4,
+      "matrices expected, got %dD tensor", dense->_dim());
 
   int64_t m = THCSTensor_(size)(state, sparse_, 0);
   int64_t k = THCSTensor_(size)(state, sparse_, 1);

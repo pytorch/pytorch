@@ -48,8 +48,8 @@ class Fold(Module):
 
         >>> # output_size (3, 3) kernel_size (2, 2), dilation (1, 1), padding (0, 0), stride (1, 1)
         >>> fold = nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1))
-        >>> input = torch.randn(1, 36, 1)
-        >>> output = unfold(input)
+        >>> input = torch.randn(1, 4, 10, 12)
+        >>> output = fold(input)
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
@@ -121,6 +121,14 @@ class Unfold(Module):
         >>> unfold = nn.Unfold((3, 3), (1, 1), (0, 0), (1, 1))
         >>> input = torch.randn(2, 4, 3, 3)
         >>> output = unfold(input)
+
+        >>> inp = torch.arange(1*3*10*12.0).view(1,3,10,12)
+        >>> w = torch.randn(2,3,4,5)
+        >>> inp_unf = torch.nn.functional.unfold(inp, (4,5))
+        >>> out_unf = torch.nn.functional.linear(inp_unf.transpose(1,2), w.view(w.size(0),-1)).transpose(1,2)
+        >>> out = torch.nn.functional.fold(out_unf, (7,8), (1, 1))
+        >>> (torch.nn.functional.conv2d(inp, w)-out).abs().max().item()
+        0.0
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md

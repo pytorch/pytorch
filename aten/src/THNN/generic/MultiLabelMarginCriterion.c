@@ -18,21 +18,21 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   int64_t t, d, dt, ddt;
   real sum;
 
-  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
+  THArgCheck((input->_dim() == 1) || (input->_dim() == 2), 2,
 	     "vector or matrix expected");
 
-  if (input->nDimension == 1)
+  if (input->_dim() == 1)
   {
     nframe = 1;
     dim = input->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
+    THArgCheck((target->_dim() == 1) && (target->size[0] == dim), 3,
 	       "inconsistent target size");
   }
   else
   {
     nframe = input->size[0];
     dim = input->size[1];
-    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe)
+    THArgCheck((target->_dim() == 2) && (target->size[0] == nframe)
 	       && (target->size[1] == dim), 3, "inconsistent target size");
   }
 
@@ -157,25 +157,25 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   int64_t t, d, dt;
   real g;
 
-  THArgCheck((input->nDimension == 1) || (input->nDimension == 2), 2,
+  THArgCheck((input->_dim() == 1) || (input->_dim() == 2), 2,
 	     "vector or matrix expected");
 
-  if (input->nDimension == 1)
+  if (input->_dim() == 1)
   {
     nframe = 1;
     dim = input->size[0];
-    THArgCheck((target->nDimension == 1) && (target->size[0] == dim), 3,
+    THArgCheck((target->_dim() == 1) && (target->size[0] == dim), 3,
 	       "inconsistent target size");
-    THArgCheck((isTarget->nDimension == 1) && (isTarget->size[0] == dim), 3,
+    THArgCheck((isTarget->_dim() == 1) && (isTarget->size[0] == dim), 3,
 	       "inconsistent isTarget size");
   }
   else
   {
     nframe = input->size[0];
     dim = input->size[1];
-    THArgCheck((target->nDimension == 2) && (target->size[0] == nframe)
+    THArgCheck((target->_dim() == 2) && (target->size[0] == nframe)
 	       && (target->size[1] == dim), 3, "inconsistent target size");
-    THArgCheck((isTarget->nDimension == 2) && (isTarget->size[0] == nframe)
+    THArgCheck((isTarget->_dim() == 2) && (isTarget->size[0] == nframe)
 	       && (isTarget->size[1] == dim), 3, "inconsistent isTarget size");
   }
 

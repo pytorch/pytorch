@@ -98,6 +98,8 @@ struct DynamicType : public Type {
   static TypePtr get();
 };
 
+struct TensorType;
+using TensorTypePtr = std::shared_ptr<TensorType>;
 // This node represents a single Tensor value with a specific size
 struct TensorType : public Type {
   friend struct Type;
@@ -132,11 +134,18 @@ struct TensorType : public Type {
     return withSizesStrides(sizes, TensorType::contiguousStridesOf(sizes));
   }
 
-  TypePtr contiguous() const {
+  TensorTypePtr contiguous() const {
     auto t = std::make_shared<TensorType>(*this);
     t->strides_ = TensorType::contiguousStridesOf(sizes_);
     return t;
   }
+
+  TensorTypePtr toScalarType(at::ScalarType type){
+    auto t = std::make_shared<TensorType>(*this);
+    t->scalar_type_ = type;
+    return t;
+  }
+
   virtual bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
       return false;

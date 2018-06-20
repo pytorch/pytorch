@@ -243,7 +243,7 @@ OnnxAttributes::OnnxAttrToCaffe2Arg(
   ::google::protobuf::RepeatedPtrField<caffe2::Argument> args;
   for (const auto& kv : onnx_attrs_) {
     // If the attribute was rewritten, we use it instead. Note that the
-    // rewritten attibute still has the unmapped name
+    // rewritten attribute still has the unmapped name
     const auto& attr = rewritten_onnx_attrs_.count(kv.first)
         ? rewritten_onnx_attrs_.at(kv.first)
         : (*kv.second);
@@ -354,6 +354,7 @@ Caffe2Backend::get_special_operators() const {
               {"BatchNormalization", &Caffe2Backend::CreateBatchNormalization},
               {"MatMul", &Caffe2Backend::CreateMatMul},
               {"Upsample", &Caffe2Backend::CreateUpsample},
+              {"Dropout", &Caffe2Backend::CreateDropout},
               {"LRN", &Caffe2Backend::CreateLRN}};
   return kSpecialOperators;
 }
@@ -476,7 +477,7 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
   const auto& node = onnx_node->node;
   auto& attributes = onnx_node->attributes;
   if (node.op_type().find("Global") == 0) {
-    auto* attr = attributes.AddRewrittenAttibute("global_pooling");
+    auto* attr = attributes.AddRewrittenAttribute("global_pooling");
     attr->set_i(1);
   }
 
@@ -492,7 +493,7 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
                 "pads");
     if (kernel_shape.size() == pads.size()) {
       // Caffe2 requires pads to be twice the size of kernels.
-      auto* attr = attributes.AddRewrittenAttibute("pads");
+      auto* attr = attributes.AddRewrittenAttribute("pads");
       attr->mutable_ints()->CopyFrom(pads);
       attr->mutable_ints()->MergeFrom(pads);
     }
@@ -653,7 +654,7 @@ Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
   }
 
   // rewrite the padding info
-  auto* attr = attributes.AddRewrittenAttibute(pad_name);
+  auto* attr = attributes.AddRewrittenAttribute(pad_name);
   attr->add_ints(pads.Get(2));
   attr->add_ints(pads.Get(3));
   attr->add_ints(pads.Get(6));
@@ -853,6 +854,12 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     attributes.remove("consumed_inputs");
   }
 
+  if (opset_version > 6) {
+    auto& attributes = onnx_node->attributes;
+    auto* attr = attributes.AddRewrittenAttribute("is_test");
+    attr->set_i(1);
+  }
+
   return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
@@ -861,7 +868,7 @@ Caffe2Ops Caffe2Backend::CreateSplit(
     int opset_version) {
   auto& attributes = onnx_node->attributes;
   if (!attributes.HasAttribute("axis")) {
-    auto* attr = attributes.AddRewrittenAttibute("axis");
+    auto* attr = attributes.AddRewrittenAttribute("axis");
     attr->set_i(0);
   }
 
@@ -904,6 +911,16 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
   c2_width->set_f(scales.Get(3));
 
   return c2_op;
+}
+
+Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {
+  if (opset_version > 6) {
+    auto& attributes = onnx_node->attributes;
+    auto* attr = attributes.AddRewrittenAttribute("is_test");
+    attr->set_i(1);
+  }
+
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
 Caffe2Ops Caffe2Backend::CreateLRN(OnnxNode* onnx_node, int opset_version) {

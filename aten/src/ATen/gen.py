@@ -99,7 +99,6 @@ class FileManager(object):
             raise Exception("Outputs declared with 'will_write' were " +
                             "never written: {}".format(self.filenames))
 
-
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
@@ -133,8 +132,7 @@ FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/Functions.h")
 NATIVE_FUNCTIONS_H = CodeTemplate.from_file(TEMPLATE_PATH + "/NativeFunctions.h")
 
 TYPE_REGISTER = CodeTemplate("""\
-context->type_registry[static_cast<int>(IsVariable::NotVariable)]
-                      [static_cast<int>(Backend::${backend})]
+context->type_registry[static_cast<int>(Backend::${backend})]
                       [static_cast<int>(ScalarType::${scalar_type})]
                       .reset(new ${type_name}(context));
 detail::getVariableHooks().registerVariableTypeFor(context, Backend::${backend}, ScalarType::${scalar_type});
@@ -266,6 +264,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#undef THCIndexTensor_',
         ]
         env['extra_cuda_headers'] = ['#include <ATen/cuda/CUDAHalf.cuh>']
+        env['extra_cuda_headers'].append('#include <ATen/DeviceGuard.h>')
         sname = '' if scalar_name == "Float" else scalar_name
         env['THType'] = 'Cuda{}'.format(sname)
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
@@ -329,10 +328,8 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         fm.write(env['Storage'] + ".cpp", STORAGE_DERIVED_CPP, env)
         fm.write(env['Storage'] + ".h", STORAGE_DERIVED_H, env)
         env['TensorDenseOrSparse'] = TENSOR_DENSE_CPP.substitute(env)
-        env['THTensor_nDimension'] = 'tensor->nDimension'
     else:
         env['TensorDenseOrSparse'] = TENSOR_SPARSE_CPP.substitute(env)
-        env['THTensor_nDimension'] = 'tensor->nDimensionI + tensor->nDimensionV'
 
     fm.write(env['Type'] + ".cpp", TYPE_DERIVED_CPP, env)
     fm.write(env['Type'] + ".h", TYPE_DERIVED_H, env)

@@ -39,6 +39,13 @@ if(APPLE)
   set(CMAKE_FIND_APPBUNDLE LAST)
 endif()
 
+# Get clang version on macOS
+if(APPLE)
+  EXECUTE_PROCESS( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
+  string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
+  MESSAGE( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
+endif()
+
 # ---[ Options.
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
@@ -104,9 +111,7 @@ option(USE_SYSTEM_NCCL "Use system-wide NCCL" OFF)
 option(USE_NERVANA_GPU "Use Nervana GPU backend" OFF)
 option(USE_NNAPI "Use NNAPI" OFF)
 option(USE_NNPACK "Use NNPACK" ON)
-cmake_dependent_option(
-    USE_NUMA "Use NUMA (only available on Linux)" ON
-    "BUILD_CAFFE2" OFF)
+option(USE_NUMA "Use NUMA (only available on Linux)" ON)
 cmake_dependent_option(
     USE_NVRTC "Use NVRTC. Only available if USE_CUDA is on." OFF
     "USE_CUDA" OFF)
@@ -133,34 +138,6 @@ cmake_dependent_option(
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 
-# Legacy options, which we will eventually remove
-cmake_dependent_option(
-    WITH_CUDA "Legacy CUDA" ON
-    "USE_CUDA" OFF)
-cmake_dependent_option(
-    NO_CUDA "Legacy no CUDA" OFF
-    "USE_CUDA" ON)
-cmake_dependent_option(
-    NO_PYTHON "Legacy Python" OFF
-    "BUILD_PYTHON" ON)
-cmake_dependent_option(
-    WITH_CUDNN "Legacy cuDNN" ON
-    "USE_CUDNN" OFF)
-cmake_dependent_option(
-    WITH_NCCL "Legacy NCCL" ON
-    "USE_NCCL" OFF)
-cmake_dependent_option(
-    NO_MKLDNN "Legacy no MKLDNN" OFF
-    "USE_MKLDNN" ON)
-cmake_dependent_option(
-    WITH_DISTRIBUTED "Legacy THD (distributed)" ON
-    "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-    WITH_DISTRIBUTED_MW "Legacy THD (distributed) MW" ON
-    "USE_DISTRIBUTED_MW" OFF)
-cmake_dependent_option(
-    WITH_GLOO_IBVERBS "Legacy Gloo IB verbs for distributed support" ON
-    "USE_GLOO_IBVERBS" OFF)
 if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
 endif()
@@ -225,14 +202,20 @@ if(NOT MSVC)
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wextra")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-field-initializers")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-type-limits")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-typedef-redefinition")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-warning-option")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unknown-pragmas")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-sign-compare")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-parameter")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-variable")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-function")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-private-field")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-unused-result")
-  if (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-inconsistent-missing-override")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-aligned-allocation-unavailable")
+  set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-error=deprecated-declarations")
+  if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
+    OR (CMAKE_COMPILER_IS_GNUCXX AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
   if ($ENV{WERROR})
@@ -257,8 +240,8 @@ else()
   endforeach(flag_var)
 endif()
 
-set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer")
-set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer")
+set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
+set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fno-omit-frame-pointer -O0")
 if (USE_ASAN)
     set (CMAKE_CXX_FLAGS_DEBUG "${CMAKE_CXX_FLAGS_DEBUG} -fsanitize=address")
     set (CMAKE_LINKER_FLAGS_DEBUG "${CMAKE_STATIC_LINKER_FLAGS_DEBUG} -fsanitize=address")
@@ -291,6 +274,9 @@ include_directories(BEFORE ${PROJECT_BINARY_DIR})
 if(BUILD_CAFFE2)
   add_subdirectory(caffe/proto)
 endif()
+
+# ---[ Shared build
+add_subdirectory(c10)
 
 # ---[ Main build
 add_subdirectory(caffe2)

@@ -50,7 +50,12 @@ Tensor isclose(const Tensor& self, const Tensor& other, double rtol, double atol
 }
 
 bool is_nonzero(const Tensor& self) {
-  if (self.numel() != 1) {
+  auto n = self.numel();
+  AT_ASSERT(n >= 0);
+  if (n == 0) {
+    AT_ERROR("bool value of Tensor with no values is ambiguous");
+  }
+  if (n > 1) {
     AT_ERROR("bool value of Tensor with more than one value is ambiguous");
   }
   Scalar localScalar = self.pImpl->localScalar();

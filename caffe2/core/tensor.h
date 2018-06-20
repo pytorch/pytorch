@@ -437,7 +437,7 @@ class Tensor {
       Deleter d = nullptr) {
     meta_ = meta;
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id(),
+        meta_.id() != CaffeTypeId::uninitialized(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
     CAFFE_ENFORCE_WITH_CALLER(
@@ -562,7 +562,7 @@ class Tensor {
    */
   inline void* raw_mutable_data() {
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id() != 0,
+        meta_.id() != CaffeTypeId::uninitialized(),
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(meta_);
@@ -579,6 +579,11 @@ class Tensor {
       if ((size_ == 0 || data_.get()) && IsType<T>()) {
         return static_cast<T*>(data_.get());
       }
+      // Check it here statically - otherwise TypeMeta would throw the runtime
+      // error in attempt to invoke TypeMeta::ctor()
+      static_assert(
+          std::is_default_constructible<T>::value,
+          "Tensor can't hold non-default-constructible types");
       return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
     }
 

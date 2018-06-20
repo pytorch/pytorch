@@ -53,6 +53,8 @@ std::string demangle(const char* name) {
 // https://msdn.microsoft.com/en-us/library/windows/desktop/bb204633%28v=vs.85%29.aspx.
 #if !defined(_WIN32)
 
+namespace {
+
 struct FrameInformation {
   /// If available, the demangled name of the function at this frame, else
   /// whatever (possibly mangled) name we got from `backtrace()`.
@@ -67,7 +69,10 @@ struct FrameInformation {
   std::string object_file;
 };
 
-namespace {
+bool is_python_frame(const FrameInformation& frame) {
+  return frame.object_file == "python" ||
+      (frame.object_file.find("libpython") != std::string::npos);
+}
 
 at::optional<FrameInformation> parse_frame_information(
     const std::string& frame_string) {
@@ -141,8 +146,9 @@ at::optional<FrameInformation> parse_frame_information(
 #endif // !defined(_WIN32)
 
 std::string get_backtrace(
-    size_t frames_to_skip = 0,
-    size_t maximum_number_of_frames = 64) {
+    size_t frames_to_skip,
+    size_t maximum_number_of_frames,
+    bool skip_python_frames) {
 #if !defined(_WIN32)
 
   // We always skip this frame (backtrace).
@@ -183,22 +189,33 @@ std::string get_backtrace(
   // The backtrace string goes into here.
   std::ostringstream stream;
 
+  // Toggles to true after the first skipped python frame.
+  bool has_skipped_python_frames = false;
+
   for (size_t frame_number = 0; frame_number < callstack.size();
        ++frame_number) {
     const auto frame = parse_frame_information(symbols[frame_number]);
 
+    if (skip_python_frames && frame && is_python_frame(*frame)) {
+      if (!has_skipped_python_frames) {
+        stream << "<omitting python frames>\n";
+        has_skipped_python_frames = true;
+      }
+      continue;
+    }
+
     // frame #<number>:
     stream << "frame #" << frame_number << ": ";
 
-    if (!frame.has_value()) {
-      // In the edge-case where we couldn't parse the frame string, we can just
-      // use it directly (it may have a different format).
-      stream << symbols[frame_number] << "\n";
-    } else {
+    if (frame) {
       // <function_name> + <offset> (<return-address> in <object-file>)
       stream << frame->function_name << " + " << frame->offset_into_function
              << " (" << callstack[frame_number] << " in " << frame->object_file
              << ")\n";
+    } else {
+      // In the edge-case where we couldn't parse the frame string, we can
+      // just use it directly (it may have a different format).
+      stream << symbols[frame_number] << "\n";
     }
   }
 

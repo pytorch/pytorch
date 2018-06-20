@@ -1,5 +1,6 @@
 set(LIB_SOURCES
-        dummy.cpp
+        TensorTypeId.cpp
+        TensorTypeIdRegistration.cpp
 )
 
 set(TEST_SOURCES

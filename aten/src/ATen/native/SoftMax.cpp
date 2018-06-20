@@ -23,7 +23,7 @@ void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   int64_t outer_stride = dim_size * dim_stride;
   scalar_t* input_data_base = input.data<scalar_t>();
   scalar_t* output_data_base = output.data<scalar_t>();
-  int64_t grain_size = std::min(internal::TBB_GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size,
       [&](int64_t begin, int64_t end) {
@@ -80,7 +80,7 @@ void host_softmax_backward(
   scalar_t* gradInput_data_base = gI.data<scalar_t>();
   scalar_t* output_data_base = output.data<scalar_t>();
   scalar_t* gradOutput_data_base = grad.data<scalar_t>();
-  int64_t grain_size = std::min(internal::TBB_GRAIN_SIZE / dim_size, (int64_t)1);
+  int64_t grain_size = std::min(internal::GRAIN_SIZE / dim_size, (int64_t)1);
   parallel_for(
       0, outer_size * inner_size, grain_size, [&](int64_t begin, int64_t end) {
         for (int64_t i = begin; i < end; i++) {

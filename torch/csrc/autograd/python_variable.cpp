@@ -1,9 +1,9 @@
 #include "torch/csrc/autograd/python_variable.h"
 
 #include "THP.h"
-#include "torch/csrc/Device.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/Device.h"
 #include "torch/csrc/Size.h"
 #include "torch/csrc/Types.h"
 #include "torch/csrc/autograd/edge.h"
@@ -26,10 +26,10 @@
 
 #include <ATen/ATen.h>
 
-#include <list>
-#include <memory>
 #include <structmember.h>
-#include <sstream>
+#include <memory>
+#include <utility>
+#include <vector>
 
 using namespace at;
 using namespace torch;

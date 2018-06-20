@@ -8,6 +8,8 @@
 
 namespace at {
 
+// NB: Order matters for this macro; it is relied upon in
+// _promoteTypesLookup and probably other places.
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \
 _(int8_t,Char,i) \
