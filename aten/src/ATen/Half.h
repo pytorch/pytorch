@@ -46,7 +46,13 @@ struct alignas(2) Half {
   struct from_bits_t {};
   static constexpr from_bits_t from_bits = from_bits_t();
 
+  // HIP wants __host__ __device__ tag, CUDA does not
+#ifdef __HIP_PLATFORM_HCC__
+  AT_HOSTDEVICE Half() = default;
+#else
   Half() = default;
+#endif
+
   constexpr AT_HOSTDEVICE Half(unsigned short bits, from_bits_t) : x(bits) {};
   inline AT_HOSTDEVICE Half(float value);
   inline AT_HOSTDEVICE operator float() const;
