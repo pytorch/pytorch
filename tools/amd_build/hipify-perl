@@ -176,8 +176,6 @@ while (@ARGV) {
 			$infile  = $file_prehip;
 			$outfile = $fileName;
 		} else {
-        #system ("cp $fileName $file_prehip");
-            #$infile = $file_prehip;
 			$infile = $fileName;
 			$fileName =~ s{\.[^.]+$}{};
             my $hipName = $fileName . "_hip.cc";
