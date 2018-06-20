@@ -779,7 +779,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto dcx = cx.defined() ? cx.type().tensor(hidden_size) : Tensor();
 
   if (!fn_train) {
-    throw std::runtime_error("backward_input can only be called in training mode");
+    throw std::runtime_error("cudnn RNN backward can only be called in training mode");
   }
   if (!input.sizes().equals(input_size)) {
     std::ostringstream oss;
@@ -899,7 +899,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
   if (!fn_train) {
-    throw std::runtime_error("backward_input can only be called in training mode");
+    throw std::runtime_error("cudnn RNN backward can only be called in training mode");
   }
   if (!input.sizes().equals(input_size)) {
     std::ostringstream oss;
