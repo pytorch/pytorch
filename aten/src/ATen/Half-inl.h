@@ -13,7 +13,7 @@ namespace at {
 /// Constructors
 
 inline AT_HOSTDEVICE Half::Half(float value) {
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   x = __half_as_short(__float2half(value));
 #else
   x = detail::float2halfbits(value);
@@ -23,7 +23,7 @@ inline AT_HOSTDEVICE Half::Half(float value) {
 /// Implicit conversions
 
 inline AT_HOSTDEVICE Half::operator float() const {
-#if defined(__CUDA_ARCH__) || defined(__HIP_PLATFORM_HCC__)
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
   return __half2float(*reinterpret_cast<const __half*>(&x));
 #else
   return detail::halfbits2float(x);
