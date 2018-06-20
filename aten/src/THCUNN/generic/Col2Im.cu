@@ -17,7 +17,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = THCTensor_(nDimension)(state, input);
+  int ndim = THCTensor_(_nDimension)(state, input);
   THCUNN_argCheck(state, ndim == 2 || ndim == 3, 2, input,
                   "2D or 3D input tensor expected but got %s");
 

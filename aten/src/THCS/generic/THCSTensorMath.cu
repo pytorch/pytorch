@@ -253,7 +253,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, sparse);
   THCTensor *values = THCSTensor_(newValues)(state, sparse);
-  int64_t nDim = THCTensor_(nDimension)(state, dense);
+  int64_t nDim = THCTensor_(_nDimension)(state, dense);
   int64_t nDimI = THCSTensor_(nDimensionI)(state, sparse);
 
  if (THCSTensor_(isCoalesced)(state, sparse)) {

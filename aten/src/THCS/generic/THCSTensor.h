@@ -5,7 +5,7 @@
 typedef struct THCSTensor THCSTensor;
 
 /**** access methods ****/
-THC_API int THCSTensor_(nDimension)(THCState *state, const THCSTensor *self);
+THC_API int THCSTensor_(_nDimension)(THCState *state, const THCSTensor *self);
 THC_API int THCSTensor_(nDimensionI)(THCState *state, const THCSTensor *self);
 THC_API int THCSTensor_(nDimensionV)(THCState *state, const THCSTensor *self);
 THC_API int64_t THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim);

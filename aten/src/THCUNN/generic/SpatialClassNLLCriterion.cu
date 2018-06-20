@@ -8,13 +8,13 @@ void THNN_(SpatialClassNLLCriterion_shapeCheck)(
            THCIndexTensor *target,
            THCTensor *weights)
 {
-  THArgCheck(THCIndexTensor_(nDimension)(state, target) == 3, 1,
+  THArgCheck(THCIndexTensor_(_nDimension)(state, target) == 3, 1,
              "only batches of spatial targets supported (3D tensors)" \
              " but got targets of dimension: %d",
-             THCIndexTensor_(nDimension)(state, target));
-  THArgCheck(THCTensor_(nDimension)(state, input) == 4, 2,
+             THCIndexTensor_(_nDimension)(state, target));
+  THArgCheck(THCTensor_(_nDimension)(state, input) == 4, 2,
              "only batches of spatial inputs supported (4D tensors), "      \
-             "but got input of dimension: %d", THCTensor_(nDimension)(state, input));
+             "but got input of dimension: %d", THCTensor_(_nDimension)(state, input));
   if (THCTensor_(size)(state, input, 0) != THCIndexTensor_(size)(state, target, 0) ||
       THCTensor_(size)(state, input, 2) != THCIndexTensor_(size)(state, target, 1) ||
       THCTensor_(size)(state, input, 3) != THCIndexTensor_(size)(state, target, 2)) {
@@ -34,9 +34,9 @@ static void THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
            THCTensor *gradOutput,
            THCIndexTensor *target)
 {
-  THArgCheck(THCTensor_(nDimension)(state, gradOutput) == 3, 2,
+  THArgCheck(THCTensor_(_nDimension)(state, gradOutput) == 3, 2,
              "Expected dimension 3 but got gradOutput of dimension: %d",
-             THCTensor_(nDimension)(state, gradOutput));
+             THCTensor_(_nDimension)(state, gradOutput));
   if (THCTensor_(size)(state, gradOutput, 0) != THCIndexTensor_(size)(state, target, 0) ||
       THCTensor_(size)(state, gradOutput, 1) != THCIndexTensor_(size)(state, target, 1) ||
       THCTensor_(size)(state, gradOutput, 2) != THCIndexTensor_(size)(state, target, 2)) {
