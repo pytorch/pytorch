@@ -600,6 +600,28 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
+Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
+  start_dim = maybe_wrap_dim(start_dim, self.dim());
+  end_dim = maybe_wrap_dim(end_dim, self.dim());
+  AT_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
+
+  if (start_dim == end_dim) {
+    return self;
+  }
+
+  std::vector<int64_t> shape;
+  shape.reserve(self.dim() - end_dim + start_dim);
+  for (int64_t i = 0; i < start_dim; i++) {
+    shape.push_back(self.size(i));
+  }
+  shape.push_back(-1);
+  for (int64_t i = end_dim + 1; i < self.dim(); i++) {
+    shape.push_back(self.size(i));
+  }
+
+  return self.reshape(shape);
+}
+
 Tensor view_as(const Tensor& self, const Tensor& other) {
   return self.view(other.sizes());
 }

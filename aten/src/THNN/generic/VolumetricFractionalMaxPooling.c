@@ -114,7 +114,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
   int widthDim = 2;
   int timeDim = 3;
 
-  int64_t numInputDims = THTensor_(nDimension)(input);
+  int64_t numInputDims = THTensor_(_nDimension)(input);
   THNN_ARGCHECK(numInputDims == 4 || numInputDims == 5, 2, input,
 		"4D or 5D (batch mode) tensor expected for input, but got: %s");
 
@@ -224,7 +224,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   int widthDim = 2;
   int timeDim = 3;
 
-  int64_t numInputDims = THTensor_(nDimension)(input);
+  int64_t numInputDims = THTensor_(_nDimension)(input);
   if (numInputDims == 5) {
     numBatch = THTensor_(size)(input, 0);
     planeDim = 1;

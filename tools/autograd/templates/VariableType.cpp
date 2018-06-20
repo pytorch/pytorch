@@ -406,7 +406,7 @@ struct Flatten : IterArgs<Flatten> {
   }
 };
 
-template<typename... Args> inline variable_list flatten(Args&&... args) {
+template<typename... Args> inline variable_list flatten_tensor_args(Args&&... args) {
   variable_list out;
   out.reserve(count_tensors(std::forward<Args>(args)...));
   Flatten(out).apply(std::forward<Args>(args)...);

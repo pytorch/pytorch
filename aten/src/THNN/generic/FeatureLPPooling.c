@@ -39,7 +39,7 @@ static inline size_t flpOutputSize(FEATURE_LP_SIZE_TYPE inputSize,
 
 FeatureLPPoolingSizes
 THNN_(FeatureLPPooling_upcastCPU)(THTensor* t, bool batchMode) {
-  int dim = THTensor_(nDimension)(t);
+  int dim = THTensor_(_nDimension)(t);
 
   // Upcast to [batch dim][feature dim][opt dim 1][opt dim 2]
   FeatureLPPoolingSizes s;
@@ -99,7 +99,7 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
                                            bool batchMode,
                                            int width,
                                            int stride) {
-  int inputDim = THTensor_(nDimension)(input);
+  int inputDim = THTensor_(_nDimension)(input);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   int64_t outSize =
@@ -147,7 +147,7 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
 void
 THNN_(FeatureLPPooling_resizeCPU)(THTensor* toResize,
                                   THTensor* src) {
-  int inputDim = THTensor_(nDimension)(src);
+  int inputDim = THTensor_(_nDimension)(src);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   if (inputDim == 1) {
@@ -183,7 +183,7 @@ THNN_(FeatureLPPooling_updateOutput)(
   int width,
   int stride,
   bool batchMode) {
-  int inputDim = THTensor_(nDimension)(input);
+  int inputDim = THTensor_(_nDimension)(input);
 
   if (batchMode) {
     THArgCheck(inputDim >= 2 && inputDim <= 4, 2,
@@ -261,7 +261,7 @@ THNN_(FeatureLPPooling_updateGradInput)(
   int width,
   int stride,
   bool batchMode) {
-  int inputDim = THTensor_(nDimension)(input);
+  int inputDim = THTensor_(_nDimension)(input);
 
   if (batchMode) {
     THArgCheck(inputDim >= 2 && inputDim <= 4, 3,

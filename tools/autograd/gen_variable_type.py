@@ -364,14 +364,14 @@ def emit_body(declaration):
 
     def get_trace_outputs(declaration):
         if declaration['return_type'] == 'std::vector<Tensor>':
-            return 'flatten({})'.format(declaration['returns'][0]['name'])
+            return 'flatten_tensor_args({})'.format(declaration['returns'][0]['name'])
         elif name.endswith('_out'):
             output_args = [arg['name'] for arg in arguments
                            if arg.get('output', False)]
             return '{' + ', '.join(output_args) + '}'
         trace_outs = [r['name'] for r in declaration['returns']]
         if any(ret['dynamic_type'] == 'TensorList' for ret in declaration['returns']):
-            return CodeTemplate("flatten( ${outs} )").substitute(outs=trace_outs)
+            return CodeTemplate("flatten_tensor_args( ${outs} )").substitute(outs=trace_outs)
         else:
             return CodeTemplate("{ ${outs} }").substitute(outs=trace_outs)
 
@@ -408,7 +408,7 @@ def emit_body(declaration):
         local['tensor_args'] = [arg['name'] for arg in tensor_args]
         if any(arg['simple_type'] == 'TensorList' for arg in tensor_args):
             # Allocate a temporary vector with flatten and pass it in
-            local['trace_inputs'] = CodeTemplate("flatten( $tensor_args )").substitute(local)
+            local['trace_inputs'] = CodeTemplate("flatten_tensor_args( $tensor_args )").substitute(local)
         else:
             local['trace_inputs'] = CodeTemplate("{ ${tensor_args} }").substitute(local)
 
@@ -496,7 +496,7 @@ def emit_body(declaration):
         fn = 'rebase' if modifies_arguments and not is_view else 'set'
         output_names = [r['name'] for r in differentiable_outputs]
         # TODO: flatten allocates a std::vector, which could be expensive
-        outs = CodeTemplate("flatten( ${outs} )").substitute(outs=output_names)
+        outs = CodeTemplate("flatten_tensor_args( ${outs} )").substitute(outs=output_names)
         return SET_HISTORY.substitute(fn=fn, differentiable_outputs=outs)
 
     def emit_save_outputs():

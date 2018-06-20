@@ -6,9 +6,9 @@
  * access methods
  ******************************************************************************/
 
-int THSTensor_(nDimension)(const THSTensor *self)
+int THSTensor_(_nDimension)(const THSTensor *self)
 {
-  THError("Internal error! THSTensor_(nDimension)(self) shouldn't be called; use self.dim() instead");
+  THError("Internal error! THSTensor_(_nDimension)(self) shouldn't be called; use self.dim() instead");
 }
 
 int THSTensor_(nDimensionI)(const THSTensor *self)

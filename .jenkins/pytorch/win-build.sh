@@ -1,6 +1,13 @@
 #!/bin/bash
 
 # If you want to rebuild, run this with REBUILD=1
+# If you want to build with CUDA, run this with USE_CUDA=1
+# If you want to build without CUDA, run this with USE_CUDA=0
+
+if [ ! -f setup.py ]; then
+  echo "ERROR: Please run this build script from PyTorch root directory."
+  exit 1
+fi
 
 COMPACT_JOB_NAME=pytorch-win-ws2016-cuda9-cudnn7-py3-build
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
@@ -109,24 +116,35 @@ set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 
-if "%REBUILD%"=="" (
-  set NO_CUDA=1
-  python setup.py install
-)
-if errorlevel 1 exit /b 1
-if not errorlevel 0 exit /b 1
-if "%REBUILD%"=="" (
-  sccache --show-stats
-  sccache --zero-stats
-  rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
-  copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+if not "%USE_CUDA%"=="1" (
+  if "%REBUILD%"=="" (
+    set NO_CUDA=1
+    python setup.py install
+  )
+  if errorlevel 1 exit /b 1
+  if not errorlevel 0 exit /b 1
 )
 
-set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
+if not "%USE_CUDA%"=="0" (
+  if "%REBUILD%"=="" (
+    sccache --show-stats
+    sccache --zero-stats
+    rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+    copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+  )
 
-if "%REBUILD%"=="" set NO_CUDA=
+  set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
-python setup.py install && sccache --show-stats && 7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+  if "%REBUILD%"=="" set NO_CUDA=0
+
+  python setup.py install && sccache --show-stats && (
+    if "%BUILD_ENVIRONMENT%"=="" (
+      echo "NOTE: To run `import torch`, please make sure to activate the conda environment by running `call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3` in Command Prompt before running Git Bash."
+    ) else (
+      7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
+    )
+  )
+)
 
 EOL
 

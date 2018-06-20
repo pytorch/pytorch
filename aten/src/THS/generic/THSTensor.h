@@ -6,7 +6,7 @@
 typedef struct THSTensor THSTensor;
 
 /**** access methods ****/
-TH_API int THSTensor_(nDimension)(const THSTensor *self);
+TH_API int THSTensor_(_nDimension)(const THSTensor *self);
 TH_API int THSTensor_(nDimensionI)(const THSTensor *self);
 TH_API int THSTensor_(nDimensionV)(const THSTensor *self);
 TH_API int64_t THSTensor_(size)(const THSTensor *self, int dim);
