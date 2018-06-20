@@ -144,7 +144,7 @@ function build() {
   # TODO: The *_LIBRARIES cmake variables should eventually be
   # deprecated because we are using .cmake files to handle finding
   # installed libraries instead
-  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -194,10 +194,22 @@ function build() {
   fi
 }
 
+function path_remove {
+  # Delete path by parts so we can never accidentally remove sub paths
+  PATH=${PATH//":$1:"/":"} # delete any instances in the middle
+  PATH=${PATH/#"$1:"/} # delete any instance at the beginning
+  PATH=${PATH/%":$1"/} # delete any instance in the at the end
+}
+
 function build_nccl() {
+  # FIXME: sccache doesn't work when building NCCL
+  path_remove /opt/cache/bin
+  export CUDA_NVCC_EXECUTABLE_SAVED=$CUDA_NVCC_EXECUTABLE
+  export CUDA_NVCC_EXECUTABLE=$(which nvcc)
+
   mkdir -p build/nccl
   pushd build/nccl
-  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -212,6 +224,10 @@ function build_nccl() {
     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
   fi
   popd
+
+  # FIXME: sccache doesn't work when building NCCL
+  export CUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE_SAVED
+  export PATH=/opt/cache/bin:$PATH
 }
 
 # purposefully not using build() because we need Caffe2 to build the same
