@@ -1283,22 +1283,25 @@ private:
     return result;
   }
 
-  std::shared_ptr<SugaredValue> emitBasicMath(
+  Value* emitBasicMath(
       const SourceRange& loc,
       Method& method,
       NodeKind kind,
       at::ArrayRef<Value*> inputs) {
-    return emitBuiltinCall(
+    auto sugared_ptr = emitBuiltinCall(
         loc,
         method,
         kind.toUnqualString(),
         toNamedValues(loc, inputs),
         /*attributes=*/{},
         /*required=*/true);
+    auto simple_ptr = std::dynamic_pointer_cast<SimpleValue>(sugared_ptr);
+    JIT_ASSERT(simple_ptr);
+    return simple_ptr->getValue();
   }
 
   // Handles binary python math ops.
-  std::shared_ptr<SugaredValue> emitPythonMath(
+  Value* emitPythonMath(
       const SourceRange& loc,
       Method& method,
       NodeKind kind,
@@ -1336,16 +1339,15 @@ private:
       throw std::runtime_error("NYI: math between float and int. See #8560.");
     }
 
-    auto* out = emitBasicMath(loc, method, kind, { lhs, rhs })
-                  ->asValue(loc, method);
-    return std::make_shared<SimpleValue>(tensorToNum(loc, *graph, out, out_type));
+    auto* out = emitBasicMath(loc, method, kind, { lhs, rhs });
+    return tensorToNum(loc, *graph, out, out_type);
   }
 
   // math ops between a tensor and a number require that the number be the
   // the same type (ScalarType and Backend) as the tensor, because numbers
   // in the JIT are represented as scalar tensors.
   // This function casts the number to the same type as the tensor.
-  std::shared_ptr<SugaredValue> emitTensorNumberMath(
+  Value* emitTensorNumberMath(
       const SourceRange& loc,
       Method& method,
       NodeKind kind,
@@ -1363,7 +1365,7 @@ private:
   }
 
   // Handles binary math ops.
-  std::shared_ptr<SugaredValue> emitMath(
+  Value* emitMath(
       const SourceRange& loc,
       Method& method,
       NodeKind kind,
@@ -1418,7 +1420,7 @@ private:
   }
 
   // Handles unary math ops.
-  std::shared_ptr<SugaredValue> emitUnaryMath(
+  Value* emitUnaryMath(
       const SourceRange& loc,
       Method& method,
       NodeKind kind,
@@ -1436,9 +1438,8 @@ private:
     // Cast to tensor, perform op, recast to number
     auto out_type = in->type();
     in = numToTensor(loc, *graph, in);
-    auto* out = emitBasicMath(loc, method, kind, { in })
-                  ->asValue(loc, method);
-    return std::make_shared<SimpleValue>(tensorToNum(loc, *graph, out, out_type));
+    auto* out = emitBasicMath(loc, method, kind, { in });
+    return tensorToNum(loc, *graph, out, out_type);
   }
 
   // any expression that can produce a SugaredValue is handled here
@@ -1464,27 +1465,6 @@ private:
         }
         return emitApplyExpr(apply.callee(), inputs, attributes, n_binders);
       } break;
-      case TK_NE:
-      case TK_EQ:
-      case '<':
-      case '>':
-      case TK_LE:
-      case TK_GE:
-      case '*':
-      case '/':
-      case '+':
-      case '-': {
-        const auto& inputs = tree.tree()->trees();
-        auto kind = getNodeKind(tree.tree()->kind(), inputs.size());
-        auto input_vals = getValues(inputs, /*maybe_unpack*/false, ensureTensorOrNumber);
-        return emitMath(tree.range(), method, kind, input_vals);
-      }
-      case TK_UNARY_MINUS: {
-        const auto& inputs = tree.tree()->trees();
-        auto kind = getNodeKind(tree.tree()->kind(), inputs.size());
-        auto input_vals = getValues(inputs, /*maybe_unpack*/false, ensureTensorOrNumber);
-        return emitUnaryMath(tree.range(), method, kind, input_vals);
-      }
       default:
         return std::make_shared<SimpleValue>(emitSimpleExpr(tree));
     }
@@ -1497,12 +1477,32 @@ private:
       case TK_POW:
       case TK_AND:
       case TK_OR:
-      case TK_NOT:
-      case TK_UNARY_MINUS: {
+      case TK_NOT: {
         const auto& inputs = tree->trees();
         auto kind = getNodeKind(tree->kind(), inputs.size());
         return emitNode(kind, tree->range(), getValues(inputs), 1)->output();
       } break;
+      case TK_NE:
+      case TK_EQ:
+      case '<':
+      case '>':
+      case TK_LE:
+      case TK_GE:
+      case '*':
+      case '/':
+      case '+':
+      case '-': {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto input_vals = getValues(inputs, /*maybe_unpack*/false, ensureTensorOrNumber);
+        return emitMath(tree->range(), method, kind, input_vals);
+      }
+      case TK_UNARY_MINUS: {
+        const auto& inputs = tree->trees();
+        auto kind = getNodeKind(tree->kind(), inputs.size());
+        auto input_vals = getValues(inputs, /*maybe_unpack*/false, ensureTensorOrNumber);
+        return emitUnaryMath(tree->range(), method, kind, input_vals);
+      }
       case TK_STARRED: {
         throw ErrorReport(tree) << "Unexpected starred expansion. File a bug report.";
       }
