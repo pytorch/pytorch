@@ -8,6 +8,7 @@
 #include <ATen/TensorOptions.h>
 
 #include <array>
+#include <functional>
 #include <string>
 #include <tuple>
 #include <vector>
@@ -21,6 +22,21 @@ struct Type;
 
 namespace at {
 namespace native {
+
+inline Tensor from_blob(
+    void* data,
+    IntList sizes,
+    const std::function<void(void*)>& deleter,
+    const TensorOptions& options = {}) {
+  return options.type().tensorFromBlob(data, sizes, deleter);
+}
+
+inline Tensor from_blob(
+    void* data,
+    IntList sizes,
+    const TensorOptions& options = {}) {
+  return native::from_blob(data, sizes, [](void*) {}, options);
+}
 
 ${native_function_declarations}
 
