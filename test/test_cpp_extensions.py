@@ -3,6 +3,7 @@ import sys
 
 import torch
 import torch.utils.cpp_extension
+import torch.backends.cudnn
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
 except ImportError:
@@ -14,7 +15,7 @@ import common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
-TEST_CUDNN = TEST_CUDA and torch._C.has_cudnn
+TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_available()
 
 
 class TestCppExtension(common.TestCase):
