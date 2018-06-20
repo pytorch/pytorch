@@ -1,21 +1,13 @@
 #include "ATen/ATen.h"
 
 #include <ATen/Error.h>
+#include <ATen/WrapDimUtils.h>
 
 #include <algorithm>
 #include <vector>
 
 namespace at {
 namespace native {
-
-// wrap negative dims
-static inline void wrap_dims(std::vector<int64_t>& v, int64_t n) {
-  for (int64_t i = 0; i < v.size(); i++) {
-    if (v[i] < 0) {
-      v[i] = (n + (v[i] % n)) % n;
-    }
-  }
-}
 
 static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size, IntList dims) {
   // check if number of axis in dim is valid

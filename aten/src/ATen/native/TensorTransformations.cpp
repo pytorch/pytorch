@@ -83,7 +83,7 @@ Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
     case 2:
       return self.flip(dims);
     case 3:
-      return self.transpose(dims[0], dims[1]).flip({dims[1]});
+      return self.flip({dims[0]}).transpose_(dims[0], dims[1]);
     default:
       return self.clone();
   }

@@ -86,4 +86,13 @@ static inline int64_t legacy_cat_wrap_dim(int64_t dim, TensorList tensors) {
   return dim;
 }
 
+// wrap negative dims in v, where total dim is n
+static inline void wrap_dims(std::vector<int64_t>& v, int64_t n) {
+  for (auto i = 0; i < v.size(); i++) {
+    if (v[i] < 0) {
+      v[i] = (n + (v[i] % n)) % n;
+    }
+  }
+}
+
 }

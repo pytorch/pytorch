@@ -6744,6 +6744,9 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([4, 3, 2, 1]).view(2, 2), data.rot90(2, [0, 1]))
         self.assertEqual(torch.tensor([3, 1, 4, 2]).view(2, 2), data.rot90(3, [0, 1]))
 
+        # test for default args k=1, dims=[0, 1]
+        # self.assertEqual(data.rot90(), data.rot90(1, [0, 1]))
+
         # test for reversed order of dims
         self.assertEqual(data.rot90(3, [0, 1]), data.rot90(1, [1, 0]))
 
