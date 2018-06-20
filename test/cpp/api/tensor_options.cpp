@@ -77,7 +77,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromVariables") {
 
   options = TensorOptions(torch::empty(5, at::requires_grad()));
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
-  REQUIRE(options.requires_grad());
+  REQUIRE(!options.requires_grad());
 }
 
 TEST_CASE("Device/ParsesCorrectlyFromString") {

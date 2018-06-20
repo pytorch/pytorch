@@ -197,9 +197,6 @@ struct Tensor : public detail::TensorBase {
   auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
     return func(*this, std::forward<Args>(params)...);
   }
-
- private:
-  Tensor to(const TensorOptions& options, bool non_blocking = false);
 };
 
 namespace detail {

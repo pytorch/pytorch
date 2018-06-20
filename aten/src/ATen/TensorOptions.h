@@ -29,8 +29,9 @@ struct TensorOptions {
 
   /// Constructs the `TensorOptions` from the type of the given `Tensor`.
   /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
-  /// tensor. See the constructor from `Type` for the semantics w.r.t. the
-  /// `type()` method.
+  /// tensor. The `requires_grad` property of the tensor is ignored and set to
+  /// false in the created `TensorOptions`.  See the constructor from `Type` for
+  /// the semantics w.r.t. the `type()` method.
   explicit TensorOptions(Tensor tensor, bool discard_runtime_type = false) {
     if (!discard_runtime_type) {
       type_ = &tensor.type();
@@ -38,9 +39,6 @@ struct TensorOptions {
     this->dtype(tensor.dtype());
     this->device(tensor.device());
     this->layout(tensor.layout());
-    if (tensor.is_variable()) {
-      this->requires_grad(tensor.requires_grad());
-    }
   }
 
   /// Constructs the `TensorOptions` from a type and a `device_index`.
@@ -238,24 +236,29 @@ inline TensorOptions Tensor::options() const {
   return TensorOptions(*this);
 }
 
-inline Tensor Tensor::to(const TensorOptions& options, bool non_blocking) {
+namespace detail {
+inline Tensor to(
+    const Tensor& tensor,
+    const TensorOptions& options,
+    bool non_blocking) {
   // Don't copy if the options match.
-  if (this->options() == options) {
-    return *this;
+  if (tensor.options() == options) {
+    return tensor;
   }
   DeviceGuard guard(options.device());
-  return options.type().copy(*this, non_blocking);
+  return options.type().copy(tensor, non_blocking);
 }
+} // namespace detail
 
 inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking) {
-  return to(options().device(device).dtype(dtype), non_blocking);
+  return detail::to(*this, options().device(device).dtype(dtype), non_blocking);
 }
 
 inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) {
-  return to(options().dtype(dtype), non_blocking);
+  return detail::to(*this, options().dtype(dtype), non_blocking);
 }
 
 inline Tensor Tensor::to(Device device, bool non_blocking) {
-  return to(options().device(device), non_blocking);
+  return detail::to(*this, options().device(device), non_blocking);
 }
 } // namespace at
