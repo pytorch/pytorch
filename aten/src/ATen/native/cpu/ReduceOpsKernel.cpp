@@ -47,11 +47,11 @@ struct Reduction {
   using ReduceScalar = Op<scalar_t>;
 
   static void apply(Tensor& res, const Tensor& self, at::optional<int64_t> dim) {
-    auto out = res.data<scalar_t>();
-    auto data = self.data<scalar_t>();
+    auto out_ = res.data<scalar_t>();
+    auto data_ = self.data<scalar_t>();
     auto numel = self.numel();
     if (!dim.has_value()) {
-      *out = reduce_all(data, numel);
+      *out_ = reduce_all(data_, numel);
       return;
     }
 
@@ -67,13 +67,55 @@ struct Reduction {
     }
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::GRAIN_SIZE;
-    _parallel_for(batch, 1, paralellize, [=](int64_t b) {
-      if (stride == 1) {
-        out[b] = reduce_all(&data[b * n], n);
-      } else {
-        reduce2d(&data[b * n * stride], &out[b * stride], n, stride, stride);
-      }
-    });
+    if (stride == 1) {
+      _parallel_for(batch, 1, paralellize, [=](int64_t b) {
+        out_[b] = reduce_all(&data_[b * n], n);
+      });
+    } else {
+      _parallel_for(batch, 1, paralellize, [=](int64_t b) {
+        const scalar_t* data = &data_[b * n * stride];
+        scalar_t* out = &out_[b * stride];
+        int64_t rows = n;
+        int64_t cols = stride;
+
+        int64_t cols_rounded = round_down(cols, WIDTH);
+        int64_t size = cols_rounded;
+        int64_t step = WIDTH;
+
+        parallel_for(
+            0, size / step, 1, [data, out, stride, rows, step](int64_t begin, int64_t end) {
+              int64_t k = begin * step;
+              for (int64_t i = begin; i < end; i++, k += step) {
+                reduce128(&data[k], &out[k], rows, stride);
+              }
+            });
+      });
+
+      _parallel_for(batch, 1, paralellize, [=](int64_t b) {
+        const scalar_t* data = &data_[b * n * stride];
+        scalar_t* out = &out_[b * stride];
+        int64_t rows = n;
+        int64_t cols = stride;
+
+        int64_t cols_rounded = round_down(cols, WIDTH);
+        if (cols_rounded != cols) {
+          // Initializes the entire (tiny) arrays to avoid uninitialized
+          // warnings
+          scalar_t buf[WIDTH] = {0};
+          std::fill(std::begin(buf), std::end(buf), ident);
+
+          for (int64_t row = 0; row != rows; row++) {
+            for (int64_t j = 0; j != cols - cols_rounded; j++) {
+              auto val = data[row * stride + j + cols_rounded];
+              buf[j] = ReduceScalar()(buf[j], val);
+            }
+          }
+          for (int64_t j = 0; j != cols - cols_rounded; j++) {
+            out[j + cols_rounded] = buf[j];
+          }
+        }
+      });
+    }
   }
 
   static scalar_t reduce_all(const scalar_t* data, int64_t size) {
@@ -115,31 +157,6 @@ struct Reduction {
 
   // Reduce a 2d matrix down each column. Stores the results in out[0 ... cols-1]
   static void reduce2d(const scalar_t* data, scalar_t* out, int64_t rows, int64_t cols, int64_t stride) {
-    int64_t cols_rounded = round_down(cols, WIDTH);
-    bool paralellize = cols * rows > internal::GRAIN_SIZE;
-    _parallel_for(cols_rounded, WIDTH, paralellize, [=](int64_t col) {
-      reduce128(&data[col], &out[col], rows, stride);
-    });
-
-    if (cols_rounded != cols) {
-#if !defined(__APPLE__)
-#pragma GCC diagnostic ignored "-Wmaybe-uninitialized"
-#endif
-      scalar_t buf[WIDTH];
-
-      // Initializes the entire (tiny) array to avoid uninitialized warnings
-      std::fill(std::begin(buf), std::end(buf), ident);
-
-      for (int64_t row = 0; row != rows; row++) {
-        for (int64_t j = 0; j != cols - cols_rounded; j++) {
-          auto val = data[row * stride + j + cols_rounded];
-          buf[j] = ReduceScalar()(buf[j], val);
-        }
-      }
-      for (int64_t j = 0; j != cols - cols_rounded; j++) {
-        out[j + cols_rounded] = buf[j];
-      }
-    }
   }
 };
 
