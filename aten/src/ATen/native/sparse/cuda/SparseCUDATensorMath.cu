@@ -12,6 +12,7 @@
 #include <THC/THCNumerics.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
+#include <thrust/system/cuda/execution_policy.h>
 
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
 #define V_INFO(tensor) cuda::detail::getTensorInfo<cuda_scalar_t, uint64_t>(tensor)
