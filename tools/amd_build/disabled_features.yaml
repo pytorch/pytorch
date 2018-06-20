@@ -118,6 +118,13 @@
         }
       },
       {
+        "path": "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
+        "s_constants": {
+          "#include <cufft.h>": "",
+          "#include <cufftXt.h>": ""
+        }
+      },
+      {
         "path": "aten/src/ATen/native/cuda/SpectralOps.cu",
         "s_constants": {
           "#include <cufft.h>": "",
