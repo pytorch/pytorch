@@ -11,6 +11,8 @@ from itertools import repeat, product
 from functools import wraps, reduce
 from operator import mul
 from collections import OrderedDict
+import hashlib
+import sys
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -28,7 +30,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, skipCUDAMemoryLeakCheckIf
+    get_function_arglist, skipCUDAMemoryLeakCheckIf, parser
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -7609,4 +7611,27 @@ add_test(NewModuleTest(
 
 
 if __name__ == '__main__':
-    run_tests()
+    parser.add_argument(
+        '--num-shards',
+        type=int,
+        required=False,
+        help='number of shards')
+    parser.add_argument(
+        '--shard',
+        type=int,
+        required=False,
+        help='which shard to run')
+
+    args, remaining = parser.parse_known_args()
+    unittest_args = [sys.argv[0]] + remaining
+
+    if args.num_shards is not None and args.shard is not None:
+        def load_tests(loader, tests, pattern):
+            test_suite = unittest.TestSuite()
+            for test_group in tests:
+                for test in test_group:
+                    if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % args.num_shards == args.shard:
+                        test_suite.addTest(test)
+            return test_suite
+
+    run_tests(unittest_args)
