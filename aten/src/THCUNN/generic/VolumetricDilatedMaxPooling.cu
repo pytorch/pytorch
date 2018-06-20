@@ -20,7 +20,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          int padT, int padW, int padH,
                          int dilationT, int dilationW, int dilationH,
                          bool ceilMode) {
-  int ndim = input->_dim();
+  int ndim = input->dim();
   int inputSlices;
   int inputTime;
   int inputHeight;
@@ -43,7 +43,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than 0, but got dilationT: %d dilationH: %d dilationW: %d",
              dilationT, dilationH, dilationW);
 
-  if (input->_dim() == 5)
+  if (input->dim() == 5)
   {
     dimf++;
     dimt++;
@@ -51,7 +51,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
     dimw++;
   }
 
-  if (THCTensor_(_nDimension)(state, input) == 4)
+  if (THCTensor_(nDimension)(state, input) == 4)
   {
     /* sizes */
     inputSlices = THCTensor_(size)(state, input, 0);
@@ -59,7 +59,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (THCTensor_(_nDimension)(state, input) == 5)
+  else if (THCTensor_(nDimension)(state, input) == 5)
   {
     /* sizes */
     inputSlices = THCTensor_(size)(state, input, 1);
@@ -69,7 +69,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
   }
   else
   {
-    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(_nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ", input->sizes());
   }
 
   THArgCheck(kT/2 >= padT && kW/2 >= padW && kH/2 >= padH, 13,
@@ -142,7 +142,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   int dimh = 2;
   int dimw = 3;
 
-  int fiveDimensionalInput = THCTensor_(_nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
 
   if (fiveDimensionalInput)
   {
@@ -157,7 +157,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
         dT, dW, dH, padT, padW, padH,
         dilationT, dilationW, dilationH, ceilMode);
 
-  if (THCTensor_(_nDimension)(state, input) == 4)
+  if (THCTensor_(nDimension)(state, input) == 4)
   {
     /* sizes */
     batchSize   = 1;
@@ -177,7 +177,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
   else
   {
-    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(_nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ", input->sizes());
   }
 
   if (ceilMode)
@@ -316,7 +316,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   int outputTime, outputHeight, outputWidth;
   int inputTime, inputHeight, inputWidth;
 
-  int fiveDimensionalInput = THCTensor_(_nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
 
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
   THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
