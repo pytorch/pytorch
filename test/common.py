@@ -39,7 +39,6 @@ torch.backends.cudnn.disable_global_flags()
 parser = argparse.ArgumentParser(add_help=False)
 parser.add_argument('--seed', type=int, default=1234)
 parser.add_argument('--accept', action='store_true')
-parser.add_argument('--shard', type=int, required=False)
 args, remaining = parser.parse_known_args()
 SEED = args.seed
 ACCEPT = args.accept
@@ -47,8 +46,8 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def run_tests():
-    unittest.main(argv=UNITTEST_ARGS)
+def run_tests(argv=UNITTEST_ARGS):
+    unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)

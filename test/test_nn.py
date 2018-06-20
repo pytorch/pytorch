@@ -12,7 +12,7 @@ from functools import wraps, reduce
 from operator import mul
 from collections import OrderedDict
 import hashlib
-import argparse
+import sys
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -30,7 +30,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, skipCUDAMemoryLeakCheckIf
+    get_function_arglist, skipCUDAMemoryLeakCheckIf, parser
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -53,8 +53,6 @@ DOUBLE_TENSORTYPES = [torch.double]
 dtype2prec = {torch.float: 1e-5,
               torch.double: 1e-5,
               torch.half: 1e-2}
-
-NUM_SHARDS = 30
 
 
 # WARNING: If you add a new top-level test case to this file, you MUST
@@ -7612,30 +7610,28 @@ add_test(NewModuleTest(
     fullname='AdaptiveLogSoftmax'))
 
 
-def parse_args():
-    parser = argparse.ArgumentParser(
-        description='Run only a portion of test_nn')
+if __name__ == '__main__':
+    parser.add_argument(
+        '--num-shards',
+        type=int,
+        required=False,
+        help='number of shards')
     parser.add_argument(
         '--shard',
         type=int,
         required=False,
-        help='the shard number to run')
-    parser.add_argument(
-        '--verbose',
-        action='store_true',
-        required=False,
-        help='verbose mode')
-    return parser.parse_args()
+        help='which shard to run')
 
+    args, remaining = parser.parse_known_args()
+    unittest_args = [sys.argv[0]] + remaining
 
-if __name__ == '__main__':
-    options = parse_args()
-    if options.shard is not None:
+    if args.num_shards is not None and args.shard is not None:
         def load_tests(loader, tests, pattern):
             test_suite = unittest.TestSuite()
             for test_group in tests:
                 for test in test_group:
-                    if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % NUM_SHARDS == options.shard:
+                    if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % args.num_shards == args.shard:
                         test_suite.addTest(test)
             return test_suite
-    run_tests()
+
+    run_tests(unittest_args)
