@@ -111,7 +111,7 @@ TEST_CASE("Device/ParsesCorrectlyFromString") {
 TEST_CASE("DefaultTensorOptions/OptionsGuard") {
   Tensor tensor;
   {
-    OptionsGuard guard();
+    OptionsGuard guard(TensorOptions{});
     tensor = at::empty({10});
   }
   REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
