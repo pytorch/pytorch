@@ -4,6 +4,7 @@
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/pooling.h>
 #include <torch/optimizers.h>
 #include <torch/tensor.h>
 #include <torch/tensor_range.h>
@@ -366,20 +367,21 @@ TEST_CASE("integration/mnist", "[cuda]") {
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto model = std::make_shared<torch::SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
+  auto pool1 = model->add(MaxPool2d(2), "pool1");
   auto batchnorm2d =
       model->add(BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
+  auto pool2 = model->add(MaxPool2d(2), "pool2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
   auto batchnorm1 =
       model->add(BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
-            .clamp_min(0);
+    x = pool1->forward({conv1->forward({x})[0]})[0].clamp_min(0);
     x = batchnorm2d->forward({x})[0];
     x = conv2->forward({x})[0];
-    x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
+    x = pool2->forward({x})[0].clamp_min(0);
 
     x = x.view({-1, 320});
     x = linear1->forward({x})[0].clamp_min(0);
