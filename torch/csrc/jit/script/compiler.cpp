@@ -1435,9 +1435,7 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
     // so the methods can see each other
     if(!self) {
       auto result = table.emplace(name, method);
-      if(!result.second) {
-        throw ErrorReport(def) << "duplicate definition of function '" << name << "'";
-      }
+      JIT_ASSERT(result.second);
     }
     methods.push_back(&method);
   }

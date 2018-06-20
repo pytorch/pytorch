@@ -3208,7 +3208,7 @@ class TestScript(JitTestCase):
 
     def test_single_starred_lhs(self):
         with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence'
-                                                  'of another non-starred expression'):
+                                                  ' of another non-starred expression'):
             cu = torch.jit.CompilationUnit('''
             def single_starred_lhs(x):
                 a = (x, x, x)
@@ -3218,7 +3218,7 @@ class TestScript(JitTestCase):
 
     def test_multi_reduction(self):
         with self.assertRaisesRegex(RuntimeError, 'reductions are only allowed when there is a single variable on'
-                                                  'the left-hand side'):
+                                                  ' the left-hand side'):
             cu = torch.jit.CompilationUnit('''
             def multi_reduction(x):
                 a, b += x
@@ -3343,6 +3343,36 @@ class TestScript(JitTestCase):
                     x = x + 1
                 return x
             ''')
+
+    def test_duplicate(self):
+        with self.assertRaisesRegex(RuntimeError, 'Method \'test\' already defined'):
+            cu = torch.jit.CompilationUnit('''
+            def test():
+                return 1
+
+            def test():
+                return 2
+            ''')
+
+    def test_call_ge(self):
+        with self.assertRaisesRegex(RuntimeError, 'expected 1 arguments but found 3'):
+            @torch.jit.trace(torch.zeros(1, 2, 3))
+            def foo(x):
+                return x
+
+            @torch.jit.script
+            def test_fn():
+                return foo(1, 2, 3)
+
+    def test_wrong_return_type(self):
+        with self.assertRaisesRegex(RuntimeError, 'Python functions can currently only return Tensors'):
+            def somefunc():
+                # type: () -> Tuple[Tuple[Tensor, Tensor]]
+                return torch.zeros(3, 4), torch.zeros(4, 5)
+
+            @torch.jit.script
+            def wrong_return_type():
+                return somefunc()
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
