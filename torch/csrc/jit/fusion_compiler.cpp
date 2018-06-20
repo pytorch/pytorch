@@ -122,6 +122,11 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 }
 )");
 
+// This snippet enables half support in the jit. Following the pattern for
+// reductions, fp16 input data is immediately upconverted to float
+// with __half2float(). All mathematical operations are done on float
+// values, and if needed the intermediate float representation is 
+// converted to half with __float2half() when writing to a half tensor.
 constexpr auto half_support_literal  = R"(    
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
