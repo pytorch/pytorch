@@ -109,19 +109,19 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual int64_t cuFFTGetPlanCacheMaxSize() const {
-    AT_ERROR("cannot configure cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
   }
 
   virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
-    AT_ERROR("cannot configure cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
   }
 
   virtual int64_t cuFFTGetPlanCacheSize() const {
-    AT_ERROR("cannot configure cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
   }
 
   virtual void cuFFTClearPlanCache() const {
-    AT_ERROR("cannot configure cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
   }
 
   virtual int getNumGPUs() const {
