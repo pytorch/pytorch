@@ -7,15 +7,13 @@
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "ATen/ATen.h"
-
 #ifdef USE_CUDA
-  #include "THC/THC.h"
-  #include "torch/csrc/cuda/cuda_check.h"
-  #include <nvrtc.h>
-  #include <cuda.h>
-  #include <cuda_runtime.h>
+#include "THC/THC.h"
+#include "torch/csrc/cuda/cuda_check.h"
+#include <nvrtc.h>
+#include <cuda.h>
+#include <cuda_runtime.h>
 #endif
-
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -68,10 +66,10 @@ so typedefs help it handle those cases*/
 
 auto type_declarations_template = CodeTemplate(R"(
 #if defined(__CUDACC_RTC__)
-  typedef unsigned char uint8_t;
-  typedef signed char int8_t;
-  typedef short int  int16_t;
-  typedef long long int int64_t;
+typedef unsigned char uint8_t;
+typedef signed char int8_t;
+typedef short int  int16_t;
+typedef long long int int64_t;
 #endif
 ${HalfHeader}
 typedef ${IndexType} IndexType;
@@ -156,9 +154,6 @@ constexpr auto half_support_literal  = R"(
 
 typedef __half half;
 )";
-
-
-// typedef __half half;
 
 // curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
 // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
@@ -339,7 +334,6 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     for(auto p : subgraph.inputs())
       emitFormal(p,agraph.input_desc[i++]);
   }
-  
   std::vector<ConcatDesc> concat_desc;
   std::vector<Value*> flat_output_nodes;
   {
