@@ -402,7 +402,7 @@ class ParameterDict(Module):
 
     Arguments:
         parameters (iterable, optional): a mapping (dictionary) of
-            (string : :class:`~torch.nn.Parameter``) or an iterable of key/value pairs
+            (string : :class:`~torch.nn.Parameter``) or an iterable of key,value pairs
             of type (string, :class:`~torch.nn.Parameter``)
 
     Example::
