@@ -460,14 +460,14 @@ class TestJit(JitTestCase):
         inputs = (x.float(), y.float())
         fusion_inputs = (x, y)
         for fn in funcs:
-            local_inputs = [x.clone().requires_grad_() for x in inputs]
-            local_fusion_inputs = [x.clone().requires_grad_() for x in fusion_inputs]
+            local_inputs = [t.clone().requires_grad_() for t in inputs]
+            local_fusion_inputs = [t.clone().requires_grad_() for t in fusion_inputs]
 
             # Verifies outputs
             fusion = torch.jit.trace(*local_fusion_inputs, optimize=True)(fn)
             outputs = fn(*local_inputs)
             fusion_outputs = fusion(*local_fusion_inputs)
-            outputs_half = [x.half() for x in outputs]
+            outputs_half = [t.half() for t in outputs]
             self.assertEqual(outputs_half, fusion_outputs)
 
             # Verifies gradients
@@ -476,7 +476,7 @@ class TestJit(JitTestCase):
                     output.float().sum(), local_inputs, allow_unused=True, retain_graph=True)
                 fusion_grads = torch.autograd.grad(
                     fusion_output.sum(), local_fusion_inputs, allow_unused=True, retain_graph=True)
-                grads_half = [x.half() for x in grads]
+                grads_half = [t.half() for t in grads]
                 self.assertEqual(grads_half, fusion_grads)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
