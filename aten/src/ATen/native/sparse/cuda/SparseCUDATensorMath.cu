@@ -6,6 +6,7 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDATypeConversion.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
+#include <ATen/cuda/CUDATensorMethods.cuh>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
