@@ -6153,6 +6153,30 @@ class TestTorch(TestCase):
         b = pickle.loads(serialized)
         self.assertEqual(a, b)
 
+    def test_pickle_parameter(self):
+        if sys.version_info[0] == 2:
+            import cPickle as pickle
+        else:
+            import pickle
+        a = torch.nn.Parameter(torch.randn(5, 5))
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertTrue(isinstance(b, torch.nn.Parameter))
+        self.assertEqual(a.requires_grad, b.requires_grad)
+        self.assertEqual(a, b)
+
+    def test_pickle_parameter_no_requires_grad(self):
+        if sys.version_info[0] == 2:
+            import cPickle as pickle
+        else:
+            import pickle
+        a = torch.nn.Parameter(torch.randn(5, 5), requires_grad=False)
+        serialized = pickle.dumps(a)
+        b = pickle.loads(serialized)
+        self.assertTrue(isinstance(b, torch.nn.Parameter))
+        self.assertEqual(a.requires_grad, b.requires_grad)
+        self.assertEqual(a, b)
+
     def test_norm_fastpaths(self):
         x = torch.randn(3, 5)
 
