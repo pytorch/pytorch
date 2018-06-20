@@ -25,6 +25,7 @@
 namespace at { namespace native {
 
 SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
+#ifndef __HIP_PLATFORM_HCC__
   int64_t nnz = self._nnz();
   if (nnz < 2) {
     _get_sparse_impl(self)->set_coalesced(true);
@@ -147,6 +148,9 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
 
   THCudaCheck(cudaGetLastError());
   return dst;
+#else
+  AT_ERROR("coalesce_sparse_cuda: HIP not supported");
+#endif
 }
 
 }} // namespace at::native
