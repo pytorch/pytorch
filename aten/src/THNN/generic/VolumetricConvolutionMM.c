@@ -28,7 +28,7 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
 
   if (weight != NULL) {
-    THNN_ARGCHECK(!weight->is_empty() && (weight->dim() == 2 || weight->dim()) == 5, 5, weight,
+    THNN_ARGCHECK(!weight->is_empty() && (weight->dim() == 2 || weight->dim() == 5), 5, weight,
                     "non-empty 2D or 5D weight tensor expected, but got: %s");
     if (bias != NULL) {
       THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);
