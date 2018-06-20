@@ -14,7 +14,7 @@ memory and will only send a handle to another process.
     not ``None``, it is also shared. After a :class:`~torch.Tensor` without
     a :attr:`torch.Tensor.grad` field is sent to the other process, it
     creates a standard process-specific ``.grad`` :class:`~torch.Tensor` that
-    is not automatically shared across all processes like how the
+    is not automatically shared across all processes, unlike how the
     :class:`~torch.Tensor`'s data has been shared.
 
 This allows to implement various training methods, like Hogwild, A3C, or any
