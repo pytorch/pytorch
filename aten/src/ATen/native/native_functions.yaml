@@ -1608,13 +1608,16 @@
   variants: []
 
 
-# NB: The function overloads are removed to avoid a nasty bug where
-# you say at::native_sparse_coo_tensor(indices, values), and then
-# it does the dispatch based on indices (wrong wrong wrong!)  Without
-# the variants, you must call this on type directly.
+# NB: I have to decompose sparse_coo_tensor into two functions, because
+# it has custom dispatch logic for which Type to dispatch on (we must
+# use the sparse equivalent of the type of the SECOND argument).
 #
-# Maybe this meant we were supposed to take a dtype as an argument here.
-# Hmmmmm.
+# The actual dispatcher, native_sparse_coo_tensor, has all of its overloads
+# removed so you don't accidentally trigger the default behavior, which
+# is to infer Type based on the first argument (indices), which is ~never
+# what you want. (I guess hypothetically it would work; you'd
+# just only ever dispatch to CPULongTensor or CUDALongTensor, but that
+# seems a bit too finely balanced.)
 
 - func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: []
