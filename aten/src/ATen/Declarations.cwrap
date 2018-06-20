@@ -3601,9 +3601,10 @@
     - double p
 ]]
 [[
-  name: _cpu_bernoulli_
+  name: _bernoulli_
   backends:
     - CPU
+    - CUDA
   cname: bernoulli
   return: self
   arguments:
