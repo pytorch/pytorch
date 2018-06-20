@@ -488,18 +488,24 @@ Tensor repeat_backward(Tensor grad, int64_t input_dims, IntList repeats) {
   return grad;
 }
 
-Tensor select_backward_scalar(Tensor grad, const Tensor & input, const Tensor & value) {
+Tensor select_equals_backward(Tensor grad, const Tensor & input, const Tensor & value) {
   auto grad_input = zeros_like(input);
   grad_input.masked_fill_(input == value, grad);
   return grad_input;
 }
 
-Tensor select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, bool keepdim) {
+Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, bool keepdim) {
   if (!keepdim) {
     grad = grad.unsqueeze(dim);
     indices = indices.unsqueeze(dim);
   }
   return at::zeros(sizes, grad.type()).scatter_(dim, indices, grad);
+}
+
+Tensor slice_backward(Tensor grad, IntList input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
+  auto grad_input = at::zeros(input_sizes, grad.type());
+  grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
 }
 
 Tensor trace_backward(const Tensor & grad, IntList sizes) {
@@ -756,9 +762,7 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
 
   // Input was a matrix but was not square
   auto grad_input = at::zeros(input_sizes, grad.type());
-  auto diagonal_size = diag_size(input_sizes[0], input_sizes[1], diagonal);
-  auto storage_offset = diagonal >= 0 ? diagonal : -diagonal * input_sizes[1];
-  auto diag = grad_input.as_strided({diagonal_size}, {input_sizes[1] + 1}, storage_offset);
+  auto diag = grad_input.diagonal(diagonal);
   diag.copy_(grad);
   return grad_input;
 }
@@ -809,7 +813,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
   return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
 }
 
-Tensor as_strided_backward(const Tensor & grad, TensorGeometry base, IntList sizes, IntList strides, int64_t storage_offset) {
+Tensor as_strided_backward_unsafe(const Tensor & grad, TensorGeometry base, IntList sizes, IntList strides, int64_t storage_offset) {
   auto src = grad.type().zeros(base.sizes());
   src.as_strided(sizes, strides, storage_offset - base.storage_offset()).copy_(grad);
   return src;
@@ -956,7 +960,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   // The following two lines invert values of F, and fills the diagonal with 0s.
   // Notice that F currently has 0s on diagonal. So we fill diagonal with +inf
   // first to prevent nan from appearing in backward of this function.
-  F.as_strided({k}, {k + 1}).fill_(INFINITY);
+  F.diagonal().fill_(INFINITY);
   F = F.pow(-1);
 
   Tensor u_term, v_term;
@@ -1337,6 +1341,19 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, c
 }
 
 } // anonymous namespace
+
+
+variable_list AsStridedBackwardUnsafe::apply(const variable_list& grads) {
+  IndexRangeGenerator gen;
+  auto self_ix = gen.range(1);
+  variable_list grad_inputs(gen.size());
+  auto& grad = grads[0];
+  if (should_compute_output({ self_ix })) {
+    auto grad_result = as_strided_backward_unsafe(grad, self_geometry, size, stride, storage_offset);
+    copy_range(grad_inputs, self_ix, grad_result);
+  }
+  return grad_inputs;
+}
 
 ${autograd_function_definitions}
 

@@ -125,7 +125,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 #endif
     AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   }
-  return at::native::slice(self, dim, start, start + length, 1);
+  return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor permute(const Tensor& self, IntList dims) {
@@ -456,7 +456,7 @@ Tensor & transpose_(Tensor & self, int64_t dim0, int64_t dim1) {
   std::vector<int64_t> sizes(self.sizes());
   std::swap(strides[dim0], strides[dim1]);
   std::swap(sizes[dim0], sizes[dim1]);
-  return self.as_strided_(sizes, strides);
+  return self._as_strided_(sizes, strides);
 }
 
 Tensor transpose(const Tensor & self, int64_t dim0, int64_t dim1) {
@@ -564,7 +564,7 @@ Tensor squeeze(const Tensor& self, int64_t dim) {
 
 Tensor & squeeze_(Tensor& self) {
   auto g = inferSqueezeGeometry(self);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self._as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
 Tensor & squeeze_(Tensor& self, int64_t dim) {
@@ -572,10 +572,10 @@ Tensor & squeeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim());
 
   if (dims == 0 || self.sizes()[dim] != 1) {
-    return self.as_strided_(self.sizes().vec(), self.strides().vec());
+    return self._as_strided_(self.sizes().vec(), self.strides().vec());
   }
   auto g = inferSqueezeGeometry(self, dim);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self._as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
 // _unsafe_view() differs from view() in that the returned tensor isn't treated
@@ -603,7 +603,7 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
   dim = maybe_wrap_dim(dim, self.dim() + 1);
 
   auto g = inferUnsqueezeGeometry(self, dim);
-  return self.as_strided_(std::get<0>(g), std::get<1>(g));
+  return self._as_strided_(std::get<0>(g), std::get<1>(g));
 }
 
 Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {

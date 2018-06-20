@@ -3759,9 +3759,7 @@
     if (storage_offset == -1) {
       storage_offset = self_->tensor->storageOffset;
     }
-    if (storage_offset < 0) {
-      AT_ERROR("as_strided(): storage_offset must be non-negative, but got ", storage_offset);
-    }
+    AT_CHECK(storage_offset >=0, "as_strided(): storage_offset must be non-negative, but got ", storage_offset);
     int64_t max = storage_offset;
     for (int64_t d = 0; d < size.size(); d++) {
       auto s = stride[d];
@@ -3769,17 +3767,16 @@
         max += (size[d] - 1) * s;
       }
     }
-    if (max > self_->tensor->storage->size) {
-      AT_ERROR("as_strided(): expected maximum index computed from target sizes and strides "
-               "to be in input tensor's storage range, but got max index = ", max,
-               " and storage size = ", static_cast<int64_t>(self_->tensor->storage->size));
-    }
+    AT_CHECK(max < self_->tensor->storage->size,
+             "as_strided(): expected maximum index computed from target sizes and strides "
+             "to be in input tensor's storage range, but got max index = ", max,
+             " and storage size = ", static_cast<int64_t>(self_->tensor->storage->size));
     ${THTensor}_setStorage(${state,}result_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
     result_->maybeScalar(size.size() == 0);
 ]]
 
 [[
-  name: as_strided_
+  name: _as_strided_
   variants: [method]
   cpu_half: True
   return: argument 0
@@ -3793,9 +3790,7 @@
     if (storage_offset == -1) {
       storage_offset = self_->tensor->storageOffset;
     }
-    if (storage_offset < 0) {
-      AT_ERROR("as_strided(): storage_offset must be non-negative, but got ", storage_offset);
-    }
+    AT_CHECK(storage_offset >=0, "as_strided(): storage_offset must be non-negative, but got ", storage_offset);
     int64_t max = storage_offset;
     for (int64_t d = 0; d < size.size(); d++) {
       auto s = stride[d];
@@ -3803,11 +3798,10 @@
         max += (size[d] - 1) * s;
       }
     }
-    if (max > self_->tensor->storage->size) {
-      AT_ERROR("as_strided(): expected maximum index computed from target sizes and strides "
-               "to be in input tensor's storage range, but got max index = ", max,
-               " and storage size = ", static_cast<int64_t>(self_->tensor->storage->size));
-    }
+    AT_CHECK(max < self_->tensor->storage->size,
+             "as_strided(): expected maximum index computed from target sizes and strides "
+             "to be in input tensor's storage range, but got max index = ", max,
+             " and storage size = ", static_cast<int64_t>(self_->tensor->storage->size));
     ${THTensor}_setStorage(${state,}self_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
     self_->maybeScalar(size.size() == 0);
 ]]

@@ -156,7 +156,7 @@ std::shared_ptr<Function>& Variable::ViewImpl::get_grad_fn() {
   auto current_version = version_counter_.current_version();
   if (attr_version != current_version) {
     TORCH_ASSERT(output_nr_ == 0);
-    auto fn = std::make_shared<generated::AsStridedBackward>();
+    auto fn = std::make_shared<generated::AsStridedBackwardUnsafe>();
     fn->self_geometry = at::TensorGeometry(base_);
     fn->size = sizes();
     fn->stride = strides();
