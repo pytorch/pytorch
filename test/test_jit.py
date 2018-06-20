@@ -1201,6 +1201,21 @@ class TestScript(JitTestCase):
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
+    # TODO: renable when we support passing literals to script fns
+    @unittest.expectedFailure
+    def test_literal_xfail(self):
+        def func4(a, b):
+            c = 0, (0, 0)
+            x = True
+            while x:
+                x = False
+                c = a, (a, b)
+            d, e = c
+            f, g = e
+            return d + f + g
+
+        self.checkScript(func4, (a, b), optimize=True)
+
     def test_literal(self):
         def func(a, b):
             c = [a, b]
@@ -1218,24 +1233,11 @@ class TestScript(JitTestCase):
             f, g = e
             return d + f + g
 
-        def func4(a, b):
-            c = 0, (0, 0)
-            x = True
-            while x:
-                x = False
-                c = a, (a, b)
-            d, e = c
-            f, g = e
-            return d + f + g
-
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b), optimize=True)
         self.checkScript(func3, (a, b), optimize=True)
-
-        # TODO: renable when we support passing literals to script fns
-        # self.checkScript(func4, (a, b), optimize=True)
 
     def test_expand(self):
         @torch.jit.script
@@ -2716,19 +2718,16 @@ def func(t):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
+    # TODO: Use this when we support passing literals to script fns
+    @unittest.expectedFailure
     def test_script_kwargs_fn_call(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
                 pass
 
-            # TODO: Use this when we support passing literals to script fns
-            # @torch.jit.script_method
-            # def call_foo(self, input):
-            #     return self.foo(input=input, bar=1)
-
             @torch.jit.script_method
             def call_foo(self, input):
-                return self.foo(input=input, bar=input)
+                return self.foo(input=input, bar=1)
 
             @torch.jit.script_method
             def foo(self, bar, input):
