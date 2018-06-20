@@ -3118,7 +3118,8 @@ class TestScript(JitTestCase):
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
     def test_reassign_module_lhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'self\' because it has type value. Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'self\' because it has type '
+                                                  'value. Only reassignments to first-class values are allowed'):
             class ReassignSelfLHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
@@ -3129,7 +3130,8 @@ class TestScript(JitTestCase):
             ReassignSelfLHS()
 
     def test_reassign_module_rhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'x\' to a value of type module. Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'x\' to a value of type module.'
+                                                  ' Only reassignments to first-class values are allowed'):
             class ReassignSelfRHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
@@ -3205,7 +3207,8 @@ class TestScript(JitTestCase):
             ''')
 
     def test_single_starred_lhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence of another non-starred expression'):
+        with self.assertRaisesRegex(RuntimeError, 'A Starred expression may only appear on the lhs within the presence'
+                                                  'of another non-starred expression'):
             cu = torch.jit.CompilationUnit('''
             def single_starred_lhs(x):
                 a = (x, x, x)
@@ -3214,7 +3217,8 @@ class TestScript(JitTestCase):
             ''')
 
     def test_multi_reduction(self):
-        with self.assertRaisesRegex(RuntimeError, 'reductions are only allowed when there is a single variable on the left-hand side'):
+        with self.assertRaisesRegex(RuntimeError, 'reductions are only allowed when there is a single variable on'
+                                                  'the left-hand side'):
             cu = torch.jit.CompilationUnit('''
             def multi_reduction(x):
                 a, b += x
@@ -3269,6 +3273,7 @@ class TestScript(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'cannot be used as a tuple'):
             def test_fn():
                 return 3
+
             @torch.jit.script
             def wrong_use_as_tuple(self):
                 a, b = test_fn
@@ -3294,6 +3299,7 @@ class TestScript(JitTestCase):
             # the function as inputs (including those with defaults) and not kwargs
             def test_fn():
                 return 3
+
             @torch.jit.script
             def wrong_python_kwarg_call(self):
                 return test_fn(attr=6)
@@ -3310,6 +3316,7 @@ class TestScript(JitTestCase):
     def test_wrong_module_attr_lookup(self):
         with self.assertRaisesRegex(RuntimeError, 'unsupported attribute lookup on'):
             import io
+
             @torch.jit.script
             def wrong_module_attr_lookup():
                 return io.BytesIO
@@ -3317,9 +3324,11 @@ class TestScript(JitTestCase):
     def test_wrong_method_call_inputs(self):
         with self.assertRaisesRegex(RuntimeError, 'argument \'y\' not provided'):
             class SomeModule(torch.jit.ScriptModule):
+
                 @torch.jit.script_method
                 def foo(self, x, y):
                     return x
+
                 @torch.jit.script_method
                 def forward(self, x, y):
                     return self.foo(x)
