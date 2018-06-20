@@ -720,8 +720,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   return std::make_tuple(output, hy, cy, reserve, weight_buf);
 }
 
-std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_
-(
+std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
     const Tensor& input_r, const Tensor& weight_buf, const Tensor& hx, const Tensor& cx,
     const Tensor& output_r, const Tensor& grad_output_r, const Tensor& grad_hy,
     const Tensor& grad_cy,
