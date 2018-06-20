@@ -7630,7 +7630,7 @@ def parse_args():
 
 if __name__ == '__main__':
     options = parse_args()
-    if options.shard != None:
+    if options.shard is not None:
         def load_tests(loader, tests, pattern):
             test_suite = unittest.TestSuite()
             for test_group in tests:
