@@ -1,4 +1,5 @@
 import unittest
+import sys
 
 import torch
 import torch.utils.cpp_extension
@@ -104,12 +105,16 @@ class TestCppExtension(common.TestCase):
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not found")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
+        if sys.platform == 'win32':
+            extra_ldflags=['cudnn.lib']
+        else:
+            extra_ldflags=['-lcudnn']
         module = torch.utils.cpp_extension.load(
             name='torch_test_cudnn_extension',
             sources=[
                 'cpp_extensions/cudnn_extension.cpp'
             ],
-            extra_cuda_cflags=['-O2'],
+            extra_ldflags=extra_ldflags,
             verbose=True,
             with_cuda=True)
 
