@@ -777,13 +777,16 @@ Applies element-wise :math:`\text{LogSigmoid}(x) = \log \left(\frac{1}{1 + \exp(
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
-hardshrink = _add_docstr(torch._C._nn.hardshrink, r"""
-hardshrink(input, lambd=0.5) -> Tensor
 
-Applies the hard shrinkage function element-wise
+def hardshrink(input, lambd=0.5):
+    r"""
+    hardshrink(input, lambd=0.5) -> Tensor
 
-See :class:`~torch.nn.Hardshrink` for more details.
-""")
+    Applies the hard shrinkage function element-wise
+
+    See :class:`~torch.nn.Hardshrink` for more details.
+    """
+    return torch.hardshrink(input, lambd)
 
 
 def tanhshrink(input):
@@ -2060,7 +2063,8 @@ def assert_int_or_pair(arg, arg_name, message):
 
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Creates array of convolution patches from :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Unfold` for details
     """
 
@@ -2078,7 +2082,8 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Combines array of convolution patches to :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Fold` for details
     """
     if input is not None and input.dim() == 3:

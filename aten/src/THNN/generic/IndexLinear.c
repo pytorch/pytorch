@@ -24,8 +24,8 @@
 static bool THNN_(checkKeysValues)(THLongTensor* keys, THTensor* values)
 {
   return THLongTensor_size(keys, 0) == THTensor_(nElement)(values)
-                && THTensor_(nDimension)(values) == 1
-                && THLongTensor_nDimension(keys) == 1;
+                && THTensor_(_nDimension)(values) == 1
+                && THLongTensor__nDimension(keys) == 1;
 }
 
 void THNN_(IndexLinear_updateOutput)(

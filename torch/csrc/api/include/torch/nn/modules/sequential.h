@@ -3,6 +3,7 @@
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/any.h>
+#include <torch/nn/pimpl.h>
 
 #include <torch/csrc/autograd/variable.h>
 
@@ -20,7 +21,7 @@ namespace nn {
 /// A `Sequential` module is a container for any number of other modules. Its
 /// `forward()` method chains outputs to inputs and returns the final output.
 /// The `Sequential` class reference semantics.
-class Sequential : public CloneableModule<Sequential> {
+class Sequential : public Cloneable<Sequential> {
  public:
   using Iterator = std::vector<std::shared_ptr<AnyModule>>::iterator;
 
@@ -88,14 +89,21 @@ class Sequential : public CloneableModule<Sequential> {
   /// Adds a new `Module` to the `Sequential` container, moving or copying it
   /// into a `shared_ptr` internally. This method allows passing value types,
   /// and letting the container deal with the boxing. This means you can write
-  /// `Sequential(Linear(3, 4), ReLU())` instead of
-  /// `Sequential(std::make_shared<Linear>(3, 4), std::make_shared<ReLU>())`.
-  template <typename M>
+  /// `Sequential(Module(3, 4))` instead of
+  /// `Sequential(std::make_shared<Module>(3, 4))`.
+  template <typename M, typename = torch::detail::disable_if_module_holder_t<M>>
   void push_back(M&& module) {
     // Need to get rid of any reference components for make_unique.
     using Type = typename std::remove_reference<M>::type;
     // Here we move (or copy) the module into a new shared_ptr.
     push_back(std::make_shared<Type>(std::forward<M>(module)));
+  }
+
+  /// Unwraps the contained module of a `ModuleHolder` and adds it to the
+  /// `Sequential`.
+  template <typename M>
+  void push_back(const ModuleHolder<M>& module_holder) {
+    push_back(module_holder.get());
   }
 
   /// Returns an iterator to the start of the `Sequential`.

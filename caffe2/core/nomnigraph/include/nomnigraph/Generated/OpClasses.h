@@ -619,6 +619,28 @@ class Flatten : public NeuralNetOperator {
  private:
 };
 
+class NCHW2NHWC : public NeuralNetOperator {
+ public:
+  NCHW2NHWC() : NeuralNetOperator(NNKind::NCHW2NHWC) {}
+
+  ~NCHW2NHWC() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(NCHW2NHWC);
+
+ private:
+};
+
+class NHWC2NCHW : public NeuralNetOperator {
+ public:
+  NHWC2NCHW() : NeuralNetOperator(NNKind::NHWC2NCHW) {}
+
+  ~NHWC2NCHW() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(NHWC2NCHW);
+
+ private:
+};
+
 class Int8Quantize : public NeuralNetOperator {
  public:
   Int8Quantize() : NeuralNetOperator(NNKind::Int8Quantize) {}

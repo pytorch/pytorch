@@ -106,7 +106,13 @@ public:
   Vec256<double> sin() const {
     return map(std::sin);
   }
+  Vec256<double> sinh() const {
+    return map(std::sinh);
+  }
   Vec256<double> cos() const {
+    return map(std::cos);
+  }
+  Vec256<double> cosh() const {
     return map(std::cos);
   }
   Vec256<double> ceil() const {
@@ -118,6 +124,9 @@ public:
   Vec256<double> round() const {
     return _mm256_round_pd(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
+  Vec256<double> tan() const {
+    return map(std::tan);
+  }
   Vec256<double> tanh() const {
     return Vec256<double>(Sleef_tanhd4_u10(values));
   }
@@ -126,6 +135,9 @@ public:
   }
   Vec256<double> sqrt() const {
     return _mm256_sqrt_pd(values);
+  }
+  Vec256<double> rsqrt() const {
+    return _mm256_div_pd(_mm256_set1_pd(1), _mm256_sqrt_pd(values));
   }
 };
 

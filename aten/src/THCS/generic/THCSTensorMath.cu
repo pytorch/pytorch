@@ -25,19 +25,19 @@ THCudaIntTensor *THCSTensor_(toCSR)(THCState *state, THCIndexTensor *rowIndices,
 
 void THCSTensor_(zero)(THCState *state, THCSTensor *self) {
   if (self->indices->_dim()) {
-    THCIndexTensor_(resizeNd)(state, self->indices, 0, NULL, NULL);
+#ifndef USE_TH_SIZE_ZERO_DIM
+    int64_t size[] = {0};
+    THCIndexTensor_(resizeNd)(state, self->indices, 1, size, NULL);
+#else
+    int64_t size[] = {1, 0};
+    THCIndexTensor_(resizeNd)(state, self->indices, 2, size, NULL);
+#endif
   }
   if (self->values->_dim()) {
-    THCTensor_(resizeNd)(state, self->values, 0, NULL, NULL);
+    int64_t size[] = {0};
+    THCTensor_(resizeNd)(state, self->values, 1, size, NULL);
   }
   self->nnz = 0;
-}
-
-void THCSTensor_(zeros)(THCState *state, THCSTensor *r_, THLongStorage *size)
-{
-  THCAssertSameGPU(THCSTensor_(checkGPU)(state, 1, 1, r_));
-  THCSTensor_(resize)(state, r_, size);
-  THCSTensor_(zero)(state, r_);
 }
 
 void THCSTensor_(zerosLike)(THCState *state, THCSTensor *r_, THCSTensor *input)
@@ -253,7 +253,7 @@ void THCSTensor_(spcadd)(THCState *state, THCTensor *r_, THCTensor *dense, real 
 
   THCIndexTensor *indices = THCSTensor_(newIndices)(state, sparse);
   THCTensor *values = THCSTensor_(newValues)(state, sparse);
-  int64_t nDim = THCTensor_(nDimension)(state, dense);
+  int64_t nDim = THCTensor_(_nDimension)(state, dense);
   int64_t nDimI = THCSTensor_(nDimensionI)(state, sparse);
 
  if (THCSTensor_(isCoalesced)(state, sparse)) {

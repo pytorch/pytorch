@@ -430,7 +430,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         self.run_model_test(super_resolution_net, train=False,
                             batch_size=BATCH_SIZE, state_dict=state_dict,
-                            input=x, use_gpu=False)
+                            input=x, use_gpu=False, atol=1e-6)
 
     @unittest.skip("This model takes too much memory")
     def test_vgg16(self):

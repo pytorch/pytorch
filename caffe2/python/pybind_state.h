@@ -43,7 +43,7 @@ void addObjectMethods(pybind11::module& m);
 // Get current workspace
 Workspace* GetCurrentWorkspace();
 
-class BlobFetcherBase {
+class CAFFE2_EXPORT BlobFetcherBase {
  public:
   struct FetchedBlob {
     pybind11::object obj;
@@ -60,7 +60,7 @@ class BlobFeederBase {
   Feed(const DeviceOption& option, PyArrayObject* array, Blob* blob) = 0;
 };
 
-CAFFE_DECLARE_TYPED_REGISTRY(
+CAFFE2_EXPORT CAFFE_DECLARE_TYPED_REGISTRY(
     BlobFetcherRegistry,
     CaffeTypeId,
     BlobFetcherBase,
@@ -168,7 +168,7 @@ class TensorFeeder : public BlobFeederBase {
     const auto npy_type = PyArray_TYPE(array);
     const TypeMeta& meta = NumpyTypeToCaffe(npy_type);
     CAFFE_ENFORCE(
-        meta.id() != 0,
+        meta.id() != CaffeTypeId::uninitialized(),
         "This numpy data type is not supported: ",
         PyArray_TYPE(array),
         ".");

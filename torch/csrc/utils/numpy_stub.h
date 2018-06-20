@@ -2,7 +2,7 @@
 
 #include "torch/csrc/python_headers.h"
 
-#ifdef WITH_NUMPY
+#ifdef USE_NUMPY
 
 #if !defined(NO_IMPORT_ARRAY) && !defined(WITH_NUMPY_IMPORT_ARRAY)
 #define NO_IMPORT_ARRAY
@@ -18,4 +18,4 @@
 
 #include <numpy/arrayobject.h>
 
-#endif // WITH_NUMPY
+#endif // USE_NUMPY

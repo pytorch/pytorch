@@ -5,7 +5,7 @@
 typedef struct THCSTensor THCSTensor;
 
 /**** access methods ****/
-THC_API int THCSTensor_(nDimension)(THCState *state, const THCSTensor *self);
+THC_API int THCSTensor_(_nDimension)(THCState *state, const THCSTensor *self);
 THC_API int THCSTensor_(nDimensionI)(THCState *state, const THCSTensor *self);
 THC_API int THCSTensor_(nDimensionV)(THCState *state, const THCSTensor *self);
 THC_API int64_t THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim);
@@ -32,12 +32,12 @@ THC_API THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self,
 /**** reshaping methods ***/
 THC_API int THCSTensor_(isSameSizeAs)(THCState *state, const THCSTensor *self, const THCSTensor* src);
 THC_API int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, const THCTensor* src);
-THC_API THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size);
 THC_API THCSTensor *THCSTensor_(resizeAs)(THCState *state, THCSTensor *self, THCSTensor *src);
 THC_API THCSTensor *THCSTensor_(resize1d)(THCState *state, THCSTensor *self, int64_t size0);
 THC_API THCSTensor *THCSTensor_(resize2d)(THCState *state, THCSTensor *self, int64_t size0, int64_t size1);
 THC_API THCSTensor *THCSTensor_(resize3d)(THCState *state, THCSTensor *self, int64_t size0, int64_t size1, int64_t size2);
 THC_API THCSTensor *THCSTensor_(resize4d)(THCState *state, THCSTensor *self, int64_t size0, int64_t size1, int64_t size2, int64_t size3);
+THC_API THCSTensor *THCSTensor_(resizeLegacy)(THCState *state, THCSTensor *self, THLongStorage *size);
 
 THC_API THCTensor *THCSTensor_(toDense)(THCState *state, THCSTensor *self);
 THC_API void THCSTensor_(copy)(THCState *state, THCSTensor *self, THCSTensor *src);

@@ -20,7 +20,7 @@ set(Caffe2_GPU_PYTHON_SRCS
 
 # ---[ HIP files
 set(Caffe2_HIP_PYTHON_SRCS
-    ${Caffe2_HIP_PYTHON_SRCS}
+    ${Caffe2_CPU_PYTHON_SRCS}
     "/pybind_state_hip.cc"
 )
 

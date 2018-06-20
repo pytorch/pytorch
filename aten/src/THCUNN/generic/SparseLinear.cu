@@ -41,7 +41,7 @@ void THNN_(SparseLinear_updateOutput)(
   int64_t inDim = THCTensor_(size)(state, weight, 1);
 
   THArgCheck(THNN_(checkInput)(input), 2, "input size must be nnz x 3");
-  THArgCheck(THCTensor_(nDimension)(state, output) == 2, 3, "output must be batchsize x outputsize");
+  THArgCheck(THCTensor_(_nDimension)(state, output) == 2, 3, "output must be batchsize x outputsize");
   THArgCheck(THNN_(checkSize1D)(bias, outDim), 5, "bias size wrong");
 
   weight = THCTensor_(newContiguous)(state, weight);
