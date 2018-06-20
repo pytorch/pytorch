@@ -14,39 +14,30 @@ namespace at {
 struct DefaultTensorOptions {
   /// Under a lock, assigns a `TensorOptions` object to the default instance.
   static void assign(const TensorOptions& new_options) {
-    std::lock_guard<std::mutex> lock(mutex());
-    options() = new_options;
+    std::lock_guard<std::mutex> lock(mutex_);
+    options_ = new_options;
   }
 
   /// Under a lock, copies the default `TensorOptions` object and returns this
   /// copy.
   static TensorOptions copy() {
-    std::lock_guard<std::mutex> lock(mutex());
-    auto local_copy = options();
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto local_copy = options_;
     return local_copy;
   }
 
   /// Under a lock, assigns a `TensorOptions` object to the default instance,
   /// and returns the instance that was previously in place.
   static TensorOptions exchange(const TensorOptions& new_options) {
-    std::lock_guard<std::mutex> lock(mutex());
-    auto old_options = options();
-    options() = new_options;
+    std::lock_guard<std::mutex> lock(mutex_);
+    auto old_options = options_;
+    options_ = new_options;
     return old_options;
   }
 
  private:
-  static TensorOptions& options() {
-    // Don't invoke the default constructor here, since `TensorOptions`'s
-    // default constructor calls into `DefaultTensorOptions` itself!
-    static TensorOptions options(
-        kFloat, Device::Type::CPU, kStrided, /*requires_grad=*/false);
-    return options;
-  }
-
-  static std::mutex& mutex() {
-    static std::mutex mutex;
-    return mutex;
-  }
+  // Defined in TensorOptions.cpp.
+  static TensorOptions options_;
+  static std::mutex mutex_;
 };
 } // namespace at
