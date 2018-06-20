@@ -810,6 +810,13 @@ frac_() -> Tensor
 In-place version of :meth:`~Tensor.frac`
 """)
 
+add_docstr_all('flatten',
+               r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+see :func:`torch.flatten`
+""")
+
 add_docstr_all('gather',
                r"""
 gather(dim, index) -> Tensor
