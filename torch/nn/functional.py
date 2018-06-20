@@ -1965,7 +1965,8 @@ def resize_images(input, size=None, scale_factor=None, mode='nearest', align_cor
         if size is not None:
             return size
         scale_factors = _ntuple(dim)(scale_factor)
-        return [math.floor(input.size(i + 2) * scale_factors[i]) for i in range(dim)]
+        # math.floor might return float in py2.7
+        return [int(math.floor(input.size(i + 2) * scale_factors[i])) for i in range(dim)]
 
     if mode in ('nearest', 'area'):
         if align_corners is not None:

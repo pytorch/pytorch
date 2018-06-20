@@ -4949,7 +4949,7 @@ class TestNN(NNTestCase):
 
     def test_resize_images(self):
         def _test_resize_images_helper(in_t, scale_factor, layer):
-                out_size = math.floor(in_t.shape[-1] * scale_factor)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                 dim = len(in_t.shape) - 2
                 out_shape = [1, 1] + [out_size] * dim
                 out_t = m(in_t)
