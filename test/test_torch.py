@@ -5429,6 +5429,43 @@ class TestTorch(TestCase):
                     ii[dim] = slice(0, idx.size(dim) + 1)
                     idx[tuple(ii)] = torch.randperm(dim_size)[0:elems_per_row]
 
+    def test_flatten(self):
+        src = torch.randn(5, 5, 5, 5)
+        flat = src.flatten(0, -1)
+        self.assertEqual(flat.shape, torch.Size([625]))
+        self.assertEqual(src.view(-1), flat.view(-1))
+
+        flat = src.flatten(0, 2)
+        self.assertEqual(flat.shape, torch.Size([125, 5]))
+        self.assertEqual(src.view(-1), flat.view(-1))
+
+        flat = src.flatten(0, 1)
+        self.assertEqual(flat.shape, torch.Size([25, 5, 5]))
+        self.assertEqual(src.view(-1), flat.view(-1))
+
+        flat = src.flatten(1, 2)
+        self.assertEqual(flat.shape, torch.Size([5, 25, 5]))
+        self.assertEqual(src.view(-1), flat.view(-1))
+
+        flat = src.flatten(2, 3)
+        self.assertEqual(flat.shape, torch.Size([5, 5, 25]))
+        self.assertEqual(src.view(-1), flat.view(-1))
+
+        flat = src.flatten(-2, -1)
+        self.assertEqual(flat.shape, torch.Size([5, 5, 25]))
+        self.assertEqual(src.view(-1), flat.view(-1))
+
+        flat = src.flatten(2, 2)
+        self.assertEqual(flat, src)
+
+        # out of bounds index
+        with self.assertRaisesRegex(RuntimeError, 'dimension out of range'):
+            src.flatten(5, 10)
+
+        # invalid start and end
+        with self.assertRaisesRegex(RuntimeError, 'start_dim cannot come after end_dim'):
+            src.flatten(2, 0)
+
     @staticmethod
     def _test_gather(self, cast, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
