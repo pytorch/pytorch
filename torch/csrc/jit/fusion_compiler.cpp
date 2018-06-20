@@ -70,8 +70,8 @@ typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;
 typedef long long int int64_t;
-#endif
 ${HalfHeader}
+#endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {
@@ -99,8 +99,8 @@ void ${kernelName}(IndexType totalElements, ${formals}) {
 
 auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstddef>
+#include <cstdint>
 #include <math.h>
-#include <iostream>
 ${type_declarations}
 
 #define OMP_THRESHOLD 100000
@@ -748,7 +748,7 @@ static const std::string compile_string =
 #ifndef __PPC64__
   "-march=native "
 #endif
-  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\"";
+  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
 static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_file, const std::string & so_file) {
   TemplateEnv env;
