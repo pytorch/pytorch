@@ -159,11 +159,11 @@ struct GraphFuser {
     return (allSupportedList(node->inputs()) && allSupportedList(node->outputs()));
   }
 
-  bool isFusable(Node* node) {
+  bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
     if (!isSimpleMap(node)) return false;
-    switch (node->kind()) {
+    switch (node->kind()){
 //comparison operators produce Byte type, and it's ok, check only inputs
       case aten::le:
       case aten::ge:

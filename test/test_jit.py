@@ -395,7 +395,7 @@ class TestJit(JitTestCase):
         mask = (x < 0).type_as(x)
         z = z * mask + y
         return z
-    
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_comparison_gt_lt(self):
@@ -418,7 +418,7 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(f, (x, y))
-    
+
     @staticmethod
     def fn_test_relu(x, y):
         return F.relu(x + .5 * y)
@@ -431,7 +431,7 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(self.fn_test_relu, (x, y))
 
-    @staticmethod 
+    @staticmethod
     def fn_test_exp(x, y):
         return (x + .5 * y).exp()
 
@@ -449,22 +449,22 @@ class TestJit(JitTestCase):
     def test_cuda_half(self):
         x = torch.randn(4, 4, dtype=torch.half, device='cuda')
         y = torch.randn(4, 4, dtype=torch.half, device='cuda')
-        
+
         funcs = [
-            self.fn_test_comparison_gt_lt, 
-            self.fn_test_relu, 
+            self.fn_test_comparison_gt_lt,
+            self.fn_test_relu,
             self.fn_test_exp
         ]
-        
-        #Note: Non fused inputs must be float to prevent loss of precision
+
+        # Note: Non fused inputs must be float to prevent loss of precision
         inputs = (x.float(), y.float())
         fusion_inputs = (x, y)
         for fn in funcs:
             local_inputs = [x.clone().requires_grad_() for x in inputs]
-            local_fusion_inputs = [x.clone().requires_grad_() for x in fusion_inputs]    
-            
+            local_fusion_inputs = [x.clone().requires_grad_() for x in fusion_inputs]
+
             # Verifies outputs
-            fusion = torch.jit.trace(*local_fusion_inputs, optimize = True)(fn)
+            fusion = torch.jit.trace(*local_fusion_inputs, optimize=True)(fn)
             outputs = fn(*local_inputs)
             fusion_outputs = fusion(*local_fusion_inputs)
             outputs_half = [x.half() for x in outputs]

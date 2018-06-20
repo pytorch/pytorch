@@ -124,7 +124,7 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 }
 )");
 
-auto half_support_literal  = R"(    
+constexpr auto half_support_literal  = R"(    
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
 #if defined(__cplusplus)
@@ -197,7 +197,7 @@ std::string valueName(Value * n) {
     (std::to_string(s.toDouble()) + "f");
 }
 
-const char* scalarTypeName(at::ScalarType type) {
+const char * scalarTypeName(at::ScalarType type) {
   if (type == at::ScalarType::Half) {
     return "half";
   }
@@ -309,11 +309,10 @@ std::string encodeRHS(Node * n) {
   return format(str, env);
 }
 
-std::vector<ConcatDesc> emitCompilationUnit(
-  std::ostream& out
-, const std::string& name
-, AnnotatedGraph& agraph
-, bool use_cuda) {
+std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
+                                            const std::string & name,
+                                            AnnotatedGraph & agraph,
+                                            bool use_cuda) {
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -324,21 +323,21 @@ std::vector<ConcatDesc> emitCompilationUnit(
   std::stringstream tensorOffsets;
   std::vector<std::string> formals;
   std::vector<std::string> argument_loads;
-  auto emitFormal = [&](Value* n, const TensorDesc& desc) {
+  auto emitFormal = [&](Value * n, const TensorDesc & desc) {
     std::string tensor = "t" + std::to_string(formals.size()); //can't be unique() because Param may be an output
     size_t nDim = desc.nDim();
     emitIndexingFor(tensorOffsets, tensor, nDim,  desc.lastIsContiguous());
     env.s("tensor",tensor);
     env.d("formal_index", formals.size() + 1); // + 1 because the first argument is the linearIndex
     env.d("nDim",nDim);
-    env.s("scalar_type", scalarTypeName(desc.scalar_type));
+    env.s("scalar_type",scalarTypeName(desc.scalar_type));
     formals.push_back(format("TensorInfo<${scalar_type},${nDim}> ${tensor}",env));
     argument_loads.push_back(format("*static_cast<TensorInfo<${scalar_type},${nDim}>*>(args[${formal_index}])",env));
   };
   {
     size_t i = 0;
-    for (auto p : subgraph.inputs())
-      emitFormal(p, agraph.input_desc[i++]);
+    for(auto p : subgraph.inputs())
+      emitFormal(p,agraph.input_desc[i++]);
   }
   
   std::vector<ConcatDesc> concat_desc;
@@ -366,7 +365,7 @@ std::vector<ConcatDesc> emitCompilationUnit(
   bool has_half_tensor = false;
   size_t formal_count = 0;
   for(auto p : subgraph.inputs()) {
-    env.s("node", valueName(p));
+    env.s("node",valueName(p));
     env.d("formal",formal_count++);
 
     // Acquires and converts (if needed) inputs
@@ -419,7 +418,7 @@ std::vector<ConcatDesc> emitCompilationUnit(
   env.v("formals",formals);
   env.v("argument_loads",argument_loads);
   env.s("type_declarations", type_declarations_template.format(env));
-  if (use_cuda) {
+  if(use_cuda) {
     out << cuda_compilation_unit_template.format(env);
   } else {
     out << cpu_compilation_unit_template.format(env);
@@ -598,7 +597,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
     std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
-    const std::vector<const char*> args = {"--std=c++11", compute.c_str()};
+    std::vector<const char *> args = {"--std=c++11", compute.c_str()};
     nvrtcResult result = nvrtcCompileProgram(program, args.size(), args.data());
     if (result == NVRTC_ERROR_COMPILATION) {
       size_t logsize;
