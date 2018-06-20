@@ -9,10 +9,10 @@ THC_API void THCTensor_(topk)(THCState* state,
                                int64_t k, int dim, int dir, int sorted) {
   THAssert(topK != NULL && indices != NULL && input != NULL);
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input));
-  THArgCheck(THCTensor_(nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  int64_t dims = THCudaLongTensor_nDimension(state, indices);
+  THArgCheck(THCTensor_(_nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  int64_t dims = THCudaLongTensor__nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  int numDims = THCTensor_(nDimension)(state, input);
+  int numDims = THCTensor_(_nDimension)(state, input);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
   THArgCheck(dim >= 0 && dim < numDims, 6, "dim not in range");

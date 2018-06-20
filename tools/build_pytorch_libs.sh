@@ -203,7 +203,8 @@ function build_nccl() {
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
+              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
+              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake"
   ${CMAKE_INSTALL}
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"

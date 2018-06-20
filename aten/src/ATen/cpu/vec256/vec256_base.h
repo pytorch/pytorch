@@ -144,6 +144,9 @@ struct Vec256 {
   Vec256<T> sqrt() const {
     return map(std::sqrt);
   }
+  Vec256<T> rsqrt() const {
+    return map([](T x) { return 1 / std::sqrt(x); });
+  }
 };
 
 template <class T> Vec256<T> operator+(const Vec256<T> &a, const Vec256<T> &b) {

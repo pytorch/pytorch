@@ -203,7 +203,8 @@ bool test_mnist(
     const auto backend = useGPU ? at::kCUDA : at::kCPU;
     auto inp =
         torch::empty({batch_size, 1, trdata.size(2), trdata.size(3)}, backend);
-    auto lab = torch::empty({batch_size}, at::device(backend).dtype(torch::kInt64));
+    auto lab =
+        torch::empty({batch_size}, at::device(backend).dtype(torch::kInt64));
     for (auto p = 0U; p < shuffled_inds.size() - batch_size; p++) {
       inp[p % batch_size] = trdata[shuffled_inds[p]];
       lab[p % batch_size] = trlabel[shuffled_inds[p]];
@@ -274,9 +275,7 @@ TEST_CASE("integration") {
         rewards[i] = R;
       }
       auto r_t =
-          at::CPU(torch::kFloat32)
-              .tensorFromBlob(
-                  rewards.data(), {static_cast<int64_t>(rewards.size())});
+          at::from_blob(rewards.data(), {static_cast<int64_t>(rewards.size())});
       r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
 
       std::vector<at::Tensor> policy_loss;
@@ -369,12 +368,12 @@ TEST_CASE("integration/mnist", "[cuda]") {
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  auto batchnorm2d = model->add(
-      BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
+  auto batchnorm2d =
+      model->add(BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  auto batchnorm1 = model->add(
-      BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
+  auto batchnorm1 =
+      model->add(BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](Variable x) {

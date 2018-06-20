@@ -18,7 +18,7 @@ static inline void THNN_(Im2Col_shapeCheck)(
   THArgCheck(sW > 0 && sH > 0, 10,
              "stride should be greater than zero, but got sH: %d sW: %d", sH, sW);
 
-  int ndim = THCTensor_(nDimension)(state, input);
+  int ndim = THCTensor_(_nDimension)(state, input);
   THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
                   "3D or 4D input tensor expected but got: %s");
 

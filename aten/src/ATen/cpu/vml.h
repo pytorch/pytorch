@@ -14,7 +14,7 @@
 #include <cstring>
 #include <iostream>
 
-#if AT_MKL_ENABLED()
+#if AT_MKL_ENABLED() && !defined(__APPLE__)
 #include <mkl.h>
 #endif
 
@@ -23,16 +23,6 @@ namespace vml {
 namespace {
 
 using namespace vec256;
-
-template <typename scalar_t>
-inline void vabs(scalar_t* out, scalar_t* in, int64_t size) {
-  parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
-    map([](const Vec256<scalar_t>& x) { return x.abs(); },
-        out + begin,
-        in + begin,
-        end - begin);
-  });
-}
 
 template <typename scalar_t>
 inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
@@ -47,7 +37,7 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   });
 }
 
-  // NB: We ignore numerical errors by convention and leave them to the user
+// NB: We ignore numerical errors by convention and leave them to the user
 
 #define IMPLEMENT_VML(op)                                               \
   template <typename scalar_t>                                          \
@@ -72,12 +62,14 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
     vmd##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_DEFAULT); \
   }
 
-#if AT_MKL_ENABLED()
+// NB: abs, cosh and sinh were temporarily disabled due to issues with Apple clang
+
+#if AT_MKL_ENABLED() && !defined(__APPLE__)
 IMPLEMENT_FLOAT_MKL_VML(acos, Acos)
 IMPLEMENT_FLOAT_MKL_VML(asin, Asin)
 IMPLEMENT_FLOAT_MKL_VML(atan, Atan)
 IMPLEMENT_FLOAT_MKL_VML(cos, Cos)
-IMPLEMENT_FLOAT_MKL_VML(cosh, Cosh)
+// IMPLEMENT_FLOAT_MKL_VML(cosh, Cosh)
 IMPLEMENT_FLOAT_MKL_VML(erf, Erf)
 IMPLEMENT_FLOAT_MKL_VML(exp, Exp)
 IMPLEMENT_FLOAT_MKL_VML(expm1, Expm1)
@@ -85,7 +77,7 @@ IMPLEMENT_FLOAT_MKL_VML(log, Ln)
 IMPLEMENT_FLOAT_MKL_VML(log10, Log10)
 IMPLEMENT_FLOAT_MKL_VML(log1p, Log1p)
 IMPLEMENT_FLOAT_MKL_VML(sin, Sin)
-IMPLEMENT_FLOAT_MKL_VML(sinh, Sinh)
+// IMPLEMENT_FLOAT_MKL_VML(sinh, Sinh)
 IMPLEMENT_FLOAT_MKL_VML(sqrt, Sqrt)
 IMPLEMENT_FLOAT_MKL_VML(tan, Tan)
 IMPLEMENT_FLOAT_MKL_VML(tanh, Tanh)
@@ -102,7 +94,7 @@ IMPLEMENT_VML(acos)
 IMPLEMENT_VML(asin)
 IMPLEMENT_VML(atan)
 IMPLEMENT_VML(cos)
-IMPLEMENT_VML(cosh)
+// IMPLEMENT_VML(cosh)
 IMPLEMENT_VML(erf)
 IMPLEMENT_VML(exp)
 IMPLEMENT_VML(expm1)
@@ -111,7 +103,7 @@ IMPLEMENT_VML(log10)
 IMPLEMENT_VML(log1p)
 IMPLEMENT_VML(log2)
 IMPLEMENT_VML(sin)
-IMPLEMENT_VML(sinh)
+// IMPLEMENT_VML(sinh)
 IMPLEMENT_VML(sqrt)
 IMPLEMENT_VML(tan)
 IMPLEMENT_VML(tanh)
