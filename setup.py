@@ -379,8 +379,8 @@ class build_deps(PytorchCommand):
 
         # Use copies instead of symbolic files.
         # Windows has very poor support for them.
-        sym_files = ['tools/shared/cwrap_common.py']
-        orig_files = ['aten/src/ATen/common_with_cwrap.py']
+        sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
+        orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
         for sym_file, orig_file in zip(sym_files, orig_files):
             if os.path.exists(sym_file):
                 os.remove(sym_file)
