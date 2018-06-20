@@ -6686,6 +6686,8 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
+        # check for wrap dim
+        self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(-1))
         # check for permute
         self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(0, 2))
         self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(2, 0))
@@ -6696,8 +6698,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: data.flip())
         # not allow size of flip dim > total dims
         self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
-        # not allow dim < 0
-        self.assertRaises(RuntimeError, lambda: data.flip(-1))
         # not allow dim > max dim
         self.assertRaises(RuntimeError, lambda: data.flip(3))
 
@@ -6755,9 +6755,9 @@ class TestTorch(TestCase):
         # test tensor with more than 2D
         data = torch.arange(1, 9, device=device).view(2, 2, 2)
         self.assertEqual(torch.tensor([2, 4, 1, 3, 6, 8, 5, 7]).view(2, 2, 2), data.rot90(1, [1, 2]))
+        self.assertEqual(data.rot90(1, [1, -1]), data.rot90(1, [1, 2]))
 
         # test for errors
-        self.assertRaises(RuntimeError, lambda: data.rot90(1, [-1, 0]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 3]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
