@@ -1,17 +1,17 @@
 /*
-* CuDNN ReLU extension. Simple function but contains the general structure of
-* most CuDNN extensions:
-* 1) Check arguments. at::check* functions provide a standard way to validate
-* input and provide pretty errors.
-* 2) Create descriptors. Most CuDNN functions require creating and setting a
-* variety of descriptors.
-* 3) Apply the CuDNN function.
-* 4) Destroy your descriptors.
-* 5) Return something (optional).
-*/
+ * CuDNN ReLU extension. Simple function but contains the general structure of
+ * most CuDNN extensions:
+ * 1) Check arguments. at::check* functions provide a standard way to validate
+ * input and provide pretty errors.
+ * 2) Create descriptors. Most CuDNN functions require creating and setting a
+ * variety of descriptors.
+ * 3) Apply the CuDNN function.
+ * 4) Destroy your descriptors.
+ * 5) Return something (optional).
+ */
 
-#include <torch/torch.h>
 #include <torch/csrc/cuda/cuda_check.h>
+#include <torch/torch.h>
 
 #include <ATen/ATen.h>
 #include <ATen/TensorUtils.h>
@@ -23,10 +23,10 @@
 
 // Name of function in python module and name used for error messages by
 // at::check* functions.
-const char *cudnn_relu_name = "cudnn_relu";
+const char* cudnn_relu_name = "cudnn_relu";
 
 // Check arguments to cudnn_relu
-void cudnn_relu_check(const at::Tensor &inputs, const at::Tensor &outputs) {
+void cudnn_relu_check(const at::Tensor& inputs, const at::Tensor& outputs) {
   // Create TensorArgs. These record the names and positions of each tensor as a
   // parameter.
   at::TensorArg arg_inputs(inputs, "inputs", 0);
@@ -44,7 +44,7 @@ void cudnn_relu_check(const at::Tensor &inputs, const at::Tensor &outputs) {
   at::checkSameSize(cudnn_relu_name, arg_inputs, arg_outputs);
 }
 
-void cudnn_relu(const at::Tensor &inputs, const at::Tensor &outputs) {
+void cudnn_relu(const at::Tensor& inputs, const at::Tensor& outputs) {
   // Most CuDNN extensions will follow a similar pattern.
   // Step 1: Check inputs
   cudnn_relu_check(inputs, outputs);
@@ -55,14 +55,21 @@ void cudnn_relu(const at::Tensor &inputs, const at::Tensor &outputs) {
   cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU;
   cudnnNanPropagation_t reluNanOpt = CUDNN_PROPAGATE_NAN;
   CUDNN_CHECK(cudnnCreateActivationDescriptor(&activationDesc));
-  CUDNN_CHECK(cudnnSetActivationDescriptor(activationDesc, mode, reluNanOpt,
-                                           /*coef=*/1.));
+  CUDNN_CHECK(cudnnSetActivationDescriptor(
+      activationDesc,
+      mode,
+      reluNanOpt,
+      /*coef=*/1.));
   // Step 3: Apply CuDNN function
   float alpha = 1.;
   float beta = 0.;
   CUDNN_CHECK(cudnnActivationForward(
-      cuDnn, activationDesc, &alpha, input_tensor_desc.desc(),
-      inputs.data_ptr(), &beta,
+      cuDnn,
+      activationDesc,
+      &alpha,
+      input_tensor_desc.desc(),
+      inputs.data_ptr(),
+      &beta,
       input_tensor_desc
           .desc(), // same size and type so we only need one descriptor
       outputs.data_ptr()));
