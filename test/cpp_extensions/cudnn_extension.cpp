@@ -31,10 +31,9 @@ void cudnn_relu_check(const at::Tensor& inputs, const at::Tensor& outputs) {
   // parameter.
   at::TensorArg arg_inputs(inputs, "inputs", 0);
   at::TensorArg arg_outputs(outputs, "outputs", 1);
-  // Check arguments.
-  // No need to return anything. These functions with throw an error if they
-  // fail.
-  // Messages are populated using information from TensorArgs.
+  // Check arguments. No need to return anything. These functions with throw an
+  // error if they fail. Messages are populated using information from
+  // TensorArgs.
   at::checkContiguous(cudnn_relu_name, arg_inputs);
   at::checkScalarType(cudnn_relu_name, arg_inputs, at::kFloat);
   at::checkBackend(cudnn_relu_name, arg_inputs.tensor, at::kCUDA);
@@ -46,19 +45,21 @@ void cudnn_relu_check(const at::Tensor& inputs, const at::Tensor& outputs) {
 
 void cudnn_relu(const at::Tensor& inputs, const at::Tensor& outputs) {
   // Most CuDNN extensions will follow a similar pattern.
-  // Step 1: Check inputs
+  // Step 1: Check inputs. This will throw an error if inputs are invalid, so no
+  // need to check return codes here.
   cudnn_relu_check(inputs, outputs);
   // Step 2: Create descriptors
   cudnnHandle_t cuDnn = at::native::getCudnnHandle();
-  at::native::TensorDescriptor input_tensor_desc(inputs, 4); // 4 is minimum dim
+  // Note: 4 is minimum dim for a TensorDescriptor. Input and output are same
+  // size and type and contiguous, so one descriptor is sufficient.
+  at::native::TensorDescriptor input_tensor_desc(inputs, 4);
   cudnnActivationDescriptor_t activationDesc;
-  cudnnActivationMode_t mode = CUDNN_ACTIVATION_RELU;
-  cudnnNanPropagation_t reluNanOpt = CUDNN_PROPAGATE_NAN;
+  // Note: Always check return value of cudnn functions using CUDNN_CHECK
   CUDNN_CHECK(cudnnCreateActivationDescriptor(&activationDesc));
   CUDNN_CHECK(cudnnSetActivationDescriptor(
       activationDesc,
-      mode,
-      reluNanOpt,
+      /*mode=*/CUDNN_ACTIVATION_RELU,
+      /*reluNanOpt=*/CUDNN_PROPAGATE_NAN,
       /*coef=*/1.));
   // Step 3: Apply CuDNN function
   float alpha = 1.;
@@ -70,12 +71,10 @@ void cudnn_relu(const at::Tensor& inputs, const at::Tensor& outputs) {
       input_tensor_desc.desc(),
       inputs.data_ptr(),
       &beta,
-      input_tensor_desc
-          .desc(), // same size and type so we only need one descriptor
+      input_tensor_desc.desc(), // output descriptor same as input
       outputs.data_ptr()));
   // Step 4: Destroy descriptors
   CUDNN_CHECK(cudnnDestroyActivationDescriptor(activationDesc));
-  delete input_tensor_desc;
   // Step 5: Return something (optional)
 }
 
