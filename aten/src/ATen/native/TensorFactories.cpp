@@ -12,6 +12,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/ScalarType.h"
 #include "ATen/Deprecated.h"
+#include "ATen/DeviceGuard.h"
 #include "TH/THRandom.h"
 
 #include <algorithm>
@@ -593,5 +594,21 @@ Tensor hann_window(
   return native::hamming_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
 }
+
+template <typename T>
+Tensor tensor(ArrayRef<T> values, const TensorOptions& options) {
+  auto result = at::empty(values.size(), options);
+  for (size_t i = 0; i < values.size(); ++i) {
+    result[i] = values[i];
+  }
+  return result;
+}
+
+#define TENSOR(T, _1, _2)                                           \
+  Tensor tensor(ArrayRef<T> values, const TensorOptions& options) { \
+    return tensor<T>(values, options);                              \
+  }
+AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(TENSOR)
+#undef TENSOR
 } // namespace native
 } // namespace at

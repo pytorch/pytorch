@@ -1573,10 +1573,10 @@
     SparseCPU: new_with_size_sparse
 
 - func: tensor(Type dtype) -> Tensor
-  variants: function
+  variants: []
 
 - func: tensor(Type dtype, IntList size) -> Tensor
-  variants: function
+  variants: []
 
 
 # NB: The function overloads are removed to avoid a nasty bug where
@@ -1598,10 +1598,10 @@
     SparseCPU: new_with_tensor_and_size_sparse
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
-  variants: function
+  variants: []
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
-  variants: function
+  variants: []
 
 
 - func: _native_sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
