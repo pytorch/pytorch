@@ -277,6 +277,8 @@ def gen_jit_dispatch(declarations, out, template_path):
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
     # to accept both Scalar and Tensor, the schema with the Tensor should come first
+    # TODO: this can (probably) be removed when we remove the implicit conversion
+    # from Tensor -> Number.
     def sort_decls(jit_decls):
         def declkey(decl):
             # key = sum_{i < len(args)} {1 if arg is tensor else 2} * (3 ** i)

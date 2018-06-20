@@ -288,6 +288,14 @@ static bool isTensorSubtype(Value* v) {
   return v->type()->isSubtypeOf(*DynamicType::get());
 }
 
+static bool isNumberSubtype(const Value* v) {
+  return v->type()->isSubtypeOf(*NumberType::get());
+}
+
+static bool isNumberSubtype(const TypePtr& type) {
+  return type->isSubtypeOf(*NumberType::get());
+}
+
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<at::IntList>(input);
   if(list)
@@ -382,7 +390,7 @@ static Value* numToTensor(
     const SourceRange& loc,
     Graph& graph,
     Value* value) {
-  JIT_ASSERT(value->type()->isSubtypeOf(*NumberType::get()));
+  JIT_ASSERT(isNumberSubtype(value));
   auto* result = graph.insertNode(graph.create(prim::NumToTensor, {value})
       ->setSourceLocation(std::make_shared<SourceRange>(loc)))
       ->output();
@@ -395,8 +403,8 @@ static Value* tensorToNum(
     Graph& graph,
     Value* value,
     const TypePtr type) {
-  JIT_ASSERT(value->type()->isSubtypeOf(*DynamicType::get()));
-  JIT_ASSERT(type->isSubtypeOf(*NumberType::get()));
+  JIT_ASSERT(isTensorSubtype(value));
+  JIT_ASSERT(isNumberSubtype(type));
   auto* result = graph.insertNode(graph.create(prim::TensorToNum, {value})
       ->setSourceLocation(std::make_shared<SourceRange>(loc)))
       ->output();
@@ -459,7 +467,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
         return at::nullopt;
       }
-      if (schema.arguments[i].type->isSubtypeOf(*NumberType::get())) {
+      if (isNumberSubtype(schema.arguments[i].type)) {
         positional_inputs[i] = NamedValue(
             loc, i, createNumber(graph, loc, *default_value));
       } else {
@@ -474,8 +482,20 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       NamedValue v = *positional_inputs[i];
       const auto& arg = schema.arguments[i];
 
-      // An IntList[1] is a union of int and IntList.
-      // Reinterpret an int as an "IntList" (a tensor)
+      // TODO: revisit this.
+      // An IntList[1] is a union of int and IntList. Consider
+      //
+      //     import torch
+      //     @torch.jit.script
+      //     def func(x):
+      //         return x.sum(dim=1)
+      //
+      // dim is specified in native_functions.yaml as a IntList[1].
+      // This means it is okay to pass a python int into to it, or a python
+      // list.
+      //
+      // If we see an IntType being used where an IntList[1] is in the schema,
+      // we reinterpret an int as an "IntList" (which is a tensor right now)
       if (isIntUsedAsIntList(v.value, arg)) {
         if (v.value->node()->kind() == prim::Constant) {
           // peephole optimization where we make a Tensor rather than
@@ -500,8 +520,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
 
       // implicit conversion from Tensor to Python Number
       // FIXME: remove this when we support passing numbers into script fns
-      if (v.value->type()->isSubtypeOf(*DynamicType::get()) &&
-        arg.type->isSubtypeOf(*NumberType::get())) {
+      if (isTensorSubtype(v.value) && isNumberSubtype(arg.type)) {
         v.value = tensorToNum(loc, graph, v.value, arg.type);
       }
 
@@ -631,7 +650,7 @@ static Value* ensureTensor(const SourceRange& range, Value* v) {
 }
 
 static Value* ensureTensorOrNumber(const SourceRange& range, Value* v) {
-  if(!v->type()->isSubtypeOf(*NumberType::get()) && !isTensorSubtype(v)) {
+  if(!isNumberSubtype(v) && !isTensorSubtype(v)) {
     throw ErrorReport(range) << "expected a Number or Tensor value but found a "
                              << *v->type();
   }
@@ -1276,11 +1295,9 @@ private:
   std::vector<NamedValue> toNamedValues(
       const SourceRange& loc,
       ArrayRef<Value*> inputs) {
-    std::vector<NamedValue> result;
-    for (Value* inp : inputs) {
-      result.push_back(NamedValue(loc, "", inp));
-    }
-    return result;
+    return fmap(inputs, [&](Value* v) {
+      return NamedValue(loc, "", v);
+    });
   }
 
   Value* emitBasicMath(
@@ -1355,7 +1372,7 @@ private:
       Value* rhs) {
     auto rhs_kind = rhs->type()->kind();
     JIT_ASSERT(rhs_kind == TypeKind::FloatType || rhs_kind == TypeKind::IntType);
-    JIT_ASSERT(lhs->type()->isSubtypeOf(*DynamicType::get()));
+    JIT_ASSERT(isTensorSubtype(lhs));
 
     rhs = numToTensor(loc, *graph, rhs);
     auto args = { rhs, lhs };
@@ -1373,10 +1390,10 @@ private:
     JIT_ASSERT(inputs.size() == 2);
     auto& lhs = inputs[0];
     auto& rhs = inputs[1];
-    bool lhs_is_number = lhs->type()->isSubtypeOf(*NumberType::get());
-    bool lhs_is_tensor = lhs->type()->isSubtypeOf(*DynamicType::get());
-    bool rhs_is_number = rhs->type()->isSubtypeOf(*NumberType::get());
-    bool rhs_is_tensor = rhs->type()->isSubtypeOf(*DynamicType::get());
+    bool lhs_is_number = isNumberSubtype(lhs);
+    bool lhs_is_tensor = isTensorSubtype(lhs);
+    bool rhs_is_number = isNumberSubtype(rhs);
+    bool rhs_is_tensor = isTensorSubtype(rhs);
     JIT_ASSERT(lhs_is_tensor || lhs_is_number);
     JIT_ASSERT(rhs_is_tensor || rhs_is_number);
 
@@ -1427,8 +1444,8 @@ private:
       ArrayRef<Value*> inputs) {
     JIT_ASSERT(inputs.size() == 1);
     auto* in = inputs[0];
-    bool in_is_number = in->type()->isSubtypeOf(*NumberType::get());
-    bool in_is_tensor = in->type()->isSubtypeOf(*DynamicType::get());
+    bool in_is_number = isNumberSubtype(in);
+    bool in_is_tensor = isTensorSubtype(in);
     JIT_ASSERT(in_is_number || in_is_tensor);
 
     if (in_is_tensor) {

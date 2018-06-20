@@ -295,6 +295,9 @@ private:
     auto local_graph = this->graph;
     if(all_dynamic(local_graph->inputs()) && all_dynamic(local_graph->outputs())) {
       local_graph = this->graph->copy();
+      // FIXME: decide when to call EraseNumberTypes
+      // This call is here because PropagateInputShapes and interpreter.cpp
+      // don't understand number types.
       EraseNumberTypes(local_graph);
       PropagateInputShapes(*local_graph, spec);
     }
