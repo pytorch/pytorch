@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import os
+import glob
 import subprocess
 
 
@@ -12,9 +13,13 @@ os.chdir(caffe2_root)
 for folder in ["operators", "sgd", "image", "transforms", "video"]:
     for extension in ["/*.cu", "/*.cuh", "/*gpu*.cc"]:
         target = folder + extension
-        os.system(hipify_tool + ' --inplace ' + target)
+        if glob.glob(target):
+            os.system(hipify_tool + ' --inplace ' + target)
         os.chdir(folder)
-        os.system("mv -n *hip.cc hip")
-        os.chdir(caffe2_root)    
+        if glob.glob('*hip.cc'):
+            os.system("mv -n *hip.cc hip")
+        os.chdir(caffe2_root)
+
+
         
         
