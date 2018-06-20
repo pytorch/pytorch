@@ -13,7 +13,11 @@
 
 include(FindPackageHandleStandardArgs)
 
-set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+if(DEFINED ENV{CUDNN_ROOT_DIR})
+  set(CUDNN_ROOT_DIR $ENV{CUDNN_ROOT_DIR})
+else()
+  set(CUDNN_ROOT_DIR "" CACHE PATH "Folder contains NVIDIA cuDNN")
+endif()
 
 if(DEFINED ENV{CUDNN_INCLUDE_DIR})
   SET(CUDNN_INCLUDE_DIR $ENV{CUDNN_INCLUDE_DIR})
