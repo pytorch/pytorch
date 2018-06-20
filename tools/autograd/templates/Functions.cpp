@@ -813,10 +813,63 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
   return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
 }
 
-Tensor as_strided_backward_unsafe(const Tensor & grad, TensorGeometry base, IntList sizes, IntList strides, int64_t storage_offset) {
-  auto src = grad.type().zeros(base.sizes());
-  src.as_strided(sizes, strides, storage_offset - base.storage_offset()).copy_(grad);
-  return src;
+Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
+  // 1. Check for size 0 dimensions,
+  //    Skip size 1 dimensions, and
+  //    Reduce on expanded dims (stride=0, size>1)
+  auto dim = grad.dim();
+  std::vector<int64_t> sizes_, strides_;
+  std::vector<std::pair<int64_t, int64_t>> sizes_strides_;
+  sizes_.reserve(dim);
+  strides_.reserve(dim);
+  sizes_strides_.reserve(dim);
+  for (int64_t i = dim - 1; i >= 0; i--) {
+    auto size_i = sizes[i];
+    auto stride_i = strides[i];
+    if (size_i == 0) {
+      return at::zeros(input_geometry.sizes(), grad.type());
+    } else if (size_i == 1) {
+      grad.squeeze_(i);
+    } else if (stride_i == 0) {
+      grad = grad.sum(i, false);
+    } else {
+      sizes_.insert(sizes_.begin(), size_i);
+      strides_.insert(strides_.begin(), stride_i);
+      sizes_strides_.emplace(sizes_strides_.begin(), size_i, stride_i);
+    }
+  }
+  // 2. Now we have all sizes >= 1, all stride > 0.
+  //    Check if it lies within the simple case where the geometry can be
+  //    interpreted as a result from a series of permute(...) and slice(...).
+  //      i.  Sort size & strides basing on strides in increasing order.
+  //      ii. Check that forall k, stride[k+1] > \sum_{i=0}^k (size[k] - 1) * stride[k]
+  if (sizes_strides_.size() > 0) {
+    std::sort(sizes_strides_.begin(), sizes_strides_.end(),
+        [&](std::pair<int64_t, int64_t> i, std::pair<int64_t, int64_t> j){
+          return i.second < j.second;
+        });
+
+    auto it = sizes_strides_.begin();
+    int64_t max_index_in_slice = 0;
+    while (it != sizes_strides_.end()) {
+      auto size_ = it->first;
+      auto stride_ = it->second;
+      AT_CHECK(stride_ > max_index_in_slice,
+               "as_strided backward is not implemented for this complex case: "
+               "sizes=", sizes, ", strides=", strides,
+               ", storage_offset=", storage_offset);
+      max_index_in_slice += stride_ * (size_ - 1);
+      it++;
+    }
+  }
+
+  auto grad_input = input_geometry.zeros_with_stride(grad.type());
+
+  // Note that the above check should be passed for all chained operations of:
+  //  'alias', 'as_strided', 'diagonal', 'expand', 'narrow', 'permute', 'view',
+  //  'select', 'slice', 'squeeze', 't', 'transpose', 'unfold', 'unsqueeze'.
+  grad_input.as_strided(sizes_, strides_, storage_offset - input_geometry.storage_offset()).copy_(grad);
+  return grad_input;
 }
 
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask) {
@@ -1341,19 +1394,6 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, c
 }
 
 } // anonymous namespace
-
-
-variable_list AsStridedBackwardUnsafe::apply(const variable_list& grads) {
-  IndexRangeGenerator gen;
-  auto self_ix = gen.range(1);
-  variable_list grad_inputs(gen.size());
-  auto& grad = grads[0];
-  if (should_compute_output({ self_ix })) {
-    auto grad_result = as_strided_backward_unsafe(grad, self_geometry, size, stride, storage_offset);
-    copy_range(grad_inputs, self_ix, grad_result);
-  }
-  return grad_inputs;
-}
 
 ${autograd_function_definitions}
 

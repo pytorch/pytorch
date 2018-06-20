@@ -131,7 +131,7 @@
   self: grad
 
 - name: as_strided(Tensor self, IntList size, IntList stride, int64_t storage_offset)
-  self: not_implemented("as_strided") # as_strided_backward_unsafe(grad, TensorGeometry(self), size, stride, storage_offset)
+  self: as_strided_backward(grad, TensorGeometry(self), size, stride, storage_offset)
 
 - name: asin(Tensor self)
   self: grad * (-self * self + 1).rsqrt()

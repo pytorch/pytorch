@@ -37,17 +37,6 @@ private:
   Type* type;
 };
 
-struct AsStridedBackwardUnsafe : public Function {
-  using Function::Function;
-  variable_list apply(const variable_list& grads) override;
-  std::string name() const override { return "AsStridedBackwardUnsafe"; }
-  void release_variables() override { }
-  TensorGeometry self_geometry;
-  std::vector<int64_t> size;
-  std::vector<int64_t> stride;
-  int64_t storage_offset;
-};
-
 ${autograd_function_declarations}
 
 }}} // namespace torch::autograd::generated
