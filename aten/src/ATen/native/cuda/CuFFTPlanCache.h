@@ -137,7 +137,7 @@ public:
       // type, i.e., multiples of 2. We check the batch dim and last signal dim
       // here. If the input can be viewed as having embedded strides, the other
       // signal dims will also satisfy this.
-      // See NOTE [ cuFFT Embedded Strides ].
+      // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
       clone_input |= (batch > 0 && input.stride(0) % 2 != 0) ||
                       input.stride(signal_ndim) % 2 != 0;
     }
@@ -174,7 +174,7 @@ public:
     // This just needs contiguity in cases except for twosided real-to-complex
     // transform where we won't have simple data layout as output is two sided.
     //
-    // See NOTE [ cuFFT Embedded Strides ].
+    // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
 
     bool simple_layout = !(!complex_input && complex_output && !onesided) &&  // not twosided R2C
                          (clone_input || input.is_contiguous());              // contiguous
@@ -227,7 +227,7 @@ public:
       // In such case, cuFFT ignores base_istride, base_ostride, idist, and odist
       // by assuming base_istride = base_ostride = 1.
       //
-      // See NOTE [ cuFFT Embedded Strides ].
+      // See NOTE [ cuFFT Embedded Strides ] in native/cuda/SpectralOps.cu.
       CUFFT_CHECK(cufftXtMakePlanMany(plan(), signal_ndim, signal_sizes.data(),
         /* inembed */ nullptr, /* base_istride */ 1, /* idist */ 1, itype,
         /* onembed */ nullptr, /* base_ostride */ 1, /* odist */ 1, otype,
