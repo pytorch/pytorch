@@ -137,6 +137,10 @@ configure_file("${CAFFE2_PATH}/aten/src/ATen/common_with_cwrap.py"
                "${TOOLS_PATH}/shared/cwrap_common.py"
                COPYONLY)
 
+configure_file("${CAFFE2_PATH}/torch/_utils_internal.py"
+               "${TOOLS_PATH}/shared/_utils_internal.py"
+               COPYONLY)
+
 add_custom_command(
   OUTPUT
   "${TORCH_SRC_DIR}/csrc/nn/THNN.cpp"
