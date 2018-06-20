@@ -95,12 +95,12 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the cacse
+  // FIXME: warn if this is the case
   THLongStorage *size;
   int i, j, cohortMax;
   int64_t offset;
   bool hasSkippedInput = false;
-  THCTensor *notSkippedTensor = NULL;
+  THCTensor *notSkippedTensor = NULL;  // non-owning reference
   auto should_skip = [](THCTensor *t) { return t->is_empty() && t->dim() == 1; };
   int nDims = 0;
 

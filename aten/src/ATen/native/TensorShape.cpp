@@ -123,7 +123,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 #else
   if (length < 0 || start > cur_size - length) {
 #endif
-    AT_ERROR("length out of range");
+    AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   }
   return at::native::slice(self, dim, start, start + length, 1);
 }

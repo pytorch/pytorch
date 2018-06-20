@@ -3588,10 +3588,10 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
   // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
   // size (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the cacse
+  // FIXME: warn if this is the case
   bool allSkipped= true;
   int64_t nDims = 0;
-  THTensor *notSkippedTensor;
+  THTensor *notSkippedTensor;  // non-owning reference
   auto should_skip = [](THTensor *t) { return t->is_empty() && t->dim() == 1; };
   for (int i = 0; i < numInputs; i++) {
     if (should_skip(inputs[i])) {
