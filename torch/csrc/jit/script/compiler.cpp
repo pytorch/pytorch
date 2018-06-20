@@ -111,6 +111,23 @@ struct Environment {
 
     return sv;
   }
+
+  SugaredValuePtr createCapturedInputIfNeeded(const SourceRange& loc, std::string ident) {
+    auto in_frame = findInThisFrame(ident);
+    if (in_frame)
+      return in_frame;
+
+    // recursively handles the case where parent blocks are also loops
+    auto from_parent = next ? next->createCapturedInputIfNeeded(loc, ident) : nullptr;
+
+    // recursively create the captured input if it is the loop block
+    if (from_parent && getBlockOwningKind() == prim::Loop) {
+      if (Value* simple_val = asSimple(from_parent))
+        from_parent = createCapturedInput(simple_val, ident);
+    }
+    return from_parent;
+  }
+
   Block* block() {
     return b;
   }
@@ -158,12 +175,8 @@ struct Environment {
         << " but is now being assigned to a value of type " << as_simple_value->type()->name();
       }
     }
-    if (as_simple_value &&
-        !findInThisFrame(name) &&
-        findInParentFrame(name) &&
-        getBlockOwningKind() == prim::Loop) {
-      createCapturedInput(as_simple_value, name);
-    }
+    if (as_simple_value)
+      createCapturedInputIfNeeded(loc, name);
     value_table[name] = std::move(value);
   }
 
@@ -175,14 +188,7 @@ struct Environment {
   }
 
   SugaredValuePtr getSugaredVar(const std::string& ident, SourceRange range, bool required=true) {
-    auto retval = findInThisFrame(ident);
-
-    if (!retval && (retval = findInParentFrame(ident)) &&
-        getBlockOwningKind() == prim::Loop) {
-      if(Value* simple_val = asSimple(retval)) {
-        retval = createCapturedInput(simple_val, ident);
-      }
-    }
+    auto retval = createCapturedInputIfNeeded(range, ident);
 
     if(!retval) {
       retval = resolver(ident);
