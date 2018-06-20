@@ -15,6 +15,7 @@
 namespace at {
 
 using native::from_blob;
+using native::tensor;
 
 ${function_declarations}
 
