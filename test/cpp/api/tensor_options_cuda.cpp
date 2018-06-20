@@ -1,7 +1,6 @@
 #include "catch.hpp"
 
 #include <ATen/Context.h>
-#include <ATen/DefaultTensorOptions.h>
 #include <ATen/DeviceGuard.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
@@ -67,7 +66,7 @@ TEST_CASE("TensorOptions/ConstructsWellFromCUDATensors", "[cuda]") {
   }
 }
 
-TEST_CASE("DefaultTensorOptions/OptionsGuardCUDA", "[cuda]") {
+TEST_CASE("OptionsGuardCUDA", "[cuda]") {
   Tensor tensor;
   {
     OptionsGuard guard(device(kCUDA));
@@ -88,7 +87,7 @@ TEST_CASE("DefaultTensorOptions/OptionsGuardCUDA", "[cuda]") {
   REQUIRE_TENSOR_OPTIONS(kCUDA, 0, kInt, kStrided);
 }
 
-TEST_CASE("DefaultTensorOptions/DeviceGuardOptionsGuardInteraction", "[cuda]") {
+TEST_CASE("DeviceGuardOptionsGuardInteraction", "[cuda]") {
   Tensor tensor;
   {
     // Check that OptionsGuard respects any active device before construction.

@@ -20,5 +20,4 @@
 #include "ATen/DeviceGuard.h"
 #include "ATen/TensorOptions.h"
 #include "ATen/Layout.h"
-#include "ATen/DefaultTensorOptions.h"
 #include "ATen/OptionsGuard.h"

@@ -3,7 +3,6 @@
 #include <torch/functions.h>
 
 #include <ATen/Context.h>
-#include <ATen/DefaultTensorOptions.h>
 #include <ATen/Functions.h>
 #include <ATen/OptionsGuard.h>
 #include <ATen/TensorOptions.h>
@@ -108,7 +107,7 @@ TEST_CASE("Device/ParsesCorrectlyFromString") {
   }
 }
 
-TEST_CASE("DefaultTensorOptions/OptionsGuard") {
+TEST_CASE("OptionsGuard") {
   Tensor tensor;
   {
     OptionsGuard guard(TensorOptions{});
