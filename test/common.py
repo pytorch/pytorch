@@ -27,6 +27,7 @@ import errno
 
 import torch
 import torch.cuda
+from torch._utils_internal import get_writable_path
 from torch._six import string_classes
 import torch.backends.cudnn
 import torch.backends.mkl
@@ -505,7 +506,7 @@ def download_file(url, binary=True):
         from urllib import request, error
 
     filename = os.path.basename(urlsplit(url)[2])
-    data_dir = os.path.join(os.path.dirname(__file__), 'data')
+    data_dir = get_writable_path(os.path.join(os.path.dirname(__file__), 'data'))
     path = os.path.join(data_dir, filename)
 
     if os.path.exists(path):
