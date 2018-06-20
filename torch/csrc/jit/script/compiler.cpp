@@ -908,6 +908,10 @@ private:
       throw ErrorReport(stmt) << "Iteration variable unpacking is not supported";
     }
 
+    if (targets[0].kind() != TK_VAR) {
+      throw ErrorReport(targets[0]) << "Starred unpacking is currently not"
+          << " supported for for loops.";
+    }
     auto target = Var(targets[0]).name();
 
     // match range(<expr>) style loops

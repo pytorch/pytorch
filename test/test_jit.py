@@ -3253,10 +3253,11 @@ class TestScript(JitTestCase):
 
     def test_print_kwargs(self):
         with self.assertRaisesRegex(RuntimeError, 'print doesn\'t accept any keyword arguments'):
-            @torch.jit.script
+            cu = torch.jit.CompilationUnit('''
             def print_kwargs(x):
                 print(x, flush=True)
                 return x
+            ''')
 
     def test_builtin_use_as_value(self):
         with self.assertRaisesRegex(RuntimeError, 'builtin cannot be used as a value'):
@@ -3323,6 +3324,16 @@ class TestScript(JitTestCase):
                 def forward(self, x, y):
                     return self.foo(x)
             SomeModule()
+
+    def test_single_starred_expr_for_loop(self):
+        with self.assertRaisesRegex(RuntimeError, 'Starred unpacking is currently not supported for for loops'):
+            cu = torch.jit.CompilationUnit('''
+            def test():
+                x = 0
+                for *a in [1, 2, 3]:
+                    x = x + 1
+                return x
+            ''')
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
