@@ -895,7 +895,7 @@ private:
     // TODO: start, stop, step loop
     if (args.size() != 1) {
       throw ErrorReport(range)
-          << "range() expects one argument but got" << args.size();
+          << "range() expects 1 argument but got " << args.size();
     }
     emitLoopCommon(range, {args[0]}, {}, body, target);
   }
@@ -1441,9 +1441,7 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
     // so the methods can see each other
     if(!self) {
       auto result = table.emplace(name, method);
-      if(!result.second) {
-        throw ErrorReport(def) << "duplicate definition of function '" << name << "'";
-      }
+      JIT_ASSERT(result.second);
     }
     methods.push_back(&method);
   }
