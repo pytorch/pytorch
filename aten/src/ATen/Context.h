@@ -84,9 +84,11 @@ public:
   cudaStream_t getCurrentCUDAStreamOnDevice(int64_t device) const {
     return detail::getCUDAHooks().getCurrentCUDAStreamOnDevice(thc_state.get(), device);
   }
+#ifndef __HIP_PLATFORM_HCC__
   cusparseHandle_t getCurrentCUDASparseHandle() const {
     return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
   }
+#endif
   cudaDeviceProp* getCurrentDeviceProperties() const {
     return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
   }
