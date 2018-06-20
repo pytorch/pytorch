@@ -334,6 +334,11 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       node->output()->inferTypeFrom(node->t(attr::value));
       handled = true;
     } break;
+    case prim::Cast: {
+      auto ten = types.at(0);
+      node->output()->setType(ten->shared_from_this());
+      handled = true;
+    } break;
     case prim::Undefined: {
       node->output()->setType(DynamicType::get());
       handled = true;

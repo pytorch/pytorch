@@ -682,6 +682,11 @@ struct CodeImpl {
         stack.push_back(t);
         return 0;
       };
+    IR_ELSEIF(Cast)
+      // no-op
+      return [](Stack& stack) {
+        return 0;
+      };
     IR_ELSEIF(Undefined)
       return [](Stack & stack) {
         stack.push_back(at::Tensor());

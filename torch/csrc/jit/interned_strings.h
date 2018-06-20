@@ -29,11 +29,17 @@ enum class SymbolNamespace : unsigned char {
 //
 // TODO: Consider moving the synthetic onnx operators to their own
 // namespace.
+//
+// prim::Cast
+// Right now this is a dummy node that holds no information. The script frontend 
+// uses it by sending in an input and declaring the type of the output.
+// During shape propagation, the type of the input is propagated to the output.
 
 #define FORALL_PRIM_SYMBOLS(_) \
 _(prim, Assign) \
 _(prim, Constant) \
 _(prim, CppOp) \
+_(prim, Cast) \
 _(prim, Drop) \
 _(prim, Eval) \
 _(prim, Expand) /* onnx */ \
