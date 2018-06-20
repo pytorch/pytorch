@@ -115,11 +115,9 @@ class TestCppExtension(common.TestCase):
 
         x = torch.randn(100, device='cuda', dtype=torch.float32)
         y = torch.zeros(100, device='cuda', dtype=torch.float32)
-        module.cudnn_relu(x, y) # y=relu(x)
+        module.cudnn_relu(x, y)  # y=relu(x)
         self.assertEqual(torch.nn.functional.relu(x), y)
-        with self.assertRaisesRegex(
-          RuntimeError,
-          "same size") as cm:
+        with self.assertRaisesRegex(RuntimeError, "same size") as cm:
             y_incorrect = torch.zeros(20, device='cuda', dtype=torch.float32)
             module.cudnn_relu(x, y_incorrect)
 
