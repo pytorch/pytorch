@@ -186,28 +186,20 @@ class TestCase(unittest.TestCase):
     def __init__(self, method_name='runTest'):
         super(TestCase, self).__init__(method_name)
         # Wraps the tested method if we should do CUDA memory check.
-        # This logic is similar to https://github.com/python/cpython/blob/master/Lib/unittest/case.py#L406-L413
-        try:
-            test_method = getattr(self, method_name)
-        except AttributeError:
-            if method_name != 'runTest':
-                # we allow instantiation with no explicit method name
-                # but not an *incorrect* or missing method name
-                raise ValueError("no such test method in %s: %s" % (self.__class__, method_name))
-        else:
-            self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
-            # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
-            if self._do_cuda_memory_leak_check and not IS_WINDOWS:
-                # the import below may initialize CUDA context, so we do it only if
-                # self._do_cuda_memory_leak_check is True.
-                from common_cuda import TEST_CUDA
-                fullname = self.id().lower()  # class_name.method_name
-                if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
-                    # initialize context & RNG to prevent false positive detections
-                    # when the test is the first to initialize those
-                    from common_cuda import initialize_cuda_context_rng
-                    initialize_cuda_context_rng()
-                    setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
+        test_method = getattr(self, method_name)
+        self._do_cuda_memory_leak_check &= getattr(test_method, '_do_cuda_memory_leak_check', True)
+        # FIXME: figure out the flaky -1024 anti-leaks on windows. See #8044
+        if self._do_cuda_memory_leak_check and not IS_WINDOWS:
+            # the import below may initialize CUDA context, so we do it only if
+            # self._do_cuda_memory_leak_check is True.
+            from common_cuda import TEST_CUDA
+            fullname = self.id().lower()  # class_name.method_name
+            if TEST_CUDA and ('gpu' in fullname or 'cuda' in fullname):
+                # initialize context & RNG to prevent false positive detections
+                # when the test is the first to initialize those
+                from common_cuda import initialize_cuda_context_rng
+                initialize_cuda_context_rng()
+                setattr(self, method_name, self.wrap_with_cuda_memory_check(test_method))
 
     def wrap_with_cuda_memory_check(self, method):
         # Assumes that `method` is the tested function in `self`.

@@ -7612,14 +7612,6 @@ add_test(NewModuleTest(
     fullname='AdaptiveLogSoftmax'))
 
 
-def disable_tests_not_in_shard(module, shard):
-    all_methods = dir(module())
-    all_tests = [x for x in all_methods if x.startswith("test_")]
-    for test_name in all_tests:
-        if int(hashlib.sha256(test_name.encode('utf-8')).hexdigest(), 16) % NUM_SHARDS != shard:
-            delattr(module, test_name)
-
-
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Run only a portion of test_nn')
@@ -7638,8 +7630,12 @@ def parse_args():
 
 if __name__ == '__main__':
     options = parse_args()
-    if options.shard:
-        disable_tests_not_in_shard(TestNN, options.shard)
-        disable_tests_not_in_shard(TestNNInit, options.shard)
-        disable_tests_not_in_shard(PackedSequenceTest, options.shard)
+    if options.shard != None:
+        def load_tests(loader, tests, pattern):
+            test_suite = unittest.TestSuite()
+            for test_group in tests:
+                for test in test_group:
+                    if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % NUM_SHARDS == options.shard:
+                        test_suite.addTest(test)
+            return test_suite
     run_tests()
