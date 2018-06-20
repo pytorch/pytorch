@@ -7,6 +7,10 @@
 #include <functional>
 #include <vector>
 
+namespace at {
+struct Tensor;
+} // namespace at
+
 namespace torch {
 namespace nn {
 
@@ -18,6 +22,7 @@ class FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
 
   explicit FunctionalImpl(Function function);
   explicit FunctionalImpl(std::function<Variable(Variable)> function);
+  explicit FunctionalImpl(at::Tensor (*function)(at::Tensor));
 
   void reset() override;
   std::vector<Variable> forward(std::vector<Variable> input);

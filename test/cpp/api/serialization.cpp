@@ -1,6 +1,7 @@
 #include <catch.hpp>
 
 #include <torch/functions.h>
+#include <torch/nn/modules/activations.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optimizers.h>
@@ -21,7 +22,8 @@ using namespace torch::nn;
 
 namespace {
 std::shared_ptr<Sequential> xor_model() {
-  return std::make_shared<Sequential>(SigmoidLinear(2, 8), SigmoidLinear(8, 1));
+  return std::make_shared<Sequential>(
+      Linear(2, 8), Sigmoid{}, Linear(8, 1), Sigmoid{});
 }
 } // namespace
 
@@ -181,7 +183,8 @@ TEST_CASE("serialization") {
       }
 
       // forward
-      auto x = model->forward<Variable>(inp);
+      auto x =
+          model->forward<std::vector<Variable>>(std::vector<Variable>{inp})[0];
       return at::binary_cross_entropy(x, lab);
     };
 
@@ -283,7 +286,8 @@ TEST_CASE("serialization_cuda", "[cuda]") {
       }
 
       // forward
-      auto x = model->forward<Variable>(inp);
+      auto x =
+          model->forward<std::vector<Variable>>(std::vector<Variable>{inp})[0];
       return at::binary_cross_entropy(x, lab);
     };
 

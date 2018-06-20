@@ -242,12 +242,15 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
       AT_ERROR(
           "Expected argument #",
           index,
+          " to module ",
+          module.name(),
           " to be of type ",
           at::demangle(typeid(T).name()),
           ", but received value of type ",
           at::demangle(value.type_info().name()));
     }
     std::vector<Value>& arguments_;
+    ModuleType& module;
   };
 
   struct InvokeForward {
@@ -275,7 +278,7 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
     // FYI: During invocation of a module's `forward()` method, the values live
     // in the `arguments` vector inside this function.
     return torch::unpack<ArgumentTypes...>(
-        InvokeForward{module}, CheckedGetter{arguments});
+        InvokeForward{module}, CheckedGetter{arguments, *module});
   }
 
   std::shared_ptr<Module> ptr() override {

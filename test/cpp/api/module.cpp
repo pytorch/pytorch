@@ -133,7 +133,7 @@ TEST_CASE("module/clone") {
         l3 = register_module("l3", Linear(5, 100));
       }
 
-      Linear l1, l2, l3;
+      Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
     };
 
     auto module = TestModule().build();

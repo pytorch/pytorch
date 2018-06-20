@@ -55,7 +55,8 @@ RNNImplBase<Derived>::RNNImplBase(
     : options_(options),
       number_of_gates_(number_of_gates),
       has_cell_state_(has_cell_state),
-      cudnn_mode_(cudnn_mode) {
+      cudnn_mode_(cudnn_mode),
+      dropout_module_(nullptr) {
   reset();
 }
 

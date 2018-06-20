@@ -17,11 +17,10 @@ using namespace torch::nn;
 
 class TestModel : public Module {
  public:
-  TestModel() {
-    l1 = register_module("l1", Linear(10, 3));
-    l2 = register_module("l2", Linear(3, 5));
-    l3 = register_module("l3", Linear(5, 100));
-  }
+  TestModel()
+      : l1(register_module("l1", Linear(10, 3))),
+        l2(register_module("l2", Linear(3, 5))),
+        l3(register_module("l3", Linear(5, 100))) {}
 
   std::vector<Variable> forward(std::vector<Variable> input) {
     return input;
@@ -32,9 +31,9 @@ class TestModel : public Module {
 
 class NestedModel : public Module {
  public:
-  NestedModel() {
-    l1 = register_module("l1", Linear(5, 20));
-    t = register_module("test", std::make_shared<TestModel>());
+  NestedModel()
+      : l1(register_module("l1", Linear(5, 20))),
+        t(register_module("test", std::make_shared<TestModel>())) {
     param_ = register_parameter("param", torch::empty({3, 2, 21}));
   }
 

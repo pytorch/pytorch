@@ -29,8 +29,12 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
  public:
   using ContainedType = Contained;
 
-  /// Constructs the `ModuleHolder` with an empty contained value.
-  ModuleHolder() = default;
+  /// Default-constructs the `ModuleHolder`, e.g. in `Sigmoid()`. Only available
+  /// if the contained object has a default constructor.
+  template <
+      typename C = Contained,
+      typename = torch::enable_if_t<std::is_default_constructible<C>::value>>
+  ModuleHolder() : impl_(std::make_shared<Contained>()) {}
 
   /// Single argument constructor of the underlying type.
   /// Example: `Linear(4)` or `Linear(LinearOptions(4))`.
@@ -52,6 +56,9 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// Example: `Linear(std::make_shared<LinearImpl>(...))`.
   explicit ModuleHolder(std::shared_ptr<Contained> module)
       : impl_(std::move(module)) {}
+
+  /// Constructs an empty `ModuleHolder` (e.g. `Linear(nullptr)`).
+  explicit ModuleHolder(std::nullptr_t) : impl_(nullptr) {}
 
   /// Returns true if the `ModuleHolder` contains a module, or false if it is
   /// `nullptr`.
@@ -105,15 +112,15 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
 /// wrapper over a `std::shared_ptr<Impl>`.
-#define TORCH_MODULE_IMPL(Name, Impl)                  \
-  class Name : public torch::nn::ModuleHolder<Impl> {  \
-   public:                                             \
-    using torch::nn::ModuleHolder<Impl>::ModuleHolder; \
-    using torch::nn::ModuleHolder<Impl>::operator->;   \
-    using torch::nn::ModuleHolder<Impl>::get;          \
-                                                       \
-   protected:                                          \
-    using torch::nn::ModuleHolder<Impl>::impl_;        \
+#define TORCH_MODULE_IMPL(Name, Impl)                       \
+  class Name final : public torch::nn::ModuleHolder<Impl> { \
+   public:                                                  \
+    using torch::nn::ModuleHolder<Impl>::ModuleHolder;      \
+    using torch::nn::ModuleHolder<Impl>::operator->;        \
+    using torch::nn::ModuleHolder<Impl>::get;               \
+                                                            \
+   protected:                                               \
+    using torch::nn::ModuleHolder<Impl>::impl_;             \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `Impl` name to `<Name>Impl`.
