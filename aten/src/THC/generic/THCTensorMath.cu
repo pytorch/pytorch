@@ -71,8 +71,8 @@ void THCTensor_(check_shape_except_dim)(THCState *state,
 inline void THCTensor_(check_shape_except_dim)(THCState *state, 
     THCTensor *first, THCTensor *second, int dimension)
 {
-  int first_dims = THCTensor_(nDimension)(state, first);
-  int second_dims = THCTensor_(nDimension)(state, second);
+  int first_dims = THCTensor_(_nDimension)(state, first);
+  int second_dims = THCTensor_(_nDimension)(state, second);
   THArgCheck(first_dims == second_dims, 0,
       "Tensors must have same number of dimensions: got %d and %d",
       first_dims, second_dims);
@@ -107,7 +107,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
   for (i = 0; i < numInputs; i++)
   {
-    int inputDim = THCTensor_(nDimension)(state, inputs[i]);
+    int inputDim = THCTensor_(_nDimension)(state, inputs[i]);
     hasEmptyInput |= !inputDim;
     if (inputDim > 0) {
       nDims = inputDim;
@@ -137,7 +137,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   int64_t cat_dim_size = 0;
   for (int i = 0; i < numInputs; i++) {
     THCTensor *tensor = inputs[i];
-    if (THCTensor_(nDimension)(state, tensor) == 0) {
+    if (THCTensor_(_nDimension)(state, tensor) == 0) {
       continue;
     }
     THCTensor_(check_shape_except_dim)(state, notEmptyTensor, tensor, cat_dimension);
@@ -167,7 +167,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
   if (numInputs > 1 &&
       !hasEmptyInput &&
-      THCTensor_(nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
+      THCTensor_(_nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
       THCTensor_canUse32BitIndexMath(state, result) &&
       THCTensor_allContiguous(state, inputs, numInputs) &&
       THCTensor_all32BitIndexable(state, inputs, numInputs) &&
@@ -203,7 +203,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       CatArrInputTensor<real, unsigned int>* stackInputs = (CatArrInputTensor<real, unsigned int>*) THCudaHostAlloc(state, tensorMetadataSize);
       cohortMax = 0;
       for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
-        int64_t dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[i+j])
+        int64_t dimSize = cat_dimension < THCTensor_(_nDimension)(state, inputs[i+j])
           ? THCTensor_(size)(state, inputs[i+j], cat_dimension)
           : 1;
 
@@ -260,9 +260,9 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     for (j = 0; j < numInputs; j++)
     {
       // No reason to copy when input is empty
-      if (!THCTensor_(nDimension)(state, inputs[j])) continue;
+      if (!THCTensor_(_nDimension)(state, inputs[j])) continue;
 
-      int64_t dimSize = cat_dimension < THCTensor_(nDimension)(state, inputs[j])
+      int64_t dimSize = cat_dimension < THCTensor_(_nDimension)(state, inputs[j])
                ? THCTensor_(size)(state, inputs[j], cat_dimension)
                : 1;
 
@@ -287,7 +287,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
-  int num_dim = THCTensor_(nDimension)(state, self);
+  int num_dim = THCTensor_(_nDimension)(state, self);
   int64_t N = THCTensor_(nElement)(state, self);
 
   THCudaLongTensor_resize2d(state, tensor, N, num_dim);
@@ -344,7 +344,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
 
 void THCTensor_(diag)(THCState *state, THCTensor *self_, THCTensor *src_, int64_t k){
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self_, src_));
-  int nDimension = THCTensor_(nDimension)(state, src_);
+  int nDimension = THCTensor_(_nDimension)(state, src_);
   THArgCheck((nDimension == 2) || (nDimension == 1), 1, "expected a matrix or a vector");
   if (nDimension == 2) {
     int64_t stride0 = THCTensor_(stride)(state, src_, 0);
