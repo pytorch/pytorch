@@ -1,10 +1,14 @@
 set(LIB_SOURCES
+        DeviceId.cpp
+        DispatchKey.cpp
+        LayoutId.cpp
+        OpSchema.cpp
         TensorTypeId.cpp
         TensorTypeIdRegistration.cpp
 )
 
 set(TEST_SOURCES
-        dummy_test.cpp
+        OpSchema_test.cpp
 )
 
 add_library(dispatch OBJECT ${LIB_SOURCES})
