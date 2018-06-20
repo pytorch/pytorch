@@ -144,7 +144,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
 }
 
 // We call the following methods via CUDA hooks because they are really only
-// valid when CUDA is available. See native/cuda/SpectralOps.h for more details.
+// valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
 int64_t _cufft_get_plan_cache_max_size() {
   return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize();
 }
