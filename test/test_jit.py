@@ -1440,6 +1440,20 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([1, -1], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_if_for_in_range(self):
+        def func(a, b):
+            d = 3
+            for _ in range(20):
+                if a > 10:
+                    a = 3 + d
+                else:
+                    b = 3 + d
+                    d = 4
+                c = a + b
+            return d
+        inputs = self._make_scalar_vars([1, -1], torch.int64)
+        self.checkScript(func, inputs, optimize=True)
+
     def test_if_noelse(self):
         def func(a, b):
             if a > 10:
@@ -1540,6 +1554,20 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([0], torch.int64)
 
         self.assertEqual(test_script_for_in_range_ast(*inputs), 161700)
+
+    def test_script_for_in_range_if_ast(self):
+        @torch.jit.script
+        def test_script_for_in_range_if_ast(x):
+            output = 0
+            for i in range(20):
+                if i == 0:
+                    output = x.unsqueeze(0)
+                else:
+                    output = torch.cat((output, x.unsqueeze(0)), dim=0)
+            return output
+        inputs = self._make_scalar_vars([0], torch.int64)
+
+        self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
     def test_script_bool_constant(self):
         script = '''
