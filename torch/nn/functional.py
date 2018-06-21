@@ -1009,7 +1009,7 @@ def tanh(input):
 
     See :class:`~torch.nn.Tanh` for more details.
     """
-    warnings.warn("nn.functional.tanh is deprecated. Use nn.Tanh or torch.tanh instead.")
+    warnings.warn("nn.functional.tanh is deprecated. Use torch.tanh instead.")
     return input.tanh()
 
 
@@ -1020,7 +1020,7 @@ def sigmoid(input):
 
     See :class:`~torch.nn.Sigmoid` for more details.
     """
-    warnings.warn("nn.functional.sigmoid is deprecated. Use nn.Sigmoid or torch.sigmoid instead.")
+    warnings.warn("nn.functional.sigmoid is deprecated. Use torch.sigmoid instead.")
     return input.sigmoid()
 
 
