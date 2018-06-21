@@ -1871,6 +1871,9 @@ class Net(object):
         self._ExtendOps(grad_ops)
         return input_to_grad
 
+    def AddArgument(self, arg_name, arg_value):
+        self._net.arg.extend([utils.MakeArgument(arg_name, arg_value)])
+
     def AddExternalInput(self, *inputs):
         assert len(inputs) > 0
         refs = []

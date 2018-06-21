@@ -63,6 +63,9 @@ class Tracer {
   void setEnabled(bool enabled);
   bool isEnabled() const;
   int bumpIter();
+  // Dump the tracing result to file with given suffix, and then
+  // clear current events.
+  void dumpTracingResultAndClearEvents(const std::string& file_suffix);
 
   virtual ~Tracer();
 
