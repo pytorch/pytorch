@@ -6,6 +6,7 @@ from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors, \
     _take_tensors
 
 from torch.cuda.comm import broadcast_coalesced
+from torch.cuda import nccl
 import torch.distributed.c10d as c10d
 
 from ..modules import Module
@@ -108,7 +109,7 @@ class DistributedDataParallelC10d(Module):
         >>> net = torch.nn.DistributedDataParallel(model, pg)
     """
     def __init__(self, module, process_group, device_ids=None,
-                 output_device=None, dim=0, broadcast_buffers=False):
+                 output_device=None, dim=0, broadcast_buffers=True):
 
         super(DistributedDataParallelC10d, self).__init__()
 
@@ -127,8 +128,9 @@ class DistributedDataParallelC10d(Module):
         self.broadcast_buffers = broadcast_buffers
 
         MB = 1024 * 1024
+
         # used for intra-node param sync and inter-node sync as well
-        self.broadcast_bucket_size = 10 * MB
+        self.broadcast_bucket_size = 25 * MB
 
         # Sync params and buffers
         module_states = list(self.module.state_dict().values())
@@ -150,7 +152,7 @@ class DistributedDataParallelC10d(Module):
         else:
             self._module_copies = [self.module]
 
-        bucket_bytes_cap = 1 * MB
+        bucket_bytes_cap = 25 * MB
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
@@ -183,9 +185,16 @@ class DistributedDataParallelC10d(Module):
         self.bucket_order.reverse()
         self.buckets_to_reduce = copy.copy(self.bucket_order)
 
-        self.devs_ready = [[] for _ in range(len(self.bucket_sizes))]
-        self.buckets_ready = []
+        self.buckets_ready = set()
         self.reduction_works = []
+
+        self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
+
+        # default stream tracking to launch nccl reduce kernels
+        self.default_streams = []
+        for dev_id in self.device_ids:
+            with torch.cuda.device(dev_id):
+                self.default_streams.append(torch.cuda.current_stream())
 
         self._register_grad_hooks()
 
@@ -278,45 +287,44 @@ class DistributedDataParallelC10d(Module):
 
             # Current device's bucket is full
             if len(bucket) == self.bucket_sizes[bucket_idx]:
-                self.devs_ready[bucket_idx].append(device_idx)
-                if len(self.devs_ready[bucket_idx]) < len(self.device_ids):
+                self.devs_ready[bucket_idx] += 1
+                if self.devs_ready[bucket_idx] < len(self.device_ids):
                     return
-                #print("bucket: {} is full. bucket size: {}".format(bucket_idx, len(bucket)))
-                self.buckets_ready.append(bucket_idx)
-                if len(self.buckets_to_reduce) > 0 and self.buckets_to_reduce[0] == bucket_idx:
-                    # Reduce the bucket
-                    self._queue_reduction(bucket_idx)
-                    self.buckets_to_reduce.pop(0)
 
-                # If all buckets are ready
-                if len(self.buckets_ready) == len(self.bucket_order):
-                    #print("ready # of buckets: {}".format(self.buckets_ready))
-                    # In case there are unreduced buckets,reduce them all
-                    if len(self.buckets_to_reduce) > 0:
-                        for b_idx in self.buckets_to_reduce:
-                            self._queue_reduction(b_idx)
-                    # A final sync for all the reduction works
-                    self._sync_reduction_works()
+                if bucket_idx not in self.buckets_ready:
+                    self.buckets_ready.add(bucket_idx)
+                    if len(self.buckets_to_reduce) > 0 and self.buckets_to_reduce[0] == bucket_idx:
+                        # Reduce the bucket
+                        self._queue_reduction(bucket_idx)
+                        self.buckets_to_reduce.pop(0)
+
+                    # If all buckets are ready
+                    if len(self.buckets_ready) == len(self.bucket_order):
+                        # In case there are unreduced buckets, reduce them all
+                        if len(self.buckets_to_reduce) > 0:
+                            for b_idx in self.buckets_to_reduce:
+                                self._queue_reduction(b_idx)
+                        # A final sync for all the reduction works
+                        self._sync_reduction_works()
 
         return distributed_data_parallel_hook
 
     def _queue_reduction(self, bucket_idx):
-        #print("reduce bucket: {}".format(bucket_idx))
         grads_batch = self.buckets[bucket_idx]
         grads_batch_coalesced = []
+
         # coalesce the bucket
-        for dev_idx, dev_grads_batch in enumerate(grads_batch):
-            #print("on device: {}, len(grads_batch): {}".format(dev_idx, len(dev_grads_batch)))
-            dev_id = self.device_ids[dev_idx]
+        for dev_id, dev_grads_batch in zip(self.device_ids, grads_batch):
             with torch.cuda.device(dev_id):
                 dev_grads_batch_coalesced = _flatten_dense_tensors(dev_grads_batch)
                 grads_batch_coalesced.append(dev_grads_batch_coalesced)
 
-        # we will only use device 0's results, but this single op should be
-        # faster than doing the following two operation sequentially:
-        # (1) intra-node reduce to lead gpu, followed by
-        # (2) inter-node allreduce for all the first lead gpus in all nodes
-        reduction_work = c10d.all_reduce_multigpu(grads_batch_coalesced, self.process_group)
+        # reduce to the first GPU in self.device_ids
+        if len(self.device_ids) > 1:
+            nccl.reduce(grads_batch_coalesced, root=0, streams=self.default_streams)
+
+        # now work on the first gpu
+        reduction_work = c10d.all_reduce(grads_batch_coalesced[0], self.process_group)
         self.reduction_works.append(reduction_work)
         self.buckets_coalesced[bucket_idx] = grads_batch_coalesced[0]
 
@@ -324,12 +332,12 @@ class DistributedDataParallelC10d(Module):
         for reduction_work in self.reduction_works:
             reduction_work.wait()
 
-        # Now only work on the first device of self.device_ids, uncoalesce
+        # Now only work on the first GPU of self.device_ids, uncoalesce
         # the gradients for each bucket
         for bucket_idx, grads_batch in enumerate(self.buckets):
             self.buckets_coalesced[bucket_idx] /= self.process_group.size()
             grads_batch_reduced = _unflatten_dense_tensors(
-                    self.buckets_coalesced[bucket_idx], grads_batch[0])
+                self.buckets_coalesced[bucket_idx], grads_batch[0])
 
             for grad, reduced in zip(grads_batch[0], grads_batch_reduced):
                 grad.copy_(reduced)
@@ -338,7 +346,8 @@ class DistributedDataParallelC10d(Module):
             self.buckets[bucket_idx] = [[] for _ in range(len(self.device_ids))]
             self.buckets_coalesced[bucket_idx] = []
 
+        # Reset the module states
         self.buckets_to_reduce = copy.copy(self.bucket_order)
-        self.buckets_ready = []
+        self.buckets_ready = set()
         self.reduction_works = []
-        self.devs_ready = [[] for _ in range(len(self.bucket_sizes))]
+        self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
