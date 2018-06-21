@@ -6,15 +6,11 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/SpectralOpsUtils.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
-#include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
-#include <THC/THCNumerics.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
@@ -118,18 +114,17 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "_fft_fill_with_conjugate_symmetry_", [&] {
-    using cuda_scalar_t = cuda::into_type<scalar_t>;
-    typedef thrust::device_ptr<cuda_scalar_t> device_ptr;
+    typedef thrust::device_ptr<scalar_t> device_ptr;
     typedef thrust::counting_iterator<int64_t> counter;
     typedef thrust::transform_iterator<cnt_to_dst_idx_functor, counter> dst_idx_iterator;
     typedef thrust::permutation_iterator<device_ptr, dst_idx_iterator> dst_iterator;
-    typedef thrust::transform_iterator<dst_idx_to_src_functor<cuda_scalar_t>, dst_idx_iterator> src_iterator;
+    typedef thrust::transform_iterator<dst_idx_to_src_functor<scalar_t>, dst_idx_iterator> src_iterator;
 
     dst_idx_iterator dst_idxs(counter(0), cnt_to_dst_idx_functor(size_last_dim, last_dim_start_slice));
 
-    auto data = device_ptr(input.data<cuda_scalar_t>());
+    auto data = device_ptr(input.data<scalar_t>());
     dst_iterator dsts(data, dst_idxs);
-    src_iterator srcs(dst_idxs, dst_idx_to_src_functor<cuda_scalar_t>(input));
+    src_iterator srcs(dst_idxs, dst_idx_to_src_functor<scalar_t>(input));
     thrust::copy_n(policy, srcs, n, dsts);
   });
 }
