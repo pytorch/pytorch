@@ -3403,6 +3403,488 @@ class TestScript(JitTestCase):
             def wrong_return_type():
                 return somefunc()
 
+    # Tests for calling between different front-end modes
+    def test_call_python_fn_from_tracing_fn(self):
+        def python_fn(x):
+            return torch.neg(x)
+
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return python_fn(x) + 1
+
+        # The neg op in the python function should be properly inlined to the
+        # graph
+        self.assertExpected(str(traced_fn.graph))
+
+    def test_call_python_mod_from_tracing_fn(self):
+        class PythonMod(torch.nn.Module):
+            def __init__(self):
+                super(PythonMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        pm = PythonMod()
+
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return pm(x) + 1
+
+        # Note: the parameter self.param from the Python module is inlined
+        # into the graph
+        self.assertExpected(str(traced_fn.graph))
+
+    def test_call_traced_fn_from_tracing_fn(self):
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn1(x):
+            return torch.neg(x)
+
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return traced_fn1(x) + 1
+
+        self.assertExpected(str(traced_fn.graph))
+
+    def test_call_traced_mod_from_tracing_fn(self):
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return tm(x) + 1
+
+        # Note: the parameter self.param from the Python module is inlined
+        # into the graph
+        self.assertExpected(str(traced_fn.graph))
+
+    def test_call_script_fn_from_tracing_fn(self):
+        @torch.jit.script
+        def script_fn(x):
+            return torch.neg(x)
+
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return script_fn(x) + 1
+
+        self.assertExpected(str(traced_fn.graph))
+
+    def test_call_script_mod_from_tracing_fn(self):
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        sm = ScriptMod()
+
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return sm(x) + 1
+
+        self.assertExpected(str(traced_fn.graph))
+
+    def test_call_python_fn_from_traced_module(self):
+        def python_fn(x):
+            return torch.neg(x)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            def forward(self, x):
+                return torch.mm(python_fn(x), self.param)
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+
+        # Note: parameter self.param from the traced module should appear as
+        # an input to the graph and the neg op from the Python function should
+        # be properly inlined
+        self.assertExpected(str(tm.__getattr__('forward').graph))
+
+    def test_call_python_mod_from_traced_module(self):
+        class PythonModule(torch.nn.Module):
+            def __init__(self):
+                super(PythonModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(5, 7))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 5))
+                self.mod = PythonModule()
+
+            def forward(self, x):
+                return self.mod(torch.mm(x, self.param)) + 1
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+
+        # Note: the parameters from both modules should appear in the flattened
+        # inputs of the graph. All ops from both modules should be inlined.
+        self.assertExpected(str(tm.__getattr__('forward').graph))
+
+    def test_call_traced_fn_from_traced_module(self):
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return torch.neg(x)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 5))
+
+            def forward(self, x):
+                return traced_fn(torch.mm(x, self.param))
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+        # Note: neg op from the traced function should be properly inlined
+        self.assertExpected(str(tm.__getattr__('forward').graph))
+
+    def test_call_traced_module_from_traced_module(self):
+        class TracedModule1(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule1, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(5, 7))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 5))
+                self.mod = torch.jit.trace(torch.rand(3, 5))(TracedModule1())
+
+            def forward(self, x):
+                return self.mod(torch.mm(x, self.param)) + 1
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+
+        # Note: the parameters from both modules should appear in the flattened
+        # inputs of the graph. All ops from both modules should be inlined.
+        self.assertExpected(str(tm.__getattr__('forward').graph))
+
+    def test_call_script_fn_from_traced_module(self):
+        @torch.jit.script
+        def traced_fn(x):
+            return torch.neg(x)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 5))
+
+            def forward(self, x):
+                return traced_fn(torch.mm(x, self.param))
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+        # Note: neg op from the script function should be properly inlined
+        self.assertExpected(str(tm.__getattr__('forward').graph))
+
+    def test_call_script_module_from_traced_module(self):
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(5, 7))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 5))
+                self.mod = ScriptMod()
+
+            def forward(self, x):
+                return self.mod(torch.mm(x, self.param)) + 1
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+
+        # Note: the parameters from both modules should appear in the flattened
+        # inputs of the graph. All ops from both modules should be inlined.
+        self.assertExpected(str(tm.__getattr__('forward').graph))
+
+    def test_call_python_fn_from_script_fn(self):
+        def python_fn(x):
+            return torch.neg(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            return python_fn(x) + 1
+
+        # Note: the call to python_fn appears as `^python_fn()` and is called
+        # as a PythonOp in the interpreter
+        self.assertExpected(str(script_fn.graph))
+
+    def test_call_python_mod_from_script_fn(self):
+        class PythonModule(torch.nn.Module):
+            def __init__(self):
+                super(PythonModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(5, 7))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        pm = PythonModule()
+
+        @torch.jit.script
+        def script_fn(x):
+            return pm(x) + 1
+
+        # Note: call to pm(x) appears as ^<python_value>() in the trace.
+        # Parameters are NOT inlined.
+        self.assertExpected(str(script_fn.graph))
+
+    def test_call_traced_fn_from_script_fn(self):
+        @torch.jit.trace(torch.rand(3, 4))
+        def traced_fn(x):
+            return torch.neg(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            return traced_fn(x) + 1
+
+        # Note: the neg op from traced_fn should be properly inlined into the
+        # script function's graph
+        self.assertExpected(str(script_fn.graph))
+
+    @unittest.skip('TODO: Incorrect behavior')
+    def test_call_traced_mod_from_script_fn(self):
+        class TracedModule(torch.nn.Module):
+            def __init__(self):
+                super(TracedModule, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
+
+        @torch.jit.script
+        def script_fn(x):
+            return tm(x) + 1
+
+        # Note: At the time of writing this produces the following graph:
+        # graph(%x : Dynamic) {
+        #   %1 : Dynamic = ^<python_value>()(%x)
+        #   %2 : Long() = prim::Constant[value={1}]()
+        #   %3 : Dynamic = aten::add[alpha={1}](%1, %2)
+        #   return (%3);
+        # }
+        # This seems incorrect. Similarly to calling a traced module from a
+        # traced function, the behavior here should likely be that we inline
+        # the parameter from the traced module as a Constant node and we inline
+        # the ops into the graph of the script function. TODO: fix
+        self.assertExpected(str(script_fn.graph))
+
+    def test_call_script_fn_from_script_fn(self):
+        @torch.jit.script
+        def script_fn1(x):
+            return torch.neg(x)
+
+        @torch.jit.script
+        def script_fn(x):
+            return script_fn1(x) + 1
+
+        # Note: the neg op from script_fn1 should be properly inlined into the
+        # graph of script_fn
+        self.assertExpected(str(script_fn.graph))
+
+    @unittest.skip('TODO: Incorrect behavior')
+    def test_call_script_mod_from_script_fn(self):
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        sm = ScriptMod()
+
+        @torch.jit.script
+        def script_fn(x):
+            return sm(x) + 1
+
+        # Note: At the time of writing this produces the following graph:
+        # graph(%x : Dynamic) {
+        #   %1 : Dynamic = ^<python_value>()(%x)
+        #   %2 : Long() = prim::Constant[value={1}]()
+        #   %3 : Dynamic = aten::add[alpha={1}](%1, %2)
+        #   return (%3);
+        # }
+        # This seems incorrect. Similarly to calling a script module from a
+        # traced function, the behavior here should likely be that we inline
+        # the parameter from the traced module as a Constant node and we inline
+        # the ops into the graph of the script function. TODO: fix
+        self.assertExpected(str(script_fn.graph))
+
+    @unittest.skip('TODO: Python value resolution broken')
+    def test_call_python_fn_from_script_module(self):
+        def python_fn(x):
+            return torch.neg(x)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return python_fn(torch.mm(x, self.param))
+
+        sm = ScriptMod()
+        # TODO: At the time of writing this test fails with:
+        # RuntimeError
+        # undefined value python_fn:
+        # @torch.jit.script_method
+        # def forward(self, x):
+        #     return python_fn(torch.mm(x, self.param))
+        #            ~~~~~~~~~ <--- HERE
+        self.assertExpected(str(sm.__getattr__('forward').graph))
+
+    def test_call_python_mod_from_script_module(self):
+        class PythonMod(torch.nn.Module):
+            def __init__(self):
+                super(PythonMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 5))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+                self.pm = PythonMod()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.pm(torch.mm(x, self.param))
+
+        sm = ScriptMod()
+        # Note: the call into PythonMod appears as ^<python_value>(). Parameters
+        # are NOT inlined
+        self.assertExpected(str(sm.__getattr__('forward').graph))
+
+    @unittest.skip('TODO: Python value resolution broken')
+    def test_call_tracing_fn_from_script_module(self):
+        @torch.jit.trace(torch.rand(3, 3))
+        def traced_fn(x):
+            return torch.neg(x)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return traced_fn(torch.mm(x, self.param))
+
+        sm = ScriptMod()
+        # FIXME: at the time of writing we fail with the following:
+        # RuntimeError:
+        # undefined value traced_fn:
+        # @torch.jit.script_method
+        # def forward(self, x):
+        #     return traced_fn(torch.mm(x, self.param))
+        #            ~~~~~~~~~ <--- HERE
+        self.assertExpected(str(sm.__getattr__('forward').graph))
+
+    def test_call_tracing_mod_from_script_module(self):
+        class TracedMod(torch.nn.Module):
+            def __init__(self):
+                super(TracedMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 5))
+
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+                self.tm = torch.jit.trace(torch.rand(3, 3))(TracedMod())
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.tm(torch.mm(x, self.param))
+
+        sm = ScriptMod()
+        # Note: the parameters from both modules should appear in the flattened
+        # input list to the graph. The mm op from TracedMod should be properly
+        # inlined
+        self.assertExpected(str(sm.__getattr__('forward').graph))
+
+    @unittest.skip('TODO: Python value resolution broken')
+    def test_call_script_fn_from_script_module(self):
+        @torch.jit.script
+        def script_fn(x):
+            return torch.neg(x)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return script_fn(torch.mm(x, self.param))
+
+        sm = ScriptMod()
+        # FIXME: at the time of writing, this failes with
+        # RuntimeError:
+        # undefined value traced_fn:
+        # @torch.jit.script_method
+        # def forward(self, x):
+        #     return traced_fn(torch.mm(x, self.param))
+        #            ~~~~~~~~~ <--- HERE
+        self.assertExpected(str(sm.__getattr__('forward').graph))
+
+    def test_call_script_mod_from_script_module(self):
+        class ScriptMod1(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod1, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(3, 5))
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return torch.mm(x, self.param)
+
+        class ScriptMod(torch.jit.ScriptModule):
+            def __init__(self):
+                super(ScriptMod, self).__init__()
+                self.param = torch.nn.Parameter(torch.rand(4, 3))
+                self.tm = ScriptMod1()
+
+            @torch.jit.script_method
+            def forward(self, x):
+                return self.tm(torch.mm(x, self.param))
+
+        sm = ScriptMod()
+        # Note: the parameters from both modules should appear in the flattened
+        # input list to the graph. The mm op from ScriptMod1 should be properly
+        # inlined
+        self.assertExpected(str(sm.__getattr__('forward').graph))
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
