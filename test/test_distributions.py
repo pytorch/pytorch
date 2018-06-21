@@ -3071,8 +3071,8 @@ class TestKL(TestCase):
             loc = [torch.randn(4) for _ in range(0, 2)]
             scale_factor = [torch.randn(4, 3) for _ in range(0, 2)]
             scale_diag = [transform_to(constraints.positive)(torch.randn(4)) for _ in range(0, 2)]
-            covariance_matrix = [scale_factor[i].matmul(scale_factor[i].t())
-                                 + scale_diag[i].diag() for i in range(0, 2)]
+            covariance_matrix = [scale_factor[i].matmul(scale_factor[i].t()) +
+                                 scale_diag[i].diag() for i in range(0, 2)]
             p = LowRankMultivariateNormal(loc[0], scale_factor[0], scale_diag[0])
             q = LowRankMultivariateNormal(loc[1], scale_factor[1], scale_diag[1])
             actual = kl_divergence(p, q)

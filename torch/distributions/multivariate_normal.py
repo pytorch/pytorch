@@ -142,8 +142,7 @@ class MultivariateNormal(Distribution):
                                  "with optional leading batch dimensions")
             self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
             batch_shape = _get_batch_shape(covariance_matrix, loc)
-            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape
-                                                              + event_shape)
+            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape + event_shape)
         else:
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
@@ -151,10 +150,8 @@ class MultivariateNormal(Distribution):
             covariance_matrix = _batch_inverse(precision_matrix)
             self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
             batch_shape = _get_batch_shape(precision_matrix, loc)
-            self.precision_matrix = precision_matrix.expand(batch_shape + event_shape
-                                                            + event_shape)
-            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape
-                                                              + event_shape)
+            self.precision_matrix = precision_matrix.expand(batch_shape + event_shape + event_shape)
+            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape + event_shape)
 
         self.loc = loc.expand(batch_shape + event_shape)
         super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)

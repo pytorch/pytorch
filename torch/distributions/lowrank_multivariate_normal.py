@@ -103,7 +103,7 @@ class LowRankMultivariateNormal(Distribution):
         scale_batch_shape = _get_batch_shape(scale_factor, scale_diag)
         try:
             batch_shape = torch._C._infer_size(loc.shape[:-1], scale_batch_shape)
-        except:
+        except RuntimeError:
             raise ValueError("Incompatible batch shapes: loc {}, scale_factor {}, scale_diag {}"
                              .format(loc.shape, scale_factor.shape, scale_diag.shape))
 
@@ -139,8 +139,8 @@ class LowRankMultivariateNormal(Distribution):
 
     @lazy_property
     def covariance_matrix(self):
-        return (torch.matmul(self.scale_factor, self.scale_factor.transpose(-1, -2))
-                + _batch_vector_diag(self.scale_diag))
+        return (torch.matmul(self.scale_factor, self.scale_factor.transpose(-1, -2)) +
+                _batch_vector_diag(self.scale_diag))
 
     @lazy_property
     def precision_matrix(self):
@@ -149,8 +149,8 @@ class LowRankMultivariateNormal(Distribution):
         # where :math:`C` is the capacitance matrix.
         Wt_Dinv = self.scale_factor.transpose(-1, -2) / self.scale_diag.unsqueeze(-2)
         A = _batch_trtrs_lower(Wt_Dinv, self._capacitance_tril)
-        return (_batch_vector_diag(self.scale_diag.reciprocal())
-                - torch.matmul(A.transpose(-1, -2), A))
+        return (_batch_vector_diag(self.scale_diag.reciprocal()) -
+                torch.matmul(A.transpose(-1, -2), A))
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)

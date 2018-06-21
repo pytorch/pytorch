@@ -299,8 +299,8 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
         raise ValueError("KL-divergence between two Low Rank Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = (_batch_lowrank_logdet(q.scale_factor, q.scale_diag, q._capacitance_tril)
-             - _batch_lowrank_logdet(p.scale_factor, p.scale_diag, p._capacitance_tril))
+    term1 = (_batch_lowrank_logdet(q.scale_factor, q.scale_diag, q._capacitance_tril) -
+             _batch_lowrank_logdet(p.scale_factor, p.scale_diag, p._capacitance_tril))
     term3 = _batch_lowrank_mahalanobis(q.scale_factor, q.scale_diag, q.loc - p.loc,
                                        q._capacitance_tril)
     # Expands term2 according to
@@ -323,8 +323,8 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
         raise ValueError("KL-divergence between two Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    half_term1 = (_batch_diag(q._unbroadcasted_scale_tril).log().sum(-1)
-                  - _batch_diag(p._unbroadcasted_scale_tril).log().sum(-1))
+    half_term1 = (_batch_diag(q._unbroadcasted_scale_tril).log().sum(-1) -
+                  _batch_diag(p._unbroadcasted_scale_tril).log().sum(-1))
     combined_batch_shape = torch._C._infer_size(q._unbroadcasted_scale_tril.shape[:-2],
                                                 p._unbroadcasted_scale_tril.shape[:-2])
     n = p.event_shape[0]
