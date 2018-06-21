@@ -7615,6 +7615,7 @@ shard = os.environ.get('TEST_NN_SHARD', None)
 if num_shards is not None and shard is not None:
     num_shards = int(num_shards)
     shard = int(shard)
+
     def load_tests(loader, tests, pattern):
         test_suite = unittest.TestSuite()
         for test_group in tests:
