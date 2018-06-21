@@ -13,7 +13,7 @@ void THNN_(MarginCriterion_updateOutput)(
   real margin = TH_CONVERT_ACCREAL_TO_REAL(margin_);
   THNN_CHECK_NELEMENT(input, target);
   THNN_CHECK_DIM_SIZE(output, 1, 0, 1);
-  real sum = 0;
+  accreal sum = 0;
 
   TH_TENSOR_APPLY2(real, input, real, target,
     real z = (margin - *input_data * *target_data);
@@ -23,7 +23,7 @@ void THNN_(MarginCriterion_updateOutput)(
   if (sizeAverage)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set1d)(output, 0, (accreal)sum);
 }
 
 void THNN_(MarginCriterion_updateGradInput)(

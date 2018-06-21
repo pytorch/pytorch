@@ -19,7 +19,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   THIndex_t *target_data;
   int64_t nframe, dim;
   int64_t t, d;
-  real sum;
+  accreal sum;
 
   THArgCheck((input->_dim() == 1) || (input->_dim() == 2), 2,
 	     "vector or matrix expected");
@@ -108,7 +108,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     if(sizeAverage)
       sum /= nframe;
 
-    THTensor_(set1d)(output, 0, sum);
+    THTensor_(set1d)(output, 0, (real)sum);
   }
 
   THTensor_(free)(input);

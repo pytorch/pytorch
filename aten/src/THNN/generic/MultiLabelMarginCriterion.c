@@ -16,7 +16,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   THIndex_t *target_data;
   int64_t nframe, dim;
   int64_t t, d, dt, ddt;
-  real sum;
+  accreal sum;
 
   THArgCheck((input->_dim() == 1) || (input->_dim() == 2), 2,
 	     "vector or matrix expected");
@@ -88,7 +88,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     sum /= dim;
     if (sizeAverage)
       sum /= nframe;
-    THTensor_(fastSet1d)(output, 0, sum);
+    THTensor_(fastSet1d)(output, 0, (real)sum);
 
     THTensor_(free)(input);
     THIndexTensor_(free)(target);

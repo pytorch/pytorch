@@ -40,7 +40,7 @@ void THNN_(BCECriterion_updateOutput)(
   }
 
 	THTensor_(resize1d)(output, 1);
-  real sum = 0;
+  accreal sum = 0;
 
   if (weights) {
     TH_TENSOR_APPLY3(real, input, real, target, real, weights,
@@ -67,7 +67,7 @@ void THNN_(BCECriterion_updateOutput)(
   if (sizeAverage)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set1d)(output, 0, (real)sum);
 }
 
 void THNN_(BCECriterion_updateGradInput)(
