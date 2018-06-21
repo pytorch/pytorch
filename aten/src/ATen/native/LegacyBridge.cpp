@@ -127,7 +127,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 // alone for now.
 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+  // See Note [Multiple dispatch to sparse]
   auto self_sparse = self.is_sparse();
   auto other_sparse = other.is_sparse();
   if (self_sparse && other_sparse) {
@@ -142,7 +142,7 @@ Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
 }
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+  // See Note [Multiple dispatch to sparse]
   auto self_sparse = self.is_sparse();
   auto other_sparse = other.is_sparse();
   if (self_sparse && other_sparse) {
@@ -280,7 +280,7 @@ Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const 
 }
 
 Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+  // See Note [Multiple dispatch to sparse]
   auto mat1_sparse = mat1.is_sparse();
   if (mat1_sparse) {
     Tensor b_self;
@@ -292,7 +292,7 @@ Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar 
 }
 
 Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+  // See Note [Multiple dispatch to sparse]
   auto mat1_sparse = mat1.is_sparse();
   if (mat1_sparse) {
     // inplace is not broadcasting
