@@ -42,7 +42,7 @@ inline bool _check_device(ArrayRef<Tensor> ts) {
   return true;
 }
 
-inline void _raw_resize_sparse(const SparseTensor& self, int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
+inline void _raw_resize_sparse(const SparseTensor& self, int64_t sparseDims, int64_t denseDims, IntList size) {
   _get_sparse_impl(self)->raw_resize_(sparseDims, denseDims, size);
 }
 
@@ -110,7 +110,7 @@ inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone
 // TODO: Expose this for real in ATen, some day?
 // NB: Doesn't preserve data.
 inline Tensor _new_values_with_size_of(const Tensor& values, int64_t nnz) {
-  if (values.dim() == 0) { // values tensor uninitialized
+  if (values.numel() == 0) { // values tensor uninitialized
     return values.type().tensor({nnz});
   } else {
     std::vector<int64_t> size = values.sizes();
