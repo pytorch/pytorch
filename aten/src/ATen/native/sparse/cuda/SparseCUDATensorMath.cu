@@ -24,7 +24,6 @@ namespace at { namespace native {
 // Utility functions
 // --------------------------------------------------------------------
 
-#ifndef __HIP_PLATFORM_HCC__
 namespace {
   IntTensor _to_csr_int(const LongTensor& rowIndices, int64_t dim, int64_t nnz) {
     IntTensor csr = at::empty({dim+1}, CUDA(kInt));
@@ -34,7 +33,6 @@ namespace {
     return csr;
   }
 }
-#endif
 
 // NB: Deleted spaddcmul (aka addcmul_, but not actually wired up), spaddcdiv (not
 // wired at all)
@@ -44,7 +42,6 @@ namespace {
 // --------------------------------------------------------------------
 
 Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, Scalar beta, Scalar alpha) {
-#ifndef __HIP_PLATFORM_HCC__
   AT_CHECK(_check_device({sparse_, r_, t, dense}));
   // THCudaIntTensor *csr;
   // THCIndexTensor *indices;
@@ -141,9 +138,6 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
 
   r_.copy_(r__);
   return r_;
-#else
-  AT_ERROR("s_addmm_out_sparse_dense_cuda: HIP not supported");
-#endif
 }
 
 Tensor s_addmm_sparse_dense_cuda(
@@ -175,7 +169,6 @@ Tensor& s_addmm_sparse_dense_cuda_(
 // --------------------------------------------------------------------
 
 SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , Scalar alpha */) {
-#ifndef __HIP_PLATFORM_HCC__
   cudaStream_t stream = globalContext().getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
@@ -222,9 +215,6 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   _get_sparse_impl(r_)->set_indices_and_values(indices, values);
 
   return r_;
-#else
-  AT_ERROR("hspmm_out_sparse_cuda: HIP not supported");
-#endif
 }
 
 SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) {
@@ -239,7 +229,6 @@ SparseTensor hspmm_sparse_cuda(const SparseTensor& sparse, const Tensor& dense) 
 // --------------------------------------------------------------------
 
 Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorRef sparse_, at::Scalar value) {
-#ifndef __HIP_PLATFORM_HCC__
   const SparseTensor& sparse = sparse_.tref;
 
   AT_CHECK(_check_device({sparse, r_, dense}));
@@ -327,9 +316,6 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
   THCudaCheck(cudaGetLastError());
 
   return r_;
-#else
-  AT_ERROR("add_out_dense_sparse_cuda: HIP not supported");
-#endif
 }
 
 Tensor add_dense_sparse_cuda(const Tensor& t, SparseTensorRef src, Scalar alpha) {
@@ -347,7 +333,6 @@ Tensor& add_dense_sparse_cuda_(Tensor& t, SparseTensorRef src, Scalar alpha) {
 // --------------------------------------------------------------------
 
 SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
-#ifndef __HIP_PLATFORM_HCC__
   AT_CHECK(_check_device({r_, t, src}));
   AT_CHECK(t.sizes().equals(src.sizes()), "cadd operands have incompatible sizes");
 
@@ -391,9 +376,6 @@ SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, con
   //   }
 
   return r_;
-#else
-  AT_ERROR("s_add_out_sparse_cuda: HIP not supported");
-#endif
 }
 
 SparseTensor s_add_sparse_cuda(const SparseTensor& t, const SparseTensor& src, Scalar alpha) {
@@ -436,7 +418,6 @@ SparseTensor& s_sub_sparse_cuda_(SparseTensor& t, const SparseTensor& src, Scala
 // --------------------------------------------------------------------
 
 SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
-#ifndef __HIP_PLATFORM_HCC__
   AT_CHECK(_check_device({r_, t_, src_}));
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul operands have incompatible sizes");
 
@@ -496,9 +477,6 @@ SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, co
   _get_sparse_impl(r_)->set_coalesced(true);
 
   return r_;
-#else
-  AT_ERROR("s_mul_out_sparse_cuda: HIP not supported");
-#endif
 }
 
 SparseTensor s_mul_sparse_cuda(const SparseTensor& t, const SparseTensor& src) {
