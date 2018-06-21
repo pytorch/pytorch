@@ -68,8 +68,29 @@ struct Reduction {
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::GRAIN_SIZE;
     if (stride == 1) {
-      _parallel_for(batch, 1, paralellize, [=](int64_t b) {
-        out_[b] = reduce_all(&data_[b * n], n);
+      parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
+        for (int64_t b = begin; b < end; b++) {
+          const scalar_t* data = &data_[b * n];
+          int64_t size = n;
+          int64_t k = size / WIDTH;
+
+          scalar_t sum = parallel_reduce(
+              0,
+              k,
+              internal::GRAIN_SIZE / WIDTH,
+              (scalar_t)ident,
+              [data](int64_t begin, int64_t end, scalar_t init) {
+                scalar_t buf[WIDTH];
+                reduce128(&data[begin * WIDTH], buf, end - begin, WIDTH);
+                return std::accumulate(buf, buf + WIDTH, init, ReduceScalar());
+              },
+              ReduceScalar());
+
+          for (int64_t i = k * WIDTH; i != size; i++) {
+            sum = ReduceScalar()(sum, data[i]);
+          }
+          out_[b] = sum;
+        }
       });
     } else {
       {

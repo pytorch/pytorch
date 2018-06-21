@@ -235,6 +235,7 @@ Tensor& sum_out(Tensor& result, const Tensor& self, IntList dim, ScalarType dtyp
 
 Tensor &_sum_out_cpu(Tensor &result, const Tensor &self, int64_t dim_,
                      bool keepdim) {
+//  std::cout << "HEE" << std::endl;
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   if (_dimreduce_return_trivial(result, self, 0))
     return result;
