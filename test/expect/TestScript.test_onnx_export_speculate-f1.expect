@@ -1,66 +1,185 @@
-ModelProto {
-  producer_name: "pytorch"
-  domain: ""
-  doc_string: ""
-  graph:
-    GraphProto {
-      name: "torch-jit-export"
-      inputs: [{name: "x.1", type:Tensor dims: 1 10}]
-      outputs: [{name: "6", type:Tensor dims: 10 1}]
-      initializers: []
-      nodes: [
-        Node {type: "Add", inputs: [x.1,x.1], outputs: [1], attributes: []},
-        Node {type: "Constant", inputs: [], outputs: [2], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
-        Node {type: "Transpose", inputs: [1], outputs: [3], attributes: [{ name: 'perm', type: ints, values: [1 0]}]},
-        Node {type: "Transpose", inputs: [1], outputs: [4], attributes: [{ name: 'perm', type: ints, values: [1 0]}]},
-        Node {type: "Transpose", inputs: [1], outputs: [5], attributes: [{ name: 'perm', type: ints, values: [1 0]}]},
-        Node {type: "If", inputs: [2], outputs: [6], attributes: [{ name: 'then_branch', type: graph, value:
-            GraphProto {
-              name: "torch-jit-export1"
-              inputs: []
-              outputs: [{name: "8", type:Tensor dims: }]
-              initializers: []
-              nodes: [
-                Node {type: "Constant", inputs: [], outputs: [7], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
-                Node {type: "If", inputs: [7], outputs: [8], attributes: [{ name: 'then_branch', type: graph, value:
-                    GraphProto {
-                      name: "torch-jit-export2"
-                      inputs: []
-                      outputs: [{name: "3", type:Tensor dims: }]
-                      initializers: []
-                      nodes: [
-                        
-                      ]
-                    }
-
-                  },{ name: 'else_branch', type: graph, value:
-                    GraphProto {
-                      name: "torch-jit-export3"
-                      inputs: []
-                      outputs: [{name: "4", type:Tensor dims: }]
-                      initializers: []
-                      nodes: [
-                        
-                      ]
-                    }
-
-                  }]}
-              ]
-            }
-
-          },{ name: 'else_branch', type: graph, value:
-            GraphProto {
-              name: "torch-jit-export4"
-              inputs: []
-              outputs: [{name: "5", type:Tensor dims: }]
-              initializers: []
-              nodes: [
-                
-              ]
-            }
-
-          }]}
-      ]
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    input: "x.1"
+    input: "x.1"
+    output: "1"
+    op_type: "Add"
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    ~~~~~~ <--- HERE\n    if True:\n        if True:\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+  }
+  node {
+    output: "2"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: UINT8
+        raw_data: "\001\000\000\000"
+      }
+      type: TENSOR
     }
-  opset_import: [OperatorSetIdProto { domain: }],
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n       ~~~~ <--- HERE\n        if True:\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+  }
+  node {
+    input: "1"
+    output: "3"
+    op_type: "Transpose"
+    attribute {
+      name: "perm"
+      ints: 1
+      ints: 0
+      type: INTS
+    }
+    doc_string: "@torch.jit.script\ndef transpose(x):\n    return x.t()\n           ~~~ <--- HERE\n"
+  }
+  node {
+    input: "1"
+    output: "4"
+    op_type: "Transpose"
+    attribute {
+      name: "perm"
+      ints: 1
+      ints: 0
+      type: INTS
+    }
+    doc_string: "@torch.jit.script\ndef transpose(x):\n    return x.t()\n           ~~~ <--- HERE\n"
+  }
+  node {
+    input: "1"
+    output: "5"
+    op_type: "Transpose"
+    attribute {
+      name: "perm"
+      ints: 1
+      ints: 0
+      type: INTS
+    }
+    doc_string: "@torch.jit.script\ndef transpose(x):\n    return x.t()\n           ~~~ <--- HERE\n"
+  }
+  node {
+    input: "2"
+    output: "6"
+    op_type: "If"
+    attribute {
+      name: "then_branch"
+      g {
+        node {
+          output: "7"
+          op_type: "Constant"
+          attribute {
+            name: "value"
+            t {
+              data_type: UINT8
+              raw_data: "\001\000\000\000"
+            }
+            type: TENSOR
+          }
+          doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n        if True:\n           ~~~~ <--- HERE\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+        }
+        node {
+          input: "7"
+          output: "8"
+          op_type: "If"
+          attribute {
+            name: "then_branch"
+            g {
+              name: "torch-jit-export2"
+              output {
+                name: "3"
+                type {
+                  tensor_type {
+                    shape {
+                    }
+                  }
+                }
+              }
+            }
+            type: GRAPH
+          }
+          attribute {
+            name: "else_branch"
+            g {
+              name: "torch-jit-export3"
+              output {
+                name: "4"
+                type {
+                  tensor_type {
+                    shape {
+                    }
+                  }
+                }
+              }
+            }
+            type: GRAPH
+          }
+          doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n        if True:\n        ~~~~~~~~...  <--- HERE\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+        }
+        name: "torch-jit-export1"
+        output {
+          name: "8"
+          type {
+            tensor_type {
+              shape {
+              }
+            }
+          }
+        }
+      }
+      type: GRAPH
+    }
+    attribute {
+      name: "else_branch"
+      g {
+        name: "torch-jit-export4"
+        output {
+          name: "5"
+          type {
+            tensor_type {
+              shape {
+              }
+            }
+          }
+        }
+      }
+      type: GRAPH
+    }
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n    ~~~~~~~~...  <--- HERE\n        if True:\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "x.1"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 10
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "6"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 10
+          }
+          dim {
+            dim_value: 1
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
 }

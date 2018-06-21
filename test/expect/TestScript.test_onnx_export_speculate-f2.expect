@@ -1,63 +1,303 @@
-ModelProto {
-  producer_name: "pytorch"
-  domain: ""
-  doc_string: ""
-  graph:
-    GraphProto {
-      name: "torch-jit-export"
-      inputs: [{name: "x.1", type:Tensor dims: 1 10},{name: "1", type:Tensor dims: 20 10},{name: "2", type:Tensor dims: 20}]
-      outputs: [{name: "5", type:Tensor dims: 1 20}]
-      initializers: [TensorProto shape: [20 10],TensorProto shape: [20]]
-      nodes: [
-        Node {type: "Add", inputs: [x.1,x.1], outputs: [3], attributes: []},
-        Node {type: "Constant", inputs: [], outputs: [4], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
-        Node {type: "If", inputs: [4], outputs: [5], attributes: [{ name: 'then_branch', type: graph, value:
-            GraphProto {
-              name: "torch-jit-export1"
-              inputs: []
-              outputs: [{name: "7", type:Tensor dims: 1 20}]
-              initializers: []
-              nodes: [
-                Node {type: "Constant", inputs: [], outputs: [6], attributes: [{ name: 'value', type: tensor, value:TensorProto shape: []}]},
-                Node {type: "If", inputs: [6], outputs: [7], attributes: [{ name: 'then_branch', type: graph, value:
-                    GraphProto {
-                      name: "torch-jit-export2"
-                      inputs: []
-                      outputs: [{name: "8", type:Tensor dims: 1 20}]
-                      initializers: []
-                      nodes: [
-                        Node {type: "Gemm", inputs: [3,1,2], outputs: [8], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'broadcast', type: int, value: 1},{ name: 'transB', type: int, value: 1}]}
-                      ]
-                    }
-
-                  },{ name: 'else_branch', type: graph, value:
-                    GraphProto {
-                      name: "torch-jit-export3"
-                      inputs: []
-                      outputs: [{name: "9", type:Tensor dims: 1 20}]
-                      initializers: []
-                      nodes: [
-                        Node {type: "Gemm", inputs: [3,1,2], outputs: [9], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'broadcast', type: int, value: 1},{ name: 'transB', type: int, value: 1}]}
-                      ]
-                    }
-
-                  }]}
-              ]
-            }
-
-          },{ name: 'else_branch', type: graph, value:
-            GraphProto {
-              name: "torch-jit-export4"
-              inputs: []
-              outputs: [{name: "10", type:Tensor dims: 1 20}]
-              initializers: []
-              nodes: [
-                Node {type: "Gemm", inputs: [3,1,2], outputs: [10], attributes: [{ name: 'alpha', type: float, value: 1},{ name: 'beta', type: float, value: 1},{ name: 'broadcast', type: int, value: 1},{ name: 'transB', type: int, value: 1}]}
-              ]
-            }
-
-          }]}
-      ]
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    input: "x.1"
+    input: "x.1"
+    output: "3"
+    op_type: "Add"
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    ~~~~~~ <--- HERE\n    if True:\n        if True:\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+  }
+  node {
+    output: "4"
+    op_type: "Constant"
+    attribute {
+      name: "value"
+      t {
+        data_type: UINT8
+        raw_data: "\001\000\000\000"
+      }
+      type: TENSOR
     }
-  opset_import: [OperatorSetIdProto { domain: }],
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n       ~~~~ <--- HERE\n        if True:\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+  }
+  node {
+    input: "4"
+    output: "5"
+    op_type: "If"
+    attribute {
+      name: "then_branch"
+      g {
+        node {
+          output: "6"
+          op_type: "Constant"
+          attribute {
+            name: "value"
+            t {
+              data_type: UINT8
+              raw_data: "\001\000\000\000"
+            }
+            type: TENSOR
+          }
+          doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n        if True:\n           ~~~~ <--- HERE\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+        }
+        node {
+          input: "6"
+          output: "7"
+          op_type: "If"
+          attribute {
+            name: "then_branch"
+            g {
+              node {
+                input: "3"
+                input: "1"
+                input: "2"
+                output: "8"
+                op_type: "Gemm"
+                attribute {
+                  name: "alpha"
+                  f: 1
+                  type: FLOAT
+                }
+                attribute {
+                  name: "beta"
+                  f: 1
+                  type: FLOAT
+                }
+                attribute {
+                  name: "broadcast"
+                  i: 1
+                  type: INT
+                }
+                attribute {
+                  name: "transB"
+                  i: 1
+                  type: INT
+                }
+                doc_string: "/data/users/royboy/pytorch/pytorch/torch/nn/functional.py(999): linear\n/data/users/royboy/pytorch/pytorch/torch/nn/modules/linear.py(55): forward\n/data/users/royboy/pytorch/pytorch/torch/nn/modules/module.py(468): __call__\n/data/users/royboy/pytorch/pytorch/torch/jit/__init__.py(305): wrapper\ntest/test_jit.py(2722): test_onnx_export_speculate\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(605): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(653): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/runner.py(176): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(256): runTests\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(95): __init__\n/data/users/royboy/pytorch/pytorch/test/common.py(50): run_tests\ntest/test_jit.py(3086): <module>\n"
+              }
+              name: "torch-jit-export2"
+              output {
+                name: "8"
+                type {
+                  tensor_type {
+                    elem_type: FLOAT
+                    shape {
+                      dim {
+                        dim_value: 1
+                      }
+                      dim {
+                        dim_value: 20
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            type: GRAPH
+          }
+          attribute {
+            name: "else_branch"
+            g {
+              node {
+                input: "3"
+                input: "1"
+                input: "2"
+                output: "9"
+                op_type: "Gemm"
+                attribute {
+                  name: "alpha"
+                  f: 1
+                  type: FLOAT
+                }
+                attribute {
+                  name: "beta"
+                  f: 1
+                  type: FLOAT
+                }
+                attribute {
+                  name: "broadcast"
+                  i: 1
+                  type: INT
+                }
+                attribute {
+                  name: "transB"
+                  i: 1
+                  type: INT
+                }
+                doc_string: "/data/users/royboy/pytorch/pytorch/torch/nn/functional.py(999): linear\n/data/users/royboy/pytorch/pytorch/torch/nn/modules/linear.py(55): forward\n/data/users/royboy/pytorch/pytorch/torch/nn/modules/module.py(468): __call__\n/data/users/royboy/pytorch/pytorch/torch/jit/__init__.py(305): wrapper\ntest/test_jit.py(2722): test_onnx_export_speculate\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(605): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(653): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/runner.py(176): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(256): runTests\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(95): __init__\n/data/users/royboy/pytorch/pytorch/test/common.py(50): run_tests\ntest/test_jit.py(3086): <module>\n"
+              }
+              name: "torch-jit-export3"
+              output {
+                name: "9"
+                type {
+                  tensor_type {
+                    elem_type: FLOAT
+                    shape {
+                      dim {
+                        dim_value: 1
+                      }
+                      dim {
+                        dim_value: 20
+                      }
+                    }
+                  }
+                }
+              }
+            }
+            type: GRAPH
+          }
+          doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n        if True:\n        ~~~~~~~~...  <--- HERE\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+        }
+        name: "torch-jit-export1"
+        output {
+          name: "7"
+          type {
+            tensor_type {
+              elem_type: FLOAT
+              shape {
+                dim {
+                  dim_value: 1
+                }
+                dim {
+                  dim_value: 20
+                }
+              }
+            }
+          }
+        }
+      }
+      type: GRAPH
+    }
+    attribute {
+      name: "else_branch"
+      g {
+        node {
+          input: "3"
+          input: "1"
+          input: "2"
+          output: "10"
+          op_type: "Gemm"
+          attribute {
+            name: "alpha"
+            f: 1
+            type: FLOAT
+          }
+          attribute {
+            name: "beta"
+            f: 1
+            type: FLOAT
+          }
+          attribute {
+            name: "broadcast"
+            i: 1
+            type: INT
+          }
+          attribute {
+            name: "transB"
+            i: 1
+            type: INT
+          }
+          doc_string: "/data/users/royboy/pytorch/pytorch/torch/nn/functional.py(999): linear\n/data/users/royboy/pytorch/pytorch/torch/nn/modules/linear.py(55): forward\n/data/users/royboy/pytorch/pytorch/torch/nn/modules/module.py(468): __call__\n/data/users/royboy/pytorch/pytorch/torch/jit/__init__.py(305): wrapper\ntest/test_jit.py(2722): test_onnx_export_speculate\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(605): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/case.py(653): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(122): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/suite.py(84): __call__\n/home/royboy/local/miniconda/lib/python3.6/unittest/runner.py(176): run\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(256): runTests\n/home/royboy/local/miniconda/lib/python3.6/unittest/main.py(95): __init__\n/data/users/royboy/pytorch/pytorch/test/common.py(50): run_tests\ntest/test_jit.py(3086): <module>\n"
+        }
+        name: "torch-jit-export4"
+        output {
+          name: "10"
+          type {
+            tensor_type {
+              elem_type: FLOAT
+              shape {
+                dim {
+                  dim_value: 1
+                }
+                dim {
+                  dim_value: 20
+                }
+              }
+            }
+          }
+        }
+      }
+      type: GRAPH
+    }
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    x += x\n    if True:\n    ~~~~~~~~...  <--- HERE\n        if True:\n            y = self.m(x)\n        else:\n            y = self.m(x)\n    else:\n        y = self.m(x)\n    return y\n"
+  }
+  name: "torch-jit-export"
+  initializer {
+    dims: 20
+    dims: 10
+    data_type: FLOAT
+    name: "1"
+    raw_data: "f\254-\276!h\210\276_\r\256\274\235\315]\275\275\345\215\275],\025\276\236\020C\276\n\",\276>X\025\276\271\307\204>\372\237H>\020\231\225\276\004O\026>#T\223=X\247\022\276\363u\334\2756\200\360\275\265\270C\276+5!>,6\301=0G\n\276\014o\332\275*n\232\275\272C\300\275\210\360\212\276!\245\232\276\026\337\226\274\003\003\352\275\215Xv>_\366\257\274G!\231>\036n\014\276}=A>.\314)\275C\307\340\275;?\234>\351\373\205\276XWp\276D\3660;\311\020\017\276y+\336\273\330dO\275\320\231\234>w\256^\276\231\320<>\263\3275\276\257t\023>\374\370K>\363\220[\276\316F\211\276az\\\276?n\251<\0058\220\2765}d>Y\266U<\266\362\230\276\203\307\237>\007/7>h9\243=\371M\217>\2663F\276\246WU>\300\253k\276\3258\035>0k\235>\220\350\327\275\326\036\232>\326se\276\217\273X>\3378\244\273\254\177F\273-\344@>\005\244\202>\233\021\207\275\255c\034\275\256tp\276a\303\350;u_D\275HC\013>i\272\n>B\224&>!\237\352=\036-\235\274b@\264;\372\016x>2\311h>S\311\215>\332G\202>\031\335o>qx\315=\002a\240\274\230\226\200\276\023pD>|E\207<\373|2>U\031\'\276\336\212\211<\213A\022>R\034\231>E\014\232>\001&\220\276\221)5\276\036\271\234>\273K\005\276\207\'\227\276\344\344\236\275\004\225\014>Y\177\005\276\226\001\212=\367[\034\276\261\033\222\276B\007\241<\020\211~=\333\337\234>\236x\327\275{&\271\275\313\310\017>X\t\217>]\002u>\374\026\230>\005\213D\276\215\223\233\275\021P\023>V\221\213\276kl2\276\223I\217\276\337`!\275\201\017\327=\255\266>\276\225L\306=V}\202>\223R\372\275\200\0308>\020\306\202>\326\033\027\275\344\233~\274\037a\221\276f\233\220=\217\216\324\275s\252i>\006Ve\276\343\376\222<\327\347\215\275\231LR<\002U\227=\223\\\236>\362}P>\022z\006>\021\374\341\274\315\025G\276LM,>\210C\245=#\342I=\235\200P>\260\002\231=+\273\032<T\202+>\300\351\377=z\314h>@w\234\276:\033E\276\363\363{\276x\302\202\276\342\223\273=p\034S>\357\241\004>\234\243h\275\305\317V\276p\337i>\347L$\276|\302\372\275\330\330\016>\331.\000>\325q\342=;\222\231=e,W\276\301s:>\256\347\353=\006\'\224\276\\\331\240\275o\272\n\275\200\317\215\276s\033L\275\356d\242\275\325{r\276\236\341\031=\037e\206>\306\336<<\214\020\225>\204\234\255\275\267\260o<y7\243\274#\246[\276o\253\t=\002\250^\276\350\377\223\276s\010\344=\246\216]\276\373\356\031\276kL\220\273"
+  }
+  initializer {
+    dims: 20
+    data_type: FLOAT
+    name: "2"
+    raw_data: "\217\300\212\276\312\275*>N\334\231\273=\262\260=\352\235\250\275\005\376%>\224Wp\276t\350\216\276\251\275\347=\266\255\212\276ag\215\276\376\3645\276\271\250\236>a\215R>z\254x>\331\330\314=\317>\211>\037\026h\276\374cY>\344\203`>"
+  }
+  input {
+    name: "x.1"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 10
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 20
+          }
+          dim {
+            dim_value: 10
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 20
+          }
+        }
+      }
+    }
+  }
+  output {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 20
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
 }

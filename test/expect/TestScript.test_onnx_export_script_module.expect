@@ -1,16 +1,53 @@
-ModelProto {
-  producer_name: "pytorch"
-  domain: ""
-  doc_string: ""
-  graph:
-    GraphProto {
-      name: "torch-jit-export"
-      inputs: [{name: "x", type:Tensor dims: 1 2 3}]
-      outputs: [{name: "1", type:Tensor dims: 1 2 3}]
-      initializers: []
-      nodes: [
-        Node {type: "Add", inputs: [x,x], outputs: [1], attributes: []}
-      ]
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    input: "x"
+    input: "x"
+    output: "1"
+    op_type: "Add"
+    doc_string: "@torch.jit.script_method\ndef forward(self, x):\n    y = x - x\n    return x + x\n           ~~~~~ <--- HERE\n"
+  }
+  name: "torch-jit-export"
+  input {
+    name: "x"
+    type {
+      tensor_type {
+        elem_type: DOUBLE
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
     }
-  opset_import: [OperatorSetIdProto { domain: }],
+  }
+  output {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: DOUBLE
+        shape {
+          dim {
+            dim_value: 1
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 3
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
 }
