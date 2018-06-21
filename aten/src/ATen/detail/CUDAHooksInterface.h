@@ -15,6 +15,8 @@ struct THCState;
 struct CUstream_st;
 typedef struct CUstream_st* cudaStream_t;
 struct cudaDeviceProp;
+struct cusparseContext;
+typedef struct cusparseContext *cusparseHandle_t;
 
 namespace at {
 class Context;
@@ -63,6 +65,10 @@ struct AT_API CUDAHooksInterface {
 
   virtual cudaStream_t getCurrentCUDAStream(THCState*) const {
     AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
+  }
+
+  virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
+    AT_ERROR("cannot getCurrentCUDASparseHandle() without ATen_cuda library");
   }
 
   virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)

@@ -1036,8 +1036,10 @@
 ]]
 [[
   name: getDevice
-  python_name: get_device
+  python_name: th_get_device
   device_guard: False
+  variants:
+    - function
   backends:
     - CUDA
   aten_sparse: True
@@ -3781,34 +3783,6 @@
 ]]
 
 [[
-  name: th_sparse_raw_resize_
-  variants: [function]
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - THSize* size
-    - int64_t nDimI
-    - int64_t nDimV
-  aten_custom_call: |
-    /*
-     * Sets sizes, nDimI, and nDimV of a sparse tensor directly without any
-     * safety checks. If nDimI and/or nDimV are -1, recompute them from
-     * indices and values, respectively.
-     */
-    if (nDimI == -1) {
-      nDimI = self._indices().size(0);
-    }
-    if (nDimV == -1) {
-      nDimV = self._values().dim() - 1;
-    }
-    ${THTensor}_rawResize(${state,}self_->tensor, nDimI, nDimV, (*size_).data<int64_t>());
-    self_->maybeScalar(size.size() == 0);
-]]
-
-[[
   name: _cat
   cname: catArray
   variants: [function]
@@ -3819,146 +3793,4 @@
     - TensorList tensors
     - arg: int64_t dim
       default: 0
-]]
-
-[[
-  # Ordinarily, I want the th variants to be function only (so they don't
-  # clutter up the namespace), but the codegen is buggy for the function
-  # variant, as it attempts to generate an _out variant, but does the
-  # wrong thing when the 'result' is a THSTensor (you get SparseTensorRef
-  # in this case.)  Didn't seem worth fixing.
-  name: _th_sparse_mask
-  return: argument 0
-  cname: sparseMask
-  aten_dense_sparse: True
-  arguments:
-    - arg: THSTensor* result
-      output: True
-    - THTensor* self
-    - THSTensor* mask
-]]
-
-[[
-  name: th_to_dense
-  cname: toDense
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: THDenseTensor*
-  arguments:
-  - THTensor* self
-]]
-
-[[
-  name: _th_sparseDims
-  cname: nDimensionI
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: int64_t
-  arguments:
-  - THTensor* self
-]]
-
-[[
-  name: _th_denseDims
-  cname: nDimensionV
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: int64_t
-  arguments:
-  - THTensor* self
-]]
-
-[[
-  name: _th_nnz
-  cname: nnz
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: int64_t
-  arguments:
-  - THTensor* self
-]]
-
-[[
-  name: th_coalesce
-  cname: newCoalesce
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: THTensor*
-  arguments:
-     - THTensor* self
-]]
-
-[[
-  name: th_is_coalesced
-  cname: isCoalesced
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: bool
-  arguments:
-     - THTensor* self
-]]
-
-[[
-  name: _th_indices
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: THDenseIndexTensor*
-  cname: newIndices
-  arguments:
-     - THTensor* self
-  aten_custom_call: |
-    if (self_->isScalar()) {
-      // Empty tensor
-      return at::native::empty({0}, toDense().toScalarType(kLong));
-    }
-]]
-
-[[
-  name: _th_values
-  variants:
-    - function
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: THDenseTensor*
-  cname: newValues
-  arguments:
-     - THTensor* self
-]]
-[[
-  name: th_hspmm
-  variants:
-    - function
-  cname: hspmm
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - CONSTANT AS_REAL(1)
-    - THTensor* mat1
-    - THDenseTensor* mat2
 ]]

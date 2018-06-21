@@ -76,7 +76,7 @@ INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
-C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
+C_FLAGS=" -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
   -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
   -I\"$INSTALL_DIR/include/THNN\" -I\"$INSTALL_DIR/include/THCUNN\""
