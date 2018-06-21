@@ -429,7 +429,7 @@ while (@ARGV) {
         #
         #
         $ft{'other'} += s/\bcontext_gpu\b/hip\/context_hip/g;
-        $ft{'other'} += s/\bcuda_stream\b/context_hip/g;
+        $ft{'other'} += s/\bcuda_stream\b/hip_stream/g;
         $ft{'other'} += s/CUDA/HIP/g;
 
         $countKeywords += m/__global__/;
