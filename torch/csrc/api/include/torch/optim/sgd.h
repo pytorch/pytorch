@@ -15,10 +15,9 @@
 
 namespace torch {
 namespace optim {
-class SGD : public Optimizer<SGD> {
+class SGD : public Optimizer {
  public:
-  SGD(std::shared_ptr<nn::Module> model, double lr)
-      : Optimizer(model), lr_(lr) {}
+  SGD(std::shared_ptr<nn::Module> model, double lr);
 
   template <typename ModuleType>
   SGD(nn::ModuleHolder<ModuleType> module_holder, double lr)
@@ -30,19 +29,17 @@ class SGD : public Optimizer<SGD> {
   TORCH_AUTOGRAD_KWARG(SGD, bool, nesterov, false, true);
   double lr_;
 
-  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss)
-      override;
-
-  void init_state() override;
+  at::Scalar step(
+      std::function<at::Scalar()> closure = NoLoss) override;
 
   template <class Archive>
-  void serialize(Archive & ar) {
+  void serialize(Archive& ar) {
     ar(CEREAL_NVP(momentum_buffers_));
   }
 
  private:
   friend class cereal::access;
-  SGD() {}
+  SGD() = default;
   std::unordered_map<std::string, at::Tensor> momentum_buffers_;
 };
 } // namespace optim

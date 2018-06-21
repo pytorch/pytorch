@@ -10,7 +10,7 @@
 
 namespace torch {
 namespace optim {
-void OptimizerImpl::zero_grad() {
+void Optimizer::zero_grad() {
   for (auto& p : model_->parameters()) {
     auto& grad = p->grad();
     if (grad.defined()) {
@@ -20,12 +20,8 @@ void OptimizerImpl::zero_grad() {
   }
 }
 
-at::Scalar OptimizerImpl::NoLoss() {
+at::Scalar Optimizer::NoLoss() {
   return at::Scalar();
-}
-
-void OptimizerImpl::set_model(std::shared_ptr<nn::Module> model) {
-  model_ = model;
 }
 
 } // namespace optim

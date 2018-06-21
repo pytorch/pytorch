@@ -116,19 +116,19 @@ inline at::Backend backendFromId(int32_t id) {
 // This is super ugly and I don't know how to simplify it
 CEREAL_REGISTER_TYPE(torch::optim::SGD);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::OptimizerImpl,
+    torch::optim::Optimizer,
     torch::optim::SGD);
 CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::OptimizerImpl,
+    torch::optim::Optimizer,
     torch::optim::Adagrad);
 CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::OptimizerImpl,
+    torch::optim::Optimizer,
     torch::optim::RMSprop);
 CEREAL_REGISTER_TYPE(torch::optim::Adam);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::optim::OptimizerImpl,
+    torch::optim::Optimizer,
     torch::optim::Adam);
 
 namespace cereal {

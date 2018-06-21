@@ -11,6 +11,20 @@
 
 namespace torch {
 namespace optim {
+
+LBFGS::LBFGS(std::shared_ptr<nn::Module> model, double lr)
+    : Optimizer(model),
+      lr_(lr),
+      d(torch::empty({0})),
+      H_diag(torch::empty({0})),
+      prev_flat_grad(torch::empty({0})),
+      t(0),
+      prev_loss(0),
+      ro(history_size_),
+      al(history_size_),
+      func_evals(0),
+      state_n_iter(0) {}
+
 at::Tensor LBFGS::gather_flat_grad() {
   std::vector<at::Tensor> views;
   for (auto& parameter : model_->parameters()) {
@@ -148,18 +162,5 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
   }
   return orig_loss;
 }
-
-void LBFGS::init_state() {
-  d = torch::empty({0});
-  t = 0;
-  H_diag = torch::empty({0});
-  prev_flat_grad = torch::empty({0});
-  prev_loss = 0;
-  ro.resize(history_size_);
-  al.resize(history_size_);
-  func_evals = 0;
-  state_n_iter = 0;
-}
-
 } // namespace optim
 } // namespace torch

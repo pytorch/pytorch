@@ -218,9 +218,9 @@ bool test_mnist(
       torch::Tensor y = lab;
       torch::Tensor loss = at::nll_loss(x, y);
 
-      optimizer->zero_grad();
+      optimizer.zero_grad();
       loss.backward();
-      optimizer->step();
+      optimizer.step();
     }
   }
 
@@ -239,7 +239,7 @@ TEST_CASE("integration/cartpole") {
   auto linear = model->add(Linear(4, 128), "linear");
   auto policyHead = model->add(Linear(128, 2), "policy");
   auto valueHead = model->add(Linear(128, 1), "action");
-  auto optim = torch::optim::Adam(model, 1e-3).make();
+  auto optimizer = torch::optim::Adam(model, 1e-3);
 
   std::vector<torch::Tensor> saved_log_probs;
   std::vector<torch::Tensor> saved_values;
@@ -289,9 +289,9 @@ TEST_CASE("integration/cartpole") {
     auto loss = at::stack(torch::TensorListView(policy_loss)).sum() +
         at::stack(torch::TensorListView(value_loss)).sum();
 
-    optim->zero_grad();
+    optimizer.zero_grad();
     loss.backward();
-    optim->step();
+    optimizer.step();
 
     rewards.clear();
     saved_log_probs.clear();
@@ -354,7 +354,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
     return x;
   };
 
-  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5).make();
+  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5);
 
   REQUIRE(test_mnist(
       32, // batch_size
@@ -391,7 +391,7 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
     return x;
   };
 
-  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5).make();
+  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5);
 
   REQUIRE(test_mnist(
       32, // batch_size

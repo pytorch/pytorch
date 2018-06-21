@@ -15,10 +15,9 @@
 
 namespace torch {
 namespace optim {
-class LBFGS : public Optimizer<LBFGS> {
+class LBFGS : public Optimizer {
  public:
-  LBFGS(std::shared_ptr<nn::Module> model, double lr)
-      : Optimizer(model), lr_(lr) {}
+  LBFGS(std::shared_ptr<nn::Module> model, double lr);
 
   template <typename ModuleType>
   LBFGS(nn::ModuleHolder<ModuleType> module_holder, double lr)
@@ -32,10 +31,9 @@ class LBFGS : public Optimizer<LBFGS> {
 
   double lr_;
   at::Scalar step(std::function<at::Scalar()> closure) override;
-  void init_state() override;
 
   template <class Archive>
-  void serialize(Archive & ar) {
+  void serialize(Archive& ar) {
     ar(CEREAL_NVP(d));
     ar(CEREAL_NVP(t));
     ar(CEREAL_NVP(H_diag));
@@ -51,11 +49,17 @@ class LBFGS : public Optimizer<LBFGS> {
   at::Tensor gather_flat_grad();
   void add_grad(const at::Scalar& step_size, const at::Tensor& update);
 
-  at::Tensor d, H_diag, prev_flat_grad;
-  at::Scalar t, prev_loss;
-  std::vector<at::Tensor> ro, al;
-  std::deque<at::Tensor> old_dirs, old_stps;
-  int func_evals, state_n_iter;
+  at::Tensor d;
+  at::Tensor H_diag;
+  at::Tensor prev_flat_grad;
+  at::Scalar t;
+  at::Scalar prev_loss;
+  std::vector<at::Tensor> ro;
+  std::vector<at::Tensor> al;
+  std::deque<at::Tensor> old_dirs;
+  std::deque<at::Tensor> old_stps;
+  int64_t func_evals;
+  int64_t state_n_iter;
 };
 
 } // namespace optim

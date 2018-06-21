@@ -1,6 +1,7 @@
 #include <torch/optim/adam.h>
 
 #include <torch/csrc/autograd/variable.h>
+#include <torch/nn/module.h>
 
 #include <ATen/ATen.h>
 
@@ -9,6 +10,10 @@
 
 namespace torch {
 namespace optim {
+
+Adam::Adam(std::shared_ptr<nn::Module> model, double lr)
+    : Optimizer(model), lr_(lr) {}
+
 at::Scalar Adam::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
   for (auto& parameter : model_->parameters()) {
@@ -57,12 +62,6 @@ at::Scalar Adam::step(std::function<at::Scalar()> closure) {
     p.addcdiv_(exp_avg, denom, -step_size);
   }
   return loss;
-}
-
-void Adam::init_state() {
-  step_buffer_.clear();
-  exp_avg_buffer_.clear();
-  exp_avg_sq_buffer_.clear();
 }
 
 } // namespace optim

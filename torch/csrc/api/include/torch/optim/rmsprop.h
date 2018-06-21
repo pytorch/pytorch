@@ -15,10 +15,9 @@
 
 namespace torch {
 namespace optim {
-class RMSprop : public Optimizer<RMSprop> {
+class RMSprop : public Optimizer {
  public:
-  RMSprop(std::shared_ptr<nn::Module> model, double lr)
-      : Optimizer(model), lr_(lr) {}
+  RMSprop(std::shared_ptr<nn::Module> model, double lr);
 
   template <typename ModuleType>
   RMSprop(nn::ModuleHolder<ModuleType> module_holder, double lr)
@@ -31,12 +30,11 @@ class RMSprop : public Optimizer<RMSprop> {
   TORCH_AUTOGRAD_KWARG(RMSprop, bool, centered, false, true);
 
   double lr_;
-  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss)
-      override;
-  void init_state() override;
+  at::Scalar step(
+      std::function<at::Scalar()> closure = NoLoss) override;
 
   template <class Archive>
-  void serialize(Archive & ar) {
+  void serialize(Archive& ar) {
     ar(CEREAL_NVP(square_avg_buffer_));
     ar(CEREAL_NVP(momentum_buffer_));
     ar(CEREAL_NVP(grad_avg_buffer_));

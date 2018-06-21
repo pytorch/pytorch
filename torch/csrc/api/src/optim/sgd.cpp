@@ -8,6 +8,10 @@
 
 namespace torch {
 namespace optim {
+
+SGD::SGD(std::shared_ptr<nn::Module> model, double lr)
+    : Optimizer(model), lr_(lr) {}
+
 at::Scalar SGD::step(std::function<at::Scalar()> closure) {
   at::Scalar loss = closure();
   for (auto& parameter : model_->parameters()) {
@@ -42,10 +46,6 @@ at::Scalar SGD::step(std::function<at::Scalar()> closure) {
     p.add_(d_p, -lr_);
   }
   return loss;
-}
-
-void SGD::init_state() {
-  momentum_buffers_.clear();
 }
 } // namespace optim
 } // namespace torch

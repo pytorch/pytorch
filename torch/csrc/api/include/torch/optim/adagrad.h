@@ -15,10 +15,9 @@
 
 namespace torch {
 namespace optim {
-class Adagrad : public Optimizer<Adagrad> {
+class Adagrad : public Optimizer {
  public:
-  Adagrad(std::shared_ptr<nn::Module> model, double lr)
-      : Optimizer(model), lr_(lr) {}
+  Adagrad(std::shared_ptr<nn::Module> model, double lr);
 
   template <typename ModuleType>
   Adagrad(nn::ModuleHolder<ModuleType> module_holder, double lr)
@@ -27,9 +26,7 @@ class Adagrad : public Optimizer<Adagrad> {
   TORCH_AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
   TORCH_AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
   double lr_;
-  at::Scalar step(
-      std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
-  void init_state() override;
+  at::Scalar step(std::function<at::Scalar()> closure = NoLoss) override;
 
   template <class Archive>
   void serialize(Archive& ar) {

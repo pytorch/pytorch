@@ -8,6 +8,10 @@
 
 namespace torch {
 namespace optim {
+
+RMSprop::RMSprop(std::shared_ptr<nn::Module> model, double lr)
+    : Optimizer(model), lr_(lr) {}
+
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
 at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
@@ -56,12 +60,5 @@ at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
   }
   return loss;
 }
-
-void RMSprop::init_state() {
-  square_avg_buffer_.clear();
-  momentum_buffer_.clear();
-  grad_avg_buffer_.clear();
-}
-
 } // namespace optim
 } // namespace torch

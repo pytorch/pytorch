@@ -8,6 +8,10 @@
 
 namespace torch {
 namespace optim {
+
+Adagrad::Adagrad(std::shared_ptr<nn::Module> model, double lr)
+    : Optimizer(model), lr_(lr) {}
+
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
 at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
@@ -39,11 +43,5 @@ at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
   }
   return loss;
 }
-
-void Adagrad::init_state() {
-  sum_.clear();
-  step_.clear();
-}
-
 } // namespace optim
 } // namespace torch

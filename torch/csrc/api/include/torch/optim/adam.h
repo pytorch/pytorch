@@ -15,10 +15,9 @@
 
 namespace torch {
 namespace optim {
-class Adam : public Optimizer<Adam> {
+class Adam : public Optimizer {
  public:
-  Adam(std::shared_ptr<nn::Module> model, double lr)
-      : Optimizer(model), lr_(lr) {}
+  Adam(std::shared_ptr<nn::Module> model, double lr);
 
   template <typename ModuleType>
   Adam(nn::ModuleHolder<ModuleType> module_holder, double lr)
@@ -31,8 +30,7 @@ class Adam : public Optimizer<Adam> {
   TORCH_AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
   double lr_;
   at::Scalar step(
-      std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
-  void init_state() override;
+      std::function<at::Scalar()> closure = NoLoss) override;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -44,7 +42,8 @@ class Adam : public Optimizer<Adam> {
 
  private:
   friend class cereal::access;
-  Adam() {}
+  Adam() = default;
+
   std::unordered_map<std::string, int> step_buffer_;
   std::unordered_map<std::string, at::Tensor> exp_avg_buffer_;
   std::unordered_map<std::string, at::Tensor> exp_avg_sq_buffer_;
