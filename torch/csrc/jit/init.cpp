@@ -9,6 +9,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
@@ -77,6 +78,7 @@ void initJITBindings(PyObject *module) {
      auto tensor_inputs = createVariableTensorList(inputs);
      PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
    })
+   .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to

@@ -848,7 +848,9 @@ void testBlocks(std::ostream & out) {
 
 const static auto cf_examples = R"JIT(
   def if_test(a, b):
-      c = 0
+      # FIXME: use 0 instead of a.
+      # c = 0
+      c = a
       if a < b:
         c = b
       else:
