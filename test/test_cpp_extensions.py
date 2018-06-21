@@ -103,7 +103,7 @@ class TestCppExtension(common.TestCase):
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
 
-    @unittest.skipIf(not TEST_CUDNN, "CUDNN not found")
+    @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
     def test_jit_cudnn_extension(self):
         # implementation of CuDNN ReLU
         if sys.platform == 'win32':
@@ -123,7 +123,7 @@ class TestCppExtension(common.TestCase):
         y = torch.zeros(100, device='cuda', dtype=torch.float32)
         module.cudnn_relu(x, y)  # y=relu(x)
         self.assertEqual(torch.nn.functional.relu(x), y)
-        with self.assertRaisesRegex(RuntimeError, "same size") as cm:
+        with self.assertRaisesRegex(RuntimeError, "same size"):
             y_incorrect = torch.zeros(20, device='cuda', dtype=torch.float32)
             module.cudnn_relu(x, y_incorrect)
 
