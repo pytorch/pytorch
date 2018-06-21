@@ -67,29 +67,22 @@ struct Reduction {
     }
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::GRAIN_SIZE;
-//    std::cout << "n: " << n << std::endl;
-//    std::cout << "stride: " << stride << std::endl;
-//    std::cout << "batch: " << batch << std::endl;
     if (stride == 1) {
       parallel_for(0, batch, 1, [=](int64_t begin, int64_t end) {
         for (int64_t b = begin; b < end; b++) {
           const scalar_t* data = &data_[b * n];
           scalar_t* out = &out_[b];
           scalar_t buf[WIDTH] = {ident};
-          int64_t a = n / WIDTH;
-//          std::cout << "a: " << a << std::endl;
-          reduce128(data, buf, a, WIDTH);
+          int64_t cols_rounded = n / WIDTH;
+          reduce128(data, buf, cols_rounded, WIDTH);
           scalar_t result = ident;
-//          std::cout << "result0: " << result << std::endl;
           for (int64_t i = 0; i < WIDTH; i++) {
             result = ReduceScalar()(result, buf[i]);
           }
-//          std::cout << "result: " << result << std::endl;
-          for (int64_t row = a * WIDTH; row != n; row++) {
-            result = ReduceScalar()(result, data[row]);
+          for (int64_t col = cols_rounded * WIDTH; col != n; col++) {
+            result = ReduceScalar()(result, data[col]);
           }
-//          std::cout << "result2: " << result << std::endl;
-          out[0] = result;
+          out_[b] = result;
         }
       });
     } else {
@@ -177,10 +170,6 @@ struct Reduction {
     for (int j = 0; j != 4; j++) {
       acc[j].store(&out[j * Vec::size]);
     }
-  }
-
-  // Reduce a 2d matrix down each column. Stores the results in out[0 ... cols-1]
-  static void reduce2d(const scalar_t* data, scalar_t* out, int64_t rows, int64_t cols, int64_t stride) {
   }
 };
 
