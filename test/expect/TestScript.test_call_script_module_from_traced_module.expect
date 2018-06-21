@@ -1,0 +1,8 @@
+graph(%0 : Double(3, 4)
+      %1 : Double(4, 5)
+      %2 : Double(5, 7)) {
+  %4 : Double(3, 5) = aten::mm(%0, %1)
+  %7 : Double(3, 7) = aten::mm(%4, %2)
+  %8 : Double(3, 7) = aten::add[other={1}, alpha={1}](%7)
+  return (%8);
+}
