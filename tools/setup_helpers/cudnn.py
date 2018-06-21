@@ -1,7 +1,7 @@
 import os
 import glob
 
-from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_negative_env_flag, gather_paths
+from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_negative_env_flag, gather_paths, lib_paths
 from .cuda import USE_CUDA, CUDA_HOME
 
 
@@ -10,11 +10,11 @@ CUDNN_LIB_DIR = None
 CUDNN_INCLUDE_DIR = None
 CUDNN_LIBRARY = None
 WITH_STATIC_CUDNN = os.getenv("USE_STATIC_CUDNN")
-LIB_SUFFIXS = ['lib', 'lib64', 'lib/x64']
 
 if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
     lib_paths = list(filter(bool, [
-        os.getenv('CUDNN_LIB_DIR'),
+        os.getenv('CUDNN_LIB_DIR')
+    ] + lib_paths(CUDA_HOME) + [
         '/usr/lib/x86_64-linux-gnu/',
         '/usr/lib/powerpc64le-linux-gnu/',
         '/usr/lib/aarch64-linux-gnu/',
@@ -33,8 +33,6 @@ if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
         'CPLUS_INCLUDE_PATH',
     ])))
     # Add CUDA related dirs to candidate list
-    for suffix in LIB_SUFFIXS:
-        lib_paths.append(os.path.join(CUDA_HOME, suffix))
     if IS_CONDA:
         lib_paths.append(os.path.join(CONDA_DIR, 'lib'))
         include_paths.append(os.path.join(CONDA_DIR, 'include'))
@@ -60,8 +58,8 @@ if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
     # Check for standalone cuDNN libraries
     if CUDNN_INCLUDE_DIR is not None:
         cudnn_path = os.path.join(os.path.dirname(CUDNN_INCLUDE_DIR))
-        for suffix in LIB_SUFFIXS:
-            lib_paths.append(os.path.join(cudnn_path, suffix))
+        cudnn_lib_paths = lib_paths(cudnn_path)
+        lib_paths.extend(cudnn_lib_paths)
 
     for path in lib_paths:
         if path is None or not os.path.exists(path):
