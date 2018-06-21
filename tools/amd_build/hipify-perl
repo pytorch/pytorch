@@ -429,6 +429,7 @@ while (@ARGV) {
         #
         #
         $ft{'other'} += s/\bcontext_gpu\b/hip\/context_hip/g;
+        $ft{'other'} += s/\bcommon_gpu\b/hip\/common_hip/g;
         $ft{'other'} += s/\bcuda_stream\b/hip_stream/g;
         $ft{'other'} += s/CUDA/HIP/g;
         $ft{'other'} += s/\bCUDA_1D_KERNEL_LOOP\b/HIP_1D_KERNEL_LOOP/g;
