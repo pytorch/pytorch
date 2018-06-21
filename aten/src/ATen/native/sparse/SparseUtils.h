@@ -1,6 +1,8 @@
 #include <ATen/ATen.h>
 #include <ATen/SparseTensorImpl.h>
 
+#include <TH/THGeneral.h>
+
 namespace at { namespace native {
 
 // Just for documentary purposes

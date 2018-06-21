@@ -2,6 +2,8 @@
 #include <ATen/Error.h>
 #include <ATen/Context.h>
 
+#include <TH/THGeneral.h>
+
 #include <cusparse.h>
 
 namespace at { namespace native { namespace sparse { namespace cuda {
