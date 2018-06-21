@@ -1001,18 +1001,6 @@ See :class:`~torch.nn.Softshrink` for more details.
 """)
 
 
-def sigmoid(input):
-    r"""sigmoid(input) -> Tensor
-
-    Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
-
-    See :class:`~torch.nn.Sigmoid` for more details.
-    """
-    return input.sigmoid()
-
-
-# etc.
-
 def linear(input, weight, bias=None):
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
