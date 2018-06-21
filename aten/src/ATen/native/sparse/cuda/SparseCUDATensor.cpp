@@ -23,7 +23,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
   _get_sparse_impl(r)->set_nnz(mask._nnz());
 
-  LongTensor indices = at::zeros({mask._nnz()}, mask_indices.type());
+  LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
 
   for (int64_t d = 0; d < mask._sparseDims(); d++) {
     indices.mul_(mask.size(d));
