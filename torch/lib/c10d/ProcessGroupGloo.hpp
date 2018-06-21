@@ -272,8 +272,14 @@ class ProcessGroupGloo : public ProcessGroup {
   // Checkout constructs new AlgorithmEntry or returns existing one.
   AlgorithmEntry* checkout(const KeyType& key);
 
+  // The maximum number of cached algorithms for a single key.
   const int cacheNumAlgorithmEntries_;
+
+  // Index of the next algorithm to use for a particular key.
+  // Note that this index must be the same for all particating processes.
   std::unordered_map<KeyType, int, HashType> cacheCurrentEntry_;
+
+  // The list of cached algorithms, by algorithm key.
   std::unordered_map<KeyType, std::vector<EntryType>, HashType> cache_;
 
   std::shared_ptr<Work> enqueue(AlgorithmEntry* entry);
