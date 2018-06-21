@@ -2,7 +2,7 @@
 
 set -ex
 
-pip install --no-cache-dir hypothesis
+pip install --no-cache-dir hypothesis==3.60.1
 
 
 # The INSTALL_PREFIX here must match up with test.sh
