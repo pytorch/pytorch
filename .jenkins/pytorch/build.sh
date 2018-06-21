@@ -57,6 +57,10 @@ fi
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST=5.2
 
+if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
+  export DEBUG=1
+fi
+
 WERROR=1 python setup.py install
 
 # Add the test binaries so that they won't be git clean'ed away
