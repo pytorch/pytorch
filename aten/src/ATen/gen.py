@@ -99,6 +99,7 @@ class FileManager(object):
             raise Exception("Outputs declared with 'will_write' were " +
                             "never written: {}".format(self.filenames))
 
+
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
@@ -228,7 +229,6 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
     scalar_name, c_type, accreal, th_scalar_type, is_floating_type = scalar_type
     env = {}
     density_tag = 'Sparse' if density == 'Sparse' else ''
-    th_density_tag = 'S' if density == 'Sparse' else ''
     env['Density'] = density
     env['ScalarName'] = scalar_name
     env['ScalarType'] = c_type
@@ -251,7 +251,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
             '#include "ATen/{}ByteTensor.h"'.format(env['Backend']),
             '#include "ATen/{}IntTensor.h"'.format(env['Backend']),
             '#include "ATen/{}LongTensor.h"'.format(env['Backend']),
-            ]
+        ]
 
     # used for generating switch logic for external functions
     tag = density_tag + backend + scalar_name
