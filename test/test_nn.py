@@ -1148,9 +1148,6 @@ class TestNN(NNTestCase):
         check()
 
         with self.assertRaises(TypeError):
-            module_dict.update({'relu': nn.ReLU()})
-
-        with self.assertRaises(TypeError):
             module_dict.update(nn.ReLU())
 
         with self.assertRaises(TypeError):
@@ -1288,9 +1285,6 @@ class TestNN(NNTestCase):
         del parameter_dict['p3']
         del parameters['p3']
         check()
-
-        with self.assertRaises(TypeError):
-            parameter_dict.update({'p7': Parameter(torch.randn(10, 10))})
 
         with self.assertRaises(TypeError):
             parameter_dict.update(1)

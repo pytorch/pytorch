@@ -288,13 +288,8 @@ class ModuleDict(Module):
                             type(modules).__name__)
 
         if isinstance(modules, Mapping):
-            if isinstance(modules, OrderedDict):
-                for key, module in modules.items():
-                    self[key] = module
-            else:
-                raise TypeError("ModuleDict.update should be called with an "
-                                "OrderedDict, otherwise the order will be "
-                                "non deterministic")
+            for key, module in sorted(modules.items()):
+                self[key] = module
         else:
             for j, m in enumerate(modules):
                 if not isinstance(m, Iterable):
@@ -497,13 +492,8 @@ class ParameterDict(Module):
                             type(parameters).__name__)
 
         if isinstance(parameters, Mapping):
-            if isinstance(parameters, OrderedDict):
-                for key, parameter in parameters.items():
-                    self[key] = parameter
-            else:
-                raise TypeError("ParametersDict.update should be called with an "
-                                "OrderedDict, otherwise the order will be "
-                                "non deterministic")
+            for key, parameter in sorted(parameters.items()):
+                self[key] = parameter
         else:
             for j, p in enumerate(parameters):
                 if not isinstance(p, Iterable):
