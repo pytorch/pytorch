@@ -431,6 +431,10 @@ while (@ARGV) {
         $ft{'other'} += s/\bcontext_gpu\b/hip\/context_hip/g;
         $ft{'other'} += s/\bcuda_stream\b/hip_stream/g;
         $ft{'other'} += s/CUDA/HIP/g;
+        $ft{'other'} += s/\bCUDA_1D_KERNEL_LOOP\b/HIP_1D_KERNEL_LOOP/g;
+        $ft{'other'} += s/\bCUDAContext\b/HIPContext/g;
+        $ft{'other'} += s/\bCAFFE_CUDA_NUM_THREADS\b/CAFFE_HIP_NUM_THREADS/g;
+        $ft{'other'} += s/\bHasCudaGPU\b/HasHipGPU/g;
 
         $countKeywords += m/__global__/;
         $countKeywords += m/__shared__/;
