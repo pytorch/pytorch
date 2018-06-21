@@ -77,22 +77,20 @@ struct Reduction {
         int64_t cols = stride;
         int64_t cols_rounded = round_down(cols, WIDTH);
         int64_t size = cols_rounded;
-        int64_t step = WIDTH;
         parallel_for(
             0,
             batch,
             1,
-            [out_, data_, n, stride, rows, cols, cols_rounded, size, step](
+            [out_, data_, n, stride, rows, cols, cols_rounded, size](
                 int64_t begin, int64_t end) {
               for (int64_t b = begin; b < end; b++) {
-                const scalar_t* data = &data_[b * n * stride];
-                scalar_t* out = &out_[b * stride];
-                int64_t begin = 0;
-                int64_t end = size / step;
-
-                int64_t k = begin * step;
-                for (int64_t i = begin; i < end; i++, k += step) {
-                  reduce128(&data[k], &out[k], rows, stride);
+                for (int64_t i = 0; i < size / WIDTH; i += 1) {
+                  int64_t k = i * WIDTH;
+                  reduce128(
+                      &data_[b * n * stride + k],
+                      &out_[b * stride + k],
+                      rows,
+                      stride);
                 }
               }
             });
