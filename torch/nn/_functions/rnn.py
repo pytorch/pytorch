@@ -2,6 +2,7 @@ import warnings
 from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
+import torch
 from .thnn import rnnFusedPointwise as fusedBackend
 import itertools
 from functools import partial
@@ -18,7 +19,7 @@ def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+    hy = torch.nn.Tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
@@ -36,11 +37,11 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
     ingate = F.sigmoid(ingate)
     forgetgate = F.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
+    cellgate = torch.nn.Tanh(cellgate)
     outgate = F.sigmoid(outgate)
 
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+    hy = outgate * torch.nn.Tanh(cy)
 
     return hy, cy
 
@@ -60,7 +61,7 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
     resetgate = F.sigmoid(i_r + h_r)
     inputgate = F.sigmoid(i_i + h_i)
-    newgate = F.tanh(i_n + resetgate * h_n)
+    newgate = torch.nn.Tanh(i_n + resetgate * h_n)
     hy = newgate + inputgate * (hidden - newgate)
 
     return hy

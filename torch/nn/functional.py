@@ -1001,17 +1001,6 @@ See :class:`~torch.nn.Softshrink` for more details.
 """)
 
 
-def tanh(input):
-    r"""tanh(input) -> Tensor
-
-    Applies element-wise,
-    :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
-
-    See :class:`~torch.nn.Tanh` for more details.
-    """
-    return input.tanh()
-
-
 def sigmoid(input):
     r"""sigmoid(input) -> Tensor
 
