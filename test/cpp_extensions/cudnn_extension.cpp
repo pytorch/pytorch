@@ -10,16 +10,10 @@
  * 5) Return something (optional).
  */
 
-#include <torch/csrc/cuda/cuda_check.h>
+#include <ATen/cudnn/Descriptors.h> // for TensorDescriptor
+#include <ATen/cudnn/Exceptions.h> // for CUDNN_CHECK
+#include <ATen/cudnn/Handles.h> // for getCudnnHandle
 #include <torch/torch.h>
-
-#include <ATen/ATen.h>
-#include <ATen/TensorUtils.h>
-#include <ATen/cudnn/Descriptors.h>
-#include <ATen/cudnn/Exceptions.h>
-#include <ATen/cudnn/Handles.h>
-
-#include <cuda.h>
 
 // Name of function in python module and name used for error messages by
 // at::check* functions.
