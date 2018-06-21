@@ -67,29 +67,27 @@ struct Reduction {
     }
     int64_t batch = numel / (n * stride);
     bool paralellize = batch * n > internal::GRAIN_SIZE;
-    {
-      int64_t rows = n;
-      int64_t cols = stride;
-      int64_t cols_rounded = round_down(cols, WIDTH);
-      int64_t size = cols_rounded;
-      parallel_for(
-          0,
-          batch * (size / WIDTH),
-          1,
-          [out_, data_, n, stride, rows, cols, cols_rounded, size](
-              int64_t begin, int64_t end) {
-            for (int64_t bi = begin; bi < end; bi++) {
-              int64_t b = bi / (size / WIDTH);
-              int64_t i = bi % (size / WIDTH);
-              int64_t k = i * WIDTH;
-              reduce128(
-                  &data_[b * n * stride + k],
-                  &out_[b * stride + k],
-                  rows,
-                  stride);
-            }
-          });
-    }
+    int64_t rows = n;
+    int64_t cols = stride;
+    int64_t cols_rounded = round_down(cols, WIDTH);
+    int64_t size = cols_rounded;
+    parallel_for(
+        0,
+        batch * (size / WIDTH),
+        1,
+        [out_, data_, n, stride, rows, cols, cols_rounded, size](
+            int64_t begin, int64_t end) {
+          for (int64_t bi = begin; bi < end; bi++) {
+            int64_t b = bi / (size / WIDTH);
+            int64_t i = bi % (size / WIDTH);
+            int64_t k = i * WIDTH;
+            reduce128(
+                &data_[b * n * stride + k],
+                &out_[b * stride + k],
+                rows,
+                stride);
+          }
+        });
 
     _parallel_for(batch, 1, paralellize, [=](int64_t b) {
       const scalar_t* data = &data_[b * n * stride];
