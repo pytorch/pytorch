@@ -14,8 +14,7 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
       ", mask is on device ", mask.get_device(), ", out is on device ", r.get_device());
   resize_as_sparse_(r, mask);
   if (mask._nnz() == 0) {
-    r.zero_();
-    return r;
+    return r.zero_();
   }
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();

@@ -107,10 +107,15 @@ inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone
   }
 }
 
+// Give us a new values tensor, with the same dimensionality
+// as 'values' but with a new number of non-zero elements.
 // TODO: Expose this for real in ATen, some day?
 // NB: Doesn't preserve data.
 inline Tensor _new_values_with_size_of(const Tensor& values, int64_t nnz) {
   if (values.numel() == 0) { // values tensor uninitialized
+    // TODO: This logic looks bogus; if we have an uninitialized
+    // values tensor, why should we believe that denseDims == 0?
+    // That's the assumption this code makes.
     return values.type().tensor({nnz});
   } else {
     std::vector<int64_t> size = values.sizes();
