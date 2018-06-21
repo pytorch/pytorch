@@ -12,11 +12,11 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *total_weight,
            int64_t ignore_index,
            bool reduce) {
-  if (THCIndexTensor_(_nDimension)(state, target) > 1) {
+  if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
 
-  int n_dims = THCTensor_(_nDimension)(state, input);
+  int n_dims = THCTensor_(nDimension)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
 
@@ -30,7 +30,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     );
   }
 
-  THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
+  THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
 
   int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
   int64_t num_targets = THCudaLongTensor_size(state, target, 0);
@@ -85,7 +85,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   real *output_data = THCTensor_(data)(state, output);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  if (THCTensor_(_nDimension)(state, input) == 1) {
+  if (THCTensor_(nDimension)(state, input) == 1) {
     cunn_ClassNLLCriterion_updateOutput_kernel1<real>
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         output_data,
@@ -98,7 +98,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         ignore_index
     );
 
-  } else if (THCTensor_(_nDimension)(state, input) == 2) {
+  } else if (THCTensor_(nDimension)(state, input) == 2) {
     cunn_ClassNLLCriterion_updateOutput_kernel<real, accreal>
       <<<1, NTHREADS, 0, THCState_getCurrentStream(state)>>>(
         output_data,
@@ -133,11 +133,11 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
            THCTensor *total_weight,
            int64_t ignore_index,
            bool reduce) {
-  if (THCIndexTensor_(_nDimension)(state, target) > 1) {
+  if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
 
-  int n_dims = THCTensor_(_nDimension)(state, input);
+  int n_dims = THCTensor_(nDimension)(state, input);
   int n_classes = THCTensor_(size)(state, input, n_dims - 1);
 
   THCTensor_(resizeAs)(state, gradInput, input);
@@ -155,7 +155,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     );
   }
 
-  THArgCheck(n_dims <= 2 && n_dims > 0, 2, "vector or matrix expected");
+  THArgCheck(!input->is_empty() && (n_dims <= 2 && n_dims > 0), 2, "non-empty vector or matrix expected");
 
   int64_t batch_size = n_dims == 1 ? 1 : THCTensor_(size)(state, input, 0);
   int64_t num_targets = THCudaLongTensor_size(state, target, 0);
@@ -207,7 +207,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   THCIndex_t  *target_data = THCIndexTensor_(data)(state, target);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  if (THCTensor_(_nDimension)(state, input) == 1) {
+  if (THCTensor_(nDimension)(state, input) == 1) {
     cunn_ClassNLLCriterion_updateGradInput_kernel1<real>
       <<<1, 1, 0, THCState_getCurrentStream(state)>>>(
         gradInput_data,
