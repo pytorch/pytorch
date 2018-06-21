@@ -2,6 +2,9 @@
 
 set -ex
 
+pip install --no-cache-dir hypothesis
+
+
 # The INSTALL_PREFIX here must match up with test.sh
 INSTALL_PREFIX="/usr/local/caffe2"
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
