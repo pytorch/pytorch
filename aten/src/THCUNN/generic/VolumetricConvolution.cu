@@ -27,7 +27,7 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
 
   if (gradOutput != NULL) {
-    THCUNN_argCheck(state, !gradOutput->is_empty() && (gradOutput->dim() == 4 || gradOutput->dim()) == 5, 3,
+    THCUNN_argCheck(state, !gradOutput->is_empty() && (gradOutput->dim() == 4 || gradOutput->dim() == 5), 3,
                     gradOutput,
                     "non-empty 4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
   }
