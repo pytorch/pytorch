@@ -18,20 +18,20 @@ bool HardtanhOp<float, CPUContext>::RunOnDevice() {
 
 template <>
 bool HardtanhGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(0);
+  auto& Y = Input(0);
   auto& dY = Input(1);
   auto* dX = Output(0);
   // Sizes are known to be equal because Hardtanh is element-wise
-  CAFFE_ENFORCE_EQ(dY.size(), X.size());
-  dX->ResizeLike(X);
+  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
+  dX->ResizeLike(Y);
 
-  ConstEigenVectorArrayMap<float> Xvec(X.data<float>(), X.size());
+  ConstEigenVectorArrayMap<float> Yvec(Y.data<float>(), Y.size());
   ConstEigenVectorArrayMap<float> dYvec(dY.data<float>(), dY.size());
   EigenVectorArrayMap<float> dXvec(dX->mutable_data<float>(), dX->size());
 
-  // TODO: dXvec should be 0 if X = max_val_ or min_val, 1 otherwise
+  // dXvec should be 0 if Y = max_val_ or min_val, dYvec otherwise
   // Nest select within initial select
-  dXvec = (Xvec > max_val_).select(0, (Xvec < min_val_).select(0, dYvec));
+  dXvec = (Yvec >= max_val_).select(0, (Yvec <= min_val_).select(0, dYvec));
   return true;
 }
 
@@ -107,13 +107,13 @@ Y:
     .Output(0, "Y", "Output tensor with same shape as input.")
     .InheritOnnxSchema("Hardtanh");
 
-// Input: X, dY; output: dX
+// Input: Y, dY; output: dX
 OPERATOR_SCHEMA(HardtanhGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})
     .SetDoc(R"DOC(
-HardtanhGradient takes both X and dY and uses this to update dX according to the
+HardtanhGradient takes both Y and dY and uses this to update dX according to the
 derivatives of the hardtanh function.
 )DOC")
     .Arg(
@@ -122,7 +122,7 @@ derivatives of the hardtanh function.
     .Arg(
         "max_val",
         "(float) default to 1~; affects the activation function itself.")
-    .Input(0, "X", "input tensor")
+    .Input(0, "Y", "input tensor")
     .Input(1, "dY", "input tensor");
 
 class GetHardtanhGradient : public GradientMakerBase {
@@ -131,7 +131,7 @@ class GetHardtanhGradient : public GradientMakerBase {
     return SingleGradientDef(
         def_.type() + "Gradient",
         "",
-        vector<string>{I(0), GO(0)},
+        vector<string>{O(0), GO(0)},
         vector<string>{GI(0)});
   }
 };
