@@ -20,6 +20,8 @@ def parse_default(s):
         return s
     elif s == '{}':
         return '{}'
+    elif re.match(r'{.*}', s):
+        return s
     elif s == 'nullopt':
         return s
     try:

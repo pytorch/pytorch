@@ -2652,6 +2652,7 @@ method_tests = [
     ('rot90', (S, S, S), (1, [0, 1],), 'k1_d01'),
     ('rot90', (S, S, S), (1, [1, 2],), 'k1_d12'),
     ('rot90', (S, S, S), (1, [1, -1],), 'k1_neg_d'),
+    ('rot90', (S, S, S), (), 'default'),
     ('view_as', (S, S, S), (non_differentiable(torch.rand(S * S, S)),)),
     ('view_as', (), (non_differentiable(torch.tensor(5.5)),), 'scalar'),
     ('view_as', (), (non_differentiable(torch.rand(1, 1)),), 'scalar_to_dims'),
