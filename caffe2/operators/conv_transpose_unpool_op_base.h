@@ -27,14 +27,17 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         stride_(OperatorBase::GetRepeatedArgument<int>("strides")),
         pads_(OperatorBase::GetRepeatedArgument<int>("pads")),
         adj_(OperatorBase::GetRepeatedArgument<int>("adjs")),
-        order_(StringToStorageOrder(
+        output_shape_(OperatorBase::GetRepeatedArgument<int>("output_shape")),
+		order_(StringToStorageOrder(
             OperatorBase::GetSingleArgument<string>("order", "NCHW"))),
         shared_buffer_(
             OperatorBase::GetSingleArgument<int>("shared_buffer", 0)),
-        ws_(ws) {
+        use_pad_(true),
+	   	ws_(ws){
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
-    if (legacy_pad_ == LegacyPadding::VALID ||
+	std::cout << "Comming..." << std::endl;
+	if (legacy_pad_ == LegacyPadding::VALID ||
         legacy_pad_ == LegacyPadding::SAME) {
       CAFFE_ENFORCE(
           !OperatorBase::HasArgument("pads"),
@@ -69,29 +72,49 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       adj_.push_back(OperatorBase::GetSingleArgument<int>("adj_w", 0));
     }
 
-    if (OperatorBase::HasArgument("pad")) {
-      CAFFE_ENFORCE(
-          legacy_pad_ != LegacyPadding::VALID &&
-              legacy_pad_ != LegacyPadding::SAME,
-          "If you use legacy padding VALID or SAME, you should not specify "
-          "any specific padding values.");
-      pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
-    } else if (
-        OperatorBase::HasArgument("pad_t") &&
+	const bool has_pad = OperatorBase::HasArgument("pad") || (
+		OperatorBase::HasArgument("pad_t") &&
         OperatorBase::HasArgument("pad_l") &&
         OperatorBase::HasArgument("pad_b") &&
-        OperatorBase::HasArgument("pad_r")) {
-      CAFFE_ENFORCE(
-          legacy_pad_ != LegacyPadding::VALID &&
-              legacy_pad_ != LegacyPadding::SAME,
-          "If you use legacy padding VALID or SAME, you should not specify "
-          "any specific padding values.");
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
-      pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
-    }
+        OperatorBase::HasArgument("pad_r"));
+	const bool has_legacy = (legacy_pad_ == LegacyPadding::VALID || legacy_pad_ == LegacyPadding::SAME);
+	const bool has_output_shape = OperatorBase::HasArgument("output_shape") || (
+		OperatorBase::HasArgument("output_shape_h") &&
+		OperatorBase::HasArgument("output_shape_w"));
+	//if pad exists, legacy padding or output_shape should not exist.
+	//if legacy padding exists, pad should not exist, output_shape is optional.
+	//if output_shape exists, pad should not exist, legacy padding is optional.
+	//CAFFE_ENFORCE(!has_pad && !has_legacy && !has_output_shape,
+	//  "Padding information missing, you should specify at least one item in [pad, legacy_pad, output_shape]");
 
+	CAFFE_ENFORCE((has_pad != has_legacy) || (!has_pad && !has_legacy),
+	  "If you use legacy padding VALID or SAME, you should not specify "
+	  "any specific padding values.");
+	CAFFE_ENFORCE((has_pad != has_output_shape) || (!has_pad && !has_legacy),
+	  "If output_shape is given, you should not specify "
+	  "any specific padding values.");
+
+	if (has_pad){
+      if (OperatorBase::HasArgument("pad")) {
+        pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
+      } else {
+		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
+		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
+		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
+		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
+	  }
+	} else
+	if (has_output_shape){
+	  if (!has_legacy){
+		use_pad_ = false;
+	  }
+	  if (OperatorBase::HasArgument("output_shape")){
+		output_shape_.resize(2, OperatorBase::GetSingleArgument<int>("output_shape", 0));
+	  } else{
+		output_shape_.push_back(OperatorBase::GetSingleArgument<int>("output_shape_h", 0));
+		output_shape_.push_back(OperatorBase::GetSingleArgument<int>("output_shape_w", 0));
+	  }
+	}
     // Fill default values.
     if (kernel_.size() == 0) {
       kernel_.assign({0, 0});
@@ -105,6 +128,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       pads_.resize(kernel_.size() * 2, 0);
     }
 
+	std::cout << "Half..." << std::endl;
     if (adj_.size() == 0) {
       adj_.resize(kernel_.size(), 0);
     }
@@ -129,6 +153,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
+	std::cout << pads_[0] << pads_[1] << pads_[2] << pads_[3] << std::endl;
   }
   // Sets the output size. The output channel is manually specified.
   void SetOutputSize(
@@ -157,31 +182,32 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       default:
         LOG(FATAL) << "Unknown Storage order: " << order_;
     }
-    int output_height = 0, output_width = 0;
-    ComputeSizeAndPad(
+	ComputeSizeAndPad(
         H,
         stride_[0],
         kernel_[0],
         adj_[0],
-        &pads_[0],
+        use_pad_,
+		&pads_[0],
         &pads_[2],
-        &output_height);
+        &output_shape_[0]);
     ComputeSizeAndPad(
         W,
         stride_[1],
         kernel_[1],
         adj_[1],
-        &pads_[1],
+        use_pad_,
+		&pads_[1],
         &pads_[3],
-        &output_width);
+        &output_shape_[1]);
     if (channel_first) {
-      output->Resize(N, output_channel, output_height, output_width);
+      output->Resize(N, output_channel, output_shape_[0], output_shape_[1]);
     } else {
-      output->Resize(N, output_height, output_width, output_channel);
+      output->Resize(N, output_shape_[0], output_shape_[1], output_channel);
     }
     VLOG(2) << "In: N " << N << " M " << M << " H " << H << " W " << W;
     VLOG(2) << "Out: output_channel " << output_channel << " H "
-            << output_height << " W " << output_width;
+            << output_shape_[0] << " W " << output_shape_[1];
   }
 
   bool RunOnDevice() override {
@@ -216,8 +242,10 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   vector<int> stride_;
   vector<int> pads_;
   vector<int> adj_;
+  vector<int> output_shape_;
   StorageOrder order_;
   bool shared_buffer_;
+  bool use_pad_;
   Workspace* ws_;
 
   // Accessors for 2D conv params.
@@ -262,32 +290,82 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     return adj_[1];
   }
 
+  inline int output_shape_h() const {
+	return output_shape_[0];
+  }
+
+  inline int output_shape_w() const {
+	return output_shape_[1];
+  }
+
+  inline void ComputePadUsingSize(
+	  const int in_size,
+	  const int stride,
+	  const int kernel,
+	  const int adj,
+	  int *pad_head,
+	  int *pad_tail,
+	  int *out_size) {
+	const int total_padding = (in_size - 1) * stride + kernel + adj - *out_size;
+	CAFFE_ENFORCE(*out_size >= 0);
+	CAFFE_ENFORCE(total_padding >= 0);
+	//Caffe2::LegacyPadding::SAME corresponds to ONNX::auto_pad::SAME_UPPER
+	//We handle Caffe2::LegacyPadding::NOTSET and SAME the same way
+	//Caffe2::LegacyPadding::VALID corresponds tp ONNX::auto_pad::VALID
+	switch (legacy_pad_) {
+	  case LegacyPadding::NOTSET:
+	  case LegacyPadding::SAME:
+		*pad_tail = (total_padding + 1) / 2;
+		*pad_head = total_padding - *pad_tail;
+		break;
+	  case LegacyPadding::VALID:
+		*pad_tail = *pad_head = 0;
+		break;
+      case LegacyPadding::CAFFE_LEGACY_POOLING:
+        LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
+        break;
+	}
+  }
+
   inline void ComputeSizeAndPad(
       const int in_size,
       const int stride,
       const int kernel,
       const int adj,
+	  const bool use_pad,
       int* pad_head,
       int* pad_tail,
       int* out_size) {
-    switch (legacy_pad_) {
-      case LegacyPadding::NOTSET:
-        CAFFE_ENFORCE(*pad_head >= 0);
-        CAFFE_ENFORCE(*pad_tail >= 0);
-        *out_size =
-            (in_size - 1) * stride + kernel + adj - *pad_head - *pad_tail;
-        break;
-      // We handle cases of LegacyPadding::VALID and LegacyPadding::SAME
-      // the same way
-      case LegacyPadding::VALID:
-      case LegacyPadding::SAME:
-        *pad_head = 0;
-        *pad_tail = 0;
-        *out_size = (in_size - 1) * stride + kernel + adj;
-        break;
-      case LegacyPadding::CAFFE_LEGACY_POOLING:
-        LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
-        break;
+    if (use_pad_ == false){
+	  ComputePadUsingSize(
+		in_size,
+		stride,
+		kernel,
+		adj,
+		pad_head,
+		pad_tail,
+		out_size);
+	} else
+	{
+	  switch (legacy_pad_) {
+		case LegacyPadding::NOTSET:
+		  CAFFE_ENFORCE(*pad_head >= 0);
+          CAFFE_ENFORCE(*pad_tail >= 0);
+          *out_size =
+              (in_size - 1) * stride + kernel + adj - *pad_head - *pad_tail;
+          break;
+        // We handle cases of LegacyPadding::VALID and LegacyPadding::SAME
+        // the same way
+        case LegacyPadding::VALID:
+        case LegacyPadding::SAME:
+          *pad_head = 0;
+          *pad_tail = 0;
+          *out_size = (in_size - 1) * stride + kernel + adj;
+          break;
+        case LegacyPadding::CAFFE_LEGACY_POOLING:
+          LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
+          break;
+      }
     }
   }
 };
@@ -300,7 +378,9 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   using ConvTransposeUnpoolBase<Context>::adj_;           \
   using ConvTransposeUnpoolBase<Context>::order_;         \
   using ConvTransposeUnpoolBase<Context>::shared_buffer_; \
-  using ConvTransposeUnpoolBase<Context>::ws_
+  using ConvTransposeUnpoolBase<Context>::ws_;			  \
+  using ConvTransposeUnpoolBase<Context>::output_shape_;  \
+  using ConvTransposeUnpoolBase<Context>::use_pad_;		  \
 
 } // namespace caffe2
 

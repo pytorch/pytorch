@@ -119,6 +119,9 @@ Y:
         "adjs",
         "*(type: [int]; default: [])*")
     .Arg(
+		"output_shape",
+		"*(type: [int]; default: [])*")
+	.Arg(
         "order",
         "*(type: string; default: \"NCHW\")* Specifies the order of the input data blob, where $N$ is batch size, $C$ is number of channels, $H$ is spatial height, and $W$ is spatial width. The only other valid option is \"NHWC\".")
     .Arg(
