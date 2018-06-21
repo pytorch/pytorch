@@ -753,8 +753,6 @@ if (BUILD_ATEN)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
 
-  add_definitions(-DTH_INDEX_BASE=0)
-
   # RPATH stuff
   # see https://cmake.org/Wiki/CMake_RPATH_handling
   if (APPLE)
