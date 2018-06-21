@@ -1,6 +1,7 @@
 #pragma once
 
 #include "onnx/onnxifi_loader.h"
+#include <string>
 #include <unordered_map>
 
 namespace caffe2 {
