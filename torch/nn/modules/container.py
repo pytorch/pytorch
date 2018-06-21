@@ -239,7 +239,7 @@ class ModuleDict(Module):
         return len(self._modules)
 
     def __iter__(self):
-        return iter(self._modules.keys())
+        return iter(self._modules)
 
     def __contains__(self, key):
         return key in self._modules
@@ -288,8 +288,13 @@ class ModuleDict(Module):
                             type(modules).__name__)
 
         if isinstance(modules, Mapping):
-            for key, module in modules.items():
-                self[key] = module
+            if isinstance(modules, OrderedDict):
+                for key, module in modules.items():
+                    self[key] = module
+            else:
+                raise TypeError("ModuleDict.update should be called with an "
+                                "OrderedDict, otherwise the order will be "
+                                "non deterministic")
         else:
             for j, m in enumerate(modules):
                 if not isinstance(m, Iterable):
@@ -492,8 +497,13 @@ class ParameterDict(Module):
                             type(parameters).__name__)
 
         if isinstance(parameters, Mapping):
-            for key, parameter in parameters.items():
-                self[key] = parameter
+            if isinstance(parameters, OrderedDict):
+                for key, parameter in parameters.items():
+                    self[key] = parameter
+            else:
+                raise TypeError("ParametersDict.update should be called with an "
+                                "OrderedDict, otherwise the order will be "
+                                "non deterministic")
         else:
             for j, p in enumerate(parameters):
                 if not isinstance(p, Iterable):
