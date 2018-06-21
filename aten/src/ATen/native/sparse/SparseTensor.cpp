@@ -161,8 +161,7 @@ SparseTensor new_with_tensor_and_size_sparse(const LongTensor& indices, const Te
   LongTensor max_indices = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
   LongTensor cpu_max_indices;
   if (max_indices.is_cuda()) {
-    cpu_max_indices = at::CPU(kLong).tensor(max_indices.sizes());
-    cpu_max_indices.copy_(max_indices);
+    cpu_max_indices = at::CPU(kLong).copy(max_indices);
   } else {
     cpu_max_indices = max_indices;
   }
