@@ -22,8 +22,7 @@ __global__ void HardtanhGradientKernel(
     T max_val_) {
   const T c = lambda_ * alpha_;
   CUDA_1D_KERNEL_LOOP(i, N) {
-    // Reuse Y[i] to avoid computing exp(X[i])
-    dX[i] = Y[i] > 0 ? lambda_ * dY[i] : dY[i] * (Y[i] + c);
+    dX[i] = Y[i] >= max_val_ ? 0 : (Y[i] <= min_val_ ? 0 : dY[i]);
   }
 }
 } // namespace
@@ -39,7 +38,7 @@ bool HardtanhOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(), X.data<float>(), Y->mutable_data<float>(), alpha_, lambda_);
+      X.size(), X.data<float>(), Y->mutable_data<float>(), min_val_, max_val_);
   return true;
 }
 
@@ -60,8 +59,8 @@ bool HardtanhGradientOp<float, CUDAContext>::RunOnDevice() {
       Y.data<float>(),
       dY.data<float>(),
       dX->mutable_data<float>(),
-      alpha_,
-      lambda_);
+      min_val_,
+      max_val_);
   return true;
 }
 
