@@ -14,12 +14,12 @@ if is_available():
     from . import BroadcastOptions, AllreduceOptions
 
 
-def broadcast(tensor, src, process_group):
-    opts = BroadcastOptions()
-    opts.rootRank = src
-    opts.rootTensor = 0
-    return process_group.broadcast([tensor], opts)
+    def broadcast(tensor, src, process_group):
+        opts = BroadcastOptions()
+        opts.rootRank = src
+        opts.rootTensor = 0
+        return process_group.broadcast([tensor], opts)
 
 
-def all_reduce(tensor, process_group, opts=AllreduceOptions()):
-    return process_group.allreduce([tensor], opts)
+    def all_reduce(tensor, process_group, opts=AllreduceOptions()):
+        return process_group.allreduce([tensor], opts)

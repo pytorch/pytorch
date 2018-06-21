@@ -270,7 +270,6 @@ class DistributedDataParallelC10d(Module):
                     self._grad_accs.append(grad_acc)
 
     def _make_param_hook(self, param, device_idx):
-
         bucket_idx = self.bucket_map[param]
 
         def distributed_data_parallel_hook(*unused):
