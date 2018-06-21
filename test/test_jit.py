@@ -1455,13 +1455,13 @@ class TestScript(JitTestCase):
 
     def test_if_for_in_range(self):
         def func(a, b):
-            d = 3
+            d = FIXME_zerol() + 3
             for _ in range(20):
                 if a > 10:
                     a = 3 + d
                 else:
                     b = 3 + d
-                    d = 4
+                    d = FIXME_zerol() + 4
                 c = a + b
             return d
         inputs = self._make_scalar_vars([1, -1], torch.int64)
@@ -1607,7 +1607,7 @@ class TestScript(JitTestCase):
     def test_script_for_in_range_if_ast(self):
         @torch.jit.script
         def test_script_for_in_range_if_ast(x):
-            output = 0
+            output = FIXME_zerol()
             for i in range(20):
                 if i == 0:
                     output = x.unsqueeze(0)
@@ -3351,7 +3351,7 @@ def func(t):
                 return x.splork(3)
 
     def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found a tuple'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found a Tuple'):
             @torch.jit.script
             def return_tuple_wrong(x):
                 a = (x, x)
@@ -3559,7 +3559,7 @@ def func(t):
 
             @torch.jit.script
             def test_fn():
-                return foo(1, 2, 3)
+                return foo(torch.full([1], 1), torch.full([1], 2), torch.full([1], 3))
 
     def test_wrong_return_type(self):
         with self.assertRaisesRegex(RuntimeError, 'Python functions can currently only return Tensors'):

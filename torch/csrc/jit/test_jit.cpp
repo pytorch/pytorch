@@ -23,7 +23,6 @@
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
-#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/assertions.h"
@@ -873,8 +872,6 @@ void testControlFlow() {
   script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
   auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
     auto graph = cu.get_method(name).graph();
-    // TODO: why isn't this (a required pass) called?
-    EraseNumberTypes(graph);
     Code code(graph);
     InterpreterState interp(code);
     interp.runOneStage(stack);

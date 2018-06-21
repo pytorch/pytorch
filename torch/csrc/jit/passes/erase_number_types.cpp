@@ -2,6 +2,14 @@
 
 namespace torch { namespace jit {
 
+static bool isNumberTypeCast(const Value* value, const Use& use) {
+  auto* node = use.user;
+  if (node->kind() != aten::type_as) {
+    return false;
+  }
+  return node->inputs()[0] == value;
+}
+
 static void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
@@ -12,10 +20,19 @@ static void EraseNumberTypesOnBlock(Block* block) {
       case prim::Constant: {
         it->output()->inferTypeFrom(it->t(attr::value));
       } break;
-      case prim::TensorToNum:
-      case prim::NumToTensor: {
+      case prim::TensorToNum: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);
-        it.destroyCurrent();
+        // Let DCE cleanup
+      } break;
+      case prim::NumToTensor: {
+        auto* ten = it->output();
+        for (const auto& use : ten->uses()) {
+          if (isNumberTypeCast(ten, use)) {
+            use.user->output()->replaceAllUsesWith(ten);
+          }
+        }
+        ten->replaceAllUsesWith(it->inputs()[0]);
+        // Let DCE cleanup
       } break;
       default: {
         for(auto o : it->outputs()) {

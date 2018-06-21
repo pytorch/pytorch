@@ -95,9 +95,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
 
 
 def _optimize_graph(graph, operator_export_type):
-    # run dce first to eliminate dead parts of the graph that might have been
-    # left behind by things like symbolic_override
+    # Erase number types to bring the graph to a pre-NumberType state
+    torch._C._jit_pass_erase_number_types(graph)
 
+    # run dce to eliminate dead parts of the graph that might have been
+    # left behind by things like symbolic_override
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
 
