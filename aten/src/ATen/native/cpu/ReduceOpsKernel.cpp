@@ -116,11 +116,7 @@ struct Reduction {
 
         int64_t cols_rounded = round_down(cols, WIDTH);
         if (cols_rounded != cols) {
-          // Initializes the entire (tiny) arrays to avoid uninitialized
-          // warnings
-          scalar_t buf[WIDTH] = {0};
-          std::fill(std::begin(buf), std::end(buf), ident);
-
+          scalar_t buf[WIDTH] = {ident};
           for (int64_t row = 0; row != rows; row++) {
             for (int64_t j = 0; j != cols - cols_rounded; j++) {
               auto val = data[row * stride + j + cols_rounded];

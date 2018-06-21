@@ -26,6 +26,7 @@ inline void parallel_for(
     const int64_t end,
     const int64_t grain_size,
     const F f) {
+#ifdef _OPENMP
 #pragma omp parallel if ((end - begin) >= grain_size)
   {
     int64_t num_threads = omp_get_num_threads();
@@ -34,6 +35,9 @@ inline void parallel_for(
     int64_t begin_tid = begin + tid * chunk_size;
     f(begin_tid, std::min(end, chunk_size + begin_tid));
   }
+#else
+  f(begin, end);
+#endif
 }
 
 template <class scalar_t, class F, class SF>
