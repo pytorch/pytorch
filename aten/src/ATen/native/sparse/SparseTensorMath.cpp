@@ -539,6 +539,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   // TODO: This error message seems awfully opaque
   AT_CHECK(sparse_._sparseDims() == 2, "matrices expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0, "scalar values expected, got ", sparse_._denseDims(), "D values");
+  AT_CHECK(!dense.is_empty(), "matrices expected, got empty tensor");
   AT_CHECK(dense.dim() == 2, "matrices expected, got ", dense.dim(), "D tensor");
 
   SparseTensor sparse = sparse_.coalesce();

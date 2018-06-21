@@ -28,17 +28,14 @@ SparseTensorImpl* _get_sparse_impl(const SparseTensor& self) {
 // Port of the old THCSTensor_(checkGPU), but it doesn't really belong here
 // because it is more general
 // NB: I dropped kernelP2PEnabled support
-// NB: This does NOT assume that the tensors are GPU tensors; if they're
-// all CPU that's OK too
+// NB: This only works if the tensors are KNOWN to be CUDA.
+// TODO: Generalize it so it works on CPU as well
 inline bool _check_device(ArrayRef<Tensor> ts) {
   if (ts.empty()) {
     return true;
   }
   const Tensor& ref_t = ts.front();
-  int64_t curDevice = -1;
-  if (ref_t.is_cuda()) {
-    curDevice = current_device();
-  }
+  int64_t curDevice = current_device();
   for (const Tensor& t : ts) {
     if (t.get_device() != curDevice) return false;
   }
