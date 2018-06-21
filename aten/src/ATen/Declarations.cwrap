@@ -158,7 +158,6 @@
   name: th_clone
   cname: newClone
   return: THTensor*
-  aten_sparse: True
   variants:
     - function
   cpu_half: True
@@ -179,7 +178,6 @@
   name: resizeAs_
   python_name: th_resize_as_
   cname: resizeAs
-  aten_sparse: True
   variants:
     - function
   return: self
@@ -1042,7 +1040,6 @@
     - function
   backends:
     - CUDA
-  aten_sparse: True
   return: long
   arguments:
     - THTensor* self
@@ -1682,19 +1679,11 @@
     - function
   options:
     - cname: normall
-      aten_sparse: True
       return: accreal
       arguments:
         - THTensor* self
         - arg: real p
           default: AS_REAL(2)
-      aten_custom_call: |
-        // norm(value) for a sparse tensor returns a DENSE 0-dim tensor
-        if (self.is_sparse()) {
-          auto result = ${THTensor}_normall(${state,} self_->tensor, convert<${THScalarType}>(p_));
-          return at::native::full({}, result, toDense());
-        }
-        // aten_custom_call is followed by the generated call to normall
 ]]
 [[
   name: norm
@@ -1880,7 +1869,6 @@
   return: argument 0
   options:
     - cname: pow
-      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2034,7 +2022,6 @@
   return: self
   variants:
     - function
-  aten_sparse: True
   arguments:
     - THTensor* self
 ]]
@@ -2159,7 +2146,6 @@
   return: argument 0
   options:
     - cname: cadd
-      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2169,17 +2155,6 @@
           default: AS_REAL(1)
           kwarg_only: True
         - THTensor* other
-    - sparse: True
-      cname: spcadd
-      aten_dense_sparse: True
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - THTensor* self
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THSTensor* other
 ]]
 [[
   name: add
@@ -2204,7 +2179,6 @@
   variants: [function]
   options:
     - cname: cadd
-      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -2213,16 +2187,6 @@
           default: AS_REAL(1)
           kwarg_only: True
         - THTensor* other
-    - sparse: True
-      cname: spcadd
-      aten_dense_sparse: True
-      arguments:
-        - THTensor* self
-        - THTensor* self
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THSTensor* other
 ]]
 [[
   name: add_
@@ -2244,7 +2208,6 @@
   return: argument 0
   options:
     - cname: csub
-      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2278,7 +2241,6 @@
   variants: [function]
   options:
     - cname: csub
-      aten_sparse: True
       arguments:
         - THTensor* self
         - arg: THTensor* self
@@ -2306,7 +2268,6 @@
   variants:
     - function
   return: argument 0
-  aten_sparse: True
   options:
     - cname: mul
       arguments:
@@ -2327,7 +2288,6 @@
   variants:
     - function
   return: argument 0
-  aten_sparse: True
   options:
     - cname: mul
       arguments:
@@ -2348,7 +2308,6 @@
   return: argument 0
   options:
     - cname: div
-      aten_sparse: True
       arguments:
         - arg: THTensor* result
           output: True
@@ -2376,7 +2335,6 @@
   return: argument 0
   options:
     - cname: div
-      aten_sparse: True
       arguments:
         - THTensor* self
         - THTensor* self
@@ -2642,21 +2600,6 @@
     - function
   return: argument 0
   options:
-    - sparse: True
-      cname: spaddmm
-      aten_dense_sparse: True
-      arguments:
-        - arg: THTensor* result
-          output: True
-        - arg: real beta
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* self
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THSTensor* mat1
-        - THTensor* mat2
     - arguments:
       - arg: THTensor* result
         output: True
@@ -2676,20 +2619,6 @@
   variants: [function]
   return: self
   options:
-    - sparse: True
-      cname: spaddmm
-      aten_dense_sparse: True
-      arguments:
-        - arg: THTensor* self
-        - arg: real beta
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THTensor* self
-        - arg: real alpha
-          default: AS_REAL(1)
-          kwarg_only: True
-        - THSTensor* mat1
-        - THTensor* mat2
     - cname: addmm
       arguments:
       - THTensor* self
@@ -3660,10 +3589,8 @@
   variants: [function]
   options:
     - cname: new
-      aten_sparse: True
       arguments: []
     - cname: newWithSize
-      aten_sparse: True
       arguments:
         - THSize* size
         - CONSTANT NULL
@@ -3699,19 +3626,6 @@
     - cname: newWithTensor
       arguments:
         - THTensor* self
-]]
-[[
-  name: _th_sparse_coo_tensor_unsafe
-  return: THTensor*
-  backends:
-    - SparseCPU
-    - SparseCUDA
-  variants: [function]
-  cname: newWithTensorAndSizeUnsafe
-  arguments:
-    - THDenseIndexTensor* indices
-    - THDenseTensor* values
-    - THSize* size
 ]]
 [[
   name: _copy_ignoring_overlaps_
