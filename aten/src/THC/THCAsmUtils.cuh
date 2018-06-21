@@ -84,7 +84,7 @@ struct Bitfield<uint64_t> {
   }
 };
 
-__device__ __forceinline__ static static int getLaneId() {
+__device__ __forceinline__ static int getLaneId() {
 #if defined(__HIP_PLATFORM_HCC__)
   return hc::__lane_id();
 #else

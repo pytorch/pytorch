@@ -8,7 +8,7 @@
    Computes ceil(a / b)
 */
 template <typename T>
-__host__ __device__ __forceinline__ static T THCCeilDiv(T a, T b) {
+__host__ __device__ __forceinline__ T THCCeilDiv(T a, T b) {
   return (a + b - 1) / b;
 }
 
@@ -17,7 +17,7 @@ __host__ __device__ __forceinline__ static T THCCeilDiv(T a, T b) {
    multiple of b
 */
 template <typename T>
-__host__ __device__ __forceinline__ static T THCRoundUp(T a, T b) {
+__host__ __device__ __forceinline__ T THCRoundUp(T a, T b) {
   return THCCeilDiv(a, b) * b;
 }
 
@@ -25,7 +25,7 @@ __host__ __device__ __forceinline__ static T THCRoundUp(T a, T b) {
  * For CC 3.5+, perform a load using __ldg
  */
 template <typename T>
-__device__ __forceinline__ static T doLdg(const T* p) {
+__device__ __forceinline__ T doLdg(const T* p) {
 #if __CUDA_ARCH__ >= 350
   return __ldg(p);
 #else
