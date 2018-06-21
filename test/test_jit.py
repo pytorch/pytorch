@@ -52,6 +52,12 @@ PY35 = sys.version_info >= (3, 5)
 WINDOWS = sys.platform == 'win32'
 
 
+# TODO: Replace all uses of this function with the literal "0" when the jit
+# is able to support returning numbers (as opposed to only Tensors)
+def FIXME_zerol():
+    return torch.tensor([0])
+
+
 def LSTMCellF(input, hx, cx, *params):
     return LSTMCell(input, (hx, cx), *params)
 
@@ -1195,6 +1201,21 @@ class TestScript(JitTestCase):
         y2 = torch.sum(x, dim=0)
         self.assertEqual(y, y2)
 
+    # TODO: renable when we support passing literals to script fns
+    @unittest.expectedFailure
+    def test_literal_xfail(self):
+        def func4(a, b):
+            c = 0, (0, 0)
+            x = True
+            while x:
+                x = False
+                c = a, (a, b)
+            d, e = c
+            f, g = e
+            return d + f + g
+
+        self.checkScript(func4, (a, b), optimize=True)
+
     def test_literal(self):
         def func(a, b):
             c = [a, b]
@@ -1212,22 +1233,11 @@ class TestScript(JitTestCase):
             f, g = e
             return d + f + g
 
-        def func4(a, b):
-            c = 0, (0, 0)
-            x = True
-            while x:
-                x = False
-                c = a, (a, b)
-            d, e = c
-            f, g = e
-            return d + f + g
-
         a = torch.rand(1, requires_grad=True)
         b = torch.rand(1, requires_grad=True)
         self.checkScript(func, (a, b), optimize=True)
         self.checkScript(func2, (a, b), optimize=True)
         self.checkScript(func3, (a, b), optimize=True)
-        self.checkScript(func4, (a, b), optimize=True)
 
     def test_expand(self):
         @torch.jit.script
@@ -1422,18 +1432,20 @@ class TestScript(JitTestCase):
 
             st = second + third
             fs = first + second
-            return third, st, fs
+            zero = FIXME_zerol()
+            return third + zero, st + zero, fs + zero
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
         def func(a, b):
+            zero = FIXME_zerol()
             d = 3
             if a > 10:
-                a = 3 + d
+                a = zero + 3 + d
             else:
-                b = 3 + d
+                b = zero + 3 + d
                 d = 4
             c = a + b
             return c
@@ -1443,13 +1455,13 @@ class TestScript(JitTestCase):
 
     def test_if_for_in_range(self):
         def func(a, b):
-            d = 3
+            d = FIXME_zerol() + 3
             for _ in range(20):
                 if a > 10:
                     a = 3 + d
                 else:
                     b = 3 + d
-                    d = 4
+                    d = FIXME_zerol() + 4
                 c = a + b
             return d
         inputs = self._make_scalar_vars([1, -1], torch.int64)
@@ -1497,7 +1509,7 @@ class TestScript(JitTestCase):
 
     def test_while_nest_if(self):
         def func(a, b):
-            c = 0
+            c = FIXME_zerol()
             while a < 10:
                 a = a + 1
                 b = b + 1
@@ -1510,9 +1522,45 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([-1234, 4321], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
+    def test_math_schema(self):
+        # This should use the add(Tensor, Tensor) schema.
+        # Also tests to see if alpha={1} is lifted correctly.
+        def fn(x, y):
+            return x + y
+
+        graph = torch.jit._script_graph(fn)
+        self.assertExpectedGraph(graph)
+
+    def test_math_tensor_number(self):
+        # Test that 7 is casted to tensor, then casted to the
+        # correct type, and finally added to x.
+        def fn(x):
+            return x + 7
+
+        graph = torch.jit._script_graph(fn)
+        self.assertExpectedGraph(graph)
+
+    def test_math_numbers(self):
+        # Test that the numbers are casted to tensor,
+        # added, and then casted back.
+        def fn1(x):
+            c = 7 + 8
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        def fn2(x):
+            c = 1.1 + 3.1
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        graph1 = torch.jit._script_graph(fn1)
+        self.assertExpectedGraph(graph1, subname="int")
+        graph2 = torch.jit._script_graph(fn2)
+        self.assertExpectedGraph(graph2, subname="float")
+
     def test_if_nest_while(self):
         def func(a, b):
-            c = 0
+            c = FIXME_zerol()
             if a > b:
                 while a > b:
                     b = b + 1
@@ -1524,7 +1572,7 @@ class TestScript(JitTestCase):
 
     def test_script_for_in_range(self):
         def fn():
-            c = 0
+            c = FIXME_zerol()
             for i in range(100):
                 c += i
             return c
@@ -1532,9 +1580,11 @@ class TestScript(JitTestCase):
 
     def test_script_for_in_range_dynamic(self):
         def fn():
-            c = 0
+            c = FIXME_zerol()
             for i in range(100):
-                acc = 0
+                # FIXME: i should really be IntType and not DynamicType in the frontend
+                # In addition, i should be a scalar tensor (it has size (1,) atm)
+                acc = FIXME_zerol()
                 for j in range(i):
                     acc += j
                 c += acc
@@ -1543,23 +1593,21 @@ class TestScript(JitTestCase):
 
     def test_script_for_in_range_ast(self):
         @torch.jit.script
-        def test_script_for_in_range_ast(zero):
-            c = zero
+        def test_script_for_in_range_ast():
+            c = FIXME_zerol()
             for i in range(100):
-                acc = zero
+                acc = FIXME_zerol()
                 for j in range(i):
                     acc += j
                 c += acc
             return c
 
-        inputs = self._make_scalar_vars([0], torch.int64)
-
-        self.assertEqual(test_script_for_in_range_ast(*inputs), 161700)
+        self.assertEqual(test_script_for_in_range_ast(), 161700)
 
     def test_script_for_in_range_if_ast(self):
         @torch.jit.script
         def test_script_for_in_range_if_ast(x):
-            output = 0
+            output = FIXME_zerol()
             for i in range(20):
                 if i == 0:
                     output = x.unsqueeze(0)
@@ -1661,6 +1709,113 @@ class TestScript(JitTestCase):
             def binop(x, y):
                 # Replace this with another unsupported op when/if it gets supported
                 return x << y
+
+    def test_number_math(self):
+        template = ('''
+# int, int -> int
+def func1():
+    c = 8 {op} 2
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+
+def func2():
+    c = 2 {op} 2
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+
+# float, float -> float
+def func3():
+    c = 3.14 {op} 0.125
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+
+def func4():
+    c = 3.14 {op} 3.14
+    # FIXME: return number instead of tensor
+    return torch.full([1], c)
+''')
+        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        # TODO: turn this on for py3 (and add PY3 division semantics)
+        ops_py2_only = ['/']
+        if PY2:
+            ops.extend(ops_py2_only)
+
+        for op in ops:
+            code = template.format(op=op)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func1(), scope['func1']())
+            self.assertEqual(cu.func2(), scope['func2']())
+            self.assertEqual(cu.func3(), scope['func3']())
+            self.assertEqual(cu.func4(), scope['func4']())
+
+    def test_number_neg(self):
+        # int -> int
+        def func1():
+            c = -8
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        # float -> float
+        def func2():
+            c = -3.14
+            # FIXME: return number instead of tensor
+            return torch.full([1], c)
+
+        self.checkScript(func1, (), optimize=True)
+        self.checkScript(func2, (), optimize=True)
+
+    def _test_tensor_number_math(self, device='cpu'):
+        template = ('''
+def func(t):
+    return {lhs} {op} {rhs}
+''')
+
+        def test(op, const, swap_args):
+            args = ('t', const)
+            if swap_args:
+                args = (const, 't')
+
+            code = template.format(lhs=args[0], rhs=args[1], op=op)
+            scope = {}
+            exec(code, globals(), scope)
+            cu = torch.jit.CompilationUnit(code)
+
+            self.assertEqual(cu.func(tensor), scope['func'](tensor))
+
+        var_int = 2
+        var_float = 1.4321
+
+        ops = ['+', '-', '*', '<', '<=', '>', '>=', '==', '!=']
+        # TODO: turn this on for py3 (and add PY3 division semantics)
+        ops_py2_only = ['/']
+        if PY2:
+            ops.extend(ops_py2_only)
+
+        float_tensor = torch.randn(5, 5, device=device)
+        double_tensor = torch.randn(5, 5, dtype=torch.double, device=device)
+        long_tensor = torch.randint(-5, 5, (5, 5), dtype=torch.long, device=device)
+        long_tensor[long_tensor == 0] = 2
+
+        tensors = [float_tensor, double_tensor, long_tensor]
+        consts = [var_int, var_float]
+
+        for op, tensor, const, swap_args in product(ops, tensors, consts, [True, False]):
+            # FIXME: things like 2 / long_tensor are not implemented correctly
+            # Look in torch/tensor.py to see how pytorch implements it.
+            if op == '/' and tensor.data_ptr() == long_tensor.data_ptr():
+                continue
+
+            test(op, const, swap_args)
+
+    def test_tensor_number_math(self):
+        self._test_tensor_number_math()
+
+    @unittest.skipIf(not RUN_CUDA, "No CUDA")
+    def test_tensor_number_math_cuda(self):
+        self._test_tensor_number_math(device='cuda')
 
     def test_python_call(self):
         def pyfunc(a):
@@ -1958,7 +2113,7 @@ class TestScript(JitTestCase):
 
             @torch.jit.script_method
             def forward(self):
-                sum = 0
+                sum = FIXME_zerol()
                 for i in self.b:
                     sum += i
                 return sum
@@ -2306,7 +2461,8 @@ class TestScript(JitTestCase):
 
         @torch.jit.script
         def return3():
-            return 1, 2, 3
+            # FIXME: use number instead of tensor
+            return torch.full([1], 1), torch.full([1], 2), torch.full([1], 3)
 
         with self.assertRaisesRegex(RuntimeError, "too many values to unpack"):
             @torch.jit.script
@@ -2394,8 +2550,8 @@ class TestScript(JitTestCase):
 
         with self.assertRaisesRegex(RuntimeError, r"variable 'a' previously has type \(Tensor, Tensor\)"):
             @torch.jit.script
-            def mixtypes():
-                a = torch.chunk(1, dim=0, chunks=2)
+            def mixtypes(x):
+                a = torch.chunk(x, dim=0, chunks=2)
                 if True:
                     a = 4
 
@@ -2562,6 +2718,8 @@ class TestScript(JitTestCase):
         with self.assertRaisesRegex(RuntimeError, 'called recursively involving'):
             M()
 
+    # TODO: Use this when we support passing literals to script fns
+    @unittest.expectedFailure
     def test_script_kwargs_fn_call(self):
         class M(torch.jit.ScriptModule):
             def __init__(self):
@@ -2605,15 +2763,14 @@ class TestScript(JitTestCase):
                 b = 1
             else:
                 b = 0
-            return b + 1
+            return FIXME_zerol() + (b + 1)
 
         @torch.jit.script
         def foo2(a):
             b = 0
             if a == 0:
                 b = 1
-
-            return b + 1
+            return FIXME_zerol() + (b + 1)
 
         @torch.jit.script
         def foo3(a):
@@ -2622,8 +2779,7 @@ class TestScript(JitTestCase):
                 c = 4
             else:
                 b = 0
-
-            return b + 1
+            return FIXME_zerol() + (b + 1)
 
         a = torch.ones(1, dtype=torch.long)
         b = torch.zeros(1, dtype=torch.long)
@@ -2797,7 +2953,8 @@ class TestScript(JitTestCase):
         def bar(x):
             y = foo(x)
             if True:
-                y = 7
+                # FIXME: use number instead of tensor
+                y = torch.full([1], 7)
             return y + 1
 
         self.assertEqual(8, bar(torch.ones(1, 1)))
@@ -3068,9 +3225,20 @@ class TestScript(JitTestCase):
 
         self.checkScript(test_rand, ())
 
+    def test_erase_number_types(self):
+        def func(a):
+            b = 7 + 1 + 3
+            c = a + b
+            c += b
+            return c
+
+        graph = torch.jit._script_graph(func)
+        self.run_pass('erase_number_types', graph)
+        self.assertExpectedGraph(graph)
+
     def test_loop_unrolling(self):
         def fn(x):
-            y = 0
+            y = FIXME_zerol()
             for i in range(x):
                 y += i
             return y
@@ -3082,13 +3250,13 @@ class TestScript(JitTestCase):
 
     def test_loop_unrolling_const(self):
         def fn():
-            y = 0
+            y = FIXME_zerol()
             for i in range(10):
                 y += 1
             return y
 
         def fn2():
-            y = 0
+            y = FIXME_zerol()
             for i in range(10):
                 y += i
             return y
@@ -3104,7 +3272,7 @@ class TestScript(JitTestCase):
 
     def test_loop_unrolling_nested(self):
         def fn(x):
-            y = 0
+            y = FIXME_zerol()
             for i in range(10):
                 for j in range(x):
                     y += j
@@ -3117,7 +3285,7 @@ class TestScript(JitTestCase):
 
     def test_loop_unroll_unused_counter(self):
         def fn(x):
-            y = 0
+            y = FIXME_zerol()
             for i in range(x):
                 y += 1
             return y
@@ -3128,7 +3296,7 @@ class TestScript(JitTestCase):
 
     def test_loop_unroll_negative(self):
         def fn(x):
-            y = 0
+            y = FIXME_zerol()
             for i in range(x):
                 y += 1
             return y
@@ -3183,7 +3351,7 @@ class TestScript(JitTestCase):
                 return x.splork(3)
 
     def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found a tuple'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found a Tuple'):
             @torch.jit.script
             def return_tuple_wrong(x):
                 a = (x, x)
@@ -3391,7 +3559,7 @@ class TestScript(JitTestCase):
 
             @torch.jit.script
             def test_fn():
-                return foo(1, 2, 3)
+                return foo(torch.full([1], 1), torch.full([1], 2), torch.full([1], 3))
 
     def test_wrong_return_type(self):
         with self.assertRaisesRegex(RuntimeError, 'Python functions can currently only return Tensors'):
@@ -4338,54 +4506,6 @@ EXCLUDE_TRACED = {
     'test___getitem___adv_index_sub_2',
     'test___getitem___adv_index_sub_3',
     'test___getitem___adv_index_var',
-    'test_add_scalar',
-    'test_add_scalar_constant',
-    'test_expand_scalar_to_scalar',
-    'test_index_add_dim',
-    'test_index_add_dim_neg0',
-    'test_index_add_scalar_all_dim',
-    'test_index_add_scalar_all_dim_neg0',
-    'test_index_add_scalar_input_dim',
-    'test_index_add_scalar_input_dim_neg0',
-    'test_index_copy_dim',
-    'test_index_copy_dim_neg0',
-    'test_index_copy_scalar_all_dim',
-    'test_index_copy_scalar_all_dim_neg0',
-    'test_index_copy_scalar_input_dim',
-    'test_index_copy_scalar_input_dim_neg0',
-    'test_index_fill_dim',
-    'test_index_fill_dim_neg0',
-    'test_index_fill_scalar_both_dim',
-    'test_index_fill_scalar_both_dim_neg0',
-    'test_index_fill_scalar_index_dim',
-    'test_index_fill_scalar_index_dim_neg0',
-    'test_index_fill_scalar_input_dim',
-    'test_index_fill_scalar_input_dim_neg0',
-    'test_index_fill_variable_dim',
-    'test_index_fill_variable_dim_neg0',
-    'test_masked_fill',
-    'test_masked_fill_broadcast_rhs',
-    'test_masked_fill_scalar',
-    'test_masked_fill_scalar_broadcast_rhs',
-    'test_masked_fill_scalar_variable',
-    'test_masked_fill_tensor',
-    'test_masked_scatter',
-    'test_masked_scatter_broadcast_rhs',
-    'test_masked_scatter_scalar',
-    'test_masked_scatter_scalar_broadcast_rhs',
-    'test_scatter_add_dim0',
-    'test_scatter_add_dim0_neg0',
-    'test_scatter_add_dim1',
-    'test_scatter_add_dim1_neg0',
-    'test_scatter_add_scalar_all_dim0',
-    'test_scatter_add_scalar_all_dim0_neg0',
-    'test_scatter_dim0',
-    'test_scatter_dim0_neg0',
-    'test_scatter_dim1',
-    'test_scatter_dim1_neg0',
-    'test_scatter_scalar_all_dim0',
-    'test_scatter_scalar_all_dim0_neg0',
-    'test_tanh_scalar',
     'test_unsqueeze_last_neg0',
     'test_unsqueeze_middle_neg0',
     'test_split_dim',
@@ -4396,48 +4516,39 @@ EXCLUDE_TRACED = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    'test_add',
-    'test_add_broadcast_all',
-    'test_add_broadcast_lhs',
-    'test_add_broadcast_rhs',
-    'test_add_scalar',
-    'test_add_scalar_broadcast_lhs',
-    'test_add_scalar_broadcast_rhs',
     'test_clamp_max',
     'test_clamp_max_scalar',
     'test_clamp_min',
     'test_clamp_min_scalar',
-    'test_max_elementwise',
-    'test_max_elementwise_broadcast_all',
-    'test_max_elementwise_broadcast_lhs',
-    'test_max_elementwise_broadcast_rhs',
-    'test_max_scalar_elementwise_broadcast_lhs',
-    'test_min_elementwise',
-    'test_min_elementwise_broadcast_all',
-    'test_min_elementwise_broadcast_lhs',
-    'test_min_elementwise_broadcast_rhs',
-    'test_min_scalar_elementwise_broadcast_lhs',
-    'test_mul_scalar',
-    'test_mul_scalar_constant',
+    # TODO: Fix var/std
+    # there are two schemas for var (and std):
+    # (1) var(Tensor, int, *, bool, bool, Tensor)
+    # (2) var(Tensor, *, bool)
+    #
+    # Right now, the following is happening:
+    # - Shorter schemas come before longer schemas
+    # - bool, int are treated as IntType rather than DynamicType like before
+    # So the schemas look like the following in aten_schema:
+    # (2) var(DynamicType, IntType)
+    # (1) var(DynamicType, IntType, IntType, DynamicType)
+    # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly
+    # matches it with (2) instead of (1), which is a problem.
+    'test_std_dim',
+    'test_std_dim_1d',
+    'test_std_dim_1d_neg0',
+    'test_std_dim_neg0',
+    'test_var_dim',
+    'test_var_dim_1d',
+    'test_var_dim_1d_neg0',
+    'test_var_dim_neg0',
     'test_norm_inf',
     'test_renorm_norm_inf',
-    'test_sigmoid_scalar',
     'test_split',
     'test_split_size_list',
     'test_split_size_list_dim',
     'test_split_size_list_dim_neg0',
-    'test_sub',
-    'test_sub_broadcast_all',
-    'test_sub_broadcast_lhs',
-    'test_sub_broadcast_rhs',
-    'test_sub_scalar_broadcast_lhs',
-    'test_sub_scalar_broadcast_rhs',
-    'test_sub_scalar_constant',
     'test_unsqueeze_last_neg0',
     'test_unsqueeze_middle_neg0',
-    'test_addmm_broadcast_lhs_coef',
-    'test_addmm_coef',
-    'test_addmm_scalar_broadcast_lhs_coef',
     'test_expand',
     'test_expand_1_element',
     'test_expand_new_dim',
@@ -4445,42 +4556,6 @@ EXCLUDE_SCRIPT = {
     'test_expand_scalar_to_dims',
     'test_expand_scalar_to_scalar',
     'test_expand_size',
-    'test_index_add_dim',
-    'test_index_add_dim_neg0',
-    'test_index_add_scalar_all_dim',
-    'test_index_add_scalar_all_dim_neg0',
-    'test_index_add_scalar_input_dim',
-    'test_index_add_scalar_input_dim_neg0',
-    'test_index_copy_dim',
-    'test_index_copy_dim_neg0',
-    'test_index_copy_scalar_all_dim',
-    'test_index_copy_scalar_all_dim_neg0',
-    'test_index_copy_scalar_input_dim',
-    'test_index_copy_scalar_input_dim_neg0',
-    'test_index_fill_dim',
-    'test_index_fill_dim_neg0',
-    'test_index_fill_scalar_both_dim',
-    'test_index_fill_scalar_both_dim_neg0',
-    'test_index_fill_scalar_index_dim',
-    'test_index_fill_scalar_index_dim_neg0',
-    'test_index_fill_scalar_input_dim',
-    'test_index_fill_scalar_input_dim_neg0',
-    'test_index_fill_variable_dim',
-    'test_index_fill_variable_dim_neg0',
-    'test_masked_fill',
-    'test_masked_fill_broadcast_rhs',
-    'test_masked_fill_scalar',
-    'test_masked_fill_scalar_broadcast_rhs',
-    'test_masked_fill_scalar_variable',
-    'test_masked_fill_tensor',
-    'test_masked_scatter',
-    'test_masked_scatter_broadcast_rhs',
-    'test_masked_scatter_scalar',
-    'test_masked_scatter_scalar_broadcast_rhs',
-    'test_max_scalar_elementwise',
-    'test_max_scalar_elementwise_broadcast_rhs',
-    'test_min_scalar_elementwise',
-    'test_min_scalar_elementwise_broadcast_rhs',
     'test_permute',
     'test_permute_neg_dim',
     'test_permute_scalar',
@@ -4493,18 +4568,6 @@ EXCLUDE_SCRIPT = {
     'test_reshape_scalar_to_1d',
     'test_reshape_scalar_to_scalar',
     'test_reshape_size',
-    'test_scatter_add_dim0',
-    'test_scatter_add_dim0_neg0',
-    'test_scatter_add_dim1',
-    'test_scatter_add_dim1_neg0',
-    'test_scatter_add_scalar_all_dim0',
-    'test_scatter_add_scalar_all_dim0_neg0',
-    'test_scatter_dim0',
-    'test_scatter_dim0_neg0',
-    'test_scatter_dim1',
-    'test_scatter_dim1_neg0',
-    'test_scatter_scalar_all_dim0',
-    'test_scatter_scalar_all_dim0_neg0',
     'test_view',
     'test_view_1d',
     'test_view_scalar_to_1d',
@@ -4514,11 +4577,6 @@ EXCLUDE_SCRIPT = {
     'test_split_dim_neg0',
     'test_gesv',
     'test_inverse',
-    'test_pow_scalar_constant',
-    'test_pow_constant',
-    'test_mul_constant',
-    'test_div_scalar_constant',
-    'test_div_constant',
 }
 
 

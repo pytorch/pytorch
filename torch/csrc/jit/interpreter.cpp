@@ -682,11 +682,21 @@ struct CodeImpl {
         stack.push_back(t);
         return 0;
       };
-    IR_ELSEIF(Undefined)
+    IR_ELSEIF(TensorToNum)
+      // no-op
       return [](Stack & stack) {
-        stack.push_back(at::Tensor());
         return 0;
       };
+    IR_ELSEIF(NumToTensor)
+      // no-op
+      return [](Stack & stack) {
+        return 0;
+      };
+    IR_ELSEIF(Undefined)
+    return [](Stack & stack) {
+      stack.push_back(at::Tensor());
+      return 0;
+    };
     IR_ELSEIF(ReplaceIfUndef)
       return [](Stack & stack) {
         auto alternate = pop(stack);
