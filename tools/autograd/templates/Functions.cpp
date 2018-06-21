@@ -737,21 +737,6 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
   return (r * grad).sum();
 }
 
-static inline int64_t diag_size(int64_t height, int64_t width, int64_t diagonal) {
-  if (width > height) {
-    return diag_size(width, height, -diagonal);
-  }
-  // Assumes height >= width
-  auto longest_diag = width;
-  if (diagonal >= 0) {
-    return longest_diag - diagonal;
-  }
-  if (longest_diag < height + diagonal) {
-    return longest_diag;
-  }
-  return height + diagonal;
-}
-
 Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
   TORCH_ASSERT(ndimension == 1 || ndimension == 2);
@@ -814,15 +799,227 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 }
 
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
+  // NOTE [ as_strided backward ]
+  //
+  // Implementing the backward of as_strided is tricky because you have to deal
+  // with mappings that maps one memory location to multiple indices. This can
+  // happen with all sorts of weird cases. For example,
+  //
+  //   x = torch.randn(100)
+  //   x.as_strided([3, 3], [1, 0])  # "expand" case
+  //   x.as_strided([3, 3], [2, 1])  # "size too large" case
+  //   x.as_strided([3, 2], [3, 6])  # res[2, 0] points to 2*3 + 0*6 = 6
+  //                                 # res[0, 1] points to 0*3 + 1*6 = 6
+  //
+  // Implementing the general check for memory overlap here is the special case
+  // of detecting memory overlap of two strided arrays, where the two arrays
+  // start at the same memory address.
+  //
+  // This function implements a check for a simple case where we can be certain
+  // that there is no overlap, except for dimensions of stride 0, i.e., "expand"
+  // case.
+  //
+  // The check can be described as:
+  //   0. Return [ pass check ] if any dimension has size 0
+  //   1. Ignore all dimensions that have size 1 or stride 0
+  //   2. If no remaining dimensions, return [ pass check ]
+  //   3. Sort the remaining dimensions according to the strides decreasingly
+  //   4. Check that for each dimension k,
+  //
+  //           stride[k] > \sum_{ i > k } (size[i] - 1) * stride[i]
+  //
+  //      That is equivalent to, after reording the dimensions so strides are
+  //      in decreasing order, checking that stride of each dimension is larger
+  //      than the maximum memory offset in a slice at that dimension.
+  //
+  // Obviously this check passes for contiguous tensors ( the dimensions will be
+  // already sorted with LHS = stride[0] = \prod size[i] being exactly 1 larger
+  // than RHS ). Similarly, the check passes for tensors contiguous in all but
+  // the last dimension, and LHS = stride[0] = stride[-1] * \prod size[i] being
+  // exactly stride[-1] larger than RHS. (*)
+  //
+  // We will show that these view operations, including all our view operations
+  // *except for* general as_strided and unfold, also preserve this invariant:
+  //
+  //  alias:      Obviously preserves
+  //
+  //  expand:     All changed dimensions are removed in step (1)
+  //
+  //  view:       Consider the input dimensions as grouped into consecutive
+  //              dimension "blocks", where dimensions are contiguous in each one.
+  //              one. view only works when the output dimensions can also be
+  //              grouped into the same consecutive blocks of same ordering.
+  //
+  //              NB: this means that the number of elements and stride of the
+  //                  last dimension in each block is the same in input and
+  //                  output. (**)
+  //
+  //              Notation:
+  //                Consider a single such block B,
+  //                    ... B_prev[-1]], [ B[0], ..., B[i], ..., B[k] = B[-1] ], [ B_next[0], ...
+  //                                start--^^^^                  ^^^^^^^^^^^^--end
+  //                Each B[i] denotes a dimension index such that B[i] = B[0] + i.
+  //
+  //              We first show that in a tensor (i.e., input) satisfies the
+  //              invariant, after sorting, the dimensions within each block
+  //              still remain consecutive. (***)
+  //
+  //                After removing dimensions of size 1, the dimensions within a
+  //                block is already sorted by strides in descending order. So
+  //                sorting all dimensions will not change the relative ordering
+  //                among them.
+  //
+  //                Assume that some block B is not consecutive after sorting,
+  //                i.e., there exists a dimension d between B[0] and B[-1] in
+  //                sorted order.
+  //
+  //                By (*), we know that
+  //                       stride[B[0]]
+  //                    =  \sum_{i > 0}   (size[B[i]] - 1) * stride[B[i]] + stride[B[-1]]
+  //                    <  \sum_{i > 0}   (size[B[i]] - 1) * stride[B[i]] + stride[d]
+  //                    <= \sum_{i > 0}   (size[B[i]] - 1) * stride[B[i]] + (size[d] - 1) * stride[d]
+  //                    <= \sum{j > B[0]} (size[j]    - 1) * stride[j],
+  //
+  //                where the first <   comes from sorting and
+  //                      the second <= comes from the fact that dimension d
+  //                                               exists after step (1) and
+  //                                               thus must have size greater
+  //                                               than 1
+  //                      the third  <= comes from the fact that each term in
+  //                                               the sum is non-negative
+  //
+  //                Then we have a countradiction as the invariant must not be
+  //                satisfied at B[0]. So the original proposition is true.
+  //
+  //              Now that we established the above claim (***), we consider the
+  //              view operation as first sorting the dimensions (i.e., blocks),
+  //              apply the original view (since it only cares dimensions being
+  //              consecutive and contiguous withtin each block), and then undo
+  //              the sort.
+  //
+  //              Consider a single block B in the output,
+  //                  ... ], [ B[0], ..., B[i], ..., B[k] = B[-1] ], [ ...
+  //                    start--^^^^                  ^^^^^^^^^^^^--end
+  //
+  //              By (*), we know that for all i
+  //                  stride[i] = stride[B[-1]] +
+  //                                \sum_{j=i+1}^{k} (size[B[j]] - 1) * stride[B[j]]
+  //
+  //              Then the invariant is obviously satisfied at every dimension
+  //              in this block if it is satisfied at dimnesion B[-1]. It only
+  //              remains to show that it is satisfied at the last dimension in
+  //              each block.
+  //
+  //              Since the same blocks are present in both input and output
+  //              with the same ordering, we will abuse the notation in the
+  //              following statements.
+  //
+  //              By (*), we know that the following holds for both input and
+  //              output, for any block B:
+  //                    \sum_{i > B[-1]} (size[i] - 1) * stride[i]
+  //                  = \sum_{block B' after B} \prod_{j in B'} size[B[j]] * stride[B'[-1]]
+  //                  = \sum_{block B' after B} numel(B') * stride[B'[-1]].
+  //                    ^^^^^^^^^^^^^^^^^^^^^^^|^^^^^^^^^^^^^^^^^^^^^^^^^^
+  //              By (**), we know that, this quantity in the above equation
+  //              remains the same in input and output. So both
+  //                  \sum_{i > B[-1]} (size[i] - 1) * stride[i]
+  //              and
+  //                  stride[B[-1]]
+  //              are the same in input and output.
+  //
+  //              These two quantities are exactly the LHS and RHS of the
+  //              invariant inequality. Since by assumption the invariant is
+  //              satisfied in input at B[-1], it is also satisfied in output at
+  //              B[-1]. This concludes the proof.
+  //
+  //  squeeze:    Special case of view
+  //
+  //  unsqueeze:  Special case of view
+  //
+  //  slice:      Consider slicing dimension i with step = k >= 1.
+  //
+  //              Let stride' and size' be the output strides and sizes. We have
+  //
+  //                  stride'[i] = k * stride[i]
+  //                  size'[i] <= floor(size[i] / k)
+  //
+  //              If size'[i] = 1, invariant is obviously satisfied as we are
+  //              just removing a dimension (afte step (1)).
+  //
+  //              Assume size'[i] > 1.
+  //
+  //              By assumption, the invariant is satisfied at every dimension
+  //              in input.
+  //
+  //              For any dimension j, if stride[j] > stride[i], we have
+  //                  stride'[j] =  stride[j]
+  //                             >  (size[i] - 1) * stride[i]
+  //                             =  (size[i] / k * k - 1) * k * stride[i] / k
+  //                             =  (size[i] / k - 1 / k) * stride'[i]
+  //                             >= (size'[i]    - 1 / k) * stride'[i]
+  //                             >= stride'[i].
+  //
+  //              If stride[j] < stride[i], we have
+  //                  stride'[j] = stride[j] < stride[i] <= stride'[i].
+  //
+  //              So the sorting order remains unchanged after slice.
+  //
+  //              Since
+  //                     (size'[i] - 1) * stride'[i]
+  //                  =  (floor(size[i] / k) - 1) * k * stride[i]
+  //                  <= (size[i] / k - 1) * k * stride[i]
+  //                  =  (size[i] - k) * stride[i]
+  //                  <= (size[i] - 1) * * stride[i],
+  //              the term from this dimension i in the invariant inequality at
+  //              other dimensions can only decrease after slice. So the
+  //              invariant is preserved.
+  //
+  //  narrow:     Special case of slice
+  //
+  //  select:     narrow + squeeze
+  //
+  //  permute:    Sorting makes permutation of dimensions irrelevant
+  //
+  //  transpose:  Sorting makes swapping dimensions irrelevant
+  //
+  //  diagonal:   Effectively merging two dimensions i and j into a new
+  //              dimension k s.t.
+  //                  stride'[k] =  stride[i] + stride[j]
+  //                  size'[k]   <= min(size[i], size[j]),
+  //              where stride and size are on the input, and stride' and size'
+  //              are on the output.
+  //
+  //              Assuming that size[i] > 1 and size[j] > 1. If any has size 1,
+  //              then this is unsqueeze on that dimension.
+  //
+  //              WLOG, say stride[i] >= stride[j].
+  //
+  //              Each dimension d in input with stride[d] > stride[j] has
+  //                  stride'[d] =  stride[d]
+  //                             >  (size[i] - 1) * stride[i] + (size[j] - 1) * stride[j]
+  //                             >= stride[i] + stride[j]
+  //                             =  stride[k].
+  //              So, considering the sorted dimensions, this is effectively
+  //              removing i, and replacing j with k.
+  //
+  //              For dimensions d with stride[i] < stride[d] < stride[j], the
+  //              term from dimension i is removed in the invariant inequality.
+  //              For dimensions d with stride[d] > stride[j], we have
+  //                     (size'[k] - 1) * stride'[k]
+  //                  <= (min(size[i], size[j]) - 1) * (stride[i] + stride[j])
+  //                  <= (size[i] - 1) * stride[i] + (size[j] - 1) * stride[j],
+  //              so the term from i and j in the invariant can only decrease.
+  //
+  //              So this is generally relaxing the constraint, and thus it
+  //              preserves it.
+
   // 1. Check for size 0 dimensions,
   //    Skip size 1 dimensions, and
   //    Reduce on expanded dims (stride=0, size>1)
   auto dim = grad.dim();
   std::vector<int64_t> sizes_, strides_;
-  std::vector<std::pair<int64_t, int64_t>> sizes_strides_;
   sizes_.reserve(dim);
   strides_.reserve(dim);
-  sizes_strides_.reserve(dim);
   for (int64_t i = dim - 1; i >= 0; i--) {
     auto size_i = sizes[i];
     auto stride_i = strides[i];
@@ -835,39 +1032,31 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     } else {
       sizes_.insert(sizes_.begin(), size_i);
       strides_.insert(strides_.begin(), stride_i);
-      sizes_strides_.emplace(sizes_strides_.begin(), size_i, stride_i);
     }
   }
-  // 2. Now we have all sizes >= 1, all stride > 0.
+  // 2. Now we have all sizes > 1, all stride > 0.
   //    Check if it lies within the simple case where the geometry can be
   //    interpreted as a result from a series of permute(...) and slice(...).
   //      i.  Sort size & strides basing on strides in increasing order.
   //      ii. Check that forall k, stride[k+1] > \sum_{i=0}^k (size[k] - 1) * stride[k]
-  if (sizes_strides_.size() > 0) {
-    std::sort(sizes_strides_.begin(), sizes_strides_.end(),
-        [&](std::pair<int64_t, int64_t> i, std::pair<int64_t, int64_t> j){
-          return i.second < j.second;
-        });
+  if (sizes_.size() > 0) {
+    std::vector<std::size_t> argsort(sizes_.size());
+    std::iota(argsort.begin(), argsort.end(), 0);
+    std::sort(argsort.begin(), argsort.end(),
+        [&](std::size_t i, std::size_t j){ return strides_[i] < strides_[j]; });
 
-    auto it = sizes_strides_.begin();
     int64_t max_index_in_slice = 0;
-    while (it != sizes_strides_.end()) {
-      auto size_ = it->first;
-      auto stride_ = it->second;
+    for (auto i : argsort) {
+      auto stride_ = strides_[i];
       AT_CHECK(stride_ > max_index_in_slice,
                "as_strided backward is not implemented for this complex case: "
                "sizes=", sizes, ", strides=", strides,
                ", storage_offset=", storage_offset);
-      max_index_in_slice += stride_ * (size_ - 1);
-      it++;
+      max_index_in_slice += stride_ * (sizes_[i] - 1);
     }
   }
 
   auto grad_input = input_geometry.zeros_with_stride(grad.type());
-
-  // Note that the above check should be passed for all chained operations of:
-  //  'alias', 'as_strided', 'diagonal', 'expand', 'narrow', 'permute', 'view',
-  //  'select', 'slice', 'squeeze', 't', 'transpose', 'unfold', 'unsqueeze'.
   grad_input.as_strided(sizes_, strides_, storage_offset - input_geometry.storage_offset()).copy_(grad);
   return grad_input;
 }
