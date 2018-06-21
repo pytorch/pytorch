@@ -116,7 +116,7 @@ def logits_to_probs(logits, is_binary=False):
     the log probabilities (possibly unnormalized) of the events.
     """
     if is_binary:
-        return torch.nn.Sigmoid(logits)
+        return torch.sigmoid(logits)
     return F.softmax(logits, dim=-1)
 
 
