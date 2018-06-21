@@ -4,7 +4,9 @@
 #include <torch/nn/modules/conv.h>
 #include <torch/nn/modules/dropout.h>
 #include <torch/nn/modules/linear.h>
-#include <torch/optimizers.h>
+#include <torch/optim/adam.h>
+#include <torch/optim/optimizer.h>
+#include <torch/optim/sgd.h>
 #include <torch/tensor.h>
 #include <torch/tensor_list_view.h>
 #include <torch/utils.h>
@@ -110,7 +112,7 @@ bool test_mnist(
     bool useGPU,
     M&& model,
     F&& forward_op,
-    O&& optim) {
+    O&& optimizer) {
   std::cout << "Training MNIST for " << num_epochs
             << " epochs, rest your eyes for a bit!\n";
   struct MNIST_Reader {
@@ -216,9 +218,9 @@ bool test_mnist(
       torch::Tensor y = lab;
       torch::Tensor loss = at::nll_loss(x, y);
 
-      optim->zero_grad();
+      optimizer->zero_grad();
       loss.backward();
-      optim->step();
+      optimizer->step();
     }
   }
 
@@ -237,7 +239,7 @@ TEST_CASE("integration/cartpole") {
   auto linear = model->add(Linear(4, 128), "linear");
   auto policyHead = model->add(Linear(128, 2), "policy");
   auto valueHead = model->add(Linear(128, 1), "action");
-  auto optim = torch::Adam(model, 1e-3).make();
+  auto optim = torch::optim::Adam(model, 1e-3).make();
 
   std::vector<torch::Tensor> saved_log_probs;
   std::vector<torch::Tensor> saved_values;
@@ -352,7 +354,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
     return x;
   };
 
-  auto optim = torch::SGD(model, 1e-2).momentum(0.5).make();
+  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5).make();
 
   REQUIRE(test_mnist(
       32, // batch_size
@@ -360,7 +362,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
       true, // useGPU
       model,
       forward,
-      optim));
+      optimizer));
 }
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
@@ -389,7 +391,7 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
     return x;
   };
 
-  auto optim = torch::SGD(model, 1e-2).momentum(0.5).make();
+  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5).make();
 
   REQUIRE(test_mnist(
       32, // batch_size
@@ -397,5 +399,5 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
       true, // useGPU
       model,
       forward,
-      optim));
+      optimizer));
 }

@@ -2,7 +2,8 @@
 
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
-#include <torch/optimizers.h>
+#include <torch/optim/optimizer.h>
+#include <torch/optim/sgd.h>
 #include <torch/serialization.h>
 #include <torch/tensor.h>
 
@@ -187,19 +188,19 @@ TEST_CASE("serialization") {
     auto model = xor_model();
     auto model2 = xor_model();
     auto model3 = xor_model();
-    auto optim = torch::SGD(model, 1e-1)
-                     .momentum(0.9)
-                     .nesterov()
-                     .weight_decay(1e-6)
-                     .make();
+    auto optimizer = torch::optim::SGD(model, 1e-1)
+                         .momentum(0.9)
+                         .nesterov()
+                         .weight_decay(1e-6)
+                         .make();
 
     float running_loss = 1;
     int epoch = 0;
     while (running_loss > 0.1) {
       torch::Tensor loss = getLoss(model, 4);
-      optim->zero_grad();
+      optimizer->zero_grad();
       loss.backward();
-      optim->step();
+      optimizer->step();
 
       running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
       REQUIRE(epoch < 3000);
@@ -227,19 +228,19 @@ TEST_CASE("serialization") {
     torch::load(ss, model3.get());
 
     // Make some optimizers with momentum (and thus state)
-    auto optim1 = torch::SGD(model1, 1e-1).momentum(0.9).make();
-    auto optim2 = torch::SGD(model2, 1e-1).momentum(0.9).make();
-    auto optim2_2 = torch::SGD(model2, 1e-1).momentum(0.9).make();
-    auto optim3 = torch::SGD(model3, 1e-1).momentum(0.9).make();
-    auto optim3_2 = torch::SGD(model3, 1e-1).momentum(0.9).make();
+    auto optim1 = torch::optim::SGD(model1, 1e-1).momentum(0.9).make();
+    auto optim2 = torch::optim::SGD(model2, 1e-1).momentum(0.9).make();
+    auto optim2_2 = torch::optim::SGD(model2, 1e-1).momentum(0.9).make();
+    auto optim3 = torch::optim::SGD(model3, 1e-1).momentum(0.9).make();
+    auto optim3_2 = torch::optim::SGD(model3, 1e-1).momentum(0.9).make();
 
     auto x = torch::ones({10, 5}, at::requires_grad());
 
-    auto step = [&](torch::Optimizer optim, Linear model) {
-      optim->zero_grad();
+    auto step = [&](torch::optim::Optimizer optimizer, Linear model) {
+      optimizer->zero_grad();
       auto y = model->forward({x})[0].sum();
       y.backward();
-      optim->step();
+      optimizer->step();
     };
 
     // Do 2 steps of model1
@@ -291,7 +292,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   auto model = xor_model();
   auto model2 = xor_model();
   auto model3 = xor_model();
-  auto optim = torch::SGD(model, 1e-1)
+  auto optim = torch::optim::SGD(model, 1e-1)
                    .momentum(0.9)
                    .nesterov()
                    .weight_decay(1e-6)

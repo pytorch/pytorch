@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include <torch/tensor.h>
+#include <torch/optim.h>
 
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
@@ -113,18 +114,22 @@ inline at::Backend backendFromId(int32_t id) {
 } // namespace torch
 
 // This is super ugly and I don't know how to simplify it
-CEREAL_REGISTER_TYPE(torch::SGD);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::SGD);
-CEREAL_REGISTER_TYPE(torch::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::SGD);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::Adagrad);
-CEREAL_REGISTER_TYPE(torch::RMSprop);
+    torch::optim::OptimizerImpl,
+    torch::optim::SGD);
+CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::RMSprop);
-CEREAL_REGISTER_TYPE(torch::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::Adam);
+    torch::optim::OptimizerImpl,
+    torch::optim::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::OptimizerImpl,
+    torch::optim::RMSprop);
+CEREAL_REGISTER_TYPE(torch::optim::Adam);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::OptimizerImpl,
+    torch::optim::Adam);
 
 namespace cereal {
 

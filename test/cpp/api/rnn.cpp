@@ -17,7 +17,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto rnn = model->add(model_maker(nhid), "rnn");
   auto lo = model->add(Linear(nhid, 1), "lo");
 
-  auto optim = torch::Adam(model, 1e-2).make();
+  auto optimizer = torch::optim::Adam(model, 1e-2).make();
 
   auto forward_op = [&](torch::Tensor x) {
     auto T = x.size(0);
@@ -49,9 +49,9 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     x = forward_op(x);
     torch::Tensor loss = at::mse_loss(x, y);
 
-    optim->zero_grad();
+    optimizer->zero_grad();
     loss.backward();
-    optim->step();
+    optimizer->step();
 
     running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
     if (epoch > max_epoch) {

@@ -3,7 +3,7 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
-#include <torch/optimizers.h>
+#include <torch/optim.h>
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
@@ -15,9 +15,10 @@
 #include <random>
 
 using namespace torch::nn;
+using namespace torch::optim;
 
 bool test_optimizer_xor(
-    torch::Optimizer optim,
+    torch::optim::Optimizer optimizer,
     std::shared_ptr<Sequential> model) {
   float running_loss = 1;
   int epoch = 0;
@@ -36,14 +37,14 @@ bool test_optimizer_xor(
     inp.set_requires_grad(true);
     // forward
     std::function<at::Scalar()> closure = [&] {
-      optim->zero_grad();
+      optimizer->zero_grad();
       auto x = model->forward(inp);
       torch::Tensor loss = at::binary_cross_entropy(x, lab);
       loss.backward();
       return at::Scalar(loss.data());
     };
 
-    auto loss = optim->step(closure);
+    auto loss = optim->optimizer(closure);
 
     running_loss = running_loss * 0.99 + loss.toFloat() * 0.01;
     if (epoch > 3000) {
@@ -62,46 +63,51 @@ TEST_CASE("optim") {
 
   // Flaky
   // SECTION("lbfgs") {
-  //   auto optim = LBFGS(model, 5e-2).max_iter(5).make();
+  //   auto optim = optim::LBFGS(model, 5e-2).max_iter(5).make();
   //   REQUIRE(test_optimizer_xor(optim, model));
   // }
 
   SECTION("sgd") {
-    auto optim = torch::SGD(model, 1e-1)
-                     .momentum(0.9)
-                     .nesterov()
-                     .weight_decay(1e-6)
-                     .make();
-    REQUIRE(test_optimizer_xor(optim, model));
+    auto optimizer = torch::optim::SGD(model, 1e-1)
+                         .momentum(0.9)
+                         .nesterov()
+                         .weight_decay(1e-6)
+                         .make();
+    REQUIRE(test_optimizer_xor(optimizer, model));
   }
 
   SECTION("adagrad") {
-    auto optim =
-        torch::Adagrad(model, 1.0).weight_decay(1e-6).lr_decay(1e-3).make();
-    REQUIRE(test_optimizer_xor(optim, model));
+    auto optimizer = torch::optim::Adagrad(model, 1.0)
+                         .weight_decay(1e-6)
+                         .lr_decay(1e-3)
+                         .make();
+    REQUIRE(test_optimizer_xor(optimizer, model));
   }
 
   SECTION("rmsprop_simple") {
-    auto optim = torch::RMSprop(model, 1e-1).centered().make();
-    REQUIRE(test_optimizer_xor(optim, model));
+    auto optimizer = torch::optim::RMSprop(model, 1e-1).centered().make();
+    REQUIRE(test_optimizer_xor(optimizer, model));
   }
 
   SECTION("rmsprop") {
-    auto optim =
-        torch::RMSprop(model, 1e-1).momentum(0.9).weight_decay(1e-6).make();
-    REQUIRE(test_optimizer_xor(optim, model));
+    auto optimizer = torch::optim::RMSprop(model, 1e-1)
+                         .momentum(0.9)
+                         .weight_decay(1e-6)
+                         .make();
+    REQUIRE(test_optimizer_xor(optimizer, model));
   }
 
   /*
   // This test appears to be flaky, see
-  https://github.com/pytorch/pytorch/issues/7288 SECTION("adam") { auto optim =
-  Adam(model, 1.0).weight_decay(1e-6).make(); REQUIRE(test_optimizer_xor(optim,
-  model));
+  https://github.com/pytorch/pytorch/issues/7288 SECTION("adam") { auto
+  optimizer = optim::Adam(model, 1.0).weight_decay(1e-6).make();
+  REQUIRE(test_optimizer_xor(optimizer, model));
   }
   */
 
   SECTION("amsgrad") {
-    auto optim = torch::Adam(model, 0.1).weight_decay(1e-6).amsgrad().make();
-    REQUIRE(test_optimizer_xor(optim, model));
+    auto optimizer =
+        torch::optim::Adam(model, 0.1).weight_decay(1e-6).amsgrad().make();
+    REQUIRE(test_optimizer_xor(optimizer, model));
   }
 }
