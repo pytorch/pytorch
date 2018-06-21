@@ -79,19 +79,19 @@ struct Reduction {
         int64_t size = cols_rounded;
         parallel_for(
             0,
-            batch,
+            batch * (size / WIDTH),
             1,
             [out_, data_, n, stride, rows, cols, cols_rounded, size](
                 int64_t begin, int64_t end) {
-              for (int64_t b = begin; b < end; b++) {
-                for (int64_t i = 0; i < size / WIDTH; i += 1) {
-                  int64_t k = i * WIDTH;
-                  reduce128(
-                      &data_[b * n * stride + k],
-                      &out_[b * stride + k],
-                      rows,
-                      stride);
-                }
+              for (int64_t bi = begin; bi < end; bi++) {
+                int64_t b = bi / (size / WIDTH);
+                int64_t i = bi % (size / WIDTH);
+                int64_t k = i * WIDTH;
+                reduce128(
+                    &data_[b * n * stride + k],
+                    &out_[b * stride + k],
+                    rows,
+                    stride);
               }
             });
       }
