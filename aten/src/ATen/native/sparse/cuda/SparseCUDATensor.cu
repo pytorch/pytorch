@@ -142,7 +142,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   }
   ////////////////////////////////////////////////////////////
 
-  SparseTensor dst = at::sparse_coo_tensor(newIndices, newValues, self.sizes());
+  SparseTensor dst = ::at::native::sparse_coo_tensor(newIndices, newValues, self.sizes());
   _get_sparse_impl(dst)->set_coalesced(true);
 
   THCudaCheck(cudaGetLastError());
