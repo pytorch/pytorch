@@ -38,12 +38,15 @@ except ImportError:
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
 RUN_CUDA = torch.cuda.is_available()
+RUN_CUDA_HALF = RUN_CUDA
 if torch.cuda.is_available():
     CUDA_VERSION = torch._C._cuda_getCompiledVersion()
     for d in range(torch.cuda.device_count()):
         major = torch.cuda.get_device_capability(d)[0]
         if (CUDA_VERSION < 8000 and major >= 6) or (CUDA_VERSION < 9000 and major >= 7):
             RUN_CUDA = False
+        if (CUDA_VERSION < 9000 or major < 6):
+            RUN_CUDA_HALF = False
 
 RUN_CUDA_MULTI_GPU = RUN_CUDA and torch.cuda.device_count() > 1
 
@@ -169,7 +172,6 @@ class JitTestCase(TestCase):
             print(ge.__getattr__('forward').graph)
 
         # test no gradients case
-
         outputs = func(*nograd_inputs)
         outputs_ge = ge(*nograd_inputs)
         self.assertEqual(outputs, outputs_ge)
@@ -393,20 +395,21 @@ class TestJit(JitTestCase):
         ge = self.checkTrace(f, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
 
+    @staticmethod
+    def fn_test_comparison_gt_lt(x, y):
+        mask = (x > 0).type_as(x)
+        z = x * mask + y
+        mask = (x < 0).type_as(x)
+        z = z * mask + y
+        return z
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_comparison_gt_lt(self):
-        def f(x, y):
-            mask = (x > 0).type_as(x)
-            z = x * mask + y
-            mask = (x < 0).type_as(x)
-            z = z * mask + y
-            return z
-
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
-        ge = self.checkTrace(f, (x, y))
+        ge = self.checkTrace(self.fn_test_comparison_gt_lt, (x, y))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
@@ -423,27 +426,65 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(f, (x, y))
 
+    @staticmethod
+    def fn_test_relu(x, y):
+        return F.relu(x + .5 * y)
+
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_relu(self):
-        def f(x, y):
-            return F.relu(x + .5 * y)
-
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
-        ge = self.checkTrace(f, (x, y))
+        ge = self.checkTrace(self.fn_test_relu, (x, y))
+
+    @staticmethod
+    def fn_test_exp(x, y):
+        return (x + .5 * y).exp()
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_exp(self):
-        def f(x, y):
-            return (x + .5 * y).exp()
-
         x = torch.randn(4, 4, dtype=torch.float, device='cuda')
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
-        ge = self.checkTrace(f, (x, y))
+        ge = self.checkTrace(self.fn_test_exp, (x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    @unittest.skipIf(not RUN_CUDA_HALF, "no half support")
+    def test_cuda_half(self):
+        x = torch.randn(4, 4, dtype=torch.half, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.half, device='cuda')
+
+        funcs = [
+            self.fn_test_comparison_gt_lt,
+            self.fn_test_relu,
+            self.fn_test_exp
+        ]
+
+        # Note: Non fused inputs must be float to prevent loss of precision
+        inputs = (x.float(), y.float())
+        fusion_inputs = (x, y)
+        for fn in funcs:
+            local_inputs = [t.clone().requires_grad_() for t in inputs]
+            local_fusion_inputs = [t.clone().requires_grad_() for t in fusion_inputs]
+
+            # Verifies outputs
+            fusion = torch.jit.trace(*local_fusion_inputs, optimize=True)(fn)
+            outputs = fn(*local_inputs)
+            fusion_outputs = fusion(*local_fusion_inputs)
+            outputs_half = [t.half() for t in outputs]
+            self.assertEqual(outputs_half, fusion_outputs)
+
+            # Verifies gradients
+            for output, fusion_output in zip(outputs_half, fusion_outputs):
+                grads = torch.autograd.grad(
+                    output.float().sum(), local_inputs, allow_unused=True, retain_graph=True)
+                fusion_grads = torch.autograd.grad(
+                    fusion_output.sum(), local_fusion_inputs, allow_unused=True, retain_graph=True)
+                grads_half = [t.half() for t in grads]
+                self.assertEqual(grads_half, fusion_grads)
 
     # TODO: adapt this test to check that GraphExecutor treats them differently
     @unittest.skip("Need to be adjusted to Graph Executor")
