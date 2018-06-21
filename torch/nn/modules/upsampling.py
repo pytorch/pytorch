@@ -6,7 +6,7 @@ from .. import functional as F
 
 
 class ResizeImages(Module):
-    r"""Upsamples a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
+    r"""Resizes a given multi-channel 1D (temporal), 2D (spatial) or 3D (volumetric) data.
 
     The input data is assumed to be of the form
     `minibatch x channels x [optional depth] x [optional height] x width`.
@@ -55,21 +55,21 @@ class ResizeImages(Module):
         tensor([[[[ 1.,  2.],
                   [ 3.,  4.]]]])
 
-        >>> m = nn.Upsample(scale_factor=2, mode='nearest')
+        >>> m = nn.ResizeImages(scale_factor=2, mode='nearest')
         >>> m(input)
         tensor([[[[ 1.,  1.,  2.,  2.],
                   [ 1.,  1.,  2.,  2.],
                   [ 3.,  3.,  4.,  4.],
                   [ 3.,  3.,  4.,  4.]]]])
 
-        >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
+        >>> m = nn.ResizeImages(scale_factor=2, mode='bilinear')  # align_corners=False
         >>> m(input)
         tensor([[[[ 1.0000,  1.2500,  1.7500,  2.0000],
                   [ 1.5000,  1.7500,  2.2500,  2.5000],
                   [ 2.5000,  2.7500,  3.2500,  3.5000],
                   [ 3.0000,  3.2500,  3.7500,  4.0000]]]])
 
-        >>> m = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        >>> m = nn.ResizeImages(scale_factor=2, mode='bilinear', align_corners=True)
         >>> m(input)
         tensor([[[[ 1.0000,  1.3333,  1.6667,  2.0000],
                   [ 1.6667,  2.0000,  2.3333,  2.6667],
@@ -87,7 +87,7 @@ class ResizeImages(Module):
                   [ 3.,  4.,  0.],
                   [ 0.,  0.,  0.]]]])
 
-        >>> m = nn.Upsample(scale_factor=2, mode='bilinear')  # align_corners=False
+        >>> m = nn.ResizeImages(scale_factor=2, mode='bilinear')  # align_corners=False
         >>> # Notice that values in top left corner are the same with the small input (except at boundary)
         >>> m(input_3x3)
         tensor([[[[ 1.0000,  1.2500,  1.7500,  1.5000,  0.5000,  0.0000],
@@ -97,7 +97,7 @@ class ResizeImages(Module):
                   [ 0.7500,  0.8125,  0.9375,  0.7500,  0.2500,  0.0000],
                   [ 0.0000,  0.0000,  0.0000,  0.0000,  0.0000,  0.0000]]]])
 
-        >>> m = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        >>> m = nn.ResizeImages(scale_factor=2, mode='bilinear', align_corners=True)
         >>> # Notice that values in top left corner are now changed
         >>> m(input_3x3)
         tensor([[[[ 1.0000,  1.4000,  1.8000,  1.6000,  0.8000,  0.0000],
@@ -169,6 +169,9 @@ class Upsample(Module):
         input size. This was the default behavior for these modes up to version
         0.3.1. Since then, the default behavior is ``align_corners = False``.
         See below for concrete examples on how this affects the outputs.
+
+    .. warning::
+        This class is deprecated in favor of :class:`~nn.ResizeImages`.
 
     Examples::
 
@@ -264,7 +267,7 @@ class UpsamplingNearest2d(Upsample):
         scale_factor (int, optional): the multiplier for the image height or width
 
     .. warning::
-        This class is deprecated in favor of :class:`~nn.Upsample`.
+        This class is deprecated in favor of :class:`~nn.ResizeImages`.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -293,7 +296,7 @@ class UpsamplingNearest2d(Upsample):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
     def forward(self, input):
-        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.Upsample instead.")
+        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.ResizeImages instead.")
         return super(UpsamplingNearest2d, self).forward(input)
 
 
@@ -311,8 +314,8 @@ class UpsamplingBilinear2d(Upsample):
         scale_factor (int, optional): the multiplier for the image height or width
 
     .. warning::
-        This class is deprecated in favor of :class:`~nn.Upsample`. It is
-        equivalent to ``nn.Upsample(..., mode='bilinear', align_corners=True)``.
+        This class is deprecated in favor of :class:`~nn.ResizeImages`. It is
+        equivalent to ``nn.ResizeImages(..., mode='bilinear', align_corners=True)``.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -341,5 +344,5 @@ class UpsamplingBilinear2d(Upsample):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
 
     def forward(self, input):
-        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.Upsample instead.")
+        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.ResizeImages instead.")
         return super(UpsamplingBilinear2d, self).forward(input)

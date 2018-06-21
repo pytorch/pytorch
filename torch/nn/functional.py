@@ -2020,8 +2020,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
-        This is equivalent with ``nn.functional.upsample(..., mode='nearest')``.
+        This function is deprecated in favor of :func:`torch.nn.functional.resize_images`.
+        This is equivalent with ``nn.functional.resize_images(..., mode='nearest')``.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -2034,16 +2034,16 @@ def upsample_nearest(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.resize_images instead.")
-    return upsample(input, size, scale_factor, mode='nearest')
+    return resize_images(input, size, scale_factor, mode='nearest')
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
+        This function is deprecated in favor of :func:`torch.nn.functional.resize_images`.
         This is equivalent with
-        ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
+        ``nn.functional.resize_images(..., mode='bilinear', align_corners=True)``.
 
     Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
     volumetric (5 dimensional) inputs.
@@ -2055,7 +2055,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     """
     # DeprecationWarning is ignored by default
     warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.resize_images instead.")
-    return upsample(input, size, scale_factor, mode='bilinear', align_corners=True)
+    return resize_images(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
