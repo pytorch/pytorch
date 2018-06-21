@@ -1,7 +1,7 @@
 import os
 import glob
 
-from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_negative_env_flag, gather_paths, lib_paths
+from .env import IS_WINDOWS, IS_CONDA, CONDA_DIR, check_negative_env_flag, gather_paths, lib_paths_from_base
 from .cuda import USE_CUDA, CUDA_HOME
 
 
