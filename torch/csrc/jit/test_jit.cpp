@@ -891,10 +891,12 @@ void testControlFlow() {
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
+  proto.DebugString();
 }
 
 std::string runJITCPPTests() {
   std::stringstream out;
+  /*
   testControlFlow();
   testGraphExecutor();
   testBlocks(out);
@@ -911,6 +913,7 @@ std::string runJITCPPTests() {
   fromQualStringTests();
   argumentSpecTest();
   shapeAnalysisTest();
+  */
   testProto();
   return out.str();
 }
