@@ -6,6 +6,8 @@
 /// performing the operation in float32, instead of using CUDA half intrinisics.
 /// Most uses of this type within ATen are memory bound, including the
 /// element-wise kernels, and the half intrinisics aren't efficient on all GPUs.
+/// If you are writing a compute bound kernel, you can use the CUDA half
+/// intrinsics directly on the Half type from device code.
 
 #include "ATen/ATenGeneral.h"
 
@@ -28,8 +30,6 @@
     #define AT_HOSTDEVICE
   #endif
 #endif
-
-// struct __half;
 
 namespace at {
 

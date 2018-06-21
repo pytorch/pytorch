@@ -3,7 +3,9 @@
 
 #include <ATen/ATen.h>
 #include <iostream>
+#include <limits>
 #include <sstream>
+#include <type_traits>
 
 using namespace at;
 
@@ -79,3 +81,37 @@ TEST_CASE( "half numeric limits", "[]" ) {
   REQUIRE(limits::quiet_NaN() != limits::quiet_NaN());
   REQUIRE(limits::signaling_NaN() != limits::signaling_NaN());
 }
+
+// Check the declared type of members of numeric_limits<Half> matches
+// the declared type of that member on numeric_limits<float>
+
+#define ASSERT_SAME_TYPE(name) \
+  static_assert( \
+      std::is_same< \
+          decltype(std::numeric_limits<Half>::name), \
+          decltype(std::numeric_limits<float>::name)>::value, \
+      "decltype(" #name ") differs")
+
+ASSERT_SAME_TYPE(is_specialized);
+ASSERT_SAME_TYPE(is_signed);
+ASSERT_SAME_TYPE(is_integer);
+ASSERT_SAME_TYPE(is_exact);
+ASSERT_SAME_TYPE(has_infinity);
+ASSERT_SAME_TYPE(has_quiet_NaN);
+ASSERT_SAME_TYPE(has_signaling_NaN);
+ASSERT_SAME_TYPE(has_denorm);
+ASSERT_SAME_TYPE(has_denorm_loss);
+ASSERT_SAME_TYPE(round_style);
+ASSERT_SAME_TYPE(is_iec559);
+ASSERT_SAME_TYPE(is_bounded);
+ASSERT_SAME_TYPE(is_modulo);
+ASSERT_SAME_TYPE(digits);
+ASSERT_SAME_TYPE(digits10);
+ASSERT_SAME_TYPE(max_digits10);
+ASSERT_SAME_TYPE(radix);
+ASSERT_SAME_TYPE(min_exponent);
+ASSERT_SAME_TYPE(min_exponent10);
+ASSERT_SAME_TYPE(max_exponent);
+ASSERT_SAME_TYPE(max_exponent10);
+ASSERT_SAME_TYPE(traps);
+ASSERT_SAME_TYPE(tinyness_before);

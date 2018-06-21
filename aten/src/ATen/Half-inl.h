@@ -138,23 +138,23 @@ template<> class numeric_limits<at::Half> {
   static constexpr bool has_infinity = true;
   static constexpr bool has_quiet_NaN = true;
   static constexpr bool has_signaling_NaN = true;
-  static constexpr bool has_denorm = numeric_limits<float>::has_denorm;
-  static constexpr bool has_denorm_loss = numeric_limits<float>::has_denorm_loss;
-  static constexpr bool round_style = numeric_limits<float>::round_style;
+  static constexpr auto has_denorm = numeric_limits<float>::has_denorm;
+  static constexpr auto has_denorm_loss = numeric_limits<float>::has_denorm_loss;
+  static constexpr auto round_style = numeric_limits<float>::round_style;
   static constexpr bool is_iec559 = true;
   static constexpr bool is_bounded = true;
   static constexpr bool is_modulo = false;
-  static constexpr bool digits = 11;
-  static constexpr bool digits10 = 3;
-  static constexpr bool max_digits10 = 5;
-  static constexpr bool radix = 2;
-  static constexpr bool min_exponent = -13;
-  static constexpr bool min_exponent10 = -4;
-  static constexpr bool max_exponent = 16;
-  static constexpr bool max_exponent10 = 4;
-  static constexpr bool traps = false;
-  static constexpr bool tinyness_before = numeric_limits<float>::tinyness_before;
-  static constexpr at::Half min() { return at::Half(0x400, at::Half::from_bits); }
+  static constexpr int digits = 11;
+  static constexpr int digits10 = 3;
+  static constexpr int max_digits10 = 5;
+  static constexpr int radix = 2;
+  static constexpr int min_exponent = -13;
+  static constexpr int min_exponent10 = -4;
+  static constexpr int max_exponent = 16;
+  static constexpr int max_exponent10 = 4;
+  static constexpr auto traps = numeric_limits<float>::traps;
+  static constexpr auto tinyness_before = numeric_limits<float>::tinyness_before;
+  static constexpr at::Half min() { return at::Half(0x0400, at::Half::from_bits); }
   static constexpr at::Half lowest() { return at::Half(0xFBFF, at::Half::from_bits); }
   static constexpr at::Half max() { return at::Half(0x7BFF, at::Half::from_bits); }
   static constexpr at::Half epsilon() { return at::Half(0x1400, at::Half::from_bits); }
@@ -162,7 +162,7 @@ template<> class numeric_limits<at::Half> {
   static constexpr at::Half infinity() { return at::Half(0x7C00, at::Half::from_bits); }
   static constexpr at::Half quiet_NaN() { return at::Half(0x7E00, at::Half::from_bits); }
   static constexpr at::Half signaling_NaN() { return at::Half(0x7D00, at::Half::from_bits); }
-  static constexpr at::Half denorm_min() { return at::Half(0x1, at::Half::from_bits); }
+  static constexpr at::Half denorm_min() { return at::Half(0x0001, at::Half::from_bits); }
 };
 
 } // namespace std

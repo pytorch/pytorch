@@ -46,7 +46,7 @@ __global__ void EmbeddingBag_updateOutputKernel(
       int64_t end = (bag < numBags - 1) ? (offsets[bag + 1]) : numIndices;
       assert(end >= begin);
 
-      accscalar_t weightFeatSum = static_cast<accscalar_t>(0); // FIXME
+      accscalar_t weightFeatSum = 0;
       scalar_t weightFeatMax;
 
       int64_t bag_size_ = 0;
