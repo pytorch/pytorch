@@ -340,6 +340,7 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(ge.graph_for(*inputs))
 
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skip("Test is flaky, see https://github.com/pytorch/pytorch/issues/8746")
     def test_lstm_fusion_cpu(self):
         inputs = get_lstm_inputs('cpu')
         try:
