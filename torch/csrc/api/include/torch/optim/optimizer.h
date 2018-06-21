@@ -7,8 +7,6 @@
 #include <functional>
 #include <memory>
 
-#define TORCH_AUTOGRAD_OPTIMIZER_CLASS(Type) \
-  class Type : public torch::optim::Optimizer_CRTP<Type>
 #define TORCH_AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
   TYP NAME##_ = DEFAULT;                                      \
   CLS& NAME(TYP x = OPTION) {                                 \
@@ -35,13 +33,12 @@ class OptimizerImpl {
 };
 
 template <class Derived>
-class Optimizer_CRTP : public OptimizerImpl {
+class Optimizer : public OptimizerImpl {
  public:
-  Optimizer_CRTP(std::shared_ptr<nn::Module> model) : OptimizerImpl(model) {}
+  Optimizer(std::shared_ptr<nn::Module> model) : OptimizerImpl(model) {}
 
   template <typename ModuleType>
-  Optimizer_CRTP(nn::ModuleHolder<ModuleType> module)
-      : Optimizer_CRTP(module.get()) {}
+  Optimizer(nn::ModuleHolder<ModuleType> module) : Optimizer(module.get()) {}
 
   std::shared_ptr<Derived> make() const {
     auto ptr = std::make_shared<Derived>(*static_cast<const Derived*>(this));
@@ -50,10 +47,8 @@ class Optimizer_CRTP : public OptimizerImpl {
   }
 
  protected:
-  Optimizer_CRTP() {}
+  Optimizer() {}
 };
-
-using Optimizer = std::shared_ptr<OptimizerImpl>;
 
 } // namespace optim
 } // namespace torch

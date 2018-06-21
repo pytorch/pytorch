@@ -18,7 +18,7 @@ using namespace torch::nn;
 using namespace torch::optim;
 
 bool test_optimizer_xor(
-    torch::optim::Optimizer optimizer,
+    std::shared_ptr<torch::optim::OptimizerImpl> optimizer,
     std::shared_ptr<Sequential> model) {
   float running_loss = 1;
   int epoch = 0;

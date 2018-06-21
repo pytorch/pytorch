@@ -15,10 +15,10 @@
 
 namespace torch {
 namespace optim {
-TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
+class Adam : public Optimizer<Adam> {
  public:
   Adam(std::shared_ptr<nn::Module> model, double lr)
-      : Optimizer_CRTP(model), lr_(lr) {}
+      : Optimizer(model), lr_(lr) {}
 
   template <typename ModuleType>
   Adam(nn::ModuleHolder<ModuleType> module_holder, double lr)
@@ -30,12 +30,12 @@ TORCH_AUTOGRAD_OPTIMIZER_CLASS(Adam) {
   TORCH_AUTOGRAD_KWARG(Adam, double, eps, 1e-8, 1e-8);
   TORCH_AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
   double lr_;
-  at::Scalar step(std::function<at::Scalar()> closure = OptimizerImpl::NoLoss)
-      override;
+  at::Scalar step(
+      std::function<at::Scalar()> closure = OptimizerImpl::NoLoss) override;
   void init_state() override;
 
   template <class Archive>
-  void serialize(Archive & ar) {
+  void serialize(Archive& ar) {
     ar(CEREAL_NVP(step_buffer_),
        CEREAL_NVP(exp_avg_buffer_),
        CEREAL_NVP(exp_avg_sq_buffer_),

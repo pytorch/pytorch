@@ -15,10 +15,10 @@
 
 namespace torch {
 namespace optim {
-TORCH_AUTOGRAD_OPTIMIZER_CLASS(LBFGS) {
+class LBFGS : public Optimizer<LBFGS> {
  public:
   LBFGS(std::shared_ptr<nn::Module> model, double lr)
-      : Optimizer_CRTP(model), lr_(lr) {}
+      : Optimizer(model), lr_(lr) {}
 
   template <typename ModuleType>
   LBFGS(nn::ModuleHolder<ModuleType> module_holder, double lr)

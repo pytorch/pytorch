@@ -236,7 +236,8 @@ TEST_CASE("serialization") {
 
     auto x = torch::ones({10, 5}, at::requires_grad());
 
-    auto step = [&](torch::optim::Optimizer optimizer, Linear model) {
+    auto step = [&](std::shared_ptr<torch::optim::OptimizerImpl> optimizer,
+                    Linear model) {
       optimizer->zero_grad();
       auto y = model->forward({x})[0].sum();
       y.backward();
