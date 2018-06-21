@@ -67,19 +67,21 @@ def _batch_trtrs_lower(bb, bA):
     return flat_X.reshape(bb.shape)
 
 
-def _batch_mahalanobis(L, x):
+def _batch_mahalanobis(bL, bx):
     r"""
     Computes the squared Mahalanobis distance :math:`\mathbf{x}^\top\mathbf{M}^{-1}\mathbf{x}`
     for a factored :math:`\mathbf{M} = \mathbf{L}\mathbf{L}^\top`.
 
-    Accepts batches for both L and x. They are not necessarily assumed to have the same batch
-    shape, just ones which can be broadcasted.
+    Accepts batches for both bL and bx. They are not necessarily assumed to have the same batch
+    shape, but `bL` one should be able to broadcasted to `bx` one.
     """
-    n = x.shape[-1]
-    batch_shape = _get_batch_shape(L, x)
-    x = x.expand(batch_shape + (n,))
-    L = L.expand(batch_shape + (n, n))
-    return _batch_trtrs_lower(x.unsqueeze(-1), L).squeeze(-1).pow(2).sum(-1)
+    n = bx.shape[-1]
+    bL = bL.expand(bx.shape[bx.dim() - bL.dim() + 1:] + (n,))
+    flat_L = bL.reshape(-1, n, n)  # shape = b x n x n
+    flat_x = bx.reshape(-1, flat_L.shape[0], n)  # shape = c x b x n
+    flat_x_swap = flat_x.permute(1, 2, 0)  # shape = b x n x c
+    M_swap = _batch_trtrs_lower(flat_x_swap, flat_L).pow(2).sum(-2)  # shape = b x c
+    return M_swap.t().reshape(bx.shape[:-1])
 
 
 class MultivariateNormal(Distribution):
@@ -131,37 +133,49 @@ class MultivariateNormal(Distribution):
             if scale_tril.dim() < 2:
                 raise ValueError("scale_tril matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
+            self._unbroadcasted_scale_tril = scale_tril
             batch_shape = _get_batch_shape(scale_tril, loc)
             self.scale_tril = scale_tril.expand(batch_shape + event_shape + event_shape)
         elif covariance_matrix is not None:
             if covariance_matrix.dim() < 2:
                 raise ValueError("covariance_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
+            self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
             batch_shape = _get_batch_shape(covariance_matrix, loc)
-            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape + event_shape)
+            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape
+                                                              + event_shape)
         else:
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
+            covariance_matrix = _batch_inverse(precision_matrix)
+            self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
             batch_shape = _get_batch_shape(precision_matrix, loc)
-            self.precision_matrix = precision_matrix.expand(batch_shape + event_shape + event_shape)
-            self.covariance_matrix = _batch_inverse(precision_matrix)
-        self.loc = loc
+            self.precision_matrix = precision_matrix.expand(batch_shape + event_shape
+                                                            + event_shape)
+            self.covariance_matrix = covariance_matrix.expand(batch_shape + event_shape
+                                                              + event_shape)
+
+        self.loc = loc.expand(batch_shape + event_shape)
         super(MultivariateNormal, self).__init__(batch_shape, event_shape, validate_args=validate_args)
 
     @lazy_property
     def scale_tril(self):
-        return _batch_potrf_lower(self.covariance_matrix)
+        return self._unbroadcasted_scale_tril.expand(
+            self._batch_shape + self._event_shape + self._event_shape)
 
     @lazy_property
     def covariance_matrix(self):
-        return torch.matmul(self.scale_tril, self.scale_tril.transpose(-1, -2))
+        return (torch.matmul(self._unbroadcasted_scale_tril,
+                             self._unbroadcasted_scale_tril.transpose(-1, -2))
+                .expand(self._batch_shape + self._event_shape + self._event_shape))
 
     @lazy_property
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
-        scale_tril_inv = _batch_inverse(self.scale_tril)
-        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv)
+        scale_tril_inv = _batch_inverse(self._unbroadcasted_scale_tril)
+        return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv).expand(
+            self._batch_shape + self._event_shape + self._event_shape)
 
     @property
     def mean(self):
@@ -169,24 +183,25 @@ class MultivariateNormal(Distribution):
 
     @property
     def variance(self):
-        return self.scale_tril.pow(2).sum(-1)
+        return self._unbroadcasted_scale_tril.pow(2).sum(-1).expand(
+            self._batch_shape + self._event_shape)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
         eps = self.loc.new(*shape).normal_()
-        return self.loc + _batch_mv(self.scale_tril, eps)
+        return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
         diff = value - self.loc
-        M = _batch_mahalanobis(self.scale_tril, diff)
-        log_det_half = _batch_diag(self.scale_tril).log().sum(-1)
-        return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + M) - log_det_half
+        M = _batch_mahalanobis(self._unbroadcasted_scale_tril, diff)
+        half_log_det = _batch_diag(self._unbroadcasted_scale_tril).log().sum(-1)
+        return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + M) - half_log_det
 
     def entropy(self):
-        log_det_half = _batch_diag(self.scale_tril).log().sum(-1)
-        H = 0.5 * self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + log_det_half
+        half_log_det = _batch_diag(self._unbroadcasted_scale_tril).log().sum(-1)
+        H = 0.5 * self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + half_log_det
         if len(self._batch_shape) == 0:
             return H
         else:
