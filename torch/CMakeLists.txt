@@ -189,19 +189,26 @@ endif()
 set(TH_CPU_INCLUDE
   # dense
   ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/TH
-  ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/THC
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/TH
-  ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THC
   # sparse
   ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/THS
-  ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/THCS
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THS
-  ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THCS
 
   ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src
   ${CMAKE_CURRENT_BINARY_DIR}/../aten/src
   ${CMAKE_BINARY_DIR}/aten/src)
 target_include_directories(torch PRIVATE ${TH_CPU_INCLUDE})
+
+if(USE_CUDA OR USE_ROCM)
+  set(TH_CUDA_INCLUDE
+    # dense
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/THC
+    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THC
+    # sparse
+    ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src/THCS
+    ${CMAKE_CURRENT_BINARY_DIR}/../aten/src/THCS)
+  target_include_directories(torch PRIVATE ${TH_CUDA_INCLUDE})
+endif()
 
 set(ATen_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/../aten/src
