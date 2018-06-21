@@ -7610,16 +7610,19 @@ add_test(NewModuleTest(
     fullname='AdaptiveLogSoftmax'))
 
 
-if __name__ == '__main__':
-    num_shards = int(os.environ.get('TEST_NN_NUM_SHARDS', None))
-    shard = int(os.environ.get('TEST_NN_SHARD', None))
-    if num_shards is not None and shard is not None:
-        def load_tests(loader, tests, pattern):
-            test_suite = unittest.TestSuite()
-            for test_group in tests:
-                for test in test_group:
-                    if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % num_shards == shard:
-                        test_suite.addTest(test)
-            return test_suite
+num_shards = os.environ.get('TEST_NN_NUM_SHARDS', None)
+shard = os.environ.get('TEST_NN_SHARD', None)
+if num_shards is not None and shard is not None:
+    num_shards = int(num_shards)
+    shard = int(shard)
+    def load_tests(loader, tests, pattern):
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % num_shards == shard:
+                    test_suite.addTest(test)
+        return test_suite
 
+
+if __name__ == '__main__':
     run_tests()
