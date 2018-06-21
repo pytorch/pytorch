@@ -72,7 +72,8 @@ struct Reduction {
         for (int64_t b = begin; b < end; b++) {
           const scalar_t* data = &data_[b * n];
           scalar_t* out = &out_[b];
-          scalar_t buf[WIDTH] = {ident};
+          scalar_t buf[WIDTH] = {0};
+          std::fill(buf, buf + WIDTH, ident);
           int64_t cols_rounded = n / WIDTH;
           reduce128(data, buf, cols_rounded, WIDTH);
           scalar_t result = ident;
@@ -116,7 +117,8 @@ struct Reduction {
 
         int64_t cols_rounded = round_down(cols, WIDTH);
         if (cols_rounded != cols) {
-          scalar_t buf[WIDTH] = {ident};
+          scalar_t buf[WIDTH] = {0};
+          std::fill(buf, buf + WIDTH, ident);
           for (int64_t row = 0; row != rows; row++) {
             for (int64_t j = 0; j != cols - cols_rounded; j++) {
               auto val = data[row * stride + j + cols_rounded];
