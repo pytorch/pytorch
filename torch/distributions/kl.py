@@ -19,8 +19,9 @@ from .half_normal import HalfNormal
 from .laplace import Laplace
 from .logistic_normal import LogisticNormal
 from .lowrank_multivariate_normal import (LowRankMultivariateNormal, _batch_lowrank_logdet,
-                                          _batch_lowrank_mahalanobis, _batch_trtrs_lower)
-from .multivariate_normal import MultivariateNormal, _batch_mahalanobis, _batch_diag, _batch_inverse
+                                          _batch_lowrank_mahalanobis)
+from .multivariate_normal import (MultivariateNormal, _batch_diag, _batch_mahalanobis,
+                                  _batch_trtrs_lower)
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto
@@ -129,9 +130,10 @@ def _batch_trace_XXT(bmat):
     """
     Utility function for calculating the trace of XX^{T} with X having arbitrary trailing batch dimensions
     """
-    mat_size = bmat.size(-1)
-    flat_trace = bmat.reshape(-1, mat_size * mat_size).pow(2).sum(-1)
-    return flat_trace.view(bmat.shape[:-2])
+    n = bmat.shape[-1]
+    m = bmat.shape[-2]
+    flat_trace = bmat.reshape(-1, m * n).pow(2).sum(-1)
+    return flat_trace.reshape(bmat.shape[:-2])
 
 
 def kl_divergence(p, q):
@@ -297,20 +299,20 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
         raise ValueError("KL-divergence between two Low Rank Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = (_batch_lowrank_logdet(q.scale_factor, q.scale_diag, q.capacitance_tril)
-             - _batch_lowrank_logdet(p.scale_factor, p.scale_diag, p.capacitance_tril))
+    term1 = (_batch_lowrank_logdet(q.scale_factor, q.scale_diag, q._capacitance_tril)
+             - _batch_lowrank_logdet(p.scale_factor, p.scale_diag, p._capacitance_tril))
     term3 = _batch_lowrank_mahalanobis(q.scale_factor, q.scale_diag, q.loc - p.loc,
-                                       q.capacitance_tril)
+                                       q._capacitance_tril)
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ (pW @ pW.T + pD)
-    term21 = p.covariance_matrix / q.scale_diag.unsqueeze(-1)
-    qWt_qDinv = q.scale_factor.tranpose(-1, -2) / q.scale_diag.unsqueeze(-2)
-    qWt_qDinv_pW = torch.matmul(qWt_qDinv, p.scale_factor)
-    qWt_qDinv_pDsqrt = qWt_qDinv * p.scale_diag.sqrt().unsqueeze(-2)
-    term221 = _batch_trtrs_lower(qWt_qDinv_pW, q.capacitance_tril)
-    term222 = _batch_trtrs_lower(qWt_qDinv_pDsqrt, q.capacitance_tril)
-    term22 = _batch_trace_XXT(term221) + _batch_trace_XXT(term22)
-    term2 = term21 - term22
+    #                  = [inv(qD) - A.T @ A] @ (pD + pW @ pW.T)
+    qWt_qDinv = q.scale_factor.transpose(-1, -2) / q.scale_diag.unsqueeze(-2)
+    A = _batch_trtrs_lower(qWt_qDinv, q._capacitance_tril)
+    term21 = (p.scale_diag / q.scale_diag).sum(-1)
+    term22 = _batch_trace_XXT(p.scale_factor * q.scale_diag.rsqrt().unsqueeze(-1))
+    term23 = _batch_trace_XXT(A * p.scale_diag.sqrt().unsqueeze(-2))
+    term24 = _batch_trace_XXT(A.matmul(p.scale_factor))
+    term2 = term21 + term22 - term23 - term24
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
 
@@ -321,10 +323,16 @@ def _kl_multivariatenormal_multivariatenormal(p, q):
         raise ValueError("KL-divergence between two Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = _batch_diag(q.scale_tril).log().sum(-1) - _batch_diag(p.scale_tril).log().sum(-1)
-    term2 = _batch_trace_XXT(torch.matmul(_batch_inverse(q.scale_tril), p.scale_tril))
-    term3 = _batch_mahalanobis(q.scale_tril, (q.loc - p.loc))
-    return term1 + 0.5 * (term2 + term3 - p.event_shape[0])
+    half_term1 = (_batch_diag(q._unbroadcasted_scale_tril).log().sum(-1)
+                  - _batch_diag(p._unbroadcasted_scale_tril).log().sum(-1))
+    combined_batch_shape = torch._C._infer_size(q._unbroadcasted_scale_tril.shape[:-2],
+                                                p._unbroadcasted_scale_tril.shape[:-2])
+    n = p.event_shape[0]
+    q_scale_tril = q._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
+    p_scale_tril = p._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
+    term2 = _batch_trace_XXT(_batch_trtrs_lower(p_scale_tril, q_scale_tril))
+    term3 = _batch_mahalanobis(q._unbroadcasted_scale_tril, (q.loc - p.loc))
+    return half_term1 + 0.5 * (term2 + term3 - n)
 
 
 @register_kl(Normal, Normal)

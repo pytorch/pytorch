@@ -111,6 +111,7 @@ class LowRankMultivariateNormal(Distribution):
         self.loc = loc.expand(loc_shape)
         self.scale_factor = scale_factor.expand(loc_shape + scale_factor.shape[-1:])
         self.scale_diag = scale_diag.expand(loc_shape)
+        self._capacitance_tril = _batch_capacitance_tril(self.scale_factor, self.scale_diag)
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
 
@@ -147,13 +148,9 @@ class LowRankMultivariateNormal(Distribution):
         #     inv(W @ W.T + D) = inv(D) - inv(D) @ W @ inv(C) @ W.T @ inv(D)
         # where :math:`C` is the capacitance matrix.
         Wt_Dinv = self.scale_factor.transpose(-1, -2) / self.scale_diag.unsqueeze(-2)
-        A = _batch_trtrs_lower(Wt_Dinv, self.capacitance_tril)
+        A = _batch_trtrs_lower(Wt_Dinv, self._capacitance_tril)
         return (_batch_vector_diag(self.scale_diag.reciprocal())
                 - torch.matmul(A.transpose(-1, -2), A))
-
-    @lazy_property
-    def capacitance_tril(self):
-        return _batch_capacitance_tril(self.scale_factor, self.scale_diag)
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
@@ -165,12 +162,14 @@ class LowRankMultivariateNormal(Distribution):
             self._validate_sample(value)
         diff = value - self.loc
         M = _batch_lowrank_mahalanobis(self.scale_factor, self.scale_diag, diff,
-                                       self.capacitance_tril)
-        log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag, self.capacitance_tril)
+                                       self._capacitance_tril)
+        log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag,
+                                        self._capacitance_tril)
         return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + log_det + M)
 
     def entropy(self):
-        log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag, self.capacitance_tril)
+        log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag,
+                                        self._capacitance_tril)
         H = 0.5 * (self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + log_det)
         if len(self._batch_shape) == 0:
             return H

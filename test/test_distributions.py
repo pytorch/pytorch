@@ -3064,6 +3064,41 @@ class TestKL(TestCase):
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
 
+    def test_kl_lowrank_multivariate_normal(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        n = 5  # Number of tests for lowrank_multivariate_normal
+        for i in range(0, n):
+            loc = [torch.randn(4) for _ in range(0, 2)]
+            scale_factor = [torch.randn(4, 3) for _ in range(0, 2)]
+            scale_diag = [transform_to(constraints.positive)(torch.randn(4)) for _ in range(0, 2)]
+            covariance_matrix = [scale_factor[i].matmul(scale_factor[i].t())
+                                 + scale_diag[i].diag() for i in range(0, 2)]
+            p = LowRankMultivariateNormal(loc[0], scale_factor[0], scale_diag[0])
+            q = LowRankMultivariateNormal(loc[1], scale_factor[1], scale_diag[1])
+            actual = kl_divergence(p, q)
+            p_full = MultivariateNormal(loc[0], covariance_matrix[0])
+            q_full = MultivariateNormal(loc[1], covariance_matrix[1])
+            expected = kl_divergence(p_full, q_full)
+            error = torch.abs(actual - expected).max()
+            self.assertLess(error, self.precision, '\n'.join([
+                'Incorrect KL(LowRankMultivariateNormal, LowRankMultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected (from KL MultivariateNormal): {}'.format(expected),
+                'Actual (analytic): {}'.format(actual),
+            ]))
+
+    def test_kl_lowrank_multivariate_normal_batched(self):
+        b = 7  # Number of batches
+        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        scale_factor = [torch.randn(b, 3, 2) for _ in range(0, 2)]
+        scale_diag = [transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(0, 2)]
+        expected_kl = torch.stack([
+            kl_divergence(LowRankMultivariateNormal(loc[0][i], scale_factor[0][i], scale_diag[0][i]),
+                          LowRankMultivariateNormal(loc[1][i], scale_factor[1][i], scale_diag[1][i]))
+            for i in range(0, b)])
+        actual_kl = kl_divergence(LowRankMultivariateNormal(loc[0], scale_factor[0], scale_diag[0]),
+                                  LowRankMultivariateNormal(loc[1], scale_factor[1], scale_diag[1]))
+        self.assertEqual(expected_kl, actual_kl)
+
     def test_kl_exponential_family(self):
         for (p, _), (_, q) in self.finite_examples:
             if type(p) == type(q) and issubclass(type(p), ExponentialFamily):
