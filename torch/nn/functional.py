@@ -1001,6 +1001,29 @@ See :class:`~torch.nn.Softshrink` for more details.
 """)
 
 
+def tanh(input):
+    r"""tanh(input) -> Tensor
+
+    Applies element-wise,
+    :math:`\text{Tanh}(x) = \tanh(x) = \frac{\exp(x) - \exp(-x)}{\exp(x) + \exp(-x)}`
+
+    See :class:`~torch.nn.Tanh` for more details.
+    """
+    warnings.warn("nn.functional.tanh is deprecated. Use nn.Tanh or torch.tanh instead.")
+    return input.tanh()
+
+
+def sigmoid(input):
+    r"""sigmoid(input) -> Tensor
+
+    Applies the element-wise function :math:`\text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}`
+
+    See :class:`~torch.nn.Sigmoid` for more details.
+    """
+    warnings.warn("nn.functional.sigmoid is deprecated. Use nn.Sigmoid or torch.sigmoid instead.")
+    return input.sigmoid()
+
+
 def linear(input, weight, bias=None):
     r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
