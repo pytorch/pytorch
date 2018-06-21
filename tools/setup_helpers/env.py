@@ -22,4 +22,4 @@ def check_negative_env_flag(name, default=''):
 
 
 def gather_paths(env_vars):
-    return list(chain(*(os.getenv(v, '').split(':') for v in env_vars)))
+    return list(chain(*(os.getenv(v, '').split(os.pathsep) for v in env_vars)))
