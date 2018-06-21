@@ -1,4 +1,5 @@
 #include "Functions.h"
+#include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 
@@ -798,6 +799,21 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
   return _sigmoid_backward(grad, x.sigmoid()) * (x < threshold).toType(grad.type()) * beta;
 }
 
+// Returns the minimum storage size needed to contain a tensor of sizes, strides, and storage_offset
+// Helper for as_strided_backward
+static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t storage_offset) {
+  int64_t storage_size = storage_offset + 1;
+  int64_t dim = sizes.size();
+  for (int64_t i = 0; i < dim; i++) {
+    auto size_i = sizes[i];
+    if (size_i == 0) {
+      return storage_offset;
+    }
+    storage_size += (size_i - 1) * strides[i];
+  }
+  return storage_size;
+}
+
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
   // NOTE [ as_strided backward ]
   //
@@ -821,10 +837,11 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //
   // The check can be described as:
   //   0. Return [ pass check ] if any dimension has size 0
-  //   1. Ignore all dimensions that have size 1 or stride 0
-  //   2. If no remaining dimensions, return [ pass check ]
-  //   3. Sort the remaining dimensions according to the strides decreasingly
-  //   4. Check that for each dimension k,
+  //   1. For all dimensions with stride 0, sum grad along that dimension
+  //   2. Ignore all dimensions that have size 1
+  //   3. If no remaining dimensions, return [ pass check ]
+  //   4. Sort the remaining dimensions according to the strides decreasingly
+  //   5. Check that for each dimension k,
   //
   //           stride[k] > \sum_{ i > k } (size[i] - 1) * stride[i]
   //
@@ -843,7 +860,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //
   //  alias:      Obviously preserves
   //
-  //  expand:     All changed dimensions are removed in step (1)
+  //  expand:     All changed dimensions are removed in step (2)
   //
   //  view:       Consider the input dimensions as grouped into consecutive
   //              dimension "blocks", where dimensions are contiguous in each one.
@@ -882,7 +899,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //
   //                where the first <   comes from sorting and
   //                      the second <= comes from the fact that dimension d
-  //                                               exists after step (1) and
+  //                                               exists after step (2) and
   //                                               thus must have size greater
   //                                               than 1
   //                      the third  <= comes from the fact that each term in
@@ -944,7 +961,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //                  size'[i] <= floor(size[i] / k)
   //
   //              If size'[i] = 1, invariant is obviously satisfied as we are
-  //              just removing a dimension (afte step (1)).
+  //              just removing a dimension (afte step (2)).
   //
   //              Assume size'[i] > 1.
   //
@@ -1013,6 +1030,8 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //              So this is generally relaxing the constraint, and thus it
   //              preserves it.
 
+  bool maybe_overlapping = false;
+
   // 1. Check for size 0 dimensions,
   //    Skip size 1 dimensions, and
   //    Reduce on expanded dims (stride=0, size>1)
@@ -1026,7 +1045,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     if (size_i == 0) {
       return at::zeros(input_geometry.sizes(), grad.type());
     } else if (size_i == 1) {
-      grad.squeeze_(i);
+      grad = grad.squeeze(i);
     } else if (stride_i == 0) {
       grad = grad.sum(i, false);
     } else {
@@ -1035,8 +1054,6 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     }
   }
   // 2. Now we have all sizes > 1, all stride > 0.
-  //    Check if it lies within the simple case where the geometry can be
-  //    interpreted as a result from a series of permute(...) and slice(...).
   //      i.  Sort size & strides basing on strides in increasing order.
   //      ii. Check that forall k, stride[k+1] > \sum_{i=0}^k (size[k] - 1) * stride[k]
   if (sizes_.size() > 0) {
@@ -1048,17 +1065,46 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     int64_t max_index_in_slice = 0;
     for (auto i : argsort) {
       auto stride_ = strides_[i];
-      AT_CHECK(stride_ > max_index_in_slice,
-               "as_strided backward is not implemented for this complex case: "
-               "sizes=", sizes, ", strides=", strides,
-               ", storage_offset=", storage_offset);
+      if (stride_ <= max_index_in_slice) {
+        maybe_overlapping = true;
+        break;
+      }
       max_index_in_slice += stride_ * (sizes_[i] - 1);
     }
   }
 
-  auto grad_input = input_geometry.zeros_with_stride(grad.type());
-  grad_input.as_strided(sizes_, strides_, storage_offset - input_geometry.storage_offset()).copy_(grad);
-  return grad_input;
+  // TODO: Raise if not all output values are visible in input geometry.
+  //       Technically speaking, if you treat those values as constants, not
+  //       raising is fine, and mathematically correct. However, these values
+  //       really are contained in some base tensor, and by treating them as
+  //       constants we are ignoring this tight dependency. Therefore, it is
+  //       more sensible to raise here.
+
+  // The strategy is similar in non-overlapping and maybe overlapping case.
+  // We create some underlying flattened tensor as if it is the base tensor
+  // representing the contiguous memory storage. In both cases, we scatter the
+  // gradients to this "storage" tensor, and return the as_strided view of it
+  // using input_geometry.
+  //   In non-overlapping case,   copy_ the grad
+  //   In maybe overlapping case, index_add_ the grad
+
+  auto shared_offset = std::min(input_geometry.storage_offset(), storage_offset);
+  auto effective_inp_offset = input_geometry.storage_offset() - shared_offset;
+  auto effective_out_offset = storage_offset - shared_offset;
+  auto base_size = std::max(
+    _min_storage_size(input_geometry.sizes(), input_geometry.strides(), effective_inp_offset),
+    _min_storage_size(sizes_, strides_, effective_out_offset)
+  );
+  auto flatten_full_gI = at::zeros({base_size}, grad.type());  // assume that new tensors have 0 storage offset
+  auto gI = flatten_full_gI.as_strided(input_geometry.sizes(), input_geometry.strides(), effective_inp_offset);
+  if (!maybe_overlapping) {
+    flatten_full_gI.as_strided(sizes_, strides_, effective_out_offset).copy_(grad);
+  } else {
+    auto flatten_full_indices = at::arange(0, base_size, grad.type().toScalarType(at::kLong));
+    auto indices = flatten_full_indices.as_strided(sizes_, strides_, effective_out_offset);
+    flatten_full_gI.index_add_(0, indices.reshape(-1), grad.reshape(-1));
+  }
+  return gI;
 }
 
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask) {
