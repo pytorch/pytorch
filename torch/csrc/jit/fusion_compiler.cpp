@@ -205,7 +205,7 @@ const char * scalarTypeName(at::ScalarType type) {
   switch(type) {
     #define DEFINE_CASE(ctype,name,_) \
       case at::ScalarType::name: return #ctype;
-    AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(DEFINE_CASE)
     #undef DEFINE_CASE
     default:
       throw std::runtime_error("unknown scalar type");
