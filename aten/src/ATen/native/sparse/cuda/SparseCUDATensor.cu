@@ -52,8 +52,8 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   // here.
   LongTensor indices1D = _newFlattenedIndices(self, true);
 
-  LongTensor origIndices = at::empty({nnz}, self._indices().type());
-  LongTensor uniqueOffsets = at::empty({nnz}, self._indices().type());
+  LongTensor origIndices = at::empty({nnz}, self._indices().options());
+  LongTensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
   thrust_ptr indicesIter(indices1D.data<int64_t>());
@@ -83,7 +83,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   indices1D.resize_({1, newNnz});
   std::vector<int64_t> newValues_size(values.sizes());
   newValues_size[0] = newNnz;
-  Tensor newValues = at::empty(newValues_size, values.type());
+  Tensor newValues = at::empty(newValues_size, values.options());
 
   dim3 grid(THCCeilDiv(newNnz, (int64_t) 4), THCCeilDiv(stride, (int64_t) 128));
   dim3 block(32, 4);
@@ -123,7 +123,7 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   if (sparseDims == 1) {
     newIndices = indices1D;
   } else {
-    newIndices = at::empty({sparseDims, newNnz}, origIndices.type());
+    newIndices = at::empty({sparseDims, newNnz}, origIndices.options());
     if (TH_INDEX_BASE != 0) {
       indices1D.add_(-1);
     }

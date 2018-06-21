@@ -94,7 +94,7 @@ inline LongTensor _newFlattenedIndices(const SparseTensor& self, bool forceClone
   } else {
     // FIXME TH_INDEX_BASE
     int64_t factor = 1;
-    LongTensor indices1D = at::empty({1, self._nnz()}, indices.type());
+    LongTensor indices1D = at::empty({1, self._nnz()}, indices.options());
     indices1D.fill_(TH_INDEX_BASE);
     for (int64_t d = sparseDims - 1; d >= 0; d--) {
       indices1D.add_(indices.select(0, d), factor);
