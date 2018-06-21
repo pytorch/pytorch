@@ -14,7 +14,7 @@ WITH_STATIC_CUDNN = os.getenv("USE_STATIC_CUDNN")
 if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
     lib_paths = list(filter(bool, [
         os.getenv('CUDNN_LIB_DIR')
-    ] + lib_paths(CUDA_HOME) + [
+    ] + lib_paths_from_base(CUDA_HOME) + [
         '/usr/lib/x86_64-linux-gnu/',
         '/usr/lib/powerpc64le-linux-gnu/',
         '/usr/lib/aarch64-linux-gnu/',
@@ -58,7 +58,7 @@ if USE_CUDA and not check_negative_env_flag('USE_CUDNN'):
     # Check for standalone cuDNN libraries
     if CUDNN_INCLUDE_DIR is not None:
         cudnn_path = os.path.join(os.path.dirname(CUDNN_INCLUDE_DIR))
-        cudnn_lib_paths = lib_paths(cudnn_path)
+        cudnn_lib_paths = lib_paths_from_base(cudnn_path)
         lib_paths.extend(cudnn_lib_paths)
 
     for path in lib_paths:
