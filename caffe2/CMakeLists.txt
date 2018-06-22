@@ -1,4 +1,4 @@
-it # ---[ Generate and install header and cpp files
+# ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
 # ---[ Declare source file lists
