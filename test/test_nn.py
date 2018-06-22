@@ -1143,6 +1143,14 @@ class TestNN(NNTestCase):
         module_dict.update(next_modules)
         check()
 
+        next_modules = {
+            'fc4': nn.Linear(5, 5),
+            'act3': nn.Sigmoid()
+        }
+        modules.update(next_modules)
+        module_dict.update(sorted(next_modules.items()))
+        check()
+
         del module_dict['fc']
         del modules['fc']
         check()
@@ -1275,11 +1283,19 @@ class TestNN(NNTestCase):
         check()
 
         next_parameters = OrderedDict([
-            ('p5', Parameter(torch.randn(10, 10))),
             ('p6', Parameter(torch.randn(10, 10))),
+            ('p5', Parameter(torch.randn(10, 10))),
         ])
         parameters.update(next_parameters)
         parameter_dict.update(next_parameters)
+        check()
+
+        next_parameters = {
+            'p8': Parameter(torch.randn(10, 10)),
+            'p7': Parameter(torch.randn(10, 10))
+        }
+        parameters.update(next_parameters)
+        parameter_dict.update(sorted(next_parameters.items()))
         check()
 
         del parameter_dict['p3']
@@ -1304,11 +1320,6 @@ class TestNN(NNTestCase):
         self.assertEqual(len(parameter_dict), 0)
         parameters.clear()
         check()
-
-        s = nn.Sequential(OrderedDict([
-            ('conv', nn.Conv2d(10, 10, 3)),
-            ('fc', nn.Linear(10, 10)),
-        ]))
 
     def test_add_module(self):
         l = nn.Linear(10, 20)
