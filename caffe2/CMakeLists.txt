@@ -268,7 +268,9 @@ if(USE_ROCM)
 
   # Include all the necessary cuh files.
   file(GLOB_RECURSE ATen_CUDA_HEADER_SRCS "${CMAKE_CURRENT_LIST_DIR}/../aten/src/*.cuh")
-  SET(Caffe2_HIP_SRCS ${ATen_CUDA_HEADER_SRCS} ${Caffe2_HIP_SRCS})
+
+  # Will uncomment the line below after all *.cuh files can compile standalone.
+  # SET(Caffe2_HIP_SRCS ${ATen_CUDA_HEADER_SRCS} ${Caffe2_HIP_SRCS})
 
   # Necessary in order to build all the source code
   set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
