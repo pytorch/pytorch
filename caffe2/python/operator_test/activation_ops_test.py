@@ -125,6 +125,57 @@ class TestActivations(hu.HypothesisTestCase):
         # Check over multiple devices
         self.assertDeviceChecks(dc, op, [X], [0])
 
+    @given(X=hu.tensor(),
+           min_val=st.floats(min_value=-2.0, max_value=0.0),
+           max_val=st.floats(min_value=0.1, max_value=2.0),
+           inplace=st.booleans(),
+           **hu.gcs)
+    def test_hardtanh(self, X, min_val, max_val, inplace, gc, dc):
+        # go away from the origin point to avoid kink problems
+        X += 0.04 * np.sign(X)
+        X[X == 0.0] += 0.04
+
+        def hardtanh_ref(X):
+            Y = X.copy()
+            to_min = X < min_val
+            to_max = X > max_val
+            Y[to_min] = min_val
+            Y[to_max] = max_val
+            return (Y,)
+
+        op = core.CreateOperator(
+            "Hardtanh",
+            ["X"], ["Y" if not inplace else "X"],
+            min_val=min_val,
+            max_val=max_val)
+        self.assertReferenceChecks(gc, op, [X], hardtanh_ref)
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X], [0])
+        # Gradient check wrt X
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(X=hu.tensor(),
+           inplace=st.booleans(),
+           **hu.gcs)
+    def test_hardtanh_default(self, X, inplace, gc, dc):
+        # go away from the origin point to avoid kink problems
+        X += 0.04 * np.sign(X)
+        X[X == 0.0] += 0.04
+
+        def hardtanh_ref(X):
+            Y = X.copy()
+            to_min = X < -1
+            to_max = X > 1
+            Y[to_min] = -1
+            Y[to_max] = 1
+            return (Y,)
+
+        op = core.CreateOperator(
+            "Hardtanh",
+            ["X"], ["Y" if not inplace else "X"])
+        self.assertReferenceChecks(gc, op, [X], hardtanh_ref)
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X], [0])
 
 if __name__ == "__main__":
     import unittest

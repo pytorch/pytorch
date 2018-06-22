@@ -1,0 +1,72 @@
+1529517403.995962 client started (1503092): socket /tmp/tmux-160374/default, protocol 8
+1529517403.995984 on Linux 4.6.7-56_fbk15_3477_ga310258 #56 SMP Mon Jul 31 15:43:35 PDT 2017; libevent 2.0.21-stable (epoll)
+1529517403.996006 socket is /tmp/tmux-160374/default
+1529517403.996013 trying connect
+1529517403.996025 connect failed: No such file or directory
+1529517403.996030 lock file is /tmp/tmux-160374/default.lock
+1529517403.996051 flock succeeded
+1529517403.996053 got lock (7)
+1529517403.996057 trying connect
+1529517403.996061 connect failed: No such file or directory
+1529517403.996214 add peer 0x681a70: 8 ((nil))
+1529517403.996279 sending message 100 to peer 0x681a70 (4 bytes)
+1529517403.996287 sending message 101 to peer 0x681a70 (15 bytes)
+1529517403.996290 sending message 102 to peer 0x681a70 (12 bytes)
+1529517403.996293 sending message 108 to peer 0x681a70 (45 bytes)
+1529517403.996297 sending message 104 to peer 0x681a70 (0 bytes)
+1529517403.996300 sending message 107 to peer 0x681a70 (4 bytes)
+1529517403.996303 sending message 105 to peer 0x681a70 (23 bytes)
+1529517403.996306 sending message 105 to peer 0x681a70 (37 bytes)
+1529517403.996309 sending message 105 to peer 0x681a70 (30 bytes)
+1529517403.996312 sending message 105 to peer 0x681a70 (16 bytes)
+1529517403.996315 sending message 105 to peer 0x681a70 (20 bytes)
+1529517403.996318 sending message 105 to peer 0x681a70 (14 bytes)
+1529517403.996321 sending message 105 to peer 0x681a70 (47 bytes)
+1529517403.996324 sending message 105 to peer 0x681a70 (35 bytes)
+1529517403.996326 sending message 105 to peer 0x681a70 (57 bytes)
+1529517403.996329 sending message 105 to peer 0x681a70 (43 bytes)
+1529517403.996332 sending message 105 to peer 0x681a70 (44 bytes)
+1529517403.996336 sending message 105 to peer 0x681a70 (32 bytes)
+1529517403.996339 sending message 105 to peer 0x681a70 (20 bytes)
+1529517403.996342 sending message 105 to peer 0x681a70 (29 bytes)
+1529517403.996345 sending message 105 to peer 0x681a70 (13 bytes)
+1529517403.996348 sending message 105 to peer 0x681a70 (1720 bytes)
+1529517403.996356 sending message 105 to peer 0x681a70 (18 bytes)
+1529517403.996359 sending message 105 to peer 0x681a70 (31 bytes)
+1529517403.996362 sending message 105 to peer 0x681a70 (47 bytes)
+1529517403.996365 sending message 105 to peer 0x681a70 (41 bytes)
+1529517403.996368 sending message 105 to peer 0x681a70 (336 bytes)
+1529517403.996371 sending message 105 to peer 0x681a70 (29 bytes)
+1529517403.996380 sending message 105 to peer 0x681a70 (49 bytes)
+1529517403.996384 sending message 105 to peer 0x681a70 (12 bytes)
+1529517403.996387 sending message 105 to peer 0x681a70 (17 bytes)
+1529517403.996390 sending message 105 to peer 0x681a70 (35 bytes)
+1529517403.996393 sending message 105 to peer 0x681a70 (74 bytes)
+1529517403.996396 sending message 105 to peer 0x681a70 (23 bytes)
+1529517403.996399 sending message 105 to peer 0x681a70 (46 bytes)
+1529517403.996402 sending message 105 to peer 0x681a70 (22 bytes)
+1529517403.996405 sending message 105 to peer 0x681a70 (19 bytes)
+1529517403.996408 sending message 105 to peer 0x681a70 (8 bytes)
+1529517403.996411 sending message 105 to peer 0x681a70 (11 bytes)
+1529517403.996414 sending message 105 to peer 0x681a70 (16 bytes)
+1529517403.996416 sending message 105 to peer 0x681a70 (12 bytes)
+1529517403.996419 sending message 105 to peer 0x681a70 (90 bytes)
+1529517403.996422 sending message 105 to peer 0x681a70 (56 bytes)
+1529517403.996425 sending message 105 to peer 0x681a70 (75 bytes)
+1529517403.996429 sending message 105 to peer 0x681a70 (25 bytes)
+1529517403.996442 sending message 105 to peer 0x681a70 (35 bytes)
+1529517403.996445 sending message 105 to peer 0x681a70 (33 bytes)
+1529517403.996448 sending message 105 to peer 0x681a70 (53 bytes)
+1529517403.996451 sending message 105 to peer 0x681a70 (45 bytes)
+1529517403.996454 sending message 105 to peer 0x681a70 (22 bytes)
+1529517403.996457 sending message 105 to peer 0x681a70 (37 bytes)
+1529517403.996459 sending message 105 to peer 0x681a70 (12 bytes)
+1529517403.996462 sending message 106 to peer 0x681a70 (0 bytes)
+1529517403.996470 sending message 200 to peer 0x681a70 (4 bytes)
+1529517403.996473 client loop enter
+1529517404.003721 peer 0x681a70 message 207
+1529517404.003730 sending message 208 to peer 0x681a70 (0 bytes)
+1529517437.729339 peer 0x681a70 message 203
+1529517437.729354 sending message 205 to peer 0x681a70 (0 bytes)
+1529517437.729467 peer 0x681a70 message 204
+1529517437.729472 client loop exit

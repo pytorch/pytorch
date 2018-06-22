@@ -1,0 +1,1946 @@
+1529517403.996743 server started (1503094): socket /tmp/tmux-160374/default, protocol 8
+1529517403.996757 on Linux 4.6.7-56_fbk15_3477_ga310258 #56 SMP Mon Jul 31 15:43:35 PDT 2017; libevent 2.0.21-stable (epoll)
+1529517403.996806 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996811 cmdq 0x6868b0: bind-key C-b send-prefix
+1529517403.996817 preparing state for bind-key C-b send-prefix (client (nil))
+1529517403.996820 cmd_find_client: no target, return (nil)
+1529517403.996822 preparing -t state: target none
+1529517403.996824 preparing -s state: target none
+1529517403.996838 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996841 cmdq 0x6868b0: bind-key C-o rotate-window
+1529517403.996844 preparing state for bind-key C-o rotate-window (client (nil))
+1529517403.996846 cmd_find_client: no target, return (nil)
+1529517403.996848 preparing -t state: target none
+1529517403.996849 preparing -s state: target none
+1529517403.996855 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996858 cmdq 0x6868b0: bind-key C-z suspend-client
+1529517403.996861 preparing state for bind-key C-z suspend-client (client (nil))
+1529517403.996863 cmd_find_client: no target, return (nil)
+1529517403.996864 preparing -t state: target none
+1529517403.996866 preparing -s state: target none
+1529517403.996872 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996875 cmdq 0x6868b0: bind-key Space next-layout
+1529517403.996878 preparing state for bind-key Space next-layout (client (nil))
+1529517403.996879 cmd_find_client: no target, return (nil)
+1529517403.996881 preparing -t state: target none
+1529517403.996882 preparing -s state: target none
+1529517403.996888 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996891 cmdq 0x6868b0: bind-key ! break-pane
+1529517403.996894 preparing state for bind-key ! break-pane (client (nil))
+1529517403.996896 cmd_find_client: no target, return (nil)
+1529517403.996897 preparing -t state: target none
+1529517403.996899 preparing -s state: target none
+1529517403.996903 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996906 cmdq 0x6868b0: bind-key " split-window
+1529517403.996910 preparing state for bind-key " split-window (client (nil))
+1529517403.996912 cmd_find_client: no target, return (nil)
+1529517403.996913 preparing -t state: target none
+1529517403.996915 preparing -s state: target none
+1529517403.996920 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996923 cmdq 0x6868b0: bind-key # list-buffers
+1529517403.996925 preparing state for bind-key # list-buffers (client (nil))
+1529517403.996927 cmd_find_client: no target, return (nil)
+1529517403.996929 preparing -t state: target none
+1529517403.996930 preparing -s state: target none
+1529517403.996936 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996940 cmdq 0x6868b0: bind-key $ command-prompt -I#S "rename-session '%%'"
+1529517403.996945 preparing state for bind-key $ command-prompt -I#S "rename-session '%%'" (client (nil))
+1529517403.996947 cmd_find_client: no target, return (nil)
+1529517403.996948 preparing -t state: target none
+1529517403.996949 preparing -s state: target none
+1529517403.996955 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996958 cmdq 0x6868b0: bind-key % split-window -h
+1529517403.996961 preparing state for bind-key % split-window -h (client (nil))
+1529517403.996963 cmd_find_client: no target, return (nil)
+1529517403.996964 preparing -t state: target none
+1529517403.996966 preparing -s state: target none
+1529517403.996972 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996977 cmdq 0x6868b0: bind-key & confirm-before "-pkill-window #W? (y/n)" kill-window
+1529517403.996981 preparing state for bind-key & confirm-before "-pkill-window #W? (y/n)" kill-window (client (nil))
+1529517403.996983 cmd_find_client: no target, return (nil)
+1529517403.996984 preparing -t state: target none
+1529517403.996986 preparing -s state: target none
+1529517403.996992 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.996996 cmdq 0x6868b0: bind-key ' command-prompt -pindex "select-window -t ':%%'"
+1529517403.997004 preparing state for bind-key ' command-prompt -pindex "select-window -t ':%%'" (client (nil))
+1529517403.997006 cmd_find_client: no target, return (nil)
+1529517403.997008 preparing -t state: target none
+1529517403.997009 preparing -s state: target none
+1529517403.997014 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997017 cmdq 0x6868b0: bind-key ( switch-client -p
+1529517403.997021 preparing state for bind-key ( switch-client -p (client (nil))
+1529517403.997022 cmd_find_client: no target, return (nil)
+1529517403.997024 preparing -t state: target none
+1529517403.997025 preparing -s state: target none
+1529517403.997031 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997034 cmdq 0x6868b0: bind-key ) switch-client -n
+1529517403.997037 preparing state for bind-key ) switch-client -n (client (nil))
+1529517403.997039 cmd_find_client: no target, return (nil)
+1529517403.997040 preparing -t state: target none
+1529517403.997042 preparing -s state: target none
+1529517403.997048 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997052 cmdq 0x6868b0: bind-key , command-prompt -I#W "rename-window '%%'"
+1529517403.997056 preparing state for bind-key , command-prompt -I#W "rename-window '%%'" (client (nil))
+1529517403.997058 cmd_find_client: no target, return (nil)
+1529517403.997060 preparing -t state: target none
+1529517403.997061 preparing -s state: target none
+1529517403.997065 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997068 cmdq 0x6868b0: bind-key - delete-buffer
+1529517403.997071 preparing state for bind-key - delete-buffer (client (nil))
+1529517403.997073 cmd_find_client: no target, return (nil)
+1529517403.997074 preparing -t state: target none
+1529517403.997075 preparing -s state: target none
+1529517403.997080 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997084 cmdq 0x6868b0: bind-key . command-prompt "move-window -t '%%'"
+1529517403.997087 preparing state for bind-key . command-prompt "move-window -t '%%'" (client (nil))
+1529517403.997089 cmd_find_client: no target, return (nil)
+1529517403.997090 preparing -t state: target none
+1529517403.997092 preparing -s state: target none
+1529517403.997096 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997099 cmdq 0x6868b0: bind-key 0 select-window -t:=0
+1529517403.997103 preparing state for bind-key 0 select-window -t:=0 (client (nil))
+1529517403.997104 cmd_find_client: no target, return (nil)
+1529517403.997106 preparing -t state: target none
+1529517403.997107 preparing -s state: target none
+1529517403.997112 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997115 cmdq 0x6868b0: bind-key 1 select-window -t:=1
+1529517403.997119 preparing state for bind-key 1 select-window -t:=1 (client (nil))
+1529517403.997120 cmd_find_client: no target, return (nil)
+1529517403.997122 preparing -t state: target none
+1529517403.997123 preparing -s state: target none
+1529517403.997128 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997131 cmdq 0x6868b0: bind-key 2 select-window -t:=2
+1529517403.997156 preparing state for bind-key 2 select-window -t:=2 (client (nil))
+1529517403.997161 cmd_find_client: no target, return (nil)
+1529517403.997163 preparing -t state: target none
+1529517403.997164 preparing -s state: target none
+1529517403.997170 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997174 cmdq 0x6868b0: bind-key 3 select-window -t:=3
+1529517403.997179 preparing state for bind-key 3 select-window -t:=3 (client (nil))
+1529517403.997181 cmd_find_client: no target, return (nil)
+1529517403.997183 preparing -t state: target none
+1529517403.997185 preparing -s state: target none
+1529517403.997190 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997194 cmdq 0x6868b0: bind-key 4 select-window -t:=4
+1529517403.997197 preparing state for bind-key 4 select-window -t:=4 (client (nil))
+1529517403.997199 cmd_find_client: no target, return (nil)
+1529517403.997201 preparing -t state: target none
+1529517403.997203 preparing -s state: target none
+1529517403.997208 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997214 cmdq 0x6868b0: bind-key 5 select-window -t:=5
+1529517403.997218 preparing state for bind-key 5 select-window -t:=5 (client (nil))
+1529517403.997220 cmd_find_client: no target, return (nil)
+1529517403.997222 preparing -t state: target none
+1529517403.997223 preparing -s state: target none
+1529517403.997229 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997232 cmdq 0x6868b0: bind-key 6 select-window -t:=6
+1529517403.997236 preparing state for bind-key 6 select-window -t:=6 (client (nil))
+1529517403.997238 cmd_find_client: no target, return (nil)
+1529517403.997239 preparing -t state: target none
+1529517403.997241 preparing -s state: target none
+1529517403.997246 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997250 cmdq 0x6868b0: bind-key 7 select-window -t:=7
+1529517403.997253 preparing state for bind-key 7 select-window -t:=7 (client (nil))
+1529517403.997255 cmd_find_client: no target, return (nil)
+1529517403.997257 preparing -t state: target none
+1529517403.997258 preparing -s state: target none
+1529517403.997264 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997267 cmdq 0x6868b0: bind-key 8 select-window -t:=8
+1529517403.997271 preparing state for bind-key 8 select-window -t:=8 (client (nil))
+1529517403.997273 cmd_find_client: no target, return (nil)
+1529517403.997274 preparing -t state: target none
+1529517403.997276 preparing -s state: target none
+1529517403.997281 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997285 cmdq 0x6868b0: bind-key 9 select-window -t:=9
+1529517403.997288 preparing state for bind-key 9 select-window -t:=9 (client (nil))
+1529517403.997290 cmd_find_client: no target, return (nil)
+1529517403.997292 preparing -t state: target none
+1529517403.997293 preparing -s state: target none
+1529517403.997299 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997302 cmdq 0x6868b0: bind-key : command-prompt
+1529517403.997305 preparing state for bind-key : command-prompt (client (nil))
+1529517403.997307 cmd_find_client: no target, return (nil)
+1529517403.997309 preparing -t state: target none
+1529517403.997311 preparing -s state: target none
+1529517403.997315 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997318 cmdq 0x6868b0: bind-key ; last-pane
+1529517403.997321 preparing state for bind-key ; last-pane (client (nil))
+1529517403.997323 cmd_find_client: no target, return (nil)
+1529517403.997325 preparing -t state: target none
+1529517403.997327 preparing -s state: target none
+1529517403.997331 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997335 cmdq 0x6868b0: bind-key = choose-buffer
+1529517403.997338 preparing state for bind-key = choose-buffer (client (nil))
+1529517403.997340 cmd_find_client: no target, return (nil)
+1529517403.997341 preparing -t state: target none
+1529517403.997343 preparing -s state: target none
+1529517403.997347 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997350 cmdq 0x6868b0: bind-key ? list-keys
+1529517403.997353 preparing state for bind-key ? list-keys (client (nil))
+1529517403.997355 cmd_find_client: no target, return (nil)
+1529517403.997357 preparing -t state: target none
+1529517403.997359 preparing -s state: target none
+1529517403.997363 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997366 cmdq 0x6868b0: bind-key D choose-client
+1529517403.997369 preparing state for bind-key D choose-client (client (nil))
+1529517403.997371 cmd_find_client: no target, return (nil)
+1529517403.997373 preparing -t state: target none
+1529517403.997374 preparing -s state: target none
+1529517403.997379 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997383 cmdq 0x6868b0: bind-key L switch-client -l
+1529517403.997386 preparing state for bind-key L switch-client -l (client (nil))
+1529517403.997388 cmd_find_client: no target, return (nil)
+1529517403.997390 preparing -t state: target none
+1529517403.997391 preparing -s state: target none
+1529517403.997397 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997401 cmdq 0x6868b0: bind-key M select-pane -M
+1529517403.997408 preparing state for bind-key M select-pane -M (client (nil))
+1529517403.997410 cmd_find_client: no target, return (nil)
+1529517403.997412 preparing -t state: target none
+1529517403.997414 preparing -s state: target none
+1529517403.997430 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997433 cmdq 0x6868b0: bind-key [ copy-mode
+1529517403.997447 preparing state for bind-key [ copy-mode (client (nil))
+1529517403.997448 cmd_find_client: no target, return (nil)
+1529517403.997450 preparing -t state: target none
+1529517403.997452 preparing -s state: target none
+1529517403.997457 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997460 cmdq 0x6868b0: bind-key ] paste-buffer
+1529517403.997463 preparing state for bind-key ] paste-buffer (client (nil))
+1529517403.997465 cmd_find_client: no target, return (nil)
+1529517403.997466 preparing -t state: target none
+1529517403.997468 preparing -s state: target none
+1529517403.997472 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997475 cmdq 0x6868b0: bind-key c new-window
+1529517403.997478 preparing state for bind-key c new-window (client (nil))
+1529517403.997479 cmd_find_client: no target, return (nil)
+1529517403.997481 preparing -t state: target none
+1529517403.997482 preparing -s state: target none
+1529517403.997487 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997489 cmdq 0x6868b0: bind-key d detach-client
+1529517403.997492 preparing state for bind-key d detach-client (client (nil))
+1529517403.997494 cmd_find_client: no target, return (nil)
+1529517403.997496 preparing -t state: target none
+1529517403.997498 preparing -s state: target none
+1529517403.997503 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997506 cmdq 0x6868b0: bind-key f command-prompt "find-window '%%'"
+1529517403.997510 preparing state for bind-key f command-prompt "find-window '%%'" (client (nil))
+1529517403.997512 cmd_find_client: no target, return (nil)
+1529517403.997513 preparing -t state: target none
+1529517403.997515 preparing -s state: target none
+1529517403.997519 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997522 cmdq 0x6868b0: bind-key i display-message
+1529517403.997525 preparing state for bind-key i display-message (client (nil))
+1529517403.997527 cmd_find_client: no target, return (nil)
+1529517403.997528 preparing -t state: target none
+1529517403.997530 preparing -s state: target none
+1529517403.997533 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997536 cmdq 0x6868b0: bind-key l last-window
+1529517403.997539 preparing state for bind-key l last-window (client (nil))
+1529517403.997541 cmd_find_client: no target, return (nil)
+1529517403.997542 preparing -t state: target none
+1529517403.997544 preparing -s state: target none
+1529517403.997548 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997551 cmdq 0x6868b0: bind-key m select-pane -m
+1529517403.997554 preparing state for bind-key m select-pane -m (client (nil))
+1529517403.997556 cmd_find_client: no target, return (nil)
+1529517403.997557 preparing -t state: target none
+1529517403.997559 preparing -s state: target none
+1529517403.997563 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997566 cmdq 0x6868b0: bind-key n next-window
+1529517403.997569 preparing state for bind-key n next-window (client (nil))
+1529517403.997570 cmd_find_client: no target, return (nil)
+1529517403.997572 preparing -t state: target none
+1529517403.997573 preparing -s state: target none
+1529517403.997578 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997581 cmdq 0x6868b0: bind-key o select-pane -t:.+
+1529517403.997584 preparing state for bind-key o select-pane -t:.+ (client (nil))
+1529517403.997586 cmd_find_client: no target, return (nil)
+1529517403.997587 preparing -t state: target none
+1529517403.997589 preparing -s state: target none
+1529517403.997593 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997596 cmdq 0x6868b0: bind-key p previous-window
+1529517403.997599 preparing state for bind-key p previous-window (client (nil))
+1529517403.997603 cmd_find_client: no target, return (nil)
+1529517403.997605 preparing -t state: target none
+1529517403.997606 preparing -s state: target none
+1529517403.997611 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997613 cmdq 0x6868b0: bind-key q display-panes
+1529517403.997616 preparing state for bind-key q display-panes (client (nil))
+1529517403.997618 cmd_find_client: no target, return (nil)
+1529517403.997619 preparing -t state: target none
+1529517403.997621 preparing -s state: target none
+1529517403.997625 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997627 cmdq 0x6868b0: bind-key r refresh-client
+1529517403.997630 preparing state for bind-key r refresh-client (client (nil))
+1529517403.997632 cmd_find_client: no target, return (nil)
+1529517403.997633 preparing -t state: target none
+1529517403.997635 preparing -s state: target none
+1529517403.997639 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997641 cmdq 0x6868b0: bind-key s choose-tree
+1529517403.997644 preparing state for bind-key s choose-tree (client (nil))
+1529517403.997646 cmd_find_client: no target, return (nil)
+1529517403.997647 preparing -t state: target none
+1529517403.997649 preparing -s state: target none
+1529517403.997653 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997655 cmdq 0x6868b0: bind-key t clock-mode
+1529517403.997658 preparing state for bind-key t clock-mode (client (nil))
+1529517403.997660 cmd_find_client: no target, return (nil)
+1529517403.997661 preparing -t state: target none
+1529517403.997663 preparing -s state: target none
+1529517403.997667 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997669 cmdq 0x6868b0: bind-key w choose-window
+1529517403.997672 preparing state for bind-key w choose-window (client (nil))
+1529517403.997674 cmd_find_client: no target, return (nil)
+1529517403.997675 preparing -t state: target none
+1529517403.997677 preparing -s state: target none
+1529517403.997682 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997686 cmdq 0x6868b0: bind-key x confirm-before "-pkill-pane #P? (y/n)" kill-pane
+1529517403.997690 preparing state for bind-key x confirm-before "-pkill-pane #P? (y/n)" kill-pane (client (nil))
+1529517403.997692 cmd_find_client: no target, return (nil)
+1529517403.997694 preparing -t state: target none
+1529517403.997695 preparing -s state: target none
+1529517403.997700 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997703 cmdq 0x6868b0: bind-key z resize-pane -Z
+1529517403.997706 preparing state for bind-key z resize-pane -Z (client (nil))
+1529517403.997708 cmd_find_client: no target, return (nil)
+1529517403.997709 preparing -t state: target none
+1529517403.997711 preparing -s state: target none
+1529517403.997716 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997719 cmdq 0x6868b0: bind-key { swap-pane -U
+1529517403.997722 preparing state for bind-key { swap-pane -U (client (nil))
+1529517403.997724 cmd_find_client: no target, return (nil)
+1529517403.997725 preparing -t state: target none
+1529517403.997727 preparing -s state: target none
+1529517403.997733 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997736 cmdq 0x6868b0: bind-key } swap-pane -D
+1529517403.997739 preparing state for bind-key } swap-pane -D (client (nil))
+1529517403.997741 cmd_find_client: no target, return (nil)
+1529517403.997742 preparing -t state: target none
+1529517403.997744 preparing -s state: target none
+1529517403.997748 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997751 cmdq 0x6868b0: bind-key ~ show-messages
+1529517403.997753 preparing state for bind-key ~ show-messages (client (nil))
+1529517403.997755 cmd_find_client: no target, return (nil)
+1529517403.997757 preparing -t state: target none
+1529517403.997758 preparing -s state: target none
+1529517403.997763 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997766 cmdq 0x6868b0: bind-key PPage copy-mode -u
+1529517403.997769 preparing state for bind-key PPage copy-mode -u (client (nil))
+1529517403.997770 cmd_find_client: no target, return (nil)
+1529517403.997774 preparing -t state: target none
+1529517403.997776 preparing -s state: target none
+1529517403.997780 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997784 cmdq 0x6868b0: bind-key -r Up select-pane -U
+1529517403.997788 preparing state for bind-key -r Up select-pane -U (client (nil))
+1529517403.997790 cmd_find_client: no target, return (nil)
+1529517403.997791 preparing -t state: target none
+1529517403.997793 preparing -s state: target none
+1529517403.997802 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997808 cmdq 0x6868b0: bind-key -r Down select-pane -D
+1529517403.997812 preparing state for bind-key -r Down select-pane -D (client (nil))
+1529517403.997813 cmd_find_client: no target, return (nil)
+1529517403.997816 preparing -t state: target none
+1529517403.997818 preparing -s state: target none
+1529517403.997823 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997826 cmdq 0x6868b0: bind-key -r Left select-pane -L
+1529517403.997830 preparing state for bind-key -r Left select-pane -L (client (nil))
+1529517403.997831 cmd_find_client: no target, return (nil)
+1529517403.997833 preparing -t state: target none
+1529517403.997834 preparing -s state: target none
+1529517403.997839 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997842 cmdq 0x6868b0: bind-key -r Right select-pane -R
+1529517403.997846 preparing state for bind-key -r Right select-pane -R (client (nil))
+1529517403.997847 cmd_find_client: no target, return (nil)
+1529517403.997849 preparing -t state: target none
+1529517403.997850 preparing -s state: target none
+1529517403.997855 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997858 cmdq 0x6868b0: bind-key M-1 select-layout even-horizontal
+1529517403.997862 preparing state for bind-key M-1 select-layout even-horizontal (client (nil))
+1529517403.997863 cmd_find_client: no target, return (nil)
+1529517403.997865 preparing -t state: target none
+1529517403.997866 preparing -s state: target none
+1529517403.997871 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997874 cmdq 0x6868b0: bind-key M-2 select-layout even-vertical
+1529517403.997877 preparing state for bind-key M-2 select-layout even-vertical (client (nil))
+1529517403.997879 cmd_find_client: no target, return (nil)
+1529517403.997880 preparing -t state: target none
+1529517403.997882 preparing -s state: target none
+1529517403.997886 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997889 cmdq 0x6868b0: bind-key M-3 select-layout main-horizontal
+1529517403.997892 preparing state for bind-key M-3 select-layout main-horizontal (client (nil))
+1529517403.997894 cmd_find_client: no target, return (nil)
+1529517403.997895 preparing -t state: target none
+1529517403.997897 preparing -s state: target none
+1529517403.997902 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997905 cmdq 0x6868b0: bind-key M-4 select-layout main-vertical
+1529517403.997908 preparing state for bind-key M-4 select-layout main-vertical (client (nil))
+1529517403.997910 cmd_find_client: no target, return (nil)
+1529517403.997912 preparing -t state: target none
+1529517403.997913 preparing -s state: target none
+1529517403.997917 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997920 cmdq 0x6868b0: bind-key M-5 select-layout tiled
+1529517403.997923 preparing state for bind-key M-5 select-layout tiled (client (nil))
+1529517403.997925 cmd_find_client: no target, return (nil)
+1529517403.997926 preparing -t state: target none
+1529517403.997928 preparing -s state: target none
+1529517403.997932 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997935 cmdq 0x6868b0: bind-key M-n next-window -a
+1529517403.997938 preparing state for bind-key M-n next-window -a (client (nil))
+1529517403.997939 cmd_find_client: no target, return (nil)
+1529517403.997941 preparing -t state: target none
+1529517403.997942 preparing -s state: target none
+1529517403.997946 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997949 cmdq 0x6868b0: bind-key M-o rotate-window -D
+1529517403.997952 preparing state for bind-key M-o rotate-window -D (client (nil))
+1529517403.997956 cmd_find_client: no target, return (nil)
+1529517403.997958 preparing -t state: target none
+1529517403.997959 preparing -s state: target none
+1529517403.997964 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997967 cmdq 0x6868b0: bind-key M-p previous-window -a
+1529517403.997969 preparing state for bind-key M-p previous-window -a (client (nil))
+1529517403.997971 cmd_find_client: no target, return (nil)
+1529517403.997973 preparing -t state: target none
+1529517403.997974 preparing -s state: target none
+1529517403.997980 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.997984 cmdq 0x6868b0: bind-key -r M-Up resize-pane -U 5
+1529517403.997988 preparing state for bind-key -r M-Up resize-pane -U 5 (client (nil))
+1529517403.997990 cmd_find_client: no target, return (nil)
+1529517403.997991 preparing -t state: target none
+1529517403.997993 preparing -s state: target none
+1529517403.997999 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998003 cmdq 0x6868b0: bind-key -r M-Down resize-pane -D 5
+1529517403.998007 preparing state for bind-key -r M-Down resize-pane -D 5 (client (nil))
+1529517403.998008 cmd_find_client: no target, return (nil)
+1529517403.998010 preparing -t state: target none
+1529517403.998011 preparing -s state: target none
+1529517403.998016 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998020 cmdq 0x6868b0: bind-key -r M-Left resize-pane -L 5
+1529517403.998024 preparing state for bind-key -r M-Left resize-pane -L 5 (client (nil))
+1529517403.998026 cmd_find_client: no target, return (nil)
+1529517403.998027 preparing -t state: target none
+1529517403.998029 preparing -s state: target none
+1529517403.998034 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998038 cmdq 0x6868b0: bind-key -r M-Right resize-pane -R 5
+1529517403.998042 preparing state for bind-key -r M-Right resize-pane -R 5 (client (nil))
+1529517403.998044 cmd_find_client: no target, return (nil)
+1529517403.998045 preparing -t state: target none
+1529517403.998046 preparing -s state: target none
+1529517403.998051 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998055 cmdq 0x6868b0: bind-key -r C-Up resize-pane -U
+1529517403.998058 preparing state for bind-key -r C-Up resize-pane -U (client (nil))
+1529517403.998060 cmd_find_client: no target, return (nil)
+1529517403.998061 preparing -t state: target none
+1529517403.998063 preparing -s state: target none
+1529517403.998068 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998071 cmdq 0x6868b0: bind-key -r C-Down resize-pane -D
+1529517403.998076 preparing state for bind-key -r C-Down resize-pane -D (client (nil))
+1529517403.998078 cmd_find_client: no target, return (nil)
+1529517403.998079 preparing -t state: target none
+1529517403.998080 preparing -s state: target none
+1529517403.998085 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998088 cmdq 0x6868b0: bind-key -r C-Left resize-pane -L
+1529517403.998092 preparing state for bind-key -r C-Left resize-pane -L (client (nil))
+1529517403.998093 cmd_find_client: no target, return (nil)
+1529517403.998095 preparing -t state: target none
+1529517403.998096 preparing -s state: target none
+1529517403.998101 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998104 cmdq 0x6868b0: bind-key -r C-Right resize-pane -R
+1529517403.998108 preparing state for bind-key -r C-Right resize-pane -R (client (nil))
+1529517403.998110 cmd_find_client: no target, return (nil)
+1529517403.998111 preparing -t state: target none
+1529517403.998112 preparing -s state: target none
+1529517403.998118 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998123 cmdq 0x6868b0: bind-key -n MouseDown1Pane select-pane -t=; send-keys -M
+1529517403.998128 preparing state for bind-key -n MouseDown1Pane select-pane -t=; send-keys -M (client (nil))
+1529517403.998129 cmd_find_client: no target, return (nil)
+1529517403.998131 preparing -t state: target none
+1529517403.998132 preparing -s state: target none
+1529517403.998158 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998166 cmdq 0x6868b0: bind-key -n MouseDrag1Border resize-pane -M
+1529517403.998170 preparing state for bind-key -n MouseDrag1Border resize-pane -M (client (nil))
+1529517403.998172 cmd_find_client: no target, return (nil)
+1529517403.998174 preparing -t state: target none
+1529517403.998175 preparing -s state: target none
+1529517403.998182 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998186 cmdq 0x6868b0: bind-key -n MouseDown1Status select-window -t=
+1529517403.998192 preparing state for bind-key -n MouseDown1Status select-window -t= (client (nil))
+1529517403.998194 cmd_find_client: no target, return (nil)
+1529517403.998196 preparing -t state: target none
+1529517403.998198 preparing -s state: target none
+1529517403.998204 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998208 cmdq 0x6868b0: bind-key -n WheelDownStatus next-window
+1529517403.998211 preparing state for bind-key -n WheelDownStatus next-window (client (nil))
+1529517403.998213 cmd_find_client: no target, return (nil)
+1529517403.998215 preparing -t state: target none
+1529517403.998217 preparing -s state: target none
+1529517403.998222 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998226 cmdq 0x6868b0: bind-key -n WheelUpStatus previous-window
+1529517403.998230 preparing state for bind-key -n WheelUpStatus previous-window (client (nil))
+1529517403.998232 cmd_find_client: no target, return (nil)
+1529517403.998233 preparing -t state: target none
+1529517403.998235 preparing -s state: target none
+1529517403.998244 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998252 cmdq 0x6868b0: bind-key -n MouseDrag1Pane if -Ft= #{mouse_any_flag} "if -Ft= "#{pane_in_mode}" "copy-mode -M" "send-keys -M"" "copy-mode -M"
+1529517403.998260 preparing state for bind-key -n MouseDrag1Pane if -Ft= #{mouse_any_flag} "if -Ft= "#{pane_in_mode}" "copy-mode -M" "send-keys -M"" "copy-mode -M" (client (nil))
+1529517403.998262 cmd_find_client: no target, return (nil)
+1529517403.998263 preparing -t state: target none
+1529517403.998265 preparing -s state: target none
+1529517403.998274 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998281 cmdq 0x6868b0: bind-key -n MouseDown3Pane if-shell -Ft= #{mouse_any_flag} "select-pane -t=; send-keys -M" "select-pane -mt="
+1529517403.998288 preparing state for bind-key -n MouseDown3Pane if-shell -Ft= #{mouse_any_flag} "select-pane -t=; send-keys -M" "select-pane -mt=" (client (nil))
+1529517403.998290 cmd_find_client: no target, return (nil)
+1529517403.998292 preparing -t state: target none
+1529517403.998294 preparing -s state: target none
+1529517403.998302 continuing cmdq 0x6868b0: flags 0, client (nil)
+1529517403.998311 cmdq 0x6868b0: bind-key -n WheelUpPane if-shell -Ft= #{mouse_any_flag} "send-keys -M" "if -Ft= "#{pane_in_mode}" "send-keys -M" "copy-mode -et=""
+1529517403.998319 preparing state for bind-key -n WheelUpPane if-shell -Ft= #{mouse_any_flag} "send-keys -M" "if -Ft= "#{pane_in_mode}" "send-keys -M" "copy-mode -et="" (client (nil))
+1529517403.998321 cmd_find_client: no target, return (nil)
+1529517403.998322 preparing -t state: target none
+1529517403.998324 preparing -s state: target none
+1529517403.998406 add peer 0x690600: 9 (0x68fff0)
+1529517403.998414 new client 0x68fff0
+1529517403.998483 continuing cmdq 0x68e2d0: flags 0, client (nil)
+1529517403.998486 unref client 0x68fff0 (2 references)
+1529517403.998491 server loop enter
+1529517403.998520 peer 0x690600 message 100
+1529517403.998523 client 0x68fff0 IDENTIFY_FLAGS 0x10000
+1529517403.998525 peer 0x690600 message 101
+1529517403.998527 client 0x68fff0 IDENTIFY_TERM xterm-256color
+1529517403.998529 peer 0x690600 message 102
+1529517403.998531 client 0x68fff0 IDENTIFY_TTYNAME /dev/pts/23
+1529517403.998532 peer 0x690600 message 108
+1529517403.998538 client 0x68fff0 IDENTIFY_CWD /home/akshayc/onnx-fb-universe/repos/pytorch
+1529517403.998540 peer 0x690600 message 104
+1529517403.998542 client 0x68fff0 IDENTIFY_STDIN 7
+1529517403.998554 peer 0x690600 message 107
+1529517403.998556 client 0x68fff0 IDENTIFY_CLIENTPID 1503092
+1529517403.998562 peer 0x690600 message 105
+1529517403.998564 client 0x68fff0 IDENTIFY_ENVIRON XDG_SESSION_ID=1838260
+1529517403.998566 peer 0x690600 message 105
+1529517403.998569 client 0x68fff0 IDENTIFY_ENVIRON HOSTNAME=devgpu227.prn2.facebook.com
+1529517403.998571 peer 0x690600 message 105
+1529517403.998573 client 0x68fff0 IDENTIFY_ENVIRON GIT_CEILING_DIRECTORIES=/home
+1529517403.998575 peer 0x690600 message 105
+1529517403.998577 client 0x68fff0 IDENTIFY_ENVIRON SHELL=/bin/bash
+1529517403.998579 peer 0x690600 message 105
+1529517403.998581 client 0x68fff0 IDENTIFY_ENVIRON TERM=xterm-256color
+1529517403.998583 peer 0x690600 message 105
+1529517403.998585 client 0x68fff0 IDENTIFY_ENVIRON HISTSIZE=1000
+1529517403.998587 peer 0x690600 message 105
+1529517403.998590 client 0x68fff0 IDENTIFY_ENVIRON CURL_CA_BUNDLE=/etc/pki/tls/certs/fb_certs.pem
+1529517403.998592 peer 0x690600 message 105
+1529517403.998594 client 0x68fff0 IDENTIFY_ENVIRON ADMIN_SCRIPTS=/usr/facebook/ops/rc
+1529517403.998596 peer 0x690600 message 105
+1529517403.998598 client 0x68fff0 IDENTIFY_ENVIRON SSH_CLIENT=2620:10d:c082:1054:cb:9934:c62a:edfe 59881 22
+1529517403.998600 peer 0x690600 message 105
+1529517403.998603 client 0x68fff0 IDENTIFY_ENVIRON FB_PAR_UNPACK_BASEDIR=/data/par_unpack_dir
+1529517403.998605 peer 0x690600 message 105
+1529517403.998607 client 0x68fff0 IDENTIFY_ENVIRON OLDPWD=/home/akshayc/onnx-fb-universe/repos
+1529517403.998609 peer 0x690600 message 105
+1529517403.998611 client 0x68fff0 IDENTIFY_ENVIRON PHPSH_CEILING_DIRECTORIES=/home
+1529517403.998613 peer 0x690600 message 105
+1529517403.998615 client 0x68fff0 IDENTIFY_ENVIRON SSH_TTY=/dev/pts/12
+1529517403.998617 peer 0x690600 message 105
+1529517403.998619 client 0x68fff0 IDENTIFY_ENVIRON TFB_SANDBOX_SCRIPTS=/var/www
+1529517403.998621 peer 0x690600 message 105
+1529517403.998624 client 0x68fff0 IDENTIFY_ENVIRON USER=akshayc
+1529517403.998627 peer 0x690600 message 105
+1529517403.998653 client 0x68fff0 IDENTIFY_ENVIRON LS_COLORS=rs=0:di=38;5;27:ln=38;5;51:mh=44;38;5;15:pi=40;38;5;11:so=38;5;13:do=38;5;5:bd=48;5;232;38;5;11:cd=48;5;232;38;5;3:or=48;5;232;38;5;9:mi=05;48;5;232;38;5;15:su=48;5;196;38;5;15:sg=48;5;11;38;5;16:ca=48;5;196;38;5;226:tw=48;5;10;38;5;16:ow=48;5;10;38;5;21:st=48;5;21;38;5;15:ex=38;5;34:*.tar=38;5;9:*.tgz=38;5;9:*.arc=38;5;9:*.arj=38;5;9:*.taz=38;5;9:*.lha=38;5;9:*.lz4=38;5;9:*.lzh=38;5;9:*.lzma=38;5;9:*.tlz=38;5;9:*.txz=38;5;9:*.tzo=38;5;9:*.t7z=38;5;9:*.zip=38;5;9:*.z=38;5;9:*.Z=38;5;9:*.dz=38;5;9:*.gz=38;5;9:*.lrz=38;5;9:*.lz=38;5;9:*.lzo=38;5;9:*.xz=38;5;9:*.bz2=38;5;9:*.bz=38;5;9:*.tbz=38;5;9:*.tbz2=38;5;9:*.tz=38;5;9:*.deb=38;5;9:*.rpm=38;5;9:*.jar=38;5;9:*.war=38;5;9:*.ear=38;5;9:*.sar=38;5;9:*.rar=38;5;9:*.alz=38;5;9:*.ace=38;5;9:*.zoo=38;5;9:*.cpio=38;5;9:*.7z=38;5;9:*.rz=38;5;9:*.cab=38;5;9:*.jpg=38;5;13:*.jpeg=38;5;13:*.gif=38;5;13:*.bmp=38;5;13:*.pbm=38;5;13:*.pgm=38;5;13:*.ppm=38;5;13:*.tga=38;5;13:*.xbm=38;5;13:*.xpm=38;5;13:*.tif=38;5;13:*.tiff=38;5;13:*.png=38;5;13:*.svg=38;5;13:*.svgz=38;5;13:*.mng=38;5;13:*.pcx=38;5;13:*.mov=38;5;13:*.mpg=38;5;13:*.mpeg=38;5;13:*.m2v=38;5;13:*.mkv=38;5;13:*.webm=38;5;13:*.ogm=38;5;13:*.mp4=38;5;13:*.m4v=38;5;13:*.mp4v=38;5;13:*.vob=38;5;13:*.qt=38;5;13:*.nuv=38;5;13:*.wmv=38;5;13:*.asf=38;5;13:*.rm=38;5;13:*.rmvb=38;5;13:*.flc=38;5;13:*.avi=38;5;13:*.fli=38;5;13:*.flv=38;5;13:*.gl=38;5;13:*.dl=38;5;13:*.xcf=38;5;13:*.xwd=38;5;13:*.yuv=38;5;13:*.cgm=38;5;13:*.emf=38;5;13:*.axv=38;5;13:*.anx=38;5;13:*.ogv=38;5;13:*.ogx=38;5;13:*.aac=38;5;45:*.au=38;5;45:*.flac=38;5;45:*.mid=38;5;45:*.midi=38;5;45:*.mka=38;5;45:*.mp3=38;5;45:*.mpc=38;5;45:*.ogg=38;5;45:*.ra=38;5;45:*.wav=38;5;45:*.axa=38;5;45:*.oga=38;5;45:*.spx=38;5;45:*.xspf=38;5;45:
+1529517403.998657 peer 0x690600 message 105
+1529517403.998659 client 0x68fff0 IDENTIFY_ENVIRON SUDO_USER=akshayc
+1529517403.998661 peer 0x690600 message 105
+1529517403.998664 client 0x68fff0 IDENTIFY_ENVIRON VIRTUAL_ENV=/home/akshayc/venv
+1529517403.998665 peer 0x690600 message 105
+1529517403.998668 client 0x68fff0 IDENTIFY_ENVIRON MAVEN_OPTS=-Djava.net.preferIPv6Addresses=true
+1529517403.998672 peer 0x690600 message 105
+1529517403.998674 client 0x68fff0 IDENTIFY_ENVIRON LOCAL_ADMIN_SCRIPTS=/usr/facebook/ops/rc
+1529517403.998676 peer 0x690600 message 105
+1529517403.998683 client 0x68fff0 IDENTIFY_ENVIRON PATH=/home/akshayc/venv/bin:/usr/local/bin:/bin:/usr/bin:/usr/local/sbin:/usr/sbin:/usr/facebook/ops/scripts:/usr/facebook/scripts:/opt/local/bin:/usr/facebook/ops/scripts:/usr/facebook/scripts:/usr/facebook/scripts:/usr/facebook/scripts/db:/usr/local/sbin:/usr/sbin:/sbin:/var/www/scripts/bin:/home/akshayc/.yarn/bin:/home/akshayc/bin
+1529517403.998685 peer 0x690600 message 105
+1529517403.998688 client 0x68fff0 IDENTIFY_ENVIRON MAIL=/var/spool/mail/akshayc
+1529517403.998689 peer 0x690600 message 105
+1529517403.998692 client 0x68fff0 IDENTIFY_ENVIRON PWD=/home/akshayc/onnx-fb-universe/repos/pytorch
+1529517403.998694 peer 0x690600 message 105
+1529517403.998696 client 0x68fff0 IDENTIFY_ENVIRON EDITOR=nano
+1529517403.998698 peer 0x690600 message 105
+1529517403.998700 client 0x68fff0 IDENTIFY_ENVIRON LANG=en_US.UTF-8
+1529517403.998701 peer 0x690600 message 105
+1529517403.998704 client 0x68fff0 IDENTIFY_ENVIRON PS1=(venv) [\\u@devgpu227.prn2 \\w] 
+1529517403.998706 peer 0x690600 message 105
+1529517403.998709 client 0x68fff0 IDENTIFY_ENVIRON THRIFT_TLS_CL_KEY_PATH=/var/facebook/credentials/akshayc/x509/akshayc.pem
+1529517403.998711 peer 0x690600 message 105
+1529517403.998713 client 0x68fff0 IDENTIFY_ENVIRON HISTCONTROL=ignoredups
+1529517403.998715 peer 0x690600 message 105
+1529517403.998717 client 0x68fff0 IDENTIFY_ENVIRON KRB5CCNAME=FILE:/var/run/ccache/krb5cc_160374
+1529517403.998719 peer 0x690600 message 105
+1529517403.998721 client 0x68fff0 IDENTIFY_ENVIRON NCURSES_NO_UTF8_ACS=1
+1529517403.998723 peer 0x690600 message 105
+1529517403.998725 client 0x68fff0 IDENTIFY_ENVIRON HOME=/home/akshayc
+1529517403.998727 peer 0x690600 message 105
+1529517403.998729 client 0x68fff0 IDENTIFY_ENVIRON SHLVL=2
+1529517403.998730 peer 0x690600 message 105
+1529517403.998733 client 0x68fff0 IDENTIFY_ENVIRON LESS=-n -i
+1529517403.998734 peer 0x690600 message 105
+1529517403.998736 client 0x68fff0 IDENTIFY_ENVIRON LOGNAME=akshayc
+1529517403.998738 peer 0x690600 message 105
+1529517403.998740 client 0x68fff0 IDENTIFY_ENVIRON CVS_RSH=ssh
+1529517403.998742 peer 0x690600 message 105
+1529517403.998745 client 0x68fff0 IDENTIFY_ENVIRON SSH_CONNECTION=2620:10d:c082:1054:cb:9934:c62a:edfe 59881 2401:db00:21:605a:face:0:7:0 22
+1529517403.998747 peer 0x690600 message 105
+1529517403.998749 client 0x68fff0 IDENTIFY_ENVIRON DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/160374/bus
+1529517403.998751 peer 0x690600 message 105
+1529517403.998754 client 0x68fff0 IDENTIFY_ENVIRON THRIFT_TLS_CL_CERT_PATH=/var/facebook/credentials/akshayc/x509/akshayc.pem
+1529517403.998756 peer 0x690600 message 105
+1529517403.998758 client 0x68fff0 IDENTIFY_ENVIRON _DOTSYNC_ALREADY_GOT=yes
+1529517403.998760 peer 0x690600 message 105
+1529517403.998762 client 0x68fff0 IDENTIFY_ENVIRON LESSOPEN=||/usr/bin/lesspipe.sh %s
+1529517403.998764 peer 0x690600 message 105
+1529517403.998766 client 0x68fff0 IDENTIFY_ENVIRON XDG_RUNTIME_DIR=/run/user/160374
+1529517403.998768 peer 0x690600 message 105
+1529517403.998770 client 0x68fff0 IDENTIFY_ENVIRON CUDA_CACHE_PATH=/data/users/akshayc/.nv/ComputeCache
+1529517403.998772 peer 0x690600 message 105
+1529517403.998774 client 0x68fff0 IDENTIFY_ENVIRON LOG_SESSION_ID=devgpu227.prn2:5b2a9367.cef82
+1529517403.998776 peer 0x690600 message 105
+1529517403.998779 client 0x68fff0 IDENTIFY_ENVIRON HISTTIMEFORMAT=%F %T 
+1529517403.998780 peer 0x690600 message 105
+1529517403.998783 client 0x68fff0 IDENTIFY_ENVIRON HISTFILE=/home/akshayc/.bash_history
+1529517403.998784 peer 0x690600 message 105
+1529517403.998786 client 0x68fff0 IDENTIFY_ENVIRON _=/bin/tmux
+1529517403.998788 peer 0x690600 message 106
+1529517403.998808 peer 0x690600 message 200
+1529517403.998815 continuing cmdq 0x6868b0: flags 0, client 0x68fff0
+1529517403.998817 cmdq 0x6868b0: new-session
+1529517403.998819 preparing state for new-session (client 0x68fff0)
+1529517403.998821 cmd_find_current_session: have client 0x68fff0
+1529517403.998826 cmd_find_client: no target, return (nil)
+1529517403.998828 preparing -t state: target none
+1529517403.998830 cmd_prepare_state_flag: flag t 4 0x2
+1529517403.998833 cmd_find_current_session: have client 0x68fff0
+1529517403.998834 cmd_find_target: target none, type 2
+1529517403.998836 cmd_find_target: cmdq 0x6868b0, flags 0x2
+1529517403.998838 cmd_find_target: s=none
+1529517403.998839 cmd_find_target: wl=none
+1529517403.998841 cmd_find_target: wp=none
+1529517403.998842 cmd_find_target: idx=none
+1529517403.998844 preparing -s state: target none
+1529517403.998847 new term: xterm-256color
+1529517403.999009 xterm-256color override: XT 
+1529517403.999242 xterm-256color override: Ms \033]52;%p1%s;%p2%s\a
+1529517403.999264 xterm-256color override: Cs \033]12;%p1%s\a
+1529517403.999274 xterm-256color override: Cr \033]112\a
+1529517403.999284 xterm-256color override: Ss \033[%p1%d q
+1529517403.999296 xterm-256color override: Se \033[2 q
+1529517403.999361 new key \033Oo: 0x100000000045 (KP/)
+1529517403.999368 new key \033Oj: 0x100000000046 (KP*)
+1529517403.999373 new key \033Om: 0x100000000047 (KP-)
+1529517403.999378 new key \033Ow: 0x100000000048 (KP7)
+1529517403.999383 new key \033Ox: 0x100000000049 (KP8)
+1529517403.999388 new key \033Oy: 0x10000000004a (KP9)
+1529517403.999393 new key \033Ok: 0x10000000004b (KP+)
+1529517403.999398 new key \033Ot: 0x10000000004c (KP4)
+1529517403.999402 new key \033Ou: 0x10000000004d (KP5)
+1529517403.999407 new key \033Ov: 0x10000000004e (KP6)
+1529517403.999412 new key \033Oq: 0x10000000004f (KP1)
+1529517403.999417 new key \033Or: 0x100000000050 (KP2)
+1529517403.999422 new key \033Os: 0x100000000051 (KP3)
+1529517403.999427 new key \033OM: 0x100000000052 (KPEnter)
+1529517403.999432 new key \033Op: 0x100000000053 (KP0)
+1529517403.999437 new key \033On: 0x100000000054 (KP.)
+1529517403.999442 new key \033OA: 0x100000000041 (Up)
+1529517403.999447 new key \033OB: 0x100000000042 (Down)
+1529517403.999452 new key \033OC: 0x100000000044 (Right)
+1529517403.999457 new key \033OD: 0x100000000043 (Left)
+1529517403.999461 new key \033[A: 0x100000000041 (Up)
+1529517403.999466 new key \033[B: 0x100000000042 (Down)
+1529517403.999471 new key \033[C: 0x100000000044 (Right)
+1529517403.999476 new key \033[D: 0x100000000043 (Left)
+1529517403.999481 new key \033OH: 0x10000000003c (Home)
+1529517403.999486 new key \033OF: 0x10000000003d (End)
+1529517403.999491 new key \033[H: 0x10000000003c (Home)
+1529517403.999495 new key \033[F: 0x10000000003d (End)
+1529517403.999500 new key \033Oa: 0x500000000041 (C-Up)
+1529517403.999506 new key \033Ob: 0x500000000042 (C-Down)
+1529517403.999511 new key \033Oc: 0x500000000044 (C-Right)
+1529517403.999516 new key \033Od: 0x500000000043 (C-Left)
+1529517403.999521 new key \033[a: 0x900000000041 (S-Up)
+1529517403.999526 new key \033[b: 0x900000000042 (S-Down)
+1529517403.999531 new key \033[c: 0x900000000044 (S-Right)
+1529517403.999536 new key \033[d: 0x900000000043 (S-Left)
+1529517403.999541 new key \033[11^: 0x50000000002e (C-F1)
+1529517403.999547 new key \033[12^: 0x50000000002f (C-F2)
+1529517403.999552 new key \033[13^: 0x500000000030 (C-F3)
+1529517403.999557 new key \033[14^: 0x500000000031 (C-F4)
+1529517403.999562 new key \033[15^: 0x500000000032 (C-F5)
+1529517403.999567 new key \033[17^: 0x500000000033 (C-F6)
+1529517403.999573 new key \033[18^: 0x500000000034 (C-F7)
+1529517403.999578 new key \033[19^: 0x500000000035 (C-F8)
+1529517403.999583 new key \033[20^: 0x500000000036 (C-F9)
+1529517403.999588 new key \033[21^: 0x500000000037 (C-F10)
+1529517403.999593 new key \033[23^: 0x500000000038 (C-F11)
+1529517403.999603 new key \033[24^: 0x500000000039 (C-F12)
+1529517403.999608 new key \033[2^: 0x50000000003a (C-IC)
+1529517403.999613 new key \033[3^: 0x50000000003b (C-DC)
+1529517403.999618 new key \033[7^: 0x50000000003c (C-Home)
+1529517403.999624 new key \033[8^: 0x50000000003d (C-End)
+1529517403.999629 new key \033[6^: 0x50000000003e (C-NPage)
+1529517403.999634 new key \033[5^: 0x50000000003f (C-PPage)
+1529517403.999639 new key \033[11$: 0x90000000002e (S-F1)
+1529517403.999653 new key \033[12$: 0x90000000002f (S-F2)
+1529517403.999658 new key \033[13$: 0x900000000030 (S-F3)
+1529517403.999663 new key \033[14$: 0x900000000031 (S-F4)
+1529517403.999668 new key \033[15$: 0x900000000032 (S-F5)
+1529517403.999673 new key \033[17$: 0x900000000033 (S-F6)
+1529517403.999678 new key \033[18$: 0x900000000034 (S-F7)
+1529517403.999683 new key \033[19$: 0x900000000035 (S-F8)
+1529517403.999688 new key \033[20$: 0x900000000036 (S-F9)
+1529517403.999693 new key \033[21$: 0x900000000037 (S-F10)
+1529517403.999698 new key \033[23$: 0x900000000038 (S-F11)
+1529517403.999703 new key \033[24$: 0x900000000039 (S-F12)
+1529517403.999709 new key \033[2$: 0x90000000003a (S-IC)
+1529517403.999724 new key \033[3$: 0x90000000003b (S-DC)
+1529517403.999728 new key \033[7$: 0x90000000003c (S-Home)
+1529517403.999730 new key \033[8$: 0x90000000003d (S-End)
+1529517403.999732 new key \033[6$: 0x90000000003e (S-NPage)
+1529517403.999734 new key \033[5$: 0x90000000003f (S-PPage)
+1529517403.999736 new key \033[11@: 0xd0000000002e (C-S-F1)
+1529517403.999738 new key \033[12@: 0xd0000000002f (C-S-F2)
+1529517403.999740 new key \033[13@: 0xd00000000030 (C-S-F3)
+1529517403.999742 new key \033[14@: 0xd00000000031 (C-S-F4)
+1529517403.999743 new key \033[15@: 0xd00000000032 (C-S-F5)
+1529517403.999745 new key \033[17@: 0xd00000000033 (C-S-F6)
+1529517403.999747 new key \033[18@: 0xd00000000034 (C-S-F7)
+1529517403.999749 new key \033[19@: 0xd00000000035 (C-S-F8)
+1529517403.999751 new key \033[20@: 0xd00000000036 (C-S-F9)
+1529517403.999753 new key \033[21@: 0xd00000000037 (C-S-F10)
+1529517403.999755 new key \033[23@: 0xd00000000038 (C-S-F11)
+1529517403.999756 new key \033[24@: 0xd00000000039 (C-S-F12)
+1529517403.999758 new key \033[2@: 0xd0000000003a (C-S-IC)
+1529517403.999760 new key \033[3@: 0xd0000000003b (C-S-DC)
+1529517403.999762 new key \033[7@: 0xd0000000003c (C-S-Home)
+1529517403.999765 new key \033[8@: 0xd0000000003d (C-S-End)
+1529517403.999767 new key \033[6@: 0xd0000000003e (C-S-NPage)
+1529517403.999769 new key \033[5@: 0xd0000000003f (C-S-PPage)
+1529517403.999774 new key \033[I: 0x100000000000 (Invalid#100000000000)
+1529517403.999777 new key \033[O: 0x100000000001 (Invalid#100000000001)
+1529517403.999779 new key \033OP: 0x10000000002e (F1)
+1529517403.999780 new key \033OQ: 0x10000000002f (F2)
+1529517403.999782 new key \033OR: 0x100000000030 (F3)
+1529517403.999784 new key \033OS: 0x100000000031 (F4)
+1529517403.999786 new key \033[15~: 0x100000000032 (F5)
+1529517403.999788 new key \033[17~: 0x100000000033 (F6)
+1529517403.999789 new key \033[18~: 0x100000000034 (F7)
+1529517403.999791 new key \033[19~: 0x100000000035 (F8)
+1529517403.999793 new key \033[20~: 0x100000000036 (F9)
+1529517403.999795 new key \033[21~: 0x100000000037 (F10)
+1529517403.999797 new key \033[23~: 0x100000000038 (F11)
+1529517403.999799 new key \033[24~: 0x100000000039 (F12)
+1529517403.999801 new key \033[1;2P: 0x90000000002e (S-F1)
+1529517403.999803 new key \033[1;2Q: 0x90000000002f (S-F2)
+1529517403.999804 new key \033[1;2R: 0x900000000030 (S-F3)
+1529517403.999806 new key \033[1;2S: 0x900000000031 (S-F4)
+1529517403.999808 new key \033[15;2~: 0x900000000032 (S-F5)
+1529517403.999810 new key \033[17;2~: 0x900000000033 (S-F6)
+1529517403.999812 new key \033[18;2~: 0x900000000034 (S-F7)
+1529517403.999814 new key \033[19;2~: 0x900000000035 (S-F8)
+1529517403.999816 new key \033[20;2~: 0x900000000036 (S-F9)
+1529517403.999818 new key \033[21;2~: 0x900000000037 (S-F10)
+1529517403.999820 new key \033[23;2~: 0x900000000038 (S-F11)
+1529517403.999822 new key \033[24;2~: 0x900000000039 (S-F12)
+1529517403.999824 new key \033[1;5P: 0x50000000002e (C-F1)
+1529517403.999826 new key \033[1;5Q: 0x50000000002f (C-F2)
+1529517403.999828 new key \033[1;5R: 0x500000000030 (C-F3)
+1529517403.999830 new key \033[1;5S: 0x500000000031 (C-F4)
+1529517403.999832 new key \033[15;5~: 0x500000000032 (C-F5)
+1529517403.999834 new key \033[17;5~: 0x500000000033 (C-F6)
+1529517403.999836 new key \033[18;5~: 0x500000000034 (C-F7)
+1529517403.999838 new key \033[19;5~: 0x500000000035 (C-F8)
+1529517403.999846 new key \033[20;5~: 0x500000000036 (C-F9)
+1529517403.999848 new key \033[21;5~: 0x500000000037 (C-F10)
+1529517403.999850 new key \033[23;5~: 0x500000000038 (C-F11)
+1529517403.999852 new key \033[24;5~: 0x500000000039 (C-F12)
+1529517403.999854 new key \033[1;6P: 0xd0000000002e (C-S-F1)
+1529517403.999856 new key \033[1;6Q: 0xd0000000002f (C-S-F2)
+1529517403.999858 new key \033[1;6R: 0xd00000000030 (C-S-F3)
+1529517403.999860 new key \033[1;6S: 0xd00000000031 (C-S-F4)
+1529517403.999862 new key \033[15;6~: 0xd00000000032 (C-S-F5)
+1529517403.999864 new key \033[17;6~: 0xd00000000033 (C-S-F6)
+1529517403.999866 new key \033[18;6~: 0xd00000000034 (C-S-F7)
+1529517403.999868 new key \033[19;6~: 0xd00000000035 (C-S-F8)
+1529517403.999870 new key \033[20;6~: 0xd00000000036 (C-S-F9)
+1529517403.999872 new key \033[21;6~: 0xd00000000037 (C-S-F10)
+1529517403.999874 new key \033[23;6~: 0xd00000000038 (C-S-F11)
+1529517403.999876 new key \033[24;6~: 0xd00000000039 (C-S-F12)
+1529517403.999878 new key \033[1;3P: 0x30000000002e (M-F1)
+1529517403.999880 new key \033[1;3Q: 0x30000000002f (M-F2)
+1529517403.999882 new key \033[1;3R: 0x300000000030 (M-F3)
+1529517403.999885 new key \033[1;3S: 0x300000000031 (M-F4)
+1529517403.999887 new key \033[15;3~: 0x300000000032 (M-F5)
+1529517403.999889 new key \033[17;3~: 0x300000000033 (M-F6)
+1529517403.999891 new key \033[18;3~: 0x300000000034 (M-F7)
+1529517403.999893 new key \033[19;3~: 0x300000000035 (M-F8)
+1529517403.999895 new key \033[20;3~: 0x300000000036 (M-F9)
+1529517403.999897 new key \033[21;3~: 0x300000000037 (M-F10)
+1529517403.999899 new key \033[23;3~: 0x300000000038 (M-F11)
+1529517403.999900 new key \033[24;3~: 0x300000000039 (M-F12)
+1529517403.999902 new key \033[1;4P: 0xb0000000002e (M-S-F1)
+1529517403.999904 new key \033[1;4Q: 0xb0000000002f (M-S-F2)
+1529517403.999906 new key \033[1;4R: 0xb00000000030 (M-S-F3)
+1529517403.999908 new key \033[2~: 0x10000000003a (IC)
+1529517403.999910 new key \033[3~: 0x10000000003b (DC)
+1529517403.999912 replacing key \033OH: 0x10000000003c (Home)
+1529517403.999914 replacing key \033OF: 0x10000000003d (End)
+1529517403.999916 new key \033[6~: 0x10000000003e (NPage)
+1529517403.999918 new key \033[5~: 0x10000000003f (PPage)
+1529517403.999920 new key \033[Z: 0x100000000040 (BTab)
+1529517403.999922 replacing key \033OA: 0x100000000041 (Up)
+1529517403.999923 replacing key \033OB: 0x100000000042 (Down)
+1529517403.999925 replacing key \033OD: 0x100000000043 (Left)
+1529517403.999927 replacing key \033OC: 0x100000000044 (Right)
+1529517403.999929 new key \033[3;2~: 0x90000000003b (S-DC)
+1529517403.999932 new key \033[3;3~: 0x30000000003b (M-DC)
+1529517403.999934 new key \033[3;4~: 0xb0000000003b (M-S-DC)
+1529517403.999936 new key \033[3;5~: 0x50000000003b (C-DC)
+1529517403.999938 new key \033[3;6~: 0xd0000000003b (C-S-DC)
+1529517403.999940 new key \033[3;7~: 0x70000000003b (C-M-DC)
+1529517403.999942 new key \033[1;2B: 0x900000000042 (S-Down)
+1529517403.999944 new key \033[1;3B: 0x300000000042 (M-Down)
+1529517403.999946 new key \033[1;4B: 0xb00000000042 (M-S-Down)
+1529517403.999948 new key \033[1;5B: 0x500000000042 (C-Down)
+1529517403.999950 new key \033[1;6B: 0xd00000000042 (C-S-Down)
+1529517403.999952 new key \033[1;7B: 0x700000000042 (C-M-Down)
+1529517403.999954 new key \033[1;2F: 0x90000000003d (S-End)
+1529517403.999956 new key \033[1;3F: 0x30000000003d (M-End)
+1529517403.999958 new key \033[1;4F: 0xb0000000003d (M-S-End)
+1529517403.999959 new key \033[1;5F: 0x50000000003d (C-End)
+1529517403.999961 new key \033[1;6F: 0xd0000000003d (C-S-End)
+1529517403.999963 new key \033[1;7F: 0x70000000003d (C-M-End)
+1529517403.999967 new key \033[1;2H: 0x90000000003c (S-Home)
+1529517403.999969 new key \033[1;3H: 0x30000000003c (M-Home)
+1529517403.999971 new key \033[1;4H: 0xb0000000003c (M-S-Home)
+1529517403.999972 new key \033[1;5H: 0x50000000003c (C-Home)
+1529517403.999974 new key \033[1;6H: 0xd0000000003c (C-S-Home)
+1529517403.999976 new key \033[1;7H: 0x70000000003c (C-M-Home)
+1529517403.999978 new key \033[2;2~: 0x90000000003a (S-IC)
+1529517403.999980 new key \033[2;3~: 0x30000000003a (M-IC)
+1529517403.999984 new key \033[2;4~: 0xb0000000003a (M-S-IC)
+1529517403.999986 new key \033[2;5~: 0x50000000003a (C-IC)
+1529517403.999988 new key \033[2;6~: 0xd0000000003a (C-S-IC)
+1529517403.999990 new key \033[2;7~: 0x70000000003a (C-M-IC)
+1529517403.999992 new key \033[1;2D: 0x900000000043 (S-Left)
+1529517403.999994 new key \033[1;3D: 0x300000000043 (M-Left)
+1529517403.999996 new key \033[1;4D: 0xb00000000043 (M-S-Left)
+1529517403.999998 new key \033[1;5D: 0x500000000043 (C-Left)
+1529517403.999999 new key \033[1;6D: 0xd00000000043 (C-S-Left)
+1529517404.000003 new key \033[1;7D: 0x700000000043 (C-M-Left)
+1529517404.000005 new key \033[6;2~: 0x90000000003e (S-NPage)
+1529517404.000007 new key \033[6;3~: 0x30000000003e (M-NPage)
+1529517404.000009 new key \033[6;4~: 0xb0000000003e (M-S-NPage)
+1529517404.000011 new key \033[6;5~: 0x50000000003e (C-NPage)
+1529517404.000013 new key \033[6;6~: 0xd0000000003e (C-S-NPage)
+1529517404.000015 new key \033[6;7~: 0x70000000003e (C-M-NPage)
+1529517404.000017 new key \033[5;2~: 0x90000000003f (S-PPage)
+1529517404.000019 new key \033[5;3~: 0x30000000003f (M-PPage)
+1529517404.000021 new key \033[5;4~: 0xb0000000003f (M-S-PPage)
+1529517404.000023 new key \033[5;5~: 0x50000000003f (C-PPage)
+1529517404.000025 new key \033[5;6~: 0xd0000000003f (C-S-PPage)
+1529517404.000027 new key \033[5;7~: 0x70000000003f (C-M-PPage)
+1529517404.000029 new key \033[1;2C: 0x900000000044 (S-Right)
+1529517404.000031 new key \033[1;3C: 0x300000000044 (M-Right)
+1529517404.000034 new key \033[1;4C: 0xb00000000044 (M-S-Right)
+1529517404.000036 new key \033[1;5C: 0x500000000044 (C-Right)
+1529517404.000038 new key \033[1;6C: 0xd00000000044 (C-S-Right)
+1529517404.000040 new key \033[1;7C: 0x700000000044 (C-M-Right)
+1529517404.000042 new key \033[1;2A: 0x900000000041 (S-Up)
+1529517404.000044 new key \033[1;3A: 0x300000000041 (M-Up)
+1529517404.000046 new key \033[1;4A: 0xb00000000041 (M-S-Up)
+1529517404.000048 new key \033[1;5A: 0x500000000041 (C-Up)
+1529517404.000049 new key \033[1;6A: 0xd00000000041 (C-S-Up)
+1529517404.000051 new key \033[1;7A: 0x700000000041 (C-M-Up)
+1529517404.000060 new session 0 $0
+1529517404.000065 session 0 activity 1529517404.000061 (last 0.000000)
+1529517404.000096 @0 alerts flags added 0x2
+1529517404.000104 spawn: /bin/bash -- 
+1529517404.002772 @0 alerts timer reset 0
+1529517404.002783 @0 alerts flags added 0x2
+1529517404.002786 session 0 created
+1529517404.002792 sending message 207 to peer 0x690600 (0 bytes)
+1529517404.002801 client 0x68fff0, status interval 15
+1529517404.002806 session 0 activity 1529517404.002803 (last 1529517404.000061)
+1529517404.002821 session 0 has 3 references
+1529517404.002824 session 0 has 2 references
+1529517404.002827 unref client 0x68fff0 (2 references)
+1529517404.002944 format '[#S] ' -> '[0] '
+1529517404.003014 format ' "#{=21:pane_title}" 10:56 20-Jun-18' -> ' "devgpu227.prn2.facebo" 10:56 20-Jun-18'
+1529517404.003070 format '#{window_flags}' -> '*'
+1529517404.003074 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517404.003648 @0 active pane not changed
+1529517404.003693 @0 active pane not changed
+1529517404.003763 peer 0x690600 message 208
+1529517404.003772 @0 active pane not changed
+1529517404.064087 %0 has 54 bytes
+1529517404.064098 @0 alerts timer reset 0
+1529517404.064101 @0 alerts flags added 0x2
+1529517404.064107 input_parse: %0 ground, 54 bytes: \033_akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch\033\\
+1529517404.064111 input_enter_apc
+1529517404.064116 input_exit_apc: "akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch"
+1529517404.064119 input_esc_dispatch: '\\', 
+1529517404.064122 input_esc_dispatch: unknown '\\'
+1529517404.064212 format '[#S] ' -> '[0] '
+1529517404.064256 format ' "#{=21:pane_title}" 10:56 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:56 20-Jun-18'
+1529517404.064292 format '#{window_flags}' -> '*'
+1529517404.064295 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517404.064349 @0 active pane changed
+1529517404.064399 format '#{pane_current_command}' -> 'bash'
+1529517404.064409 format '' -> ''
+1529517404.064412 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517404.064418 @0 name not changed (still bash)
+1529517404.064429 %0 has 58 bytes
+1529517404.064442 @0 alerts timer reset 0
+1529517404.064444 @0 alerts flags added 0x2
+1529517404.064448 input_parse: %0 ground, 58 bytes: [akshayc@devgpu227.prn2 ~/onnx-fb-universe/repos/pytorch] 
+1529517404.064481 @0 active pane changed
+1529517404.064484 @0 name timer queued (499868 left)
+1529517404.064503 @0 active pane changed
+1529517404.064506 @0 name timer already queued (499845 left)
+1529517404.565071 @0 name timer expired
+1529517404.565089 @0 active pane changed
+1529517404.565153 format '#{pane_current_command}' -> 'bash'
+1529517404.565159 format '' -> ''
+1529517404.565161 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517404.565167 @0 name not changed (still bash)
+1529517409.855219 keys are 1 (q)
+1529517409.855252 complete key q 0x71
+1529517409.855268 session 0 activity 1529517409.855255 (last 1529517404.002803)
+1529517409.855274 session 0 not pasting
+1529517409.855279 writing key 0x71 (q) to %0
+1529517409.855295 @0 active pane not changed
+1529517409.855306 @0 active pane not changed
+1529517409.855404 %0 has 1 bytes
+1529517409.855411 @0 alerts timer reset 0
+1529517409.855414 @0 alerts flags added 0x2
+1529517409.855418 input_parse: %0 ground, 1 bytes: q
+1529517409.855448 @0 active pane changed
+1529517409.855510 format '#{pane_current_command}' -> 'bash'
+1529517409.855514 format '' -> ''
+1529517409.855517 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517409.855523 @0 name not changed (still bash)
+1529517409.855535 @0 active pane not changed
+1529517410.683320 keys are 1 (\177)
+1529517410.683340 complete key \177 0x10000000002d
+1529517410.683346 session 0 activity 1529517410.683343 (last 1529517409.855255)
+1529517410.683351 session 0 not pasting
+1529517410.683357 writing key 0x10000000002d (BSpace) to %0
+1529517410.683361 found key 0x10000000002d: "\177"
+1529517410.683376 @0 active pane not changed
+1529517410.683388 @0 active pane not changed
+1529517410.683458 %0 has 4 bytes
+1529517410.683463 @0 alerts timer reset 0
+1529517410.683465 @0 alerts flags added 0x2
+1529517410.683469 input_parse: %0 ground, 4 bytes: \b\033[K
+1529517410.683472 input_c0_dispatch: '\b'
+1529517410.683476 input_csi_dispatch: 'K' "" ""
+1529517410.683486 @0 active pane changed
+1529517410.683565 format '#{pane_current_command}' -> 'bash'
+1529517410.683569 format '' -> ''
+1529517410.683572 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517410.683579 @0 name not changed (still bash)
+1529517410.683592 @0 active pane not changed
+1529517410.949647 keys are 1 (\177)
+1529517410.949668 complete key \177 0x10000000002d
+1529517410.949674 session 0 activity 1529517410.949671 (last 1529517410.683343)
+1529517410.949681 session 0 not pasting
+1529517410.949687 writing key 0x10000000002d (BSpace) to %0
+1529517410.949691 found key 0x10000000002d: "\177"
+1529517410.949709 @0 active pane not changed
+1529517410.949720 @0 active pane not changed
+1529517410.949768 %0 has 1 bytes
+1529517410.949771 @0 alerts timer reset 0
+1529517410.949774 @0 alerts flags added 0x2
+1529517410.949778 input_parse: %0 ground, 1 bytes: \a
+1529517410.949781 input_c0_dispatch: '\a'
+1529517410.949783 @0 alerts timer reset 0
+1529517410.949785 @0 alerts flags added 0x1
+1529517410.949787 alerts check queued (by @0)
+1529517410.949796 @0 active pane changed
+1529517410.949800 @0 name timer queued (233689 left)
+1529517410.949809 cmd_find_from_winlink: s=$0
+1529517410.949812 cmd_find_from_winlink: wl=0 1 w=@0 bash
+1529517410.949813 cmd_find_from_winlink: wp=%0
+1529517410.949816 cmd_find_from_winlink: idx=none
+1529517410.949821 0:0 @0 alerts check, alerts 0x1, flags 0x3
+1529517410.949910 format '[#S] ' -> '[0] '
+1529517410.949956 format ' "#{=21:pane_title}" 10:56 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:56 20-Jun-18'
+1529517410.949994 format '#{window_flags}' -> '*'
+1529517410.950007 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517410.950046 @0 active pane changed
+1529517410.950059 @0 name timer already queued (233440 left)
+1529517410.950068 @0 active pane changed
+1529517410.950070 @0 name timer already queued (233418 left)
+1529517411.184348 @0 name timer expired
+1529517411.184376 @0 active pane changed
+1529517411.184476 format '#{pane_current_command}' -> 'bash'
+1529517411.184481 format '' -> ''
+1529517411.184483 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517411.184490 @0 name not changed (still bash)
+1529517411.430953 keys are 1 (t)
+1529517411.430973 complete key t 0x74
+1529517411.430978 session 0 activity 1529517411.430976 (last 1529517410.949671)
+1529517411.430985 session 0 not pasting
+1529517411.430991 writing key 0x74 (t) to %0
+1529517411.431007 @0 active pane not changed
+1529517411.431018 @0 active pane not changed
+1529517411.431090 %0 has 1 bytes
+1529517411.431093 @0 alerts flags added 0x2
+1529517411.431097 input_parse: %0 ground, 1 bytes: t
+1529517411.431113 @0 active pane changed
+1529517411.431115 @0 name timer queued (253264 left)
+1529517411.431141 @0 active pane changed
+1529517411.431145 @0 name timer already queued (253234 left)
+1529517411.628238 keys are 1 (m)
+1529517411.628259 complete key m 0x6d
+1529517411.628265 session 0 activity 1529517411.628262 (last 1529517411.430976)
+1529517411.628271 session 0 not pasting
+1529517411.628278 writing key 0x6d (m) to %0
+1529517411.628295 @0 active pane changed
+1529517411.628298 @0 name timer already queued (56082 left)
+1529517411.628309 @0 active pane changed
+1529517411.628312 @0 name timer already queued (56068 left)
+1529517411.628357 %0 has 1 bytes
+1529517411.628361 @0 alerts timer reset 0
+1529517411.628363 @0 alerts flags added 0x2
+1529517411.628368 input_parse: %0 ground, 1 bytes: m
+1529517411.628385 @0 active pane changed
+1529517411.628387 @0 name timer already queued (55992 left)
+1529517411.628395 @0 active pane changed
+1529517411.628397 @0 name timer already queued (55982 left)
+1529517411.684508 @0 name timer expired
+1529517411.684538 @0 active pane changed
+1529517411.684628 format '#{pane_current_command}' -> 'bash'
+1529517411.684633 format '' -> ''
+1529517411.684636 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517411.684643 @0 name not changed (still bash)
+1529517411.842934 keys are 1 (u)
+1529517411.842955 complete key u 0x75
+1529517411.842960 session 0 activity 1529517411.842957 (last 1529517411.628262)
+1529517411.842966 session 0 not pasting
+1529517411.842971 writing key 0x75 (u) to %0
+1529517411.842987 @0 active pane not changed
+1529517411.842998 @0 active pane not changed
+1529517411.843070 %0 has 1 bytes
+1529517411.843074 @0 alerts timer reset 0
+1529517411.843076 @0 alerts flags added 0x2
+1529517411.843080 input_parse: %0 ground, 1 bytes: u
+1529517411.843096 @0 active pane changed
+1529517411.843099 @0 name timer queued (341443 left)
+1529517411.843106 @0 active pane changed
+1529517411.843108 @0 name timer already queued (341433 left)
+1529517411.951862 keys are 1 (v)
+1529517411.951884 complete key v 0x76
+1529517411.951890 session 0 activity 1529517411.951887 (last 1529517411.842957)
+1529517411.951897 session 0 not pasting
+1529517411.951903 writing key 0x76 (v) to %0
+1529517411.951920 @0 active pane changed
+1529517411.951924 @0 name timer already queued (232618 left)
+1529517411.951934 @0 active pane changed
+1529517411.951937 @0 name timer already queued (232604 left)
+1529517411.952008 %0 has 1 bytes
+1529517411.952013 @0 alerts timer reset 0
+1529517411.952015 @0 alerts flags added 0x2
+1529517411.952019 input_parse: %0 ground, 1 bytes: v
+1529517411.952036 @0 active pane changed
+1529517411.952039 @0 name timer already queued (232503 left)
+1529517411.952046 @0 active pane changed
+1529517411.952048 @0 name timer already queued (232493 left)
+1529517412.081465 keys are 1 ( )
+1529517412.081487 complete key   0x20
+1529517412.081493 session 0 activity 1529517412.081490 (last 1529517411.951887)
+1529517412.081512 session 0 not pasting
+1529517412.081519 writing key 0x20 (Space) to %0
+1529517412.081537 @0 active pane changed
+1529517412.081540 @0 name timer already queued (103002 left)
+1529517412.081552 @0 active pane changed
+1529517412.081554 @0 name timer already queued (102987 left)
+1529517412.081604 %0 has 1 bytes
+1529517412.081608 @0 alerts timer reset 0
+1529517412.081610 @0 alerts flags added 0x2
+1529517412.081615 input_parse: %0 ground, 1 bytes:  
+1529517412.081632 @0 active pane changed
+1529517412.081635 @0 name timer already queued (102907 left)
+1529517412.081643 @0 active pane changed
+1529517412.081645 @0 name timer already queued (102896 left)
+1529517412.184795 @0 name timer expired
+1529517412.184824 @0 active pane changed
+1529517412.184914 format '#{pane_current_command}' -> 'bash'
+1529517412.184918 format '' -> ''
+1529517412.184922 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517412.184929 @0 name not changed (still bash)
+1529517412.566442 keys are 1 (-)
+1529517412.566464 complete key - 0x2d
+1529517412.566469 session 0 activity 1529517412.566467 (last 1529517412.081490)
+1529517412.566476 session 0 not pasting
+1529517412.566481 writing key 0x2d (-) to %0
+1529517412.566497 @0 active pane not changed
+1529517412.566508 @0 active pane not changed
+1529517412.566557 %0 has 1 bytes
+1529517412.566561 @0 alerts timer reset 0
+1529517412.566563 @0 alerts flags added 0x2
+1529517412.566567 input_parse: %0 ground, 1 bytes: -
+1529517412.566583 @0 active pane changed
+1529517412.566585 @0 name timer queued (118242 left)
+1529517412.566593 @0 active pane changed
+1529517412.566595 @0 name timer already queued (118232 left)
+1529517412.685757 @0 name timer expired
+1529517412.685788 @0 active pane changed
+1529517412.685880 format '#{pane_current_command}' -> 'bash'
+1529517412.685884 format '' -> ''
+1529517412.685887 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517412.685894 @0 name not changed (still bash)
+1529517412.887567 keys are 1 (V)
+1529517412.887587 complete key V 0x56
+1529517412.887604 session 0 activity 1529517412.887590 (last 1529517412.566467)
+1529517412.887610 session 0 not pasting
+1529517412.887615 writing key 0x56 (V) to %0
+1529517412.887632 @0 active pane not changed
+1529517412.887644 @0 active pane not changed
+1529517412.887720 %0 has 1 bytes
+1529517412.887724 @0 alerts timer reset 0
+1529517412.887726 @0 alerts flags added 0x2
+1529517412.887730 input_parse: %0 ground, 1 bytes: V
+1529517412.887746 @0 active pane changed
+1529517412.887749 @0 name timer queued (298042 left)
+1529517412.887769 @0 active pane changed
+1529517412.887771 @0 name timer already queued (298020 left)
+1529517413.170545 keys are 1 (\r)
+1529517413.170565 complete key \r 0xd
+1529517413.170571 session 0 activity 1529517413.170568 (last 1529517412.887590)
+1529517413.170577 session 0 not pasting
+1529517413.170582 writing key 0xd (Enter) to %0
+1529517413.170599 @0 active pane changed
+1529517413.170602 @0 name timer already queued (15190 left)
+1529517413.170612 @0 active pane changed
+1529517413.170615 @0 name timer already queued (15177 left)
+1529517413.170756 %0 has 2 bytes
+1529517413.170763 @0 alerts timer reset 0
+1529517413.170765 @0 alerts flags added 0x2
+1529517413.170770 input_parse: %0 ground, 2 bytes: \r\n
+1529517413.170772 input_c0_dispatch: '\r'
+1529517413.170774 input_c0_dispatch: '\n'
+1529517413.170784 @0 active pane changed
+1529517413.170797 @0 name timer already queued (15005 left)
+1529517413.170805 @0 active pane changed
+1529517413.170808 @0 name timer already queued (14983 left)
+1529517413.185902 @0 name timer expired
+1529517413.185912 @0 active pane changed
+1529517413.185975 format '#{pane_current_command}' -> 'bash'
+1529517413.185979 format '' -> ''
+1529517413.185982 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517413.185989 @0 name not changed (still bash)
+1529517413.197230 %0 has 31 bytes
+1529517413.197239 @0 alerts timer reset 0
+1529517413.197241 @0 alerts flags added 0x2
+1529517413.197245 input_parse: %0 ground, 31 bytes: bash: tmuv: command not found\r\n
+1529517413.197275 input_c0_dispatch: '\r'
+1529517413.197277 input_c0_dispatch: '\n'
+1529517413.197283 @0 active pane changed
+1529517413.197285 @0 name timer queued (488630 left)
+1529517413.197295 @0 active pane changed
+1529517413.197298 @0 name timer already queued (488617 left)
+1529517413.197644 %0 has 54 bytes
+1529517413.197654 @0 alerts timer reset 0
+1529517413.197657 @0 alerts flags added 0x2
+1529517413.197663 input_parse: %0 ground, 54 bytes: \033_akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch\033\\
+1529517413.197668 input_enter_apc
+1529517413.197672 input_exit_apc: "akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch"
+1529517413.197676 input_esc_dispatch: '\\', 
+1529517413.197679 input_esc_dispatch: unknown '\\'
+1529517413.197759 format '[#S] ' -> '[0] '
+1529517413.197803 format ' "#{=21:pane_title}" 10:56 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:56 20-Jun-18'
+1529517413.197840 format '#{window_flags}' -> '*'
+1529517413.197843 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517413.197864 @0 active pane changed
+1529517413.197867 @0 name timer already queued (488049 left)
+1529517413.197878 %0 has 58 bytes
+1529517413.197880 @0 alerts timer reset 0
+1529517413.197882 @0 alerts flags added 0x2
+1529517413.197886 input_parse: %0 ground, 58 bytes: [akshayc@devgpu227.prn2 ~/onnx-fb-universe/repos/pytorch] 
+1529517413.197919 @0 active pane changed
+1529517413.197921 @0 name timer already queued (487994 left)
+1529517413.197930 @0 active pane changed
+1529517413.197933 @0 name timer already queued (487982 left)
+1529517413.686464 @0 name timer expired
+1529517413.686490 @0 active pane changed
+1529517413.686579 format '#{pane_current_command}' -> 'bash'
+1529517413.686583 format '' -> ''
+1529517413.686587 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517413.686593 @0 name not changed (still bash)
+1529517416.524265 keys are 3 (\033[A)
+1529517416.524287 complete key \033[A 0x100000000041
+1529517416.524291 session 0 activity 1529517416.524289 (last 1529517413.170568)
+1529517416.524297 session 0 not pasting
+1529517416.524301 writing key 0x100000000041 (Up) to %0
+1529517416.524305 found key 0x100000000041: "\033[A"
+1529517416.524320 @0 active pane not changed
+1529517416.524331 @0 active pane not changed
+1529517416.524406 %0 has 7 bytes
+1529517416.524410 @0 alerts timer reset 0
+1529517416.524412 @0 alerts flags added 0x2
+1529517416.524415 input_parse: %0 ground, 7 bytes: tmuv -V
+1529517416.524434 @0 active pane changed
+1529517416.524496 format '#{pane_current_command}' -> 'bash'
+1529517416.524501 format '' -> ''
+1529517416.524504 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517416.524510 @0 name not changed (still bash)
+1529517416.524521 @0 active pane not changed
+1529517417.117675 keys are 3 (\033[D)
+1529517417.117693 complete key \033[D 0x100000000043
+1529517417.117699 session 0 activity 1529517417.117696 (last 1529517416.524289)
+1529517417.117705 session 0 not pasting
+1529517417.117710 writing key 0x100000000043 (Left) to %0
+1529517417.117715 found key 0x100000000043: "\033[D"
+1529517417.117731 @0 active pane not changed
+1529517417.117742 @0 active pane not changed
+1529517417.117810 %0 has 1 bytes
+1529517417.117814 @0 alerts timer reset 0
+1529517417.117816 @0 alerts flags added 0x2
+1529517417.117821 input_parse: %0 ground, 1 bytes: \b
+1529517417.117824 input_c0_dispatch: '\b'
+1529517417.117830 @0 active pane changed
+1529517417.117899 format '#{pane_current_command}' -> 'bash'
+1529517417.117904 format '' -> ''
+1529517417.117907 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517417.117914 @0 name not changed (still bash)
+1529517417.117924 @0 active pane not changed
+1529517417.309798 keys are 3 (\033[D)
+1529517417.309816 complete key \033[D 0x100000000043
+1529517417.309822 session 0 activity 1529517417.309819 (last 1529517417.117696)
+1529517417.309828 session 0 not pasting
+1529517417.309833 writing key 0x100000000043 (Left) to %0
+1529517417.309846 found key 0x100000000043: "\033[D"
+1529517417.309862 @0 active pane not changed
+1529517417.309874 @0 active pane not changed
+1529517417.309939 %0 has 1 bytes
+1529517417.309944 @0 alerts timer reset 0
+1529517417.309946 @0 alerts flags added 0x2
+1529517417.309950 input_parse: %0 ground, 1 bytes: \b
+1529517417.309952 input_c0_dispatch: '\b'
+1529517417.309958 @0 active pane changed
+1529517417.309960 @0 name timer queued (307872 left)
+1529517417.309967 @0 active pane changed
+1529517417.309969 @0 name timer already queued (307863 left)
+1529517417.500670 keys are 3 (\033[D)
+1529517417.500691 complete key \033[D 0x100000000043
+1529517417.500697 session 0 activity 1529517417.500694 (last 1529517417.309819)
+1529517417.500703 session 0 not pasting
+1529517417.500710 writing key 0x100000000043 (Left) to %0
+1529517417.500715 found key 0x100000000043: "\033[D"
+1529517417.500732 @0 active pane changed
+1529517417.500735 @0 name timer already queued (117098 left)
+1529517417.500747 @0 active pane changed
+1529517417.500750 @0 name timer already queued (117083 left)
+1529517417.500815 %0 has 1 bytes
+1529517417.500818 @0 alerts timer reset 0
+1529517417.500821 @0 alerts flags added 0x2
+1529517417.500825 input_parse: %0 ground, 1 bytes: \b
+1529517417.500828 input_c0_dispatch: '\b'
+1529517417.500834 @0 active pane changed
+1529517417.500837 @0 name timer already queued (116996 left)
+1529517417.500844 @0 active pane changed
+1529517417.500846 @0 name timer already queued (116986 left)
+1529517417.618008 @0 name timer expired
+1529517417.618036 @0 active pane changed
+1529517417.618127 format '#{pane_current_command}' -> 'bash'
+1529517417.618131 format '' -> ''
+1529517417.618140 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517417.618162 @0 name not changed (still bash)
+1529517418.071596 keys are 1 (\177)
+1529517418.071618 complete key \177 0x10000000002d
+1529517418.071623 session 0 activity 1529517418.071621 (last 1529517417.500694)
+1529517418.071629 session 0 not pasting
+1529517418.071635 writing key 0x10000000002d (BSpace) to %0
+1529517418.071639 found key 0x10000000002d: "\177"
+1529517418.071655 @0 active pane not changed
+1529517418.071665 @0 active pane not changed
+1529517418.071850 %0 has 11 bytes
+1529517418.071854 @0 alerts timer reset 0
+1529517418.071856 @0 alerts flags added 0x2
+1529517418.071860 input_parse: %0 ground, 11 bytes: \b\033[1P -V\b\b\b
+1529517418.071863 input_c0_dispatch: '\b'
+1529517418.071874 input_csi_dispatch: 'P' "" "1"
+1529517418.071893 input_c0_dispatch: '\b'
+1529517418.071895 input_c0_dispatch: '\b'
+1529517418.071897 input_c0_dispatch: '\b'
+1529517418.071901 @0 active pane changed
+1529517418.071904 @0 name timer queued (46135 left)
+1529517418.071912 @0 active pane changed
+1529517418.071914 @0 name timer already queued (46124 left)
+1529517418.118985 @0 name timer expired
+1529517418.119010 @0 active pane changed
+1529517418.119096 format '#{pane_current_command}' -> 'bash'
+1529517418.119101 format '' -> ''
+1529517418.119104 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517418.119111 @0 name not changed (still bash)
+1529517418.236747 keys are 1 (x)
+1529517418.236769 complete key x 0x78
+1529517418.236774 session 0 activity 1529517418.236771 (last 1529517418.071621)
+1529517418.236781 session 0 not pasting
+1529517418.236787 writing key 0x78 (x) to %0
+1529517418.236816 @0 active pane not changed
+1529517418.236829 @0 active pane not changed
+1529517418.237005 %0 has 7 bytes
+1529517418.237009 @0 alerts timer reset 0
+1529517418.237011 @0 alerts flags added 0x2
+1529517418.237015 input_parse: %0 ground, 7 bytes: x -V\b\b\b
+1529517418.237030 input_c0_dispatch: '\b'
+1529517418.237032 input_c0_dispatch: '\b'
+1529517418.237034 input_c0_dispatch: '\b'
+1529517418.237038 @0 active pane changed
+1529517418.237040 @0 name timer queued (381973 left)
+1529517418.237047 @0 active pane changed
+1529517418.237050 @0 name timer already queued (381964 left)
+1529517418.374671 keys are 1 (\r)
+1529517418.374694 complete key \r 0xd
+1529517418.374708 session 0 activity 1529517418.374705 (last 1529517418.236771)
+1529517418.374715 session 0 not pasting
+1529517418.374721 writing key 0xd (Enter) to %0
+1529517418.374739 @0 active pane changed
+1529517418.374742 @0 name timer already queued (244272 left)
+1529517418.374753 @0 active pane changed
+1529517418.374756 @0 name timer already queued (244257 left)
+1529517418.374803 %0 has 2 bytes
+1529517418.374808 @0 alerts timer reset 0
+1529517418.374810 @0 alerts flags added 0x2
+1529517418.374815 input_parse: %0 ground, 2 bytes: \r\n
+1529517418.374817 input_c0_dispatch: '\r'
+1529517418.374819 input_c0_dispatch: '\n'
+1529517418.374825 @0 active pane changed
+1529517418.374828 @0 name timer already queued (244186 left)
+1529517418.374834 @0 active pane changed
+1529517418.374836 @0 name timer already queued (244177 left)
+1529517418.376326 %0 has 10 bytes
+1529517418.376343 @0 alerts timer reset 0
+1529517418.376345 @0 alerts flags added 0x2
+1529517418.376350 input_parse: %0 ground, 10 bytes: tmux 2.2\r\n
+1529517418.376373 input_c0_dispatch: '\r'
+1529517418.376375 input_c0_dispatch: '\n'
+1529517418.376383 @0 active pane changed
+1529517418.376386 @0 name timer already queued (242628 left)
+1529517418.376397 @0 active pane changed
+1529517418.376400 @0 name timer already queued (242613 left)
+1529517418.376486 %0 has 54 bytes
+1529517418.376489 @0 alerts timer reset 0
+1529517418.376490 @0 alerts flags added 0x2
+1529517418.376495 input_parse: %0 ground, 54 bytes: \033_akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch\033\\
+1529517418.376498 input_enter_apc
+1529517418.376503 input_exit_apc: "akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch"
+1529517418.376506 input_esc_dispatch: '\\', 
+1529517418.376509 input_esc_dispatch: unknown '\\'
+1529517418.376587 format '[#S] ' -> '[0] '
+1529517418.376632 format ' "#{=21:pane_title}" 10:56 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:56 20-Jun-18'
+1529517418.376669 format '#{window_flags}' -> '*'
+1529517418.376672 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517418.376693 @0 active pane changed
+1529517418.376696 @0 name timer already queued (242318 left)
+1529517418.376706 %0 has 58 bytes
+1529517418.376708 @0 alerts timer reset 0
+1529517418.376710 @0 alerts flags added 0x2
+1529517418.376713 input_parse: %0 ground, 58 bytes: [akshayc@devgpu227.prn2 ~/onnx-fb-universe/repos/pytorch] 
+1529517418.376752 @0 active pane changed
+1529517418.376755 @0 name timer already queued (242258 left)
+1529517418.376762 @0 active pane changed
+1529517418.376764 @0 name timer already queued (242249 left)
+1529517418.620048 @0 name timer expired
+1529517418.620059 @0 active pane changed
+1529517418.620120 format '#{pane_current_command}' -> 'bash'
+1529517418.620124 format '' -> ''
+1529517418.620127 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517418.620138 @0 name not changed (still bash)
+1529517418.999565 client 0x68fff0, status interval 15
+1529517418.999632 format '[#S] ' -> '[0] '
+1529517418.999670 format ' "#{=21:pane_title}" 10:56 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:56 20-Jun-18'
+1529517418.999702 format '#{window_flags}' -> '*'
+1529517418.999705 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517418.999723 @0 active pane not changed
+1529517420.921707 keys are 3 (\033[B)
+1529517420.921726 complete key \033[B 0x100000000042
+1529517420.921731 session 0 activity 1529517420.921728 (last 1529517418.374705)
+1529517420.921737 session 0 not pasting
+1529517420.921742 writing key 0x100000000042 (Down) to %0
+1529517420.921747 found key 0x100000000042: "\033[B"
+1529517420.921763 @0 active pane not changed
+1529517420.921773 @0 active pane not changed
+1529517420.921852 %0 has 1 bytes
+1529517420.921860 @0 alerts timer reset 0
+1529517420.921862 @0 alerts flags added 0x2
+1529517420.921867 input_parse: %0 ground, 1 bytes: \a
+1529517420.921870 input_c0_dispatch: '\a'
+1529517420.921872 @0 alerts timer reset 0
+1529517420.921874 @0 alerts flags added 0x1
+1529517420.921876 alerts check queued (by @0)
+1529517420.921881 @0 active pane changed
+1529517420.921956 format '#{pane_current_command}' -> 'bash'
+1529517420.921960 format '' -> ''
+1529517420.921963 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517420.921970 @0 name not changed (still bash)
+1529517420.921983 cmd_find_from_winlink: s=$0
+1529517420.921986 cmd_find_from_winlink: wl=0 1 w=@0 bash
+1529517420.921987 cmd_find_from_winlink: wp=%0
+1529517420.921989 cmd_find_from_winlink: idx=none
+1529517420.921993 0:0 @0 alerts check, alerts 0x1, flags 0x3
+1529517420.922063 format '[#S] ' -> '[0] '
+1529517420.922114 format ' "#{=21:pane_title}" 10:57 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:57 20-Jun-18'
+1529517420.922154 format '#{window_flags}' -> '*'
+1529517420.922161 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517420.922206 @0 active pane not changed
+1529517420.922217 @0 active pane not changed
+1529517420.991811 keys are 3 (\033[B)
+1529517420.991831 complete key \033[B 0x100000000042
+1529517420.991835 session 0 activity 1529517420.991833 (last 1529517420.921728)
+1529517420.991838 session 0 not pasting
+1529517420.991841 writing key 0x100000000042 (Down) to %0
+1529517420.991843 found key 0x100000000042: "\033[B"
+1529517420.991850 @0 active pane not changed
+1529517420.991859 @0 active pane not changed
+1529517420.991922 %0 has 1 bytes
+1529517420.991925 @0 alerts flags added 0x2
+1529517420.991928 input_parse: %0 ground, 1 bytes: \a
+1529517420.991930 input_c0_dispatch: '\a'
+1529517420.991932 @0 alerts timer reset 0
+1529517420.991934 @0 alerts flags added 0x1
+1529517420.991936 alerts check queued (by @0)
+1529517420.991939 @0 active pane changed
+1529517420.991941 @0 name timer queued (429952 left)
+1529517420.991947 cmd_find_from_winlink: s=$0
+1529517420.991949 cmd_find_from_winlink: wl=0 1 w=@0 bash
+1529517420.991950 cmd_find_from_winlink: wp=%0
+1529517420.991952 cmd_find_from_winlink: idx=none
+1529517420.991955 0:0 @0 alerts check, alerts 0x1, flags 0x3
+1529517420.992016 format '[#S] ' -> '[0] '
+1529517420.992056 format ' "#{=21:pane_title}" 10:57 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:57 20-Jun-18'
+1529517420.992090 format '#{window_flags}' -> '*'
+1529517420.992092 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517420.992111 @0 active pane changed
+1529517420.992113 @0 name timer already queued (429780 left)
+1529517420.992122 @0 active pane changed
+1529517420.992124 @0 name timer already queued (429769 left)
+1529517421.083713 keys are 6 (\033[B\033[B)
+1529517421.083733 complete key \033[B 0x100000000042
+1529517421.083737 session 0 activity 1529517421.083735 (last 1529517420.991833)
+1529517421.083740 session 0 not pasting
+1529517421.083743 writing key 0x100000000042 (Down) to %0
+1529517421.083746 found key 0x100000000042: "\033[B"
+1529517421.083751 keys are 3 (\033[B)
+1529517421.083753 complete key \033[B 0x100000000042
+1529517421.083755 session 0 activity 1529517421.083754 (last 1529517421.083735)
+1529517421.083757 session 0 pasting (flag 0)
+1529517421.083759 writing key 0x100000000042 (Down) to %0
+1529517421.083761 found key 0x100000000042: "\033[B"
+1529517421.083766 @0 active pane changed
+1529517421.083768 @0 name timer already queued (338125 left)
+1529517421.083776 @0 active pane changed
+1529517421.083778 @0 name timer already queued (338115 left)
+1529517421.083839 %0 has 1 bytes
+1529517421.083841 @0 alerts flags added 0x2
+1529517421.083845 input_parse: %0 ground, 1 bytes: \a
+1529517421.083847 input_c0_dispatch: '\a'
+1529517421.083849 @0 alerts timer reset 0
+1529517421.083850 @0 alerts flags added 0x1
+1529517421.083852 alerts check queued (by @0)
+1529517421.083855 @0 active pane changed
+1529517421.083857 @0 name timer already queued (338036 left)
+1529517421.083861 %0 has 1 bytes
+1529517421.083863 @0 alerts timer reset 0
+1529517421.083865 input_parse: %0 ground, 1 bytes: \a
+1529517421.083867 input_c0_dispatch: '\a'
+1529517421.083869 @0 alerts timer reset 0
+1529517421.083875 cmd_find_from_winlink: s=$0
+1529517421.083878 cmd_find_from_winlink: wl=0 1 w=@0 bash
+1529517421.083880 cmd_find_from_winlink: wp=%0
+1529517421.083882 cmd_find_from_winlink: idx=none
+1529517421.083889 0:0 @0 alerts check, alerts 0x1, flags 0x3
+1529517421.083961 format '[#S] ' -> '[0] '
+1529517421.083999 format ' "#{=21:pane_title}" 10:57 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:57 20-Jun-18'
+1529517421.084031 format '#{window_flags}' -> '*'
+1529517421.084034 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517421.084051 @0 active pane changed
+1529517421.084054 @0 name timer already queued (337840 left)
+1529517421.084061 @0 active pane changed
+1529517421.084064 @0 name timer already queued (337829 left)
+1529517421.298615 keys are 3 (\033[A)
+1529517421.298632 complete key \033[A 0x100000000041
+1529517421.298638 session 0 activity 1529517421.298635 (last 1529517421.083754)
+1529517421.298644 session 0 not pasting
+1529517421.298649 writing key 0x100000000041 (Up) to %0
+1529517421.298654 found key 0x100000000041: "\033[A"
+1529517421.298669 @0 active pane changed
+1529517421.298671 @0 name timer already queued (123222 left)
+1529517421.298683 @0 active pane changed
+1529517421.298686 @0 name timer already queued (123207 left)
+1529517421.298746 %0 has 7 bytes
+1529517421.298750 @0 alerts flags added 0x2
+1529517421.298754 input_parse: %0 ground, 7 bytes: tmux -V
+1529517421.298774 @0 active pane changed
+1529517421.298776 @0 name timer already queued (123117 left)
+1529517421.298783 @0 active pane changed
+1529517421.298785 @0 name timer already queued (123108 left)
+1529517421.422955 @0 name timer expired
+1529517421.422981 @0 active pane changed
+1529517421.423058 format '#{pane_current_command}' -> 'bash'
+1529517421.423062 format '' -> ''
+1529517421.423066 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517421.423073 @0 name not changed (still bash)
+1529517429.171103 keys are 1 (d)
+1529517429.171125 complete key d 0x64
+1529517429.171130 session 0 activity 1529517429.171128 (last 1529517421.298635)
+1529517429.171141 session 0 not pasting
+1529517429.171148 writing key 0x64 (d) to %0
+1529517429.171164 @0 active pane not changed
+1529517429.171176 @0 active pane not changed
+1529517429.171245 %0 has 1 bytes
+1529517429.171248 @0 alerts timer reset 0
+1529517429.171251 @0 alerts flags added 0x2
+1529517429.171254 input_parse: %0 ground, 1 bytes: d
+1529517429.171272 @0 active pane changed
+1529517429.171344 format '#{pane_current_command}' -> 'bash'
+1529517429.171349 format '' -> ''
+1529517429.171352 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517429.171359 @0 name not changed (still bash)
+1529517429.171370 @0 active pane not changed
+1529517429.341469 keys are 1 (e)
+1529517429.341485 complete key e 0x65
+1529517429.341490 session 0 activity 1529517429.341487 (last 1529517429.171128)
+1529517429.341494 session 0 not pasting
+1529517429.341499 writing key 0x65 (e) to %0
+1529517429.341511 @0 active pane not changed
+1529517429.341522 @0 active pane not changed
+1529517429.341587 %0 has 1 bytes
+1529517429.341590 @0 alerts timer reset 0
+1529517429.341592 @0 alerts flags added 0x2
+1529517429.341596 input_parse: %0 ground, 1 bytes: e
+1529517429.341610 @0 active pane changed
+1529517429.341613 @0 name timer queued (329662 left)
+1529517429.341620 @0 active pane changed
+1529517429.341635 @0 name timer already queued (329640 left)
+1529517429.515257 keys are 1 (t)
+1529517429.515269 complete key t 0x74
+1529517429.515274 session 0 activity 1529517429.515271 (last 1529517429.341487)
+1529517429.515278 session 0 not pasting
+1529517429.515282 writing key 0x74 (t) to %0
+1529517429.515291 @0 active pane changed
+1529517429.515294 @0 name timer already queued (155981 left)
+1529517429.515304 @0 active pane changed
+1529517429.515306 @0 name timer already queued (155969 left)
+1529517429.515337 %0 has 1 bytes
+1529517429.515340 @0 alerts timer reset 0
+1529517429.515342 @0 alerts flags added 0x2
+1529517429.515345 input_parse: %0 ground, 1 bytes: t
+1529517429.515357 @0 active pane changed
+1529517429.515360 @0 name timer already queued (155915 left)
+1529517429.515366 @0 active pane changed
+1529517429.515368 @0 name timer already queued (155907 left)
+1529517429.629032 keys are 1 (a)
+1529517429.629041 complete key a 0x61
+1529517429.629044 session 0 activity 1529517429.629043 (last 1529517429.515271)
+1529517429.629047 session 0 not pasting
+1529517429.629050 writing key 0x61 (a) to %0
+1529517429.629057 @0 active pane changed
+1529517429.629060 @0 name timer already queued (42216 left)
+1529517429.629068 @0 active pane changed
+1529517429.629070 @0 name timer already queued (42205 left)
+1529517429.629120 %0 has 1 bytes
+1529517429.629123 @0 alerts timer reset 0
+1529517429.629125 @0 alerts flags added 0x2
+1529517429.629128 input_parse: %0 ground, 1 bytes: a
+1529517429.629144 @0 active pane changed
+1529517429.629148 @0 name timer already queued (42127 left)
+1529517429.629155 @0 active pane changed
+1529517429.629157 @0 name timer already queued (42118 left)
+1529517429.672241 @0 name timer expired
+1529517429.672252 @0 active pane changed
+1529517429.672315 format '#{pane_current_command}' -> 'bash'
+1529517429.672319 format '' -> ''
+1529517429.672323 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517429.672329 @0 name not changed (still bash)
+1529517429.814418 keys are 1 (c)
+1529517429.814443 complete key c 0x63
+1529517429.814447 session 0 activity 1529517429.814445 (last 1529517429.629043)
+1529517429.814451 session 0 not pasting
+1529517429.814455 writing key 0x63 (c) to %0
+1529517429.814465 @0 active pane not changed
+1529517429.814475 @0 active pane not changed
+1529517429.814541 %0 has 1 bytes
+1529517429.814545 @0 alerts timer reset 0
+1529517429.814547 @0 alerts flags added 0x2
+1529517429.814550 input_parse: %0 ground, 1 bytes: c
+1529517429.814563 @0 active pane changed
+1529517429.814565 @0 name timer queued (357689 left)
+1529517429.814572 @0 active pane changed
+1529517429.814575 @0 name timer already queued (357680 left)
+1529517429.927127 keys are 1 (h)
+1529517429.927144 complete key h 0x68
+1529517429.927161 session 0 activity 1529517429.927158 (last 1529517429.814445)
+1529517429.927164 session 0 not pasting
+1529517429.927167 writing key 0x68 (h) to %0
+1529517429.927175 @0 active pane changed
+1529517429.927177 @0 name timer already queued (245077 left)
+1529517429.927186 @0 active pane changed
+1529517429.927189 @0 name timer already queued (245065 left)
+1529517429.927236 %0 has 1 bytes
+1529517429.927239 @0 alerts timer reset 0
+1529517429.927241 @0 alerts flags added 0x2
+1529517429.927244 input_parse: %0 ground, 1 bytes: h
+1529517429.927254 @0 active pane changed
+1529517429.927257 @0 name timer already queued (244997 left)
+1529517429.927263 @0 active pane changed
+1529517429.927265 @0 name timer already queued (244989 left)
+1529517430.063110 keys are 1 (\r)
+1529517430.063155 complete key \r 0xd
+1529517430.063172 session 0 activity 1529517430.063170 (last 1529517429.927158)
+1529517430.063178 session 0 not pasting
+1529517430.063184 writing key 0xd (Enter) to %0
+1529517430.063199 @0 active pane changed
+1529517430.063203 @0 name timer already queued (109053 left)
+1529517430.063214 @0 active pane changed
+1529517430.063216 @0 name timer already queued (109038 left)
+1529517430.063258 %0 has 2 bytes
+1529517430.063262 @0 alerts timer reset 0
+1529517430.063264 @0 alerts flags added 0x2
+1529517430.063269 input_parse: %0 ground, 2 bytes: \r\n
+1529517430.063271 input_c0_dispatch: '\r'
+1529517430.063273 input_c0_dispatch: '\n'
+1529517430.063279 @0 active pane changed
+1529517430.063281 @0 name timer already queued (108973 left)
+1529517430.063287 @0 active pane changed
+1529517430.063290 @0 name timer already queued (108964 left)
+1529517430.064606 %0 has 10 bytes
+1529517430.064615 @0 alerts timer reset 0
+1529517430.064617 @0 alerts flags added 0x2
+1529517430.064620 input_parse: %0 ground, 10 bytes: tmux 2.2\r\n
+1529517430.064638 input_c0_dispatch: '\r'
+1529517430.064640 input_c0_dispatch: '\n'
+1529517430.064645 @0 active pane changed
+1529517430.064648 @0 name timer already queued (107607 left)
+1529517430.064656 @0 active pane changed
+1529517430.064659 @0 name timer already queued (107595 left)
+1529517430.064827 %0 has 54 bytes
+1529517430.064837 @0 alerts timer reset 0
+1529517430.064840 @0 alerts flags added 0x2
+1529517430.064845 input_parse: %0 ground, 54 bytes: \033_akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch\033\\
+1529517430.064848 input_enter_apc
+1529517430.064854 input_exit_apc: "akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch"
+1529517430.064857 input_esc_dispatch: '\\', 
+1529517430.064860 input_esc_dispatch: unknown '\\'
+1529517430.064942 format '[#S] ' -> '[0] '
+1529517430.064987 format ' "#{=21:pane_title}" 10:57 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:57 20-Jun-18'
+1529517430.065024 format '#{window_flags}' -> '*'
+1529517430.065027 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517430.065049 @0 active pane changed
+1529517430.065051 @0 name timer already queued (107203 left)
+1529517430.065061 %0 has 58 bytes
+1529517430.065063 @0 alerts timer reset 0
+1529517430.065065 @0 alerts flags added 0x2
+1529517430.065069 input_parse: %0 ground, 58 bytes: [akshayc@devgpu227.prn2 ~/onnx-fb-universe/repos/pytorch] 
+1529517430.065098 @0 active pane changed
+1529517430.065100 @0 name timer already queued (107154 left)
+1529517430.065107 @0 active pane changed
+1529517430.065109 @0 name timer already queued (107145 left)
+1529517430.173271 @0 name timer expired
+1529517430.173295 @0 active pane changed
+1529517430.173410 format '#{pane_current_command}' -> 'bash'
+1529517430.173418 format '' -> ''
+1529517430.173425 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517430.173440 @0 name not changed (still bash)
+1529517431.058285 keys are 1 (d)
+1529517431.058318 complete key d 0x64
+1529517431.058322 session 0 activity 1529517431.058320 (last 1529517430.063170)
+1529517431.058326 session 0 not pasting
+1529517431.058340 writing key 0x64 (d) to %0
+1529517431.058348 @0 active pane not changed
+1529517431.058357 @0 active pane not changed
+1529517431.058434 %0 has 1 bytes
+1529517431.058438 @0 alerts timer reset 0
+1529517431.058439 @0 alerts flags added 0x2
+1529517431.058443 input_parse: %0 ground, 1 bytes: d
+1529517431.058455 @0 active pane changed
+1529517431.058525 format '#{pane_current_command}' -> 'bash'
+1529517431.058529 format '' -> ''
+1529517431.058531 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517431.058537 @0 name not changed (still bash)
+1529517431.058546 @0 active pane not changed
+1529517431.197451 keys are 1 (e)
+1529517431.197470 complete key e 0x65
+1529517431.197476 session 0 activity 1529517431.197473 (last 1529517431.058320)
+1529517431.197482 session 0 not pasting
+1529517431.197487 writing key 0x65 (e) to %0
+1529517431.197503 @0 active pane not changed
+1529517431.197514 @0 active pane not changed
+1529517431.197578 %0 has 1 bytes
+1529517431.197582 @0 alerts timer reset 0
+1529517431.197584 @0 alerts flags added 0x2
+1529517431.197588 input_parse: %0 ground, 1 bytes: e
+1529517431.197605 @0 active pane changed
+1529517431.197607 @0 name timer queued (360850 left)
+1529517431.197614 @0 active pane changed
+1529517431.197616 @0 name timer already queued (360841 left)
+1529517431.400363 keys are 1 (t)
+1529517431.400381 complete key t 0x74
+1529517431.400387 session 0 activity 1529517431.400384 (last 1529517431.197473)
+1529517431.400394 session 0 not pasting
+1529517431.400401 writing key 0x74 (t) to %0
+1529517431.400419 @0 active pane changed
+1529517431.400423 @0 name timer already queued (158036 left)
+1529517431.400434 @0 active pane changed
+1529517431.400437 @0 name timer already queued (158021 left)
+1529517431.400506 %0 has 1 bytes
+1529517431.400509 @0 alerts timer reset 0
+1529517431.400512 @0 alerts flags added 0x2
+1529517431.400516 input_parse: %0 ground, 1 bytes: t
+1529517431.400533 @0 active pane changed
+1529517431.400536 @0 name timer already queued (157921 left)
+1529517431.400543 @0 active pane changed
+1529517431.400545 @0 name timer already queued (157912 left)
+1529517431.509324 keys are 1 (a)
+1529517431.509351 complete key a 0x61
+1529517431.509356 session 0 activity 1529517431.509353 (last 1529517431.400384)
+1529517431.509361 session 0 not pasting
+1529517431.509372 writing key 0x61 (a) to %0
+1529517431.509385 @0 active pane changed
+1529517431.509388 @0 name timer already queued (49070 left)
+1529517431.509397 @0 active pane changed
+1529517431.509399 @0 name timer already queued (49058 left)
+1529517431.509532 %0 has 1 bytes
+1529517431.509538 @0 alerts timer reset 0
+1529517431.509541 @0 alerts flags added 0x2
+1529517431.509545 input_parse: %0 ground, 1 bytes: a
+1529517431.509573 @0 active pane changed
+1529517431.509575 @0 name timer already queued (48882 left)
+1529517431.509584 @0 active pane changed
+1529517431.509586 @0 name timer already queued (48871 left)
+1529517431.558698 @0 name timer expired
+1529517431.558722 @0 active pane changed
+1529517431.558855 format '#{pane_current_command}' -> 'bash'
+1529517431.558865 format '' -> ''
+1529517431.558873 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517431.558888 @0 name not changed (still bash)
+1529517431.675998 keys are 1 (c)
+1529517431.676017 complete key c 0x63
+1529517431.676022 session 0 activity 1529517431.676020 (last 1529517431.509353)
+1529517431.676028 session 0 not pasting
+1529517431.676033 writing key 0x63 (c) to %0
+1529517431.676048 @0 active pane not changed
+1529517431.676059 @0 active pane not changed
+1529517431.676130 %0 has 1 bytes
+1529517431.676139 @0 alerts timer reset 0
+1529517431.676141 @0 alerts flags added 0x2
+1529517431.676145 input_parse: %0 ground, 1 bytes: c
+1529517431.676163 @0 active pane changed
+1529517431.676167 @0 name timer queued (382559 left)
+1529517431.676175 @0 active pane changed
+1529517431.676177 @0 name timer already queued (382549 left)
+1529517431.748544 keys are 1 (h)
+1529517431.748556 complete key h 0x68
+1529517431.748561 session 0 activity 1529517431.748558 (last 1529517431.676020)
+1529517431.748564 session 0 not pasting
+1529517431.748569 writing key 0x68 (h) to %0
+1529517431.748578 @0 active pane changed
+1529517431.748581 @0 name timer already queued (310146 left)
+1529517431.748590 @0 active pane changed
+1529517431.748592 @0 name timer already queued (310133 left)
+1529517431.748653 %0 has 1 bytes
+1529517431.748656 @0 alerts timer reset 0
+1529517431.748658 @0 alerts flags added 0x2
+1529517431.748661 input_parse: %0 ground, 1 bytes: h
+1529517431.748674 @0 active pane changed
+1529517431.748676 @0 name timer already queued (310050 left)
+1529517431.748682 @0 active pane changed
+1529517431.748685 @0 name timer already queued (310041 left)
+1529517431.912569 keys are 1 (\r)
+1529517431.912585 complete key \r 0xd
+1529517431.912591 session 0 activity 1529517431.912588 (last 1529517431.748558)
+1529517431.912596 session 0 not pasting
+1529517431.912601 writing key 0xd (Enter) to %0
+1529517431.912615 @0 active pane changed
+1529517431.912618 @0 name timer already queued (146109 left)
+1529517431.912629 @0 active pane changed
+1529517431.912631 @0 name timer already queued (146095 left)
+1529517431.912671 %0 has 2 bytes
+1529517431.912675 @0 alerts timer reset 0
+1529517431.912677 @0 alerts flags added 0x2
+1529517431.912681 input_parse: %0 ground, 2 bytes: \r\n
+1529517431.912684 input_c0_dispatch: '\r'
+1529517431.912686 input_c0_dispatch: '\n'
+1529517431.912692 @0 active pane changed
+1529517431.912694 @0 name timer already queued (146032 left)
+1529517431.912700 @0 active pane changed
+1529517431.912703 @0 name timer already queued (146023 left)
+1529517431.923847 %0 has 33 bytes
+1529517431.923862 @0 alerts timer reset 0
+1529517431.923865 @0 alerts flags added 0x2
+1529517431.923870 input_parse: %0 ground, 33 bytes: bash: detach: command not found\r\n
+1529517431.923898 input_c0_dispatch: '\r'
+1529517431.923900 input_c0_dispatch: '\n'
+1529517431.923908 @0 active pane changed
+1529517431.923910 @0 name timer already queued (134816 left)
+1529517431.923922 @0 active pane changed
+1529517431.923924 @0 name timer already queued (134802 left)
+1529517431.924187 %0 has 54 bytes
+1529517431.924191 @0 alerts timer reset 0
+1529517431.924193 @0 alerts flags added 0x2
+1529517431.924197 input_parse: %0 ground, 54 bytes: \033_akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch\033\\
+1529517431.924208 input_enter_apc
+1529517431.924213 input_exit_apc: "akshayc@devgpu227:~/onnx-fb-universe/repos/pytorch"
+1529517431.924217 input_esc_dispatch: '\\', 
+1529517431.924219 input_esc_dispatch: unknown '\\'
+1529517431.924298 format '[#S] ' -> '[0] '
+1529517431.924344 format ' "#{=21:pane_title}" 10:57 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:57 20-Jun-18'
+1529517431.924380 format '#{window_flags}' -> '*'
+1529517431.924384 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517431.924404 @0 active pane changed
+1529517431.924407 @0 name timer already queued (134320 left)
+1529517431.924417 %0 has 58 bytes
+1529517431.924419 @0 alerts timer reset 0
+1529517431.924421 @0 alerts flags added 0x2
+1529517431.924425 input_parse: %0 ground, 58 bytes: [akshayc@devgpu227.prn2 ~/onnx-fb-universe/repos/pytorch] 
+1529517431.924463 @0 active pane changed
+1529517431.924465 @0 name timer already queued (134261 left)
+1529517431.924472 @0 active pane changed
+1529517431.924474 @0 name timer already queued (134252 left)
+1529517432.059625 @0 name timer expired
+1529517432.059647 @0 active pane changed
+1529517432.059715 format '#{pane_current_command}' -> 'bash'
+1529517432.059720 format '' -> ''
+1529517432.059723 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517432.059730 @0 name not changed (still bash)
+1529517434.001726 client 0x68fff0, status interval 15
+1529517434.001867 format '[#S] ' -> '[0] '
+1529517434.001911 format ' "#{=21:pane_title}" 10:57 20-Jun-18' -> ' "akshayc@devgpu227:~/o" 10:57 20-Jun-18'
+1529517434.001949 format '#{window_flags}' -> '*'
+1529517434.001952 format '#I:#W#{?window_flags,#{window_flags}, }' -> '0:bash*'
+1529517434.001974 @0 active pane not changed
+1529517437.186552 keys are 1 (e)
+1529517437.186572 complete key e 0x65
+1529517437.186577 session 0 activity 1529517437.186575 (last 1529517431.912588)
+1529517437.186584 session 0 not pasting
+1529517437.186590 writing key 0x65 (e) to %0
+1529517437.186605 @0 active pane not changed
+1529517437.186616 @0 active pane not changed
+1529517437.186686 %0 has 1 bytes
+1529517437.186690 @0 alerts timer reset 0
+1529517437.186692 @0 alerts flags added 0x2
+1529517437.186696 input_parse: %0 ground, 1 bytes: e
+1529517437.186713 @0 active pane changed
+1529517437.186780 format '#{pane_current_command}' -> 'bash'
+1529517437.186784 format '' -> ''
+1529517437.186787 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517437.186794 @0 name not changed (still bash)
+1529517437.186804 @0 active pane not changed
+1529517437.363127 keys are 1 (x)
+1529517437.363163 complete key x 0x78
+1529517437.363169 session 0 activity 1529517437.363166 (last 1529517437.186575)
+1529517437.363175 session 0 not pasting
+1529517437.363181 writing key 0x78 (x) to %0
+1529517437.363198 @0 active pane not changed
+1529517437.363210 @0 active pane not changed
+1529517437.363287 %0 has 1 bytes
+1529517437.363291 @0 alerts timer reset 0
+1529517437.363293 @0 alerts flags added 0x2
+1529517437.363297 input_parse: %0 ground, 1 bytes: x
+1529517437.363315 @0 active pane changed
+1529517437.363317 @0 name timer queued (323398 left)
+1529517437.363325 @0 active pane changed
+1529517437.363327 @0 name timer already queued (323388 left)
+1529517437.491132 keys are 1 (i)
+1529517437.491177 complete key i 0x69
+1529517437.491184 session 0 activity 1529517437.491180 (last 1529517437.363166)
+1529517437.491191 session 0 not pasting
+1529517437.491196 writing key 0x69 (i) to %0
+1529517437.491213 @0 active pane changed
+1529517437.491217 @0 name timer already queued (195499 left)
+1529517437.491229 @0 active pane changed
+1529517437.491232 @0 name timer already queued (195484 left)
+1529517437.491300 %0 has 1 bytes
+1529517437.491304 @0 alerts timer reset 0
+1529517437.491306 @0 alerts flags added 0x2
+1529517437.491311 input_parse: %0 ground, 1 bytes: i
+1529517437.491328 @0 active pane changed
+1529517437.491331 @0 name timer already queued (195385 left)
+1529517437.491338 @0 active pane changed
+1529517437.491340 @0 name timer already queued (195375 left)
+1529517437.555343 keys are 1 (t)
+1529517437.555358 complete key t 0x74
+1529517437.555363 session 0 activity 1529517437.555360 (last 1529517437.491180)
+1529517437.555368 session 0 not pasting
+1529517437.555373 writing key 0x74 (t) to %0
+1529517437.555383 @0 active pane changed
+1529517437.555386 @0 name timer already queued (131330 left)
+1529517437.555395 @0 active pane changed
+1529517437.555397 @0 name timer already queued (131318 left)
+1529517437.555458 %0 has 1 bytes
+1529517437.555462 @0 alerts timer reset 0
+1529517437.555464 @0 alerts flags added 0x2
+1529517437.555468 input_parse: %0 ground, 1 bytes: t
+1529517437.555483 @0 active pane changed
+1529517437.555485 @0 name timer already queued (131230 left)
+1529517437.555491 @0 active pane changed
+1529517437.555494 @0 name timer already queued (131221 left)
+1529517437.674621 keys are 1 (\r)
+1529517437.674644 complete key \r 0xd
+1529517437.674652 session 0 activity 1529517437.674648 (last 1529517437.555360)
+1529517437.674659 session 0 not pasting
+1529517437.674665 writing key 0xd (Enter) to %0
+1529517437.674682 @0 active pane changed
+1529517437.674686 @0 name timer already queued (12031 left)
+1529517437.674697 @0 active pane changed
+1529517437.674699 @0 name timer already queued (12016 left)
+1529517437.674751 %0 has 2 bytes
+1529517437.674755 @0 alerts timer reset 0
+1529517437.674757 @0 alerts flags added 0x2
+1529517437.674762 input_parse: %0 ground, 2 bytes: \r\n
+1529517437.674764 input_c0_dispatch: '\r'
+1529517437.674766 input_c0_dispatch: '\n'
+1529517437.674773 @0 active pane changed
+1529517437.674776 @0 name timer already queued (11940 left)
+1529517437.674782 @0 active pane changed
+1529517437.674785 @0 name timer already queued (11930 left)
+1529517437.674862 %0 has 8 bytes
+1529517437.674864 @0 alerts timer reset 0
+1529517437.674866 @0 alerts flags added 0x2
+1529517437.674869 input_parse: %0 ground, 8 bytes: logout\r\n
+1529517437.674885 input_c0_dispatch: '\r'
+1529517437.674886 input_c0_dispatch: '\n'
+1529517437.674891 @0 active pane changed
+1529517437.674893 @0 name timer already queued (11822 left)
+1529517437.674899 @0 active pane changed
+1529517437.674901 @0 name timer already queued (11814 left)
+1529517437.676056 %0 has 6 bytes
+1529517437.676065 @0 alerts timer reset 0
+1529517437.676068 @0 alerts flags added 0x2
+1529517437.676072 input_parse: %0 ground, 6 bytes: \033[H\033[J
+1529517437.676077 input_csi_dispatch: 'H' "" ""
+1529517437.676081 input_csi_dispatch: 'J' "" ""
+1529517437.676116 @0 active pane changed
+1529517437.676119 @0 name timer already queued (10597 left)
+1529517437.676129 @0 active pane changed
+1529517437.676131 @0 name timer already queued (10584 left)
+1529517437.687222 @0 name timer expired
+1529517437.687235 @0 active pane changed
+1529517437.687301 format '#{pane_current_command}' -> 'bash'
+1529517437.687305 format '' -> ''
+1529517437.687309 format '#{?pane_in_mode,[tmux],#{pane_current_command}}#{?pane_dead,[dead],}' -> 'bash'
+1529517437.687316 @0 name not changed (still bash)
+1529517437.729229 cmd_find_from_window: s=$0
+1529517437.729240 cmd_find_from_window: wl=0 1 w=@0 bash
+1529517437.729242 cmd_find_from_window: wp=none
+1529517437.729244 cmd_find_from_window: idx=0
+1529517437.729250 session 0 has 2 references
+1529517437.729254 session 0 destroyed
+1529517437.729257 session 0 has 2 references
+1529517437.729259 session 0 has 1 references
+1529517437.729272 sending message 203 to peer 0x690600 (4 bytes)
+1529517437.729300 session 0 freed (0 references)
+1529517437.729391 peer 0x690600 message 205
+1529517437.729445 sending message 204 to peer 0x690600 (0 bytes)
+1529517437.729778 lost client 0x68fff0
+1529517437.729805 remove peer 0x690600
+1529517437.729815 unref client 0x68fff0 (1 references)
+1529517437.729834 server loop exit

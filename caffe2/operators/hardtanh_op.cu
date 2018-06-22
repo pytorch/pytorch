@@ -20,7 +20,6 @@ __global__ void HardtanhGradientKernel(
     T* dX,
     T min_val_,
     T max_val_) {
-  const T c = lambda_ * alpha_;
   CUDA_1D_KERNEL_LOOP(i, N) {
     dX[i] = Y[i] >= max_val_ ? 0 : (Y[i] <= min_val_ ? 0 : dY[i]);
   }
