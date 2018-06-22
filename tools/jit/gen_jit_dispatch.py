@@ -90,6 +90,10 @@ def is_jit_arg(i, arg):
 
 
 def is_jit_op(decl):
+    # We currently don't support functions that return nothing
+    if all(r['type'] == 'void' for r in decl['returns']):
+        return False
+
     # we currently only support vararg tensor lists when they are the _first_ argument
     # and the only tensor argument
     arguments = decl['arguments']

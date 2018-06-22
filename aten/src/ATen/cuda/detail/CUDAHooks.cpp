@@ -5,6 +5,7 @@
 #include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
@@ -162,6 +163,38 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #else
   AT_ERROR(
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_max_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_set_plan_cache_max_size_impl(max_size);
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTClearPlanCache() const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_clear_plan_cache_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
 #endif
 }
 
