@@ -30,7 +30,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, skipCUDAMemoryLeakCheckIf, IN_SANDCASTLE
+    get_function_arglist, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -111,7 +111,6 @@ class PackedSequenceTest(TestCase):
         padded_tensor = rnn_utils.pad_sequence(ordered)
         return padded_tensor, lengths
 
-    @unittest.skipIf(IN_SANDCASTLE, "FIXME: out-of-range error in Sandcastle")
     def test_type_casts(self):
         """Test type casting of `PackedSequence` against type casting of tensor"""
         for _, (input_type, _) in self._type_by_name.items():
@@ -1835,7 +1834,6 @@ class TestNN(NNTestCase):
         F.conv_transpose2d(x, torch.randn(16, 1, 1, 1, device="cuda"))
         F.conv2d(x, torch.randn(1, 16, 1, 1, device="cuda"))
 
-    @unittest.skipIf(IN_SANDCASTLE, "FIXME: division-by-zero error in Sandcastle")
     def test_embedding_bag(self):
         self._test_EmbeddingBag(False, 'sum', False)
         self._test_EmbeddingBag(False, 'mean', False)
