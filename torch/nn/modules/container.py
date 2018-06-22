@@ -407,8 +407,8 @@ class ParameterDict(Module):
             def __init__(self):
                 super(MyModule, self).__init__()
                 self.choices = nn.ParameterDict({
-                        'left': nn.Parameter(torch.randn(10, 10)),
-                        'right': nn.Parameter(torch.randn(10, 10))
+                        'left': nn.Parameter(torch.randn(5, 10)),
+                        'right': nn.Parameter(torch.randn(5, 10))
                 })
 
             def forward(self, x, choice):
