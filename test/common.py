@@ -47,14 +47,15 @@ UNITTEST_ARGS = [sys.argv[0]] + remaining
 torch.manual_seed(SEED)
 
 
-def run_tests():
-    unittest.main(argv=UNITTEST_ARGS)
+def run_tests(argv=UNITTEST_ARGS):
+    unittest.main(argv=argv)
 
 PY3 = sys.version_info > (3, 0)
 PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
+IN_SANDCASTLE = 'IN_SANDCASTLE' in os.environ
 
 TEST_NUMPY = True
 try:
