@@ -337,7 +337,7 @@ int64_t get_device(const Tensor& self) {
   if (_has_native(self)) {
     return native_get_device(self);
   } else {
-    return th_get_device(self);
+    return _th_get_device(self);
   }
 }
 

@@ -1034,7 +1034,7 @@
 ]]
 [[
   name: getDevice
-  python_name: th_get_device
+  python_name: _th_get_device
   device_guard: False
   variants:
     - function
