@@ -108,6 +108,22 @@ struct AT_API CUDAHooksInterface {
         "cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library");
   }
 
+  virtual int64_t cuFFTGetPlanCacheMaxSize() const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+  }
+
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+  }
+
+  virtual int64_t cuFFTGetPlanCacheSize() const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+  }
+
+  virtual void cuFFTClearPlanCache() const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+  }
+
   virtual int getNumGPUs() const {
     return 0;
   }

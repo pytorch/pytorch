@@ -6,6 +6,7 @@ import unittest
 import sys
 from itertools import repeat
 import os
+from contextlib import contextmanager
 
 import torch
 import torch.cuda
@@ -1387,6 +1388,31 @@ class TestCuda(TestCase):
 
     def test_fft_ifft_rfft_irfft(self):
         TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        @contextmanager
+        def plan_cache_max_size(n):
+            original = torch.backends.cuda.cufft_plan_cache.max_size
+            torch.backends.cuda.cufft_plan_cache.max_size = n
+            yield
+            torch.backends.cuda.cufft_plan_cache.max_size = original
+
+        with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with plan_cache_max_size(0):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        torch.backends.cuda.cufft_plan_cache.clear()
+
+        # check that stll works after clearing cache
+        with plan_cache_max_size(10):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
+            torch.backends.cuda.cufft_plan_cache.max_size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"read-only property"):
+            torch.backends.cuda.cufft_plan_cache.size = -1
 
     def test_stft(self):
         TestTorch._test_stft(self, device=torch.device('cuda'))

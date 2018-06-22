@@ -646,6 +646,22 @@
     CPU: _fft_mkl
     CUDA: _fft_cufft
 
+- func: _cufft_get_plan_cache_size() -> int64_t
+  variants: function
+  device_guard: false
+
+- func: _cufft_get_plan_cache_max_size() -> int64_t
+  variants: function
+  device_guard: false
+
+- func: _cufft_set_plan_cache_max_size(int64_t max_size)
+  variants: function
+  device_guard: false
+
+- func: _cufft_clear_plan_cache()
+  variants: function
+  device_guard: false
+
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 

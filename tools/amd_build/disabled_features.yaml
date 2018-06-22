@@ -118,6 +118,13 @@
         }
       },
       {
+        "path": "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
+        "s_constants": {
+          "#include <cufft.h>": "",
+          "#include <cufftXt.h>": ""
+        }
+      },
+      {
         "path": "aten/src/ATen/native/cuda/SpectralOps.cu",
         "s_constants": {
           "#include <cufft.h>": "",
@@ -133,6 +140,7 @@
     ],
   "disabled_modules": [
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
+    "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
     "aten/src/THCUNN/RReLU.cu",
     "aten/src/ATen/native/cuda/Distributions.cu"

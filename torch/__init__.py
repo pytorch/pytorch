@@ -285,6 +285,7 @@ import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
+import torch.backends.cuda
 import torch.backends.mkl
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
