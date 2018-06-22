@@ -15,22 +15,28 @@
 
 namespace torch {
 namespace optim {
+
+struct LBFGSOptions {
+  LBFGSOptions(double learning_rate);
+  TORCH_ARG(double, learning_rate);
+  TORCH_ARG(int, max_iter) = 20;
+  TORCH_ARG(int, max_eval) = 25;
+  TORCH_ARG(float, tolerance_grad) = 1e-5;
+  TORCH_ARG(float, tolerance_change) = 1e-9;
+  TORCH_ARG(int, history_size) = 100;
+};
+
 class LBFGS : public Optimizer {
  public:
-  LBFGS(std::shared_ptr<nn::Module> model, double lr);
+  LBFGS(std::shared_ptr<nn::Module> model, const LBFGSOptions& options);
 
   template <typename ModuleType>
-  LBFGS(nn::ModuleHolder<ModuleType> module_holder, double lr)
-      : LBFGS(module_holder.get(), lr) {}
+  LBFGS(nn::ModuleHolder<ModuleType> module_holder, const LBFGSOptions& options)
+      : LBFGS(module_holder.get(), options) {}
 
-  TORCH_AUTOGRAD_KWARG(LBFGS, int, max_iter, 20, 20);
-  TORCH_AUTOGRAD_KWARG(LBFGS, int, max_eval, 25, 25);
-  TORCH_AUTOGRAD_KWARG(LBFGS, float, tolerance_grad, 1e-5, 1e-5);
-  TORCH_AUTOGRAD_KWARG(LBFGS, float, tolerance_change, 1e-9, 1e-9);
-  TORCH_AUTOGRAD_KWARG(LBFGS, int, history_size, 100, 100);
-
-  double lr_;
   at::Scalar step(std::function<at::Scalar()> closure) override;
+
+  const LBFGSOptions& options() const noexcept;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -45,9 +51,12 @@ class LBFGS : public Optimizer {
 
  private:
   friend class cereal::access;
-  LBFGS() {}
+  LBFGS() : options_(0) {}
+
   at::Tensor gather_flat_grad();
   void add_grad(const at::Scalar& step_size, const at::Tensor& update);
+
+  LBFGSOptions options_;
 
   at::Tensor d;
   at::Tensor H_diag;

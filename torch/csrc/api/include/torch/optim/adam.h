@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/nn/module.h>
+#include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
 
 #include <ATen/ATen.h>
@@ -15,22 +16,26 @@
 
 namespace torch {
 namespace optim {
+
+struct AdamOptions {
+  /* implicit */ AdamOptions(double learning_rate);
+  TORCH_ARG(double, learning_rate);
+  TORCH_ARG(double, beta1) = 0.9;
+  TORCH_ARG(double, beta2) = 0.999;
+  TORCH_ARG(double, weight_decay) = 0;
+  TORCH_ARG(double, eps) = 1e-8;
+  TORCH_ARG(bool, amsgrad) = false;
+};
+
 class Adam : public Optimizer {
  public:
-  Adam(std::shared_ptr<nn::Module> model, double lr);
+  Adam(std::shared_ptr<nn::Module> model, const AdamOptions& options);
 
   template <typename ModuleType>
-  Adam(nn::ModuleHolder<ModuleType> module_holder, double lr)
-      : Adam(module_holder.get(), lr) {}
+  Adam(nn::ModuleHolder<ModuleType> module_holder, const AdamOptions& options)
+      : Adam(module_holder.get(), options) {}
 
-  TORCH_AUTOGRAD_KWARG(Adam, double, beta1, 0.9, 0.9);
-  TORCH_AUTOGRAD_KWARG(Adam, double, beta2, 0.999, 0.999);
-  TORCH_AUTOGRAD_KWARG(Adam, double, weight_decay, 0, 0);
-  TORCH_AUTOGRAD_KWARG(Adam, double, eps, 1e-8, 1e-8);
-  TORCH_AUTOGRAD_KWARG(Adam, bool, amsgrad, false, true);
-  double lr_;
-  at::Scalar step(
-      std::function<at::Scalar()> closure = NoLoss) override;
+  at::Scalar step(std::function<at::Scalar()> closure = NoLoss) override;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -40,9 +45,13 @@ class Adam : public Optimizer {
        CEREAL_NVP(max_exp_avg_sq_buffer_));
   }
 
+  const AdamOptions& options() const noexcept;
+
  private:
   friend class cereal::access;
-  Adam() = default;
+  Adam() : options_(0) {}
+
+  AdamOptions options_;
 
   std::unordered_map<std::string, int> step_buffer_;
   std::unordered_map<std::string, at::Tensor> exp_avg_buffer_;

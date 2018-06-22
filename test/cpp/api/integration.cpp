@@ -354,7 +354,8 @@ TEST_CASE("integration/mnist", "[cuda]") {
     return x;
   };
 
-  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5);
+  auto optimizer =
+      torch::optim::SGD(model, torch::optim::SGDOptions(1e-2).momentum(0.5));
 
   REQUIRE(test_mnist(
       32, // batch_size
@@ -391,7 +392,8 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
     return x;
   };
 
-  auto optimizer = torch::optim::SGD(model, 1e-2).momentum(0.5);
+  auto optimizer =
+      torch::optim::SGD(model, torch::optim::SGDOptions(1e-2).momentum(0.5));
 
   REQUIRE(test_mnist(
       32, // batch_size

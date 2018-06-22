@@ -188,7 +188,12 @@ TEST_CASE("serialization") {
     auto model = xor_model();
     auto model2 = xor_model();
     auto model3 = xor_model();
-    torch::optim::SGD(model, 1e-1).momentum(0.9).nesterov().weight_decay(1e-6);
+    auto optimizer = torch::optim::SGD(
+        model,
+        torch::optim::SGDOptions(1e-1)
+            .momentum(0.9)
+            .nesterov(true)
+            .weight_decay(1e-6));
 
     float running_loss = 1;
     int epoch = 0;
@@ -224,11 +229,16 @@ TEST_CASE("serialization") {
     torch::load(ss, model3.get());
 
     // Make some optimizers with momentum (and thus state)
-    auto optim1 = torch::optim::SGD(model1, 1e-1).momentum(0.9);
-    auto optim2 = torch::optim::SGD(model2, 1e-1).momentum(0.9);
-    auto optim2_2 = torch::optim::SGD(model2, 1e-1).momentum(0.9);
-    auto optim3 = torch::optim::SGD(model3, 1e-1).momentum(0.9);
-    auto optim3_2 = torch::optim::SGD(model3, 1e-1).momentum(0.9);
+    auto optim1 =
+        torch::optim::SGD(model1, torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim2 =
+        torch::optim::SGD(model2, torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim2_2 =
+        torch::optim::SGD(model2, torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim3 =
+        torch::optim::SGD(model3, torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim3_2 =
+        torch::optim::SGD(model3, torch::optim::SGDOptions(1e-1).momentum(0.9));
 
     auto x = torch::ones({10, 5}, at::requires_grad());
 
@@ -236,7 +246,7 @@ TEST_CASE("serialization") {
       optimizer.zero_grad();
       auto y = model->forward({x})[0].sum();
       y.backward();
-      optimizer.step(optim::Optimizer::NoLoss);
+      optimizer.step(torch::optim::Optimizer::NoLoss);
     };
 
     // Do 2 steps of model1
@@ -288,10 +298,10 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   auto model = xor_model();
   auto model2 = xor_model();
   auto model3 = xor_model();
-  auto optimizer = torch::optim::SGD(model, 1e-1)
-                       .momentum(0.9)
-                       .nesterov()
-                       .weight_decay(1e-6);
+  auto optimizer = torch::optim::SGD(
+      model,
+      torch::optim::SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(
+          1e-6));
 
   float running_loss = 1;
   int epoch = 0;

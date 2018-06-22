@@ -15,23 +15,30 @@
 
 namespace torch {
 namespace optim {
+
+struct RMSpropOptions {
+  RMSpropOptions(double learning_rate);
+  TORCH_ARG(double, learning_rate);
+  TORCH_ARG(double, alpha) = 0.99;
+  TORCH_ARG(double, eps) = 1e-8;
+  TORCH_ARG(double, weight_decay) = 0;
+  TORCH_ARG(double, momentum) = 0;
+  TORCH_ARG(bool, centered) = false;
+};
+
 class RMSprop : public Optimizer {
  public:
-  RMSprop(std::shared_ptr<nn::Module> model, double lr);
+  RMSprop(std::shared_ptr<nn::Module> model, const RMSpropOptions& options);
 
   template <typename ModuleType>
-  RMSprop(nn::ModuleHolder<ModuleType> module_holder, double lr)
-      : RMSprop(module_holder.get(), lr) {}
+  RMSprop(
+      nn::ModuleHolder<ModuleType> module_holder,
+      const RMSpropOptions& options)
+      : RMSprop(module_holder.get(), options) {}
 
-  TORCH_AUTOGRAD_KWARG(RMSprop, double, alpha, 0.99, 0.99);
-  TORCH_AUTOGRAD_KWARG(RMSprop, double, eps, 1e-8, 1e-8);
-  TORCH_AUTOGRAD_KWARG(RMSprop, double, weight_decay, 0, 0);
-  TORCH_AUTOGRAD_KWARG(RMSprop, double, momentum, 0, 0);
-  TORCH_AUTOGRAD_KWARG(RMSprop, bool, centered, false, true);
+  at::Scalar step(std::function<at::Scalar()> closure = NoLoss) override;
 
-  double lr_;
-  at::Scalar step(
-      std::function<at::Scalar()> closure = NoLoss) override;
+  const RMSpropOptions& options() const noexcept;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -42,7 +49,10 @@ class RMSprop : public Optimizer {
 
  private:
   friend class cereal::access;
-  RMSprop() {}
+  RMSprop() : options_(0) {}
+
+  RMSpropOptions options_;
+
   std::unordered_map<std::string, at::Tensor> square_avg_buffer_;
   std::unordered_map<std::string, at::Tensor> momentum_buffer_;
   std::unordered_map<std::string, at::Tensor> grad_avg_buffer_;

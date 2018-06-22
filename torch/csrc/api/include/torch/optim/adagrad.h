@@ -15,18 +15,27 @@
 
 namespace torch {
 namespace optim {
+
+struct AdagradOptions {
+  AdagradOptions(double learning_rate);
+  TORCH_ARG(double, learning_rate);
+  TORCH_ARG(double, lr_decay) = 0;
+  TORCH_ARG(double, weight_decay) = 0;
+};
+
 class Adagrad : public Optimizer {
  public:
-  Adagrad(std::shared_ptr<nn::Module> model, double lr);
+  Adagrad(std::shared_ptr<nn::Module> model, const AdagradOptions& options);
 
   template <typename ModuleType>
-  Adagrad(nn::ModuleHolder<ModuleType> module_holder, double lr)
-      : Adagrad(module_holder.get(), lr) {}
+  Adagrad(
+      nn::ModuleHolder<ModuleType> module_holder,
+      const AdagradOptions& options)
+      : Adagrad(module_holder.get(), options) {}
 
-  TORCH_AUTOGRAD_KWARG(Adagrad, double, lr_decay, 0, 0);
-  TORCH_AUTOGRAD_KWARG(Adagrad, double, weight_decay, 0, 0);
-  double lr_;
   at::Scalar step(std::function<at::Scalar()> closure = NoLoss) override;
+
+  const AdagradOptions& options() const noexcept;
 
   template <class Archive>
   void serialize(Archive& ar) {
@@ -36,7 +45,10 @@ class Adagrad : public Optimizer {
 
  private:
   friend class cereal::access;
-  Adagrad() {}
+  Adagrad() : options_(0) {}
+
+  AdagradOptions options_;
+
   std::unordered_map<std::string, at::Tensor> sum_;
   std::unordered_map<std::string, double> step_;
 };

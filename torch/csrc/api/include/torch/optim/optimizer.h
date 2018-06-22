@@ -7,13 +7,6 @@
 #include <functional>
 #include <memory>
 
-#define TORCH_AUTOGRAD_KWARG(CLS, TYP, NAME, DEFAULT, OPTION) \
-  TYP NAME##_ = DEFAULT;                                      \
-  CLS& NAME(TYP x = OPTION) {                                 \
-    NAME##_ = x;                                              \
-    return *this;                                             \
-  }
-
 namespace torch {
 namespace optim {
 class Optimizer {

@@ -9,8 +9,17 @@
 namespace torch {
 namespace optim {
 
-Adagrad::Adagrad(std::shared_ptr<nn::Module> model, double lr)
-    : Optimizer(model), lr_(lr) {}
+AdagradOptions::AdagradOptions(double learning_rate)
+    : learning_rate_(learning_rate) {}
+
+Adagrad::Adagrad(
+    std::shared_ptr<nn::Module> model,
+    const AdagradOptions& options)
+    : Optimizer(model), options_(options) {}
+
+const AdagradOptions& Adagrad::options() const noexcept {
+  return options_;
+}
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
@@ -24,12 +33,13 @@ at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
       continue;
 
     auto d_p = torch::autograd::as_variable_ref(grad).data();
-    if (weight_decay_ > 0) {
-      d_p.add_(p, weight_decay_);
+    if (options_.weight_decay_ > 0) {
+      d_p.add_(p, options_.weight_decay_);
     };
     auto& step = step_[name];
     step += 1.0;
-    auto clr = lr_ / (1.0 + (step - 1.0) * lr_decay_);
+    auto clr =
+        options_.learning_rate_ / (1.0 + (step - 1.0) * options_.lr_decay_);
     at::Tensor buf;
     if (sum_.find(name) == sum_.end()) {
       buf = sum_[name] = at::zeros_like(p);

@@ -12,18 +12,25 @@
 namespace torch {
 namespace optim {
 
-LBFGS::LBFGS(std::shared_ptr<nn::Module> model, double lr)
+LBFGSOptions::LBFGSOptions(double learning_rate)
+    : learning_rate_(learning_rate) {}
+
+LBFGS::LBFGS(std::shared_ptr<nn::Module> model, const LBFGSOptions& options)
     : Optimizer(model),
-      lr_(lr),
+      options_(options),
       d(torch::empty({0})),
       H_diag(torch::empty({0})),
       prev_flat_grad(torch::empty({0})),
       t(0),
       prev_loss(0),
-      ro(history_size_),
-      al(history_size_),
+      ro(options_.history_size_),
+      al(options_.history_size_),
       func_evals(0),
       state_n_iter(0) {}
+
+const LBFGSOptions& LBFGS::options() const noexcept {
+  return options_;
+}
 
 at::Tensor LBFGS::gather_flat_grad() {
   std::vector<at::Tensor> views;
@@ -53,14 +60,14 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
   at::Tensor flat_grad = gather_flat_grad();
   at::Scalar abs_grad_sum = at::Scalar(flat_grad.abs().sum());
 
-  if (at::Scalar(abs_grad_sum).toFloat() <= tolerance_grad_) {
+  if (at::Scalar(abs_grad_sum).toFloat() <= options_.tolerance_grad_) {
     return loss;
   }
 
   at::Tensor ONE = flat_grad.type().scalarTensor(1);
 
   int n_iter = 0;
-  while (n_iter < max_iter_) {
+  while (n_iter < options_.max_iter_) {
     n_iter++;
     state_n_iter++;
 
@@ -76,7 +83,7 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
       if (ys.toFloat() > 1e-10) {
         // updating memory
 
-        if ((int)old_dirs.size() == history_size_) {
+        if ((int)old_dirs.size() == options_.history_size_) {
           // shift history by one (limited memory)
           old_dirs.pop_front();
           old_stps.pop_front();
@@ -120,15 +127,16 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
 
     // reset initial guess for step size
     if (n_iter == 1) {
-      t = at::Scalar(at::min(ONE, ONE / abs_grad_sum) * lr_);
+      t = at::Scalar(
+          at::min(ONE, ONE / abs_grad_sum) * options_.learning_rate_);
     } else {
-      t = lr_;
+      t = options_.learning_rate_;
     }
 
     at::Scalar gtd = at::Scalar(flat_grad.dot(d));
     add_grad(t, d);
     int ls_func_evals = 0;
-    if (n_iter != max_iter_) {
+    if (n_iter != options_.max_iter_) {
       // re-evaluate function only if not in last iteration
       // the reason we do this: in a stochastic setting,
       // no use to re-evaluate that function here
@@ -144,19 +152,21 @@ at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
      * Check conditions
      */
 
-    if (n_iter == max_iter_) {
+    if (n_iter == options_.max_iter_) {
       break;
-    } else if (current_evals >= max_eval_) {
+    } else if (current_evals >= options_.max_eval_) {
       break;
-    } else if (abs_grad_sum.toFloat() <= tolerance_grad_) {
+    } else if (abs_grad_sum.toFloat() <= options_.tolerance_grad_) {
       break;
-    } else if (gtd.toFloat() > -tolerance_grad_) {
-      break;
-    } else if (
-        at::Scalar(d.mul(t).abs_().sum()).toFloat() <= tolerance_change_) {
+    } else if (gtd.toFloat() > -options_.tolerance_grad_) {
       break;
     } else if (
-        std::abs(loss.toFloat() - prev_loss.toFloat()) < tolerance_change_) {
+        at::Scalar(d.mul(t).abs_().sum()).toFloat() <=
+        options_.tolerance_change_) {
+      break;
+    } else if (
+        std::abs(loss.toFloat() - prev_loss.toFloat()) <
+        options_.tolerance_change_) {
       break;
     }
   }
