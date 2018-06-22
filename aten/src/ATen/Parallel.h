@@ -26,14 +26,18 @@ inline void parallel_for(
     const int64_t end,
     const int64_t grain_size,
     const F f) {
-  if (get_num_threads() == 1) {
-    f(begin, end);
-  } else {
-#pragma omp parallel for if ((end - begin) >= grain_size)
-    for (int64_t i = begin; i < end; i += grain_size) {
-      f(i, i + std::min(end - i, grain_size));
-    }
+#ifdef _OPENMP
+#pragma omp parallel if ((end - begin) >= grain_size)
+  {
+    int64_t num_threads = omp_get_num_threads();
+    int64_t tid = omp_get_thread_num();
+    int64_t chunk_size = divup((end - begin), num_threads);
+    int64_t begin_tid = begin + tid * chunk_size;
+    f(begin_tid, std::min(end, chunk_size + begin_tid));
   }
+#else
+  f(begin, end);
+#endif
 }
 
 template <class scalar_t, class F, class SF>
