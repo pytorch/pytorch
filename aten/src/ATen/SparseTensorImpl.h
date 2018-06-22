@@ -6,10 +6,23 @@
 
 namespace at {
 struct SparseTensorImpl : public TensorImpl {
-  // Stored in COO format, indices + values
+  // Stored in COO format, indices + values.
+
+  // Ideal INVARIANTS:
+  // _sparseDims: range [0, len(shape)]; _sparseDims + _denseDims = len(shape)
+  // _denseDims : range [0, len(shape)]; _sparseDims + _denseDims = len(shape)
+  // _indices.shape: dimensionality: 2,  shape: (_sparseDims, nnz)
+  // _values.shape:  dimensionality: 1 + _denseDims.  shape: (nnz, shape[_sparseDims:])
+
+  // Actual INVARIANT differences:
+  // 1) _sparseDims: range [1, len(shape)] (i.e. we don't allow 0 sparse dimensions)
+  // 2) when nnz = 0, there is strange behavior because we lack 0-dimensional sparse tensors.  Namely:
+  //    dimensionality == 0, _sparseDims == 0, _denseDims == 0, _indices.shape == {0}, _values.shape == {0}
+  // 3) For both _indices.shape and _values.shape, the nnz dimension may be larger than nnz
+  // 4) For _values.shape, the non-nnz dimensions may be smaller than the corresponding dimension size, e.g.
+  //    a shape (2,3) sparse tensor with _sparseDims == 1, may have _values.shape: (nnz, <=2, <=3).
 
   std::vector<int64_t> size_;
-  // INVARIANT: indices_.size(1) >= nnz_ && values_.size(0) >= nnz_
   int64_t nnz_ = 0;
   int64_t sparseDims_ = 0; // number of sparse dimensions
   int64_t denseDims_ = 0; // number of dense dimensions
