@@ -9,6 +9,7 @@
 
 #include <test/cpp/api/util.h>
 
+#include <cmath>
 #include <cstdlib>
 #include <functional>
 #include <memory>
@@ -19,7 +20,7 @@ using namespace torch::optim;
 
 bool test_optimizer_xor(
     torch::optim::Optimizer&& optimizer,
-    , Sequential& model) {
+    Sequential& model) {
   float running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
@@ -51,10 +52,17 @@ bool test_optimizer_xor(
   return true;
 }
 
+// TODO: Add test for zero_grad
+// TODO: Add test for passing arbitrary vector of variables
+// TODO: Add hard tests that verify deterministically the output of each
+// optimization algorithm against the PyTorch algorithms (i.e. compare against a
+// matrix of values after 1000 iterations)
+
 TEST_CASE("optim") {
   std::srand(0);
   torch::manual_seed(0);
-  Sequential model(torch::SigmoidLinear(Linear(2, 8)), torch::SigmoidLinear(Linear(8, 1)));
+  Sequential model(
+      torch::SigmoidLinear(Linear(2, 8)), torch::SigmoidLinear(Linear(8, 1)));
 
   SECTION("sgd") {
     REQUIRE(test_optimizer_xor(
@@ -65,10 +73,10 @@ TEST_CASE("optim") {
   }
 
   // // Flaky
-  // SECTION("lbfgs") {
-  //   auto optimizer = LBFGS(model.parameters(), LBFGSOptions(5e-2).max_iter(5));
-  //   // REQUIRE(test_optimizer_xor(optimizer, model));
-  // }
+  SECTION("lbfgs") {
+    auto optimizer = LBFGS(model.parameters(), LBFGSOptions(5e-2).max_iter(5));
+    // REQUIRE(test_optimizer_xor(optimizer, model));
+  }
 
   SECTION("adagrad") {
     REQUIRE(test_optimizer_xor(

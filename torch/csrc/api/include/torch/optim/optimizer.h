@@ -7,9 +7,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
-#include <algorithm>
 #include <functional>
-#include <iterator>
 #include <memory>
 #include <type_traits>
 #include <vector>
@@ -32,14 +30,8 @@ class OptimizerBase {
  public:
   using ParameterCursor = torch::detail::CursorBase<Variable>;
 
-  template <
-      typename ParameterContainer,
-      typename = torch::disable_if_t<
-          std::is_base_of<ParameterCursor, ParameterContainer>::value>>
-  explicit OptimizerBase(ParameterContainer&& parameters)
-      : parameters_(parameters.size()) {
-    std::move(parameters.begin(), parameters.end(), parameters_.begin());
-  }
+  explicit OptimizerBase(std::vector<Variable>&& parameters)
+      : parameters_(std::move(parameters)) {}
 
   explicit OptimizerBase(ParameterCursor&& cursor) {
     parameters_.reserve(cursor.size());
