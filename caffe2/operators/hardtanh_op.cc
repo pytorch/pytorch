@@ -111,7 +111,7 @@ Y:
 OPERATOR_SCHEMA(HardtanhGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .AllowInplace({{1, 0}})
+    .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
 HardtanhGradient takes both dY and Y and uses this to update dX according to the
 derivatives of the hardtanh function.
@@ -122,8 +122,8 @@ derivatives of the hardtanh function.
     .Arg(
         "max_val",
         "(float) default to 1~; affects the activation function itself.")
-    .Input(0, "Y", "input tensor")
-    .Input(1, "dY", "input tensor");
+    .Input(0, "dY", "input tensor")
+    .Input(1, "Y", "input tensor");
 
 class GetHardtanhGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
