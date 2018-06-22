@@ -261,7 +261,7 @@ class RNN(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            as `(batch, seq, feature)`
+            as `(batch, seq, feature)`. Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -364,7 +364,7 @@ class LSTM(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            as (batch, seq, feature)
+            as (batch, seq, feature). Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -457,7 +457,7 @@ class GRU(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            as (batch, seq, feature)
+            as (batch, seq, feature). Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             GRU layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
