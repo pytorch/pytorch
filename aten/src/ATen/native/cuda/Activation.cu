@@ -12,8 +12,7 @@ void hardshrink_cuda_kernel(const Tensor& self, Tensor& out_tensor, scalar_t* la
     out_tensor,
     [lambd] __device__ (
       scalar_t& self_val,
-      scalar_t& out_tensor_val,
-      bool early_exit) {
+      scalar_t& out_tensor_val) {
         out_tensor_val = (self_val >= -*lambd && self_val <= *lambd) ? scalar_t(0) : self_val;
   });
 }
