@@ -5692,15 +5692,14 @@ class TestTorch(TestCase):
         ]
         for t in float_types:
             data = data_original.type(t)
-            self.assertEqual(torch.tensor([1, 0.5, 0, 0.6]).view(2, 2), torch.nn.Hardshrink(0.3)(data))
-            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), torch.nn.Hardshrink(0.5)(data))
-            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), torch.nn.Hardshrink()(data))
+            self.assertEqual(torch.tensor([1, 0.5, 0, 0.6]).view(2, 2), data.hardshrink(0.3))
+            self.assertEqual(torch.tensor([1, 0, 0, 0.6]).view(2, 2), data.hardshrink(0.5))
+
+            # test default lambd=0.5
+            self.assertEqual(data.hardshrink(), data.hardshrink(0.5))
 
             # test non-contiguous case
-            self.assertEqual(torch.tensor([1, 0.3, 0.5, 0.6]).view(2, 2), torch.nn.Hardshrink(0.1)(data.t()))
-
-            # not supporting default lambd value for torch.hardshrink() due to a Scalar bug
-            self.assertRaises(TypeError, lambda: data.hardshrink())
+            self.assertEqual(torch.tensor([1, 0, 0.5, 0.6]).view(2, 2), data.t().hardshrink(0.3))
 
     def test_unbiased(self):
         tensor = torch.randn(100)
