@@ -79,6 +79,17 @@ if "%REBUILD%"=="" (
   )
 )
 
+:: Install Clang-LLVM
+if "%REBUILD%"=="" (
+  if "%BUILD_ENVIRONMENT%"=="" (
+    curl.exe -k -O https://s3.amazonaws.com/ossci-windows/LLVM-6.0.1-rC331533.7z
+  ) else (
+    aws s3 cp s3://ossci-windows/LLVM-6.0.1-rC331533.7z LLVM-6.0.1-rC331533.7z --quiet
+  )
+  7z x -aoa ./LLVM-6.0.1-rC331533.7z -o"C:\Program Files\LLVM"
+  set "PATH=C:\Program Files\LLVM\bin;%PATH%"
+)
+
 :: Install Miniconda3
 if "%BUILD_ENVIRONMENT%"=="" (
   set CONDA_PARENT_DIR=%CD%
@@ -120,8 +131,8 @@ set TORCH_CUDA_ARCH_LIST=5.2
 sccache --stop-server
 sccache --start-server
 sccache --zero-stats
-set CC=sccache cl
-set CXX=sccache cl
+set CC=sccache clang-cl
+set CXX=sccache clang-cl
 
 set DISTUTILS_USE_SDK=1
 

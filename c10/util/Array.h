@@ -42,6 +42,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <algorithm>
 
 namespace c10 { namespace guts {
 
