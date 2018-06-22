@@ -263,6 +263,7 @@ class TestTorch(TestCase):
         if input is None:
             input = []
             input.append(list(range(-5, 5)))
+            input.append([0 for x in range(-5, 5)])
             input.append([x + 1e-6 for x in range(-5, 5)])
             # Some vectorized implementations don't support large ranges
             input.append([x + 1e10 for x in range(-5, 5)])
