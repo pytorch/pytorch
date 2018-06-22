@@ -29,22 +29,12 @@ struct SparseTensorImpl : public TensorImpl {
   std::vector<int64_t> size_;
 
   // The number of non-zero elements.
-  // INVARIANT: indices_.size(1) >= nnz_ && values_.size(0) >= nnz_
-  // TODO: There isn't really any good reason for the invariant to
-  // be relaxed like this; we should have these inequalities be
-  // equalities.  This will let us simplify _indices() and _values()
-  // methods.
   int64_t nnz_ = 0;
 
   int64_t sparseDims_ = 0; // number of sparse dimensions
   int64_t denseDims_ = 0; // number of dense dimensions
 
-  // 2-D tensor of nDim x nnz of indices. May have nnz dim bigger than nnz
-  // as buffer, so we keep track of both
   Tensor indices_; // always a LongTensor
-
-  // (1+denseDims)-D tensor of nnx x dim0 x dim1 x ... of values.  As with
-  // indices, may have nnz dim bigger than nnz.
   Tensor values_;
 
   // A sparse tensor is 'coalesced' if every index occurs at most once in
