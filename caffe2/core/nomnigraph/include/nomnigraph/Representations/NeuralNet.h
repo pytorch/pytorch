@@ -49,6 +49,7 @@ class Annotation {
 
   Annotation(AnnotationKind K) : Kind(K) {}
   Annotation() : Kind(AnnotationKind::Generic) {}
+  virtual ~Annotation() {}
 
   AnnotationKind getKind() const {
     return Kind;
