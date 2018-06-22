@@ -38,8 +38,9 @@ struct SparseTensorImpl : public TensorImpl {
   Tensor values_;
 
   // A sparse tensor is 'coalesced' if every index occurs at most once in
-  // the indices tensor, and the indices are in sorted order.  This is almost
-  // nearly equivalent to CSR format.
+  // the indices tensor, and the indices are in sorted order.  (This means
+  // that it is very easy to convert a coalesced tensor to CSR format: you
+  // need only compute CSR format indices.)
   //
   // Most math operations can only be performed on coalesced sparse tensors,
   // because many algorithms proceed by merging two sorted lists (of indices).
