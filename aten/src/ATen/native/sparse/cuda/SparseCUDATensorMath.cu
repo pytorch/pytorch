@@ -6,7 +6,6 @@
 #include <ATen/cuda/CUDAApplyUtils.cuh>
 #include <ATen/cuda/CUDATypeConversion.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
-#include <ATen/cuda/CUDATensorMethods.cuh>
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
@@ -16,7 +15,7 @@
 #include <thrust/system/cuda/execution_policy.h>
 
 #define I_INFO(tensor) cuda::detail::getTensorInfo<int64_t, uint64_t>(tensor)
-#define V_INFO(tensor) cuda::detail::getTensorInfo<cuda_scalar_t, uint64_t>(tensor)
+#define V_INFO(tensor) cuda::detail::getTensorInfo<scalar_t, uint64_t>(tensor)
 
 namespace at { namespace native {
 
@@ -277,10 +276,9 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 
       AT_DISPATCH_ALL_TYPES_AND_HALF(
           values.type(), "add_out_dense_sparse_cuda", [&] {
-            using cuda_scalar_t = cuda::into_type<scalar_t>;
-            apply::sparseElementwiseKernelScalar<TensorCAddOp<cuda_scalar_t>, uint64_t, cuda_scalar_t>
+            apply::sparseElementwiseKernelScalar<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
-                TensorCAddOp<cuda_scalar_t>(value.to<cuda_scalar_t>()),
+                TensorCAddOp<scalar_t>(value.to<scalar_t>()),
                 V_INFO(r_), I_INFO(indices), V_INFO(values),
                 static_cast<uint64_t>(nnz));
           });
@@ -289,10 +287,9 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 
       AT_DISPATCH_ALL_TYPES_AND_HALF(
           values.type(), "add_out_dense_sparse_cuda", [&] {
-            using cuda_scalar_t = cuda::into_type<scalar_t>;
-            apply::sparseElementwiseKernel<TensorCAddOp<cuda_scalar_t>, uint64_t, cuda_scalar_t>
+            apply::sparseElementwiseKernel<TensorCAddOp<scalar_t>, uint64_t, scalar_t>
               <<<grid, block, 0, stream>>>(
-                TensorCAddOp<cuda_scalar_t>(value.to<cuda_scalar_t>()),
+                TensorCAddOp<scalar_t>(value.to<scalar_t>()),
                 V_INFO(r_), I_INFO(indices), V_INFO(values),
                 static_cast<uint64_t>(nnz));
           });
@@ -305,8 +302,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     // NB: Purposely not inplace!
     AT_DISPATCH_ALL_TYPES_AND_HALF(
         values.type(), "add_out_dense_sparse_cuda", [&] {
-          using cuda_scalar_t = cuda::into_type<scalar_t>;
-          if (value.to<cuda_scalar_t>() != ScalarConvert<int, cuda_scalar_t>::to(1)) {
+          if (value.to<scalar_t>() != ScalarConvert<int, scalar_t>::to(1)) {
             values = values.mul(value);
           }
         });
@@ -371,8 +367,7 @@ SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, con
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       s_values_.type(), "s_add_out_sparse_cuda", [&] {
-        using cuda_scalar_t = cuda::into_type<scalar_t>;
-        if (value.to<cuda_scalar_t>() != ScalarConvert<int, cuda_scalar_t>::to(1)) {
+        if (value.to<scalar_t>() != ScalarConvert<int, scalar_t>::to(1)) {
           s_values_ = s_values_.mul(value);
         }
       });
@@ -413,9 +408,8 @@ SparseTensor& s_add_sparse_cuda_(SparseTensor& t, const SparseTensor& src, Scala
 SparseTensor& s_sub_out_sparse_cuda(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
   AT_DISPATCH_ALL_TYPES(
       t.type(), "sub_sparse", [&] {
-        using cuda_scalar_t = cuda::into_type<scalar_t>;
-        cuda_scalar_t cast_value = value.to<cuda_scalar_t>();
-        s_add_out_sparse_cuda(r, t, src, ScalarNegate<cuda_scalar_t>::to(cast_value));
+        scalar_t cast_value = value.to<scalar_t>();
+        s_add_out_sparse_cuda(r, t, src, ScalarNegate<scalar_t>::to(cast_value));
       }
   );
   return r;
@@ -471,16 +465,15 @@ SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, co
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       t_values_.type(), "s_mul_out_sparse_cuda", [&] {
-        using cuda_scalar_t = cuda::into_type<scalar_t>;
-        apply::valueSparseIntersectionKernel<TensorMulOp<cuda_scalar_t>, uint64_t, cuda_scalar_t>
+        apply::valueSparseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
           <<<grid, block, 0, stream>>>(
-            TensorMulOp<cuda_scalar_t>(),
+            TensorMulOp<scalar_t>(),
             I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
             V_INFO(r_values_), V_INFO(t_values_), V_INFO(s_values_),
             static_cast<uint64_t>(t_nnz), static_cast<uint64_t>(s_nnz));
         THCudaCheck(cudaGetLastError());
 
-        apply::indexSparseIntersectionKernel<uint64_t, cuda_scalar_t>
+        apply::indexSparseIntersectionKernel<uint64_t, scalar_t>
           <<<1, 1, 0, stream>>>(
             I_INFO(r_indices_), I_INFO(t_indices_), I_INFO(s_indices_),
             // reinterpret_cast shenanigans, because we don't actually have

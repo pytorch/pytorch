@@ -4,7 +4,6 @@
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/AccumulateType.h>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDATensorMethods.cuh>
 
 #include <THC/THCThrustAllocator.cuh>
 #include <THC/THCTensorSort.cuh>
@@ -89,13 +88,12 @@ SparseTensor coalesce_sparse_cuda(const SparseTensor& self) {
   dim3 block(32, 4);
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       values.type(), "coalesce_sparse_cuda", [&] {
-        using cuda_scalar_t = cuda::into_type<scalar_t>;
-        using cuda_accscalar_t = acc_type<cuda_scalar_t, /* is_cuda */ true>;
-        apply::coalesceValuesKernel<cuda_scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
+        using accscalar_t = acc_type<scalar_t>;
+        apply::coalesceValuesKernel<scalar_t, accscalar_t><<<grid, block, 0, stream>>>(
           uniqueOffsets.data<int64_t>(),
           origIndices.data<int64_t>(),
-          values.data<cuda_scalar_t>(),
-          newValues.data<cuda_scalar_t>(),
+          values.data<scalar_t>(),
+          newValues.data<scalar_t>(),
           nnz,
           newNnz,
           stride
