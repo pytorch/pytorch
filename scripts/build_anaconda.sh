@@ -1,4 +1,6 @@
 #!/bin/bash
+# pointless change
+# another one!
 
 # This script creates and (possibly) uploads a Caffe2 Anaconda package, and
 # then (optionally) installs the package locally into the current activated
