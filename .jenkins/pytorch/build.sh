@@ -40,7 +40,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
 
   # Invoke from the pytorch_amd directory.
-  USE_ROCM=1 python "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/setup.py" install
+  cd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd"
+  USE_ROCM=1 python setup.py install
   exit
 fi
 
