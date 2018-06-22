@@ -79,13 +79,6 @@ const char * ${Type}::typeString() {
   return "${Type}";
 }
 
-/* example
-Tensor * ${Type}::add(Tensor & a, Tensor & b) {
-  std::cout << "add ${Tensor}\n";
-  return &a;
-}
-*/
-
 ${type_derived_method_definitions}
 
 }

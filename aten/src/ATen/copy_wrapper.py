@@ -150,6 +150,13 @@ def create_one_copy(dst_type, all_types):
     else:
         function_fallthrough = FUNCTION_FALLTHROUGH_ERROR
 
+    # Note [checked_cast_tensor is for dense only]
+    # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    # checked_cast_tensor is only needed for backends which implement
+    # copy and thus do a cast.  Sparse does not support copies, so there
+    # is no need to do a checked cast.  (Furthermore, the code as written
+    # will not work, as it will try to there is no derived Tensor type
+    # for sparse.)
     checked_cast_dst = ''
     if dst_type['Density'] == 'Dense':
         checked_cast_dst = 'checked_cast_tensor<{}>(dst.pImpl, "dst", 0, false);'.format(dst_type['Tensor'])
@@ -198,6 +205,7 @@ def create_one_copy_from(src_type, all_types):
 
         copy_body.append(CASE.substitute(body_env, copies=copies))
 
+    # See Note [checked_cast_tensor is for dense only]
     checked_cast_src = ''
     if src_type['Density'] != 'Sparse':
         checked_cast_src = 'checked_cast_tensor<{}>(src.pImpl, "src", 0, false);'.format(src_type['Tensor'])
