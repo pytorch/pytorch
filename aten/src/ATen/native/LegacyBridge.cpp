@@ -319,8 +319,6 @@ Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
   }
 }
 
-// TODO: eliminate this trampoline, delete th_sparse_coo_tensor
-
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
   return values.type().toSparse().native_sparse_coo_tensor(indices, values);
 }
