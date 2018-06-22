@@ -1,5 +1,5 @@
 #include "torch/csrc/onnx/init.h"
-#include "torch/csrc/onnx/onnx.pb.h"
+#include "torch/csrc/onnx/onnx.npb.h"
 #include "torch/csrc/onnx/onnx.h"
 
 namespace torch { namespace onnx {

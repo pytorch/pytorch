@@ -817,7 +817,7 @@ main_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
-    "torch/csrc/onnx/onnx.pb.cpp",
+    "torch/csrc/onnx/onnx.npb.cpp",
     "torch/csrc/onnx/onnx.cpp",
     "torch/csrc/onnx/init.cpp",
 ]
