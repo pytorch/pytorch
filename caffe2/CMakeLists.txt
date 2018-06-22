@@ -1,4 +1,4 @@
-# ---[ Generate and install header and cpp files
+it # ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
 # ---[ Declare source file lists
@@ -256,18 +256,31 @@ endif()
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  IF(BUILD_ATEN)
-  GET_DIRECTORY_PROPERTY(MY_DEFINITIONS COMPILE_DEFINITIONS)
-  IF (MY_DEFINITIONS)
-    FOREACH(_item ${MY_DEFINITIONS})
-      LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
-    ENDFOREACH()
-  ENDIF()
-     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
-  ENDIF()
-  IF(BUILD_CAFFE2)
-     set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-  ENDIF()
+  if(BUILD_ATEN)
+    get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
+    if(MY_DEFINITIONS)
+      foreach(_item ${MY_DEFINITIONS})
+        LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
+      endforeach()
+    endif()
+    hip_include_directories(${Caffe2_HIP_INCLUDES})
+  endif()
+
+  # Necessary in order to build all the source code
+  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+
+  # Strip out all *.h files from the source list when building with HCC.
+  if(BUILD_ATEN)
+    foreach(hip_source ${Caffe2_HIP_SRCS})
+      get_filename_component(extension ${hip_source} EXT)
+      if (${extension} MATCHES "\\.h$")
+        # Set to 0 to disable device compilation of regular header files.
+        set_source_files_properties(${hip_source} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 0)
+      endif()
+    endforeach()
+  endif()
+
+  # Add the HIP library
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
