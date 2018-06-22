@@ -78,10 +78,14 @@ class LowRankMultivariateNormal(Distribution):
 
     Note:
         The computation for determinant and inverse of covariance matrix is saved when
-        `scale_factor.shape[1] << scale_factor.shape[0]` thanks to "Woodbury matrix identity" and
-        "matrix determinant lemma". Thanks to these formulas, we just need to compute the
-        determinant and inverse of the small size "capacitance" matrix::
+        `scale_factor.shape[1] << scale_factor.shape[0]` thanks to `Woodbury matrix identity
+        <https://en.wikipedia.org/wiki/Woodbury_matrix_identity>`_ and
+        `matrix determinant lemma <https://en.wikipedia.org/wiki/Matrix_determinant_lemma>`_.
+        Thanks to these formulas, we just need to compute the determinant and inverse of
+        the small size "capacitance" matrix::
             capacitance = I + scale_factor.T @ inv(scale_diag) @ scale_factor
+
+    
     """
     arg_constraints = {"loc": constraints.real,
                        "scale_factor": constraints.real,
@@ -90,6 +94,7 @@ class LowRankMultivariateNormal(Distribution):
     has_rsample = True
 
     def __init__(self, loc, scale_factor, scale_diag, validate_args=None):
+        loc = loc.unsqueeze(0) if loc.dim() < 1 else loc
         event_shape = loc.shape[-1:]
         if scale_factor.dim() < 2:
             raise ValueError("scale_factor must be at least two-dimensional, "
