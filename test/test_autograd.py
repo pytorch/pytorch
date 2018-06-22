@@ -2059,7 +2059,7 @@ class TestAutograd(TestCase):
                 return x.as_strided(*args, **kwargs)
 
             x = x.to(torch.double).detach().requires_grad_()
-            gradcheck(closure, [x], raise_exception=True)
+            gradcheck(closure, [x])
             gradgradcheck(closure, [x])
 
         # test
@@ -2084,6 +2084,9 @@ class TestAutograd(TestCase):
         x = torch.randn(6, 2)
         test(x[3:], [3, 2], [2, 1])
         self.assertEqual(x[3:].as_strided([3, 2], [2, 1], 0), x[:3])
+
+        # test input expanded case
+        test(torch.randn(2, 3).expand(10, 2, 3), [2, 3], [3, 1], 0)
 
     def _test_where_functional(self, t):
         x = Variable(t(torch.randn(5, 5)), requires_grad=True)

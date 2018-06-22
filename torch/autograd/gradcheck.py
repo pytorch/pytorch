@@ -43,6 +43,16 @@ def iter_tensors(x, only_requiring_grad=False):
                 yield result
 
 
+def make_contiguous(input):
+    if isinstance(input, torch.Tensor):
+        return input.contiguous()
+    elif isinstance(input, dict):
+        return {k: make_contiguous(i) for k, i in input.items()}
+    elif isinstance(input, Iterable):
+        return tuple(make_contiguous(i) for i in input)
+    raise NotImplementedError
+
+
 # `input` is input to `fn`
 # `target` is the Tensors wrt whom Jacobians are calculated (default=`input`)
 #
@@ -52,6 +62,7 @@ def get_numerical_jacobian(fn, input, target=None, eps=1e-3):
     if target is None:
         target = input
     output_size = fn(input).numel()
+    input = make_contiguous(input)
     jacobian = make_jacobian(target, output_size)
 
     # It's much easier to iterate over flattened lists of tensors.
