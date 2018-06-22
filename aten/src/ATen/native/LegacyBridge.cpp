@@ -100,7 +100,7 @@ Tensor& zero_(Tensor& self) {
 // done it.
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
-  // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+  // See Note [Multiple dispatch to sparse]
   auto self_sparse = self.is_sparse();
   auto other_sparse = other.is_sparse();
   if (self_sparse && other_sparse) {
@@ -268,7 +268,7 @@ Tensor& div_(Tensor& self, Scalar other) {
 }
 
 Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
+  // See Note [Multiple dispatch to sparse]
   auto mat1_sparse = mat1.is_sparse();
   if (mat1_sparse) {
     Tensor b_self;
