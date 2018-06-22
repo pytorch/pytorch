@@ -4,6 +4,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 else()
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  project(ATen CXX C)
   include(CMakeDependentOption)
   option(USE_CUDA "Use CUDA" ON)
   option(USE_ROCM "Use ROCm" OFF)
@@ -17,9 +18,6 @@ else()
   # Flag for shared dependencies
   set(BUILD_ATEN ON)
 endif()
-
-# Create the project in all cases
-project(ATen CXX C)
 
 # Find modules
 list(APPEND CMAKE_MODULE_PATH
