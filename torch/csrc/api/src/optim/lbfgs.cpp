@@ -37,9 +37,9 @@ void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
   }
 }
 
-at::Scalar LBFGS::step(LossClosure closure) {
-  at::Scalar orig_loss = closure();
-  at::Scalar loss = orig_loss;
+Variable LBFGS::step(LossClosure closure) {
+  Variable orig_loss = closure();
+  Variable loss = orig_loss.clone();
   int64_t current_evals = 1;
   func_evals += 1;
 
@@ -151,7 +151,7 @@ at::Scalar LBFGS::step(LossClosure closure) {
         options_.tolerance_change_) {
       break;
     } else if (
-        std::abs(loss.toFloat() - prev_loss.toFloat()) <
+        std::abs(loss.toCFloat() - prev_loss.toFloat()) <
         options_.tolerance_change_) {
       break;
     }
