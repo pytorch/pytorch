@@ -1,11 +1,11 @@
-## @package layer_model_helper
+# @package layer_model_helper
 # Module caffe2.python.layer_model_helper
 from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, model_helper, schema, scope, utils
+from caffe2.python import core, model_helper, schema, scope, utils, muji
 from caffe2.python.modeling.parameter_info import (
     ParameterInfo,
 )
@@ -15,7 +15,7 @@ from caffe2.python.modeling.parameter_sharing import (
 from caffe2.python.modeling.net_modifier import NetModifier
 
 from caffe2.python.optimizer import get_param_device
-from caffe2.python.regularizer import Regularizer
+from caffe2.python.regularizer import Regularizer, RegularizationBy
 from caffe2.python.layers import layers
 from caffe2.proto import caffe2_pb2
 from future.utils import viewitems, viewvalues
@@ -494,6 +494,7 @@ class LayerModelHelper(model_helper.ModelHelper):
             # single layer. To enforce using an op (e.g. Split) as functional
             # layer, one can call 'model.FunctionalLayerSplit'
             layer = resolve_functional_layer(layer)
+
             def wrapper(*args, **kwargs):
                 def apply_operator(net, in_record, out_record, **kwargs):
                     # TODO(amalevich): Switch to net.operator as soon as it gets
@@ -533,14 +534,16 @@ class LayerModelHelper(model_helper.ModelHelper):
         blob_to_device=None,
     ):
         for param, regularizer in viewitems(self.param_to_reg):
-            if regularizer is None or regularizer.apply_after_optimizer:
+            if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
-            added_loss_blob = regularizer(train_net, train_init_net, param)
-            self.add_loss(
-                schema.Scalar(blob=added_loss_blob),
-                str(added_loss_blob)
-            )
+            added_loss_blob = regularizer(train_net, train_init_net, param, grad=None,
+                                          by=RegularizationBy.ON_LOSS)
+            if added_loss_blob is not None:
+                self.add_loss(
+                    schema.Scalar(blob=added_loss_blob),
+                    str(added_loss_blob)
+                )
 
     def apply_regularizers_after_optimizer(
         self,
@@ -549,12 +552,24 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
+        CPU = muji.OnCPU()
+        # if given, blob_to_device is a map from blob to device_option
+        blob_to_device = blob_to_device or {}
         for param, regularizer in viewitems(self.param_to_reg):
-            if regularizer is None or not regularizer.apply_after_optimizer:
+            if regularizer is None:
                 continue
             assert isinstance(regularizer, Regularizer)
-            regularizer(
-                train_net, train_init_net, param, grad_map.get(str(param)))
+            device = get_param_device(
+                param,
+                grad_map.get(str(param)),
+                param_to_device=blob_to_device,
+                default_device=CPU,
+            )
+            with core.DeviceScope(device):
+                regularizer(
+                    train_net, train_init_net, param, grad=grad_map.get(str(param)),
+                    by=RegularizationBy.AFTER_OPTIMIZER
+                )
 
     def apply_post_grad_net_modifiers(
         self,
@@ -565,7 +580,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         modify_output_record=False,
     ):
         param_grad_map = {param: grad_map[param]
-            for param in self.param_to_optim.keys() if param in grad_map}
+                          for param in self.param_to_optim.keys() if param in grad_map}
 
         for modifier in self._post_grad_net_modifiers:
             modifier(trainer_net, trainer_init_net, param_grad_map,
@@ -592,7 +607,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
-        CPU = core.DeviceOption(caffe2_pb2.CPU)
+        CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
         for param, optimizer in viewitems(self.param_to_optim):

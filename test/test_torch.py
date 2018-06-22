@@ -13,6 +13,7 @@ import unittest
 import warnings
 import pickle
 import gzip
+from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
 from itertools import product, combinations
@@ -6420,7 +6421,7 @@ class TestTorch(TestCase):
             return module
 
         with filecontext_lambda() as checkpoint:
-            fname = os.path.join(os.path.dirname(__file__), 'data/network1.py')
+            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.py')
             module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
@@ -6433,7 +6434,7 @@ class TestTorch(TestCase):
                     self.assertEquals(len(w), 0)
 
             # Replace the module with different source
-            fname = os.path.join(os.path.dirname(__file__), 'data/network2.py')
+            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network2.py')
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:

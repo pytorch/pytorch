@@ -19,15 +19,31 @@ class BatchDistillLRLoss(ModelLayer):
 
     def __init__(
             self, model, input_record,
-            name='batch_distill_lr_loss', teacherWeight=0.0, **kwargs):
+            name='batch_distill_lr_loss', teacher_weight=0.0,
+            filter_invalid_teacher_label=False, **kwargs):
 
         super(BatchDistillLRLoss, self).__init__(model, name, input_record, **kwargs)
 
-        assert teacherWeight >= 0 and teacherWeight <= 1, (
-            'teacherWeight=%0.2f should be in [0, 1]' % teacherWeight
+        assert teacher_weight >= 0 and teacher_weight <= 1, (
+            'teacher_weight=%0.2f should be in [0, 1]' % teacher_weight
         )
-        self._teacherWeight = teacherWeight
 
+        self._teacher_weight = teacher_weight
+        self._filter_invalid_teacher_label = filter_invalid_teacher_label
+        # hyper-parameter determines whether to filter out bad teacehr labels,
+        # i.e., teacher labels that are zero.
+        if self._filter_invalid_teacher_label:
+            self.threshold = model.add_global_constant(
+                str(model.net.NextScopedBlob('threshold')),
+                [0.0],   # threshold for filtering teacher weight.
+                dtype=np.float
+            )
+            self.neg_ONE = model.add_global_constant(
+                str(model.net.NextScopedBlob('neg_ONE')),
+                [-1.0],
+                dtype=np.float
+            )
+            self.ONE = model._GetOne()
         assert schema.is_schema_subset(
             schema.Struct(
                 ('teacher_label', schema.Scalar()),
@@ -57,6 +73,7 @@ class BatchDistillLRLoss(ModelLayer):
                                dims=[1])
 
         teacher_label = self.input_record.teacher_label()
+
         if self.input_record.teacher_label.field_type() != np.float32:
             teacher_label = net.Cast(
                 teacher_label,
@@ -76,17 +93,69 @@ class BatchDistillLRLoss(ModelLayer):
             [self.input_record.logit(), teacher_label],
             net.NextScopedBlob('teacher_cross_entropy')
         )
+        if self._filter_invalid_teacher_label:
+            squeezed_teacher_label = net.Squeeze(
+                teacher_label,
+                net.NextScopedBlob('squeezed_teacher_label'),
+                dims=[1]
+            )
+            # blob used to contain the original teacher weights
+            keep_weights = net.ConstantFill(
+                [squeezed_teacher_label],
+                net.NextScopedBlob('keep_weights'),
+                value=self._teacher_weight,
+                dtype=core.DataType.FLOAT
+            )
+            #blob used to zero out the teacher weights
+            zero_weights = net.ConstantFill(
+                [squeezed_teacher_label],
+                net.NextScopedBlob('zero_weights'),
+                value=0.0,
+                dtype=core.DataType.FLOAT
+            )
 
-        scaled_true_xent = net.Scale(
-            true_xent,
-            net.NextScopedBlob('scaled_cross_entropy'),
-            scale=1.0 - self._teacherWeight,
-        )
-        scaled_teacher_xent = net.Scale(
-            teacher_xent,
-            net.NextScopedBlob('scaled_teacher_cross_entropy'),
-            scale=self._teacherWeight,
-        )
+            #Indicating which teacher labels are bad, i.e., are zero.
+            judge = net.GT(
+                [squeezed_teacher_label, self.threshold],
+                net.NextScopedBlob('judge'),
+                broadcast=1
+            )
+            #zero out bad teacher weights corresponding to bad teacher labels.
+            screened_teacher_weights = net.Conditional(
+                [judge, keep_weights, zero_weights],
+                net.NextScopedBlob('screened_teacher_weights')
+            )
+            neg_screened_teacher_weights = net.Mul(
+                [screened_teacher_weights, self.neg_ONE],
+                net.NextScopedBlob('neg_screened_teacher_weights'),
+                broadcast=1
+            )
+            one_minus_screened_teacher_weights = net.Add(
+                [neg_screened_teacher_weights, self.ONE],
+                net.NextScopedBlob('one_minus_screened_teacher_weights'),
+                broadcast=1
+            )
+            scaled_true_xent = net.Mul(
+                [true_xent, one_minus_screened_teacher_weights],
+                net.NextScopedBlob('scaled_cross_entropy'),
+                broadcast=1
+            )
+            scaled_teacher_xent = net.Mul(
+                [teacher_xent, screened_teacher_weights],
+                net.NextScopedBlob('scaled_teacher_cross_entropy'),
+                broadcast=1
+            )
+        else:
+            scaled_true_xent = net.Scale(
+                true_xent,
+                net.NextScopedBlob('scaled_cross_entropy'),
+                scale=1.0 - self._teacher_weight,
+            )
+            scaled_teacher_xent = net.Scale(
+                teacher_xent,
+                net.NextScopedBlob('scaled_teacher_cross_entropy'),
+                scale=self._teacher_weight,
+            )
         if 'weight' in self.input_record.fields:
             weight_blob = self.input_record.weight()
             if self.input_record.weight.field_type().base != np.float32:

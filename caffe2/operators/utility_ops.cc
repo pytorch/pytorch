@@ -741,11 +741,7 @@ Example:
                                 const vector<TensorShape>& in) {
       std::vector<TensorShape> out(2);
 
-      int total = 1;
-      for (auto d : in[0].dims()) {
-        total *= d;
-      }
-      out[0].add_dims(total);
+      out[0].set_unknown_shape(true);
       out[0].set_data_type(in[0].data_type());
       out[1].add_dims(in[1].dims(0));
       out[1].set_data_type(in[1].data_type());
@@ -1295,5 +1291,21 @@ output: [ 4  6  8 10 12 14 16]
 
 REGISTER_CPU_OPERATOR(Range, RangeOp<CPUContext>);
 NO_GRADIENT(Range);
+
+REGISTER_CPU_OPERATOR(ThrowException, ThrowExceptionOp);
+OPERATOR_SCHEMA(ThrowException).NumInputs(0).NumOutputs(0);
+SHOULD_NOT_DO_GRADIENT(ThrowException);
+
+REGISTER_CPU_OPERATOR(ThrowChildThreadException, ThrowChildThreadExceptionOp);
+OPERATOR_SCHEMA(ThrowChildThreadException).NumInputs(0).NumOutputs(0);
+SHOULD_NOT_DO_GRADIENT(ThrowChildThreadException);
+
+REGISTER_CPU_OPERATOR(LogFatal, LogFatalOp);
+OPERATOR_SCHEMA(LogFatal).NumInputs(0).NumOutputs(0);
+SHOULD_NOT_DO_GRADIENT(LogFatal);
+
+REGISTER_CPU_OPERATOR(Fail, FailOp);
+OPERATOR_SCHEMA(Fail).NumInputs(0).NumOutputs(0);
+SHOULD_NOT_DO_GRADIENT(Fail);
 
 } // namespace caffe2

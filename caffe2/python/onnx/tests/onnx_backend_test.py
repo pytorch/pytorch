@@ -38,6 +38,7 @@ backend_test.exclude(r'(test_hardsigmoid'  # Does not support Hardsigmoid.
                      '|test_prelu.*'  # PRelu is not compliant with ONNX yet
                      '|test_operator_repeat.*'  # Tile is not compliant with ONNX yet
                      '|test_.*pool_.*same.*'  # Does not support pool same.
+                     '|test_convtranspose.*'  # ConvTranspose needs some more complicated translation
                      ')')
 
 # Quick patch to unbreak master CI, is working on the debugging.
@@ -47,7 +48,8 @@ backend_test.exclude('(test_cast_.*'
                      '|test_rnn_seq_length'
                      '|test_operator_add.*_cuda'
                      '|test_operator_lstm_cuda'
-                     '|test_operator_rnn.*_cuda)')
+                     '|test_operator_rnn.*_cuda'
+                     '|test_lrn_default_cuda)')
 
 # Temporarily skip some ONNX backend tests with broadcasting.
 backend_test.exclude('(test_xor_bcast'

@@ -12,9 +12,9 @@
 #include <cuda.h>
 #endif
 
-#if (!defined(__CUDACC__) || CUDA_VERSION > 9000 ) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
+#if !defined(__CUDACC__) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
 #include <glog/stl_logging.h>
-#else // (!defined(__CUDACC__) || CUDA_VERSION > 9000 ) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
+#else // !defined(__CUDACC__) && !defined(CAFFE2_USE_MINIMAL_GOOGLE_GLOG)
 
 // here, we need to register a fake overload for vector/string - here,
 // we just ignore the entries in the logs.

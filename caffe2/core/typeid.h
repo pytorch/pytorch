@@ -130,6 +130,12 @@ class TypeMeta {
       TypedDestructor dtor)
       : id_(i), itemsize_(s), ctor_(ctor), copy_(copy), dtor_(dtor) {}
 
+  // Mechanism for throwing errors which can't be prevented at compile time
+  // due to type erasure. E.g. somebody calling TypeMeta::copy() for
+  // non-copiable type. Right now just throws exception but is implemented
+  // in .cpp to manage dependencies
+  static void _ThrowRuntimeTypeLogicError(const std::string& msg);
+
  public:
   /**
    * Returns the type id.
@@ -224,6 +230,29 @@ class TypeMeta {
     }
   }
 
+  template <typename T>
+  static void _CtorNotDefault(void* /*ptr*/, size_t /*n*/) {
+    _ThrowRuntimeTypeLogicError(
+        "Type " + std::string(DemangleType<T>()) +
+        " is not default-constructible.");
+  }
+
+  template <
+      typename T,
+      typename std::enable_if<std::is_default_constructible<T>::value>::type* =
+          nullptr>
+  static inline PlacementNew _PickCtor() {
+    return _Ctor<T>;
+  }
+
+  template <
+      typename T,
+      typename std::enable_if<!std::is_default_constructible<T>::value>::type* =
+          nullptr>
+  static inline PlacementNew _PickCtor() {
+    return _CtorNotDefault<T>;
+  }
+
   /**
    * Typed copy function for classes.
    */
@@ -242,9 +271,25 @@ class TypeMeta {
   template <typename T>
   static void
   _CopyNotAllowed(const void* /*src*/, void* /*dst*/, size_t /*n*/) {
-    std::cerr << "Type " << DemangleType<T>() << " does not allow assignment.";
-    // This is an error by design, so we will quit loud.
-    abort();
+    _ThrowRuntimeTypeLogicError(
+        "Type " + std::string(DemangleType<T>()) +
+        " does not allow assignment.");
+  }
+
+  template <
+      typename T,
+      typename std::enable_if<std::is_copy_assignable<T>::value>::type* =
+          nullptr>
+  static inline TypedCopy _PickCopy() {
+    return _Copy<T>;
+  }
+
+  template <
+      typename T,
+      typename std::enable_if<!std::is_copy_assignable<T>::value>::type* =
+          nullptr>
+  static inline TypedCopy _PickCopy() {
+    return _CopyNotAllowed<T>;
   }
 
   /**
@@ -269,22 +314,13 @@ class TypeMeta {
     return TypeMeta(Id<T>(), ItemSize<T>(), nullptr, nullptr, nullptr);
   }
 
-  template <
-      typename T,
-      typename std::enable_if<
-          !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-          std::is_copy_assignable<T>::value>::type* = nullptr>
-  static TypeMeta Make() {
-    return TypeMeta(Id<T>(), ItemSize<T>(), _Ctor<T>, _Copy<T>, _Dtor<T>);
-  }
-
   template <typename T>
-  static TypeMeta Make(
-      typename std::enable_if<
-          !(std::is_fundamental<T>::value || std::is_pointer<T>::value) &&
-          !std::is_copy_assignable<T>::value>::type* = 0) {
+  static typename std::enable_if<
+      !(std::is_fundamental<T>::value || std::is_pointer<T>::value),
+      TypeMeta>::type
+  Make() {
     return TypeMeta(
-        Id<T>(), ItemSize<T>(), _Ctor<T>, _CopyNotAllowed<T>, _Dtor<T>);
+        Id<T>(), ItemSize<T>(), _PickCtor<T>(), _PickCopy<T>(), _Dtor<T>);
   }
 
  private:

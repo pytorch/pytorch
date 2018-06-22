@@ -487,13 +487,13 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(MakeTwoClass)
     .NumInputs(1)
     .NumOutputs(1)
-    .TensorInferenceFunction(
-        [](const OperatorDef& /* unused */, const vector<TensorShape>& in) {
-          vector<TensorShape> out(1);
-          out[0].add_dims(in[0].dims(0));
-          out[0].add_dims(2);
-          return out;
-        })
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      vector<TensorShape> out(1);
+      out[0].add_dims(in[0].dims(0));
+      out[0].add_dims(2);
+      return out;
+    })
     .SetDoc(R"DOC(
 Given a vector of probabilities, this operator transforms this into a 2-column
  matrix with complimentary probabilities for binary classification. In explicit
@@ -522,7 +522,20 @@ in the dataset later as (true) positive example.
 )DOC")
     .NumInputs(2)
     .NumOutputs(1)
-    .IdenticalTypeAndShapeOfInputDim(0, 0)
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      CAFFE_ENFORCE(
+          in.size(), 2, "SigmoidCrossEntropyWithLogits requires 2 inputs");
+      const TensorShape& logits = in[0];
+
+      vector<TensorShape> out(1);
+      if (logits.dims_size() == 1) {
+        return out;
+      }
+      out[0].add_dims(logits.dims(0));
+      out[0].set_data_type(logits.data_type());
+      return out;
+    })
     .SetDoc(R"DOC(
 Given two matrices logits and targets, of same shape,
 (batch_size, num_classes), computes the sigmoid cross entropy between the two.
@@ -539,7 +552,23 @@ OPERATOR_SCHEMA(SigmoidCrossEntropyWithLogitsGradient)
 OPERATOR_SCHEMA(WeightedSigmoidCrossEntropyWithLogits)
     .NumInputs(3)
     .NumOutputs(1)
-    .IdenticalTypeAndShapeOfInputDim(0, 0)
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(
+          in.size(),
+          3,
+          "WeightedSigmoidCrossEntropyWithLogits requires three inputs");
+
+      std::vector<TensorShape> out(1);
+      const auto& logits = in[0];
+      if (logits.dims_size() == 0) {
+        return out;
+      }
+      for (int i = 0; i < logits.dims_size() - 1; i++) {
+        out[0].add_dims(logits.dims(i));
+      }
+      return out;
+    })
     .SetDoc(R"DOC(
 Given three matrices: logits, targets, weights, all of the same shape,
 (batch_size, num_classes), computes the weighted sigmoid cross entropy between

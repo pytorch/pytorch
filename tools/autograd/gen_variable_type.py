@@ -26,12 +26,8 @@ from __future__ import print_function
 import os
 import sys
 from .utils import CodeTemplate, nested_dict, write, uninplace_api_name
-from .gen_autograd import VIEW_FUNCTIONS, template_path, \
-    HARDCODED_DIFFERENTIABLE_OUTPUTS
+from .gen_autograd import VIEW_FUNCTIONS, HARDCODED_DIFFERENTIABLE_OUTPUTS
 from .gen_autograd_functions import uses_single_grad
-
-VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
-VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
 
 # These functions are written manually in templates/VariableType.cpp
 MANUAL_IMPLEMENTATIONS = {
@@ -166,13 +162,16 @@ def should_trace(declaration):
     return True
 
 
-def gen_variable_type(out, aten_declarations):
+def gen_variable_type(out, aten_declarations, template_path):
     """VariableType.h and VariableType.cpp body
 
     This is the at::Type subclass for differentiable tensors. The
     implementation of each function dispatches to the base tensor type to
     compute the output. The grad_fn is attached to differentiable functions.
     """
+
+    VARIABLE_TYPE_H = CodeTemplate.from_file(template_path + '/VariableType.h')
+    VARIABLE_TYPE_CPP = CodeTemplate.from_file(template_path + '/VariableType.cpp')
 
     type_declarations = []
     type_definitions = []

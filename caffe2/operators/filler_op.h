@@ -22,7 +22,7 @@ class FillerOp : public Operator<Context> {
  public:
   FillerOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
-        shape_(ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))),
+        shape_(OperatorBase::GetRepeatedArgument<int64_t>("shape")),
         extra_shape_(ToVectorTIndex(
             OperatorBase::GetRepeatedArgument<int>("extra_shape"))),
         input_as_shape_(
@@ -520,16 +520,17 @@ inline std::vector<TensorShape> FillerTensorInference(
     // TODO
     bool input_as_shape =
         helper.GetSingleArgument<bool>("input_as_shape", false);
-    if (input_as_shape) {
+    bool extra_shape = helper.GetSingleArgument<bool>("extra_shape", false);
+    if (input_as_shape || extra_shape) {
       out[0].set_unknown_shape(true);
       return out;
     }
-    for (int d : in[0].dims()) {
+    for (auto d : in[0].dims()) {
       out[0].add_dims(d);
     }
   } else {
-    auto shape = helper.GetRepeatedArgument<int>("shape");
-    for (int d : shape) {
+    auto shape = helper.GetRepeatedArgument<int64_t>("shape");
+    for (auto d : shape) {
       out[0].add_dims(d);
     }
   }

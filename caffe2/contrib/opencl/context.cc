@@ -27,7 +27,7 @@ OpenCLContextSingleton::OpenCLContextSingleton() {
   }
   device = devices[device_id];
 
-  context  = cl::Context({device});
+  context = cl::Context({device});
   queue = cl::CommandQueue(context, device);
 }
 

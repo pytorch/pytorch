@@ -1,4 +1,4 @@
-## @package utils
+# @package utils
 # Module caffe2.python.utils
 from __future__ import absolute_import
 from __future__ import division
@@ -15,7 +15,10 @@ import copy
 import collections
 import functools
 import numpy as np
-from six import integer_types, binary_type, text_type
+from six import integer_types, binary_type, text_type, string_types
+
+OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
+ITERATION_MUTEX_NAME = "iteration_mutex"
 
 
 def OpAlmostEqual(op_a, op_b, ignore_fields=None):
@@ -326,3 +329,56 @@ def debug(f):
         return DebugMode.run(func)
 
     return wrapper
+
+
+def BuildUniqueMutexIter(
+    init_net,
+    net,
+    iter=None,
+    iter_mutex=None,
+    iter_val=0
+):
+    '''
+    Often, a mutex guarded iteration counter is needed. This function creates a
+    mutex iter in the net uniquely (if the iter already existing, it does
+    nothing)
+
+    This function returns the iter blob
+    '''
+    iter = iter if iter is not None else OPTIMIZER_ITERATION_NAME
+    iter_mutex = iter_mutex if iter_mutex is not None else ITERATION_MUTEX_NAME
+    from caffe2.python import core
+    if not init_net.BlobIsDefined(iter):
+        # Add training operators.
+        with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
+            iteration = init_net.ConstantFill(
+                [],
+                iter,
+                shape=[1],
+                value=iter_val,
+                dtype=core.DataType.INT64,
+            )
+            iter_mutex = init_net.CreateMutex([], [iter_mutex])
+            net.AtomicIter([iter_mutex, iteration], [iteration])
+    else:
+        iteration = init_net.GetBlobRef(iter)
+    return iteration
+
+
+def EnumClassKeyVals(cls):
+    # cls can only be derived from object
+    assert type(cls) == type
+    # Enum attribute keys are all capitalized and values are strings
+    enum = {}
+    for k in dir(cls):
+        if k == k.upper():
+            v = getattr(cls, k)
+            if isinstance(v, string_types):
+                assert v not in enum.values(), (
+                    "Failed to resolve {} as Enum: "
+                    "duplicate entries {}={}, {}={}".format(
+                        cls, k, v, [key for key in enum if enum[key] == v][0], v
+                    )
+                )
+                enum[k] = v
+    return enum

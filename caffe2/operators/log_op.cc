@@ -1,20 +1,13 @@
-#include "caffe2/operators/math_ops.h"
-#include "caffe2/utils/math.h"
+#include "caffe2/operators/log_op.h"
 
+#include <string>
+#include <vector>
 
 namespace caffe2 {
 
-struct LogCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* device_context) {
-    math::Log<T, CPUContext>(n, x, y, device_context);
-  }
-};
-
 REGISTER_CPU_OPERATOR(
     Log,
-    UnaryElementwiseOp<TensorTypes<float>, CPUContext, LogCPUFunctor>);
+    UnaryElementwiseOp<TensorTypes<float>, CPUContext, LogFunctor<CPUContext>>);
 
 OPERATOR_SCHEMA(Log)
     .NumInputs(1)
@@ -34,16 +27,21 @@ and output blobs.
         "element-wise")
     .InheritOnnxSchema("Log");
 
+namespace {
+
 class GetLogGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         "Div",
         "",
-        std::vector<string>{GO(0), I(0)},
-        std::vector<string>{GI(0)});
+        std::vector<std::string>{GO(0), I(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
+
+} // namespace
+
 REGISTER_GRADIENT(Log, GetLogGradient);
 
 } // namespace caffe2

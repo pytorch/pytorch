@@ -19,7 +19,16 @@ struct Handle {
   }
   ~Handle() {
     if (handle) {
+// this is because of something dumb in the ordering of
+// destruction. Sometimes atexit, the cuda context (or something)
+// would already be destroyed by the time this gets destroyed. It
+// happens in fbcode setting. @colesbury and I decided to not destroy
+// the handle as a workaround.
+//   - @soumith
+#ifdef NO_CUDNN_DESTROY_HANDLE
+#else
       cudnnDestroy(handle);
+#endif
     }
   }
 };

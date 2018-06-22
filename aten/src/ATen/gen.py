@@ -99,7 +99,6 @@ class FileManager(object):
             raise Exception("Outputs declared with 'will_write' were " +
                             "never written: {}".format(self.filenames))
 
-
 TEMPLATE_PATH = options.source_path + "/templates"
 GENERATOR_DERIVED = CodeTemplate.from_file(
     TEMPLATE_PATH + "/GeneratorDerived.h")
