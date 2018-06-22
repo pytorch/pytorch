@@ -1147,8 +1147,8 @@ class TestNN(NNTestCase):
             'fc4': nn.Linear(5, 5),
             'act3': nn.Sigmoid()
         }
-        modules.update(next_modules)
-        module_dict.update(sorted(next_modules.items()))
+        modules.update(sorted(next_modules.items()))
+        module_dict.update(next_modules)
         check()
 
         del module_dict['fc']
@@ -1294,8 +1294,8 @@ class TestNN(NNTestCase):
             'p8': Parameter(torch.randn(10, 10)),
             'p7': Parameter(torch.randn(10, 10))
         }
-        parameters.update(next_parameters)
-        parameter_dict.update(sorted(next_parameters.items()))
+        parameters.update(sorted(next_parameters.items()))
+        parameter_dict.update(next_parameters)
         check()
 
         del parameter_dict['p3']
