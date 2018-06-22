@@ -39,7 +39,7 @@ void poisson_cuda_kernel(
       ret,
       lambda,
       [seeds] __device__(
-          scalar_t & ret_val, const scalar_t& lambda, bool early_exit) {
+          scalar_t & ret_val, const scalar_t& lambda) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -60,7 +60,7 @@ void gamma_cuda_kernel(
       ret,
       alpha,
       [seeds] __device__(
-          scalar_t & ret_val, const scalar_t& alpha, bool early_exit) {
+          scalar_t & ret_val, const scalar_t& alpha) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
