@@ -1704,6 +1704,16 @@ class TestCuda(TestCase):
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
 
+    def test_linspace(self):
+        a = torch.linspace(0, 10, 10, device='cuda')
+        b = torch.linspace(0, 10, 10)
+        self.assertEqual(a, b.cuda())
+
+    def test_logspace(self):
+        a = torch.logspace(1, 10, 10, device='cuda')
+        b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.cuda())
+
     def test_diagonal(self):
         TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')
 
