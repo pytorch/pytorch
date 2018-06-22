@@ -8,6 +8,8 @@
 
 namespace at {
 
+// NB: Order matters for this macro; it is relied upon in
+// _promoteTypesLookup and probably other places.
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \
 _(int8_t,Char,i) \
@@ -15,6 +17,15 @@ _(int16_t,Short,i) \
 _(int,Int,i) \
 _(int64_t,Long,i) \
 _(at::Half,Half,d) \
+_(float,Float,d) \
+_(double,Double,d)
+
+#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
+_(uint8_t,Byte,i) \
+_(int8_t,Char,i) \
+_(int16_t,Short,i) \
+_(int,Int,i) \
+_(int64_t,Long,i) \
 _(float,Float,d) \
 _(double,Double,d)
 

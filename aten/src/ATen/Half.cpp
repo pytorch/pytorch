@@ -1,45 +1,34 @@
 #include "ATen/Half.h"
 
-#include <TH/TH.h>
-
 #include "ATen/Tensor.h"
 #include "ATen/Context.h"
 
+#include <TH/TH.h>
+#include <iostream>
+
 namespace at {
 
-template<> AT_API Half convert(float f) {
-  Half t;
-  TH_float2halfbits(&f,&t.x);
-  return t;
-}
-template<> AT_API float convert(Half f) {
-  float t;
-  TH_halfbits2float(&f.x,&t);
-  return t;
+static_assert(std::is_standard_layout<Half>::value, "at::Half must be standard layout.");
+
+namespace detail {
+
+float halfbits2float(unsigned short bits) {
+  float value;
+  TH_halfbits2float(&bits, &value);
+  return value;
 }
 
-template<> AT_API Half convert(double f) {
-  return convert<Half, float>(f);
-}
-template<> AT_API double convert(Half f) {
-  return convert<float, Half>(f);
-}
-
-template<> AT_API Half convert(int64_t f) {
-  return convert<Half,double>(static_cast<double>(f));
-}
-template<> AT_API int64_t convert(Half f) {
-  return static_cast<int64_t>(convert<double,Half>(f));
+unsigned short float2halfbits(float value) {
+  unsigned short bits;
+  TH_float2halfbits(&value, &bits);
+  return bits;
 }
 
-template<> bool overflows<Half, double>(double f) {
-  using limit = std::numeric_limits<double>;
-  if (limit::has_infinity && std::isinf(f)) {
-    return false;
-  }
-  return f > 65504 || f < -65504;
+} // namespace detail
+
+std::ostream& operator<<(std::ostream & out, const Half& value) {
+  out << (float)value;
+  return out;
 }
-template<> bool overflows<Half, int64_t>(int64_t f) {
-  return f > 65504 || f < -65504;
-}
+
 } // namespace at

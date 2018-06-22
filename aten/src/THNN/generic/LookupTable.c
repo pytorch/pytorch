@@ -48,9 +48,9 @@ void THNN_(LookupTable_accGradParameters)(
     THError("gradWeight must be contiguous");
   if (!THIndexTensor_(isContiguous)(input))
     THError("input must be contiguous");
-  if (THIndexTensor_(nDimension)(input) != 1 && THIndexTensor_(nDimension)(input) != 2) {
+  if (input->is_empty() || (THIndexTensor_(nDimension)(input) != 1 && THIndexTensor_(nDimension)(input) != 2)) {
     THDescBuff s1 = THIndexTensor_(sizeDesc)(input);
-    THError("input must be a vector or matrix, but is of shape: %s", s1.str);
+    THError("input must be a non-empty vector or matrix, but is of shape: %s", s1.str);
   }
 
   THIndex_t *input_data = THIndexTensor_(data)(input);
@@ -173,8 +173,8 @@ void THNN_(LookupTable_renorm)(
     THError("weight must be contiguous");
   if (!THIndexTensor_(isContiguous)(idx))
     THError("input must be contiguous");
-  if (THIndexTensor_(nDimension)(idx) != 1)
-    THError("idx must be a vector");
+  if (idx->is_empty() || THIndexTensor_(nDimension)(idx) != 1)
+    THError("idx must be a non-empty vector");
   if (normType <= 0)
     THError("non-positive-norm not supported");
 

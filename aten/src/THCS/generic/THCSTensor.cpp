@@ -6,7 +6,7 @@
  * access methods
  ******************************************************************************/
 
-int THCSTensor_(nDimension)(THCState *state, const THCSTensor *self)
+int THCSTensor_(_nDimension)(THCState *state, const THCSTensor *self)
 {
   return self->nDimensionI + self->nDimensionV;
 }
@@ -25,7 +25,7 @@ int64_t THCSTensor_(size)(THCState *state, const THCSTensor *self, int dim)
 {
   THArgCheck((dim >= 0) && (dim < self->nDimensionI + self->nDimensionV),
       1, "dimension %d out of range of %dD tensor",
-      dim+1, THCSTensor_(nDimension)(state, self));
+      dim+1, THCSTensor_(_nDimension)(state, self));
   return self->size[dim];
 }
 
@@ -66,7 +66,8 @@ THCTensor *THCSTensor_(newValues)(THCState *state, const THCSTensor *self) {
 /*** Helper methods ***/
 static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
 {
-  self->size = NULL;
+  self->size = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
+  self->size[0] = 0;
   self->indices = THCIndexTensor_(new)(state);
   self->values = THCTensor_(new)(state);
   self->nDimensionI = 0;
@@ -79,9 +80,10 @@ static void THCSTensor_(rawInit)(THCState *state, THCSTensor *self)
 
 THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI, int nDimV, int64_t *size) {
   // Only resize valid sizes into tensor.
-  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(nDimI + nDimV));
+  int64_t dims = nDimI + nDimV == 0 ? 1 : nDimI + nDimV; // FIXME: nDimI + nDimV should not be 0.
+  self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*(dims));
 
-  for (int64_t d = 0; d < nDimI + nDimV; d++) {
+  for (int64_t d = 0; d < dims; d++) {
     self->size[d] = size[d];
   }
   self->nDimensionI = nDimI;
@@ -91,18 +93,18 @@ THCSTensor* THCSTensor_(rawResize)(THCState *state, THCSTensor *self, int nDimI,
 
 // directly assign without cloning or retaining (internal method)
 THCSTensor* THCSTensor_(_move)(THCState *state, THCSTensor *self, THCIndexTensor *indices, THCTensor *values) {
-  int empty = THCTensor_(nDimension)(state, values) == 0;
+  int empty = THCTensor_(_nDimension)(state, values) == 0;
   if (!empty) {
-    THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 2, 2,
+    THArgCheck(THCIndexTensor_(_nDimension)(state, indices) == 2, 2,
         "indices must be nDim x nnz");
     THArgCheck(THCIndexTensor_(size)(state, indices, 1) == THCTensor_(size)(state, values, 0), 2,
         "indices and values must have same nnz");
     THArgCheck(THCIndexTensor_(size)(state, indices, 0) == self->nDimensionI, 2,
         "indices has incorrect first dimension, expected %d, got %d", self->nDimensionI, THCIndexTensor_(size)(state, indices, 0));
-    THArgCheck(THCTensor_(nDimension)(state, values) == self->nDimensionV + 1, 3,
-        "values has incorrect number of dimensions, expected %d, got %d", self->nDimensionV + 1, THCTensor_(nDimension)(state, values));
+    THArgCheck(THCTensor_(_nDimension)(state, values) == self->nDimensionV + 1, 3,
+        "values has incorrect number of dimensions, expected %d, got %d", self->nDimensionV + 1, THCTensor_(_nDimension)(state, values));
   } else {
-    THArgCheck(THCIndexTensor_(nDimension)(state, indices) == 0, 2,
+    THArgCheck(THCIndexTensor_(_nDimension)(state, indices) == 0, 2,
         "if values is empty, indices must be empty too");
   }
   THCIndexTensor_(free)(state, self->indices);
@@ -146,7 +148,7 @@ THCSTensor *THCSTensor_(newWithTensor)(THCState *state, THCIndexTensor *indices,
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
 
   int64_t nDimI = THCIndexTensor_(size)(state, indices, 0);
-  int64_t nDimV = THCTensor_(nDimension)(state, values) - 1;
+  int64_t nDimV = THCTensor_(_nDimension)(state, values) - 1;
 
   // TODO Make it work with N-dimensional values
   THArgCheck(nDimV > 0, 3, "size must be provided when nDimV > 0");
@@ -175,14 +177,14 @@ THCSTensor *THCSTensor_(newWithTensorAndSizeUnsafe)(THCState *state, THCIndexTen
   if (sizes == NULL) {
     return THCSTensor_(newWithTensor)(state, indices, values);
   }
-  if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0) {
+  if (THCudaLongTensor__nDimension(state, indices) == 0 && THCTensor_(_nDimension)(state, values) == 0) {
     return THCSTensor_(newWithSize)(state, sizes, NULL);
   }
 
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
 
   int64_t nDimI = THCIndexTensor_(size)(state, indices, 0);
-  int64_t nDimV = THCTensor_(nDimension)(state, values) - 1;
+  int64_t nDimV = THCTensor_(_nDimension)(state, values) - 1;
 
   return THCSTensor_(_newWithDimsAndTensor)(state, nDimI, nDimV, THLongStorage_data(sizes), indices, values);
 }
@@ -192,14 +194,14 @@ THCSTensor *THCSTensor_(newWithTensorAndSize)(THCState *state, THCIndexTensor *i
   if (sizes == NULL) {
     return THCSTensor_(newWithTensor)(state, indices, values);
   }
-  if (THCudaLongTensor_nDimension(state, indices) == 0 && THCTensor_(nDimension)(state, values) == 0) {
+  if (THCudaLongTensor__nDimension(state, indices) == 0 && THCTensor_(_nDimension)(state, values) == 0) {
     return THCSTensor_(newWithSize)(state, sizes, NULL);
   }
 
   THCAssertSameGPU(THCSTensor_(checkGPU)(state, 0, 2, indices, values));
 
   int64_t nDimI = THCIndexTensor_(size)(state, indices, 0);
-  int64_t nDimV = THCTensor_(nDimension)(state, values) - 1;
+  int64_t nDimV = THCTensor_(_nDimension)(state, values) - 1;
   THArgCheck(THLongStorage_size(sizes) == nDimI + nDimV, 3,
       "number of dimensions must be nDimI + nDimV");
 
@@ -284,7 +286,7 @@ THCSTensor *THCSTensor_(newTranspose)(THCState *state, THCSTensor *self, int d1,
 
 THCTensor *THCSTensor_(newValuesWithSizeOf)(THCState *state, THCTensor *values, int64_t nnz) {
   THCTensor *new_values;
-  if (THCTensor_(nDimension)(state, values) == 0) { // values tensor uninitialized
+  if (THCTensor_(_nDimension)(state, values) == 0) { // values tensor uninitialized
     new_values = THCTensor_(newWithSize1d)(state, nnz);
   } else {
     THLongStorage *size = THCTensor_(newSizeOf)(state, values);
@@ -323,7 +325,7 @@ int THCSTensor_(isSameSizeAsDense)(THCState *state, const THCSTensor *self, cons
   return 1;
 }
 
-THCSTensor *THCSTensor_(resize)(THCState *state, THCSTensor *self, THLongStorage *size)
+THCSTensor *THCSTensor_(resizeLegacy)(THCState *state, THCSTensor *self, THLongStorage *size)
 {
   THCSTensor_(rawResize)(state, self, size->size, 0, THLongStorage_data(size));
   return self;

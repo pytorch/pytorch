@@ -12,7 +12,7 @@ def gather_paths(env_vars):
 
 MKLDNN_HOME = os.getenv('MKLDNN_HOME', '/usr/local/mkl-dnn')
 
-WITH_MKLDNN = False
+USE_MKLDNN = False
 MKLDNN_LIB_DIR = None
 MKLDNN_INCLUDE_DIR = None
 MKLDNN_LIBRARY = None
@@ -84,4 +84,4 @@ if (IS_LINUX or IS_WINDOWS) and not check_env_flag('NO_MKLDNN'):
         real_mkldnn_lib_dir = os.path.realpath(MKLDNN_LIB_DIR)
         assert os.path.dirname(real_mkldnn_library) == real_mkldnn_lib_dir, (
             'mkldnn library and lib_dir must agree')
-        WITH_MKLDNN = True
+        USE_MKLDNN = True

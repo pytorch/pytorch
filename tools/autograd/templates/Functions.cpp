@@ -152,7 +152,7 @@ Tensor sum_backward(const Tensor & grad, IntList sizes, IntList dims, bool keepd
 }
 
 Tensor reverse_dim(const Tensor& t, int64_t dim) {
-  Tensor index = at::arange(t.type().toScalarType(at::ScalarType::Long), t.size(dim) - 1, -1, -1);
+  Tensor index = at::arange(t.size(dim) - 1, -1, -1, t.type().toScalarType(at::ScalarType::Long));
   return t.index_select(dim, index);
 }
 
@@ -163,7 +163,7 @@ Tensor prod_safe_zeros_backward(const Tensor &grad, const Tensor& inp, int64_t d
 
   std::vector<int64_t> ones_size(inp.sizes());
   ones_size[dim] = 1;
-  Tensor ones = at::ones(grad.type(), ones_size);
+  Tensor ones = at::ones(ones_size, grad.type());
   Tensor exclusive_normal_nocp = at::cat({ones, inp.narrow(dim, 0, inp.size(dim) - 1)}, dim);
   Tensor exclusive_normal = exclusive_normal_nocp.cumprod(dim);
 
@@ -316,8 +316,8 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
 
   std::vector<int64_t> ones_size(input.sizes());
   ones_size[dim] = 1;
-  Tensor ones = at::ones(grad.type(), {1}).expand(ones_size);
-  Tensor grad_input = at::zeros(grad.type(), input.sizes());
+  Tensor ones = at::ones({1}, grad.type()).expand(ones_size);
+  Tensor grad_input = at::zeros(input.sizes(), grad.type());
   Tensor prods_from_k_plus_1;
   Tensor omitted_products;
   for (int k = 0; k < dim_size; ++k) {
@@ -407,7 +407,7 @@ std::vector<Tensor> cat_tensors_backward(const Tensor & grad, const std::vector<
     auto& shape = sizes[i];
     // If input was empty tensor, gradInput should be empty tensor.
     if (shape == std::vector<int64_t>({0})) {
-      grad_inputs[i] = at::zeros(grad.type(), {0});
+      grad_inputs[i] = at::zeros({0}, grad.type());
       continue;
     }
     auto size = shape[dim];
@@ -499,7 +499,7 @@ Tensor select_backward(Tensor grad, int64_t dim, Tensor indices, IntList sizes, 
     grad = grad.unsqueeze(dim);
     indices = indices.unsqueeze(dim);
   }
-  return at::zeros(grad.type(), sizes).scatter_(dim, indices, grad);
+  return at::zeros(sizes, grad.type()).scatter_(dim, indices, grad);
 }
 
 Tensor trace_backward(const Tensor & grad, IntList sizes) {
@@ -509,8 +509,8 @@ Tensor trace_backward(const Tensor & grad, IntList sizes) {
 
   auto& long_type = grad.type().toScalarType(at::kLong);
 
-  auto grad_input = at::zeros(grad.type(), sizes[0] * sizes[1]);
-  auto indices = at::arange(long_type, 0, grad_input.numel(), sizes[1] + 1);
+  auto grad_input = at::zeros(sizes[0] * sizes[1], grad.type());
+  auto indices = at::arange(0, grad_input.numel(), sizes[1] + 1, long_type);
   grad_input.index_fill_(0, indices, grad);
   return grad_input.view(sizes);
 }
@@ -523,9 +523,9 @@ Tensor unfold_backward(const Tensor & grad, IntList input_sizes, int64_t dim, in
     numel *= size;
   }
 
-  auto idx = at::arange(long_type, 0, numel).view(input_sizes);
+  auto idx = at::arange(0, numel, long_type).view(input_sizes);
   auto idx_unfolded = idx.unfold(dim, size, step).contiguous().view(-1);
-  auto grad_input = at::zeros(grad.type(), {numel});
+  auto grad_input = at::zeros({numel}, grad.type());
   grad_input.index_add_(0, idx_unfolded, grad.contiguous().view(-1));
   return grad_input.view(input_sizes);
 }
@@ -554,7 +554,7 @@ Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList
   if (diff_nelem > 0) {
     // because mask_selected returns a 1-d tensor with size of masked elements that are 1,
     // we need to fill out the rest with zeros then reshape back to tensor2's size.
-    auto zeros_fillin = at::zeros(grad.type(), {diff_nelem});
+    auto zeros_fillin = at::zeros({diff_nelem}, grad.type());
     mask_selected = at::cat({mask_selected, zeros_fillin}, 0);
   }
   return mask_selected.view(sizes);
@@ -602,7 +602,7 @@ Tensor split_with_sizes_backward(const std::vector<torch::autograd::Variable> &g
       auto length = split_sizes[j];
       std::vector<int64_t> grad_size(sizes);
       grad_size[dim] = length;
-      grads_all_defined[j] = at::zeros(type, grad_size);
+      grads_all_defined[j] = at::zeros(grad_size, type);
     }
   }
 
@@ -651,7 +651,7 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
   if (dim < 0) dim += input.dim();
   std::vector<int64_t> sizes = input.sizes();
   sizes[dim] /= 2;
-  auto tmp = grad * glu_backward(at::ones(input.type(), sizes), input, dim);
+  auto tmp = grad * glu_backward(at::ones(sizes, input.type()), input, dim);
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
 }
 
@@ -755,7 +755,7 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
   }
 
   // Input was a matrix but was not square
-  auto grad_input = at::zeros(grad.type(), input_sizes);
+  auto grad_input = at::zeros(input_sizes, grad.type());
   auto diagonal_size = diag_size(input_sizes[0], input_sizes[1], diagonal);
   auto storage_offset = diagonal >= 0 ? diagonal : -diagonal * input_sizes[1];
   auto diag = grad_input.as_strided({diagonal_size}, {input_sizes[1] + 1}, storage_offset);
@@ -764,7 +764,7 @@ Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal)
 }
 
 Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offset, int64_t dim1, int64_t dim2) {
-  auto grad_input = at::zeros(grad.type(), input_sizes);
+  auto grad_input = at::zeros(input_sizes, grad.type());
   auto diag = grad_input.diagonal(offset, dim1, dim2);
   diag.copy_(grad);
   return grad_input;
@@ -938,7 +938,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   if (gsigma.defined()) {
     sigma_term = u.mm(gsigma.diag()).mm(vt);
   } else {
-    sigma_term = at::zeros(self.type(), {1}).expand_as(self);
+    sigma_term = at::zeros({1}, self.type()).expand_as(self);
   }
   // in case that there are no gu and gv, we can avoid the series of kernel
   // calls below
@@ -947,8 +947,8 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   auto ut = u.t();
-  auto im = self.type().eye(m);
-  auto in = self.type().eye(n);
+  auto im = eye(m, self.type());
+  auto in = eye(n, self.type());
   auto sigma_mat = sigma.diag();
   auto sigma_mat_inv = sigma.pow(-1).diag();
   auto sigma_expanded_sq = sigma.pow(2).expand_as(sigma_mat);
@@ -968,7 +968,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     u_term = u_term.mm(vt);
   } else {
-    u_term = at::zeros(self.type(), {1}).expand_as(self);
+    u_term = at::zeros({1}, self.type()).expand_as(self);
   }
 
   if (gv.defined()) {
@@ -979,7 +979,7 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
     }
     v_term = u.mm(v_term);
   } else {
-    v_term = at::zeros(self.type(), {1}).expand_as(self);
+    v_term = at::zeros({1}, self.type()).expand_as(self);
   }
 
   return u_term + sigma_term + v_term;
@@ -1051,10 +1051,10 @@ std::tuple<Tensor, Tensor> trtrs_backward(
     }
   }
   if (!grad_a.defined()) {
-    grad_a = at::zeros(a.type(), {1}).expand_as(a);
+    grad_a = at::zeros({1}, a.type()).expand_as(a);
   }
   if (!grad_b.defined()) {
-    grad_b = at::zeros(b.type(), {1}).expand_as(b);
+    grad_b = at::zeros({1}, b.type()).expand_as(b);
   }
   if (output_mask[1] && grad_m.defined()) {
     grad_a = grad_a.add(grad_m);
@@ -1094,7 +1094,7 @@ Tensor fft_backward(const Tensor& self, const Tensor& grad, int64_t signal_ndim,
         }
         zero_grad_shape[signal_ndim] = zero_length;
         zero_grad_shape[signal_ndim + 1] = 2;
-        complex_full_grad =  at::cat({ grad, at::zeros(grad.type(), zero_grad_shape) }, signal_ndim);
+        complex_full_grad =  at::cat({ grad, at::zeros(zero_grad_shape, grad.type()) }, signal_ndim);
       }
       gI = _fft_with_size(complex_full_grad, signal_ndim,
                           /* complex_input */ true, /* complex_output */ true,

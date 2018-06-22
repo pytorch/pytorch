@@ -11,6 +11,8 @@ from itertools import repeat, product
 from functools import wraps, reduce
 from operator import mul
 from collections import OrderedDict
+import hashlib
+import os
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -304,8 +306,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
             for p in module.parameters():
                 test_case.assertIsInstance(p, torch.DoubleTensor)
 
-            # TODO: Hardshrink is lacking a CUDA implementation
-            if TEST_CUDA and self.should_test_cuda and type(module) != nn.Hardshrink:
+            if TEST_CUDA and self.should_test_cuda:
                 # check that cuda() moves module parameters to correct GPU device,
                 # and that float() casts parameters correctly
 
@@ -363,7 +364,7 @@ class NewModuleTest(InputVariableMixin, ModuleTest):
                 input = input.half().cuda()
                 module.half().cuda()
                 module(input)
-                for o in module.parameters():
+                for p in module.parameters():
                     test_case.assertIsInstance(p, torch.cuda.HalfTensor)
                     test_case.assertEqual(p.get_device(), 0)
 
@@ -2209,6 +2210,29 @@ class TestNN(NNTestCase):
         indices.add_(1)
         self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
 
+    def test_adaptive_pooling_input_size(self):
+        for numel in (2, 3):
+            for pool_type in ('Max', 'Avg'):
+                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                module_cls = getattr(nn, cls_name)
+                output_size = (2,) * numel
+                module = module_cls(output_size)
+
+                input = torch.randn(output_size)
+                self.assertRaises(ValueError, lambda: module(input))
+
+    def test_adaptive_pooling_size_none(self):
+        for numel in (2, 3):
+            for pool_type in ('Max', 'Avg'):
+                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                module_cls = getattr(nn, cls_name)
+                output_size = (2,) * (numel - 1) + (None,)
+                module = module_cls(output_size)
+
+                input = torch.randn((4,) * (numel + 1))
+                output = module(input)
+                self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
+
     def test_Conv2d_naive_groups(self):
         self._test_Conv2d_naive_groups()
 
@@ -3683,6 +3707,7 @@ class TestNN(NNTestCase):
         batch_size = 4
         seq_len = 6
         num_directions = 1
+        bad_size = 7  # prime number so that no size can divide it.
 
         def test(input_shape, hidden_shape, mode):
             for input, hidden in get_inputs(input_shape, hidden_shape, mode):
@@ -3692,10 +3717,10 @@ class TestNN(NNTestCase):
         correct_input_shape = (seq_len, batch_size, input_size)
         correct_hidden_shape = (num_layers * num_directions, batch_size, hidden_size)
 
-        def update_tuple(tup, dim, delta):
-            new_tup = list(tup)
-            new_tup[dim] = delta
-            return tuple(new_tup)
+        def update_shape(shape, dim, new_dim_size):
+            new_shape = list(shape)
+            new_shape[dim] = new_dim_size
+            return tuple(new_shape)
 
         def get_inputs(input_shape, hidden_shape, mode):
             '''returns list( tuple(input, hidden) )
@@ -3715,28 +3740,28 @@ class TestNN(NNTestCase):
         rnn_modes = ['RNN', 'GRU', 'LSTM']
         for mode in rnn_modes:
             # Incorrect input batch size
-            input_shape = update_tuple(correct_input_shape, 1, -1)
+            input_shape = update_shape(correct_input_shape, 1, bad_size)
             hidden_shape = correct_hidden_shape
             test(input_shape, hidden_shape, mode)
 
             # Incorrect hidden batch size
             input_shape = correct_input_shape
-            hidden_shape = update_tuple(correct_hidden_shape, 1, -1)
+            hidden_shape = update_shape(correct_hidden_shape, 1, bad_size)
             test(input_shape, hidden_shape, mode)
 
             # Incorrect input size
-            input_shape = update_tuple(correct_input_shape, 2, -1)
+            input_shape = update_shape(correct_input_shape, 2, bad_size)
             hidden_shape = correct_hidden_shape
             test(input_shape, hidden_shape, mode)
 
             # Incorrect hidden size
             input_shape = correct_input_shape
-            hidden_shape = update_tuple(correct_hidden_shape, 2, -1)
+            hidden_shape = update_shape(correct_hidden_shape, 2, bad_size)
             test(input_shape, hidden_shape, mode)
 
             # Incorrect hidden[0]
             input_shape = correct_input_shape
-            hidden_shape = update_tuple(correct_hidden_shape, 0, -1)
+            hidden_shape = update_shape(correct_hidden_shape, 0, bad_size)
             test(input_shape, hidden_shape, mode)
 
     def test_rnn_initial_hidden_state(self):
@@ -5568,19 +5593,17 @@ def add_test(test, decorator=None):
 
     test_name = test.get_name()
     add(test_name, lambda self, test=test: test(self))
-    # Hardshrink is not implemented in CUDA, so we must not test it.
-    if not test_name.startswith("test_Hardshrink"):
-        cuda_test_name = test_name + '_cuda'
-        # With dtype enable, it's good enough to test against three floating types
-        if 'dtype' in get_function_arglist(test.test_cuda):
-            add(cuda_test_name + '_float', lambda self,
-                test=test: test.test_cuda(self, dtype=torch.float))
-            add(cuda_test_name + '_double', lambda self,
-                test=test: test.test_cuda(self, dtype=torch.double))
-            add(cuda_test_name + '_half', lambda self,
-                test=test: test.test_cuda(self, dtype=torch.half))
-        else:
-            add(cuda_test_name, lambda self, test=test: test.test_cuda(self))
+    cuda_test_name = test_name + '_cuda'
+    # With dtype enable, it's good enough to test against three floating types
+    if 'dtype' in get_function_arglist(test.test_cuda):
+        add(cuda_test_name + '_float', lambda self,
+            test=test: test.test_cuda(self, dtype=torch.float))
+        add(cuda_test_name + '_double', lambda self,
+            test=test: test.test_cuda(self, dtype=torch.double))
+        add(cuda_test_name + '_half', lambda self,
+            test=test: test.test_cuda(self, dtype=torch.half))
+    else:
+        add(cuda_test_name, lambda self, test=test: test.test_cuda(self))
 
 
 def wrap_functional(fn, **kwargs):
@@ -7222,6 +7245,12 @@ new_module_tests = [
         desc='tuple',
     ),
     dict(
+        module_name='AdaptiveMaxPool2d',
+        constructor_args=((3, None),),
+        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
+        desc='tuple_none',
+    ),
+    dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=(3,),
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
@@ -7232,6 +7261,12 @@ new_module_tests = [
         constructor_args=((3, 4, 5),),
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='tuple',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool3d',
+        constructor_args=((3, None, 5),),
+        input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
+        desc='tuple_none',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
@@ -7263,6 +7298,12 @@ new_module_tests = [
         desc='tuple',
     ),
     dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=((3, None),),
+        input_fn=lambda: torch.rand(1, 3, 5, 6),
+        desc='tuple_none',
+    ),
+    dict(
         module_name='AdaptiveAvgPool3d',
         constructor_args=(3,),
         input_fn=lambda: torch.rand(2, 3, 5, 2, 7),
@@ -7273,6 +7314,12 @@ new_module_tests = [
         constructor_args=((3, 4, 5),),
         input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
         desc='tuple',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((None, 4, 5),),
+        input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
+        desc='tuple_none',
     ),
     dict(
         module_name='SELU',
@@ -7608,6 +7655,21 @@ add_test(NewModuleTest(
     constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
     input_size=(4, 16),
     fullname='AdaptiveLogSoftmax'))
+
+
+num_shards = os.environ.get('TEST_NN_NUM_SHARDS', None)
+shard = os.environ.get('TEST_NN_SHARD', None)
+if num_shards is not None and shard is not None:
+    num_shards = int(num_shards)
+    shard = int(shard)
+
+    def load_tests(loader, tests, pattern):
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % num_shards == shard:
+                    test_suite.addTest(test)
+        return test_suite
 
 
 if __name__ == '__main__':

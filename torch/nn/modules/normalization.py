@@ -72,10 +72,11 @@ class LayerNorm(Module):
     the paper `Layer Normalization`_ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The mean and standard-deviation are calculated separately over the last
-    certain number dimensions with shape specified by :attr:`normalized_shape`.
+    certain number dimensions which have to be of the shape specified by
+    :attr:`normalized_shape`.
     :math:`\gamma` and :math:`\beta` are learnable affine transform parameters of
     :attr:`normalized_shape` if :attr:`elementwise_affine` is ``True``.
 
@@ -96,7 +97,7 @@ class LayerNorm(Module):
                 [* \times \text{normalized_shape}[0] \times \text{normalized_shape}[1]
                     \times \ldots \times \text{normalized_shape}[-1]]
             If a single integer is used, it is treated as a singleton list, and this module will
-            normalize over the last dimension with that specific size.
+            normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         elementwise_affine: a boolean value that when set to ``True``, this module
             has learnable per-element affine parameters. Default: ``True``
@@ -155,7 +156,7 @@ class GroupNorm(Module):
     the paper `Group Normalization`_ .
 
     .. math::
-        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x]} + \epsilon} * \gamma + \beta
+        y = \frac{x - \mathrm{E}[x]}{ \sqrt{\mathrm{Var}[x] + \epsilon}} * \gamma + \beta
 
     The input channels are separated into :attr:`num_groups` groups, each containing
     ``num_channels / num_groups`` channels. The mean and standard-deviation are calculated

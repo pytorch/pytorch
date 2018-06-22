@@ -1,19 +1,13 @@
 #include "ATen/ATen.h"
 #include "ATen/TensorUtils.h"
-#include "ATen/NativeFunctions.h"
 #include "ATen/Error.h"
 
 #include "ATen/AccumulateType.h"
-#include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <THC/THCDeviceUtils.cuh>
-#include <THC/THCNumerics.cuh>
 #include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
-
-#include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
@@ -26,12 +20,12 @@ namespace {
 static const int WARP_SIZE = 32;
 static const int BLOCKDIMY = 32;
 
-template 
-  <typename scalar_t, 
+template
+  <typename scalar_t,
    typename accscalar_t>
 __global__ void embedding_backward_feature_kernel
-  (int64_t* indices, 
-   const scalar_t* __restrict__ grad, 
+  (int64_t* indices,
+   const scalar_t* __restrict__ grad,
    scalar_t* __restrict__ grad_weight,
    int n, // OK to pass as int, we don't expect 2 billion+ samples in one shot
    int64_t stride,
@@ -52,33 +46,33 @@ __global__ void embedding_backward_feature_kernel
     int tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
       indices_batch[tid] = (int)indices[batch_start + tid];
-    
+
     // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
     for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
     {
-      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group 
+      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group
       // leaders are done with their accumulates before other warps start loading again.
-      __syncthreads();  
-  
-      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y; 
+      __syncthreads();
 
-      int src_row = chunk_start + threadIdx.y; 
+      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y;
+
+      int src_row = chunk_start + threadIdx.y;
       int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
-      
+
       // All warps load their smem segments with incoming grad data
       if(src_row < n && f < s && dst_row != padding_idx)
-        my_s[threadIdx.x] = scalar_cast<accscalar_t>(grad[src_row*stride + f]);
-      
+        my_s[threadIdx.x] = static_cast<accscalar_t>(grad[src_row*stride + f]);
+
       __syncthreads();
-    
+
       // To ensure determinism, we can't just have each warp add its grad data to its dst_row.
       // We need to check if any other warps pulled grad data targeting dst_row.
-      // If so, we elect the first warp in each matching group as the leader. 
+      // If so, we elect the first warp in each matching group as the leader.
       // Each leader warp serializes the accumulates targeting dst_row in shared memory,
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
       if(dst_row != padding_idx && src_row < n) // Per-warp exit condition, safe with ballot_sync
       {
-        int match_found_this_thread = 
+        int match_found_this_thread =
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
@@ -88,7 +82,7 @@ __global__ void embedding_backward_feature_kernel
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
         {
-          matchmask ^= (1 << first_remaining_peer);   
+          matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
             first_remaining_peer = __ffs(matchmask) - 1;
@@ -96,7 +90,7 @@ __global__ void embedding_backward_feature_kernel
             matchmask ^= (1 << first_remaining_peer);
           }
           if(f < s)
-            grad_weight[dst_row*stride + f] += scalar_cast<scalar_t>(my_s[threadIdx.x]);
+            grad_weight[dst_row*stride + f] += static_cast<scalar_t>(my_s[threadIdx.x]);
         }
       }
     }
@@ -142,8 +136,8 @@ __global__ void embedding_backward_kernel(
       for (int ii = 0; ii < SZ; ii++) {
         int feature_dim = start_feature + ii * WARP_SIZE;
         if (feature_dim < stride) {
-          gradient[ii] = scalar_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
-          weight[ii] = scalar_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
+          gradient[ii] = static_cast<accscalar_t>(grad_output[grad_row + feature_dim]);
+          weight[ii] = static_cast<accscalar_t>(grad_weight[weight_row + feature_dim]);
         }
       }
 
@@ -156,7 +150,7 @@ __global__ void embedding_backward_kernel(
       for (int ii = 0; ii < SZ; ii++) {
         int feature_dim = start_feature + ii * WARP_SIZE;
         if (feature_dim < stride) {
-            grad_weight[weight_row + feature_dim] = scalar_cast<scalar_t>(weight[ii]);
+            grad_weight[weight_row + feature_dim] = static_cast<scalar_t>(weight[ii]);
         }
       }
 
@@ -180,13 +174,13 @@ __global__ void renorm_kernel(
 
   accscalar_t v = 0;
   for (int i = tid; i < dim; i += blockDim.x) {
-    auto x = scalar_cast<accscalar_t>(weights[base_index + i]);
+    auto x = static_cast<accscalar_t>(weights[base_index + i]);
     if (norm_type == 1) {
       v += std::abs(x);
     } else if (norm_type == 2) {
       v += x * x;
     } else {
-      v += THCNumerics<accscalar_t>::pow(x, norm_type);
+      v += std::pow(x, norm_type);
     }
   }
 
@@ -194,13 +188,13 @@ __global__ void renorm_kernel(
   v = reduceBlock<accscalar_t>(sdata, blockDim.x, v, Op(), 0);
 
   if (tid == 0) {
-    sdata[0] = THCNumerics<accscalar_t>::pow(v, scalar_cast<accscalar_t>(1.0 / norm_type));
+    sdata[0] = std::pow(v, static_cast<accscalar_t>(1.0 / norm_type));
   }
   __syncthreads();
 
   // now we renormalize the blocks that need it
   if (sdata[0] > max_norm) {
-    auto factor = scalar_cast<scalar_t>(max_norm / (sdata[0] + 1e-7));
+    auto factor = static_cast<scalar_t>(max_norm / (sdata[0] + 1e-7));
     for (int i = tid; i < dim; i += blockDim.x) {
       weights[base_index + i] *= factor;
     }
@@ -220,7 +214,7 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
 
   auto num_indices = indices.numel();
   auto grad = grad_.contiguous().view({num_indices, grad_.size(-1)});
-  auto grad_weight = at::zeros(grad_.type(), {num_weights, grad_.size(-1)});
+  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.type());
 
   int64_t stride = grad_weight.stride(0);
   cudaStream_t stream = globalContext().getCurrentCUDAStream();
@@ -230,20 +224,19 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
     AT_DISPATCH_FLOATING_TYPES_AND_HALF
-      (grad.type(), 
-       "embedding_backward", 
-       [&] 
+      (grad.type(),
+       "embedding_backward",
+       [&]
        {
-         using cuda_scalar_t = cuda::into_type<scalar_t>;
-         using accscalar_t = acc_type<cuda_scalar_t, true>;
-         embedding_backward_feature_kernel<cuda_scalar_t, accscalar_t>
-           <<<grid, 
-              block, 
+         using accscalar_t = acc_type<scalar_t, true>;
+         embedding_backward_feature_kernel<scalar_t, accscalar_t>
+           <<<grid,
+              block,
               sizeof(accscalar_t)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
               stream>>>
            (indices.data<int64_t>(),
-            grad.data<cuda_scalar_t>(),
-            grad_weight.data<cuda_scalar_t>(),
+            grad.data<scalar_t>(),
+            grad_weight.data<scalar_t>(),
             num_indices,
             stride,
             padding_idx);
@@ -315,12 +308,11 @@ Tensor embedding_backward_cuda(const Tensor & grad_, const Tensor & indices,
   dim3 block(32, 4);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(grad.type(), "embedding_backward", [&] {
-    using cuda_scalar_t = cuda::into_type<scalar_t>;
     embedding_backward_kernel<<<grid, block, 0, stream>>>(
       sorted_indices.data<int64_t>(),
       orig_indices.data<int64_t>(),
-      grad.data<cuda_scalar_t>(),
-      grad_weight.data<cuda_scalar_t>(),
+      grad.data<scalar_t>(),
+      grad_weight.data<scalar_t>(),
       count.defined() ? count.data<int64_t>() : nullptr,
       num_indices,
       stride,
@@ -362,13 +354,12 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   int dim = self.stride(0);
 
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "embedding_backward", [&] {
-    using cuda_scalar_t = cuda::into_type<scalar_t>;
-    using accscalar_t = acc_type<cuda_scalar_t, true>;
+    using accscalar_t = acc_type<scalar_t, true>;
     renorm_kernel<<<grid, block, 128 * sizeof(accscalar_t), stream>>>(
-      self.data<cuda_scalar_t>(),
+      self.data<scalar_t>(),
       unique_indices.data<int64_t>(),
-      scalar_cast<accscalar_t>(max_norm),
-      scalar_cast<accscalar_t>(norm_type),
+      static_cast<accscalar_t>(max_norm),
+      static_cast<accscalar_t>(norm_type),
       dim);
   });
   THCudaCheck(cudaGetLastError());
@@ -377,4 +368,3 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
 }
 
 }}  // namespace at::native
-

@@ -16,8 +16,8 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   THCUNN_assertSameGPU(state, 3, input, output, weight);
 
   // Only handle 4D Input Tensors for now
-  THAssert(THCTensor_(nDimension)(state, input) == 4);
-  THAssert(THCTensor_(nDimension)(state, weight) == 4);
+  THAssert(!input->is_empty() && THCTensor_(nDimension)(state, input) == 4);
+  THAssert(!weight->is_empty() && THCTensor_(nDimension)(state, weight) == 4);
 
   // We assume that the input and weight Tensors are shaped properly by
   // the caller, so we verify that here to some extent
@@ -107,9 +107,9 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
   THCUNN_assertSameGPU(state, 3, gradOutput, gradInput, weight);
 
   // Only handle 4D Input Tensors for now
-  THAssert(THCTensor_(nDimension)(state, input) == 4);
-  THAssert(THCTensor_(nDimension)(state, weight) == 4);
-  THAssert(THCTensor_(nDimension)(state, gradOutput) == 4);
+  THAssert(!input->is_empty() && THCTensor_(nDimension)(state, input) == 4);
+  THAssert(!weight->is_empty() && THCTensor_(nDimension)(state, weight) == 4);
+  THAssert(!gradOutput->is_empty() && THCTensor_(nDimension)(state, gradOutput) == 4);
 
   // Minimal shape checking, as above
   // Same # of elements in batch
@@ -204,9 +204,9 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
   THCUNN_assertSameGPU(state, 3, input, gradOutput, gradWeight);
 
   // Only handle 4D Input Tensors for now
-  THAssert(THCTensor_(nDimension)(state, input) == 4);
-  THAssert(THCTensor_(nDimension)(state, gradOutput) == 4);
-  THAssert(THCTensor_(nDimension)(state, gradWeight) == 4);
+  THAssert(!input->is_empty() && THCTensor_(nDimension)(state, input) == 4);
+  THAssert(!gradOutput->is_empty() && THCTensor_(nDimension)(state, gradOutput) == 4);
+  THAssert(!gradWeight->is_empty() && THCTensor_(nDimension)(state, gradWeight) == 4);
 
   // Minimal shape checking as above
   // Same # of elements in batch
