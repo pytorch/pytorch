@@ -6,6 +6,7 @@
 
 #include <vector>
 #include <functional>
+#include <sstream>
 #include "caffe2/utils/Array.h"
 
 namespace c10 {
@@ -20,6 +21,11 @@ struct TensorParameterDispatchKey final {
 };
 inline constexpr bool operator==(const TensorParameterDispatchKey& lhs, const TensorParameterDispatchKey& rhs) {
   return lhs.deviceTypeId == rhs.deviceTypeId && lhs.layoutId == rhs.layoutId && lhs.dataType == rhs.dataType;
+}
+inline std::string to_string(const TensorParameterDispatchKey& key) {
+  std::ostringstream str;
+  str << "TensorKey(" << key.deviceTypeId << ", " << key.layoutId.value() << ", " << key.dataType << ")";
+  return str.str();
 }
 }  // namespace details
 }  // namespace c10
@@ -57,6 +63,19 @@ template<size_t num_dispatch_args>
 inline constexpr bool operator==(const DispatchKey<num_dispatch_args> &lhs, const DispatchKey<num_dispatch_args>& rhs) {
   // TODO: Use AVX instructions to perform this equality test more quickly
   return lhs.argTypes == rhs.argTypes;
+}
+template<size_t num_dispatch_args>
+inline std::string to_string(const DispatchKey<num_dispatch_args>& key) {
+  if (num_dispatch_args == 0) {
+    return "DispatchKey()";
+  }
+  std::ostringstream str;
+  str << "DispatchKey(" << to_string(key.argTypes[0]);
+  for(size_t i = 1; i < num_dispatch_args; ++i) {
+    str << ", " + to_string(key.argTypes[i]);
+  }
+  str << ")";
+  return str.str();
 }
 
 }  // namespace c10

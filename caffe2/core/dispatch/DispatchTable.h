@@ -14,7 +14,7 @@ namespace c10 {
 
 namespace details {
 
-/// Internal implementation of the operator as a thread-safe hash table.
+/// Kernel implementations in a thread-safe hash table.
 template<class Key>
 class ThreadsafeOperatorTable_ final {
 public:
@@ -32,12 +32,13 @@ public:
 
     template<class Key_>
     void emplace(Key_&& key, void* value) {
+      using std::to_string;
       // TODO Locking
       //std::unique_lock<std::shared_timed_mutex> lock(mutex_);
 
       auto result = map_.emplace(std::forward<Key>(key), value);
       if (!result.second) {
-        throw std::logic_error("Tried to register conflicting operators to the dispatcher.");
+        throw std::logic_error("Tried to register conflicting kernels to the dispatcher: " + to_string(key));
       }
     }
 
@@ -48,7 +49,7 @@ public:
       size_t num_removed = map_.erase(key);
       assert(num_removed <= 1); //This is not a multi-map
       if (num_removed == 0) {
-        throw std::logic_error("Tried to deregister an operator that isn't registered.");
+        throw std::logic_error("Tried to deregister a kernel that isn't registered.");
       }
     }
 
@@ -74,7 +75,7 @@ private:
  * Per-operator dispatch table.
  *
  * Given an operator specified by 'OpSchemaDef', this class records a dispatch table for
- * various backends provided for this operator.  For example, if we consider the operator
+ * various kernels provided for this operator.  For example, if we consider the operator
  * add(Tensor, Tensor), the dispatch table for this operator may contain implementations
  * for various dynamic tensor types, such as (CPUFloatTensor, CPUFloatTensor),
  * (CUDAFloatTensor, CUDAFloatTensor), etc.
@@ -88,27 +89,27 @@ private:
   using Schema = OpSchema<OpSchemaDef>;
 
 public:
-  DispatchTable(): ops_() {}
+  DispatchTable(): kernels_() {}
 
   /**
-   * Register an operator implementation in the table at some dispatch key.
-   * @param func Concrete function implementation to register
-   * @param dispatch_key Dispatch key to implement this function with
+   * Register a kernel in the table at some dispatch key.
+   * @param func Concrete kernel function implementation to register
+   * @param dispatch_key Dispatch key to define when this kernel is selected
    */
-  void registerOp(typename Schema::signature::func_type* func, typename Schema::dispatch::dispatch_key_type dispatch_key) {
-    ops_.emplace(std::move(dispatch_key), reinterpret_cast<void*>(func));
+  void registerKernel(typename Schema::signature::func_type* func, typename Schema::dispatch::dispatch_key_type dispatch_key) {
+    kernels_.emplace(std::move(dispatch_key), reinterpret_cast<void*>(func));
   }
 
   /**
-   * Unregister the operator implementation at some dispatch key.
+   * Deregister the kernel for some dispatch key.
    *
    * @param dispatch_key Dispatch key to unregister.
    */
   // TODO: This isn't going to work so well when we get more complicated override patterns!
   // In this case, an operator will show up in multiple slots, and erasing them one-by-one
   // is probably not such a good idea.
-  void deregisterOp(const typename Schema::dispatch::dispatch_key_type& dispatch_key) {
-    ops_.erase(dispatch_key);
+  void deregisterKernel(const typename Schema::dispatch::dispatch_key_type& dispatch_key) {
+    kernels_.erase(dispatch_key);
   }
 
   /**
@@ -122,22 +123,23 @@ public:
   typename Schema::signature::return_type call(Args&&... args) const {
     // TODO Better error message, but need to take care that reference arguments match non-reference arguments and so on.
     //      static_assert(std::is_same<typename Schema::return_type (Args...), typename Schema::func_type>::value, "Argument types don't match operator signature");
-    auto operator_func = lookupOp_(args...);
-    return operator_func(std::forward<Args>(args)...);
+    auto kernel_func = lookupKernelFunc_(args...);
+    return kernel_func(std::forward<Args>(args)...);
   }
 
 private:
   template<class... Args>
-  typename Schema::signature::func_type* lookupOp_(const Args&... args) const {
+  typename Schema::signature::func_type* lookupKernelFunc_(const Args&... args) const {
     auto dispatch_key = Schema::dispatch::dispatch_key(args...);
-    void* found = ops_.lookup(dispatch_key);
+    void* found = kernels_.lookup(dispatch_key);
     if (found == nullptr) {
-      throw std::logic_error("Didn't find operator to dispatch to");
+      // TODO Better error message - include op name and dispatch key (i.e. argument types)
+      throw std::logic_error("Didn't find kernel to dispatch to");
     }
     return reinterpret_cast<typename Schema::signature::func_type*>(found);
   }
 
-  details::ThreadsafeOperatorTable_<typename Schema::dispatch::dispatch_key_type> ops_;
+  details::ThreadsafeOperatorTable_<typename Schema::dispatch::dispatch_key_type> kernels_;
 };
 
 } // namespace c10
