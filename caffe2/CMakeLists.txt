@@ -1,4 +1,4 @@
-it # ---[ Generate and install header and cpp files
+# ---[ Generate and install header and cpp files
 include(../cmake/Codegen.cmake)
 
 # ---[ Declare source file lists
@@ -265,6 +265,10 @@ if(USE_ROCM)
     endif()
     hip_include_directories(${Caffe2_HIP_INCLUDES})
   endif()
+
+  # Include all the necessary cuh files.
+  file(GLOB_RECURSE ATen_CUDA_HEADER_SRCS "${CMAKE_CURRENT_LIST_DIR}/../aten/src/*.cuh")
+  SET(Caffe2_HIP_SRCS ${ATen_CUDA_HEADER_SRCS} ${Caffe2_HIP_SRCS})
 
   # Necessary in order to build all the source code
   set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
