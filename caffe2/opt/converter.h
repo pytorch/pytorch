@@ -16,6 +16,7 @@ public:
   Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
   Caffe2Annotation(std::string device)
       : Annotation(AnnotationKind::Caffe2), Device(device) {}
+  virtual ~Caffe2Annotation() {}
 
   void setDevice(std::string device) { Device = device; }
   const std::string getDevice() const { return Device; }
