@@ -618,12 +618,9 @@ void __THCublasCheck(cublasStatus_t status, const char *file, const int line)
         errmsg = "an invalid numeric value was used as an argument";
         break;
 
-#ifndef __HIP_PLATFORM_HCC__
-      // As of ROCm 1.8.2, this enum is not defined
       case CUBLAS_STATUS_ARCH_MISMATCH:
         errmsg = "an absent device architectural feature is required";
         break;
-#endif
 
       case CUBLAS_STATUS_MAPPING_ERROR:
         errmsg = "an access to GPU memory space failed";
