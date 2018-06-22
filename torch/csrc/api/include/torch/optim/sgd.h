@@ -29,7 +29,8 @@ class SGD : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit SGD(ParameterContainer&& parameters, const SGDOptions& options)
-      : Optimizer(std::move(parameters)), options_(options) {
+      : Optimizer(std::forward<ParameterContainer>(parameters)),
+        options_(options) {
     if (options_.momentum_ > 0) {
       momentum_buffers_ = detail::zeros_like(parameters_);
     }

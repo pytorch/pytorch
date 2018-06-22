@@ -14,6 +14,7 @@
 #include <functional>
 #include <memory>
 #include <random>
+#include <vector>
 
 using namespace torch::nn;
 using namespace torch::optim;
@@ -52,7 +53,6 @@ bool test_optimizer_xor(
   return true;
 }
 
-// TODO: Add test for zero_grad
 // TODO: Add test for passing arbitrary vector of variables
 // TODO: Add hard tests that verify deterministically the output of each
 // optimization algorithm against the PyTorch algorithms (i.e. compare against a
@@ -140,4 +140,24 @@ TEST_CASE("Optim/ZeroGrad") {
     REQUIRE(parameter->grad().defined());
     REQUIRE(parameter->grad().sum().toCFloat() == 0);
   }
+}
+
+TEST_CASE("Optim/ExternalVectorOfParameters") {
+  std::vector<Variable> parameters = {
+      torch::randn({2, 2}), torch::randn({3, 3}), torch::randn({4, 4})};
+  std::vector<Variable> original_parameters = {
+      parameters[0].clone(), parameters[1].clone(), parameters[2].clone()};
+
+  // Set all gradients to one
+  for (auto& parameter : parameters) {
+    parameter.grad() = torch::ones_like(parameter);
+  }
+
+  SGD optimizer(parameters, 1.0);
+
+  optimizer.step();
+
+  REQUIRE(parameters[0].allclose(original_parameters[0] - 1.0));
+  REQUIRE(parameters[1].allclose(original_parameters[1] - 1.0));
+  REQUIRE(parameters[2].allclose(original_parameters[2] - 1.0));
 }

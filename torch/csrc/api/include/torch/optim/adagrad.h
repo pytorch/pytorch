@@ -28,7 +28,7 @@ class Adagrad : public Optimizer {
   explicit Adagrad(
       ParameterContainer&& parameters,
       const AdagradOptions& options)
-      : Optimizer(std::move(parameters)),
+      : Optimizer(std::forward<ParameterContainer>(parameters)),
         options_(options),
         sum_(detail::zeros_like(parameters_)),
         step_(parameters_.size(), 0) {}

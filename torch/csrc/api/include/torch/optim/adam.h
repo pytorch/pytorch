@@ -29,7 +29,7 @@ class Adam : public Optimizer {
  public:
   template <typename ParameterContainer>
   explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
-      : Optimizer(std::move(parameters)),
+      : Optimizer(std::forward<ParameterContainer>(parameters)),
         options_(options),
         step_buffers_(parameters.size(), 0),
         exp_average_buffers_(detail::zeros_like(parameters_)),

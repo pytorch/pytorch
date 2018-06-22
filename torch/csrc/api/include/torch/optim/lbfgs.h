@@ -30,7 +30,7 @@ class LBFGS : public LossClosureOptimizer {
  public:
   template <typename ParameterContainer>
   explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
-      : LossClosureOptimizer(std::move(parameters)),
+      : LossClosureOptimizer(std::forward<ParameterContainer>(parameters)),
         options_(options),
         ro(options_.history_size_),
         al(options_.history_size_) {}

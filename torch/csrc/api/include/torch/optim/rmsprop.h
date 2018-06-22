@@ -40,7 +40,7 @@ class RMSprop : public Optimizer {
   explicit RMSprop(
       ParameterContainer&& parameters,
       const RMSpropOptions& options)
-      : Optimizer(std::move(parameters)),
+      : Optimizer(std::forward<ParameterContainer>(parameters)),
         options_(options),
         square_average_buffers_(detail::zeros_like(parameters_)) {
     if (options_.momentum_ > 0) {

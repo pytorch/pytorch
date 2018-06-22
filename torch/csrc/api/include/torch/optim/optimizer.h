@@ -28,13 +28,13 @@ class OptimizerBase {
  public:
   using ParameterCursor = torch::detail::CursorBase<Variable>;
 
-  explicit OptimizerBase(std::vector<Variable>&& parameters)
+  explicit OptimizerBase(std::vector<Variable> parameters)
       : parameters_(std::move(parameters)) {}
 
-  explicit OptimizerBase(ParameterCursor&& cursor) {
+  explicit OptimizerBase(ParameterCursor cursor) {
     parameters_.reserve(cursor.size());
     for (auto& parameter : cursor) {
-      parameters_.push_back(*parameter);
+      parameters_.push_back(std::move(*parameter));
     }
   }
 
