@@ -12,7 +12,7 @@ from .modules import utils
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
-from .modules.utils import _single, _pair, _triple
+from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 
 
@@ -490,6 +490,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool2d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -505,6 +506,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool3d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -521,35 +523,38 @@ Args:
     output_size: the target output size (single integer)
 """)
 
-adaptive_avg_pool2d = _add_docstr(torch._C._nn.adaptive_avg_pool2d, r"""
-adaptive_avg_pool2d(input, output_size) -> Tensor
 
-Applies a 2D adaptive average pooling over an input signal composed of
-several input planes.
+def adaptive_avg_pool2d(input, output_size):
+    r"""
+    Applies a 2D adaptive average pooling over an input signal composed of
+    several input planes.
 
-See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
 
-Args:
-    output_size: the target output size (single integer or
-        double-integer tuple)
-""")
+    Args:
+        output_size: the target output size (single integer or
+            double-integer tuple)
+    """
+    output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool2d(input, output_size)
 
-adaptive_avg_pool3d = _add_docstr(torch._C._nn.adaptive_avg_pool3d, r"""
-adaptive_avg_pool3d(input, output_size) -> Tensor
 
-Applies a 3D adaptive average pooling over an input signal composed of
-several input planes.
+def adaptive_avg_pool3d(input, output_size):
+    r"""
+    Applies a 3D adaptive average pooling over an input signal composed of
+    several input planes.
 
-See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
+    See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
 
-Args:
-    output_size: the target output size (single integer or
-        triple-integer tuple)
-""")
+    Args:
+        output_size: the target output size (single integer or
+            triple-integer tuple)
+    """
+    output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
 
 
 # Activation functions
-
 def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
