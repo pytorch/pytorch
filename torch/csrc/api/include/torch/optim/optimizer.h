@@ -1,16 +1,14 @@
 #pragma once
 
 #include <torch/csrc/autograd/generated/variable_factories.h>
-#include <torch/csrc/utils/variadic.h>
 #include <torch/nn/cursor.h>
-#include <torch/nn/module.h>
-#include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
 #include <functional>
 #include <memory>
-#include <type_traits>
 #include <vector>
+
+// TODO: document
 
 namespace torch {
 namespace optim {
@@ -61,6 +59,7 @@ class LossClosureOptimizer : public detail::OptimizerBase {
  public:
   using LossClosure = std::function<at::Scalar()>;
   using detail::OptimizerBase::OptimizerBase;
+  // TODO: make Tensor
   virtual at::Scalar step(LossClosure closure) = 0;
 };
 

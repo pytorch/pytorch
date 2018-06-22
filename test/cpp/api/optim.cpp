@@ -58,7 +58,7 @@ bool test_optimizer_xor(
 // optimization algorithm against the PyTorch algorithms (i.e. compare against a
 // matrix of values after 1000 iterations)
 
-TEST_CASE("optim") {
+TEST_CASE("Optim/Optimizers") {
   std::srand(0);
   torch::manual_seed(0);
   Sequential model(
@@ -114,5 +114,30 @@ TEST_CASE("optim") {
             model.parameters(),
             AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
         model));
+  }
+}
+
+TEST_CASE("Optim/ZeroGrad") {
+  Linear model(2, 8);
+  SGD optimizer(model->parameters(), 0.1);
+
+  for (const auto& parameter : model->parameters()) {
+    REQUIRE(!parameter->grad().defined());
+  }
+
+  auto output = model->forward({torch::ones({5, 2})}).front();
+  auto loss = output.sum();
+  loss.backward();
+
+  for (const auto& parameter : model->parameters()) {
+    REQUIRE(parameter->grad().defined());
+    REQUIRE(parameter->grad().sum().toCFloat() > 0);
+  }
+
+  optimizer.zero_grad();
+
+  for (const auto& parameter : model->parameters()) {
+    REQUIRE(parameter->grad().defined());
+    REQUIRE(parameter->grad().sum().toCFloat() == 0);
   }
 }
