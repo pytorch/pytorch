@@ -27,8 +27,8 @@ class HardtanhOp final : public Operator<Context> {
   bool RunOnDevice() override;
 
  protected:
-  T min_val_;
-  T max_val_;
+  const T min_val_;
+  const T max_val_;
 };
 
 template <typename T, class Context>
@@ -36,11 +36,9 @@ class HardtanhGradientOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   HardtanhGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator<Context>(operator_def, ws) {
-    min_val_ = OperatorBase::GetSingleArgument<T>(
-        "min_val", -1.0f);
-    max_val_ = OperatorBase::GetSingleArgument<T>(
-        "max_val", 1.0f);
+      : Operator<Context>(operator_def, ws),
+        OP_SINGLE_ARG(T, "min_val", min_val_, -1.0f),
+        OP_SINGLE_ARG(T, "max_val", max_val_, 1.0f) {
     CAFFE_ENFORCE_GT(max_val_, min_val_);
   }
 

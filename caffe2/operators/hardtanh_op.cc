@@ -6,7 +6,7 @@ namespace caffe2 {
 
 template <>
 bool HardtanhOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(0);
+  const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
 
@@ -18,8 +18,8 @@ bool HardtanhOp<float, CPUContext>::RunOnDevice() {
 
 template <>
 bool HardtanhGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& dY = Input(1);
+  const auto& Y = Input(1);
+  const auto& dY = Input(0);
   auto* dX = Output(0);
   // Sizes are known to be equal because Hardtanh is element-wise
   CAFFE_ENFORCE_EQ(dY.size(), Y.size());
@@ -107,13 +107,13 @@ Y:
     .Output(0, "Y", "Output tensor with same shape as input.")
     .InheritOnnxSchema("Hardtanh");
 
-// Input: Y, dY; output: dX
+// Input: dY, Y; output: dX
 OPERATOR_SCHEMA(HardtanhGradient)
     .NumInputs(2)
     .NumOutputs(1)
     .AllowInplace({{1, 0}})
     .SetDoc(R"DOC(
-HardtanhGradient takes both Y and dY and uses this to update dX according to the
+HardtanhGradient takes both dY and Y and uses this to update dX according to the
 derivatives of the hardtanh function.
 )DOC")
     .Arg(
@@ -131,7 +131,7 @@ class GetHardtanhGradient : public GradientMakerBase {
     return SingleGradientDef(
         def_.type() + "Gradient",
         "",
-        vector<string>{O(0), GO(0)},
+        vector<string>{GO(0), O(0)},
         vector<string>{GI(0)});
   }
 };

@@ -8,7 +8,7 @@ template <typename T>
 __global__ void HardtanhKernel(const int N, const T* X, T* Y, T min_val_, T max_val_) {
   // Utilize naive implementation of Hardtanh
   CUDA_1D_KERNEL_LOOP(i, N) {
-    Y[i] = X[i] > max_val_ ? max_val_ : (X[i] < min_val_ ? min_val_ : X[i]);
+    Y[i] = fminf(max_val_, fmaxf(min_val_, X[i]));
   }
 }
 
@@ -30,7 +30,6 @@ template <>
 bool HardtanhOp<float, CUDAContext>::RunOnDevice() {
   auto& X = Input(0);
   auto* Y = Output(0);
-  CAFFE_ENFORCE_GT(X.size(), 0);
   Y->ResizeLike(X);
   HardtanhKernel<<<
       CAFFE_GET_BLOCKS(X.size()),
@@ -43,8 +42,8 @@ bool HardtanhOp<float, CUDAContext>::RunOnDevice() {
 
 template <>
 bool HardtanhGradientOp<float, CUDAContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& dY = Input(1);
+  auto& Y = Input(1);
+  auto& dY = Input(0);
   auto* dX = Output(0);
   CAFFE_ENFORCE_GT(Y.size(), 0);
   CAFFE_ENFORCE_EQ(dY.size(), Y.size());
