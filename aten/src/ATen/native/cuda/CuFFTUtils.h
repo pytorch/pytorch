@@ -60,7 +60,7 @@ static inline std::string _cudaGetErrorEnum(cufftResult error)
   }
 }
 
-static void CUFFT_CHECK(cufftResult error)
+static inline void CUFFT_CHECK(cufftResult error)
 {
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
