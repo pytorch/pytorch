@@ -4,10 +4,12 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/core/timer.h"
 
+// experimental support for multiple streams per worker per GPU
 CAFFE2_DEFINE_int(
     caffe2_streams_per_gpu,
-    4,
-    "Number of streams per GPU to use in GPU thread pool");
+    1,
+    "Number of streams per worker per GPU"
+    " to use in GPU thread pool (experimental)");
 
 CAFFE2_DECLARE_bool(caffe2_dag_net_collect_stats);
 
