@@ -29,9 +29,6 @@ list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
 
 cmake_policy(SET CMP0012 NEW)
 
-# Polyfill for upstream FindCUDA
-include(CMakeInitializeConfigs)
-
 #############################################
 
 set(ATen_CPU_SRCS)
