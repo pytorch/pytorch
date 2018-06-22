@@ -1,5 +1,8 @@
 #include "caffe2/operators/lpnorm_op.h"
 
+#include "caffe2/core/operator.h"
+#include "caffe2/core/types.h"
+
 namespace caffe2 {
 
 template <>
@@ -118,8 +121,19 @@ Y:
 )DOC")
     .Input(0, "X", "1D Input tensor of data to be operated on.")
     .Output(0, "Z", "1D output tensor")
-    .Arg("p", "*(type: int; default: 2, possible values: {1,2})* Order of the norm in p-norm.")
-    .Arg("average", "*(type: bool; default: False)* Whether we calculate norm or averaged_norm.The Lp_averaged_norm(x) is defined as Lp_averaged_norm(x) = LpNorm(x) / size(x)");
+    .Arg(
+        "p",
+        "*(type: int; default: 2, possible values: {1,2})* Order of the norm in p-norm.")
+    .Arg(
+        "average",
+        "*(type: bool; default: False)* Whether we calculate norm or averaged_norm.The Lp_averaged_norm(x) is defined as Lp_averaged_norm(x) = LpNorm(x) / size(x)")
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      std::vector<TIndex> output_dims(1);
+      output_dims[0] = 1; // 1
+      return vector<TensorShape>{
+          CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+    });
 
 OPERATOR_SCHEMA(LpNormGradient)
     .NumInputs(2)
