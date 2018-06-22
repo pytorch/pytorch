@@ -19,7 +19,6 @@
 
 #ifdef USE_CUDA
 #include <THC/THC.h>
-#include <THCS/THCS.h>
 #endif
 
 namespace torch {

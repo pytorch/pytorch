@@ -64,7 +64,7 @@ void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tenso
   AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");
   AT_CHECK(indices.type().scalarType() == kLong);
   AT_CHECK(indices.type().backend() == values.type().backend());
-  // TODO: test that device tensors are on is the same
+  AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device());
   if (!empty) {
     AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz");
     AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz");

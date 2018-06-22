@@ -1,9 +1,14 @@
-#include "THCSTensor.hpp"
-#include "THCTensor.hpp"
-#include "THCApply.cuh"
-#include "THCTensorSort.cuh"
-#include "THCTensorMathPointwise.cuh"
-#include "stdio.h"
+#pragma once
+
+#include <ATen/cuda/detail/TensorInfo.cuh>
+#include <THC/THCNumerics.cuh>
+
+namespace at { namespace native {
+
+namespace apply {
+
+using at::cuda::detail::TensorInfo;
+using indexT = int64_t;
 
 const int WARP_SIZE = 32;
 
@@ -35,7 +40,7 @@ __device__ void applyOp3(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_sparseElementwiseKernel(
+__global__ void sparseElementwiseKernel(
     Op op,
     TensorInfo<Real, IndexType> dense,
     TensorInfo<indexT, IndexType> indices,
@@ -59,7 +64,7 @@ __global__ void THCSTensor_sparseElementwiseKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_sparseElementwiseKernelScalar(
+__global__ void sparseElementwiseKernelScalar(
     Op op,
     TensorInfo<Real, IndexType> dense,
     TensorInfo<indexT, IndexType> indices,
@@ -78,7 +83,7 @@ __global__ void THCSTensor_sparseElementwiseKernelScalar(
 }
 
 template <typename OpBoth, typename OpLeft, typename OpRight, typename IndexType, typename Real>
-__global__ void THCSTensor_valueSparseUnionKernel(
+__global__ void valueSparseUnionKernel(
     OpBoth opBoth,
     OpLeft opLeft,
     OpRight opRight,
@@ -122,7 +127,7 @@ __global__ void THCSTensor_valueSparseUnionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
-__global__ void THCSTensor_indexSparseUnionKernel(
+__global__ void indexSparseUnionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
     TensorInfo<indexT, IndexType> s_indices,
@@ -169,7 +174,7 @@ __global__ void THCSTensor_indexSparseUnionKernel(
 }
 
 template <typename Op, typename IndexType, typename Real>
-__global__ void THCSTensor_valueSparseIntersectionKernel(
+__global__ void valueSparseIntersectionKernel(
     Op op,
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
@@ -205,7 +210,7 @@ __global__ void THCSTensor_valueSparseIntersectionKernel(
 
 // TODO find a way to parallelize this...
 template <typename IndexType, typename Real>
-__global__ void THCSTensor_indexSparseIntersectionKernel(
+__global__ void indexSparseIntersectionKernel(
     TensorInfo<indexT, IndexType> r_indices,
     TensorInfo<indexT, IndexType> t_indices,
     TensorInfo<indexT, IndexType> s_indices,
@@ -240,7 +245,7 @@ __global__ void THCSTensor_indexSparseIntersectionKernel(
 }
 
 // template <typename Dtype, typename Acctype>
-// __global__ void THCSTensor_coalesceValuesKernel_gridStrided(
+// __global__ void coalesceValuesKernel_gridStrided(
 //   long *segment_offsets, long *value_indices,
 //   Dtype *values, Dtype *newValues,
 //   long nnz, long newNnz, long stride) {
@@ -268,7 +273,7 @@ __global__ void THCSTensor_indexSparseIntersectionKernel(
 // }
 
 template <typename Dtype, typename Acctype>
-__global__ void THCSTensor_coalesceValuesKernel(
+__global__ void coalesceValuesKernel(
   int64_t *segment_offsets, int64_t *value_indices,
   Dtype *values, Dtype *newValues,
   int64_t nnz, int64_t newNnz, int64_t stride) {
@@ -314,8 +319,6 @@ __global__ void THCSTensor_coalesceValuesKernel(
   }
 }
 
-#include "generic/THCSTensor.cu"
-#include "THCSGenerateAllTypes.h"
+} // namespace apply
 
-#include "generic/THCSTensorMath.cu"
-#include "THCSGenerateAllTypes.h"
+}} // namespace at::native

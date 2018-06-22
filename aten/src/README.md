@@ -6,11 +6,11 @@ multiple variants of the library, summarized here:
 
 * TH = TorcH
 * THC = TorcH Cuda
-* THCS = TorcH Cuda Sparse
+* THCS = TorcH Cuda Sparse (now defunct)
 * THCUNN = TorcH CUda Neural Network (see cunn)
 * THD = TorcH Distributed
 * THNN = TorcH Neural Network
-* THS = TorcH Sparse
+* THS = TorcH Sparse (now defunct)
 
 (You'll also see these abbreviations show up in symbol names.)
 
