@@ -63,6 +63,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
         pos2 += outputWidth;
       }
     }
+    THTensor_(free)(input);
     return;
   }
 
@@ -110,6 +111,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
         pos2 += outputWidth;
       }
     }
+    THTensor_(free)(gradOutput);
     return;
   }
 

@@ -74,6 +74,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
         }
       }
     }
+    THTensor_(free)(input);
     return;
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
@@ -144,6 +145,7 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
         }
       }
     }
+    THTensor_(free)(gradOutput);
     return;
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);

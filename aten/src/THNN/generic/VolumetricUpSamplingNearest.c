@@ -82,6 +82,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
         }
       }
     }
+    THTensor_(free)(input);
     return;
   }
   
@@ -146,6 +147,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
         }
       }
     }
+    THTensor_(free)(gradOutput);
     return;
   }
   

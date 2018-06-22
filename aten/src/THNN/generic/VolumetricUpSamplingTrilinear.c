@@ -81,6 +81,7 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
         }
       }
     }
+    THTensor_(free)(input);
     return;
   }
   const accreal rdepth  = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
@@ -171,6 +172,7 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
         }
       }
     }
+    THTensor_(free)(gradOutput);
     return;
   }
   const accreal rdepth  = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);

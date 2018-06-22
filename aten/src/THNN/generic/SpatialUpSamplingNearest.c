@@ -74,6 +74,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
         }
       }
     }
+    THTensor_(free)(input);
     return;
   }
   
@@ -129,6 +130,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
         }
       }
     }
+    THTensor_(free)(gradOutput);
     return;
   }
   
