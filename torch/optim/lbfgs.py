@@ -3,8 +3,22 @@ from functools import reduce
 from .optimizer import Optimizer
 
 
+def _interpolate():
+    pass
+
+
+def _zoom():
+    pass
+
+
+def _strong_Wolfe(phi, t, f, g, gtd, tolerance_change=1e-9, c1=1e-4,
+                  c2=0.9, max_ls=25):
+    
+
+
 class LBFGS(Optimizer):
-    """Implements L-BFGS algorithm.
+    """Implements L-BFGS algorithm. This implementation is inspired by `minFunc 
+    <https://www.cs.ubc.ca/~schmidtm/Software/minFunc.html>`.
 
     .. warning::
         This optimizer doesn't support per-parameter options and parameter
@@ -106,9 +120,10 @@ class LBFGS(Optimizer):
         state['func_evals'] += 1
 
         flat_grad = self._gather_flat_grad()
-        abs_grad_sum = flat_grad.abs().sum()
+        abs_grad_max = flat_grad.abs().max()
 
-        if abs_grad_sum <= tolerance_grad:
+        # optimal condition
+        if abs_grad_max <= tolerance_grad:
             return orig_loss
 
         # tensors cached in state (for tracing)
@@ -134,6 +149,7 @@ class LBFGS(Optimizer):
                 d = flat_grad.neg()
                 old_dirs = []
                 old_stps = []
+                old_ros = []
                 H_diag = 1
             else:
                 # do lbfgs update (update memory)
@@ -146,10 +162,12 @@ class LBFGS(Optimizer):
                         # shift history by one (limited-memory)
                         old_dirs.pop(0)
                         old_stps.pop(0)
+                        old_ros.pop(0)
 
                     # store new direction/step
                     old_dirs.append(y)
                     old_stps.append(s)
+                    old_ros.append(1. / ys)
 
                     # update scale of initial Hessian approximation
                     H_diag = ys / y.dot(y)  # (y*y)
@@ -164,8 +182,7 @@ class LBFGS(Optimizer):
                 ro = state['ro']
                 al = state['al']
 
-                for i in range(num_old):
-                    ro[i] = 1. / old_dirs[i].dot(old_stps[i])
+                ro[:num_old] = old_ros
 
                 # iteration in L-BFGS loop collapsed to use just one buffer
                 q = flat_grad.neg()
@@ -191,12 +208,16 @@ class LBFGS(Optimizer):
             ############################################################
             # reset initial guess for step size
             if state['n_iter'] == 1:
-                t = min(1., 1. / abs_grad_sum) * lr
+                t = min(1., 1. / flat_grad.abs().sum()) * lr
             else:
                 t = lr
 
             # directional derivative
             gtd = flat_grad.dot(d)  # g * d
+
+            # directional derivative is below tolerance
+            if gtd > -tolerance_change:
+                break
 
             # optional line search: user function
             ls_func_evals = 0
@@ -212,7 +233,7 @@ class LBFGS(Optimizer):
                     # no use to re-evaluate that function here
                     loss = float(closure())
                     flat_grad = self._gather_flat_grad()
-                    abs_grad_sum = flat_grad.abs().sum()
+                    abs_grad_max = flat_grad.abs().max()
                     ls_func_evals = 1
 
             # update func eval
@@ -228,13 +249,12 @@ class LBFGS(Optimizer):
             if current_evals >= max_eval:
                 break
 
-            if abs_grad_sum <= tolerance_grad:
+            # optimal condition
+            if abs_grad_max <= tolerance_grad:
                 break
 
-            if gtd > -tolerance_change:
-                break
-
-            if d.mul(t).abs_().sum() <= tolerance_change:
+            # lack of progress
+            if d.mul(t).abs().max() <= tolerance_change:
                 break
 
             if abs(loss - prev_loss) < tolerance_change:
