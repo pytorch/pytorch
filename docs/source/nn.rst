@@ -686,12 +686,6 @@ Vision layers
 .. autoclass:: PixelShuffle
     :members:
 
-:hidden:`ResizeImages`
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. autoclass:: ResizeImages
-    :members:
-
 :hidden:`Upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1247,10 +1241,10 @@ Vision functions
 
 .. autofunction:: pad
 
-:hidden:`resize_images`
+:hidden:`interpolate`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: resize_images
+.. autofunction:: interpolate 
 
 :hidden:`upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~

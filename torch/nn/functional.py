@@ -1869,8 +1869,8 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     :attr:`scale_factor`
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.resize_images`.
-        This is equivalent with ``nn.functional.resize_images(...)``.
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
+        This is equivalent with ``nn.functional.interpolate(...)``.
 
 
     The algorithm used for upsampling is determined by :attr:`mode`.
@@ -1906,12 +1906,12 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         affects the outputs.
 
     """
-    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.resize_images instead.")
-    return resize_images(input, size, scale_factor, mode, align_corners)
+    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode, align_corners)
 
 
-def resize_images(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
-    r"""Down/upsamples the input to either the given :attr:`size` or the given
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
+    r"""Down/up samples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
     The algorithm used for interpolation is determined by :attr:`mode`.
@@ -2020,8 +2020,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.resize_images`.
-        This is equivalent with ``nn.functional.resize_images(..., mode='nearest')``.
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
+        This is equivalent with ``nn.functional.interpolate(..., mode='nearest')``.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -2033,17 +2033,17 @@ def upsample_nearest(input, size=None, scale_factor=None):
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.resize_images instead.")
-    return resize_images(input, size, scale_factor, mode='nearest')
+    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode='nearest')
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.resize_images`.
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
         This is equivalent with
-        ``nn.functional.resize_images(..., mode='bilinear', align_corners=True)``.
+        ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
     Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
     volumetric (5 dimensional) inputs.
@@ -2054,8 +2054,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.resize_images instead.")
-    return resize_images(input, size, scale_factor, mode='bilinear', align_corners=True)
+    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):

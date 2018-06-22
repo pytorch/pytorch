@@ -4947,8 +4947,8 @@ class TestNN(NNTestCase):
         out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
 
-    def test_resize_images(self):
-        def _test_resize_images_helper(in_t, scale_factor, layer):
+    def test_interpolate(self):
+        def _test_interpolate_helper(in_t, scale_factor, layer):
                 out_size = int(math.floor(in_t.shape[-1] * scale_factor))
                 dim = len(in_t.shape) - 2
                 out_shape = [1, 1] + [out_size] * dim
@@ -4956,10 +4956,10 @@ class TestNN(NNTestCase):
                 self.assertEqual(torch.ones(out_shape), out_t)
 
                 self.assertEqual(
-                    F.resize_images(in_t, (out_size,) * dim, **kwargs),
-                    F.resize_images(in_t, scale_factor=scale_factor, **kwargs))
-                gradcheck(lambda x: F.resize_images(x, out_size, **kwargs), [in_t])
-                gradgradcheck(lambda x: F.resize_images(x, out_size, **kwargs), [in_t])
+                    F.interpolate(in_t, (out_size,) * dim, **kwargs),
+                    F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
 
         def _make_input(dim):
             size = [1, 1]
@@ -4974,22 +4974,22 @@ class TestNN(NNTestCase):
             for scale_factor in [0.5, 1.5, 2]:
                 for mode in ['nearest', 'area']:
                     kwargs = dict(mode=mode)
-                    m = nn.ResizeImages(scale_factor=scale_factor, **kwargs).to(device)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
                     for input in [_make_input(1), _make_input(2), _make_input(3)]:
-                        _test_resize_images_helper(input, scale_factor, m)
+                        _test_interpolate_helper(input, scale_factor, m)
 
                 for align_corners in [True, False]:
                     kwargs = dict(mode='linear', align_corners=align_corners)
-                    m = nn.ResizeImages(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_resize_images_helper(_make_input(1), scale_factor, m)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(1), scale_factor, m)
 
                     kwargs = dict(mode='bilinear', align_corners=align_corners)
-                    m = nn.ResizeImages(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_resize_images_helper(_make_input(2), scale_factor, m)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(2), scale_factor, m)
 
                     kwargs = dict(mode='trilinear', align_corners=align_corners)
-                    m = nn.ResizeImages(scale_factor=scale_factor, **kwargs).to(device)
-                    _test_resize_images_helper(_make_input(3), scale_factor, m)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(3), scale_factor, m)
 
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
@@ -7248,145 +7248,145 @@ new_module_tests = [
         input_size=(1, 9, 4, 4),
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4),
         desc='nearest_1d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((12, ), None, 'nearest'),
         input_size=(1, 2, 3),
         desc='nearest_tuple_1d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 4, 'nearest'),
         input_size=(1, 2, 4),
         desc='nearest_scale_1d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(12, None, 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_1d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((4, ), None, 'linear', False),
         input_size=(1, 2, 3),
         desc='linear_tuple_1d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 4, 'linear', False),
         input_size=(1, 2, 4),
         desc='linear_scale_1d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(12, None, 'linear', True),
         input_size=(1, 2, 4),
         desc='linear_1d_align_corners',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 4, 'linear', True),
         input_size=(1, 2, 4),
         desc='linear_scale_1d_align_corners',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4),
         desc='nearest_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((12, 16), None, 'nearest'),
         input_size=(1, 2, 3, 4),
         desc='nearest_tuple_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 4, 'nearest'),
         input_size=(1, 2, 4, 4),
         desc='nearest_scale_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(12, None, 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((4, 6), None, 'bilinear', False),
         input_size=(1, 2, 2, 3),
         desc='bilinear_tuple_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 4, 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, (2, 2), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_shared_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, (2, 1), 'bilinear', False),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((4, 6), None, 'bilinear', True),
         input_size=(1, 2, 4, 4),
         desc='bilinear_tuple_2d_align_corners',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, (2, 1), 'bilinear', True),
         input_size=(1, 2, 4, 4),
         desc='bilinear_scale_tuple_skewed_2d_align_corners',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4, 4, 4),
         desc='nearest_3d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((12, 16, 16), None, 'nearest'),
         input_size=(1, 2, 3, 4, 4),
         desc='nearest_tuple_3d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 4, 'nearest'),
         input_size=(1, 2, 4, 4, 4),
         desc='nearest_scale_3d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(12, None, 'trilinear', False),
         input_size=(1, 2, 4, 4, 4),
         desc='trilinear_3d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((4, 6, 6), None, 'trilinear', False),
         input_size=(1, 2, 2, 3, 3),
         desc='trilinear_tuple_3d',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 3, 'trilinear', False),
         input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d',
@@ -7394,13 +7394,13 @@ new_module_tests = [
         precision=3e-4,
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=((4, 6, 6), None, 'trilinear', True),
         input_size=(1, 2, 2, 3, 3),
         desc='trilinear_tuple_3d_align_corners',
     ),
     dict(
-        module_name='ResizeImages',
+        module_name='Upsample',
         constructor_args=(None, 3, 'trilinear', True),
         input_size=(1, 2, 3, 4, 4),
         desc='trilinear_scale_3d_align_corners',
