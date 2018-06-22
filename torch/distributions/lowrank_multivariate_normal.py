@@ -84,8 +84,6 @@ class LowRankMultivariateNormal(Distribution):
         Thanks to these formulas, we just need to compute the determinant and inverse of
         the small size "capacitance" matrix::
             capacitance = I + scale_factor.T @ inv(scale_diag) @ scale_factor
-
-    
     """
     arg_constraints = {"loc": constraints.real,
                        "scale_factor": constraints.real,
