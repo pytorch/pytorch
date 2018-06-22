@@ -12,7 +12,7 @@ from .modules import utils
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
-from .modules.utils import _single, _pair, _triple, set_output_size
+from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 
 
@@ -490,7 +490,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    output_size = set_output_size(input.size()[2:], output_size)
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool2d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -506,7 +506,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
-    output_size = set_output_size(input.size()[2:], output_size)
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool3d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -535,7 +535,7 @@ def adaptive_avg_pool2d(input, output_size):
         output_size: the target output size (single integer or
             double-integer tuple)
     """
-    output_size = set_output_size(input.size()[2:], output_size)
+    output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, output_size)
 
 
@@ -550,7 +550,7 @@ def adaptive_avg_pool3d(input, output_size):
         output_size: the target output size (single integer or
             triple-integer tuple)
     """
-    output_size = set_output_size(input.size()[2:], output_size)
+    output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, output_size)
 
 

@@ -15,16 +15,9 @@ _triple = _ntuple(3)
 _quadruple = _ntuple(4)
 
 
-def set_output_size(input_size, output_size):
-    dim = len(input_size)
-    if isinstance(output_size, int):
-        return _ntuple(dim)(output_size)
-    if len(output_size) == 1:
-        return _ntuple(dim)(output_size[0])
-    assert(len(output_size) == dim)
-
-    shape = ()
-    for i, s in enumerate(output_size):
-        shape += ((s or input_size[i]), )
-
-    return shape
+def _list_with_default(out_size, defaults):
+    if isinstance(out_size, int):
+        return out_size
+    if len(defaults) <= len(out_size):
+        raise ValueError('Input dimension should be at least {}'.format(len(out_size) + 1))
+    return [v if v is not None else d for v, d in zip(out_size, defaults[-len(out_size):])]
