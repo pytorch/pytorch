@@ -23,9 +23,9 @@ public:
    * @return void
    */
   template<class... Args>
-  static void registerOp(Args&&... args) {
+  static void registerKernel(Args&&... args) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
-    return dispatch_table_for_this_op.registerOp(std::forward<Args>(args)...);
+    return dispatch_table_for_this_op.registerKernel(std::forward<Args>(args)...);
   }
 
   /**
@@ -37,9 +37,9 @@ public:
    * @return void
    */
   template<class... Args>
-  static void deregisterOp(Args&&... args) {
+  static void deregisterKernel(Args&&... args) {
     auto& dispatch_table_for_this_op = c10_dispatch_table<OpSchemaDef>();
-    return dispatch_table_for_this_op.deregisterOp(std::forward<Args>(args)...);
+    return dispatch_table_for_this_op.deregisterKernel(std::forward<Args>(args)...);
   }
 
   /**

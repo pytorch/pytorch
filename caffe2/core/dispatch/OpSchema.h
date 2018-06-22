@@ -150,6 +150,9 @@ template<class OpSchemaDef>
 class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_key_defined<OpSchemaDef>::value>> final {
   using signature = OpSignatureSchema<OpSchemaDef>;
 
+  // TODO Static assert that dispatch_key_type has operator<<(ostream, _) defined for debug output.
+  // TODO Use an ADL-based debugString(DispatchKey) function instead of operator<< for debug printing.
+
 public:
   using dispatch_key_type = DispatchKey<signature::num_tensor_args>;
 

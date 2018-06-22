@@ -22,10 +22,8 @@ struct TensorParameterDispatchKey final {
 inline constexpr bool operator==(const TensorParameterDispatchKey& lhs, const TensorParameterDispatchKey& rhs) {
   return lhs.deviceTypeId == rhs.deviceTypeId && lhs.layoutId == rhs.layoutId && lhs.dataType == rhs.dataType;
 }
-inline std::string to_string(const TensorParameterDispatchKey& key) {
-  std::ostringstream str;
-  str << "TensorKey(" << key.deviceTypeId << ", " << key.layoutId.value() << ", " << key.dataType << ")";
-  return str.str();
+inline std::ostream& operator<<(std::ostream& stream, const TensorParameterDispatchKey& key) {
+  return stream << "TensorKey(" << key.deviceTypeId << ", " << key.layoutId.value() << ", " << key.dataType << ")";
 }
 }  // namespace details
 }  // namespace c10
@@ -65,17 +63,16 @@ inline constexpr bool operator==(const DispatchKey<num_dispatch_args> &lhs, cons
   return lhs.argTypes == rhs.argTypes;
 }
 template<size_t num_dispatch_args>
-inline std::string to_string(const DispatchKey<num_dispatch_args>& key) {
-  if (num_dispatch_args == 0) {
-    return "DispatchKey()";
+inline std::ostream& operator<<(std::ostream& stream, const DispatchKey<num_dispatch_args>& key) {
+  stream << "DispatchKey(";
+  if (num_dispatch_args > 0) {
+      stream << "DispatchKey(" << key.argTypes[0];
+      for (size_t i = 1; i < num_dispatch_args; ++i) {
+          stream << ", " << key.argTypes[i];
+      }
+      stream << ")";
   }
-  std::ostringstream str;
-  str << "DispatchKey(" << to_string(key.argTypes[0]);
-  for(size_t i = 1; i < num_dispatch_args; ++i) {
-    str << ", " + to_string(key.argTypes[i]);
-  }
-  str << ")";
-  return str.str();
+  return stream << ")";
 }
 
 }  // namespace c10

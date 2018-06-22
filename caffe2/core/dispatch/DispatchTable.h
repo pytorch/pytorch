@@ -38,7 +38,9 @@ public:
 
       auto result = map_.emplace(std::forward<Key>(key), value);
       if (!result.second) {
-        throw std::logic_error("Tried to register conflicting kernels to the dispatcher: " + to_string(key));
+        std::ostringstream msg;
+        msg << "Tried to register conflicting kernels to the dispatcher: " << key;
+        throw std::logic_error(msg.str());
       }
     }
 
@@ -66,7 +68,7 @@ public:
 
 private:
     ska::flat_hash_map<Key, void*> map_;
-    // TODO Figure out how to get fast locking in C++11 (use boost::shared_timed_mutex? folly::SharedMutex?)
+    // TODO Figure out how to get fast locking in C++11 (use boost::shared_timed_mutex? folly::SharedMutex? LR pattern?)
     //mutable std::shared_timed_mutex mutex_;
 };
 } // namespace details

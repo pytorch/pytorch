@@ -19,6 +19,7 @@ inline std::ostream& operator<<(std::ostream& stream, DeviceTypeId device_type_i
         case DeviceTypeId::CUDA: return stream << "DeviceTypeId(CUDA)";
         case DeviceTypeId::UNDEFINED: return stream << "DeviceTypeId(UNDEFINED)";
     }
+    throw std::logic_error("Unknown DeviceTypeId");
 }
 
 }
