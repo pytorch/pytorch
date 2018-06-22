@@ -19,20 +19,21 @@ namespace optim {
 struct LBFGSOptions {
   LBFGSOptions(double learning_rate);
   TORCH_ARG(double, learning_rate);
-  TORCH_ARG(int, max_iter) = 20;
-  TORCH_ARG(int, max_eval) = 25;
+  TORCH_ARG(int64_t, max_iter) = 20;
+  TORCH_ARG(int64_t, max_eval) = 25;
   TORCH_ARG(float, tolerance_grad) = 1e-5;
   TORCH_ARG(float, tolerance_change) = 1e-9;
-  TORCH_ARG(int, history_size) = 100;
+  TORCH_ARG(size_t, history_size) = 100;
 };
 
 class LBFGS : public LossClosureOptimizer {
  public:
-  LBFGS(std::shared_ptr<nn::Module> model, const LBFGSOptions& options);
-
-  template <typename ModuleType>
-  LBFGS(nn::ModuleHolder<ModuleType> module_holder, const LBFGSOptions& options)
-      : LBFGS(module_holder.get(), options) {}
+  template <typename ParameterContainer>
+  explicit LBFGS(ParameterContainer&& parameters, const LBFGSOptions& options)
+      : LossClosureOptimizer(std::move(parameters)),
+        options_(options),
+        ro(options_.history_size_),
+        al(options_.history_size_) {}
 
   at::Scalar step(LossClosure closure) override;
 
@@ -58,17 +59,17 @@ class LBFGS : public LossClosureOptimizer {
 
   LBFGSOptions options_;
 
-  at::Tensor d;
-  at::Tensor H_diag;
-  at::Tensor prev_flat_grad;
-  at::Scalar t;
-  at::Scalar prev_loss;
+  at::Tensor d{torch::empty({0})};
+  at::Tensor H_diag{torch::empty({0})};
+  at::Tensor prev_flat_grad{torch::empty({0})};
+  at::Scalar t{0};
+  at::Scalar prev_loss{0};
   std::vector<at::Tensor> ro;
   std::vector<at::Tensor> al;
   std::deque<at::Tensor> old_dirs;
   std::deque<at::Tensor> old_stps;
-  int64_t func_evals;
-  int64_t state_n_iter;
+  int64_t func_evals{0};
+  int64_t state_n_iter{0};
 };
 
 } // namespace optim

@@ -9,15 +9,12 @@
 namespace torch {
 namespace optim {
 namespace detail {
-OptimizerBase::OptimizerBase(std::shared_ptr<nn::Module> model)
-    : model_(model) {}
-
 void OptimizerBase::zero_grad() {
-  for (auto& p : model_->parameters()) {
-    auto& grad = p->grad();
+  for (auto& parameter : parameters_) {
+    auto& grad = parameter.grad();
     if (grad.defined()) {
       grad = grad.detach();
-      torch::autograd::as_variable_ref(grad).data().zero_();
+      Variable(grad).data().zero_();
     }
   }
 }

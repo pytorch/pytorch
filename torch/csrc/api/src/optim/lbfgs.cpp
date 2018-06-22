@@ -15,37 +15,23 @@ namespace optim {
 LBFGSOptions::LBFGSOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-LBFGS::LBFGS(std::shared_ptr<nn::Module> model, const LBFGSOptions& options)
-    : LossClosureOptimizer(model),
-      options_(options),
-      d(torch::empty({0})),
-      H_diag(torch::empty({0})),
-      prev_flat_grad(torch::empty({0})),
-      t(0),
-      prev_loss(0),
-      ro(options_.history_size_),
-      al(options_.history_size_),
-      func_evals(0),
-      state_n_iter(0) {}
-
 const LBFGSOptions& LBFGS::options() const noexcept {
   return options_;
 }
 
 at::Tensor LBFGS::gather_flat_grad() {
   std::vector<at::Tensor> views;
-  for (auto& parameter : model_->parameters()) {
-    views.push_back(
-        torch::autograd::as_variable_ref(parameter->grad()).data().view(-1));
+  for (auto& parameter : parameters_) {
+    views.push_back(Variable(parameter.grad()).data().view(-1));
   }
   return at::cat(views);
 }
 
 void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
-  int offset = 0;
-  for (auto& parameter : model_->parameters()) {
-    int numel = parameter->numel();
-    at::Tensor& pd = parameter->data();
+  int64_t offset = 0;
+  for (auto& parameter : parameters_) {
+    int64_t numel = parameter.numel();
+    at::Tensor& pd = parameter.data();
     pd.add_(update.slice(0, offset, offset + numel, 1).view_as(pd), step_size);
     offset += numel;
   }
@@ -54,7 +40,7 @@ void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
 at::Scalar LBFGS::step(LossClosure closure) {
   at::Scalar orig_loss = closure();
   at::Scalar loss = orig_loss;
-  int current_evals = 1;
+  int64_t current_evals = 1;
   func_evals += 1;
 
   at::Tensor flat_grad = gather_flat_grad();
@@ -66,7 +52,7 @@ at::Scalar LBFGS::step(LossClosure closure) {
 
   at::Tensor ONE = flat_grad.type().scalarTensor(1);
 
-  int n_iter = 0;
+  int64_t n_iter = 0;
   while (n_iter < options_.max_iter_) {
     n_iter++;
     state_n_iter++;
@@ -83,7 +69,7 @@ at::Scalar LBFGS::step(LossClosure closure) {
       if (ys.toFloat() > 1e-10) {
         // updating memory
 
-        if ((int)old_dirs.size() == options_.history_size_) {
+        if (old_dirs.size() == options_.history_size_) {
           // shift history by one (limited memory)
           old_dirs.pop_front();
           old_stps.pop_front();
@@ -97,14 +83,14 @@ at::Scalar LBFGS::step(LossClosure closure) {
         H_diag = ys / y.dot(y);
       }
 
-      int num_old = old_dirs.size();
+      int64_t num_old = old_dirs.size();
 
-      for (int i = 0; i < num_old; i++) {
+      for (int64_t i = 0; i < num_old; i++) {
         ro[i] = ONE / old_dirs[i].dot(old_stps[i]);
       }
 
       at::Tensor q = flat_grad.neg();
-      for (int i = num_old - 1; i >= 0; i--) {
+      for (int64_t i = num_old - 1; i >= 0; i--) {
         al[i] = old_stps[i].dot(q) * ro[i];
         q.add_(old_dirs[i], at::Scalar(-al[i]));
       }
@@ -114,7 +100,7 @@ at::Scalar LBFGS::step(LossClosure closure) {
       at::Tensor r = q.mul(H_diag);
       d = r;
 
-      for (int i = 0; i < num_old; i++) {
+      for (int64_t i = 0; i < num_old; i++) {
         at::Tensor be_i = old_dirs[i].dot(r) * ro[i];
         r.add_(old_stps[i], at::Scalar(al[i] - be_i));
       }
@@ -135,7 +121,7 @@ at::Scalar LBFGS::step(LossClosure closure) {
 
     at::Scalar gtd = at::Scalar(flat_grad.dot(d));
     add_grad(t, d);
-    int ls_func_evals = 0;
+    int64_t ls_func_evals = 0;
     if (n_iter != options_.max_iter_) {
       // re-evaluate function only if not in last iteration
       // the reason we do this: in a stochastic setting,

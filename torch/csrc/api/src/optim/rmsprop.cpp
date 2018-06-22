@@ -12,11 +12,6 @@ namespace optim {
 RMSpropOptions::RMSpropOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
-RMSprop::RMSprop(
-    std::shared_ptr<nn::Module> model,
-    const RMSpropOptions& options)
-    : Optimizer(model), options_(options) {}
-
 const RMSpropOptions& RMSprop::options() const noexcept {
   return options_;
 }
@@ -24,22 +19,11 @@ const RMSpropOptions& RMSprop::options() const noexcept {
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
 void RMSprop::step() {
-  for (auto& parameter : model_->parameters()) {
-    auto& name = parameter.key;
-    auto& grad = parameter->grad();
-    auto& p = parameter->data();
+  for (size_t i = 0; i < parameters_.size(); ++i) {
+    auto& grad = parameters_[i].grad();
+    auto& p = parameters_[i].data();
     if (!grad.defined()) {
       continue;
-    }
-
-    if (square_avg_buffer_.find(name) == square_avg_buffer_.end()) {
-      square_avg_buffer_[name] = at::zeros_like(p);
-      if (options_.momentum_) {
-        momentum_buffer_[name] = at::zeros_like(p);
-      }
-      if (options_.centered_) {
-        grad_avg_buffer_[name] = at::zeros_like(p);
-      }
     }
 
     auto d_p = torch::autograd::as_variable_ref(grad).data();
@@ -47,26 +31,30 @@ void RMSprop::step() {
       d_p.add_(p, options_.weight_decay_);
     }
 
-    auto& square_avg = square_avg_buffer_[name];
-    square_avg.mul_(options_.alpha_).addcmul_(d_p, d_p, 1.0 - options_.alpha_);
+    auto& square_average = square_average_buffers_[i].data();
+    square_average
+        .mul_(options_.alpha_)
+        .addcmul_(d_p, d_p, 1.0 - options_.alpha_);
 
-    at::Tensor avg;
-    if (options_.centered_) {
-      auto& grad_avg = grad_avg_buffer_[name];
-      grad_avg.mul_(options_.alpha_).add_(d_p, 1.0 - options_.alpha_);
-      avg = square_avg.addcmul(grad_avg, grad_avg, -1.0)
-                .sqrt()
-                .add_(options_.eps_);
+    at::Tensor average;
+    if (options_.centered_ > 0) {
+      auto& grad_average = grad_average_buffers_[i].data();
+      grad_average
+          .mul_(options_.alpha_)
+          .add_(d_p, 1.0 - options_.alpha_);
+      average = square_average.addcmul(grad_average, grad_average, -1.0)
+                    .sqrt()
+                    .add_(options_.eps_);
     } else {
-      avg = square_avg.sqrt().add_(options_.eps_);
+      average = square_average.sqrt().add_(options_.eps_);
     }
 
     if (options_.momentum_ > 0) {
-      auto& buf = momentum_buffer_[name];
-      buf.mul_(options_.momentum_).addcdiv_(d_p, avg);
-      p.add_(buf, -options_.learning_rate_);
+      auto& momentum = momentum_buffers_[i].data();
+      momentum.mul_(options_.momentum_).addcdiv_(d_p, average);
+      p.add_(momentum, -options_.learning_rate_);
     } else {
-      p.addcdiv_(d_p, avg, -options_.learning_rate_);
+      p.addcdiv_(d_p, average, -options_.learning_rate_);
     }
   }
 }

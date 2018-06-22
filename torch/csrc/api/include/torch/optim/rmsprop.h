@@ -11,7 +11,7 @@
 #include <functional>
 #include <memory>
 #include <string>
-#include <unordered_map>
+#include <vector>
 
 namespace torch {
 namespace optim {
@@ -36,15 +36,30 @@ class RMSprop : public Optimizer {
       const RMSpropOptions& options)
       : RMSprop(module_holder.get(), options) {}
 
+  template <typename ParameterContainer>
+  explicit RMSprop(
+      ParameterContainer&& parameters,
+      const RMSpropOptions& options)
+      : Optimizer(std::move(parameters)),
+        options_(options),
+        square_average_buffers_(detail::zeros_like(parameters_)) {
+    if (options_.momentum_ > 0) {
+      momentum_buffers_ = detail::zeros_like(parameters_);
+    }
+    if (options_.centered_ > 0) {
+      grad_average_buffers_ = detail::zeros_like(parameters_);
+    }
+  }
+
   void step() override;
 
   const RMSpropOptions& options() const noexcept;
 
   template <class Archive>
   void serialize(Archive& ar) {
-    ar(CEREAL_NVP(square_avg_buffer_));
-    ar(CEREAL_NVP(momentum_buffer_));
-    ar(CEREAL_NVP(grad_avg_buffer_));
+    ar(CEREAL_NVP(square_average_buffers_));
+    ar(CEREAL_NVP(momentum_buffers_));
+    ar(CEREAL_NVP(grad_average_buffers_));
   }
 
  private:
@@ -53,9 +68,9 @@ class RMSprop : public Optimizer {
 
   RMSpropOptions options_;
 
-  std::unordered_map<std::string, at::Tensor> square_avg_buffer_;
-  std::unordered_map<std::string, at::Tensor> momentum_buffer_;
-  std::unordered_map<std::string, at::Tensor> grad_avg_buffer_;
+  std::vector<Variable> square_average_buffers_;
+  std::vector<Variable> momentum_buffers_;
+  std::vector<Variable> grad_average_buffers_;
 };
 
 } // namespace optim

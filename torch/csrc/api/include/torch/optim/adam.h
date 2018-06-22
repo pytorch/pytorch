@@ -9,10 +9,8 @@
 #include <cereal/access.hpp>
 #include <cereal/cereal.hpp>
 
-#include <functional>
-#include <memory>
-#include <string>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace torch {
 namespace optim {
@@ -29,20 +27,26 @@ struct AdamOptions {
 
 class Adam : public Optimizer {
  public:
-  Adam(std::shared_ptr<nn::Module> model, const AdamOptions& options);
-
-  template <typename ModuleType>
-  Adam(nn::ModuleHolder<ModuleType> module_holder, const AdamOptions& options)
-      : Adam(module_holder.get(), options) {}
+  template <typename ParameterContainer>
+  explicit Adam(ParameterContainer&& parameters, const AdamOptions& options)
+      : Optimizer(std::move(parameters)),
+        options_(options),
+        step_buffers_(parameters.size(), 0),
+        exp_average_buffers_(detail::zeros_like(parameters_)),
+        exp_average_sq_buffers_(detail::zeros_like(parameters_)) {
+    if (options_.amsgrad_ > 0) {
+      max_exp_average_sq_buffers_ = detail::zeros_like(parameters_);
+    }
+  }
 
   void step() override;
 
   template <class Archive>
   void serialize(Archive& ar) {
-    ar(CEREAL_NVP(step_buffer_),
-       CEREAL_NVP(exp_avg_buffer_),
-       CEREAL_NVP(exp_avg_sq_buffer_),
-       CEREAL_NVP(max_exp_avg_sq_buffer_));
+    ar(CEREAL_NVP(step_buffers_),
+       CEREAL_NVP(exp_average_buffers_),
+       CEREAL_NVP(exp_average_sq_buffers_),
+       CEREAL_NVP(max_exp_average_sq_buffers_));
   }
 
   const AdamOptions& options() const noexcept;
@@ -53,10 +57,10 @@ class Adam : public Optimizer {
 
   AdamOptions options_;
 
-  std::unordered_map<std::string, int> step_buffer_;
-  std::unordered_map<std::string, at::Tensor> exp_avg_buffer_;
-  std::unordered_map<std::string, at::Tensor> exp_avg_sq_buffer_;
-  std::unordered_map<std::string, at::Tensor> max_exp_avg_sq_buffer_;
+  std::vector<int64_t> step_buffers_;
+  std::vector<Variable> exp_average_buffers_;
+  std::vector<Variable> exp_average_sq_buffers_;
+  std::vector<Variable> max_exp_average_sq_buffers_;
 };
 
 } // namespace optim

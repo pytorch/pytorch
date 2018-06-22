@@ -19,7 +19,7 @@ using namespace torch::optim;
 
 bool test_optimizer_xor(
     torch::optim::Optimizer&& optimizer,
-    std::shared_ptr<Sequential> model) {
+    , Sequential& model) {
   float running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
@@ -36,7 +36,7 @@ bool test_optimizer_xor(
     }
     inp.set_requires_grad(true);
     optimizer.zero_grad();
-    auto x = model->forward(inp);
+    auto x = model.forward(inp);
     torch::Tensor loss = at::binary_cross_entropy(x, lab);
     loss.backward();
 
@@ -54,45 +54,57 @@ bool test_optimizer_xor(
 TEST_CASE("optim") {
   std::srand(0);
   torch::manual_seed(0);
-  auto model = std::make_shared<Sequential>(
-      torch::SigmoidLinear(Linear(2, 8)), torch::SigmoidLinear(Linear(8, 1)));
+  Sequential model(torch::SigmoidLinear(Linear(2, 8)), torch::SigmoidLinear(Linear(8, 1)));
 
   SECTION("sgd") {
     REQUIRE(test_optimizer_xor(
         optim::SGD(
-            model,
+            model.parameters(),
             SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(1e-6)),
         model));
   }
 
+  // // Flaky
+  // SECTION("lbfgs") {
+  //   auto optimizer = LBFGS(model.parameters(), LBFGSOptions(5e-2).max_iter(5));
+  //   // REQUIRE(test_optimizer_xor(optimizer, model));
+  // }
+
   SECTION("adagrad") {
     REQUIRE(test_optimizer_xor(
         optim::Adagrad(
-            model, AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)),
+            model.parameters(),
+            AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)),
         model));
   }
 
   SECTION("rmsprop_simple") {
     REQUIRE(test_optimizer_xor(
-        RMSprop(model, RMSpropOptions(1e-1).centered(true)), model));
+        RMSprop(model.parameters(), RMSpropOptions(1e-1).centered(true)),
+        model));
   }
 
   SECTION("rmsprop") {
     REQUIRE(test_optimizer_xor(
-        RMSprop(model, RMSpropOptions(1e-1).momentum(0.9).weight_decay(1e-6)),
+        RMSprop(
+            model.parameters(),
+            RMSpropOptions(1e-1).momentum(0.9).weight_decay(1e-6)),
         model));
   }
 
   // This test appears to be flaky, see
   // https://github.com/pytorch/pytorch/issues/7288
-  // SECTION("adam") {
-  //   REQUIRE(test_optimizer_xor(
-  //       optim::Adam(model, AdamOptions(1.0).weight_decay(1e-6)), model));
-  // }
+  SECTION("adam") {
+    REQUIRE(test_optimizer_xor(
+        optim::Adam(model.parameters(), AdamOptions(1.0).weight_decay(1e-6)),
+        model));
+  }
 
   SECTION("amsgrad") {
     REQUIRE(test_optimizer_xor(
-        optim::Adam(model, AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
+        optim::Adam(
+            model.parameters(),
+            AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
         model));
   }
 }

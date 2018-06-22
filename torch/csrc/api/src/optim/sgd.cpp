@@ -8,21 +8,17 @@
 
 namespace torch {
 namespace optim {
-
 SGDOptions::SGDOptions(double learning_rate) : learning_rate_(learning_rate) {}
-
-SGD::SGD(std::shared_ptr<nn::Module> model, const SGDOptions& options)
-    : Optimizer(model), options_(options) {}
 
 const SGDOptions& SGD::options() const noexcept {
   return options_;
 }
 
 void SGD::step() {
-  for (auto& parameter : model_->parameters()) {
-    auto& name = parameter.key;
-    auto& grad = parameter->grad();
-    auto& p = parameter->data();
+  for (size_t i = 0; i < parameters_.size(); ++i) {
+    auto& grad = parameters_[i].grad();
+    auto& p = parameters_[i].data();
+
     if (!grad.defined()) {
       continue;
     }
@@ -33,24 +29,27 @@ void SGD::step() {
     }
 
     if (options_.momentum_ != 0) {
-      at::Tensor buf;
-      if (momentum_buffers_.find(name) == momentum_buffers_.end()) {
-        buf = momentum_buffers_[name] = at::zeros_like(p);
-        buf.mul_(options_.momentum_).add_(d_p);
+      AT_ASSERT(momentum_buffers_.size() == parameters_.size());
+      auto momentum = momentum_buffers_[i];
+
+      if (iteration_ == 0) {
+        momentum.data().mul_(options_.momentum_).add_(d_p);
       } else {
-        buf = momentum_buffers_[name];
-        buf.mul_(options_.momentum_).add_(d_p, 1 - options_.dampening_);
+        momentum.data()
+            .mul_(options_.momentum_)
+            .add_(d_p, 1 - options_.dampening_);
       }
 
       if (options_.nesterov_) {
-        d_p = d_p.add(buf, options_.momentum_);
+        d_p = d_p.add(momentum.data(), options_.momentum_);
       } else {
-        d_p = buf;
+        d_p = momentum;
       }
     }
 
     p.add_(d_p, -options_.learning_rate_);
   }
+  iteration_ += 1;
 }
 } // namespace optim
 } // namespace torch

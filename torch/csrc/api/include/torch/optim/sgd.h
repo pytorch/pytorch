@@ -3,16 +3,15 @@
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
 #include <torch/optim/optimizer.h>
+#include <torch/tensor.h>
 
 #include <ATen/ATen.h>
 
 #include <cereal/access.hpp>
 #include <cereal/cereal.hpp>
 
-#include <functional>
-#include <memory>
-#include <string>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace torch {
 namespace optim {
@@ -28,11 +27,13 @@ struct SGDOptions {
 
 class SGD : public Optimizer {
  public:
-  SGD(std::shared_ptr<nn::Module> model, const SGDOptions& options);
-
-  template <typename ModuleType>
-  SGD(nn::ModuleHolder<ModuleType> module_holder, const SGDOptions& options)
-      : SGD(module_holder.get(), options) {}
+  template <typename ParameterContainer>
+  explicit SGD(ParameterContainer&& parameters, const SGDOptions& options)
+      : Optimizer(std::move(parameters)), options_(options) {
+    if (options_.momentum_ > 0) {
+      momentum_buffers_ = detail::zeros_like(parameters_);
+    }
+  }
 
   void step() override;
 
@@ -48,7 +49,8 @@ class SGD : public Optimizer {
   SGD() : options_(0) {}
 
   SGDOptions options_;
-  std::unordered_map<std::string, at::Tensor> momentum_buffers_;
+  std::vector<Variable> momentum_buffers_;
+  size_t iteration_{0};
 };
 } // namespace optim
 } // namespace torch

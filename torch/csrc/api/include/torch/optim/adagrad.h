@@ -2,16 +2,15 @@
 
 #include <torch/nn/module.h>
 #include <torch/optim/optimizer.h>
+#include <torch/tensor.h>
 
 #include <ATen/ATen.h>
 
 #include <cereal/access.hpp>
 #include <cereal/cereal.hpp>
 
-#include <functional>
-#include <memory>
-#include <string>
-#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace torch {
 namespace optim {
@@ -25,13 +24,14 @@ struct AdagradOptions {
 
 class Adagrad : public Optimizer {
  public:
-  Adagrad(std::shared_ptr<nn::Module> model, const AdagradOptions& options);
-
-  template <typename ModuleType>
-  Adagrad(
-      nn::ModuleHolder<ModuleType> module_holder,
+  template <typename ParameterContainer>
+  explicit Adagrad(
+      ParameterContainer&& parameters,
       const AdagradOptions& options)
-      : Adagrad(module_holder.get(), options) {}
+      : Optimizer(std::move(parameters)),
+        options_(options),
+        sum_(detail::zeros_like(parameters_)),
+        step_(parameters_.size(), 0) {}
 
   void step() override;
 
@@ -49,8 +49,8 @@ class Adagrad : public Optimizer {
 
   AdagradOptions options_;
 
-  std::unordered_map<std::string, at::Tensor> sum_;
-  std::unordered_map<std::string, double> step_;
+  std::vector<Variable> sum_;
+  std::vector<double> step_;
 };
 } // namespace optim
 } // namespace torch

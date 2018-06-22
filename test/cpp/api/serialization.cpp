@@ -189,7 +189,7 @@ TEST_CASE("serialization") {
     auto model2 = xor_model();
     auto model3 = xor_model();
     auto optimizer = torch::optim::SGD(
-        model,
+        model->parameters(),
         torch::optim::SGDOptions(1e-1)
             .momentum(0.9)
             .nesterov(true)
@@ -229,16 +229,16 @@ TEST_CASE("serialization") {
     torch::load(ss, model3.get());
 
     // Make some optimizers with momentum (and thus state)
-    auto optim1 =
-        torch::optim::SGD(model1, torch::optim::SGDOptions(1e-1).momentum(0.9));
-    auto optim2 =
-        torch::optim::SGD(model2, torch::optim::SGDOptions(1e-1).momentum(0.9));
-    auto optim2_2 =
-        torch::optim::SGD(model2, torch::optim::SGDOptions(1e-1).momentum(0.9));
-    auto optim3 =
-        torch::optim::SGD(model3, torch::optim::SGDOptions(1e-1).momentum(0.9));
-    auto optim3_2 =
-        torch::optim::SGD(model3, torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim1 = torch::optim::SGD(
+        model1->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim2 = torch::optim::SGD(
+        model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim2_2 = torch::optim::SGD(
+        model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim3 = torch::optim::SGD(
+        model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim3_2 = torch::optim::SGD(
+        model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
 
     auto x = torch::ones({10, 5}, at::requires_grad());
 
@@ -277,6 +277,7 @@ TEST_CASE("serialization") {
 }
 
 TEST_CASE("serialization_cuda", "[cuda]") {
+<<<<<<< fe1d12acd210356ed2ec84d514dd4ff240a51447
   // We better be able to save and load a XOR model!
   auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
     auto inp = torch::empty({bs, 2});
@@ -299,7 +300,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   auto model2 = xor_model();
   auto model3 = xor_model();
   auto optimizer = torch::optim::SGD(
-      model,
+      model->parameters(),
       torch::optim::SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(
           1e-6));
 
