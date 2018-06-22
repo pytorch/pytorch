@@ -4,13 +4,15 @@
 
 #include <torch/csrc/autograd/variable.h>
 
-#include <ATen/ATen.h>
-
 #include <memory>
 
 namespace torch {
 namespace optim {
-void Optimizer::zero_grad() {
+namespace detail {
+OptimizerBase::OptimizerBase(std::shared_ptr<nn::Module> model)
+    : model_(model) {}
+
+void OptimizerBase::zero_grad() {
   for (auto& p : model_->parameters()) {
     auto& grad = p->grad();
     if (grad.defined()) {
@@ -19,10 +21,6 @@ void Optimizer::zero_grad() {
     }
   }
 }
-
-at::Scalar Optimizer::NoLoss() {
-  return at::Scalar();
-}
-
+} // namespace detail
 } // namespace optim
 } // namespace torch

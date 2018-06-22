@@ -36,7 +36,7 @@ class RMSprop : public Optimizer {
       const RMSpropOptions& options)
       : RMSprop(module_holder.get(), options) {}
 
-  at::Scalar step(std::function<at::Scalar()> closure = NoLoss) override;
+  void step() override;
 
   const RMSpropOptions& options() const noexcept;
 

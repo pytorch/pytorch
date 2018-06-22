@@ -35,18 +35,14 @@ bool test_optimizer_xor(
       lab[i] = c;
     }
     inp.set_requires_grad(true);
-    // forward
-    std::function<at::Scalar()> closure = [&] {
-      optimizer.zero_grad();
-      auto x = model->forward(inp);
-      torch::Tensor loss = at::binary_cross_entropy(x, lab);
-      loss.backward();
-      return at::Scalar(loss.data());
-    };
+    optimizer.zero_grad();
+    auto x = model->forward(inp);
+    torch::Tensor loss = at::binary_cross_entropy(x, lab);
+    loss.backward();
 
-    auto loss = optimizer.step(closure);
+    optimizer.step();
 
-    running_loss = running_loss * 0.99 + loss.toFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
     if (epoch > 3000) {
       return false;
     }
@@ -60,12 +56,6 @@ TEST_CASE("optim") {
   torch::manual_seed(0);
   auto model = std::make_shared<Sequential>(
       torch::SigmoidLinear(Linear(2, 8)), torch::SigmoidLinear(Linear(8, 1)));
-
-  // Flaky
-  // SECTION("lbfgs") {
-  //   REQUIRE(test_optimizer_xor(
-  //       optim::LBFGS(model, LBFGSOptions(5e-2).max_iter(5)), model));
-  // }
 
   SECTION("sgd") {
     REQUIRE(test_optimizer_xor(
@@ -84,7 +74,7 @@ TEST_CASE("optim") {
 
   SECTION("rmsprop_simple") {
     REQUIRE(test_optimizer_xor(
-        RMSprop(model, RMSpropOptions(1e-1).centered()), model));
+        RMSprop(model, RMSpropOptions(1e-1).centered(true)), model));
   }
 
   SECTION("rmsprop") {
@@ -102,7 +92,7 @@ TEST_CASE("optim") {
 
   SECTION("amsgrad") {
     REQUIRE(test_optimizer_xor(
-        optim::Adam(model, AdamOptions(0.1).weight_decay(1e-6).amsgrad()),
+        optim::Adam(model, AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
         model));
   }
 }

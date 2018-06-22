@@ -16,7 +16,7 @@ LBFGSOptions::LBFGSOptions(double learning_rate)
     : learning_rate_(learning_rate) {}
 
 LBFGS::LBFGS(std::shared_ptr<nn::Module> model, const LBFGSOptions& options)
-    : Optimizer(model),
+    : LossClosureOptimizer(model),
       options_(options),
       d(torch::empty({0})),
       H_diag(torch::empty({0})),
@@ -51,7 +51,7 @@ void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
   }
 }
 
-at::Scalar LBFGS::step(std::function<at::Scalar()> closure) {
+at::Scalar LBFGS::step(LossClosure closure) {
   at::Scalar orig_loss = closure();
   at::Scalar loss = orig_loss;
   int current_evals = 1;

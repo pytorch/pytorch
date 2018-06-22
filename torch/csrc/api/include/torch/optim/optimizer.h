@@ -9,20 +9,32 @@
 
 namespace torch {
 namespace optim {
-class Optimizer {
+namespace detail {
+class OptimizerBase {
  public:
-  Optimizer(std::shared_ptr<nn::Module> model) : model_(model) {}
-  virtual ~Optimizer() = default;
+  OptimizerBase(std::shared_ptr<nn::Module> model);
+  virtual ~OptimizerBase() = default;
 
-  void zero_grad();
-  virtual at::Scalar step(std::function<at::Scalar()> closure) = 0;
-
-  at::Scalar static NoLoss();
+  virtual void zero_grad();
 
  protected:
-  Optimizer() = default;
+  OptimizerBase() = default;
 
   std::shared_ptr<nn::Module> model_;
+};
+} // namespace detail
+
+class Optimizer : public detail::OptimizerBase {
+ public:
+  using detail::OptimizerBase::OptimizerBase;
+  virtual void step() = 0;
+};
+
+class LossClosureOptimizer : public detail::OptimizerBase {
+ public:
+  using LossClosure = std::function<at::Scalar()>;
+  using detail::OptimizerBase::OptimizerBase;
+  virtual at::Scalar step(LossClosure closure) = 0;
 };
 
 } // namespace optim

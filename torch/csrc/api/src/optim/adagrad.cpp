@@ -23,8 +23,7 @@ const AdagradOptions& Adagrad::options() const noexcept {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/adagrad.py
-at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
-  at::Scalar loss = closure();
+void Adagrad::step() {
   for (auto& parameter : model_->parameters()) {
     auto& name = parameter.key;
     auto& grad = parameter->grad();
@@ -51,7 +50,6 @@ at::Scalar Adagrad::step(std::function<at::Scalar()> closure) {
     at::Tensor std = buf.sqrt().add_(1e-10);
     p.addcdiv_(d_p, std, -clr);
   }
-  return loss;
 }
 } // namespace optim
 } // namespace torch

@@ -23,29 +23,29 @@ const RMSpropOptions& RMSprop::options() const noexcept {
 
 /// Adapted from
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
-at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
-  at::Scalar loss = closure();
+void RMSprop::step() {
   for (auto& parameter : model_->parameters()) {
     auto& name = parameter.key;
     auto& grad = parameter->grad();
     auto& p = parameter->data();
-    if (!grad.defined())
+    if (!grad.defined()) {
       continue;
+    }
 
     if (square_avg_buffer_.find(name) == square_avg_buffer_.end()) {
       square_avg_buffer_[name] = at::zeros_like(p);
       if (options_.momentum_) {
         momentum_buffer_[name] = at::zeros_like(p);
-      };
+      }
       if (options_.centered_) {
         grad_avg_buffer_[name] = at::zeros_like(p);
-      };
-    };
+      }
+    }
 
     auto d_p = torch::autograd::as_variable_ref(grad).data();
     if (options_.weight_decay_ > 0) {
       d_p.add_(p, options_.weight_decay_);
-    };
+    }
 
     auto& square_avg = square_avg_buffer_[name];
     square_avg.mul_(options_.alpha_).addcmul_(d_p, d_p, 1.0 - options_.alpha_);
@@ -59,7 +59,7 @@ at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
                 .add_(options_.eps_);
     } else {
       avg = square_avg.sqrt().add_(options_.eps_);
-    };
+    }
 
     if (options_.momentum_ > 0) {
       auto& buf = momentum_buffer_[name];
@@ -67,9 +67,8 @@ at::Scalar RMSprop::step(std::function<at::Scalar()> closure) {
       p.add_(buf, -options_.learning_rate_);
     } else {
       p.addcdiv_(d_p, avg, -options_.learning_rate_);
-    };
+    }
   }
-  return loss;
 }
 } // namespace optim
 } // namespace torch

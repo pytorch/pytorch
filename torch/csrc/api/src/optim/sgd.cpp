@@ -18,8 +18,7 @@ const SGDOptions& SGD::options() const noexcept {
   return options_;
 }
 
-at::Scalar SGD::step(std::function<at::Scalar()> closure) {
-  at::Scalar loss = closure();
+void SGD::step() {
   for (auto& parameter : model_->parameters()) {
     auto& name = parameter.key;
     auto& grad = parameter->grad();
@@ -52,7 +51,6 @@ at::Scalar SGD::step(std::function<at::Scalar()> closure) {
 
     p.add_(d_p, -options_.learning_rate_);
   }
-  return loss;
 }
 } // namespace optim
 } // namespace torch

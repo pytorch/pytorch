@@ -26,7 +26,7 @@ struct LBFGSOptions {
   TORCH_ARG(int, history_size) = 100;
 };
 
-class LBFGS : public Optimizer {
+class LBFGS : public LossClosureOptimizer {
  public:
   LBFGS(std::shared_ptr<nn::Module> model, const LBFGSOptions& options);
 
@@ -34,7 +34,7 @@ class LBFGS : public Optimizer {
   LBFGS(nn::ModuleHolder<ModuleType> module_holder, const LBFGSOptions& options)
       : LBFGS(module_holder.get(), options) {}
 
-  at::Scalar step(std::function<at::Scalar()> closure) override;
+  at::Scalar step(LossClosure closure) override;
 
   const LBFGSOptions& options() const noexcept;
 

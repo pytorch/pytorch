@@ -35,7 +35,7 @@ class Adam : public Optimizer {
   Adam(nn::ModuleHolder<ModuleType> module_holder, const AdamOptions& options)
       : Adam(module_holder.get(), options) {}
 
-  at::Scalar step(std::function<at::Scalar()> closure = NoLoss) override;
+  void step() override;
 
   template <class Archive>
   void serialize(Archive& ar) {

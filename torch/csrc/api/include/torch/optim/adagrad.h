@@ -33,7 +33,7 @@ class Adagrad : public Optimizer {
       const AdagradOptions& options)
       : Adagrad(module_holder.get(), options) {}
 
-  at::Scalar step(std::function<at::Scalar()> closure = NoLoss) override;
+  void step() override;
 
   const AdagradOptions& options() const noexcept;
 

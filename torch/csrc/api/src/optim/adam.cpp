@@ -21,8 +21,7 @@ const AdamOptions& Adam::options() const noexcept {
   return options_;
 }
 
-at::Scalar Adam::step(std::function<at::Scalar()> closure) {
-  at::Scalar loss = closure();
+void Adam::step() {
   for (auto& parameter : model_->parameters()) {
     auto& name = parameter.key;
     auto& grad = parameter->grad();
@@ -60,7 +59,7 @@ at::Scalar Adam::step(std::function<at::Scalar()> closure) {
       denom = max_exp_avg_sq.sqrt().add_(options_.eps_);
     } else {
       denom = exp_avg_sq.sqrt().add_(options_.eps_);
-    };
+    }
 
     const auto bias_correction1 = 1 - std::pow(options_.beta1_, step);
     const auto bias_correction2 = 1 - std::pow(options_.beta2_, step);
@@ -69,7 +68,6 @@ at::Scalar Adam::step(std::function<at::Scalar()> closure) {
 
     p.addcdiv_(exp_avg, denom, -step_size);
   }
-  return loss;
 }
 
 } // namespace optim
