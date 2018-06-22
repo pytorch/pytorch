@@ -17,9 +17,9 @@ template <size_t D>
 MaxPoolOptions<D>::MaxPoolOptions(const ExpandingArray<D>& kernel_size)
     : kernel_size_(kernel_size), stride_(kernel_size) {}
 
-template class MaxPoolOptions<1>;
-template class MaxPoolOptions<2>;
-template class MaxPoolOptions<3>;
+template struct MaxPoolOptions<1>;
+template struct MaxPoolOptions<2>;
+template struct MaxPoolOptions<3>;
 
 namespace detail {
 template <size_t D, typename Derived>
@@ -79,9 +79,9 @@ template <size_t D>
 AvgPoolOptions<D>::AvgPoolOptions(const ExpandingArray<D>& kernel_size)
     : kernel_size_(kernel_size), stride_(kernel_size) {}
 
-template class AvgPoolOptions<1>;
-template class AvgPoolOptions<2>;
-template class AvgPoolOptions<3>;
+template struct AvgPoolOptions<1>;
+template struct AvgPoolOptions<2>;
+template struct AvgPoolOptions<3>;
 
 namespace detail {
 template <size_t D, typename Derived>
