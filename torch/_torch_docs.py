@@ -5297,12 +5297,12 @@ The inverse of this function is :func:`~torch.ifft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration. 
-    
+    same configuration.
+
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU 
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query  
-    the number of plans currently in cache, and 
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5397,12 +5397,12 @@ The inverse of this function is :func:`~torch.fft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration. 
-    
+    same configuration.
+
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU 
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query  
-    the number of plans currently in cache, and 
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5486,12 +5486,12 @@ The inverse of this function is :func:`~torch.irfft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration. 
-    
+    same configuration.
+
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU 
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query  
-    the number of plans currently in cache, and 
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
@@ -5567,12 +5567,12 @@ The inverse of this function is :func:`~torch.rfft`.
 .. note::
     For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
     repeatedly running FFT methods on tensors of same geometry with same
-    same configuration. 
-    
+    same configuration.
+
     Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
-    controls the capacity of this cache. Some cuFFT plans may allocate GPU 
-    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query  
-    the number of plans currently in cache, and 
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
     ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
 
 .. warning::
