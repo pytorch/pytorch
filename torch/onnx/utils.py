@@ -167,6 +167,8 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             method = model.__getattr__('forward')
             graph = method.propagate_and_assign_input_and_output_shapes(
                 args, example_outputs, False, propagate)
+            # Erase number types to bring the graph to a pre-NumberType state
+            torch._C._jit_pass_erase_number_types(graph)
             params = method.params()
         except AttributeError:
             # TODO: just trace it

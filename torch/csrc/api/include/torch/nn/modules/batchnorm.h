@@ -1,28 +1,41 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/cloneable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
 #include <torch/csrc/autograd/variable.h>
 
 #include <cstdint>
 
-namespace torch { namespace nn {
-class BatchNorm : public torch::nn::CloneableModule<BatchNorm> {
+namespace torch {
+namespace nn {
+struct BatchNormOptions {
+  /* implicit */ BatchNormOptions(int64_t features);
+  TORCH_ARG(int64_t, features);
+  TORCH_ARG(bool, affine) = true;
+  TORCH_ARG(bool, stateful) = false;
+  TORCH_ARG(double, eps) = 1e-5;
+  TORCH_ARG(double, momentum) = 0.1;
+};
+
+class BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
  public:
-  explicit BatchNorm(int64_t features);
+  explicit BatchNormImpl(BatchNormOptions options);
 
   void reset() override;
-
   std::vector<Variable> forward(std::vector<Variable>);
+  const BatchNormOptions& options() const noexcept;
 
-  TORCH_ATTR(int64_t, features);
-  TORCH_ATTR(bool, affine) = true;
-  TORCH_ATTR(bool, stateful) = false;
-  TORCH_ATTR(double, eps) = 1e-5;
-  TORCH_ATTR(double, momentum) = 0.1;
-  TORCH_ATTR(Variable, weight);
-  TORCH_ATTR(Variable, bias);
-  TORCH_ATTR(Variable, running_mean);
-  TORCH_ATTR(Variable, running_variance);
+ private:
+  BatchNormOptions options_;
+  Variable weight_;
+  Variable bias_;
+  Variable running_mean_;
+  Variable running_variance_;
 };
-}} // namespace torch::nn
+
+TORCH_MODULE(BatchNorm);
+
+} // namespace nn
+} // namespace torch

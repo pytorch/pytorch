@@ -2,10 +2,6 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/AccumulateType.h"
-#include "ATen/cuda/CUDATypeConversion.cuh"
-#include "ATen/cuda/CUDATensorMethods.cuh"
-#include <THC/THCNumerics.cuh>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <curand.h>
 #include <curand_kernel.h>
@@ -20,9 +16,9 @@
 #include <THC/THCTensorRandom.h>
 #include <THC/THCGenerator.hpp>
 #include <THC/THCApply.cuh>
-#include <THC/THCNumerics.cuh>
 
 #include <cstdint>
+#include <limits>
 #include <utility>
 
 THCGenerator* THCRandom_getGenerator(THCState* state);
@@ -43,7 +39,7 @@ void poisson_cuda_kernel(
       ret,
       lambda,
       [seeds] __device__(
-          scalar_t & ret_val, const scalar_t& lambda, bool early_exit) {
+          scalar_t & ret_val, const scalar_t& lambda) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -64,7 +60,7 @@ void gamma_cuda_kernel(
       ret,
       alpha,
       [seeds] __device__(
-          scalar_t & ret_val, const scalar_t& alpha, bool early_exit) {
+          scalar_t & ret_val, const scalar_t& alpha) {
         curandStatePhilox4_32_10_t state;
         curand_init(
             seeds.first,
@@ -78,7 +74,8 @@ void gamma_cuda_kernel(
           return curand_normal(&state);
         });
         auto sample = sample_gamma<scalar_t, accscalar_t>(alpha, standard_uniform, standard_normal);
-        ret_val = ((THCNumerics<scalar_t>::min() > sample) ? (THCNumerics<scalar_t>::min()) : sample);
+        auto min_value = std::numeric_limits<scalar_t>::lowest();
+        ret_val = (min_value > sample) ? min_value : sample;
       });
 }
 
@@ -101,7 +98,7 @@ namespace at { namespace native {
 Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
   Tensor ret = lambda.type().tensor(lambda.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "poisson", [&] {
-    poisson_cuda_kernel<cuda::into_type<scalar_t>>(ret, lambda, next_philox_seed(gen, 20));
+    poisson_cuda_kernel<scalar_t>(ret, lambda, next_philox_seed(gen, 20));
   });
   return ret;
 }
@@ -109,7 +106,7 @@ Tensor _s_poisson_cuda(const Tensor& lambda, Generator* gen) {
 Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
   Tensor ret = alpha.type().tensor(alpha.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(ret.type(), "gamma", [&] {
-     gamma_cuda_kernel<cuda::into_type<scalar_t>>(ret, alpha, next_philox_seed(gen, 10));
+     gamma_cuda_kernel<scalar_t>(ret, alpha, next_philox_seed(gen, 10));
    });
   return ret;
 }
@@ -117,7 +114,7 @@ Tensor _s_gamma_cuda(const Tensor& alpha, Generator* gen) {
 Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
   Tensor ret = self.type().tensor(self.sizes());
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "_standard_gamma_grad", [&] {
-     gamma_grad_cuda_kernel<cuda::into_type<scalar_t>>(ret, self, output);
+     gamma_grad_cuda_kernel<scalar_t>(ret, self, output);
    });
   return ret;
 }

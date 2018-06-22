@@ -138,31 +138,6 @@ cmake_dependent_option(
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 
-# Legacy options, which we will eventually remove
-cmake_dependent_option(
-    WITH_CUDA "Legacy CUDA" ON
-    "USE_CUDA" OFF)
-cmake_dependent_option(
-    NO_PYTHON "Legacy Python" OFF
-    "BUILD_PYTHON" ON)
-cmake_dependent_option(
-    WITH_CUDNN "Legacy cuDNN" ON
-    "USE_CUDNN" OFF)
-cmake_dependent_option(
-    WITH_NCCL "Legacy NCCL" ON
-    "USE_NCCL" OFF)
-cmake_dependent_option(
-    NO_MKLDNN "Legacy no MKLDNN" OFF
-    "USE_MKLDNN" ON)
-cmake_dependent_option(
-    WITH_DISTRIBUTED "Legacy THD (distributed)" ON
-    "USE_DISTRIBUTED" OFF)
-cmake_dependent_option(
-    WITH_DISTRIBUTED_MW "Legacy THD (distributed) MW" ON
-    "USE_DISTRIBUTED_MW" OFF)
-cmake_dependent_option(
-    WITH_GLOO_IBVERBS "Legacy Gloo IB verbs for distributed support" ON
-    "USE_GLOO_IBVERBS" OFF)
 if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
 endif()

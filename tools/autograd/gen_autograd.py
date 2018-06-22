@@ -50,7 +50,10 @@ def load_aten_declarations(path):
         declarations = yaml.load(f, Loader=YamlLoader)
 
     # enrich declarations with additional information
+    selected_declarations = []
     for declaration in declarations:
+        if declaration.get('deprecated'):
+            continue
         for arg in declaration['arguments']:
             simple_type = arg['type']
             simple_type = simple_type.replace(' &', '').replace('const ', '')
@@ -68,7 +71,9 @@ def load_aten_declarations(path):
         declaration['return_type'] = format_return_type(declaration['returns'])
 
         declaration['base_name'] = declaration['name']
-    return declarations
+        selected_declarations.append(declaration)
+
+    return selected_declarations
 
 
 def load_deprecated_signatures(aten_decls, deprecated_path):
@@ -141,27 +146,33 @@ def gen_autograd(aten_path, out, autograd_dir):
     autograd_functions = load_derivatives(
         os.path.join(autograd_dir, 'derivatives.yaml'), aten_decls)
 
+    template_path = os.path.join(autograd_dir, 'templates')
+
     # Generate VariableType.h/cpp
     from .gen_variable_type import gen_variable_type
-    gen_variable_type(out, aten_decls, os.path.join(autograd_dir, 'templates'))
+    gen_variable_type(out, aten_decls, template_path)
 
     # Generate Functions.h/cpp
     from .gen_autograd_functions import gen_autograd_functions
     gen_autograd_functions(
-        out, autograd_functions, os.path.join(autograd_dir, 'templates'))
+        out, autograd_functions, template_path)
 
     # Load deprecated signatures
     deprecated = load_deprecated_signatures(
         aten_decls, os.path.join(autograd_dir, 'deprecated.yaml'))
 
-    # Genereate Python bindings
+    # Generate Python bindings
     from . import gen_python_functions
     gen_python_functions.gen_py_variable_methods(
-        out, aten_decls + deprecated, os.path.join(autograd_dir, 'templates'))
+        out, aten_decls + deprecated, template_path)
     gen_python_functions.gen_py_torch_functions(
-        out, aten_decls + deprecated, os.path.join(autograd_dir, 'templates'))
+        out, aten_decls + deprecated, template_path)
     gen_python_functions.gen_py_nn_functions(
-        out, aten_decls, os.path.join(autograd_dir, 'templates'))
+        out, aten_decls, template_path)
+
+    # Generate variable_factories.h
+    from .gen_variable_factories import gen_variable_factories
+    gen_variable_factories(out, aten_decls, template_path)
 
 
 def main():

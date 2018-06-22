@@ -52,7 +52,7 @@ for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
             # Update contents.
             with open(source, "r+") as f:
                 contents = f.read()
-                contents = contents.replace("WITH_CUDA", "WITH_ROCM")
+                contents = contents.replace("USE_CUDA", "USE_ROCM")
                 contents = contents.replace("CUDA_VERSION", "0")
                 f.seek(0)
                 f.write(contents)

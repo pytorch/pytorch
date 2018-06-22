@@ -7,6 +7,7 @@
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/detail/CUDAHooksInterface.h"
 #include "ATen/native/SpectralOpsUtils.h"
 
 #include <algorithm>
@@ -36,7 +37,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     throw std::runtime_error(ss.str());
   }
 
-  auto signal_tensor_ndim = signal_ndim + static_cast<int>(complex_input);  // add complex dim
+  auto signal_tensor_ndim = signal_ndim + static_cast<int64_t>(complex_input);  // add complex dim
   if (self.dim() < signal_tensor_ndim) {
     std::ostringstream ss;
     ss << "Given signal_ndim=" << signal_ndim << ", expected an input tensor "
@@ -83,7 +84,7 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
        << signal_ndim << "D, but got signal_sizes=" << signal_sizes;
     throw std::runtime_error(ss.str());
   }
-  std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int>(complex_output));
+  std::vector<int64_t> output_sizes(signal_ndim + 1 + static_cast<int64_t>(complex_output));
   output_sizes[0] = input.size(0);  // batch size
   std::vector<int64_t> checked_signal_sizes(signal_ndim);
   for (int64_t i = 0; i < signal_ndim; i++) {
@@ -133,13 +134,31 @@ static inline Tensor _fft(const Tensor &self, const int64_t signal_ndim,
     // slightly faster path for non-batch mode
     output = output.squeeze(0);
   } else if (batch_ndim > 1) {
-    auto output_ndim = self.dim() + static_cast<int>(complex_output) - static_cast<int>(complex_input);
+    auto output_ndim = self.dim() + static_cast<int64_t>(complex_output) - static_cast<int64_t>(complex_input);
     std::vector<int64_t> unflatten_output_shape(output_ndim);
     std::copy(self_shape.begin(), self_shape.begin() + batch_ndim, unflatten_output_shape.begin());
     std::copy(output_sizes.begin() + 1, output_sizes.end(), unflatten_output_shape.begin() + batch_ndim);
     output = output.reshape(unflatten_output_shape);
   }
   return output;
+}
+
+// We call the following methods via CUDA hooks because they are really only
+// valid when CUDA is available. See native/cuda/CuFFTPlanCache.h for more details.
+int64_t _cufft_get_plan_cache_max_size() {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheMaxSize();
+}
+
+void _cufft_set_plan_cache_max_size(int64_t max_size) {
+  detail::getCUDAHooks().cuFFTSetPlanCacheMaxSize(max_size);
+}
+
+int64_t _cufft_get_plan_cache_size() {
+  return detail::getCUDAHooks().cuFFTGetPlanCacheSize();
+}
+
+void _cufft_clear_plan_cache() {
+  detail::getCUDAHooks().cuFFTClearPlanCache();
 }
 
 Tensor fft(const Tensor& self, const int64_t signal_ndim, const bool normalized) {
@@ -203,7 +222,7 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   }
   // pad zeros
   if (pad_end != 0) {
-    Tensor padded_input = at::zeros(self.type(), {batch, len + pad_end});
+    Tensor padded_input = at::zeros({batch, len + pad_end}, self.type());
     padded_input.narrow(1, 0, len).copy_(input);
     len += pad_end;
     input = padded_input;
@@ -236,8 +255,8 @@ Tensor stft(const Tensor& self, const int64_t frame_length,
   // build ft kernel
   // k[omega, t] = cos (2 pi omega t / N) - j sin (2 pi omega t / N)
   double N = static_cast<double>(fft_size);
-  auto freq_arange = at::arange(self.type(), 0, return_size).mul_(M_PI * 2. / N);
-  auto time_arange = at::arange(self.type(), 0, frame_length);
+  auto freq_arange = at::arange(0, return_size, self.type()).mul_(M_PI * 2. / N);
+  auto time_arange = at::arange(0, frame_length, self.type());
   auto arange_2d = at::ger(freq_arange, time_arange);
   auto re_kernel = arange_2d.cos();
   auto im_kernel = arange_2d.sin().neg_();

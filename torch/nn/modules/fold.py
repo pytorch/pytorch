@@ -4,16 +4,16 @@ from .. import functional as F
 
 class Fold(Module):
     """
-    De-interleaves vectors of length :math:`\prod(kernel_size)` from the "channel"
-    dimension of the input tensor to generate blocks of size :math:`kernel_size`
+    De-interleaves vectors of length :math:`\prod(kernel\_size)` from the "channel"
+    dimension of the input tensor to generate blocks of size :math:`kernel\_size`
     of the output.  These blocks populate the "spatial" dimensions [2:]
     of the output via a sliding window with positions determined by the
     padding, stride and dilation values.  The "channel" dimension 1 of the output
     is determined by the vectors interleaevd position in the "channel" dimension
     of the input.
 
-    Each element of the output batch dimension 0 has :math:`C / \prod(kernel_size)`
-    channels (dimension 1) and spatial dimensions [2:] of shape :math:`output_size`.
+    Each element of the output batch dimension 0 has :math:`C / \prod(kernel\_size)`
+    channels (dimension 1) and spatial dimensions [2:] of shape :math:`output\_size`.
 
     | If :attr:`padding` is non-zero, then the input is implicitly
     zero-padded on both sides by :attr:`padding` number of points
@@ -41,15 +41,15 @@ class Fold(Module):
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N * C * \prod(kernel_size), L_{out},)` where
-          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1)
+        - Output: :math:`(N * C * \prod(kernel\_size), L_{out},)` where
+          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel\_size - 1) - 1) / stride + 1)`
 
     Examples::
 
         >>> # output_size (3, 3) kernel_size (2, 2), dilation (1, 1), padding (0, 0), stride (1, 1)
         >>> fold = nn.Fold((3, 3), (2, 2), (1, 1), (0, 0), (1, 1))
-        >>> input = torch.randn(1, 36, 1)
-        >>> output = unfold(input)
+        >>> input = torch.randn(1, 4, 10, 12)
+        >>> output = fold(input)
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md
@@ -78,14 +78,14 @@ class Fold(Module):
 class Unfold(Module):
     """
 
-    Converts each sliding :math:`kernel_size` block of the "spatial" dimensions [2:]
+    Converts each sliding :math:`kernel\_size` block of the "spatial" dimensions [2:]
     of the input tensor into a column of the output. These columns are interleaved
     with the "channel" dimension 1 such that in the output the channel dimension combines
     both the spatial position of the block within the input and the original
     channel position. We denote size of the "batch" dimension 0 as :math:`N`.
 
-    Each element of the output batch dimension 0 has :math:`C * \prod(kernel_size)`
-    rows and contains as many columns as there are :math:`kernel_size` neighborhoods
+    Each element of the output batch dimension 0 has :math:`C * \prod(kernel\_size)`
+    rows and contains as many columns as there are :math:`kernel\_size` neighborhoods
     of the input according to the padding, stride and dilation values.
 
     | If :attr:`padding` is non-zero, then the input is implicitly
@@ -112,8 +112,8 @@ class Unfold(Module):
 
     Shape:
         - Input: :math:`(N, C, L_{in})`
-        - Output: :math:`(N, C * \prod(kernel_size), L_{out},)` where
-          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel_size - 1) - 1) / stride + 1)
+        - Output: :math:`(N, C * \prod(kernel\_size), L_{out},)` where
+          :math:`L_{out} = floor((L_{in} + 2 * padding - dilation * (kernel\_size - 1) - 1) / stride + 1)`
 
     Examples::
 
@@ -121,6 +121,14 @@ class Unfold(Module):
         >>> unfold = nn.Unfold((3, 3), (1, 1), (0, 0), (1, 1))
         >>> input = torch.randn(2, 4, 3, 3)
         >>> output = unfold(input)
+
+        >>> inp = torch.arange(1*3*10*12.0).view(1,3,10,12)
+        >>> w = torch.randn(2,3,4,5)
+        >>> inp_unf = torch.nn.functional.unfold(inp, (4,5))
+        >>> out_unf = torch.nn.functional.linear(inp_unf.transpose(1,2), w.view(w.size(0),-1)).transpose(1,2)
+        >>> out = torch.nn.functional.fold(out_unf, (7,8), (1, 1))
+        >>> (torch.nn.functional.conv2d(inp, w)-out).abs().max().item()
+        0.0
 
     .. _link:
         https://github.com/vdumoulin/conv_arithmetic/blob/master/README.md

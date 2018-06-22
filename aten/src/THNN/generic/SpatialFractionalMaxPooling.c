@@ -103,8 +103,8 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   int widthDim = 2;
 
   int64_t numInputDims = THTensor_(nDimension)(input);
-  THNN_ARGCHECK(numInputDims == 3 || numInputDims == 4, 2, input,
-		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (numInputDims == 3 || numInputDims == 4), 2, input,
+		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 4) {
     numBatch = THTensor_(size)(input, 0);

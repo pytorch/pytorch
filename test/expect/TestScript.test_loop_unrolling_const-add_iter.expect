@@ -1,5 +1,5 @@
 graph() {
-  %y.1 : Long() = prim::Constant[value={0}]()
+  %y.1 : Dynamic = ^FIXME_zerol()()
   %1 : Long() = prim::Constant[value={0}]()
   %y.11 : Dynamic = aten::add[alpha={1}](%y.1, %1)
   %3 : Dynamic = aten::add[alpha={1}, other={1}](%1)

@@ -3,12 +3,13 @@
 #include "torch/csrc/jit/autodiff.h"
 #include <unordered_map>
 
+#ifdef USE_CUDA
+  #include "cuda.h" // for CUDA_VERSION
+#endif 
+
 namespace torch { namespace jit {
 
 namespace {
-
-
-
 
 // What is a simple mappable operator?  It is:
 //    - Has an output with the same sizes as its input
@@ -57,6 +58,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::neg,
   aten::pow,
   aten::reciprocal,
+  aten::relu,
   aten::remainder,
   aten::round,
   aten::rsqrt,
@@ -126,24 +128,37 @@ struct GraphFuser {
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
-  bool hasFloatType(Value * node) {
-    if(auto tt = node->type()->cast<TensorType>()) {
-      return tt->scalarType() == at::kFloat;
-    } else {
-      return false;
-    }
+  // and half values when running on a GPU with sufficient CUDA arch
+  bool hasSupportedType(Value* node) {
+    if (auto tt = node->type()->cast<TensorType>()) {
+      if (tt->scalarType() == at::kFloat) return true;
+
+      #ifdef USE_CUDA
+        // Checks for half tensor on GPU
+        // const auto device = tt->device();
+        if (tt->device() != kCPUDevice 
+          && CUDA_VERSION >= 9
+          && tt->scalarType() == at::ScalarType::Half) {
+          return true;
+        }
+      #endif 
+    } 
+
+    return false;
   }
-  bool allFloatList(at::ArrayRef<Value*> list){
-    for (auto & o: list){
-      if(!hasFloatType(o)) {
-        return false;
-      }
+
+  bool allSupportedList(at::ArrayRef<Value*> list){
+    for (auto& o: list){
+      if (!hasSupportedType(o)) return false;
     }
+
     return true;
   }
-  bool allFloatIO(Node * node) {
-    return (allFloatList(node->inputs()) && allFloatList(node->outputs()));
+
+  bool allSupportedIO(Node* node) {
+    return (allSupportedList(node->inputs()) && allSupportedList(node->outputs()));
   }
+
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
@@ -156,12 +171,12 @@ struct GraphFuser {
       case aten::gt:
       case aten::ne:
       case aten::eq:
-         return allFloatList(node->inputs());
+         return allSupportedList(node->inputs());
       case aten::type_as:
 //type_as can have different input types as long as output is float, check only output
-         return allFloatList(node->outputs());
+         return allSupportedList(node->outputs());
       default:
-         return allFloatIO(node);
+         return allSupportedIO(node);
     }
   }
 

@@ -35,26 +35,115 @@ OPERATOR_SCHEMA(SoftmaxWithLoss)
           return out;
         })
     .SetDoc(R"DOC(
-Combined Softmax and Cross-Entropy loss operator.
-The operator computes the softmax normalized values for each layer in the batch
-of the given input, after which cross-entropy loss is computed. This operator is
-numerically more stable than separate Softmax and CrossEntropy ops.
-The inputs are a 2-D tensor (Tensor<float>) of size
-(batch_size x input_feature_dimensions) and tensor of labels (ground truth).
-Output is tensor with the probability for each label for each example (N x D)
-and averaged loss (scalar).
-Use parameter label_prob=1 to enable inputting labels as a probability
-distribution.
-Optional third input blob can be used to weight the samples for the loss.
+Combined Softmax and Cross-Entropy loss operator. The operator first computes the softmax normalized values for each layer in the batch of the given input, then computes cross-entropy loss. This operator is numerically more stable than separate `Softmax` and `CrossEntropy` ops. The inputs are a 2-D tensor `logits` of size (batch_size x input_feature_dimensions), which represents the unscaled log probabilities, and a 1-dimensional integer `labels` tensor for ground truth. An optional third input blob (`weight_tensor`) can be used to weight the samples for the loss, which is useful if the training set is unbalanced. This operator outputs a `softmax` tensor which contains the probability for each label for each example (same shape is `logits` input), and a scalar `loss` value, which is the averaged cross-entropy loss between the softmax probabilities and the ground truth values. Use parameter `label_prob`=1 to enable inputting labels as a probability distribution.
+
+Softmax cross-entropy loss function:
+
+$$loss(x, class) = -\log{\biggl(\frac{\exp(x[class])}{\sum_{j} \exp(x[j])}\biggr)} = -x[class] + \log{\biggl(\sum_{j} \exp(x[j])\biggr)}$$
+
+or if the `weight_tensor` has been passed:
+
+$$loss(x, class) = weight[class]\biggl(-x[class] + \log{\biggl(\sum_{j} \exp(x[j])\biggr)}\biggr)$$
+
+The `logits` input does not need to explicitly be a 2D vector; rather, it will be coerced into one. For an arbitrary n-dimensional tensor `X` in $[a_0, a_1, ..., a_{k-1}, a_k, ..., a_{n-1}]$, where k is the `axis` provided, then `X` will be coerced into a 2-dimensional tensor with dimensions $[(a_0 * ... * a_{k-1}), (a_k * ... * a_{n-1})]$. For the default case where `axis`=1, the `X` tensor will be coerced into a 2D tensor of dimensions $[a_0, (a_1 * ... * a_{n-1})]$, where $a_0$ is often the batch size. In this situation, we must have $a_0 = N$ and $a_1 * ... * a_{n-1} = D$. Each of these dimensions must be matched correctly, or else the operator will throw errors.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softmax_with_loss_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "SoftmaxWithLoss",
+    ["logits", "labels"],
+    ["softmax", "avgloss"]
+)
+
+workspace.FeedBlob("logits", np.random.randn(1, 5).astype(np.float32))
+workspace.FeedBlob("labels", np.asarray([4]).astype(np.int32))
+print("logits:", workspace.FetchBlob("logits"))
+print("labels:", workspace.FetchBlob("labels"))
+workspace.RunOperatorOnce(op)
+print("softmax:", workspace.FetchBlob("softmax"))
+print("avgloss:", workspace.FetchBlob("avgloss"))
+
+```
+
+**Result**
+
+```
+
+logits: [[-0.3429451  -0.80375195  0.23104447  1.4569176  -0.5268362 ]]
+labels: [4]
+softmax: [[0.09721052 0.0613179  0.17258129 0.58800864 0.0808817 ]]
+avgloss: 2.5147676
+
+```
+
+</details>
+
+<details>
+
+<summary> <b>Example 2</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "SoftmaxWithLoss",
+    ["logits", "labels"],
+    ["softmax", "avgloss"],
+    scale=5.0
+)
+
+workspace.FeedBlob("logits", np.asarray([[.1, .4, .7, 1.5, .2]]).astype(np.float32))
+workspace.FeedBlob("labels", np.asarray([4]).astype(np.int32))
+print("logits:", workspace.FetchBlob("logits"))
+print("labels:", workspace.FetchBlob("labels"))
+workspace.RunOperatorOnce(op)
+print("softmax:", workspace.FetchBlob("softmax"))
+print("avgloss:", workspace.FetchBlob("avgloss"))
+
+```
+
+**Result**
+
+```
+
+logits: [[0.1 0.4 0.7 1.5 0.2]]
+labels: [4]
+softmax: [[0.10715417 0.144643   0.19524762 0.4345316  0.11842369]]
+avgloss: 10.667433
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "logits", "Unscaled log probabilities")
-    .Input(1, "labels", "Ground truth")
+    .Arg("label_prob","*(type: int; default: 0)* Setting to 1 enables inputting labels as probability distribution.")
+    .Arg("axis","*(type: int; default: 1)* Axis of the inputs when coerced to 2D.")
+    .Arg("scale","*(type: float)* Average loss output scaling factor (must be >= 0).")
+    .Arg("order","*(type: string; default: 'NCHW')* Order of blob dimensions (only 'NCHW' is supported currently).")
+    .Input(0, "logits", "*(type: Tensor`<float>`)* Input tensor.")
+    .Input(1, "labels", "*(type: Tensor`<float>`)* Ground truth label tensor.")
     .Input(
         2,
         "weight_tensor",
-        "Optional blob to be used to weight the samples for the loss.")
-    .Output(0, "softmax", "Tensor with softmax cross entropy loss")
-    .Output(1, "loss", "Average loss");
+        "*(type: Tensor`<float>`)* [OPTIONAL] Blob used to weight the samples for the loss.")
+    .Output(0, "softmax", "*(type: Tensor`<float>`)* Softmax output tensor.")
+    .Output(1, "loss", "*(type: float)* Averaged cross-entropy loss output.");
 
 // Input: X, T, P, dY; Output: dX
 OPERATOR_SCHEMA(SoftmaxWithLossGradient).NumOutputs(1);
