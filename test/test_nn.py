@@ -1452,16 +1452,32 @@ class TestNN(NNTestCase):
         self.assertTrue(hasattr(m, 'weight'))
         self.assertTrue('weight' in m._parameters)
 
-    def test_spectral_norm_eval(self):
+    def test_spectral_norm_eval_remove(self):
         inp = torch.randn(3, 5)
         m = nn.Linear(5, 7)
         m = torch.nn.utils.spectral_norm(m)
         x0 = m(inp)
         m.eval()
+        # test that eval mode and removing / adding+removing doesn't change weight and output
         x1 = m(inp)
         x2 = m(inp)
         self.assertEqual(x0, x1)
         self.assertEqual(x0, x2)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x3 = m(inp)
+        self.assertEqual(x0, x3)
+        m = torch.nn.utils.spectral_norm(m)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x4 = m(inp)
+        self.assertEqual(x0, x4)
+        # check that removing after train doesn't change output
+        m.train()
+        m = torch.nn.utils.spectral_norm(m)
+        for i in range(5):
+            x0 = m(inp)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x1 = m(inp)
+        self.assertEqual(x0, x1)
 
     def test_spectral_norm_dim(self):
         inp = torch.randn(2, 3, 10, 12)
