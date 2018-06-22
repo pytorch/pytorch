@@ -33,8 +33,8 @@ class OptimizerBase {
 
   explicit OptimizerBase(ParameterCursor cursor) {
     parameters_.reserve(cursor.size());
-    for (auto& parameter : cursor) {
-      parameters_.push_back(std::move(*parameter));
+    for (const auto& parameter : cursor) {
+      parameters_.push_back(*parameter);
     }
   }
 

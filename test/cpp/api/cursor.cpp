@@ -129,26 +129,58 @@ TEST_CASE("cursor/module") {
       REQUIRE(cursor.find("bar") == nullptr);
     }
 
-    SECTION("at() returns the correct modules when given a valid key") {
+    SECTION("at(key) returns the correct modules when given a valid key") {
       REQUIRE(&cursor.at("0") == &model[0]);
       REQUIRE(&cursor.at("1") == &model[1]);
       REQUIRE(&cursor.at("2") == &model[2]);
     }
 
-    SECTION("at() throws when given an invalid key") {
+    SECTION("at(key) throws when given an invalid key") {
       REQUIRE_THROWS_WITH(cursor.at("foo"), StartsWith("No such key: 'foo'"));
       REQUIRE_THROWS_WITH(cursor.at("bar"), StartsWith("No such key: 'bar'"));
     }
 
-    SECTION("operator[] returns the correct modules when given a valid key") {
+    SECTION(
+        "operator[key] returns the correct modules when given a valid key") {
       REQUIRE(&cursor["0"] == &model[0]);
       REQUIRE(&cursor["1"] == &model[1]);
       REQUIRE(&cursor["2"] == &model[2]);
     }
 
-    SECTION("operator[] throws when given an invalid key") {
+    SECTION("operator[key] throws when given an invalid key") {
       REQUIRE_THROWS_WITH(cursor["foo"], StartsWith("No such key: 'foo'"));
       REQUIRE_THROWS_WITH(cursor["bar"], StartsWith("No such key: 'bar'"));
+    }
+
+    SECTION("at(index) returns the correct modules when given a valid index") {
+      REQUIRE(&cursor.at(0).value == &model[0]);
+      REQUIRE(&cursor.at(1).value == &model[1]);
+      REQUIRE(&cursor.at(2).value == &model[2]);
+    }
+
+    SECTION("at(index) throws when given an invalid index") {
+      REQUIRE_THROWS_WITH(
+          cursor.at(5),
+          StartsWith("Index 5 is out of range for cursor of size 3"));
+      REQUIRE_THROWS_WITH(
+          cursor.at(123),
+          StartsWith("Index 123 is out of range for cursor of size 3"));
+    }
+
+    SECTION(
+        "operator[index] returns the correct modules when given a valid index") {
+      REQUIRE(&cursor[0].value == &model[0]);
+      REQUIRE(&cursor[1].value == &model[1]);
+      REQUIRE(&cursor[2].value == &model[2]);
+    }
+
+    SECTION("operator[index] throws when given an invalid key") {
+      REQUIRE_THROWS_WITH(
+          cursor[5],
+          StartsWith("Index 5 is out of range for cursor of size 3"));
+      REQUIRE_THROWS_WITH(
+          cursor[123],
+          StartsWith("Index 123 is out of range for cursor of size 3"));
     }
 
     SECTION("contains() is correct") {

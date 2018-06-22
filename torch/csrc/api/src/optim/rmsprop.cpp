@@ -20,8 +20,8 @@ const RMSpropOptions& RMSprop::options() const noexcept {
 /// https://github.com/pytorch/pytorch/blob/master/torch/optim/rmsprop.py
 void RMSprop::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    auto& grad = parameters_[i].grad();
-    auto& p = parameters_[i].data();
+    auto& grad = parameters_.at(i).grad();
+    auto& p = parameters_.at(i).data();
     if (!grad.defined()) {
       continue;
     }
@@ -31,14 +31,14 @@ void RMSprop::step() {
       d_p.add_(p, options_.weight_decay_);
     }
 
-    auto& square_average = square_average_buffers_[i].data();
+    auto& square_average = square_average_buffers_.at(i).data();
     square_average
         .mul_(options_.alpha_)
         .addcmul_(d_p, d_p, 1.0 - options_.alpha_);
 
     at::Tensor average;
     if (options_.centered_ > 0) {
-      auto& grad_average = grad_average_buffers_[i].data();
+      auto& grad_average = grad_average_buffers_.at(i).data();
       grad_average
           .mul_(options_.alpha_)
           .add_(d_p, 1.0 - options_.alpha_);
@@ -50,7 +50,7 @@ void RMSprop::step() {
     }
 
     if (options_.momentum_ > 0) {
-      auto& momentum = momentum_buffers_[i].data();
+      auto& momentum = momentum_buffers_.at(i).data();
       momentum.mul_(options_.momentum_).addcdiv_(d_p, average);
       p.add_(momentum, -options_.learning_rate_);
     } else {

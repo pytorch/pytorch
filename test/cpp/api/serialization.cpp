@@ -277,7 +277,6 @@ TEST_CASE("serialization") {
 }
 
 TEST_CASE("serialization_cuda", "[cuda]") {
-<<<<<<< fe1d12acd210356ed2ec84d514dd4ff240a51447
   // We better be able to save and load a XOR model!
   auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
     auto inp = torch::empty({bs, 2});

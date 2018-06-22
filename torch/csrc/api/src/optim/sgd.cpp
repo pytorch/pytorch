@@ -16,32 +16,28 @@ const SGDOptions& SGD::options() const noexcept {
 
 void SGD::step() {
   for (size_t i = 0; i < parameters_.size(); ++i) {
-    auto& grad = parameters_[i].grad();
-    auto& p = parameters_[i].data();
+    auto& grad = parameters_.at(i).grad();
+    auto& p = parameters_.at(i).data();
 
     if (!grad.defined()) {
       continue;
     }
 
-    auto d_p = torch::autograd::as_variable_ref(grad).data();
+    auto d_p = Variable(grad).data();
     if (options_.weight_decay_ > 0) {
       d_p.add_(p, options_.weight_decay_);
     }
 
     if (options_.momentum_ != 0) {
-      AT_ASSERT(momentum_buffers_.size() == parameters_.size());
-      auto momentum = momentum_buffers_[i];
+      auto& momentum = momentum_buffers_.at(i).data();
 
       if (iteration_ == 0) {
-        momentum.data().mul_(options_.momentum_).add_(d_p);
+        momentum.mul_(options_.momentum_).add_(d_p);
       } else {
-        momentum.data()
-            .mul_(options_.momentum_)
-            .add_(d_p, 1 - options_.dampening_);
+        momentum.mul_(options_.momentum_).add_(d_p, 1 - options_.dampening_);
       }
-
       if (options_.nesterov_) {
-        d_p = d_p.add(momentum.data(), options_.momentum_);
+        d_p = d_p.add(momentum, options_.momentum_);
       } else {
         d_p = momentum;
       }

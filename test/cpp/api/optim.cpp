@@ -7,11 +7,13 @@
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
+#include <test/cpp/api/optim_baseline.h>
 #include <test/cpp/api/util.h>
 
 #include <cmath>
 #include <cstdlib>
 #include <functional>
+#include <iostream>
 #include <memory>
 #include <random>
 #include <vector>
@@ -53,12 +55,60 @@ bool test_optimizer_xor(
   return true;
 }
 
-// TODO: Add test for passing arbitrary vector of variables
-// TODO: Add hard tests that verify deterministically the output of each
-// optimization algorithm against the PyTorch algorithms (i.e. compare against a
-// matrix of values after 1000 iterations)
+template <typename OptimizerClass, typename Options>
+void check_exact_values(
+    Options options,
+    std::vector<std::vector<at::Tensor>> expected_parameters) {
+  const size_t kIterations = 1001;
+  const size_t kSampleEvery = 100;
 
-TEST_CASE("Optim/Optimizers") {
+  torch::manual_seed(0);
+  Sequential model(SigmoidLinear(Linear(2, 3)), SigmoidLinear(Linear(3, 1)));
+  model.to(torch::kFloat64);
+
+  // Use exact input values because matching random values is hard.
+  auto parameters = model.parameters();
+  parameters.at("0.linear.weight").data().flatten() = at::tensor(
+      {-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}, torch::kFloat64);
+  parameters.at("0.linear.bias").data() =
+      at::tensor({-0.1085, -0.2979, 0.6892}, torch::kFloat64);
+  parameters.at("1.linear.weight").data().flatten() =
+      at::tensor({-0.0508, -0.3941, -0.2843}, torch::kFloat64);
+  parameters.at("1.linear.bias").data() =
+      at::tensor({-0.0711}, torch::kFloat64);
+
+  auto optimizer = OptimizerClass(parameters, options);
+
+  auto input = at::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64)
+                   .reshape({3, 2});
+
+  for (size_t i = 0; i < kIterations; ++i) {
+    optimizer.zero_grad();
+    auto output = model.forward(torch::autograd::make_variable(input));
+    auto loss = output.sum();
+    loss.backward();
+
+    optimizer.step();
+
+    if (i % kSampleEvery == 0) {
+      REQUIRE(
+          expected_parameters.at(i / kSampleEvery).size() == parameters.size());
+      for (size_t p = 0; p < parameters.size(); ++p) {
+        REQUIRE(parameters.at(p)->defined());
+        auto computed = parameters.at(p)->data().flatten();
+        auto expected = expected_parameters.at(i / kSampleEvery).at(p);
+        if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/1e-5)) {
+          std::cout << "Iteration " << i << ": " << computed
+                    << " != " << expected << " (parameter " << p << ")"
+                    << std::endl;
+          REQUIRE(false);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("Optim/XORConvergence") {
   std::srand(0);
   torch::manual_seed(0);
   Sequential model(
@@ -115,6 +165,29 @@ TEST_CASE("Optim/Optimizers") {
             AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
         model));
   }
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
+  check_exact_values<Adam>(
+      AdamOptions(1.0).weight_decay(1e-6), expected_parameters::Adam);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
+  check_exact_values<Adagrad>(
+      AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
+      expected_parameters::Adagrad);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
+  check_exact_values<RMSprop>(
+      RMSpropOptions(1e-1).momentum(0.9).weight_decay(1e-6),
+      expected_parameters::RMSprop);
+}
+
+TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
+  check_exact_values<SGD>(
+      SGDOptions(1e-1).momentum(0.9).weight_decay(1e-6),
+      expected_parameters::SGD);
 }
 
 TEST_CASE("Optim/ZeroGrad") {

@@ -101,6 +101,17 @@ const T& CursorBase<T>::at(const std::string& key) const {
 }
 
 template <typename T>
+typename CursorBase<T>::Item& CursorBase<T>::at(size_t index) {
+  AT_CHECK(
+      index < size(),
+      "Index ",
+      index,
+      " is out of range for cursor of size ",
+      size());
+  return items_[index];
+}
+
+template <typename T>
 T& CursorBase<T>::operator[](const std::string& key) {
   return at(key);
 }
@@ -108,6 +119,10 @@ T& CursorBase<T>::operator[](const std::string& key) {
 template <typename T>
 const T& CursorBase<T>::operator[](const std::string& key) const {
   return at(key);
+}
+
+typename CursorBase<T>::Item& CursorBase<T>::operator[](size_t index) {
+  return at(index);
 }
 
 template <typename T>

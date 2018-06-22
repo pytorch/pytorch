@@ -86,13 +86,13 @@ at::Scalar LBFGS::step(LossClosure closure) {
       int64_t num_old = old_dirs.size();
 
       for (int64_t i = 0; i < num_old; i++) {
-        ro[i] = ONE / old_dirs[i].dot(old_stps[i]);
+        ro.at(i) = ONE / old_dirs.at(i).dot(old_stps.at(i));
       }
 
       at::Tensor q = flat_grad.neg();
       for (int64_t i = num_old - 1; i >= 0; i--) {
-        al[i] = old_stps[i].dot(q) * ro[i];
-        q.add_(old_dirs[i], at::Scalar(-al[i]));
+        al.at(i) = old_stps.at(i).dot(q) * ro.at(i);
+        q.add_(old_dirs.at(i), at::Scalar(-al.at(i)));
       }
 
       // Multiply by initial Hessian
@@ -101,8 +101,8 @@ at::Scalar LBFGS::step(LossClosure closure) {
       d = r;
 
       for (int64_t i = 0; i < num_old; i++) {
-        at::Tensor be_i = old_dirs[i].dot(r) * ro[i];
-        r.add_(old_stps[i], at::Scalar(al[i] - be_i));
+        at::Tensor be_i = old_dirs.at(i).dot(r) * ro.at(i);
+        r.add_(old_stps.at(i), at::Scalar(al.at(i) - be_i));
       }
       prev_flat_grad.copy_(flat_grad);
     }
