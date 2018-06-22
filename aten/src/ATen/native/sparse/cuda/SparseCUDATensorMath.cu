@@ -4,7 +4,6 @@
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
 #include <ATen/native/sparse/cuda/SparseCUDABlas.cuh>
 #include <ATen/cuda/CUDAApplyUtils.cuh>
-#include <ATen/cuda/CUDATypeConversion.cuh>
 #include <ATen/cuda/detail/IndexUtils.cuh>
 
 #include <THC/THCTensorMathPointwise.cuh>
