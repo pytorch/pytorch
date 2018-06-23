@@ -2363,13 +2363,13 @@ class TestAutograd(TestCase):
 
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, True)
-        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
             with detect_anomaly():
                 out.backward()
 
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, False)
-        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
             with detect_anomaly():
                 out.backward()
 
