@@ -467,11 +467,15 @@ class TestOptim(TestCase):
             wrap_old_fn(old_optim.lbfgs)
         )
         self._test_rosenbrock(
-            lambda params: optim.LBFGS(params, lr=5e-2, max_iter=5),
-            wrap_old_fn(old_optim.lbfgs, learningRate=5e-2, maxIter=5)
+            lambda params: optim.LBFGS(params, lr=1, max_iter=5),
+            wrap_old_fn(old_optim.lbfgs, learningRate=1, maxIter=5)
         )
         self._test_basic_cases(
             lambda weight, bias: optim.LBFGS([weight, bias]),
+            ignore_multidevice=True
+        )
+        self._test_basic_cases(
+            lambda weight, bias: optim.LBFGS([weight, bias], line_search_fn="strong_Wolfe"),
             ignore_multidevice=True
         )
 
