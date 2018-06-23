@@ -152,6 +152,14 @@ class DistributedDataParallelC10d(Module):
         else:
             self._module_copies = [self.module]
 
+
+        self.modules_params_data = [[] for _ in range(len(self.device_ids))]
+        self.modules_buffers_data = [[] for _ in range(len(self.device_ids))]
+
+        for dev_idx, module in enumerate(self._module_copies):
+            self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
+            self.modules_buffers_data[dev_idx] = [b.data for b in module._all_buffers()]
+
         bucket_bytes_cap = 25 * MB
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
@@ -182,7 +190,6 @@ class DistributedDataParallelC10d(Module):
 
         # We will always reduce the bucket following the reverse order
         self.bucket_order = list(range(len(self.bucket_sizes)))
-        self.bucket_order.reverse()
         self.buckets_to_reduce = copy.copy(self.bucket_order)
 
         self.buckets_ready = set()
@@ -200,6 +207,7 @@ class DistributedDataParallelC10d(Module):
 
     def __getstate__(self):
         attrs = copy.copy(self.__dict__)
+        del attrs['_grad_accs']
         return attrs
 
     def __setstate__(self, state):
@@ -231,33 +239,34 @@ class DistributedDataParallelC10d(Module):
     def _dist_broadcast_coalesced(self, tensors, buffer_size):
         for tensors in _take_tensors(tensors, buffer_size):
             flat_tensors = _flatten_dense_tensors(tensors)
-            work = c10d.broadcast(flat_tensors, 0, self.process_group)
-            work.wait()
+            c10d.broadcast(flat_tensors, 0, self.process_group).wait()
             for tensor, synced in zip(tensors, _unflatten_dense_tensors(flat_tensors, tensors)):
                 tensor.copy_(synced)
 
     def _sync_params(self):
         if len(self.device_ids) > 1:
             # intra-node parameter sync
-            params = [p.data for p in self.module.parameters()]
-            result = broadcast_coalesced(params, self.device_ids, self.broadcast_bucket_size)
-            for tensors, module in zip(result[1:], self._module_copies[1:]):
-                for tensor, param in zip(tensors, module.parameters()):
-                    param.data.set_(tensor)
+            result = broadcast_coalesced(self.modules_params_data[0],
+                                         self.device_ids,
+                                         self.broadcast_bucket_size)
+            for tensors, module_params_data in zip(result[1:], self.modules_params_data[1:]):
+                for tensor, param_data in zip(tensors, module_params_data):
+                    param_data.set_(tensor)
 
         # module buffer sync
         if self.broadcast_buffers:
-            buffers = list(self.module._all_buffers())
-            if len(buffers) > 0:
+            if len(self.modules_buffers_data[0]) > 0:
                 # cross-node buffer sync
-                self._dist_broadcast_coalesced(buffers, self.broadcast_bucket_size)
-
+                self._dist_broadcast_coalesced(self.modules_buffers_data[0],
+                                               self.broadcast_bucket_size)
                 if len(self.device_ids) > 1:
                     # intra-node buffer sync
-                    result = broadcast_coalesced(buffers, self.device_ids, self.broadcast_bucket_size)
-                    for tensors, module in zip(result[1:], self._module_copies[1:]):
-                        for tensor, buf in zip(tensors, module._all_buffers()):
-                            buf.set_(tensor)
+                    result = broadcast_coalesced(self.modules_buffers_data[0],
+                                                 self.device_ids,
+                                                 self.broadcast_bucket_size)
+                    for tensors, module_buffers_data in zip(result[1:], self.modules_buffers_data[1:]):
+                        for tensor, buffer_data in zip(tensors, module_buffers_data):
+                            buffer_data.set_(tensor)
 
     def _register_grad_hooks(self):
         self._grad_accs = []  # need to keep them in scope
@@ -292,16 +301,16 @@ class DistributedDataParallelC10d(Module):
 
                 if bucket_idx not in self.buckets_ready:
                     self.buckets_ready.add(bucket_idx)
-                    if len(self.buckets_to_reduce) > 0 and self.buckets_to_reduce[0] == bucket_idx:
+                    if len(self.buckets_to_reduce) > 0 and self.buckets_to_reduce[-1] == bucket_idx:
                         # Reduce the bucket
                         self._queue_reduction(bucket_idx)
-                        self.buckets_to_reduce.pop(0)
+                        self.buckets_to_reduce.pop()
 
                     # If all buckets are ready
                     if len(self.buckets_ready) == len(self.bucket_order):
                         # In case there are unreduced buckets, reduce them all
                         if len(self.buckets_to_reduce) > 0:
-                            for b_idx in self.buckets_to_reduce:
+                            for b_idx in reversed(self.buckets_to_reduce):
                                 self._queue_reduction(b_idx)
                         # A final sync for all the reduction works
                         self._sync_reduction_works()
