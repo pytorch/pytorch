@@ -212,7 +212,7 @@ function build_nccl() {
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
               -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake"
-  ${CMAKE_INSTALL} -j"$NUM_JOBS"
+  ${CMAKE_INSTALL} -j1
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
