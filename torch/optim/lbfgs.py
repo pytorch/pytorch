@@ -382,6 +382,7 @@ class LBFGS(Optimizer):
                     raise RuntimeError("only 'strong_Wolfe' is supported")
                 else:
                     x_init = self._clone_param()
+
                     def obj_func(x, t, d):
                         return self._directional_evaluate(closure, x, t, d)
                     loss, flat_grad, t, ls_func_evals = _strong_Wolfe(obj_func, x_init, t, d,
