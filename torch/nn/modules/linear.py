@@ -79,10 +79,10 @@ class Bilinear(Module):
             Default: ``True``
 
     Shape:
-        - Input: :math:`(N, *, \text{in1_features})`, :math:`(N, *, \text{in2_features})`
+        - Input: :math:`(N, *, \text{in1\_features})`, :math:`(N, *, \text{in2\_features})`
           where :math:`*` means any number of additional dimensions. All but the last
           dimension of the inputs should be the same.
-        - Output: :math:`(N, *, \text{out_features})` where all but the last dimension
+        - Output: :math:`(N, *, \text{out\_features})` where all but the last dimension
           are the same shape as the input.
 
     Attributes:

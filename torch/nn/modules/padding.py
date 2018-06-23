@@ -227,6 +227,7 @@ class ReflectionPad2d(_ReflectionPadNd):
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
         - Output: :math:`(N, C, H_{out}, W_{out})` where
+
           :math:`H_{out} = H_{in} + \textit{paddingTop} + \textit{paddingBottom}`
           :math:`W_{out} = W_{in} + \textit{paddingLeft} + \textit{paddingRight}`
 

@@ -71,11 +71,9 @@ class Conv1d(_ConvNd):
     precisely described as:
 
     .. math::
-
-        \begin{equation*}
         \text{out}(N_i, C_{out_j}) = \text{bias}(C_{out_j}) +
-                                \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{out_j}, k) \star \text{input}(N_i, k)
-        \end{equation*},
+                                \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{out_j}, k)
+                                \star \text{input}(N_i, k)
 
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
@@ -101,8 +99,9 @@ class Conv1d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size
-          :math:`\left\lfloor \frac{\text{out_channels}}{\text{in_channels}} \right\rfloor`).
+          its own set of filters,
+          of size
+          :math:`\left\lfloor\frac{\text{out\_channels}}{\text{in\_channels}}\right\rfloor`
 
     .. note::
 
@@ -119,7 +118,7 @@ class Conv1d(_ConvNd):
          In other words, for an input of size :math:`(N, C_{in}, L_{in})`, if you want a
          depthwise convolution with a depthwise multiplier `K`,
          then you use the constructor arguments
-         :math:`(\text{in_channels}=C_{in}, \text{out_channels}=C_{in} * K, ..., \text{groups}=C_{in})`
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -189,11 +188,8 @@ class Conv2d(_ConvNd):
     can be precisely described as:
 
     .. math::
-
-        \begin{equation*}
-        \text{out}(N_i, C_{out_j}) = \text{bias}(C_{out_j}) +
-                                \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{out_j}, k) \star \text{input}(N_i, k)
-        \end{equation*},
+        out(N_i, C_{out_j}) = bias(C_{out_j}) +
+        \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
@@ -220,8 +216,8 @@ class Conv2d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size
-          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          its own set of filters, of size:
+          :math:`\left\lfloor\frac{out_channels}{in_channels}\right\rfloor`.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -244,7 +240,7 @@ class Conv2d(_ConvNd):
          In other words, for an input of size :math:`(N, C_{in}, H_{in}, W_{in})`, if you want a
          depthwise convolution with a depthwise multiplier `K`,
          then you use the constructor arguments
-         :math:`(\text{in_channels}=C_{in}, \text{out_channels}=C_{in} * K, ..., \text{groups}=C_{in})`
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -319,11 +315,8 @@ class Conv3d(_ConvNd):
     and output :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` can be precisely described as:
 
     .. math::
-
-        \begin{equation*}
-        \text{out}(N_i, C_{out_j}) = \text{bias}(C_{out_j}) +
-                                \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{out_j}, k) \star \text{input}(N_i, k)
-        \end{equation*},
+        out(N_i, C_{out_j}) = bias(C_{out_j}) +
+                                \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
 
     where :math:`\star` is the valid 3D `cross-correlation`_ operator
 
@@ -345,8 +338,8 @@ class Conv3d(_ConvNd):
           and producing half the output channels, and both subsequently
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
-          its own set of filters (of size
-          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          its own set of filters, of size
+          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 
@@ -369,7 +362,7 @@ class Conv3d(_ConvNd):
          In other words, for an input of size :math:`(N, C_{in}, D_{in}, H_{in}, W_{in})`, if you want a
          depthwise convolution with a depthwise multiplier `K`,
          then you use the constructor arguments
-         :math:`(\text{in_channels}=C_{in}, \text{out_channels}=C_{in} * K, ..., \text{groups}=C_{in})`
+         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -509,7 +502,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters (of size
-          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
 
     .. note::
 
@@ -612,7 +605,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters (of size
-          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
@@ -752,7 +745,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters (of size
-          :math:`\left\lfloor\frac{\text{out_channels}}{\text{in_channels}}\right\rfloor`).
+          :math:`\left\lfloor\frac{out\_channels}{in\_channels}\right\rfloor`).
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`output_padding`
     can either be:
