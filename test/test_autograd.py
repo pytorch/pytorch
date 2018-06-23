@@ -2054,39 +2054,41 @@ class TestAutograd(TestCase):
 
     def test_as_strided(self):
 
-        def test(x, *args, **kwargs):
+        def test(x, repro_fn, *args):
             def closure(x):
-                return x.as_strided(*args, **kwargs)
+                if repro_fn is not None:
+                    x = repro_fn(x)
+                return x.as_strided(*args)
 
             x = x.to(torch.double).detach().requires_grad_()
             gradcheck(closure, [x])
             gradgradcheck(closure, [x])
 
         # test
-        test(torch.arange(0, 25).view(5, 5), [3, 3], [6, 2], 2)
+        test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
 
         # test crazy stride at dim with size 1 case
-        test(torch.randn(10), [1, 2, 1, 5], [0, 5, 100, 1], 2)
+        test(torch.randn(10), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
 
         # test expand case
-        test(torch.randn(5), [3, 3, 3], [0, 1, 0], 2)
-        test(torch.randn(5), [3, 3, 3], [0, 0, 0], 4)
-        test(torch.randn(5).expand(5, 5), [5, 5], [0, 1], 0)
+        test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
+        test(torch.randn(5), None, [3, 3, 3], [0, 0, 0], 4)
+        test(torch.randn(5), lambda x: x.expand(5, 5), [5, 5], [0, 1], 0)
 
         # test non-expand overlapping case
-        test(torch.randn(35), [6, 6], [5, 1], 2)
-        test(torch.randn(15), [3, 2], [3, 6], 2)
+        test(torch.randn(35), None, [6, 6], [5, 1], 2)
+        test(torch.randn(15), None, [3, 2], [3, 6], 2)
 
         # test transpose case
-        test(torch.randn(3, 4), [4, 3], [1, 4])
+        test(torch.randn(3, 4), None, [4, 3], [1, 4])
 
         # test "getting things outside the input" case
         x = torch.randn(6, 2)
-        test(x[3:], [3, 2], [2, 1])
+        test(x[3:], None, [3, 2], [2, 1], 0)  # should be all zeros
         self.assertEqual(x[3:].as_strided([3, 2], [2, 1], 0), x[:3])
 
-        # test input expanded case
-        test(torch.randn(2, 3).expand(10, 2, 3), [2, 3], [3, 1], 0)
+        # test select on expanded input case
+        test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
 
     def _test_where_functional(self, t):
         x = Variable(t(torch.randn(5, 5)), requires_grad=True)

@@ -800,15 +800,17 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 }
 
 
-// NOTE [ as_strided backward ]
+// NOTE [ as_strided Backward ]
+//
+// `storage_offset` is ignored for simplicity in this note. If you just want the
+// full algorithm without explanation, scroll down to bottom of this note.
 //
 // Implementing the backward of as_strided is tricky because you have to deal
 // with mappings that maps one memory location to multiple indices, i.e., the
-// output tensor indices pointing to **overlapping** memory addresses. (For
-// simplicity we call such tensors overlapping tensors.) This can happen in all
-// in all sorts of weird cases. For example,
+// output tensor indices pointing to **overlapping** memory addresses. This can
+// happen in all in all sorts of weird cases. For example,
 //
-//   x = torch.randn(100)
+//   x = torch.randn(15)
 //   x.as_strided([3, 3], [1, 0])  # "expand" case
 //   x.as_strided([3, 3], [2, 1])  # "size too large" case
 //   x.as_strided([3, 2], [3, 6])  # res[2, 0] points to 2*3 + 0*6 = 6
@@ -817,26 +819,49 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 // Here is the general strategy we apply in implementing as_strided backward:
 //   0. ??? (optimizaiont step. we will talk about this later)
 //   1. Create some underlying flattened tensor as if it is the base tensor
-//      representing the contiguous memory storage.
+//      representing the contiguous memory storage for both input and output.
 //   2. Use the output geometry to scatter (or index_add) the gradients into
 //      this storage tensor.
-//   3. ??? (fix for overlapping input tensor. we will talk about this later)
+//   3. ??? (fix for input tensor with overlapping memory. we will talk about
+//           this later)
 //   4. Return the as_strided view of the storage tensor using input geometry.
 //
-// In step (2), if the output tensor isn't overlapping, we can safely scatter
-// (implemented as storage.as_strided(output_geometry).copy_(grad)); otherwise,
-// we must use index_add as gradient at different indices may need to
-// be summed to a single location.
+// In step (2), if the output tensor does't have overlapping memory, we can
+// safely scatter (`storage.as_strided(output_geometry).copy_(grad)`);
+// otherwise, we must use `index_add` as gradient at different indices may need
+// to be summed to a single location.
 //
-// Moreover, the input tensor is overlapping, we must add an extra step (3).
-// Considering this case:
+// For example, in this case:
 //
-//   x = torch.randn(3).expand(3, 3)  # overlapping input
-//                                    # size   [3, 3]
-//                                    # stride [0, 1]
-//   y = x.as_strided([1], [1])       # contiguous output
-//                                    # size   [1]
-//                                    # stride [1]
+//   x = torch.randn(3)
+//   y = x.as_strided([3, 3], [1, 0])  # "expand" case
+//                                     # size   [ 3, 3]
+//                                     # stride [ 1, 0]
+//   y.backward()  # step (1): contiguous storagte tensor `s` of size 3, which
+//                             is large enough to be used as underlying storage
+//                             for `x` and `y`.
+//                               s = [ 0, 0, 0]
+//                 # step (2): since `y` has overlapping memory, index_add grad
+//                             into `s` basing on `y`'s geometry, i.e.,
+//                             s[i * y.stride(0) + j * y.stride(1)] += gy[i, j].
+//                               s = [ 3, 3, 3]
+//                 # step (4): as_strided view `s` using `x`'s geometry
+//                               s = [ 3, 3, 3]
+//                               grad_input = s.as_strided(x.size(), x.stride())
+//                                          = s.as_strided([3], [1])
+//                                          = [ 3, 3, 3]
+//
+// This is exactly what we would get if using `expand`. However, here the input
+// tensor doesn't have overlapping memory. If it does, we must add an extra step
+// before (4). Considering this case:
+//
+//   t = torch.randn(3)
+//   x = t.expand(3, 3)            # input with overlapping memory
+//                                 # size   [3, 3]
+//                                 # stride [0, 1]
+//   y = x.as_strided([3], [1])    # contiguous output
+//                                 # size   [3]
+//                                 # stride [1]
 //   y.backward()  # step (1): contiguous storagte tensor `s` of size 3, which
 //                             is large enough to be used as underlying storage
 //                             for `x` and `y`.
@@ -846,67 +871,147 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //                 # step (4): as_strided view `s` using `x`'s geometry
 //                               s = [ 1, 0, 0]
 //                               grad_input = s.as_strided([3, 3], [0, 1])
-//                               ^^^^^^^^^^-----[[ 1, 1, 1],
-//                                               [ 1, 1, 1],
-//                                               [ 1, 1, 1]]
-//
-// Now here comes the question: is this result correct?
+//                                          = s.as_strided([3, 3], [0, 1])
+//                                          = [[ 1, 0, 0],
+//                                             [ 1, 0, 0],
+//                                             [ 1, 0, 0]]
+// Is this result correct?
 //
 // `x.as_strided([1], [1])` call is obviously equivalent with
 // `x[(0,) * x.dim()].view(1)` for any `x`. But autograd through the second
 // gives gradient `[ [ 1, 0, 0], [ 0, 0, 0], [ 0, 0, 0]]`. For this specific
-// case, indexing `x` with any index is also equivalent, and yields a gradient
-// of shape `[3 x 3]` containing eight 0's and one 1. There is an
-// order-of-magnitude difference between these gradients from other PyTorch ops
-// and the gradient we got from as_strided.
+// case, indexing `x` at any index in first column is also equivalent, and
+// yields a gradient of shape `[3 x 3]` containing eight 0's and one 1. There is
+// an `x.size(1)`-times difference between these gradients computed from other
+// PyTorch ops and the gradient we got from as_strided.
 //
-// The difference is understandable. The behavior of as_strided depends on input
-// strides, and is probably the only op that do so, while other ops are mostly
-// stride-agnostic. So in a sense the above as_strided backward computes the
-// correct gradients w.r.t. the underlying storage elements, i.e., memory.
+// You might conclude that the gradients from as_strided is wrong. However,
+// let's first see why they are actually reasonable. Consider the pointwise
+// perturbations by `delta` anywhere in the first column of `x`. It will lead to
+// a `delta` change in the same memory location, and then `y` will change by
+// `delta`. So one can say the gradient should be exactly 1 at the first column,
+// as given by our above procedure.
+//
+// In the above computation of numerical gradients, they only match the
+// analytical results because strides and memory locations are considered in the
+// forward pass, i.e., this op (including both forward and backward) is
+// stride-aware.
+//
+// However, most (probably all) other ops (forward and backward) are
+// stride-agnostic. E.g.,
+//
+//   t = torch.randn(1)
+//   x = t.expand(2)
+//   y = x.sum()
+//   y.backward()
+//
+// Stride-agnostic autograd (as it is currently in PyTorch) will give you
+//
+//   gy = 1
+//   gx = [ 1, 1]  # SumBackward:    torch.ones_like(x)
+//   gt = [ 2]     # ExpandBackward: gx.sum()
+//
+// Note that `gx = [ 1, 1]`. However, if you perturb any value in `x` by `delta`
+// (the other will also change by `delta`), `y` will change by `2 * delta`. So
+// the gradients, if strides are taken into consideration, should be 2.
+//
+// Stride-aware autograd should give you
+//
+//   gy = 1
+//   gx = [ 2, 2]  # Because the backward considers the fact that the input `x`
+//                 # is already expanded.
+//   gt = [ 2]     # Stride-aware backward of expand is just a slicing because
+//                 # the previous backward should have already taken care of
+//                 # strides and made sure that gradients are the same along the
+//                 # expanded dimension.
+//
+// As shown above, these two types are not compatible. Therefore, we must either
+// make as_strided stride-agnostic, or make all other ops stride-aware.
+//
+// It is unrealisitc to support stride-aware autograd (at least in the current
+// structure), because it would mean
+//   1. storing tensor geometries of every input tensor for backward
+//   2. depending on input geometry, the gradient computed from backward change
+//   3. ideally enforcing gradient of T to always have same strides as T
+// (although these two methods only differ when it comes to overlapping memory)
+//
+// To formulate `as_strided(input, size, stride)` in a stride-agnostic way, we
+// consider `input.stride()` as a separate independent arguement `input_stride`:
+//   1. "Scatter" each value of `input` into a "storage" using storage location
+//      computed from the value's index in `input`, `input.size()` and
+//      `input_stride`, but if N values end up in the same location, the value
+//      is average of those N values (they will be the same value anyways).
+//
+//      Formal description:
+//        Denote the set of all input indices that pointing to the same storage
+//        location `storage[n]` as `S(n)`, i.e.,
+//
+//            S(n) = { index : index @ input_stride == n, index is valid given input.size() }
+//
+//        Then, the process is:
+//
+//            storage[n] = Avg { S(n) }
+//
+//        Note that all values in `S(n)` are the same (they point to the same
+//        memory location anyways, so this step doesn't change anything, but
+//        effectively avoids using `input.stride()`.
+//
+//      NOTE: for forward pass, we can equivalently simply selet any one of
+//            `S(n)` as `storage[n]`. However, cosnidering this as an average
+//            operation makes backward easier (so all values in set
+//            `{ grad_input[i] : i in S(n) }` are the same, and it can use the
+//            same geometry as input).
+//   2. As usual, return the as_strided view of `storage` using required output
+//      `size` and `stride`.
+//
+// To backward through this stride-agnostic version, we simply add the following
+// step :
+//   .... (scatter gradients into the storage tensor using output geometry)
+//   3. For all storage location n, `storage[n] /= |S(n)|`.
+//   .... (return as_strided view of the storage tensor using input geometry)
+//
+// Finally, we note that these general operations are expensive, so we apply the
+// following optimizations:
+//   Add step (0): For all output dimension `d` with output stride 0, sum the
+//                 gradients along dimension `d` (don't keepdim), and remove
+//                 dimension `d` from output size and stride.
+//                 (An optimization for "expand" cases so we may avoid step (3))
+//  Only apply step (3) when input tensor has overlapping memory.
+//
+// FULL ALGORITHM:
+//   0. For all output dimension `d` with output stride 0, sum the gradients
+//       along dimension `d` (don't keepdim), and remove dimension `d` from
+//       output size and stride.
+//   1. Create some underlying flattened tensor as if it is the base tensor
+//      representing the contiguous memory storage for both input and output.
+//   2. Use the output geometry to scatter (or index_add) the gradients into
+//      this storage tensor `storage`.
+//   3. If input tensor has overlapping memory,
+//      For all storage location `i`, `storage[i] /= N(i)`, where `N(i)` is the
+//      number of indices in input geometry pointing to the same storage
+//      location `i` (i.e., `|S(i)|` in equations above).
+//   4. Return the as_strided view of the storage tensor using input geometry.
+//
+// See NOTE [ Detecting Memory Overlap Within A Strided Tensor ] on how to
+// roughly detech overlapping memory.
 
-// It is more of a philosophical question whether this is wrong. Computing
-// gradients w.r.t. to the actual memory location is reasonable, and arguably
-// more mathematically sound. Consider optimizing the following expanded tensor:
+
+// NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
 //
-//   param = torch.randn(1).expand(10, 10)
+// Checking memory overlap within a strided tensor is the special case of
+// detecting memory overlap of two strided tensors, where the two tensors start
+// at the same memory address. The later is HARD (see #8212).
 //
-// If the strides are ignored, gradients w.r.t. `param` is computed as if it is
-// `param = torch.randn(1).expand(10, 10).contiguous()`. However, when applying
-// the gradients using the common pattern:
+// But even this special case isn't simple. This note describes a check for a
+// even more constrained simple case where we can be certain that there is no
+// overlap.
 //
-//   param.add_(param.grad)
-//
-// it is essentially adding `param.grad.sum()` to the single memory location
-// `param` lives in, and thus effectively magnifies the gradient by 100x.
-//
-// However, this behavior can feel unexpected and unintuitive as we have been
-// mostly operating in the stride-agnostic land. (and it makes chaining `expand` and `as_strided` fail gradcheck for
-// obvious reasons). More importantly, to supportin-place operations on views,
-// if a grad_fn of a view is stale (i.e., the base is modified after the view is
-// created), we replace it with an `AsStridedBackward`. So it is crucial to have
-// it behave similarly to other view ops.
-//
-// Now here is a somewhat philosophical discussion on whether this is wrong.
-//
-//
-//
-//
-// Implementing the general check for memory overlap here is the special case
-// of detecting memory overlap of two strided arrays, where the two arrays
-// start at the same memory address.
-//
-// This function implements a check for a simple case where we can be certain
-// that there is no overlap, except for dimensions of stride 0, i.e., "expand"
-// case.
-//
-// The check can be described as:
+// The checking algorithm can be described as:
 //   0. Return [ pass check ] if any dimension has size 0
-//   1. For all dimensions with stride 0, sum grad along that dimension
-//   2. Ignore all dimensions that have size 1
-//   3. If no remaining dimensions, return [ pass check ]
-//   4. Sort the remaining dimensions according to the strides decreasingly
-//   5. Check that for each dimension k,
+//   1. Ignore all dimensions that have size 1
+//   2. If no remaining dimensions, return [ pass check ]
+//   3. Sort the remaining dimensions according to the strides decreasingly
+//   4. Check that for each dimension k,
 //
 //           stride[k] > \sum_{ i > k } (size[i] - 1) * stride[i]
 //
@@ -925,7 +1030,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 //  alias:      Obviously preserves
 //
-//  expand:     All changed dimensions are removed in step (2)
+//  expand:     All changed dimensions are removed in step (1)
 //
 //  view:       Consider the input dimensions as grouped into consecutive
 //              dimension "blocks", where dimensions are contiguous in each one.
@@ -964,7 +1069,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //
 //                where the first <   comes from sorting and
 //                      the second <= comes from the fact that dimension d
-//                                               exists after step (2) and
+//                                               exists after step (1) and
 //                                               thus must have size greater
 //                                               than 1
 //                      the third  <= comes from the fact that each term in
@@ -1026,7 +1131,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //                  size'[i] <= floor(size[i] / k)
 //
 //              If size'[i] = 1, invariant is obviously satisfied as we are
-//              just removing a dimension (afte step (2)).
+//              just removing a dimension (afte step (1)).
 //
 //              Assume size'[i] > 1.
 //
@@ -1095,6 +1200,28 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //              So this is generally relaxing the constraint, and thus it
 //              preserves it.
 
+// This implements steps (2)~(4) of the algorithm in
+// NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+// Helper for as_strided_backward
+static inline bool _maybe_overlapping_memory(IntList sizes, IntList strides) {
+  if (sizes.size() > 0) {
+    std::vector<std::size_t> argsort(sizes.size());
+    std::iota(argsort.begin(), argsort.end(), 0);
+    std::sort(argsort.begin(), argsort.end(),
+        [&](std::size_t i, std::size_t j){ return strides[i] < strides[j]; });
+
+    int64_t max_index_in_slice = 0;
+    for (auto i : argsort) {
+      auto stride_ = strides[i];
+      if (stride_ <= max_index_in_slice) {
+        return true;
+      }
+      max_index_in_slice += stride_ * (sizes[i] - 1);
+    }
+  }
+  return false;
+}
+
 // Returns the minimum storage size needed to contain a tensor of sizes, strides, and storage_offset
 // Helper for as_strided_backward
 static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t storage_offset) {
@@ -1110,18 +1237,20 @@ static inline int64_t _min_storage_size(IntList sizes, IntList strides, int64_t 
   return storage_size;
 }
 
+// See NOTE [ as_strided Backward ] for explanation
 Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList sizes, IntList strides, int64_t storage_offset) {
-
-  bool maybe_overlapping = false;
-
-  // 1. Check for size 0 dimensions,
-  //    Skip size 1 dimensions, and
-  //    Reduce on expanded dims (stride=0, size>1)
-  auto dim = grad.dim();
-  std::vector<int64_t> sizes_, strides_;
-  sizes_.reserve(dim);
-  strides_.reserve(dim);
-  for (int64_t i = dim - 1; i >= 0; i--) {
+  // For output geometry,
+  //   check for size 0 dimensions,
+  //   skip size 1 dimensions,
+  //   reduce grad on expanded dims (stride=0, size>1)
+  // Step (0)     for the algorithm in NOTE [ as_strided Backward ]
+  // Step (0)~(1) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  //              on output geometry
+  auto odim = grad.dim();
+  std::vector<int64_t> out_sizes_, out_strides_;
+  out_sizes_.reserve(odim);
+  out_strides_.reserve(odim);
+  for (int64_t i = odim - 1; i >= 0; i--) {
     auto size_i = sizes[i];
     auto stride_i = strides[i];
     if (size_i == 0) {
@@ -1131,30 +1260,41 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
     } else if (stride_i == 0) {
       grad = grad.sum(i, false);
     } else {
-      sizes_.insert(sizes_.begin(), size_i);
-      strides_.insert(strides_.begin(), stride_i);
+      out_sizes_.insert(out_sizes_.begin(), size_i);
+      out_strides_.insert(out_strides_.begin(), stride_i);
     }
   }
-  // 2. Now we have all sizes > 1, all stride > 0.
-  //      i.  Sort size & strides basing on strides in increasing order.
-  //      ii. Check that forall k, stride[k+1] > \sum_{i=0}^k (size[k] - 1) * stride[k]
-  if (sizes_.size() > 0) {
-    std::vector<std::size_t> argsort(sizes_.size());
-    std::iota(argsort.begin(), argsort.end(), 0);
-    std::sort(argsort.begin(), argsort.end(),
-        [&](std::size_t i, std::size_t j){ return strides_[i] < strides_[j]; });
+  // Step (2)~(4) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  //              on output geometry
+  auto out_maybe_overlap = _maybe_overlapping_memory(out_sizes_, out_strides_);
 
-    int64_t max_index_in_slice = 0;
-    for (auto i : argsort) {
-      auto stride_ = strides_[i];
-      if (stride_ <= max_index_in_slice) {
-        maybe_overlapping = true;
-        break;
-      }
-      max_index_in_slice += stride_ * (sizes_[i] - 1);
+  // For input geometry,
+  //   check for size 0 dimensions,
+  //   skip size 1 dimensions,
+  // Step (0)~(1) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  //              on input geometry
+  auto idim = input_geometry.dim();
+  IntList inp_sizes = input_geometry.sizes(), inp_strides = input_geometry.strides();
+  std::vector<int64_t> inp_sizes_, inp_strides_;
+  inp_sizes_.reserve(idim);
+  inp_strides_.reserve(idim);
+  for (int64_t i = idim - 1; i >= 0; i--) {
+    auto size_i = inp_sizes[i];
+    auto stride_i = inp_strides[i];
+    if (size_i == 0) {
+      return at::zeros(input_geometry.sizes(), grad.type());
+    } else if (size_i != 1) {
+      inp_sizes_.insert(inp_sizes_.begin(), size_i);
+      inp_strides_.insert(inp_strides_.begin(), stride_i);
     }
   }
+  // Step (1)~(4) for the algorithm in NOTE [ Detecting Memory Overlap Within A Strided Tensor ]
+  //              on input geometry
+  auto inp_maybe_overlap = _maybe_overlapping_memory(inp_sizes_, inp_strides_);
 
+
+  // Following implements
+  // Step (1)~(4) for the algorithm in NOTE [ as_strided Backward ]
   // TODO: Raise if not all output values are visible in input geometry.
   //       Technically speaking, if you treat those values as constants, not
   //       raising is fine, and mathematically correct. However, these values
@@ -1162,31 +1302,42 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   //       constants we are ignoring this tight dependency. Therefore, it is
   //       more sensible to raise here.
 
-  // The strategy is similar in non-overlapping and maybe overlapping case.
-  // We create some underlying flattened tensor as if it is the base tensor
-  // representing the contiguous memory storage. In both cases, we scatter the
-  // gradients to this "storage" tensor, and return the as_strided view of it
-  // using input_geometry.
-  //   In non-overlapping case,   copy_ the grad
-  //   In maybe overlapping case, index_add_ the grad
-
+  // Step (1): create underlying tensor as "storage"
   auto shared_offset = std::min(input_geometry.storage_offset(), storage_offset);
-  auto effective_inp_offset = input_geometry.storage_offset() - shared_offset;
-  auto effective_out_offset = storage_offset - shared_offset;
+  auto inp_effective_offset = input_geometry.storage_offset() - shared_offset;
+  auto out_effective_offset = storage_offset - shared_offset;
   auto base_size = std::max(
-    _min_storage_size(input_geometry.sizes(), input_geometry.strides(), effective_inp_offset),
-    _min_storage_size(sizes_, strides_, effective_out_offset)
+    _min_storage_size(inp_sizes_, inp_strides_, inp_effective_offset),
+    _min_storage_size(out_sizes_, out_strides_, out_effective_offset)
   );
-  auto flatten_full_gI = at::zeros({base_size}, grad.type());  // assume that new tensors have 0 storage offset
-  auto gI = flatten_full_gI.as_strided(input_geometry.sizes(), input_geometry.strides(), effective_inp_offset);
-  if (!maybe_overlapping) {
-    flatten_full_gI.as_strided(sizes_, strides_, effective_out_offset).copy_(grad);
-  } else {
-    auto flatten_full_indices = at::arange(0, base_size, grad.type().toScalarType(at::kLong));
-    auto indices = flatten_full_indices.as_strided(sizes_, strides_, effective_out_offset);
-    flatten_full_gI.index_add_(0, indices.reshape(-1), grad.reshape(-1));
+  auto& ty = grad.type();
+  auto storage = at::zeros({base_size}, ty);
+
+  // prepare indices tensor if we will do index_add_ later
+  at::optional<at::Tensor> flatten_full_indices;
+  if (inp_maybe_overlap || out_maybe_overlap) {
+    flatten_full_indices = at::arange(0, base_size, ty.toScalarType(at::kLong));
   }
-  return gI;
+
+  // Step (2): use output geometry to scatter gradients into storage
+  if (out_maybe_overlap) {
+    auto out_indices = flatten_full_indices->as_strided(out_sizes_, out_strides_, out_effective_offset);
+    storage.index_add_(0, out_indices.reshape(-1), grad.reshape(-1));
+  } else {
+    // assume that new tensors have 0 storage offset
+    storage.as_strided(out_sizes_, out_strides_, out_effective_offset).copy_(grad);
+  }
+
+  // Step (3): if input tensor has overlapping memory, divide scattered gradient
+  //           at storage[i] by the number of times i shows up in input geometry
+  if (inp_maybe_overlap) {
+    auto count = at::zeros_like(storage);
+    auto inp_indices = flatten_full_indices->as_strided(inp_sizes_, inp_strides_, inp_effective_offset).reshape(-1);
+    count.index_add_(0, inp_indices, at::ones({1}, ty).expand_as(inp_indices));
+    storage.div_(count); // this will give nan outside visible range
+  }
+  // Step (4): return as_strided view of the storage tensor with input geometry
+  return storage.as_strided(inp_sizes, inp_strides, inp_effective_offset);
 }
 
 std::tuple<Tensor, Tensor> atan2_backward(const Tensor& grad, const Tensor& self, const Tensor& other, std::array<bool, 2> output_mask) {

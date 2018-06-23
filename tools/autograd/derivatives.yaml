@@ -578,8 +578,8 @@
 # DO NOT define a backward for reshape!
 # reshape is special in that it sometimes returns a view, and somtimes not.
 # Defining a backward will make codegen spit out the forward call as
-#     as_variable(baseType->reshape(self))
-# , making it impossible (hard) to detect when it is actually a view.
+#     as_variable(baseType->reshape(self)),
+# making it impossible (hard) to detect when it is actually a view.
 # - name: reshape(Tensor self, IntList shape)
 
 - name: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale)
