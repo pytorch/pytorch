@@ -188,15 +188,15 @@ void fillInputBlob(
     return;
   }
 
-  int map_size = tensor_protos_map.size();
   for (auto& tensor_kv : tensor_protos_map) {
     caffe2::Blob* blob = workspace->GetBlob(tensor_kv.first);
     if (blob == nullptr) {
       blob = workspace->CreateBlob(tensor_kv.first);
     }
     // todo: support gpu and make this function a tempalte
+    int protos_size = tensor_kv.second.protos_size();
     caffe2::TensorProto* tensor_proto =
-        tensor_kv.second.mutable_protos(iteration % map_size);
+        tensor_kv.second.mutable_protos(iteration % protos_size);
     caffe2::TensorCPU* tensor = blob->GetMutable<caffe2::TensorCPU>();
     tensor->Resize(std::vector<caffe2::TIndex>());
     if (tensor_proto->data_type() == caffe2::TensorProto::STRING) {
