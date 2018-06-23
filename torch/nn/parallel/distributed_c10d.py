@@ -152,7 +152,6 @@ class DistributedDataParallelC10d(Module):
         else:
             self._module_copies = [self.module]
 
-
         self.modules_params_data = [[] for _ in range(len(self.device_ids))]
         self.modules_buffers_data = [[] for _ in range(len(self.device_ids))]
 
@@ -193,7 +192,7 @@ class DistributedDataParallelC10d(Module):
         self.buckets_to_reduce = copy.copy(self.bucket_order)
 
         self.buckets_ready = set()
-        self.reduction_works = []
+        self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
 
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
 
@@ -333,16 +332,16 @@ class DistributedDataParallelC10d(Module):
 
         # now work on the first gpu
         reduction_work = c10d.all_reduce(grads_batch_coalesced[0], self.process_group)
-        self.reduction_works.append(reduction_work)
+        self.reduction_works[bucket_idx] = reduction_work
         self.buckets_coalesced[bucket_idx] = grads_batch_coalesced[0]
 
     def _sync_reduction_works(self):
-        for reduction_work in self.reduction_works:
-            reduction_work.wait()
-
         # Now only work on the first GPU of self.device_ids, uncoalesce
         # the gradients for each bucket
         for bucket_idx, grads_batch in enumerate(self.buckets):
+            # wait will let current stream wait on the c10d reduction stream
+            self.reduction_works[bucket_idx].wait()
+
             self.buckets_coalesced[bucket_idx] /= self.process_group.size()
             grads_batch_reduced = _unflatten_dense_tensors(
                 self.buckets_coalesced[bucket_idx], grads_batch[0])
@@ -357,5 +356,5 @@ class DistributedDataParallelC10d(Module):
         # Reset the module states
         self.buckets_to_reduce = copy.copy(self.bucket_order)
         self.buckets_ready = set()
-        self.reduction_works = []
+        self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
