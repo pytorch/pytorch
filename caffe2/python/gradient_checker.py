@@ -167,11 +167,12 @@ class GradientChecker:
         self._workspace_name = workspace_name
 
     def GetLossAndGrad(
-        self, op, grad_ops, x, input_name, grad_name, outputs_with_grads
+        self, op, grad_ops, inputs, input_names, input_to_check, grad_name,
+        outputs_with_grads
     ):
-        # First, feed in the current input. Note that we are not changing
-        # anything else, so we don't need to feed in others.
-        workspace.FeedBlob(input_name, x, self._device_option)
+        for i in range(len(inputs)):
+            workspace.FeedBlob(input_names[i], inputs[i], self._device_option)
+        x = inputs[input_to_check]
         # Run.
         workspace.RunOperatorOnce(op)
         loss = 0.
@@ -262,10 +263,9 @@ class GradientChecker:
                     op.input[i], self._device_option))
 
         # Get the loss and gradient for the original.
-        input_name = op.input[input_to_check]
         grad_name = g_input[input_to_check]
         loss, grad = self.GetLossAndGrad(
-            op, grad_ops, inputs[input_to_check], input_name, grad_name,
+            op, grad_ops, inputs, op.input, input_to_check, grad_name,
             outputs_with_grads
         )
         grad_estimate = np.zeros_like(inputs[input_to_check])
@@ -278,14 +278,14 @@ class GradientChecker:
             # Positive gradient
             inputs[input_to_check].flat[current_dim] += self._stepsize
             pos_loss, _ = self.GetLossAndGrad(
-                op, grad_ops, inputs[input_to_check], input_name,
-                grad_name, outputs_with_grads
+                op, grad_ops, inputs, op.input, input_to_check, grad_name,
+                outputs_with_grads
             )
             # Negative gradient
             inputs[input_to_check].flat[current_dim] -= self._stepsize * 2
             neg_loss, _ = self.GetLossAndGrad(
-                op, grad_ops, inputs[input_to_check], input_name,
-                grad_name, outputs_with_grads
+                op, grad_ops, inputs, op.input, input_to_check, grad_name,
+                outputs_with_grads
             )
             # Recover the value
             inputs[input_to_check].flat[current_dim] += self._stepsize

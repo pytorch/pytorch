@@ -330,6 +330,9 @@ class TestSum(test_util.TestCase):
                 res, grad, grad_estimated = checker.CheckSimple(
                     op, [X1, X2], 0, [0])
                 self.assertTrue(res)
+                res, grad, grad_estimated = checker.CheckSimple(
+                    op, [X1, X2], 1, [0])
+                self.assertTrue(res)
 
 
 class TestMakeTwoClass(test_util.TestCase):
