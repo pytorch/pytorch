@@ -114,16 +114,16 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sW,)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
-    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple `(out_padW,)`.
-      Default: 0
+      tuple ``(sW,)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padW,)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dW,)`. Default: 1
+      a tuple ``(dW,)``. Default: 1
 
 Examples::
 
@@ -145,16 +145,17 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kH \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padH, padW)`. Default: 0
-    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple
-      `(out_padH, out_padW)`. Default: 0
+      tuple ``(sH, sW)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padH, padW)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple ``(out_padH, out_padW)``.
+      Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dH, dW)`. Default: 1
+      a tuple ``(dH, dW)``. Default: 1
 
 Examples::
 
@@ -177,12 +178,13 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kT \times kH \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Default: 0
-    output_padding: implicit zero-paddings of `0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple
-      `(out_padT, out_padH, out_padW)`. Default: 0
+      tuple ``(sT, sH, sW)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padT, padH, padW)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple
+      ``(out_padT, out_padH, out_padW)``. Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
