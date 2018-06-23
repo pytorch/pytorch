@@ -153,7 +153,7 @@ std::vector<Tensor> RNNImplBase<Derived>::autograd_forward(
     }
   }
 
-  auto state_output = at::stack(TensorRange(state));
+  auto state_output = at::stack(TensorListView(state));
   if (has_cell_state_) {
     state_output.transpose_(0, 1);
   }
@@ -185,7 +185,7 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   {
     NoGradGuard guard;
     flat_weights_ = at::_cudnn_rnn_flatten_weight(
-        TensorRange(flat_weights()),
+        TensorListView(flat_weights()),
         /*weight_stride=*/options_.with_bias_ ? 4 : 2,
         options_.input_size_,
         static_cast<int64_t>(*cudnn_mode_),
@@ -236,7 +236,7 @@ std::vector<Tensor> RNNImplBase<Derived>::CUDNN_forward(
   // tup = std::tuple of output, hy, cy, reserve, new_weight_buf
   auto tup = _cudnn_rnn(
       x,
-      TensorRange(flat_weights()),
+      TensorListView(flat_weights()),
       /*weight_stride=*/options_.with_bias_ ? 4 : 2,
       flat_weights_,
       hx,
@@ -255,7 +255,7 @@ std::vector<Tensor> RNNImplBase<Derived>::CUDNN_forward(
   Tensor hidden_output;
   if (has_cell_state_) {
     hidden_output =
-        at::stack(TensorRange({std::get<1>(tup), std::get<2>(tup)}), 0);
+        at::stack(TensorListView({std::get<1>(tup), std::get<2>(tup)}), 0);
   } else {
     hidden_output = std::get<1>(tup);
   }
@@ -331,7 +331,7 @@ std::vector<Tensor> RNNImpl::cell_forward(
   auto h = linear(x, ihw_[layer], ihb_[layer]) +
       linear(hx, hhw_[layer], hhb_[layer]);
 
-  return {at::stack(TensorRange(activation_function_(h)))};
+  return {at::stack(TensorListView(activation_function_(h)))};
 }
 
 const RNNOptions& RNNImpl::options() const noexcept {
@@ -369,7 +369,7 @@ std::vector<Tensor> LSTMImpl::cell_forward(
   auto cy = (forget_gate * cx) + (in_gate * cell_gate);
   auto hy = out_gate * cy.tanh();
 
-  return {at::stack(TensorRange({hy, cy}), 0)};
+  return {at::stack(TensorListView({hy, cy}), 0)};
 }
 
 const LSTMOptions& LSTMImpl::options() const noexcept {
@@ -402,7 +402,7 @@ std::vector<Tensor> GRUImpl::cell_forward(
   auto new_gate = (gic[2] + reset_gate * ghc[2]).tanh_();
   auto hy = new_gate + input_gate * (hx - new_gate);
 
-  return {at::stack(TensorRange(hy))};
+  return {at::stack(TensorListView(hy))};
 }
 
 const GRUOptions& GRUImpl::options() const noexcept {

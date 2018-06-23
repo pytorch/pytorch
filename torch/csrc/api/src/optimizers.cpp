@@ -30,7 +30,7 @@ Tensor LBFGS::gather_flat_grad() {
     views.push_back(
         torch::autograd::as_variable_ref(parameter->grad()).data().view(-1));
   }
-  return at::cat(TensorRange(views));
+  return at::cat(TensorListView(views));
 }
 
 void LBFGS::add_grad(const at::Scalar& step_size, const Tensor& update) {

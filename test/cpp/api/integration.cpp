@@ -284,8 +284,8 @@ TEST_CASE("integration/cartpole") {
           at::smooth_l1_loss(saved_values[i], torch::ones({1}) * rewards[i]));
     }
 
-    auto loss = at::stack(torch::TensorRange(policy_loss)).sum() +
-        at::stack(torch::TensorRange(value_loss)).sum();
+    auto loss = at::stack(torch::TensorListView(policy_loss)).sum() +
+        at::stack(torch::TensorListView(value_loss)).sum();
 
     optim->zero_grad();
     loss.backward();

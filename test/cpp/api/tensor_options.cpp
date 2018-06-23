@@ -1,6 +1,6 @@
 #include "catch.hpp"
 
-#include <torch/functions.h>
+#include <torch/tensor.h>
 
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
