@@ -473,7 +473,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for ``kernel_size - 1 - padding`` number of points. See note 
+      sides for ``kernel_size - 1 - padding`` number of points. See note
       below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
@@ -569,7 +569,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for ``kernel_size - 1 - padding`` number of points. See note 
+      sides for ``kernel_size - 1 - padding`` number of points. See note
       below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
@@ -703,7 +703,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for ``kernel_size - 1 - padding`` number of points. See note 
+      sides for ``kernel_size - 1 - padding`` number of points. See note
       below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
