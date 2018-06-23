@@ -2789,6 +2789,9 @@ void ReduceTensorCUDA(
     T* Y,
     CUDAContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
+  if (X == Y) {
+    return;
+  }
   std::vector<int> transpose_axes(num_dims);
   utils::ComputeTransposeAxesForReduceOp(
       num_dims, num_axes, axes, transpose_axes.data());
