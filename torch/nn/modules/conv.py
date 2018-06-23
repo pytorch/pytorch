@@ -473,11 +473,11 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points.
+      sides for ``kernel_size - 1 - padding`` number of points. See note
+      below for details.
 
-    * :attr:`output_padding` controls the amount of implicit zero-paddings on
-      both sides of the output for :attr:`output_padding` number of points.
-      number of points.
+    * :attr:`output_padding` controls the additional size added to one side
+      of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -507,7 +507,7 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv1d` and a :class:`~torch.nn.ConvTranspose1d`
         are initialized with same parameters, they are inverses of each other in
-        regard to the input and output shapes. However, when :attr`stride` ``>1``,
+        regard to the input and output shapes. However, when ``stride > 1``,
         :class:`~torch.nn.Conv1d` maps multiple input shapes to the same output
         shape. :attr:`output_padding` is provided to resolve this ambiguity by
         effectively increasing the calculated output shape on one side. Note
@@ -569,11 +569,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points for each dimension.
+      sides for ``kernel_size - 1 - padding`` number of points. See note
+      below for details.
 
-    * :attr:`output_padding` controls the amount of implicit zero-paddings on
-      both sides of the output for :attr:`output_padding` number of points for
-      each dimension.
+    * :attr:`output_padding` controls the additional size added to one side
+      of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -610,7 +610,7 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv2d` and a :class:`~torch.nn.ConvTranspose2d`
         are initialized with same parameters, they are inverses of each other in
-        regard to the input and output shapes. However, when :attr`stride` ``>1``,
+        regard to the input and output shapes. However, when ``stride > 1``,
         :class:`~torch.nn.Conv2d` maps multiple input shapes to the same output
         shape. :attr:`output_padding` is provided to resolve this ambiguity by
         effectively increasing the calculated output shape on one side. Note
@@ -703,11 +703,11 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points for each dimension.
+      sides for ``kernel_size - 1 - padding`` number of points. See note
+      below for details.
 
-    * :attr:`output_padding` controls the amount of implicit zero-paddings on
-      both sides of the output for :attr:`output_padding` number of points for
-      each dimension.
+    * :attr:`output_padding` controls the additional size added to one side
+      of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -744,7 +744,7 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         amount of zero padding to both sizes of the input. This is set so that
         when a :class:`~torch.nn.Conv3d` and a :class:`~torch.nn.ConvTranspose3d`
         are initialized with same parameters, they are inverses of each other in
-        regard to the input and output shapes. However, when :attr`stride` ``>1``,
+        regard to the input and output shapes. However, when ``stride > 1``,
         :class:`~torch.nn.Conv3d` maps multiple input shapes to the same output
         shape. :attr:`output_padding` is provided to resolve this ambiguity by
         effectively increasing the calculated output shape on one side. Note
