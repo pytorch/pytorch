@@ -23,9 +23,9 @@ def _cubic_interpolate(x1, f1, g1, x2, f2, g2, bounds=None):
     if d2_square >= 0:
         d2 = d2_square.sqrt()
         if x1 <= x2:
-            min_pos = x2 - (x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2*d2))
+            min_pos = x2 - (x2 - x1) * ((g2 + d2 - d1) / (g2 - g1 + 2 * d2))
         else:
-            min_pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2*d2))
+            min_pos = x1 - (x1 - x2) * ((g1 + d2 - d1) / (g1 - g2 + 2 * d2))
         return min(max(min_pos, xmin_bound), xmax_bound)
     else:
         return (xmin_bound + xmax_bound) / 2.
@@ -116,7 +116,7 @@ def _strong_Wolfe(obj_func, x, t, d, f, g, gtd, c1=1e-4, c2=0.9, tolerance_chang
             else:
                 insuf_progress = True
         else:
-             insuf_progress = False
+            insuf_progress = False
 
         # Evaluate new point
         f_new, g_new = obj_func(x, t, d)
@@ -382,7 +382,8 @@ class LBFGS(Optimizer):
                     raise RuntimeError("only 'strong_Wolfe' is supported")
                 else:
                     x_init = self._clone_param()
-                    obj_func = lambda x, t, d: self._directional_evaluate(closure, x, t, d)
+                    def obj_func(x, t, d):
+                        return self._directional_evaluate(closure, x, t, d)
                     loss, flat_grad, t, ls_func_evals = _strong_Wolfe(obj_func, x_init, t, d,
                                                                       loss, flat_grad, gtd)
                 self._add_grad(t, d)
