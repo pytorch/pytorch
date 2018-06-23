@@ -226,7 +226,9 @@ function build_nccl() {
   popd
 
   # FIXME: sccache doesn't work when building NCCL
-  export CUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE_SAVED
+  if [ -n "$CUDA_NVCC_EXECUTABLE_SAVED" ]; then
+    export CUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE_SAVED
+  fi
   export PATH=/opt/cache/bin:$PATH
 }
 
