@@ -473,10 +473,11 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points.
+      sides for ``kernel_size - 1 - padding`` number of points. See note 
+      below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
-      of the output shape.
+      of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -568,10 +569,11 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points for each dimension.
+      sides for ``kernel_size - 1 - padding`` number of points. See note 
+      below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
-      of the output shape.
+      of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
@@ -701,10 +703,11 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     * :attr:`stride` controls the stride for the cross-correlation.
 
     * :attr:`padding` controls the amount of implicit zero-paddings on both
-      sides for :attr:`padding` number of points for each dimension.
+      sides for ``kernel_size - 1 - padding`` number of points. See note 
+      below for details.
 
     * :attr:`output_padding` controls the additional size added to one side
-      of the output shape.
+      of the output shape. See note below for details.
 
     * :attr:`dilation` controls the spacing between the kernel points; also known as the à trous algorithm.
       It is harder to describe, but this `link`_ has a nice visualization of what :attr:`dilation` does.
