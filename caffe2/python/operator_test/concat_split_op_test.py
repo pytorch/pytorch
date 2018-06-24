@@ -134,7 +134,7 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
             max_value=5,
             allow_empty=True,
         ),
-        **hu.gcs
+        **hu.gcs_cpu_only
     )
     def test_split_by_lengths(self, inputs, gc, dc):
         data, lengths = inputs
@@ -170,10 +170,11 @@ class TestConcatSplitOps(hu.HypothesisTestCase):
             ]
         outputs_with_grad = range(num_output)
         input_tensors = [data, lengths]
-        self.assertReferenceChecks(gc, op, input_tensors, split_by_lengths_ref)
+        self.assertReferenceChecks(
+            hu.cpu_do, op, input_tensors, split_by_lengths_ref)
         self.assertDeviceChecks(dc, op, input_tensors, outputs_with_grad)
-        self.assertGradientChecks(gc, op, input_tensors, 0, outputs_with_grad)
-
+        self.assertGradientChecks(
+            hu.cpu_do, op, input_tensors, 0, outputs_with_grad)
 
 
 if __name__ == "__main__":
