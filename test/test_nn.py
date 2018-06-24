@@ -1438,9 +1438,9 @@ class TestNN(NNTestCase):
         # weight_u should be just a reused buffer
         self.assertTrue(hasattr(m, 'weight_u'))
         self.assertTrue('weight_u' in m._buffers)
+        self.assertTrue('weight' in m._buffers)
         # weight should be a plain attribute, not counted as a buffer or a param
-        self.assertTrue(hasattr(m, 'weight'))
-        self.assertFalse('weight' in m._buffers or 'weight' in m._parameters)
+        self.assertFalse('weight' in m._parameters)
         # it should also be sharing storage as `weight_orig`
         self.assertEqual(m.weight_orig.storage(), m.weight.storage())
         self.assertEqual(m.weight_orig.size(), m.weight.size())
@@ -1452,6 +1452,42 @@ class TestNN(NNTestCase):
         # weight should be converted back as a parameter
         self.assertTrue(hasattr(m, 'weight'))
         self.assertTrue('weight' in m._parameters)
+
+    def test_spectral_norm_eval_remove(self):
+        inp = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        m = torch.nn.utils.spectral_norm(m)
+        x0 = m(inp)
+        m.eval()
+        # test that eval mode and removing / adding+removing doesn't change weight and output
+        x1 = m(inp)
+        x2 = m(inp)
+        self.assertEqual(x0, x1)
+        self.assertEqual(x0, x2)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x3 = m(inp)
+        self.assertEqual(x0, x3)
+        m = torch.nn.utils.spectral_norm(m)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x4 = m(inp)
+        self.assertEqual(x0, x4)
+        # check that removing after train doesn't change output
+        m.train()
+        m = torch.nn.utils.spectral_norm(m)
+        for i in range(5):
+            x0 = m(inp)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x1 = m(inp)
+        self.assertEqual(x0, x1)
+
+    def test_spectral_norm_dim(self):
+        inp = torch.randn(2, 3, 10, 12)
+        m = nn.ConvTranspose2d(3, 4, (5, 6))
+        m = torch.nn.utils.spectral_norm(m)
+        # this should not run into incompatible shapes
+        x = m(inp)
+        # check that u refers to the same dimension
+        self.assertEqual(m.weight_u.shape, m.weight_orig[0, :, 0, 0].shape)
 
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
