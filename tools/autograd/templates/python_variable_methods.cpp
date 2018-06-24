@@ -309,40 +309,6 @@ static PyObject * THPVariable_invert(PyObject* self, PyObject* args) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPVariable_cpu(PyObject* self, PyObject* args)
-{
-   HANDLE_TH_ERRORS
-   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-   auto backend = self_.is_sparse() ? Backend::SparseCPU : Backend::CPU;
-   auto& type = self_.type().toBackend(backend);
-   return wrap(torch::utils::dispatch_type_conversion(self_, type));
-   END_HANDLE_TH_ERRORS
-}
-
-static PyObject * THPVariable_cuda(PyObject* self, PyObject* args, PyObject* kwargs)
-{
-  HANDLE_TH_ERRORS
-  static PythonArgParser parser({
-    "cuda(Device? device=None, bool non_blocking=False)",
-    "cuda(Device? device=None, bool async=False)|deprecated"
-  });
-  auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  ParsedArgs<2> parsed_args;
-  auto r = parser.parse(args, kwargs, parsed_args);
-  auto backend = self_.is_sparse() ? at::kSparseCUDA : at::kCUDA;
-  auto& type = self_.type().toBackend(backend);
-  auto device_obj = r.device(0);
-  if (!r.isNone(0) && device_obj.is_cpu()) {
-    throw std::runtime_error("Invalid device, must be cuda device");
-  }
-  int32_t device_index = -1;
-  if (device_obj.has_index() && device_obj.is_cuda()) {
-    device_index = device_obj.index();
-  }
-  return THPVariable_Wrap(torch::utils::dispatch_type_conversion(self_, type, device_index, r.toBool(1)));
-  END_HANDLE_TH_ERRORS
-}
-
 static PyObject * THPVariable_to_type(PyObject* self, ScalarType scalarType) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;

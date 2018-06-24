@@ -1784,3 +1784,10 @@
 
 - func: get_device(Tensor self) -> int64_t
   device_guard: False
+
+- func: cpu(Tensor self) -> Tensor
+  variants: method
+
+# TODO: Would be preferable if this were an at::optional<int64_t> device
+- func: cuda(Tensor self, int64_t device=-1, bool non_blocking=false) -> Tensor
+  variants: method
