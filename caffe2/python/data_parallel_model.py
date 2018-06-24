@@ -732,7 +732,6 @@ def _CreateBarrierNet(model, init_net, name_prefix, timeout_sec):
         init_net,
         name_prefix + "_barrier_cw",
         rendezvous=model._rendezvous,
-        status_blob=name_prefix + "_barrier_cw_status",
         timeout_sec=timeout_sec,
     )
     barrier_net = core.Net(name_prefix + "_barrier_net")
@@ -740,7 +739,6 @@ def _CreateBarrierNet(model, init_net, name_prefix, timeout_sec):
         inputs=[comm_world],
         outputs=[],
         engine=model._rendezvous['engine'],
-        status_blob=name_prefix + "_barrier_status",
     )
     return barrier_net
 
@@ -1114,16 +1112,12 @@ def AddDistributedBlobSync(model, blobs):
         model.param_init_net,
         "blob_sync_cw_" + synth_name,
         rendezvous=model._rendezvous,
-        status_blob="create_blob_sync_cw_{}_cw_status".format(
-            synth_name,
-        ),
     )
 
     model.net.Allreduce(
         inputs=[comm_world] + blobs,
         outputs=blobs,
         engine=model._rendezvous['engine'],
-        status_blob="blob_sync_allred_{}_status".format(synth_name),
     )
 
 
@@ -1161,7 +1155,6 @@ def _SyncAllParamsDistributed(
                 outputs=params,
                 name=param_name,
                 engine=rendezvous['engine'],
-                status_blob="broadcast_{}_status".format(str(param_name)),
                 control_input=control_input
             )
 
@@ -1292,10 +1285,6 @@ class CollectivesConcurrencyControl(object):
                 self.param_init_net,
                 "{}_{}_cw".format(self.name, current_slot),
                 rendezvous=self.rendezvous,
-                status_blob="create_{}_cw_{}_status".format(
-                    self.name,
-                    current_slot
-                ),
             )
             self.common_worlds.append(common_world)
             self.control_inputs.append(control_output_blob)
@@ -1352,7 +1341,6 @@ def _AllReduceBlobsDistributed(
                     name=blob_name,
                     engine=all_reduce_engine,
                     control_input=control_input,
-                    status_blob="allreduce_{}_status".format(blob_name),
                     **kwargs
                 )
 
@@ -1759,7 +1747,6 @@ def _CreateOrCloneCommonWorld(
         common_world_blob,
         rendezvous,
         name=None,
-        status_blob=None,
         timeout_sec=None):
 
     if timeout_sec is None:
@@ -1798,7 +1785,6 @@ def _CreateOrCloneCommonWorld(
             common_world_blob,
             name=name,
             engine=rendezvous['engine'],
-            status_blob=status_blob,
         )
     else:
         kwargs=dict()
@@ -1815,7 +1801,6 @@ def _CreateOrCloneCommonWorld(
             size=rendezvous['num_shards'],
             rank=rendezvous['shard_id'],
             engine=rendezvous['engine'],
-            status_blob=status_blob,
             timeout_ms=timeout_ms,
             **kwargs
         )
@@ -1847,7 +1832,6 @@ def _RunComparison(model, blob_name, device=None):
             size=rendezvous['num_shards'],
             rank=rendezvous['shard_id'],
             engine=rendezvous['engine'],
-            status_blob="cw_master_select",
             **kwargs
         )
 
@@ -1867,7 +1851,6 @@ def _RunComparison(model, blob_name, device=None):
             inputs=[comm_world, blob_name_gather],
             outputs=[blob_name_gather],
             engine=rendezvous['engine'],
-            status_blob="all_reduce_master_select_status",
         )
 
         workspace.RunNetOnce(comparison_net)
