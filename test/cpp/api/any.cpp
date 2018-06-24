@@ -78,10 +78,10 @@ TEST_CASE("any-module") {
       }
     };
     AnyModule any(M{});
-    REQUIRE_THROWS_WITH(
-        any.forward(5.0),
-        StartsWith("Expected argument #0 to be of type float, "
-                   "but received value of type double"));
+
+    auto message = std::string("Expected argument #0 to module ") + M{}.name() +
+        " to be of type float, but received value of type double";
+    REQUIRE_THROWS_WITH(any.forward(5.0), StartsWith(message));
   }
   SECTION("wrong number of arguments") {
     struct M : nn::Module {

@@ -16,6 +16,11 @@ FunctionalImpl::FunctionalImpl(std::function<Variable(Variable)> function)
         return std::vector<Variable>({function(input.front())});
       }) {}
 
+FunctionalImpl::FunctionalImpl(at::Tensor (*function)(at::Tensor))
+    : function_([function](std::vector<Variable> input) {
+        return std::vector<Variable>({function(input.front())});
+      }) {}
+
 void FunctionalImpl::reset() {}
 
 std::vector<Variable> FunctionalImpl::forward(std::vector<Variable> input) {

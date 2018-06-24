@@ -2,6 +2,7 @@
 
 #include <torch/functions.h>
 #include <torch/nn/module.h>
+#include <torch/nn/modules/activations.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optimizers.h>
@@ -32,8 +33,8 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<Sequential> model) {
     // forward
     std::function<at::Scalar()> closure = [&]() -> at::Scalar {
       optim->zero_grad();
-      auto x = model->forward(inp);
-      Variable loss = at::binary_cross_entropy(x, lab);
+      auto x = model->forward<std::vector<Variable>>(std::vector<Variable>{inp});
+      Variable loss = at::binary_cross_entropy(x[0], lab);
       loss.backward();
       return at::Scalar(loss.data());
     };
@@ -52,8 +53,9 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<Sequential> model) {
 TEST_CASE("optim") {
   std::srand(0);
   torch::manual_seed(0);
+
   auto model = std::make_shared<Sequential>(
-      SigmoidLinear(Linear(2, 8)), SigmoidLinear(Linear(8, 1)));
+      Linear(2, 8), Sigmoid{}, Linear(8, 1), Sigmoid{});
 
   // Flaky
   // SECTION("lbfgs") {

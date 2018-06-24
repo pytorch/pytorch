@@ -245,6 +245,7 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/cuda.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/cursor.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/module.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/activations.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/batchnorm.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/conv.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/dropout.cpp
@@ -352,6 +353,7 @@ if (TORCH_BUILD_TEST)
 
     add_executable(test_api
       ${TORCH_API_TEST_DIR}/any.cpp
+      ${TORCH_API_TEST_DIR}/activations.cpp
       ${TORCH_API_TEST_DIR}/modules.cpp
       ${TORCH_API_TEST_DIR}/cursor.cpp
       ${TORCH_API_TEST_DIR}/integration.cpp
