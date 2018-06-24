@@ -7,7 +7,6 @@
 
 // ${generated_comment}
 
-$storage_tensor_headers
 #include "ATen/${Generator}.h"
 #include "ATen/${DenseTensor}.h"
 #include "ATen/${DenseBackend}LongTensor.h"
@@ -44,28 +43,22 @@ bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() ==
 bool ${Type}::is_distributed() const { return false; }
 
 std::unique_ptr<Storage> ${Type}::storage() const {
-  return std::unique_ptr<Storage>(new ${Storage}(context));
+  AT_ERROR("storage not supported on sparse");
 }
 std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
-  return std::unique_ptr<Storage>(new ${Storage}(context,size));
+  AT_ERROR("storage not supported on sparse");
 }
 std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
-    return std::unique_ptr<Storage>(
-      new ${Storage}(context,data,size,deleter));
+  AT_ERROR("storage not supported on sparse");
 }
 std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
-    return std::unique_ptr<Storage>(
-        new ${Storage}(context, size, std::move(allocator)));
+  AT_ERROR("storage not supported on sparse");
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
-  if (retain)
-    ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new ${Tensor}(context,(${THTensor}*)(th_pointer)), false);
+  AT_ERROR("unsafeTensorFromTH not supported on sparse");
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
-  if (retain)
-    ${THStorage}_retain(${state,} (${THStorage}*) th_pointer);
-  return std::unique_ptr<Storage>(new ${Storage}(context, (${THStorage}*) th_pointer));
+  AT_ERROR("unsafeTensorFromTH not supported on sparse");
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
   return std::unique_ptr<Generator>(new ${Generator}(context));
@@ -85,13 +78,6 @@ size_t ${Type}::elementSizeInBytes() const {
 const char * ${Type}::typeString() {
   return "${Type}";
 }
-
-/* example
-Tensor * ${Type}::add(Tensor & a, Tensor & b) {
-  std::cout << "add ${Tensor}\n";
-  return &a;
-}
-*/
 
 ${type_derived_method_definitions}
 
