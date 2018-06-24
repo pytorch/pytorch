@@ -10,6 +10,9 @@ namespace py = pybind11;
 PYBIND11_MODULE(python, m) {
   m.doc() = "Python interface for distributed Caffe2";
 
+  py::register_exception<StoreHandlerNotAvailableException>(
+      m, "StoreHandlerNotAvailableError");
+
   py::register_exception<StoreHandlerTimeoutException>(
       m, "StoreHandlerTimeoutError");
 }
