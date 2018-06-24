@@ -83,18 +83,12 @@ set(TH_CPU_INCLUDE
   ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
   ${CMAKE_CURRENT_BINARY_DIR}/src/TH
   ${CMAKE_CURRENT_BINARY_DIR}/src/THC
-  # sparse
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THS
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THS
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
 
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src
   ${CMAKE_BINARY_DIR}/aten/src)
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
 add_subdirectory(src/THNN)
-add_subdirectory(src/THS)
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 IF(USE_ROCM)
@@ -115,13 +109,11 @@ if(USE_ROCM)
   SET(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
-  add_subdirectory(src/THCS)
   message("ROCm is enabled.")
 elseif(USE_CUDA)
   SET(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
-  add_subdirectory(src/THCS)
 else()
   message("disabling CUDA because USE_CUDA is set false")
   SET(AT_CUDA_ENABLED 0)

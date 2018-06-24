@@ -104,6 +104,11 @@ cudaStream_t CUDAHooks::getCurrentCUDAStreamOnDevice(
     int64_t device) const {
   return THCState_getCurrentStreamOnDevice(thc_state, device);
 }
+#ifndef __HIP_PLATFORM_HCC__
+cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) const {
+  return THCState_getCurrentSparseHandle(thc_state);
+}
+#endif
 struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
     THCState* thc_state) const {
   return THCState_getCurrentDeviceProperties(thc_state);
