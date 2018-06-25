@@ -61,6 +61,73 @@ class TestRegularizerContext(LayersTestCase):
             _, train_net = layer_model_instantiator.generate_training_nets(self.model)
             ops = train_net.Proto().op
             ops_type_list = [ops[i].type for i in range(len(ops))]
-            assert ops_type_list.count('LpNorm') == 2
-            assert ops_type_list.count('Scale') == 4
-            assert ops_type_list.count('LpNormGradient') == 2
+            assert ops_type_list.count("LpNorm") == 2
+            assert ops_type_list.count("Scale") == 4
+            assert ops_type_list.count("LpNormGradient") == 2
+
+
+class TestRegularizer(LayersTestCase):
+    @given(X=hu.arrays(dims=[2, 5], elements=st.floats(min_value=-1.0, max_value=1.0)))
+    def test_log_barrier(self, X):
+        param = core.BlobReference("X")
+        workspace.FeedBlob(param, X)
+        train_init_net, train_net = self.get_training_nets()
+        reg = regularizer.LogBarrier(1.0)
+        output = reg(train_net, train_init_net, param, by=RegularizationBy.ON_LOSS)
+        reg(
+            train_net,
+            train_init_net,
+            param,
+            grad=None,
+            by=RegularizationBy.AFTER_OPTIMIZER,
+        )
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+
+        def ref(X):
+            return (
+                np.array(np.sum(-np.log(np.clip(X, 1e-9, None))) * 0.5).astype(
+                    np.float32
+                ),
+                np.clip(X, 1e-9, None),
+            )
+
+        for x, y in zip(workspace.FetchBlobs([output, param]), ref(X)):
+            npt.assert_allclose(x, y, rtol=1e-3)
+
+    @given(
+        X=hu.arrays(dims=[2, 5], elements=st.floats(min_value=-1.0, max_value=1.0)),
+        left_open=st.booleans(),
+        right_open=st.booleans(),
+        eps=st.floats(min_value=1e-6, max_value=1e-4),
+        ub=st.floats(min_value=-1.0, max_value=1.0),
+        lb=st.floats(min_value=-1.0, max_value=1.0),
+        **hu.gcs_cpu_only
+    )
+    def test_bounded_grad_proj(self, X, left_open, right_open, eps, ub, lb, gc, dc):
+        if ub - (eps if right_open else 0.) < lb + (eps if left_open else 0.):
+            return
+        param = core.BlobReference("X")
+        workspace.FeedBlob(param, X)
+        train_init_net, train_net = self.get_training_nets()
+        reg = regularizer.BoundedGradientProjection(
+            lb=lb, ub=ub, left_open=left_open, right_open=right_open, epsilon=eps
+        )
+        output = reg(train_net, train_init_net, param, by=RegularizationBy.ON_LOSS)
+        reg(
+            train_net,
+            train_init_net,
+            param,
+            grad=None,
+            by=RegularizationBy.AFTER_OPTIMIZER,
+        )
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+
+        def ref(X):
+            return np.clip(
+                X, lb + (eps if left_open else 0.), ub - (eps if right_open else 0.)
+            )
+
+        assert output is None
+        npt.assert_allclose(workspace.blobs[param], ref(X), atol=1e-7)

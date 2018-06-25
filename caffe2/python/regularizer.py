@@ -89,3 +89,100 @@ class ConstantNorm(Regularizer):
             raise NotImplementedError(
                 "ConstantNorm is not supported for dense parameters"
             )
+
+
+class LogBarrier(Regularizer):
+    """
+    Wright, S., & Nocedal, J. (1999). Numerical optimization. Springer Science,
+    35(67-68), 7. Chapter 19
+    """
+
+    def __init__(self, reg_lambda, discount_policy="inv", discount_options=None):
+        """
+        discount is a positive weight that is decreasing, and here it is implemented
+        similar to the learning rate. It is specified by a learning rate policy and
+        corresponding options
+        """
+        super(LogBarrier, self).__init__()
+        assert reg_lambda > 0, "factor ahead of regularization should be 0 or positive"
+        self.reg_lambda = reg_lambda
+        self.discount_policy = discount_policy
+        self.discount_options = discount_options or {"gamma": 1.0, "power": 1.0}
+
+    def _run_on_loss(self, net, param_init_net, param, grad=None):
+        iteration = utils.BuildUniqueMutexIter(param_init_net, net)
+        # Since we are most likely to do a minimization
+        discount = net.NextScopedBlob(param + "_log_barrier_discount")
+        net.LearningRate(
+            [iteration],
+            [discount],
+            base_lr=-self.reg_lambda,
+            policy=self.discount_policy,
+            **self.discount_options
+        )
+        # TODO(xlwang): param might still be negative at the initialization time or
+        # slighly negative due to the distributed training. Enforce it's non-negativity
+        # for now (at least above machine epsilon)
+        param_non_neg = net.NextScopedBlob(param + "_non_neg")
+        net.Clip([param], [param_non_neg], min=self.kEpsilon)
+        param_log = net.NextScopedBlob(param + "_log")
+        net.Log([param_non_neg], [param_log])
+        param_log_sum = net.NextScopedBlob(param + "_log_sum")
+        net.SumElements([param_log], [param_log_sum])
+        output_blob = net.NextScopedBlob(param + "_log_barrier")
+        net.Mul([param_log_sum, discount], [output_blob], broadcast=1)
+        return output_blob
+
+    def _run_after_optimizer(self, net, param_init_net, param, grad):
+        self._ensure_clipped(net, param, grad, min=0, open_range=True)
+
+
+class BoundedGradientProjection(Regularizer):
+    """
+    Wright, S., & Nocedal, J. (1999). Numerical optimization. Springer Science,
+    35(67-68), 7. Chapter 16
+    """
+
+    def __init__(
+        self, lb=None, ub=None, left_open=False, right_open=False, epsilon=None
+    ):
+        super(BoundedGradientProjection, self).__init__()
+        lb = float(lb) if lb is not None else None
+        ub = float(ub) if ub is not None else None
+        epsilon = float(epsilon) if epsilon is not None else self.kEpsilon
+        assert epsilon > 0, "Bounded Gradient Projection with invalid eps={eps}".format(
+            eps=epsilon
+        )
+        assert (
+            (lb is None)
+            or (ub is None)
+            or (
+                lb + (epsilon if left_open else 0.)
+                <= ub - (epsilon if right_open else 0.)
+            )
+        ), (
+            "Bounded Gradient Projection with invalid "
+            "{lp}ub={ub}, lb={lb}{rp}, eps={eps}".format(
+                lb=lb,
+                ub=ub,
+                lp="(" if left_open else "[",
+                rp=")" if right_open else "]",
+                eps=epsilon,
+            )
+        )
+        self.left_open = left_open
+        self.right_open = right_open
+        self.kEpsilon = epsilon
+        self.lb = lb
+        self.ub = ub
+
+    def _run_after_optimizer(self, net, param_init_net, param, grad):
+        self._ensure_clipped(
+            net,
+            param,
+            grad,
+            min=self.lb,
+            max=self.ub,
+            left_open=self.left_open,
+            right_open=self.right_open,
+        )
