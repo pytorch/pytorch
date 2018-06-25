@@ -251,6 +251,7 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/embedding.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/pooling.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
   )
@@ -352,19 +353,20 @@ if (TORCH_BUILD_TEST)
 
     add_executable(test_api
       ${TORCH_API_TEST_DIR}/any.cpp
-      ${TORCH_API_TEST_DIR}/modules.cpp
       ${TORCH_API_TEST_DIR}/cursor.cpp
       ${TORCH_API_TEST_DIR}/integration.cpp
       ${TORCH_API_TEST_DIR}/main.cpp
       ${TORCH_API_TEST_DIR}/misc.cpp
       ${TORCH_API_TEST_DIR}/module.cpp
+      ${TORCH_API_TEST_DIR}/modules.cpp
       ${TORCH_API_TEST_DIR}/optim.cpp
-      ${TORCH_API_TEST_DIR}/sequential.cpp
+      ${TORCH_API_TEST_DIR}/pooling.cpp
       ${TORCH_API_TEST_DIR}/rnn.cpp
+      ${TORCH_API_TEST_DIR}/sequential.cpp
       ${TORCH_API_TEST_DIR}/serialization.cpp
       ${TORCH_API_TEST_DIR}/static.cpp
-      ${TORCH_API_TEST_DIR}/tensor.cpp
       ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
+      ${TORCH_API_TEST_DIR}/tensor.cpp
       # Temporary until ATen tests are built with Caffe2
       ${TORCH_API_TEST_DIR}/tensor_options.cpp
       ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
