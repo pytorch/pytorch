@@ -80,7 +80,8 @@ except ImportError:
 from torch._C import *
 
 __all__ += [name for name in dir(_C)
-            if not name.endswith('Base')]
+            if name[0] != '_' and
+            not name.endswith('Base')]
 
 if platform.system() != 'Windows':
     sys.setdlopenflags(old_flags)
@@ -247,6 +248,10 @@ del manager_path
 
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
+
+private_methods_C = ["__and__", "__lshift__", "__or__", "__rshift__", "__xor__", "_abs", "_acos", "_addmv", "_addr", "_argmax", "_argmin", "_asin", "_atan", "_cast_Byte", "_cast_Char", "_cast_Double", "_cast_Float", "_cast_Half", "_cast_Int", "_cast_Long", "_cast_Short", "_cat", "_ceil", "_convolution", "_convolution_nogroup", "_cos", "_cosh", "_cudnn_init_dropout_state", "_cudnn_rnn", "_cudnn_rnn_flatten_weight", "_cufft_clear_plan_cache", "_cufft_get_plan_cache_max_size", "_cufft_get_plan_cache_size", "_cufft_set_plan_cache_max_size", "_dim_arange", "_dirichlet_grad", "_dot", "_erf", "_exp", "_expm1", "_fft_with_size", "_floor", "_ger", "_log", "_log10", "_log1p", "_log2", "_mm", "_mv", "_round", "_rsqrt", "_s_where", "_sin", "_sinh", "_sparse_coo_tensor_unsafe", "_sqrt", "_standard_gamma", "_standard_gamma_grad", "_tan", "_th_bernoulli", "_th_get_device", "_th_tanh", "_trilinear", "_trunc", "_unique"]
+for name in private_methods_C:
+    globals()[name] = getattr(_C, name)
 tensor = _C.tensor  # remove duplicate name, and fix to shortcut function
 
 ################################################################################
