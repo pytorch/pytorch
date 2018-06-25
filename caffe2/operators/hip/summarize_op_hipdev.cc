@@ -19,7 +19,7 @@
 #include <thrust/system/cuda/execution_policy.h>
 
 #include "caffe2/operators/summarize_op.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 
 namespace caffe2 {
 

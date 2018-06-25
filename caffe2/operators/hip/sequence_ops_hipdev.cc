@@ -16,7 +16,7 @@
 
 #include <cub/cub.cuh>
 #include "hip/hip_runtime.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/sequence_ops.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"

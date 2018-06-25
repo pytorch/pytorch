@@ -4,8 +4,8 @@
 #include <cub/block/block_load.cuh>
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
-#include "caffe2/core/common_hip.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/common_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/elementwise_op.h"
 #include "caffe2/utils/conversions.h"
 

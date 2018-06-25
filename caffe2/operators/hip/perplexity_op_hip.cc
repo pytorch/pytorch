@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/perplexity_op.h"
 #include "caffe2/utils/math.h"
 #include <thrust/device_vector.h>

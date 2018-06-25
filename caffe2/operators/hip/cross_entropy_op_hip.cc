@@ -17,7 +17,7 @@
 #include <assert.h>
 #include <cub/block/block_reduce.cuh>
 #include "hip/hip_runtime.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/cross_entropy_op.h"
 #include "caffe2/operators/operator_fallback_hip.h"
 

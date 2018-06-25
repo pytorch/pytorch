@@ -16,7 +16,7 @@
 
 #include <cub/block/block_reduce.cuh>
 #include "hip/hip_runtime.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/rmac_regions_op.h"
 
 namespace cub {

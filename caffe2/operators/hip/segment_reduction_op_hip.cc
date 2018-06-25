@@ -17,7 +17,7 @@
 #include <cub/block/block_reduce.cuh>
 #include <cub/device/device_reduce.cuh>
 #include <cub/device/device_scan.cuh>
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/math.h"
 #include "hip/hip_runtime.h"

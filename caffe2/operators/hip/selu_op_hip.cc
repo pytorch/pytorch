@@ -1,6 +1,6 @@
 #include "hip/hip_runtime.h"
-#include "caffe2/core/common_hip.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/common_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/selu_op.h"
 
 namespace caffe2 {

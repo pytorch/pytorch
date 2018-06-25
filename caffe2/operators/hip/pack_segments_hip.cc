@@ -1,6 +1,6 @@
 #include "hip/hip_runtime.h"
 #include <cub/cub.cuh>
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/pack_segments.h"
 
 namespace caffe2 {

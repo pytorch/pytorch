@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/prelu_op.h"
 #include "hip/hip_runtime.h"
 #include <cub/block/block_reduce.cuh>

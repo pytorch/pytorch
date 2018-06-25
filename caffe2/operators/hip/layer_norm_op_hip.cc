@@ -17,7 +17,7 @@
 #include "caffe2/operators/layer_norm_op.h"
 #include "hip/hip_runtime.h"
 #include <cub/cub.cuh>
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {

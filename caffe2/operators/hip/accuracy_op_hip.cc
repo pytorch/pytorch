@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/accuracy_op.h"
 #include "caffe2/utils/math.h"
 #include "hip/hip_runtime.h"

@@ -16,7 +16,7 @@
  */
 
 #include <cub/block/block_reduce.cuh>
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/tile_op.h"
 
 namespace caffe2 {

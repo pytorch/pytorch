@@ -15,7 +15,7 @@
  */
 
 #include <cub/block/block_reduce.cuh>
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/reduction_front_back_ops.h"
 #include "hip/hip_runtime.h"
 
