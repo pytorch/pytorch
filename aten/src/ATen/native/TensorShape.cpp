@@ -112,6 +112,14 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
+Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
+  return self.as_strided(size, stride, self.storage_offset());
+}
+
+Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
+  return self.as_strided_(size, stride, self.storage_offset());
+}
+
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
@@ -125,7 +133,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 #endif
     AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   }
-  return at::native::slice(self, dim, start, start + length, 1);
+  return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor permute(const Tensor& self, IntList dims) {
