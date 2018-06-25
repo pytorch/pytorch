@@ -3,6 +3,7 @@
 #define CAFFE2_IMAGE_IMAGE_INPUT_OP_H_
 
 #include <opencv2/opencv.hpp>
+#include <opencv2/highgui/highgui_c.h>
 
 #include <iostream>
 #include <algorithm>
