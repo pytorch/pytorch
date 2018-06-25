@@ -255,6 +255,8 @@ endfunction(print_target_properties)
 
 ###
 # Helper function to add style warning options to the given target
+# Optionally pass in the second argument ($ARGV1) which will force -Werror if
+# it evaluates to true.
 function(target_enable_style_warnings TARGET)
   if(MSVC)
     # TODO Also add some warning options that MSVC can understand
@@ -280,11 +282,24 @@ function(target_enable_style_warnings TARGET)
             -fdiagnostics-show-option
             -Wconversion
             -Wpedantic
-            -Wno-gnu-zero-variadic-macro-arguments
             -Wundef
             )
-    if ($ENV{WERROR})
-      set(WARNING_OPTIONS "${WARNING_OPTIONS} -Werror")
+    # -Wno-gnu-zero-variadic-macro-arguments is not available in GCC-4.8.5. Set
+    # only when using clang.
+    # Compared against https://gcc.gnu.org/onlinedocs/gcc-4.8.5/gcc/Option-Summary.html
+    if ("${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
+      list(APPEND WARNING_OPTIONS "-Wno-gnu-zero-variadic-macro-arguments")
+    endif()
+    set(WERROR $ENV{WERROR})
+    if (${ARGC} GREATER 1)
+      # accessing ${ARGV1} is UB when ${ARGC} <= 1
+      # CMake doesn't do smart AND, so we have to use a nested `if`
+      if (${ARGV1})
+        set(WERROR TRUE)
+      endif()
+    endif()
+    if (WERROR)
+      list(APPEND WARNING_OPTIONS "-Werror")
     endif()
   endif()
   target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
