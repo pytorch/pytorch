@@ -7681,6 +7681,18 @@ add_test(NewModuleTest(
     check_gradgrad=False,))
 
 
+class _AdaptiveLogSoftmaxWithLoss(nn.AdaptiveLogSoftmaxWithLoss):
+    def __call__(self, input):
+        t = torch.tensor([0, 1, 4, 8]).to(input.device)
+        return nn.AdaptiveLogSoftmaxWithLoss.__call__(self, input, t).output
+
+
+add_test(NewModuleTest(
+    constructor=lambda: _AdaptiveLogSoftmaxWithLoss(16, 10, [2, 6]),
+    input_size=(4, 16),
+    fullname='AdaptiveLogSoftmax'))
+
+
 num_shards = os.environ.get('TEST_NN_NUM_SHARDS', None)
 shard = os.environ.get('TEST_NN_SHARD', None)
 if num_shards is not None and shard is not None:
