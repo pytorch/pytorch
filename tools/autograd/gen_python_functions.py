@@ -186,7 +186,7 @@ def gen_py_torch_functions(out, declarations, template_path):
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
-    env = create_python_bindings(py_torch_functions, has_self=False)
+    env = create_python_bindings(py_torch_functions, has_self=False, is_module=True)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
     write(out, 'python_torch_functions_dispatch.h', PY_TORCH_DISPATCH_H, env)
 
