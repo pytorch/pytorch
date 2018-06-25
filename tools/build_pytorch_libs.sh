@@ -202,11 +202,6 @@ function path_remove {
 }
 
 function build_nccl() {
-  # FIXME: sccache doesn't work when building NCCL
-  path_remove /opt/cache/bin
-  export CUDA_NVCC_EXECUTABLE_SAVED=$CUDA_NVCC_EXECUTABLE
-  export CUDA_NVCC_EXECUTABLE=$(which nvcc)
-
   mkdir -p build/nccl
   pushd build/nccl
   ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
@@ -216,20 +211,15 @@ function build_nccl() {
               -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
-              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake"
-  ${CMAKE_INSTALL}
+              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
+              -DNUM_JOBS="$NUM_JOBS"
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
     ln -s "${INSTALL_DIR}/lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so"
   fi
   popd
-
-  # FIXME: sccache doesn't work when building NCCL
-  if [ -n "$CUDA_NVCC_EXECUTABLE_SAVED" ]; then
-    export CUDA_NVCC_EXECUTABLE=$CUDA_NVCC_EXECUTABLE_SAVED
-  fi
-  export PATH=/opt/cache/bin:$PATH
 }
 
 # purposefully not using build() because we need Caffe2 to build the same
