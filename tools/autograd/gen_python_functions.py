@@ -4,6 +4,7 @@
 # torch._C._nn object.
 #
 from collections import defaultdict
+import sys
 import re
 from .nested_dict import nested_dict
 from .gen_variable_type import should_trace
@@ -14,6 +15,8 @@ try:
 except ImportError:
     from tools.shared.module_loader import import_module
     CodeTemplate = import_module('code_template', 'aten/src/ATen/code_template.py').CodeTemplate
+
+PY2 = sys.version_info[0] == 2
 
 # These functions require manual Python bindings or are not exposed to Python
 SKIP_PYTHON_BINDINGS = [
@@ -186,7 +189,10 @@ def gen_py_torch_functions(out, declarations, template_path):
 
     py_torch_functions = group_declarations_by_name(declarations, should_bind)
 
-    env = create_python_bindings(py_torch_functions, has_self=False, is_module=True)
+    if PY2:
+        env = create_python_bindings(py_torch_functions, has_self=False)
+    else:
+        env = create_python_bindings(py_torch_functions, has_self=False, is_module=True)
     write(out, 'python_torch_functions.cpp', PY_TORCH_FUNCTIONS_CPP, env)
     write(out, 'python_torch_functions_dispatch.h', PY_TORCH_DISPATCH_H, env)
 

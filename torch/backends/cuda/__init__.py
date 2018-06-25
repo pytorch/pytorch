@@ -1,5 +1,5 @@
 import sys
-import torch._C
+import torch
 
 
 class ContextProp(object):
@@ -17,11 +17,11 @@ class ContextProp(object):
 
 
 class cuFFTPlanCache(object):
-    size = ContextProp(torch._C._cufft_get_plan_cache_size,
+    size = ContextProp(torch._cufft_get_plan_cache_size,
                        'cufft_plan_cache.size is a read-only property showing the current cache. '
                        'To set the cache capacity, use cufft_plan_cache.max_size.')
-    max_size = ContextProp(torch._C._cufft_get_plan_cache_max_size, torch._C._cufft_set_plan_cache_max_size)
-    clear = torch._C._cufft_clear_plan_cache
+    max_size = ContextProp(torch._cufft_get_plan_cache_max_size, torch._cufft_set_plan_cache_max_size)
+    clear = torch._cufft_clear_plan_cache
 
 
 class CUDAModule(object):
