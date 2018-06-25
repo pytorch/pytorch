@@ -137,4 +137,4 @@ public:
 #define MACRO_CONCAT( x, y ) CONCAT_IMPL( x, y )
 // NB: Semicolon after applying this macro is MANDATORY
 #define C10_REGISTER_KERNEL(OpSchemaDef)                                                           \
-  static KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<OpSchemaDef, false, false>()
+  static KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<OpSchemaDef, 0>()

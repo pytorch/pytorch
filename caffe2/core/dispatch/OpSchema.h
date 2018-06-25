@@ -219,7 +219,7 @@ template<class OpSchemaDef>
 class OpMetadataSchema final {
 private:
     static_assert(has_name_defined<OpSchemaDef>::value, "The operator schema has to define a 'static constexpr const char* name = ...' member to specify the operator name.");
-    static_assert(std::is_same<const char*, decltype(OpSchemaDef::name)>::value, "The 'name' member of the operator schema must have type 'static constexpr const char*'");
+    static_assert(std::is_same<const char* const, decltype(OpSchemaDef::name)>::value, "The 'name' member of the operator schema must have type 'static constexpr const char*'");
 
 public:
     static constexpr const char* name() {
