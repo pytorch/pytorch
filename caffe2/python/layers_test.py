@@ -1826,7 +1826,7 @@ class TestLayers(LayersTestCase):
         result = workspace.FetchBlob(result())
         if not feed_weight:
             weights = 1. / num
-        expected = np.sum(weights * data + np.log(1. / 2. / weights))
+        expected = np.sum(weights * data + 0.5 * np.log(1. / 2. / weights))
         npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
 
     @given(num=st.integers(min_value=10, max_value=100), **hu.gcs)
