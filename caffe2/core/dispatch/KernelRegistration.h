@@ -81,10 +81,13 @@ private:
  * @tparam hasKernel Boolean for compile-time checking that a kernel is specified before finalizing the builder
  * @tparam hasDispatchKey Boolean for compile-time checking thhat a dispatch key is specified before finalizing the builder
  */
-template<class OpSchemaDef, bool hasKernel, bool hasDispatchKey>
+template<class OpSchemaDef, uint64_t FieldsPresentFlags>
 class KernelRegistrationBuilder final {
 private:
   using Schema = OpSchema<OpSchemaDef>;
+
+  static constexpr uint64_t KERNEL_PRESENT = 0x01 << 0;
+  static constexpr uint64_t DISPATCH_KEY_PRESENT = 0x01 << 1;
 
   optional<typename Schema::signature::func_type*> kernel_;
   optional<typename Schema::dispatch::dispatch_key_type> dispatch_key_;
@@ -101,8 +104,8 @@ public:
    * @return Produced KernelRegistrar
    */
   constexpr operator KernelRegistrar<OpSchemaDef>() && {
-    static_assert(hasKernel, "Forgot to call .kernel() in kernel registration");
-    static_assert(hasDispatchKey, "Forgot to call .dispatchKey() in kernel registration");
+    static_assert(FieldsPresentFlags & KERNEL_PRESENT, "Forgot to call .kernel() in kernel registration");
+    static_assert(FieldsPresentFlags & DISPATCH_KEY_PRESENT, "Forgot to call .dispatchKey() in kernel registration");
     return KernelRegistrar<OpSchemaDef>(std::move(*kernel_), std::move(*dispatch_key_));
   }
 
@@ -111,9 +114,9 @@ public:
    * @param kernel concrete function implementation to be registered
    * @return "this" for method chaining
    */
-  constexpr KernelRegistrationBuilder<OpSchemaDef, true, hasDispatchKey> kernel(typename Schema::signature::func_type* kernel_func) && {
-    static_assert(!hasKernel, "Tried to define kernel twice in same op registration");
-    return KernelRegistrationBuilder<OpSchemaDef, true, hasDispatchKey>(*kernel_func, std::move(dispatch_key_));
+  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT> kernel(typename Schema::signature::func_type* kernel_func) && {
+    static_assert(!(FieldsPresentFlags & KERNEL_PRESENT), "Tried to define kernel twice in same op registration");
+    return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | KERNEL_PRESENT>(*kernel_func, std::move(dispatch_key_));
   }
 
   /**
@@ -121,9 +124,9 @@ public:
    * @param dispatch_key dispatch key to register the function to
    * @return "this" for method chaining
    */
-  constexpr KernelRegistrationBuilder<OpSchemaDef, hasKernel, true> dispatchKey(typename Schema::dispatch::dispatch_key_type dispatch_key) && {
-    static_assert(!hasDispatchKey, "Tried to define kernel twice in same op registration");
-    return KernelRegistrationBuilder<OpSchemaDef, hasKernel, true>(std::move(kernel_), std::move(dispatch_key));
+  constexpr KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | DISPATCH_KEY_PRESENT> dispatchKey(typename Schema::dispatch::dispatch_key_type dispatch_key) && {
+    static_assert(!(FieldsPresentFlags & DISPATCH_KEY_PRESENT), "Tried to define kernel twice in same op registration");
+    return KernelRegistrationBuilder<OpSchemaDef, FieldsPresentFlags | DISPATCH_KEY_PRESENT>(std::move(kernel_), std::move(dispatch_key));
   }
 };
 

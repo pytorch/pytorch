@@ -136,7 +136,7 @@ private:
     void* found = kernels_.lookup(dispatch_key);
     if (found == nullptr) {
       // TODO Better error message - include op name and dispatch key (i.e. argument types)
-      throw std::logic_error("Didn't find kernel to dispatch to");
+      throw std::logic_error("Didn't find kernel to dispatch to for operator '" + Schema::metadata::name + "'");
     }
     return reinterpret_cast<typename Schema::signature::func_type*>(found);
   }
