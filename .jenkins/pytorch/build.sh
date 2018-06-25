@@ -5,7 +5,7 @@ if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
 fi
 
 # TODO: move this to Docker
-# TODO: add both NCCL and MPI in CI test by fixing these test first 
+# TODO: add both NCCL and MPI in CI test by fixing these test first
 # sudo apt-get update
 # sudo apt-get install libnccl-dev libnccl2
 # sudo apt-get install openmpi-bin libopenmpi-dev
@@ -22,6 +22,9 @@ python --version
 
 echo "GCC version:"
 gcc --version
+
+echo "CMake version:"
+cmake --version
 
 # TODO: Don't run this...
 pip install -r requirements.txt || true
