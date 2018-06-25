@@ -608,9 +608,6 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     caffe2::Argument arg_trans_b;
     arg_trans_b.set_name("trans_b");
     arg_trans_b.set_i(trans_b);
-    caffe2::Argument arg_broadcast;
-    arg_broadcast.set_name("broadcast");
-    arg_broadcast.set_i(broadcast);
 
     auto* c2_op = ret.ops.Add();
     BuildOperator(
@@ -619,6 +616,9 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     if (opset_version > 6) {
       BuildOperator(c2_op, "Add", {ab, input_c}, {output});
     } else {
+      caffe2::Argument arg_broadcast;
+      arg_broadcast.set_name("broadcast");
+      arg_broadcast.set_i(broadcast);
       BuildOperator(c2_op, "Add", {ab, input_c}, {output}, {arg_broadcast});
     }
   }

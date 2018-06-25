@@ -225,6 +225,13 @@ OnnxExporter::get_special_operators() const {
           {"Sub", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Mul", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Div", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Pow", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"And", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Or", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Xor", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Equal", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Greater", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Less", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Cast", &OnnxExporter::CreateCastNodes},
           {"Conv", &OnnxExporter::CreateConvPoolNodes},
           {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
@@ -346,48 +353,53 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
 ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
-  int64_t end_dim = 0;
-  const auto& x = def.input(0);
-  const auto& y = def.input(1);
-  const auto& z = def.output(0);
+  // The upper bound (excluded) of expanded y.
+  // 0 indicates that no need to unsqueeze y, otherwise, we have to do the unsqueeze.
+  caffe2::OperatorDef mdef(def);  // The modified def without broadcast and axis
+  const auto& x = mdef.input(0);
+  const auto& y = def.input(1);  // Refer to the old def, later won't change it.
+  const auto& z = mdef.output(0);
   const auto& x_shape = shapes.at(x);
   const auto& y_shape = shapes.at(y);
-  const auto& z_shape = shapes.at(z);
-  for (const auto& arg: def.arg()) {
+  for (int i = 0; i < mdef.arg_size(); ++i) {
+    const auto& arg = mdef.arg(i);
+    if (arg.name() == "broadcast") {
+      if (i < mdef.arg_size() - 1) {
+        mdef.mutable_arg()->SwapElements(i, mdef.arg_size() - 1);
+      }
+      mdef.mutable_arg()->RemoveLast();
+      break;
+    }
+  }
+  std::vector<int64_t> axes;
+  for (int i = 0; i < mdef.arg_size(); ++i) {
+    const auto& arg = mdef.arg(i);
     if (arg.name() == "axis") {
       int64_t axis = arg.i();
       if (x_shape.dims().size() - axis != y_shape.dims().size()) {
-        end_dim = y_shape.dims().size() - 1 - axis + x_shape.dims().size();
+        int64_t end_dim = y_shape.dims().size() - 1 - axis + x_shape.dims().size();
+        for (int64_t j = y_shape.dims().size(); j < end_dim; ++j) {
+          axes.emplace_back(j);
+        }
+        mdef.set_input(1, dummy_->NewDummyName());
       }
+      if (i < mdef.arg_size() - 1) {
+        mdef.mutable_arg()->SwapElements(i, mdef.arg_size() - 1);
+      }
+      mdef.mutable_arg()->RemoveLast();
       break;
     }
   }
 
-  if (end_dim > 0) {
-    ConvertedResult result;
-    auto& nodes = result.first;
-
-    std::vector<int64_t> unsqueezed_dims(y_shape.dims().begin(), y_shape.dims().end());
-    std::vector<int64_t> axes;
-    for (int64_t i = y_shape.dims().size(); i < end_dim; ++i) {
-      axes.emplace_back(i);
-      unsqueezed_dims.emplace_back(1);
-    }
-    const auto unsqueeze_output = dummy_->NewDummyName();
-    nodes.emplace_back(MakeNode(
+  auto result = CommonCaffe2OpToOnnxNodes(mdef);
+  if (axes.size() != 0) {
+    result.first.insert(result.first.begin(), MakeNode(
           "Unsqueeze",
           {y},
-          {unsqueeze_output},
+          {mdef.input(1)},
           {MakeAttribute("axes", axes)}));
-    nodes.emplace_back(MakeNode(
-          caffe2::get_default(get_renamed_operators(), def.type(), def.type()),
-          {x, unsqueeze_output},
-          {z}));
-    nodes.back().set_name(def.name());
-    return result;
-  } else {
-    return CommonCaffe2OpToOnnxNodes(def);
   }
+  return result;
 }
 
 ConvertedResult OnnxExporter::CreateCastNodes(
