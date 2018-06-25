@@ -22,12 +22,12 @@ class LinearImpl : public torch::nn::Cloneable<LinearImpl> {
   explicit LinearImpl(LinearOptions options);
 
   void reset() override;
-  std::vector<Variable> forward(std::vector<Variable>);
+  std::vector<Tensor> forward(std::vector<Tensor>);
   const LinearOptions& options() const noexcept;
 
  private:
-  Variable weight_;
-  Variable bias_;
+  Tensor weight_;
+  Tensor bias_;
   LinearOptions options_;
 };
 

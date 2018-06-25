@@ -14,13 +14,13 @@ namespace nn {
 // Sequential.
 class FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
  public:
-  using Function = std::function<std::vector<Variable>(std::vector<Variable>)>;
+  using Function = std::function<std::vector<Tensor>(std::vector<Tensor>)>;
 
   explicit FunctionalImpl(Function function);
-  explicit FunctionalImpl(std::function<Variable(Variable)> function);
+  explicit FunctionalImpl(std::function<Tensor(Tensor)> function);
 
   void reset() override;
-  std::vector<Variable> forward(std::vector<Variable> input);
+  std::vector<Tensor> forward(std::vector<Tensor> input);
 
  private:
   Function function_;

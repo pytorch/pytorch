@@ -1,20 +1,19 @@
 #include <catch.hpp>
 
-#include <torch/functions.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/tensor.h>
 
+#include <memory>
 #include <vector>
 
-using namespace torch;
 using namespace torch::nn;
 
 using Catch::StartsWith;
 
 TEST_CASE("sequential") {
   SECTION("construction from shared pointer") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       explicit M(int value_) : value(value_) {}
       int value;
       int forward() {
@@ -26,7 +25,7 @@ TEST_CASE("sequential") {
     REQUIRE(sequential.size() == 3);
   }
   SECTION("construction from concrete type") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       explicit M(int value_) : value(value_) {}
       int value;
       int forward() {
@@ -38,7 +37,7 @@ TEST_CASE("sequential") {
     REQUIRE(sequential.size() == 3);
   }
   SECTION("construction from module holders") {
-    struct MImpl : nn::Module {
+    struct MImpl : torch::nn::Module {
       explicit MImpl(int value_) : value(value_) {}
       int forward() {
         return value;
@@ -55,7 +54,7 @@ TEST_CASE("sequential") {
     REQUIRE(sequential.size() == 3);
   }
   SECTION("push_back") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       explicit M(int value_) : value(value_) {}
       int forward() {
         return value;
@@ -73,7 +72,7 @@ TEST_CASE("sequential") {
     REQUIRE(sequential.size() == 3);
   }
   SECTION("access") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       explicit M(int value_) : value(value_) {}
       int forward() {
         return value;
@@ -132,7 +131,7 @@ TEST_CASE("sequential") {
     }
 
     SECTION("calling forward() on a non-empty sequential chains correctly") {
-      struct MockModule : nn::Module {
+      struct MockModule : torch::nn::Module {
         explicit MockModule(int value) : expected(value) {}
         int expected;
         int forward(int value) {
@@ -147,7 +146,7 @@ TEST_CASE("sequential") {
     }
 
     SECTION("calling forward() with the wrong return type throws") {
-      struct M : public nn::Module {
+      struct M : public torch::nn::Module {
         int forward() {
           return 5;
         }
@@ -161,9 +160,9 @@ TEST_CASE("sequential") {
                      "is int, but you asked for type float"));
     }
 
-    SECTION("The return type of forward() defaults to Variable") {
-      struct M : public nn::Module {
-        autograd::Variable forward(autograd::Variable v) {
+    SECTION("The return type of forward() defaults to Tensor") {
+      struct M : public torch::nn::Module {
+        torch::Tensor forward(torch::Tensor v) {
           return v;
         }
       };
@@ -178,8 +177,10 @@ TEST_CASE("sequential") {
     Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
 
     auto x = torch::randn({1000, 10}, at::requires_grad());
-    auto y = sequential.forward<std::vector<Variable>>(std::vector<Variable>{x})
-                 .front();
+    auto y =
+        sequential
+            .forward<std::vector<torch::Tensor>>(std::vector<torch::Tensor>{x})
+            .front();
     REQUIRE(y.ndimension() == 2);
     REQUIRE(y.size(0) == 1000);
     REQUIRE(y.size(1) == 100);

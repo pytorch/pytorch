@@ -12,7 +12,7 @@ namespace torch {
 // for experimental implementations
 class SimpleContainer : public nn::Cloneable<SimpleContainer> {
  public:
-  virtual std::vector<Variable> forward(std::vector<Variable>) {
+  virtual std::vector<Tensor> forward(std::vector<Tensor>) {
     throw std::runtime_error(
         "SimpleContainer has no forward, maybe you"
         " wanted to subclass and override this function?");
@@ -36,7 +36,7 @@ struct SigmoidLinear : nn::Module {
   explicit SigmoidLinear(nn::Linear linear_) : linear(std::move(linear_)) {
     register_module("linear", linear);
   }
-  Variable forward(Variable input) {
+  Tensor forward(Tensor input) {
     return linear->forward({input}).front().sigmoid();
   }
   nn::Linear linear;
