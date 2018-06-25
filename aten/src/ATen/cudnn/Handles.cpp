@@ -15,7 +15,7 @@ namespace {
 struct Handle {
   cudnnHandle_t handle;
   Handle() : handle(NULL) {
-    CUDNN_CHECK(cudnnCreate(&handle));
+    AT_CUDNN_CHECK(cudnnCreate(&handle));
   }
   ~Handle() {
     if (handle) {
@@ -42,7 +42,7 @@ std::unordered_map<int, Handle> handles;
 cudnnHandle_t getCudnnHandle()
 {
   int device;
-  CUDA_CHECK(cudaGetDevice(&device));
+  AT_CUDA_CHECK(cudaGetDevice(&device));
 
   std::lock_guard<std::mutex> guard(mutex);
   return handles[device].handle;
