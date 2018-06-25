@@ -186,7 +186,6 @@ from ._tensor_str import set_printoptions
 from .tensor import Tensor
 from .storage import _StorageBase
 
-tensor = _C.tensor  # remove duplicate name, and fix to shortcut function
 
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
     pass
@@ -249,6 +248,7 @@ del manager_path
 
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
+tensor = _C.tensor  # remove duplicate name, and fix to shortcut function
 
 ################################################################################
 # Import interface functions defined in Python
