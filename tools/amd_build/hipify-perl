@@ -437,7 +437,6 @@ while (@ARGV) {
         $ft{'other'} += s/\bCAFFE_CUDA_NUM_THREADS\b/CAFFE_HIP_NUM_THREADS/g;
         $ft{'other'} += s/\bHasCudaGPU\b/HasHipGPU/g;
         $ft{'math_func'} += s/\b__expf\b/expf/g;
-        $ft{'math_func'} += s/\babs\b/fabsf/g;
         $countKeywords += m/__global__/;
         $countKeywords += m/__shared__/;
 
