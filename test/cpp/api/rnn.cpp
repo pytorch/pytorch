@@ -22,9 +22,9 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     auto T = x.size(0);
     auto B = x.size(1);
     x = x.view({T * B, 1});
-    x = l1->forward({x})[0].view({T, B, nhid}).tanh_();
-    x = rnn->forward({x})[0][T - 1];
-    x = lo->forward({x})[0];
+    x = l1->forward(x).view({T, B, nhid}).tanh_();
+    x = rnn->forward(x).output[T - 1];
+    x = lo->forward(x);
     return x;
   };
 
@@ -61,26 +61,23 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   return true;
 };
 
-void check_lstm_sizes(std::vector<torch::Tensor> tup) {
+void check_lstm_sizes(RNNOutput output) {
   // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
   // 10 and 16 time steps (10 x 16 x n)
 
-  auto out = tup[0];
-  auto hids = tup[1];
+  REQUIRE(output.output.ndimension() == 3);
+  REQUIRE(output.output.size(0) == 10);
+  REQUIRE(output.output.size(1) == 16);
+  REQUIRE(output.output.size(2) == 64);
 
-  REQUIRE(out.ndimension() == 3);
-  REQUIRE(out.size(0) == 10);
-  REQUIRE(out.size(1) == 16);
-  REQUIRE(out.size(2) == 64);
-
-  REQUIRE(hids.ndimension() == 4);
-  REQUIRE(hids.size(0) == 2); // (hx, cx)
-  REQUIRE(hids.size(1) == 3); // layers
-  REQUIRE(hids.size(2) == 16); // Batchsize
-  REQUIRE(hids.size(3) == 64); // 64 hidden dims
+  REQUIRE(output.state.ndimension() == 4);
+  REQUIRE(output.state.size(0) == 2); // (hx, cx)
+  REQUIRE(output.state.size(1) == 3); // layers
+  REQUIRE(output.state.size(2) == 16); // Batchsize
+  REQUIRE(output.state.size(3) == 64); // 64 hidden dims
 
   // Something is in the hiddens
-  REQUIRE(hids.norm().toCFloat() > 0);
+  REQUIRE(output.state.norm().toCFloat() > 0);
 }
 
 TEST_CASE("rnn") {
@@ -88,17 +85,17 @@ TEST_CASE("rnn") {
     SECTION("sizes") {
       LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
       auto x = torch::randn({10, 16, 128}, at::requires_grad());
-      auto tup = model->forward({x});
+      auto output = model->forward(x);
       auto y = x.mean();
 
       y.backward();
-      check_lstm_sizes(tup);
+      check_lstm_sizes(output);
 
-      auto next = model->forward({x, tup[1]});
+      auto next = model->forward(x, output.state);
 
       check_lstm_sizes(next);
 
-      torch::Tensor diff = next[1] - tup[1];
+      torch::Tensor diff = next.state - output.state;
 
       // Hiddens changed
       REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
@@ -122,13 +119,13 @@ TEST_CASE("rnn") {
         p[i] = (size - i) / size;
       }
 
-      auto out = model->forward({x});
-      REQUIRE(out[0].ndimension() == 3);
-      REQUIRE(out[0].size(0) == 3);
-      REQUIRE(out[0].size(1) == 4);
-      REQUIRE(out[0].size(2) == 2);
+      auto out = model->forward(x);
+      REQUIRE(out.output.ndimension() == 3);
+      REQUIRE(out.output.size(0) == 3);
+      REQUIRE(out.output.size(1) == 4);
+      REQUIRE(out.output.size(2) == 2);
 
-      auto flat = out[0].data().view(3 * 4 * 2);
+      auto flat = out.output.data().view(3 * 4 * 2);
       float c_out[] = {0.4391, 0.5402, 0.4330, 0.5324, 0.4261, 0.5239,
                        0.4183, 0.5147, 0.6822, 0.8064, 0.6726, 0.7968,
                        0.6620, 0.7860, 0.6501, 0.7741, 0.7889, 0.9003,
@@ -137,12 +134,12 @@ TEST_CASE("rnn") {
         REQUIRE(std::abs(flat[i].toCFloat() - c_out[i]) < 1e-3);
       }
 
-      REQUIRE(out[1].ndimension() == 4); // (hx, cx) x layers x B x 2
-      REQUIRE(out[1].size(0) == 2);
-      REQUIRE(out[1].size(1) == 1);
-      REQUIRE(out[1].size(2) == 4);
-      REQUIRE(out[1].size(3) == 2);
-      flat = out[1].data().view(16);
+      REQUIRE(out.state.ndimension() == 4); // (hx, cx) x layers x B x 2
+      REQUIRE(out.state.size(0) == 2);
+      REQUIRE(out.state.size(1) == 1);
+      REQUIRE(out.state.size(2) == 4);
+      REQUIRE(out.state.size(3) == 2);
+      flat = out.state.data().view(16);
       float h_out[] = {0.7889,
                        0.9003,
                        0.7769,
@@ -192,17 +189,17 @@ TEST_CASE("rnn_cuda", "[cuda]") {
     LSTM model(LSTMOptions(128, 64).layers(3).dropout(0.2));
     model->cuda();
     auto x = torch::randn({10, 16, 128}, at::requires_grad().device(at::kCUDA));
-    auto tup = model->forward({x});
+    auto output = model->forward(x);
     auto y = x.mean();
 
     y.backward();
-    check_lstm_sizes(tup);
+    check_lstm_sizes(output);
 
-    auto next = model->forward({x, tup[1]});
+    auto next = model->forward(x, output.state);
 
     check_lstm_sizes(next);
 
-    torch::Tensor diff = next[1] - tup[1];
+    torch::Tensor diff = next.state - output.state;
 
     // Hiddens changed
     REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);

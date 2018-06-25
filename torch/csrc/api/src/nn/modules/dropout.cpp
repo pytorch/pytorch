@@ -21,19 +21,16 @@ template <typename Derived>
 void DropoutImplBase<Derived>::reset() {}
 
 template <typename Derived>
-std::vector<Tensor> DropoutImplBase<Derived>::forward(
-    std::vector<Tensor> input) {
+Tensor DropoutImplBase<Derived>::forward(Tensor input) {
   if (options_.rate_ == 0 || !this->is_training()) {
     return input;
   }
-  std::vector<Tensor> output;
-  for (const auto& value : input) {
-    const auto noise = (noise_mask(value).uniform_(0, 1) > options_.rate_)
-                           .toType(value.type().scalarType())
-                           .mul_(1.0f / (1.0f - options_.rate_));
-    output.push_back(value * noise);
-  }
-  return output;
+
+  auto scale = 1.0f / (1.0f - options_.rate_);
+  auto boolean_mask = noise_mask(input).uniform_(0, 1) > options_.rate_;
+  auto noise = boolean_mask.to(input.dtype()).mul_(scale);
+
+  return input * noise;
 }
 
 template <typename Derived>

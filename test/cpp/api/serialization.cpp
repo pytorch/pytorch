@@ -244,7 +244,7 @@ TEST_CASE("serialization") {
 
     auto step = [&](torch::optim::Optimizer& optimizer, Linear model) {
       optimizer.zero_grad();
-      auto y = model->forward({x})[0].sum();
+      auto y = model->forward(x).sum();
       y.backward();
       optimizer.step();
     };

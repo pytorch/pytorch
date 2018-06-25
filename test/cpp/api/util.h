@@ -1,5 +1,6 @@
 #include <torch/nn/module.h>
 #include <torch/nn/modules/linear.h>
+#include <torch/tensor.h>
 
 #include <memory>
 #include <stdexcept>
@@ -12,12 +13,6 @@ namespace torch {
 // for experimental implementations
 class SimpleContainer : public nn::Cloneable<SimpleContainer> {
  public:
-  virtual std::vector<Tensor> forward(std::vector<Tensor>) {
-    throw std::runtime_error(
-        "SimpleContainer has no forward, maybe you"
-        " wanted to subclass and override this function?");
-  }
-
   void reset() override {}
 
   template <typename ModuleHolder>
@@ -37,7 +32,7 @@ struct SigmoidLinear : nn::Module {
     register_module("linear", linear);
   }
   Tensor forward(Tensor input) {
-    return linear->forward({input}).front().sigmoid();
+    return linear->forward(input).sigmoid();
   }
   nn::Linear linear;
 };

@@ -5,7 +5,6 @@
 #include <torch/tensor.h>
 
 #include <functional>
-#include <vector>
 
 namespace torch {
 namespace nn {
@@ -14,16 +13,13 @@ namespace nn {
 // Sequential.
 class FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
  public:
-  using Function = std::function<std::vector<Tensor>(std::vector<Tensor>)>;
-
-  explicit FunctionalImpl(Function function);
   explicit FunctionalImpl(std::function<Tensor(Tensor)> function);
 
   void reset() override;
-  std::vector<Tensor> forward(std::vector<Tensor> input);
+  Tensor forward(Tensor input);
 
  private:
-  Function function_;
+  std::function<Tensor(Tensor)> function_;
 };
 
 TORCH_MODULE(Functional);

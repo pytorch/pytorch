@@ -43,13 +43,13 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
   ConvOptions<D> options_;
 };
 
-#define CONV_D(D)                                               \
-  class Conv##D##dImpl : public ConvImpl<D, Conv##D##dImpl> {   \
-   public:                                                      \
-    using ConvImpl<D, Conv##D##dImpl>::ConvImpl;                \
-    std::vector<Tensor> forward(std::vector<Tensor> input); \
-  };                                                            \
-  using Conv##D##dOptions = ConvOptions<D>;                     \
+#define CONV_D(D)                                             \
+  class Conv##D##dImpl : public ConvImpl<D, Conv##D##dImpl> { \
+   public:                                                    \
+    using ConvImpl<D, Conv##D##dImpl>::ConvImpl;              \
+    Tensor forward(Tensor input);                             \
+  };                                                          \
+  using Conv##D##dOptions = ConvOptions<D>;                   \
   TORCH_MODULE(Conv##D##d)
 
 CONV_D(1);
