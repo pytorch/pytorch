@@ -1,10 +1,7 @@
 #include <torch/nn/modules/conv.h>
 
 #include <torch/expanding_array.h>
-#include <torch/functions.h>
 #include <torch/tensor.h>
-
-#include <ATen/ATen.h>
 
 #include <cmath>
 #include <cstdint>
@@ -73,7 +70,7 @@ const ConvOptions<D>& ConvImpl<D, Derived>::options() const noexcept {
   return options_;
 }
 
-std::vector<Variable> Conv1dImpl::forward(std::vector<Variable> input) {
+std::vector<Tensor> Conv1dImpl::forward(std::vector<Tensor> input) {
   AT_ASSERT(input.front().ndimension() == 3);
 
   if (options_.transposed_) {
@@ -97,7 +94,7 @@ std::vector<Variable> Conv1dImpl::forward(std::vector<Variable> input) {
       options_.groups_)};
 }
 
-std::vector<Variable> Conv2dImpl::forward(std::vector<Variable> input) {
+std::vector<Tensor> Conv2dImpl::forward(std::vector<Tensor> input) {
   AT_ASSERT(input.front().ndimension() == 4);
 
   if (options_.transposed_) {
@@ -121,7 +118,7 @@ std::vector<Variable> Conv2dImpl::forward(std::vector<Variable> input) {
       options_.groups_)};
 }
 
-std::vector<Variable> Conv3dImpl::forward(std::vector<Variable> input) {
+std::vector<Tensor> Conv3dImpl::forward(std::vector<Tensor> input) {
   AT_ASSERT(input.front().ndimension() == 5);
 
   if (options_.transposed_) {

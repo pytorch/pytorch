@@ -109,11 +109,11 @@ class Module {
   }
 
  protected:
-  Variable& register_parameter(
+  Tensor& register_parameter(
       std::string name,
-      Variable tensor,
+      Tensor tensor,
       bool requires_grad = true);
-  Variable& register_buffer(std::string name, Variable tensor);
+  Tensor& register_buffer(std::string name, Tensor tensor);
 
   template <
       typename ModuleType,
@@ -144,8 +144,8 @@ class Module {
 
   virtual void clone_(Module& other);
 
-  OrderedDict<autograd::Variable> parameters_;
-  OrderedDict<autograd::Variable> buffers_;
+  OrderedDict<Tensor> parameters_;
+  OrderedDict<Tensor> buffers_;
   OrderedDict<std::shared_ptr<Module>> children_;
 
   /// The module's name (e.g. "LSTM").

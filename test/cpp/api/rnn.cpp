@@ -1,23 +1,25 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/rnn.h>
+#include <torch/optimizers.h>
+#include <torch/tensor.h>
 
 #include <test/cpp/api/util.h>
 
-using namespace torch;
 using namespace torch::nn;
 
 template <typename R, typename Func>
 bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto nhid = 32;
-  auto model = std::make_shared<SimpleContainer>();
+  auto model = std::make_shared<torch::SimpleContainer>();
   auto l1 = model->add(Linear(1, nhid), "l1");
   auto rnn = model->add(model_maker(nhid), "rnn");
   auto lo = model->add(Linear(nhid, 1), "lo");
 
-  auto optim = Adam(model, 1e-2).make();
+  auto optim = torch::Adam(model, 1e-2).make();
 
-  auto forward_op = [&](Variable x) {
+  auto forward_op = [&](torch::Tensor x) {
     auto T = x.size(0);
     auto B = x.size(1);
     x = x.view({T * B, 1});
@@ -42,10 +44,10 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
     auto inp = at::rand({nlen, bs, 1}, backend).round().toType(torch::kFloat32);
     auto lab = inp.sum(0);
 
-    auto x = autograd::make_variable(inp, /*requires_grad=*/true);
-    auto y = autograd::make_variable(lab);
+    auto x = torch::autograd::make_variable(inp, /*requires_grad=*/true);
+    auto y = torch::autograd::make_variable(lab);
     x = forward_op(x);
-    Variable loss = at::mse_loss(x, y);
+    torch::Tensor loss = at::mse_loss(x, y);
 
     optim->zero_grad();
     loss.backward();
@@ -60,7 +62,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   return true;
 };
 
-void check_lstm_sizes(std::vector<Variable> tup) {
+void check_lstm_sizes(std::vector<torch::Tensor> tup) {
   // Expect the LSTM to have 64 outputs and 3 layers, with an input of batch
   // 10 and 16 time steps (10 x 16 x n)
 
@@ -97,7 +99,7 @@ TEST_CASE("rnn") {
 
       check_lstm_sizes(next);
 
-      Variable diff = next[1] - tup[1];
+      torch::Tensor diff = next[1] - tup[1];
 
       // Hiddens changed
       REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
@@ -171,8 +173,8 @@ TEST_CASE("rnn/integration/LSTM") {
 }
 
 TEST_CASE("rnn/integration/GRU") {
-  REQUIRE(test_RNN_xor<GRU>(
-      [](int s) { return GRU(GRUOptions(s, s).layers(2)); }));
+  REQUIRE(
+      test_RNN_xor<GRU>([](int s) { return GRU(GRUOptions(s, s).layers(2)); }));
 }
 
 TEST_CASE("rnn/integration/RNN") {
@@ -201,11 +203,11 @@ TEST_CASE("rnn_cuda", "[cuda]") {
 
     check_lstm_sizes(next);
 
-    Variable diff = next[1] - tup[1];
+    torch::Tensor diff = next[1] - tup[1];
 
     // Hiddens changed
     REQUIRE(diff.data().abs().sum().toCFloat() > 1e-3);
-  };
+  }
 
   SECTION("lstm") {
     REQUIRE(test_RNN_xor<LSTM>(
@@ -220,13 +222,11 @@ TEST_CASE("rnn_cuda", "[cuda]") {
   SECTION("rnn") {
     SECTION("relu") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); },
-          true));
+          [](int s) { return RNN(RNNOptions(s, s).relu().layers(2)); }, true));
     }
     SECTION("tanh") {
       REQUIRE(test_RNN_xor<RNN>(
-          [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); },
-          true));
+          [](int s) { return RNN(RNNOptions(s, s).tanh().layers(2)); }, true));
     }
   }
 }

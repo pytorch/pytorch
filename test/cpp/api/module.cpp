@@ -1,23 +1,25 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/module.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/rnn.h>
+#include <torch/tensor.h>
 
-using namespace torch;
 using namespace torch::nn;
 
 using Catch::StartsWith;
 
-struct AGIUnit : nn::Module {};
+struct AGIUnit : torch::nn::Module {};
 
 namespace test {
-struct AGIUnit : nn::Module {};
-struct AGIUnit2 : nn::Module {
-  AGIUnit2() : nn::Module("Foo") {}
+struct AGIUnit : torch::nn::Module {};
+struct AGIUnit2 : torch::nn::Module {
+  AGIUnit2() : torch::nn::Module("Foo") {}
 };
 } // namespace test
 
-bool pointer_equal(at::Tensor first, at::Tensor second) {
-  return first.data<float>() == second.data<float>();
+bool pointer_equal(torch::Tensor first, torch::Tensor second) {
+  return first.data().data<float>() == second.data().data<float>();
 }
 
 TEST_CASE("module/training-mode") {
@@ -39,13 +41,13 @@ TEST_CASE("module/zero-grad") {
   auto loss = module->forward({weight}).front().sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
-    Variable grad = parameter->grad();
+    auto grad = parameter->grad();
     REQUIRE(grad.defined());
     REQUIRE(grad.sum().toCFloat() != 0);
   }
   module->zero_grad();
   for (auto& parameter : module->parameters()) {
-    Variable grad = parameter->grad();
+    auto grad = parameter->grad();
     REQUIRE(grad.defined());
     REQUIRE(grad.sum().toCFloat() == 0);
   }
@@ -156,7 +158,7 @@ TEST_CASE("module/clone") {
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
-      Variable weight;
+      torch::Tensor weight;
     };
     auto module = TestModule().build();
     module->weight.data() += 1;
@@ -178,7 +180,7 @@ TEST_CASE("module/clone") {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
 
-      Variable weight;
+      torch::Tensor weight;
       int value = 0;
     };
     struct NestedModule : public Cloneable<NestedModule> {
@@ -211,7 +213,7 @@ TEST_CASE("module/parameters") {
       c = register_parameter("c", torch::ones({2, 2}) * 2);
     }
 
-    Variable a, b, c;
+    torch::Tensor a, b, c;
   };
 
   TestModule module;

@@ -1,6 +1,5 @@
 #include <torch/nn/modules/dropout.h>
 
-#include <torch/functions.h>
 #include <torch/tensor.h>
 
 #include <ATen/Error.h>
@@ -22,12 +21,12 @@ template <typename Derived>
 void DropoutImplBase<Derived>::reset() {}
 
 template <typename Derived>
-std::vector<Variable> DropoutImplBase<Derived>::forward(
-    std::vector<Variable> input) {
+std::vector<Tensor> DropoutImplBase<Derived>::forward(
+    std::vector<Tensor> input) {
   if (options_.rate_ == 0 || !this->is_training()) {
     return input;
   }
-  std::vector<Variable> output;
+  std::vector<Tensor> output;
   for (const auto& value : input) {
     const auto noise = (noise_mask(value).uniform_(0, 1) > options_.rate_)
                            .toType(value.type().scalarType())
@@ -48,11 +47,11 @@ template class DropoutImplBase<Dropout2dImpl>;
 
 DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
 
-Variable DropoutImpl::noise_mask(Variable input) const {
+Tensor DropoutImpl::noise_mask(Tensor input) const {
   return at::empty_like(input);
 }
 
-Variable Dropout2dImpl::noise_mask(Variable input) const {
+Tensor Dropout2dImpl::noise_mask(Tensor input) const {
   return torch::empty({input.size(0), input.size(1), 1, 1}, input.options());
 }
 } // namespace nn

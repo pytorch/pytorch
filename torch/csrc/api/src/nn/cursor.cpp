@@ -151,8 +151,8 @@ struct CursorBase<T>::Collector {
 // Explicitly instantiate the CursorBase template for all types we need.
 template class CursorBase<nn::Module>;
 template class CursorBase<const nn::Module>;
-template class CursorBase<autograd::Variable>;
-template class CursorBase<const autograd::Variable>;
+template class CursorBase<Tensor>;
+template class CursorBase<const Tensor>;
 } // namespace detail
 
 namespace nn {
@@ -165,19 +165,19 @@ ConstModuleCursor::ConstModuleCursor(const Module& module, size_t maximum_depth)
           Collector().collect_children(module, maximum_depth)) {}
 
 ParameterCursor::ParameterCursor(Module& module)
-    : detail::CursorBase<autograd::Variable>(
+    : detail::CursorBase<Tensor>(
           Collector().collect_parameters(module)) {}
 
 ConstParameterCursor::ConstParameterCursor(const Module& module)
-    : detail::CursorBase<const autograd::Variable>(
+    : detail::CursorBase<const Tensor>(
           Collector().collect_parameters(module)) {}
 
 BufferCursor::BufferCursor(Module& module)
-    : detail::CursorBase<autograd::Variable>(
+    : detail::CursorBase<Tensor>(
           Collector().collect_buffers(module)) {}
 
 ConstBufferCursor::ConstBufferCursor(const Module& module)
-    : detail::CursorBase<const autograd::Variable>(
+    : detail::CursorBase<const Tensor>(
           Collector().collect_buffers(module)) {}
 } // namespace nn
 } // namespace torch
