@@ -21,14 +21,13 @@ class cudnn_exception : public std::runtime_error {
 
 inline void cudnnCheck(cudnnStatus_t status, const char* file, int line) {
   if (status != CUDNN_STATUS_SUCCESS) {
-    std::string msg("CuDNN error: ");
-    msg += cudnnGetErrorString(status);
-    msg = msg + " (" + file + ":" + std::to_string(line) + ")";
+    std::stringstream msg;
+    msg << file << ":" << line << ": CuDNN error: " << cudnnGetErrorString(status);
     if (status == CUDNN_STATUS_NOT_SUPPORTED) {
-      msg += ". This error may appear if you passed in a non-contiguous input.";
-      throw cudnn_exception(status, msg);
+      msg << ". This error may appear if you passed in a non-contiguous input.";
+      throw cudnn_exception(status, msg.str());
     }
-    throw cudnn_exception(status, msg);
+    throw cudnn_exception(status, msg.str());
   }
 }
 
@@ -36,10 +35,9 @@ inline void cudnnCheck(cudnnStatus_t status, const char* file, int line) {
 
 inline void cudaCheck(cudaError_t error, const char* file, int line) {
   if (error != cudaSuccess) {
-    std::string msg("CUDA error: ");
-    msg += cudaGetErrorString(error);
-    msg = msg + " (" + file + ":" + std::to_string(line) + ")";
-    throw std::runtime_error(msg);
+    std::stringstream msg;
+    msg << file << ":" << line << ": CUDA error: " << cudaGetErrorString(error);
+    throw std::runtime_error(msg.str());
   }
 }
 
