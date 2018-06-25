@@ -323,3 +323,39 @@ TEST_CASE("cursor/parameter") {
     }
   }
 }
+
+TEST_CASE("cursor/non-const-to-const-conversion") {
+  auto first = std::make_shared<TestModule>(1);
+  auto second = std::make_shared<TestModule>(2);
+  Container model(first, second);
+
+  {
+    ConstModuleCursor const_cursor(model.modules());
+    {
+      ModuleCursor cursor = model.modules();
+      ConstModuleCursor const_cursor = cursor;
+    }
+  }
+  {
+    ConstParameterCursor const_cursor(model.parameters());
+    {
+      ParameterCursor cursor = model.parameters();
+      ConstParameterCursor const_cursor = cursor;
+    }
+  }
+  {
+    ConstBufferCursor const_cursor(model.buffers());
+    {
+      BufferCursor cursor = model.buffers();
+      ConstBufferCursor const_cursor = cursor;
+    }
+  }
+}
+
+TEST_CASE("cursor/can-invoke-const-method-on-const-cursor") {
+  TestModule model(1);
+
+  /// This will only compile if `Cursor` has the appropriate const methods.
+  const auto cursor = model.parameters();
+  REQUIRE(cursor.contains("tensor1"));
+}
