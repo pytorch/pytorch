@@ -9,6 +9,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/onnx/onnxifi_manager.h"
+#include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
 
@@ -50,12 +51,15 @@ class OnnxifiOp final : public Operator<Context> {
       ++output_idx;
     }
 
-    // TODO: Encode the rest of the arguments to backend
+    // Encode arguments starting with "custom_" to backend
+    std::vector<uint64_t> property_pointers;
+    std::vector<int64_t> int_args;
+    std::vector<float> float_args;
+    BuildPropertyList(operator_def, &property_pointers, &int_args, &float_args);
 
-    // Pull the weights from workspace and assembly it back to the onnx model,
-    // notice that since we may have rewritten the net, we need to map the
-    // weight names
-    // TODO: this step can be avoided by initGraphIO
+    // Pull the weights from workspace and feed it to the backend through
+    // setGraphIO. Notice that since we may have rewritten the net, we need to
+    // map the weight names
     auto initializers =
         OperatorBase::GetRepeatedArgument<std::string>("initializers");
     CAFFE_ENFORCE_EQ(
@@ -84,9 +88,9 @@ class OnnxifiOp final : public Operator<Context> {
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_LT(
         num_backends_, 0, "At least 1 onnxifi backend should be available");
-    // TODO: feed encoded parameter list to backend
+    // TODO: choose backedn id
     CAFFE_ENFORCE_EQ(
-        lib_->onnxInitBackend(backend_ids_[0], NULL, &backend_),
+        lib_->onnxInitBackend(backend_ids_[0], property_pointers.data(), &backend_),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitGraph(
@@ -124,6 +128,39 @@ class OnnxifiOp final : public Operator<Context> {
     if (it != output_size_hints_.end()) {
       *dims = it->second;
     }
+  }
+
+  void BuildPropertyList(
+      const OperatorDef& operator_def,
+      std::vector<uint64_t>* property_list,
+      std::vector<int64_t>* int_args,
+      std::vector<float>* float_args) {
+    for (const auto& arg: operator_def.arg()) {
+      if (!StartsWith(arg.name(), "custom_")) {
+        continue;
+      }
+      // Pick the name as ABC if the arg name is custom_ABC
+      property_list->push_back((uint64_t)(arg.name().c_str() + 7));
+
+      if (arg.has_s()) {
+        property_list->push_back((uint64_t)(arg.s().c_str()));
+      } else if (arg.has_i()) {
+        int_args->push_back(arg.i());
+        property_list->push_back((uint64_t)(&int_args->back()));
+      } else if (arg.has_f()) {
+        float_args->push_back(arg.f());
+        property_list->push_back((uint64_t)(&float_args->back()));
+      } else if (arg.floats_size()) {
+        property_list->push_back((uint64_t)(arg.floats().data()));
+      } else if (arg.ints_size()) {
+        property_list->push_back((uint64_t)(arg.ints().data()));
+      } else {
+        // TODO: support string lists
+        CAFFE_THROW(
+            "Cannot pass string list to onnxifi backend yet");
+      }
+    }
+    property_list->push_back(ONNXIFI_BACKEND_PROPERTY_NONE);
   }
 
   std::vector<onnxTensorDescriptor> BuildInitializationList(
