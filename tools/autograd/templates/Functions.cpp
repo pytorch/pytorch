@@ -965,7 +965,7 @@ Tensor softplus_double_backward(const Tensor & grad, const Tensor & input, Scala
 //      `size` and `stride`.
 //
 // To backward through this stride-agnostic version, we simply add the following
-// step :
+// step:
 //   .... (scatter gradients into the storage tensor using output geometry)
 //   3. For all storage location n, `storage[n] /= |S(n)|`.
 //   .... (return as_strided view of the storage tensor using input geometry)
@@ -1293,7 +1293,7 @@ Tensor as_strided_backward(Tensor grad, TensorGeometry input_geometry, IntList s
   auto inp_maybe_overlap = _maybe_overlapping_memory(inp_sizes_, inp_strides_);
 
 
-  // Following implements
+  // Rest of this function implements
   // Step (1)~(4) for the algorithm in NOTE [ as_strided Backward ]
   // TODO: Raise if not all output values are visible in input geometry.
   //       Technically speaking, if you treat those values as constants, not
