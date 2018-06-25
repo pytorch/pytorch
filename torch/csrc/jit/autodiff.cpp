@@ -512,7 +512,7 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
   // Take ownership of the graph
   JIT_ASSERTM(_graph.use_count() == 1,
               "differentiate will mutate and destroy the graph, so it requires "
-              "graph.use_count() == 1");
+              "graph.use_count() == 1, but found %d", _graph.use_count());
   std::swap(_graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
