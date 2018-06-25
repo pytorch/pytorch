@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/csrc/autograd/variable.h>
 #include <torch/tensor.h>
 
 #include <cstddef>

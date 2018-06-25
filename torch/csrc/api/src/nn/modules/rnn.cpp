@@ -2,7 +2,7 @@
 
 #include <torch/nn/modules/dropout.h>
 #include <torch/tensor.h>
-#include <torch/tensor_range.h>
+#include <torch/tensor_list_view\.h>
 #include <torch/utils.h>
 
 #include <ATen/Error.h>

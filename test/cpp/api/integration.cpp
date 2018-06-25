@@ -6,7 +6,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/optimizers.h>
 #include <torch/tensor.h>
-#include <torch/tensor_range.h>
+#include <torch/tensor_list_view\.h>
 #include <torch/utils.h>
 
 #include <test/cpp/api/util.h>

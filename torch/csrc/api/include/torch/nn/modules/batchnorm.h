@@ -4,8 +4,6 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
-
 #include <cstdint>
 
 namespace torch {

@@ -1,7 +1,7 @@
 #include <torch/nn/cursor.h>
-#include <torch/nn/module.h>
 
-#include <torch/csrc/autograd/variable.h>
+#include <torch/nn/module.h>
+#include <torch/tensor.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -229,12 +229,11 @@ ConstModuleCursor::ConstModuleCursor(const ModuleCursor& cursor)
 // Parameter cursors
 
 ParameterCursor::ParameterCursor(Module& module)
-    : detail::CursorBase<Tensor>(
-          Collector().collect_parameters(module)) {}
+    : detail::CursorBase<Tensor>(Collector().collect_parameters(module)) {}
 
 ConstParameterCursor::ConstParameterCursor(const Module& module)
-    : detail::CursorBase<const Tensor>(
-          Collector().collect_parameters(module)) {}
+    : detail::CursorBase<const Tensor>(Collector().collect_parameters(module)) {
+}
 
 ConstParameterCursor::ConstParameterCursor(const ParameterCursor& cursor)
     : detail::CursorBase<const autograd::Variable>(
@@ -243,12 +242,10 @@ ConstParameterCursor::ConstParameterCursor(const ParameterCursor& cursor)
 // Buffer cursors
 
 BufferCursor::BufferCursor(Module& module)
-    : detail::CursorBase<Tensor>(
-          Collector().collect_buffers(module)) {}
+    : detail::CursorBase<Tensor>(Collector().collect_buffers(module)) {}
 
 ConstBufferCursor::ConstBufferCursor(const Module& module)
-    : detail::CursorBase<const Tensor>(
-          Collector().collect_buffers(module)) {}
+    : detail::CursorBase<const Tensor>(Collector().collect_buffers(module)) {}
 
 ConstBufferCursor::ConstBufferCursor(const BufferCursor& cursor)
     : detail::CursorBase<const autograd::Variable>(
