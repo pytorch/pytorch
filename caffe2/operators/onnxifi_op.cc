@@ -34,51 +34,71 @@ void CPUTensorToTensorProto(
   }
 }
 
-void BlobToTensorProto(
+void BlobToTensorDescriptor(
     const std::string& name,
     Workspace* ws,
-    ::ONNX_NAMESPACE::TensorProto* t) {
-  // Set name
-  t->set_name(name);
+    onnxTensorDescriptor* desc,
+    std::vector<std::vector<uint64_t>>* shapes) {
   const Blob* blob = ws->GetBlob(name);
   CAFFE_ENFORCE(blob, "Blob ", name, " doesn't exist");
 
-  // Set dims
-  const auto shape = GetTensorShapeOfBlob(blob);
-  for (const auto i : shape.dims()) {
-    t->add_dims(i);
-  }
-
-  // Set values
+  // Memory type
+  // We only allow weights to be CPU tensor for now
   CAFFE_ENFORCE(
       blob->template IsType<TensorCPU>(),
       "Initialization blob ",
       name,
-      " needs to be either TensorCPU or TensorCUDA");
-  CPUTensorToTensorProto(blob->template Get<TensorCPU>(), t);
+      " needs to be TensorCPU");
+  desc->memoryType = ONNXIFI_MEMORY_TYPE_CPU;
+
+  // Data type
+  const auto& cpu_tensor = blob->template Get<TensorCPU>();
+  if (cpu_tensor.template IsType<float>()) {
+    desc->dataType = ONNXIFI_DATATYPE_FLOAT32;
+    desc->buffer = (onnxPointer)(cpu_tensor.data<float>());
+  } else if (cpu_tensor.template IsType<int64_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT64;
+    desc->buffer = (onnxPointer)(cpu_tensor.data<int64_t>());
+  } else if (cpu_tensor.template IsType<int32_t>()) {
+    desc->dataType = ONNXIFI_DATATYPE_INT32;
+    desc->buffer = (onnxPointer)(cpu_tensor.data<int32_t>());
+  }
+
+  // Set dims
+  const auto shape = GetTensorShapeOfBlob(blob);
+  desc->dimensions = shape.dims_size();
+  shapes->emplace_back();
+  auto& shape_tmp = shapes->back();
+  for (const auto d : shape.dims()) {
+    shape_tmp.push_back(d);
+  }
+  desc->shape = shape_tmp.data();
 }
-}
+} // namespace
 
 template <>
-void OnnxifiOp<float, CPUContext>::BuildInitializationList(
+std::vector<onnxTensorDescriptor>
+OnnxifiOp<float, CPUContext>::BuildInitializationList(
     Workspace* ws,
-    ::ONNX_NAMESPACE::GraphProto* g,
-    std::unordered_set<std::string>* initialization_list) {
+    std::unordered_set<std::string>* initialization_list,
+    std::vector<std::string>* weight_names,
+    std::vector<std::vector<uint64_t>>* weight_shapes) {
   const std::vector<string>& ws_blobs = ws->Blobs();
-
+  std::vector<onnxTensorDescriptor> descs;
   for (const auto& s : ws_blobs) {
     auto it = initialization_list->find(s);
     if (it != initialization_list->end()) {
-      auto* init_tensor = g->add_initializer();
-      BlobToTensorProto(s, ws, init_tensor);
+      weight_names->emplace_back(s);
+      descs.emplace_back();
+      auto& tensor_desc = descs.back();
+      tensor_desc.name = weight_names->back().c_str();
+      BlobToTensorDescriptor(s, ws, &tensor_desc, weight_shapes);
       initialization_list->erase(it);
     }
   }
   CAFFE_ENFORCE(
       initialization_list->empty(), "Unfulfilled initialization list");
-  for (const auto& t : g->initializer()) {
-    VLOG(2) << "Initializer: " << t.name();
-  }
+  return descs;
 }
 
 template <>
@@ -108,7 +128,6 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
-    tensor_descriptor.shape = new uint64_t[tensor_descriptor.dimensions];
     output_shapes_.emplace_back();
     auto& output_shape = output_shapes_.back();
     for (unsigned j = 0U; j < tensor_descriptor.dimensions; ++j) {
@@ -140,14 +159,9 @@ OPERATOR_SCHEMA(Onnxifi)
     .NumInputs(0, INT_MAX)
     .NumOutputs(0, INT_MAX)
     .SetDoc(R"DOC(
-    The Onnixifi operator is a black-box operator to lower the computation to Onnxifi backend
+    The Onnxifi operator is a black-box operator to lower the computation to Onnxifi backend
     )DOC")
     .Arg("onnxifi_backend", "(string default=\"\") Name of the backend")
-    .Arg("onnxifi_backend_suffix", "(string default=\"\") Function suffix of the backend")
-    .Arg(
-        "onnxifi_backend_path",
-        "(string default=\"\") Path to the onnxifi bakcend dynamic library")
-    .Arg("onnxifi_backend_idx", "(int default 0) Backend index to be used")
     .Arg(
         "onnx_model",
         "(string default=\"\") Serialized ONNX model to be converted to backend representation")

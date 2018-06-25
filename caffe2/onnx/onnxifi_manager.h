@@ -9,10 +9,7 @@ namespace onnx {
 class OnnxifiManager {
   public:
     OnnxifiManager() {}
-    onnxifi_library* AddOnnxifiLibrary(
-        const std::string& name,
-        const std::string& path,
-        const std::string& suffix);
+    onnxifi_library* AddOnnxifiLibrary(const std::string& name);
     void RemoveOnnxifiLibrary(const std::string& name);
     void ClearAll();
 

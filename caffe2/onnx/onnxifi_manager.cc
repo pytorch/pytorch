@@ -8,9 +8,7 @@ namespace caffe2 {
 namespace onnx {
 
 onnxifi_library* OnnxifiManager::AddOnnxifiLibrary(
-    const std::string& name,
-    const std::string& path,
-    const std::string& suffix) {
+    const std::string& name) {
   auto it = onnxifi_interfaces_.find(name);
   if (it != onnxifi_interfaces_.end()) {
     LOG(INFO) << "Onnx interface " << name <<  " already exists";
@@ -18,11 +16,10 @@ onnxifi_library* OnnxifiManager::AddOnnxifiLibrary(
   }
 
   onnxifi_library lib;
-  const char* suffix_cstr = suffix.empty() ? nullptr : suffix.c_str();
   auto ret = onnxifi_load(
-      ONNXIFI_LOADER_FLAG_VERSION_1_0, path.c_str(), suffix_cstr, &lib);
+      ONNXIFI_LOADER_FLAG_VERSION_1_0, nullptr, nullptr, &lib);
   if (!ret) {
-    CAFFE_THROW("Cannot load onnxifi lib ", name, " at ", path);
+    CAFFE_THROW("Cannot load onnxifi lib ", name);
   }
   return &onnxifi_interfaces_.emplace(name, lib).first->second;
 }

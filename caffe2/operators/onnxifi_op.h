@@ -20,16 +20,9 @@ class OnnxifiOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {
     onnxifi_backend_ =
         OperatorBase::GetSingleArgument<std::string>("onnxifi_backend", "");
-    location_ = OperatorBase::GetSingleArgument<std::string>(
-        "onnxifi_backend_path", "");
-    backend_idx_ =
-        OperatorBase::GetSingleArgument<int>("onnxifi_backend_idx", 0);
-    auto suffix = OperatorBase::GetSingleArgument<std::string>(
-        "onnxifi_backend_suffix", "");
     CAFFE_ENFORCE(!onnxifi_backend_.empty(), "Unspecified onnxifi_backend");
-    CAFFE_ENFORCE(!location_.empty(), "Unspecified onnxifi_backend_path");
     auto* onnxifi_manager = onnx::OnnxifiManager::get_onnxifi_manager();
-    lib_ = onnxifi_manager->AddOnnxifiLibrary(onnxifi_backend_, location_, suffix);
+    lib_ = onnxifi_manager->AddOnnxifiLibrary(onnxifi_backend_);
     auto onnx_model_str =
         OperatorBase::GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
@@ -75,45 +68,52 @@ class OnnxifiOp final : public Operator<Context> {
       initializer_set.emplace(key);
     }
     Workspace mapped_ws(ws, input_mapping);
+    std::vector<std::string> weight_names;
+    std::vector<std::vector<uint64_t>> weight_shapes;
+    auto weight_descs = BuildInitializationList(
+        &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
+
     ::ONNX_NAMESPACE::ModelProto onnx_model;
     ParseProtoFromLargeString(onnx_model_str, &onnx_model);
-    BuildInitializationList(
-        &mapped_ws, onnx_model.mutable_graph(), &initializer_set);
     onnx_model_str.clear();
     onnx_model.SerializeToString(&onnx_model_str);
 
     // Build the Onnxifi engine
     CAFFE_ENFORCE_EQ(
-        lib_->onnxGetBackendIDs(&backend_id_, &num_backends_),
+        lib_->onnxGetBackendIDs(backend_ids_, &num_backends_),
         ONNXIFI_STATUS_SUCCESS);
-    CAFFE_ENFORCE_GT(num_backends_, backend_idx_);
+    CAFFE_ENFORCE_LT(
+        num_backends_, 0, "At least 1 onnxifi backend should be available");
     // TODO: feed encoded parameter list to backend
     CAFFE_ENFORCE_EQ(
-        lib_->onnxInitBackend(backend_id_, NULL, &backend_),
+        lib_->onnxInitBackend(backend_ids_[0], NULL, &backend_),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitGraph(
             backend_,
             onnx_model_str.size(),
             (void*)(onnx_model_str.c_str()),
-            0,
-            NULL,
+            weight_descs.size(),
+            weight_descs.data(),
             &graph_),
         ONNXIFI_STATUS_SUCCESS);
   }
 
   ~OnnxifiOp() {
-    if (backend_id_ && !num_backends_) {
-      CAFFE_ENFORCE_EQ(
-          lib_->onnxReleaseBackendID(backend_id_), ONNXIFI_STATUS_SUCCESS);
-    }
     if (graph_) {
       CAFFE_ENFORCE_EQ(lib_->onnxReleaseGraph(graph_), ONNXIFI_STATUS_SUCCESS);
+      graph_ = nullptr;
     }
     if (backend_) {
       CAFFE_ENFORCE_EQ(
           lib_->onnxReleaseBackend(backend_), ONNXIFI_STATUS_SUCCESS);
+      backend_ = nullptr;
     }
+    for (unsigned i = 0U; i < num_backends_; ++i) {
+      CAFFE_ENFORCE_EQ(
+          lib_->onnxReleaseBackendID(backend_ids_[i]), ONNXIFI_STATUS_SUCCESS);
+    }
+    backend_ids_ = nullptr;
   }
 
   bool RunOnDevice() override;
@@ -126,17 +126,16 @@ class OnnxifiOp final : public Operator<Context> {
     }
   }
 
-  void BuildInitializationList(
+  std::vector<onnxTensorDescriptor> BuildInitializationList(
       Workspace* ws,
-      ::ONNX_NAMESPACE::GraphProto* g,
-      std::unordered_set<std::string>* initialization_list);
+      std::unordered_set<std::string>* initialization_list,
+      std::vector<std::string>* weight_names,
+      std::vector<std::vector<uint64_t>>* weight_shapes);
 
   std::string onnxifi_backend_;
-  std::string location_;
-  int backend_idx_{0};
   onnxifi_library* lib_{nullptr};
 
-  onnxBackendID backend_id_{nullptr};
+  onnxBackendID* backend_ids_{nullptr};
   onnxBackend backend_{nullptr};
   onnxGraph graph_{nullptr};
   size_t num_backends_{0};
