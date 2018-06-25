@@ -36,7 +36,7 @@ public:
   }
 
 private:
-    constexpr explicit CaffeTypeId(intptr_t id): IdWrapper(id) {}
+    constexpr explicit CaffeTypeId(uint16_t id): IdWrapper(id) {}
 };
 
 inline std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId) {
