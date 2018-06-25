@@ -2,7 +2,7 @@
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
-#include <ATen/Reduction.h>
+#include <THNN/Reduction.h>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
