@@ -108,7 +108,7 @@ TEST_CASE("modules") {
     SECTION("basic1") {
       Linear model(5, 2);
       auto x = torch::randn({10, 5}, at::requires_grad());
-      auto y = model(x);
+      auto y = model->forward(x);
       torch::Tensor s = y.sum();
 
       s.backward();
@@ -211,14 +211,27 @@ TEST_CASE("modules") {
   }
 
   SECTION("functional") {
-    bool was_called = false;
-    auto functional = Functional([&was_called](torch::Tensor input) {
-      was_called = true;
-      return input;
-    });
-    auto output = functional->forward(torch::ones(5, at::requires_grad()));
-    REQUIRE(was_called);
-    REQUIRE(output.equal(torch::ones(5, at::requires_grad())));
+    {
+      bool was_called = false;
+      auto functional = Functional([&was_called](torch::Tensor input) {
+        was_called = true;
+        return input;
+      });
+      auto output = functional->forward(torch::ones(5, at::requires_grad()));
+      REQUIRE(was_called);
+      REQUIRE(output.equal(torch::ones(5, at::requires_grad())));
+
+      was_called = false;
+      output = functional(torch::ones(5, at::requires_grad()));
+      REQUIRE(was_called);
+      REQUIRE(output.equal(torch::ones(5, at::requires_grad())));
+    }
+    {
+      auto functional = Functional(at::relu);
+      REQUIRE(functional(torch::ones({})).data().toCFloat() == 1);
+      REQUIRE(functional(torch::ones({})).toCFloat() == 1);
+      REQUIRE(functional(torch::ones({}) * -1).toCFloat() == 0);
+    }
   }
 }
 
@@ -245,7 +258,7 @@ TEST_CASE("modules_cuda", "[cuda]") {
     model->cpu();
     auto x = torch::randn({10, 5}, at::requires_grad());
     auto y = model->forward(x);
-    Tensor s = y.sum();
+    torch::Tensor s = y.sum();
 
     s.backward();
     REQUIRE(y.ndimension() == 2);

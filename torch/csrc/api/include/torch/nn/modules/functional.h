@@ -18,6 +18,9 @@ class FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
   void reset() override;
   Tensor forward(Tensor input);
 
+  /// Calls forward(input).
+  Tensor operator()(Tensor input);
+
  private:
   std::function<Tensor(Tensor)> function_;
 };

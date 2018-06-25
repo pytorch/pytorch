@@ -15,5 +15,9 @@ void FunctionalImpl::reset() {}
 Tensor FunctionalImpl::forward(Tensor input) {
   return function_(input);
 }
+
+Tensor FunctionalImpl::operator()(Tensor input) {
+  return forward(input);
+}
 } // namespace nn
 } // namespace torch

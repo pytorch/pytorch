@@ -1,6 +1,5 @@
 #pragma once
 
-#include <torch/nn/callable.h>
 #include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
 #include <torch/nn/pimpl.h>
@@ -18,7 +17,7 @@ struct LinearOptions {
   TORCH_ARG(bool, with_bias) = true;
 };
 
-class LinearImpl : public Cloneable<LinearImpl>, public Callable<LinearImpl> {
+class LinearImpl : public Cloneable<LinearImpl> {
  public:
   explicit LinearImpl(LinearOptions options);
 

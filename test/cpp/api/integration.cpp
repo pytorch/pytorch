@@ -235,7 +235,7 @@ bool test_mnist(
 TEST_CASE("integration/cartpole") {
   std::cerr << "Training episodic policy gradient with a critic for up to 3000"
                " episodes, rest your eyes for a bit!\n";
-  auto model = std::make_shared<SimpleContainer>();
+  auto model = std::make_shared<torch::SimpleContainer>();
   auto linear = model->add(Linear(4, 128), "linear");
   auto policyHead = model->add(Linear(128, 2), "policy");
   auto valueHead = model->add(Linear(128, 1), "action");
@@ -277,92 +277,56 @@ TEST_CASE("integration/cartpole") {
         at::from_blob(rewards.data(), {static_cast<int64_t>(rewards.size())});
     r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
 
-    std::vector<at::Tensor> policy_loss;
-    std::vector<at::Tensor> value_loss;
+    std::vector<torch::Tensor> policy_loss;
+    std::vector<torch::Tensor> value_loss;
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
       auto r = rewards[i] - saved_values[i].toCFloat();
       policy_loss.push_back(-r * saved_log_probs[i]);
       value_loss.push_back(
           at::smooth_l1_loss(saved_values[i], torch::ones({1}) * rewards[i]));
     }
-    auto loss = at::stack(policy_loss).sum() + at::stack(value_loss).sum();
 
-    auto selectAction = [&](torch::Tensor state) {
-      // Only work on single state now, change index to gather for batch
-      auto out = forward({state});
-      auto probs = torch::Tensor(std::get<0>(out));
-      auto value = torch::Tensor(std::get<1>(out));
-      auto action = probs.data().multinomial(1)[0].toCInt();
-      // Compute the log prob of a multinomial distribution.
-      // This should probably be actually implemented in autogradpp...
-      auto p = probs / probs.sum(-1, true);
-      auto log_prob = p[action].log();
-      saved_log_probs.emplace_back(log_prob);
-      saved_values.push_back(value);
-      return action;
-    };
+    auto loss = at::stack(torch::TensorListView(policy_loss)).sum() +
+        at::stack(torch::TensorListView(value_loss)).sum();
 
-    auto finishEpisode = [&]() {
-      auto R = 0.;
-      for (int i = rewards.size() - 1; i >= 0; i--) {
-        R = rewards[i] + 0.99 * R;
-        rewards[i] = R;
-      }
-      auto r_t =
-          at::from_blob(rewards.data(), {static_cast<int64_t>(rewards.size())});
-      r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
+    optimizer.zero_grad();
+    loss.backward();
+    optimizer.step();
 
-      std::vector<torch::Tensor> policy_loss;
-      std::vector<torch::Tensor> value_loss;
-      for (auto i = 0U; i < saved_log_probs.size(); i++) {
-        auto r = rewards[i] - saved_values[i].toCFloat();
-        policy_loss.push_back(-r * saved_log_probs[i]);
-        value_loss.push_back(
-            at::smooth_l1_loss(saved_values[i], torch::ones({1}) * rewards[i]));
-      }
+    rewards.clear();
+    saved_log_probs.clear();
+    saved_values.clear();
+  };
 
-      auto loss = at::stack(torch::TensorListView(policy_loss)).sum() +
-          at::stack(torch::TensorListView(value_loss)).sum();
+  auto env = CartPole();
+  double running_reward = 10.0;
+  for (auto episode = 0;; episode++) {
+    env.reset();
+    auto state = env.getState();
+    int t = 0;
+    for (; t < 10000; t++) {
+      auto action = selectAction(state);
+      env.step(action);
+      state = env.getState();
+      auto reward = env.getReward();
+      auto done = env.isDone();
 
-      optimizer.zero_grad();
-      loss.backward();
-      optimizer.step();
-
-      rewards.clear();
-      saved_log_probs.clear();
-      saved_values.clear();
-    };
-
-    auto env = CartPole();
-    double running_reward = 10.0;
-    for (auto episode = 0;; episode++) {
-      env.reset();
-      auto state = env.getState();
-      int t = 0;
-      for (; t < 10000; t++) {
-        auto action = selectAction(state);
-        env.step(action);
-        state = env.getState();
-        auto reward = env.getReward();
-        auto done = env.isDone();
-
-        rewards.push_back(reward);
-        if (done)
-          break;
-      }
-
-      running_reward = running_reward * 0.99 + t * 0.01;
-      finishEpisode();
-      /*
-      if (episode % 10 == 0) {
-        printf("Episode %i\tLast length: %5d\tAverage length: %.2f\n",
-                episode, t, running_reward);
-      }
-      */
-      if (running_reward > 150)
+      rewards.push_back(reward);
+      if (done)
         break;
-      REQUIRE(episode < 3000);
     }
+
+    running_reward = running_reward * 0.99 + t * 0.01;
+    finishEpisode();
+    /*
+    if (episode % 10 == 0) {
+      printf("Episode %i\tLast length: %5d\tAverage length: %.2f\n",
+              episode, t, running_reward);
+    }
+    */
+    if (running_reward > 150)
+      break;
+    REQUIRE(episode < 3000);
   }
 }
 
