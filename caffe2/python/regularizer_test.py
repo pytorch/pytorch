@@ -10,6 +10,7 @@ from caffe2.python.layer_test_util import LayersTestCase
 from caffe2.python import layer_model_instantiator
 
 from hypothesis import given
+import hypothesis.strategies as st
 
 import caffe2.python.hypothesis_test_util as hu
 import numpy as np
