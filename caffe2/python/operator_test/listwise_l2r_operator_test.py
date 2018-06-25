@@ -88,8 +88,8 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
         workspace.RunOperatorOnce(op)
         loss = workspace.blobs['loss']
         dy = workspace.blobs['dy']
-        np.testing.assert_allclose(loss, ref_loss, rtol=1e-5, atol=1e-6)
-        np.testing.assert_allclose(dy, ref_dy, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(loss, ref_loss, rtol=1e-5, atol=1e-4)
+        np.testing.assert_allclose(dy, ref_dy, rtol=1e-5, atol=1e-4)
 
         op = core.CreateOperator(
             'LambdaRankNdcg', ['y', 'r', 'session_lengths'], ['loss', 'dy'],
@@ -97,8 +97,8 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
         workspace.RunOperatorOnce(op)
         loss = workspace.blobs['loss']
         dy = workspace.blobs['dy']
-        np.testing.assert_allclose(loss, ref_ndcg_loss, rtol=1e-5, atol=1e-6)
-        np.testing.assert_allclose(dy, ref_dy, rtol=1e-5, atol=1e-6)
+        np.testing.assert_allclose(loss, ref_ndcg_loss, rtol=1e-5, atol=1e-4)
+        np.testing.assert_allclose(dy, ref_dy, rtol=1e-5, atol=1e-4)
 
         op = core.CreateOperator(
             'LambdaRankNdcgGradient',
@@ -111,4 +111,4 @@ class TestListwiseL2rOps(hu.HypothesisTestCase):
             np.testing.assert_allclose(
                 dy_back[i * n:(i + 1) * n],
                 dloss[i] * ref_dy[i * n:(i + 1) * n],
-                rtol=1e-5, atol=1e-6)
+                rtol=1e-5, atol=1e-4)
