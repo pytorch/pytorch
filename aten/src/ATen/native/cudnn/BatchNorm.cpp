@@ -109,7 +109,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
     int64_t num_features = input_t.size(1);
     save_mean = weight_t.type().tensor({ num_features });
     save_var = weight_t.type().tensor({ num_features });
-    CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
+    AT_CUDNN_CHECK(cudnnBatchNormalizationForwardTraining(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),
       idesc.desc(), output->data_ptr(),
@@ -123,7 +123,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm(
       save_mean.data_ptr(),
       save_var.data_ptr()));
   } else {
-    CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
+    AT_CUDNN_CHECK(cudnnBatchNormalizationForwardInference(
       handle, mode, &one, &zero,
       idesc.desc(), input->data_ptr(),
       idesc.desc(), output->data_ptr(),
@@ -202,7 +202,7 @@ std::tuple<Tensor, Tensor, Tensor> cudnn_batch_norm_backward(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  CUDNN_CHECK(cudnnBatchNormalizationBackward(
+  AT_CUDNN_CHECK(cudnnBatchNormalizationBackward(
     handle, mode, &one, &zero, &one, &zero,
     idesc.desc(), input->data_ptr(),
     idesc.desc(), grad_output->data_ptr(),
