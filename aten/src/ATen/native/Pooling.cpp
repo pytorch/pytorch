@@ -1,20 +1,18 @@
 #include "ATen/ATen.h"
-#include "ATen/TensorUtils.h"
+
+#include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/TensorUtils.h"
 
-#include <sstream>
-#include <vector>
-
+#include <tuple>
 
 namespace at { namespace native {
 
 static void check1d(const char* name, IntList x) {
-  if (x.size() != 1) {
-    std::ostringstream ss;
-    ss << "max_pool1d() argument '" << name << "' should contain one int (got "
-       << x.size() << ")";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(
+      x.size() == 1,
+      "max_pool1d() argument '", name,
+      "' should contain one int (got ", x.size(), ")");
 }
 
 Tensor adaptive_avg_pool1d(const Tensor & self, IntList output_size) {
@@ -65,4 +63,30 @@ std::tuple<Tensor,Tensor> max_pool1d(
   return std::make_tuple(output.squeeze(2), indices.squeeze(2));
 }
 
-}}  // namespace at::native
+Tensor avg_pool1d(
+    const Tensor& self,
+    IntList kernel_size,
+    IntList stride,
+    IntList padding,
+    bool ceil_mode,
+    bool count_include_pad) {
+  if (stride.empty()) {
+    stride = kernel_size;
+  }
+  checkDim("avg_pool1d", TensorArg(self, "self", 1), 3);
+  check1d("kernel_size", kernel_size);
+  check1d("stride", stride);
+  check1d("padding", padding);
+
+  auto output = at::avg_pool2d(
+      self.unsqueeze(2),
+      {1, kernel_size[0]},
+      {1, stride[0]},
+      {0, padding[0]},
+      ceil_mode,
+      count_include_pad);
+
+  return output.squeeze(2);
+}
+} // namespace native
+} // namespace at
