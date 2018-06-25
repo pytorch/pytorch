@@ -77,12 +77,17 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     Graph& g = *m.graph();
 
-    // this python object might be a @trace or @script stand-alone function
+    // this python object might be a @trace or @script function/module
     // if so, inline the graph rather than calling the python
-    if(py::isinstance<GraphExecutor>(self)) {
-      GraphExecutor& ge = py::cast<GraphExecutor&>(self);
-      ensureSizeMatches(loc, ge.graph()->inputs().size(), inputs.size(), "arguments");
-      return packOutputs(*m.graph(),inlineCallTo(*m.graph(), *ge.graph(), inputs));
+
+    if(py::isinstance<Module>(self)) {
+      Module& mod = py::cast<Module&>(self);
+      auto& forward = mod.get_method("forward");
+      // return packOutputs(*m.graph(),inlineCallTo(*m.graph(), *forward.graph(), inputs));
+      std::vector<torch::jit::NamedValue> named_inputs;
+      for (auto inp : inputs)
+        named_inputs.push_back(NamedValue(loc, "", inp));
+      return packOutputs(*m.graph(), m.emit_call_to(loc, forward, named_inputs, {}));
     }
 
     // Release the function object so we can wrap it in a PythonOp
@@ -436,6 +441,14 @@ void initJitScriptBindings(PyObject* module) {
         return fmap(self.get_methods(), [](const Item & item) {
           return (*item)->name();
         });
+      })
+      .def("_create_method_from_graph", [](
+        Module& self,
+        const std::string& name,
+        std::shared_ptr<Graph> graph
+      ){
+        std::vector<at::Tensor*> parameters;
+        self.create_method(name, std::move(graph), std::move(parameters));
       })
       .def("_create_method_from_trace", [](
         Module& self,
