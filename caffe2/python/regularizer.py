@@ -180,3 +180,54 @@ class LogBarrier(Regularizer):
 
     def _run_after_optimizer(self, net, param_init_net, param, grad):
         self._ensure_clipped(net, param, grad, min=0, open_range=True)
+
+
+class BoundedGradientProjection(Regularizer):
+    """
+    Wright, S., & Nocedal, J. (1999). Numerical optimization. Springer Science,
+    35(67-68), 7. Chapter 16
+    """
+
+    def __init__(
+        self, lb=None, ub=None, left_open=False, right_open=False, epsilon=None
+    ):
+        super(BoundedGradientProjection, self).__init__()
+        lb = float(lb) if lb is not None else None
+        ub = float(ub) if ub is not None else None
+        epsilon = float(epsilon) if epsilon is not None else self.kEpsilon
+        assert epsilon > 0, "Bounded Gradient Projection with invalid eps={eps}".format(
+            eps=epsilon
+        )
+        assert (
+            (lb is None)
+            or (ub is None)
+            or (
+                lb + (epsilon if left_open else 0.)
+                <= ub - (epsilon if right_open else 0.)
+            )
+        ), (
+            "Bounded Gradient Projection with invalid "
+            "{lp}ub={ub}, lb={lb}{rp}, eps={eps}".format(
+                lb=lb,
+                ub=ub,
+                lp="(" if left_open else "[",
+                rp=")" if right_open else "]",
+                eps=epsilon,
+            )
+        )
+        self.left_open = left_open
+        self.right_open = right_open
+        self.kEpsilon = epsilon
+        self.lb = lb
+        self.ub = ub
+
+    def _run_after_optimizer(self, net, param_init_net, param, grad):
+        self._ensure_clipped(
+            net,
+            param,
+            grad,
+            min=self.lb,
+            max=self.ub,
+            left_open=self.left_open,
+            right_open=self.right_open,
+        )
