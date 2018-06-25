@@ -17,13 +17,6 @@ fi
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda* ]]; then
-  if which conda; then
-    conda uninstall -y cmake
-  fi
-  sudo apt-get install -y --no-install-recommends cmake=3.5\*
-fi
-
 echo "Python version:"
 python --version
 
