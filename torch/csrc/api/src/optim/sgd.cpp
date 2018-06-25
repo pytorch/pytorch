@@ -29,8 +29,7 @@ void SGD::step() {
     }
 
     if (options_.momentum_ != 0) {
-      auto& momentum =
-          lazily_create_buffer(momentum_buffers_, i, parameters_[i]).data();
+      auto momentum = buffer_at(momentum_buffers_, i).data();
       if (iteration_ == 0) {
         momentum.mul_(options_.momentum_).add_(d_p);
       } else {

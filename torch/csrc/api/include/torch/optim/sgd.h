@@ -30,7 +30,11 @@ class SGD : public Optimizer {
   template <typename ParameterContainer>
   explicit SGD(ParameterContainer&& parameters, const SGDOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options) {}
+        options_(options) {
+    if (options_.momentum_ > 0) {
+      momentum_buffers_ = zero_buffers_like(parameters_);
+    }
+  }
 
   void step() override;
 

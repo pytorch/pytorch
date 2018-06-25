@@ -16,18 +16,6 @@ void OptimizerBase::zero_grad() {
     }
   }
 }
-
-Tensor& OptimizerBase::lazily_create_buffer(
-    std::vector<Tensor>& buffers,
-    size_t index,
-    const Tensor& parameter) {
-  AT_ASSERT(index <= buffers.size());
-  if (index == buffers.size()) {
-    buffers.push_back(torch::zeros_like(parameter));
-  }
-  return buffers[index];
-}
-
 } // namespace detail
 } // namespace optim
 } // namespace torch

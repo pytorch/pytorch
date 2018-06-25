@@ -31,15 +31,13 @@ void RMSprop::step() {
       d_p.add_(p, options_.weight_decay_);
     }
 
-    auto& square_average =
-        lazily_create_buffer(square_average_buffers_, i, parameters_[i]).data();
+    auto square_average = buffer_at(square_average_buffers_, i).data();
     square_average.mul_(options_.alpha_)
         .addcmul_(d_p, d_p, 1.0 - options_.alpha_);
 
     at::Tensor average;
     if (options_.centered_ > 0) {
-      auto& grad_average =
-          lazily_create_buffer(grad_average_buffers_, i, parameters_[i]).data();
+      auto grad_average = buffer_at(grad_average_buffers_, i).data();
       grad_average.mul_(options_.alpha_).add_(d_p, 1.0 - options_.alpha_);
       average = square_average.addcmul(grad_average, grad_average, -1.0)
                     .sqrt()
@@ -49,8 +47,7 @@ void RMSprop::step() {
     }
 
     if (options_.momentum_ > 0) {
-      auto& momentum =
-          lazily_create_buffer(momentum_buffers_, i, parameters_[i]).data();
+      auto momentum = buffer_at(momentum_buffers_, i).data();
       momentum.mul_(options_.momentum_).addcdiv_(d_p, average);
       p.add_(momentum, -options_.learning_rate_);
     } else {

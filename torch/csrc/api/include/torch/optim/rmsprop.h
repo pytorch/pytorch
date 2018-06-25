@@ -41,7 +41,15 @@ class RMSprop : public Optimizer {
       ParameterContainer&& parameters,
       const RMSpropOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options) {}
+        options_(options),
+        square_average_buffers_(zero_buffers_like(parameters_)) {
+    if (options.centered_ > 0) {
+      grad_average_buffers_ = zero_buffers_like(parameters_);
+    }
+    if (options.momentum_ > 0) {
+      momentum_buffers_ = zero_buffers_like(parameters_);
+    }
+  }
 
   void step() override;
 
