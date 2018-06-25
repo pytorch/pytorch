@@ -165,7 +165,7 @@ class Module {
   virtual void clone_(Module& other);
 
   template <typename... Ts>
-  void to(Ts&&... ts) {
+  void to_impl(Ts&&... ts) {
     for (auto& child : children_) {
       child.value->to(ts...);
     }
