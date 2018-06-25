@@ -99,6 +99,11 @@ class DistributedDataParallelC10d(Module):
         broadcast_buffers: flag that enables syncing (broadcasting) buffers of
                            the module at beginning of the forward function.
                            (default: True)
+        bucket_cap_mb: DistributedDataParallelC10d will bucket parameters into
+                       multiple buckets so that gradient reduction of each
+                       bucket can potentially overlap with backward computation.
+                       bucket_cap_mb controls the bucket size in MegaBytes (MB)
+                       (default: 25)
 
     Attributes:
         module (Module): the module to be parallelized
@@ -109,7 +114,8 @@ class DistributedDataParallelC10d(Module):
         >>> net = torch.nn.DistributedDataParallel(model, pg)
     """
     def __init__(self, module, process_group, device_ids=None,
-                 output_device=None, dim=0, broadcast_buffers=True):
+                 output_device=None, dim=0, broadcast_buffers=True,
+                 bucket_cap_mb=25):
 
         super(DistributedDataParallelC10d, self).__init__()
 
@@ -159,7 +165,7 @@ class DistributedDataParallelC10d(Module):
             self.modules_params_data[dev_idx] = [p.data for p in module.parameters()]
             self.modules_buffers_data[dev_idx] = [b.data for b in module._all_buffers()]
 
-        bucket_bytes_cap = 25 * MB
+        bucket_bytes_cap = bucket_cap_mb * MB
 
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
