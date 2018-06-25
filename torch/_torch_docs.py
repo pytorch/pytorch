@@ -3,7 +3,6 @@
 import re
 
 import torch
-import torch._C as _C
 from torch._C import _add_docstr as add_docstr
 
 
@@ -69,7 +68,7 @@ factory_data_common_args = parse_kwargs("""
         returned tensor. Default: ``False``.
 """)
 
-add_docstr(_C.abs,
+add_docstr(torch.abs,
            r"""
 abs(input, out=None) -> Tensor
 
@@ -88,7 +87,7 @@ Example::
     tensor([ 1,  2,  3])
 """)
 
-add_docstr(_C.acos,
+add_docstr(torch.acos,
            r"""
 acos(input, out=None) -> Tensor
 
@@ -110,7 +109,7 @@ Example::
     tensor([ 1.2294,  2.2004,  1.3690,  1.7298])
 """)
 
-add_docstr(_C.add,
+add_docstr(torch.add,
            r"""
 .. function:: add(input, value, out=None)
 
@@ -179,7 +178,7 @@ Example::
             [ -8.9902,  -8.3667,  -7.3925,  -7.6147]])
 """)
 
-add_docstr(_C.addbmm,
+add_docstr(torch.addbmm,
            r"""
 addbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
 
@@ -222,7 +221,7 @@ Example::
             [ -3.8202,   4.3691,   1.0943,  -1.1109,   5.4730]])
 """)
 
-add_docstr(_C.addcdiv,
+add_docstr(torch.addcdiv,
            r"""
 addcdiv(tensor, value=1, tensor1, tensor2, out=None) -> Tensor
 
@@ -256,7 +255,7 @@ Example::
             [-0.5369, -0.9829,  0.0430]])
 """)
 
-add_docstr(_C.addcmul,
+add_docstr(torch.addcmul,
            r"""
 addcmul(tensor, value=1, tensor1, tensor2, out=None) -> Tensor
 
@@ -291,7 +290,7 @@ Example::
             [-0.8353, -0.6249,  1.6511]])
 """)
 
-add_docstr(_C.addmm,
+add_docstr(torch.addmm,
            r"""
 addmm(beta=1, mat, alpha=1, mat1, mat2, out=None) -> Tensor
 
@@ -330,7 +329,7 @@ Example::
             [ 0.7573, -3.9555, -2.8681]])
 """)
 
-add_docstr(_C.addmv,
+add_docstr(torch.addmv,
            r"""
 addmv(beta=1, tensor, alpha=1, mat, vec, out=None) -> Tensor
 
@@ -369,7 +368,7 @@ Example::
     tensor([-0.3768, -5.5565])
 """)
 
-add_docstr(_C.addr,
+add_docstr(torch.addr,
            r"""
 addr(beta=1, mat, alpha=1, vec1, vec2, out=None) -> Tensor
 
@@ -411,7 +410,7 @@ Example::
             [ 3.,  6.]])
 """)
 
-add_docstr(_C.as_tensor,
+add_docstr(torch.as_tensor,
            r"""
 as_tensor(data, dtype=None, device=None) -> Tensor
 
@@ -440,7 +439,7 @@ Example::
     array([-1,  2,  3])
 """.format(**factory_data_common_args))
 
-add_docstr(_C.asin,
+add_docstr(torch.asin,
            r"""
 asin(input, out=None) -> Tensor
 
@@ -462,7 +461,7 @@ Example::
     tensor([-0.6387,     nan, -0.4552,     nan])
 """)
 
-add_docstr(_C.atan,
+add_docstr(torch.atan,
            r"""
 atan(input, out=None) -> Tensor
 
@@ -484,7 +483,7 @@ Example::
     tensor([ 0.2299,  0.2487, -0.5591, -0.5727])
 """)
 
-add_docstr(_C.atan2,
+add_docstr(torch.atan2,
            r"""
 atan2(input1, input2, out=None) -> Tensor
 
@@ -508,7 +507,7 @@ Example::
     tensor([ 0.9833,  0.0811, -1.9743, -1.4151])
 """)
 
-add_docstr(_C.baddbmm,
+add_docstr(torch.baddbmm,
            r"""
 baddbmm(beta=1, mat, alpha=1, batch1, batch2, out=None) -> Tensor
 
@@ -549,7 +548,7 @@ Example::
     torch.Size([10, 3, 5])
 """)
 
-add_docstr(_C.bernoulli,
+add_docstr(torch.bernoulli,
            r"""
 bernoulli(input, out=None) -> Tensor
 
@@ -598,7 +597,7 @@ Example::
             [ 0.,  0.,  0.]])
 """)
 
-add_docstr(_C.bincount,
+add_docstr(torch.bincount,
            r"""
 bincount(self, weights=None, minlength=0) -> Tensor
 
@@ -634,7 +633,7 @@ Example::
     tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
 """)
 
-add_docstr(_C.bmm,
+add_docstr(torch.bmm,
            r"""
 bmm(batch1, batch2, out=None) -> Tensor
 
@@ -668,7 +667,7 @@ Example::
     torch.Size([10, 3, 5])
 """)
 
-add_docstr(_C.stack,
+add_docstr(torch.stack,
            r"""
 stack(seq, dim=0, out=None) -> Tensor
 
@@ -683,7 +682,7 @@ Arguments:
     out (Tensor, optional): the output tensor
 """)
 
-add_docstr(_C.chunk,
+add_docstr(torch.chunk,
            r"""
 chunk(tensor, chunks, dim=0) -> List of Tensors
 
@@ -698,7 +697,7 @@ Arguments:
     dim (int): dimension along which to split the tensor
 """)
 
-add_docstr(_C.cat,
+add_docstr(torch.cat,
            r"""
 cat(seq, dim=0, out=None) -> Tensor
 
@@ -738,7 +737,7 @@ Example::
              -0.5790,  0.1497]])
 """)
 
-add_docstr(_C.ceil,
+add_docstr(torch.ceil,
            r"""
 ceil(input, out=None) -> Tensor
 
@@ -761,7 +760,7 @@ Example::
     tensor([-0., -1., -1.,  1.])
 """)
 
-add_docstr(_C.reciprocal,
+add_docstr(torch.reciprocal,
            r"""
 reciprocal(input, out=None) -> Tensor
 
@@ -783,7 +782,7 @@ Example::
     tensor([-2.1763, -0.4713, -0.6986,  1.3702])
 """)
 
-add_docstr(_C.clamp,
+add_docstr(torch.clamp,
            r"""
 clamp(input, min, max, out=None) -> Tensor
 
@@ -855,7 +854,7 @@ Example::
     tensor([ 0.5000, -0.4702, -0.4599,  0.5000])
 """)
 
-add_docstr(_C.cos,
+add_docstr(torch.cos,
            r"""
 cos(input, out=None) -> Tensor
 
@@ -877,7 +876,7 @@ Example::
     tensor([ 0.1395,  0.2957,  0.6553,  0.5574])
 """)
 
-add_docstr(_C.cosh,
+add_docstr(torch.cosh,
            r"""
 cosh(input, out=None) -> Tensor
 
@@ -900,7 +899,7 @@ Example::
     tensor([ 1.0133,  1.7860,  1.2536,  1.2805])
 """)
 
-add_docstr(_C.cross,
+add_docstr(torch.cross,
            r"""
 cross(input, other, dim=-1, out=None) -> Tensor
 
@@ -946,7 +945,7 @@ Example::
             [-1.2329,  1.9883,  1.0551]])
 """)
 
-add_docstr(_C.cumprod,
+add_docstr(torch.cumprod,
            r"""
 cumprod(input, dim, dtype=None) -> Tensor
 
@@ -980,7 +979,7 @@ Example::
              0.0000, -0.0000, -0.0000])
 """.format(**reduceops_common_args))
 
-add_docstr(_C.cumsum,
+add_docstr(torch.cumsum,
            r"""
 cumsum(input, dim, out=None) -> Tensor
 
@@ -1009,7 +1008,7 @@ Example::
             -1.8209, -2.9780, -3.4022])
 """.format(**reduceops_common_args))
 
-add_docstr(_C.diag,
+add_docstr(torch.diag,
            r"""
 diag(input, diagonal=0, out=None) -> Tensor
 
@@ -1066,7 +1065,7 @@ Get the k-th diagonal of a given matrix::
     tensor([ 0.0255, 0.1374])
 """)
 
-add_docstr(_C.diagflat,
+add_docstr(torch.diagflat,
            r"""
 diagflat(input, diagonal=0) -> Tensor
 
@@ -1112,7 +1111,7 @@ Examples::
             [ 0.0000,  0.0000,  0.0000,  1.9342]])
 """)
 
-add_docstr(_C.diagonal,
+add_docstr(torch.diagonal,
            r"""
 diagonal(input, offset=0, dim1=0, dim2=1) -> Tensor
 
@@ -1163,7 +1162,7 @@ Examples::
              [ 1.0500,  0.7336, -0.3836, -1.1015]]])
 """)
 
-add_docstr(_C.dist,
+add_docstr(torch.dist,
            r"""
 dist(input, other, p=2) -> Tensor
 
@@ -1195,7 +1194,7 @@ Example::
     tensor(2.6537)
 """)
 
-add_docstr(_C.div,
+add_docstr(torch.div,
            r"""
 .. function:: div(input, value, out=None) -> Tensor
 
@@ -1254,7 +1253,7 @@ Example::
             [-0.2278, -0.1068, -1.4678,  6.3936]])
 """)
 
-add_docstr(_C.dot,
+add_docstr(torch.dot,
            r"""
 dot(tensor1, tensor2) -> Tensor
 
@@ -1268,7 +1267,7 @@ Example::
     tensor(7)
 """)
 
-add_docstr(_C.eig,
+add_docstr(torch.eig,
            r"""
 eig(a, eigenvectors=False, out=None) -> (Tensor, Tensor)
 
@@ -1287,7 +1286,7 @@ Returns:
         - **v** (*Tensor*): the eigenvectors of ``a`` if ``eigenvectors`` is ``True``; otherwise an empty tensor
 """)
 
-add_docstr(_C.einsum,
+add_docstr(torch.einsum,
            r"""
 einsum(equation, operands) -> Tensor
 
@@ -1357,7 +1356,7 @@ Examples::
     torch.Size([2, 3, 5, 4])
 """)
 
-add_docstr(_C.eq,
+add_docstr(torch.eq,
            r"""
 eq(input, other, out=None) -> Tensor
 
@@ -1381,7 +1380,7 @@ Example::
             [ 0,  1]], dtype=torch.uint8)
 """)
 
-add_docstr(_C.equal,
+add_docstr(torch.equal,
            r"""
 equal(tensor1, tensor2) -> bool
 
@@ -1393,7 +1392,7 @@ Example::
     True
 """)
 
-add_docstr(_C.erf,
+add_docstr(torch.erf,
            r"""
 erf(tensor, out=None) -> Tensor
 
@@ -1412,7 +1411,7 @@ Example::
     tensor([ 0.0000, -0.8427,  1.0000])
 """)
 
-add_docstr(_C.erfinv,
+add_docstr(torch.erfinv,
            r"""
 erfinv(tensor, out=None) -> Tensor
 
@@ -1432,7 +1431,7 @@ Example::
     tensor([ 0.0000,  0.4769,    -inf])
 """)
 
-add_docstr(_C.exp,
+add_docstr(torch.exp,
            r"""
 exp(tensor, out=None) -> Tensor
 
@@ -1456,7 +1455,7 @@ Example::
     tensor([ 1.,  2.])
 """)
 
-add_docstr(_C.expm1,
+add_docstr(torch.expm1,
            r"""
 expm1(tensor, out=None) -> Tensor
 
@@ -1480,7 +1479,7 @@ Example::
     tensor([ 0.,  1.])
 """)
 
-add_docstr(_C.eye,
+add_docstr(torch.eye,
            r"""
 eye(n, m=None, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -1506,7 +1505,7 @@ Example::
             [ 0.,  0.,  1.]])
 """.format(**factory_common_args))
 
-add_docstr(_C.floor,
+add_docstr(torch.floor,
            r"""
 floor(input, out=None) -> Tensor
 
@@ -1529,7 +1528,7 @@ Example::
     tensor([-1.,  1., -1., -1.])
 """)
 
-add_docstr(_C.fmod,
+add_docstr(torch.fmod,
            r"""
 fmod(input, divisor, out=None) -> Tensor
 
@@ -1556,7 +1555,7 @@ Example::
 
 """)
 
-add_docstr(_C.frac,
+add_docstr(torch.frac,
            r"""
 frac(tensor, out=None) -> Tensor
 
@@ -1592,7 +1591,7 @@ Example::
     array([-1,  2,  3])
 """)
 
-add_docstr(_C.flatten,
+add_docstr(torch.flatten,
            r"""
 flatten(input, start_dim=0, end_dim=-1) -> Tensor
 
@@ -1616,7 +1615,7 @@ Example::
             [5, 6, 7, 8]])
 """)
 
-add_docstr(_C.gather,
+add_docstr(torch.gather,
            r"""
 gather(input, dim, index, out=None) -> Tensor
 
@@ -1648,7 +1647,7 @@ Example::
             [ 4,  3]])
 """)
 
-add_docstr(_C.ge,
+add_docstr(torch.ge,
            r"""
 ge(input, other, out=None) -> Tensor
 
@@ -1672,7 +1671,7 @@ Example::
             [ 0,  1]], dtype=torch.uint8)
 """)
 
-add_docstr(_C.gels,
+add_docstr(torch.gels,
            r"""
 gels(B, A, out=None) -> Tensor
 
@@ -1739,7 +1738,7 @@ Example::
             [  8.9332,   5.2418]])
 """)
 
-add_docstr(_C.geqrf,
+add_docstr(torch.geqrf,
            r"""
 geqrf(input, out=None) -> (Tensor, Tensor)
 
@@ -1764,7 +1763,7 @@ Args:
 
 """)
 
-add_docstr(_C.ger,
+add_docstr(torch.ger,
            r"""
 ger(vec1, vec2, out=None) -> Tensor
 
@@ -1790,7 +1789,7 @@ Example::
             [  4.,   8.,  12.]])
 """)
 
-add_docstr(_C.gesv,
+add_docstr(torch.gesv,
            r"""
 torch.gesv(B, A) -> (Tensor, Tensor)
 
@@ -1848,7 +1847,7 @@ Example::
 
 """)
 
-add_docstr(_C.get_default_dtype,
+add_docstr(torch.get_default_dtype,
            r"""
 get_default_dtype() -> :class:`torch.dtype`
 
@@ -1867,14 +1866,14 @@ Example::
 
 """)
 
-add_docstr(_C.get_num_threads,
+add_docstr(torch.get_num_threads,
            r"""
 get_num_threads() -> int
 
 Gets the number of OpenMP threads used for parallelizing CPU operations
 """)
 
-add_docstr(_C.gt,
+add_docstr(torch.gt,
            r"""
 gt(input, other, out=None) -> Tensor
 
@@ -1898,7 +1897,7 @@ Example::
             [ 0,  0]], dtype=torch.uint8)
 """)
 
-add_docstr(_C.histc,
+add_docstr(torch.histc,
            r"""
 histc(input, bins=100, min=0, max=0, out=None) -> Tensor
 
@@ -1924,7 +1923,7 @@ Example::
     tensor([ 0.,  2.,  1.,  0.])
 """)
 
-add_docstr(_C.index_select,
+add_docstr(torch.index_select,
            r"""
 index_select(input, dim, index, out=None) -> Tensor
 
@@ -1963,7 +1962,7 @@ Example::
             [-1.1734,  0.7230]])
 """)
 
-add_docstr(_C.inverse,
+add_docstr(torch.inverse,
            r"""
 inverse(input, out=None) -> Tensor
 
@@ -1993,7 +1992,7 @@ Example::
            1.1921)
 """)
 
-add_docstr(_C.kthvalue,
+add_docstr(torch.kthvalue,
            r"""
 kthvalue(input, k, dim=None, keepdim=False, out=None) -> (Tensor, LongTensor)
 
@@ -2035,7 +2034,7 @@ Example::
     (tensor([[ 4.,  5.,  6.]]), tensor([[ 1,  1,  1]]))
 """)
 
-add_docstr(_C.le,
+add_docstr(torch.le,
            r"""
 le(input, other, out=None) -> Tensor
 
@@ -2059,7 +2058,7 @@ Example::
             [ 1,  1]], dtype=torch.uint8)
 """)
 
-add_docstr(_C.lerp,
+add_docstr(torch.lerp,
            r"""
 lerp(start, end, weight, out=None)
 
@@ -2090,7 +2089,7 @@ Example::
     tensor([ 5.5000,  6.0000,  6.5000,  7.0000])
 """)
 
-add_docstr(_C.linspace,
+add_docstr(torch.linspace,
            r"""
 linspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -2121,7 +2120,7 @@ Example::
     tensor([-10.,  -5.,   0.,   5.,  10.])
 """.format(**factory_common_args))
 
-add_docstr(_C.log,
+add_docstr(torch.log,
            r"""
 log(input, out=None) -> Tensor
 
@@ -2144,7 +2143,7 @@ Example::
     tensor([ nan,  nan,  nan,  nan,  nan])
 """)
 
-add_docstr(_C.log10,
+add_docstr(torch.log10,
            r"""
 log10(input, out=None) -> Tensor
 
@@ -2170,7 +2169,7 @@ Example::
 
 """)
 
-add_docstr(_C.log1p,
+add_docstr(torch.log1p,
            r"""
 log1p(input, out=None) -> Tensor
 
@@ -2195,7 +2194,7 @@ Example::
     tensor([    nan, -4.8653,  0.7055, -0.7705,  0.2225])
 """)
 
-add_docstr(_C.log2,
+add_docstr(torch.log2,
            r"""
 log2(input, out=None) -> Tensor
 
@@ -2221,7 +2220,7 @@ Example::
 
 """)
 
-add_docstr(_C.logspace,
+add_docstr(torch.logspace,
            r"""
 logspace(start, end, steps=100, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -2249,7 +2248,7 @@ Example::
     tensor([  1.2589,   2.1135,   3.5481,   5.9566,  10.0000])
 """.format(**factory_common_args))
 
-add_docstr(_C.logsumexp,
+add_docstr(torch.logsumexp,
            r"""
 logsumexp(input, dim, keepdim=False, out=None)
 
@@ -2280,7 +2279,7 @@ Example::
     tensor([ 0.8442,  1.4322,  0.8711])
 """)
 
-add_docstr(_C.lt,
+add_docstr(torch.lt,
            r"""
 lt(input, other, out=None) -> Tensor
 
@@ -2304,7 +2303,7 @@ Example::
             [ 1,  0]], dtype=torch.uint8)
 """)
 
-add_docstr(_C.masked_select,
+add_docstr(torch.masked_select,
            r"""
 masked_select(input, mask, out=None) -> Tensor
 
@@ -2338,7 +2337,7 @@ Example::
     tensor([ 1.2252,  0.5002,  0.6248,  2.0139])
 """)
 
-add_docstr(_C.max,
+add_docstr(torch.max,
            r"""
 .. function:: max(input) -> Tensor
 
@@ -2414,7 +2413,7 @@ Example::
     tensor([ 0.8722, -0.7416,  0.2653, -0.1584])
 """)
 
-add_docstr(_C.mean,
+add_docstr(torch.mean,
            r"""
 .. function:: mean(input) -> Tensor
 
@@ -2464,7 +2463,7 @@ Example::
             [ 0.1807]])
 """)
 
-add_docstr(_C.median,
+add_docstr(torch.median,
            r"""
 .. function:: median(input) -> Tensor
 
@@ -2513,7 +2512,7 @@ Example::
     (tensor([-0.3982,  0.2270,  0.2488,  0.4742]), tensor([ 1,  4,  4,  3]))
 """)
 
-add_docstr(_C.min,
+add_docstr(torch.min,
            r"""
 .. function:: min(input) -> Tensor
 
@@ -2590,7 +2589,7 @@ Example::
     tensor([-0.1369, -1.1740, -0.6460, -0.1929])
 """)
 
-add_docstr(_C.mm,
+add_docstr(torch.mm,
            r"""
 mm(mat1, mat2, out=None) -> Tensor
 
@@ -2616,7 +2615,7 @@ Example::
             [-0.0760, -3.6705,  2.4784]])
 """)
 
-add_docstr(_C.matmul,
+add_docstr(torch.matmul,
            r"""
 matmul(tensor1, tensor2, out=None) -> Tensor
 
@@ -2680,7 +2679,7 @@ Example::
 
 """)
 
-add_docstr(_C.mode,
+add_docstr(torch.mode,
            r"""
 mode(input, dim=-1, keepdim=False, values=None, indices=None) -> (Tensor, LongTensor)
 
@@ -2716,7 +2715,7 @@ Example::
     (tensor([-1.5946, -0.6383, -1.3514, -1.4689]), tensor([ 2,  2,  3,  2]))
 """)
 
-add_docstr(_C.mul,
+add_docstr(torch.mul,
            r"""
 .. function:: mul(input, value, out=None)
 
@@ -2776,7 +2775,7 @@ Example::
             [ 0.4312,  0.1019, -0.4394,  1.8753]])
 """)
 
-add_docstr(_C.multinomial,
+add_docstr(torch.multinomial,
            r"""
 multinomial(input, num_samples, replacement=False, out=None) -> LongTensor
 
@@ -2820,7 +2819,7 @@ Example::
     tensor([ 2,  1,  1,  1])
 """)
 
-add_docstr(_C.mv,
+add_docstr(torch.mv,
            r"""
 mv(mat, vec, out=None) -> Tensor
 
@@ -2845,7 +2844,7 @@ Example::
     tensor([ 1.0404, -0.6361])
 """)
 
-add_docstr(_C.ne,
+add_docstr(torch.ne,
            r"""
 ne(input, other, out=None) -> Tensor
 
@@ -2869,7 +2868,7 @@ Example::
             [ 1,  0]], dtype=torch.uint8)
 """)
 
-add_docstr(_C.neg,
+add_docstr(torch.neg,
            r"""
 neg(input, out=None) -> Tensor
 
@@ -2891,7 +2890,7 @@ Example::
     tensor([-0.0090,  0.2262,  0.0682,  0.2866, -0.3940])
 """)
 
-add_docstr(_C.nonzero,
+add_docstr(torch.nonzero,
            r"""
 nonzero(input, out=None) -> LongTensor
 
@@ -2924,7 +2923,7 @@ Example::
             [ 3,  3]])
 """)
 
-add_docstr(_C.norm,
+add_docstr(torch.norm,
            r"""
 .. function:: norm(input, p=2) -> Tensor
 
@@ -2978,7 +2977,7 @@ Example::
             [ 2.]])
 """)
 
-add_docstr(_C.normal,
+add_docstr(torch.normal,
            r"""
 .. function:: normal(mean, std, out=None) -> Tensor
 
@@ -3039,7 +3038,7 @@ Example::
     tensor([ 1.1552,  2.6148,  2.6535,  5.8318,  4.2361])
 """)
 
-add_docstr(_C.numel,
+add_docstr(torch.numel,
            r"""
 numel(input) -> int
 
@@ -3059,7 +3058,7 @@ Example::
 
 """)
 
-add_docstr(_C.ones,
+add_docstr(torch.ones,
            r"""
 ones(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -3086,7 +3085,7 @@ Example::
 
 """.format(**factory_common_args))
 
-add_docstr(_C.ones_like,
+add_docstr(torch.ones_like,
            r"""
 ones_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
@@ -3114,7 +3113,7 @@ Example::
             [ 1.,  1.,  1.]])
 """.format(**factory_like_common_args))
 
-add_docstr(_C.orgqr,
+add_docstr(torch.orgqr,
            r"""
 orgqr(a, tau) -> Tensor
 
@@ -3133,7 +3132,7 @@ Args:
 
 """)
 
-add_docstr(_C.ormqr,
+add_docstr(torch.ormqr,
            r"""
 ormqr(a, tau, mat, left=True, transpose=False) -> (Tensor, Tensor)
 
@@ -3153,7 +3152,7 @@ Args:
 
 """)
 
-add_docstr(_C.potrf, r"""
+add_docstr(torch.potrf, r"""
 potrf(a, upper=True, out=None) -> Tensor
 
 Computes the Cholesky decomposition of a symmetric positive-definite
@@ -3198,7 +3197,7 @@ Example::
             [ 1.4551,  0.1294,  1.6724]])
 """)
 
-add_docstr(_C.potri, r"""
+add_docstr(torch.potri, r"""
 potri(u, upper=True, out=None) -> Tensor
 
 Computes the inverse of a positive semidefinite matrix given its
@@ -3241,7 +3240,7 @@ Example::
             [-0.0889,  0.2122,  0.1412]])
 """)
 
-add_docstr(_C.potrs, r"""
+add_docstr(torch.potrs, r"""
 potrs(b, u, upper=True, out=None) -> Tensor
 
 Solves a linear system of equations with a positive semidefinite
@@ -3291,7 +3290,7 @@ Example::
             [ -4.3771,  10.4173]])
 """)
 
-add_docstr(_C.pow,
+add_docstr(torch.pow,
            r"""
 .. function:: pow(input, exponent, out=None) -> Tensor
 
@@ -3359,7 +3358,7 @@ Example::
     tensor([  2.,   4.,   8.,  16.])
 """)
 
-add_docstr(_C.prod,
+add_docstr(torch.prod,
            r"""
 .. function:: prod(input, dtype=None) -> Tensor
 
@@ -3405,7 +3404,7 @@ Example::
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
 """.format(**reduceops_common_args))
 
-add_docstr(_C.pstrf, r"""
+add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
 
 Computes the pivoted Cholesky decomposition of a positive semidefinite
@@ -3444,7 +3443,7 @@ Example::
             [ 0.8342, -0.1996,  3.7493]])
 """)
 
-add_docstr(_C.qr,
+add_docstr(torch.qr,
            r"""
 qr(input, out=None) -> (Tensor, Tensor)
 
@@ -3490,7 +3489,7 @@ Example::
             [ 0., -0.,  1.]])
 """)
 
-add_docstr(_C.rand,
+add_docstr(torch.rand,
            r"""
 rand(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -3517,7 +3516,7 @@ Example::
             [ 0.3816,  0.7249,  0.0998]])
 """)
 
-add_docstr(_C.rand_like,
+add_docstr(torch.rand_like,
            r"""
 rand_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
@@ -3535,7 +3534,7 @@ Args:
 
 """.format(**factory_like_common_args))
 
-add_docstr(_C.randint,
+add_docstr(torch.randint,
            r"""
 randint(low=0, high, size, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -3576,7 +3575,7 @@ Example::
 
 """.format(**factory_common_args))
 
-add_docstr(_C.randint_like,
+add_docstr(torch.randint_like,
            r"""
 randint_like(input, low=0, high, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -3599,7 +3598,7 @@ Args:
 
 """.format(**factory_like_common_args))
 
-add_docstr(_C.randn,
+add_docstr(torch.randn,
            r"""
 randn(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -3630,7 +3629,7 @@ Example::
             [ 1.1719, -0.4709, -0.1996]])
 """.format(**factory_common_args))
 
-add_docstr(_C.randn_like,
+add_docstr(torch.randn_like,
            r"""
 randn_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
@@ -3648,7 +3647,7 @@ Args:
 
 """.format(**factory_like_common_args))
 
-add_docstr(_C.randperm,
+add_docstr(torch.randperm,
            r"""
 randperm(n, out=None, dtype=torch.int64, layout=torch.strided, device=None, requires_grad=False) -> LongTensor
 
@@ -3669,7 +3668,7 @@ Example::
     tensor([ 2,  1,  0,  3])
 """.format(**factory_common_args))
 
-add_docstr(_C.tensor,
+add_docstr(torch.tensor,
            r"""
 tensor(data, dtype=None, device=None, requires_grad=False) -> Tensor
 
@@ -3712,7 +3711,7 @@ Example::
     tensor([])
 """.format(**factory_data_common_args))
 
-add_docstr(_C.range,
+add_docstr(torch.range,
            r"""
 range(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -3744,7 +3743,7 @@ Example::
     tensor([ 1.0000,  1.5000,  2.0000,  2.5000,  3.0000,  3.5000,  4.0000])
 """.format(**factory_common_args))
 
-add_docstr(_C.arange,
+add_docstr(torch.arange,
            r"""
 arange(start=0, end, step=1, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -3782,7 +3781,7 @@ Example::
     tensor([ 1.0000,  1.5000,  2.0000])
 """.format(**factory_common_args))
 
-add_docstr(_C.remainder,
+add_docstr(torch.remainder,
            r"""
 remainder(input, divisor, out=None) -> Tensor
 
@@ -3813,7 +3812,7 @@ Example::
         division equivalently to the C library function ``fmod()``.
 """)
 
-add_docstr(_C.renorm,
+add_docstr(torch.renorm,
            r"""
 renorm(input, p, dim, maxnorm, out=None) -> Tensor
 
@@ -3847,7 +3846,7 @@ Example::
             [ 1.6667,  1.6667,  1.6667]])
 """)
 
-add_docstr(_C.reshape,
+add_docstr(torch.reshape,
            r"""
 reshape(input, shape) -> Tensor
 
@@ -3876,7 +3875,7 @@ Example::
 """)
 
 
-add_docstr(_C.round,
+add_docstr(torch.round,
            r"""
 round(input, out=None) -> Tensor
 
@@ -3896,7 +3895,7 @@ Example::
     tensor([ 1.,  1.,  1., -1.])
 """)
 
-add_docstr(_C.rsqrt,
+add_docstr(torch.rsqrt,
            r"""
 rsqrt(input, out=None) -> Tensor
 
@@ -3919,7 +3918,7 @@ Example::
     tensor([    nan,  1.8351,  0.8053,     nan])
 """)
 
-add_docstr(_C.set_flush_denormal,
+add_docstr(torch.set_flush_denormal,
            r"""
 set_flush_denormal(mode) -> bool
 
@@ -3945,14 +3944,14 @@ Example::
            [ 1.0000], dtype=torch.float64)
 """)
 
-add_docstr(_C.set_num_threads,
+add_docstr(torch.set_num_threads,
            r"""
 set_num_threads(int)
 
 Sets the number of OpenMP threads used for parallelizing CPU operations
 """)
 
-add_docstr(_C.sigmoid,
+add_docstr(torch.sigmoid,
            r"""
 sigmoid(input, out=None) -> Tensor
 
@@ -3974,7 +3973,7 @@ Example::
     tensor([ 0.7153,  0.7481,  0.2920,  0.1458])
 """)
 
-add_docstr(_C.sign,
+add_docstr(torch.sign,
            r"""
 sign(input, out=None) -> Tensor
 
@@ -3993,7 +3992,7 @@ Example::
     tensor([ 1., -1., -1.,  1.])
 """)
 
-add_docstr(_C.sin,
+add_docstr(torch.sin,
            r"""
 sin(input, out=None) -> Tensor
 
@@ -4015,7 +4014,7 @@ Example::
     tensor([-0.5194,  0.1343, -0.4032, -0.2711])
 """)
 
-add_docstr(_C.sinh,
+add_docstr(torch.sinh,
            r"""
 sinh(input, out=None) -> Tensor
 
@@ -4038,7 +4037,7 @@ Example::
     tensor([ 0.5644, -0.9744, -0.1268,  1.0845])
 """)
 
-add_docstr(_C.sort,
+add_docstr(torch.sort,
            r"""
 sort(input, dim=None, descending=False, out=None) -> (Tensor, LongTensor)
 
@@ -4084,7 +4083,7 @@ Example::
             [ 1,  2,  2,  0]])
 """)
 
-add_docstr(_C.sparse_coo_tensor,
+add_docstr(torch.sparse_coo_tensor,
            r"""
 sparse_coo_tensor(indices, values, size=None, dtype=None, device=None, requires_grad=False) -> Tensor
 
@@ -4146,7 +4145,7 @@ Example::
     tensor([])
 """)
 
-add_docstr(_C.sqrt,
+add_docstr(torch.sqrt,
            r"""
 sqrt(input, out=None) -> Tensor
 
@@ -4168,7 +4167,7 @@ Example::
     tensor([    nan,  1.0112,  0.2883,  0.6933])
 """)
 
-add_docstr(_C.squeeze,
+add_docstr(torch.squeeze,
            r"""
 squeeze(input, dim=None, out=None) -> Tensor
 
@@ -4211,7 +4210,7 @@ Example::
     torch.Size([2, 2, 1, 2])
 """)
 
-add_docstr(_C.std,
+add_docstr(torch.std,
            r"""
 .. function:: std(input, unbiased=True) -> Tensor
 
@@ -4264,7 +4263,7 @@ Example::
     tensor([ 1.0311,  0.7477,  1.2204,  0.9087])
 """)
 
-add_docstr(_C.sum,
+add_docstr(torch.sum,
            r"""
 .. function:: sum(input, dtype=None) -> Tensor
 
@@ -4314,7 +4313,7 @@ Example::
     tensor([  435.,  1335.,  2235.,  3135.])
 """.format(**reduceops_common_args))
 
-add_docstr(_C.svd,
+add_docstr(torch.svd,
            r"""
 svd(input, some=True, out=None) -> (Tensor, Tensor, Tensor)
 
@@ -4379,7 +4378,7 @@ Example::
            9.3738)
 """)
 
-add_docstr(_C.symeig,
+add_docstr(torch.symeig,
            r"""
 symeig(input, eigenvectors=False, upper=True, out=None) -> (Tensor, Tensor)
 
@@ -4431,7 +4430,7 @@ Examples::
             [-0.8041,  0.4480,  0.1725,  0.3108,  0.1622]])
 """)
 
-add_docstr(_C.t,
+add_docstr(torch.t,
            r"""
 t(input) -> Tensor
 
@@ -4455,7 +4454,7 @@ Example::
             [-0.5872,  0.6932]])
 """)
 
-add_docstr(_C.flip,
+add_docstr(torch.flip,
            r"""
 flip(input, dims) -> Tensor
 
@@ -4482,7 +4481,7 @@ Example::
              [ 0,  1]]])
 """)
 
-add_docstr(_C.take,
+add_docstr(torch.take,
            r"""
 take(input, indices) -> Tensor
 
@@ -4502,7 +4501,7 @@ Example::
     tensor([ 4,  5,  8])
 """)
 
-add_docstr(_C.tan,
+add_docstr(torch.tan,
            r"""
 tan(input, out=None) -> Tensor
 
@@ -4524,7 +4523,7 @@ Example::
     tensor([-2.5930,  4.9859,  0.4722, -5.3366])
 """)
 
-add_docstr(_C.tanh,
+add_docstr(torch.tanh,
            r"""
 tanh(input, out=None) -> Tensor
 
@@ -4547,7 +4546,7 @@ Example::
     tensor([ 0.7156, -0.6218,  0.8257,  0.2553])
 """)
 
-add_docstr(_C.topk,
+add_docstr(torch.topk,
            r"""
 topk(input, k, dim=None, largest=True, sorted=True, out=None) -> (Tensor, LongTensor)
 
@@ -4584,7 +4583,7 @@ Example::
     (tensor([ 5.,  4.,  3.]), tensor([ 4,  3,  2]))
 """)
 
-add_docstr(_C.trace,
+add_docstr(torch.trace,
            r"""
 trace(input) -> Tensor
 
@@ -4601,7 +4600,7 @@ Example::
     tensor(15.)
 """)
 
-add_docstr(_C.transpose,
+add_docstr(torch.transpose,
            r"""
 transpose(input, dim0, dim1) -> Tensor
 
@@ -4629,7 +4628,7 @@ Example::
             [ 0.5809,  0.4942]])
 """)
 
-add_docstr(_C.tril,
+add_docstr(torch.tril,
            r"""
 tril(input, diagonal=0, out=None) -> Tensor
 
@@ -4682,7 +4681,7 @@ Example::
             [-0.0614, -0.7344, -1.3164,  0.0000,  0.0000,  0.0000]])
 """)
 
-add_docstr(_C.triu,
+add_docstr(torch.triu,
            r"""
 triu(input, diagonal=0, out=None) -> Tensor
 
@@ -4743,7 +4742,7 @@ Example::
             [-0.9888,  1.0679, -1.3337,  0.0000,  0.0000,  0.0000]])
 """)
 
-add_docstr(_C.trtrs,
+add_docstr(torch.trtrs,
            r"""
 trtrs(b, A, upper=True, transpose=False, unitriangular=False) -> (Tensor, Tensor)
 
@@ -4794,7 +4793,7 @@ Examples::
             [ 0.0000,  0.7986]]))
 """)
 
-add_docstr(_C.trunc,
+add_docstr(torch.trunc,
            r"""
 trunc(input, out=None) -> Tensor
 
@@ -4814,7 +4813,7 @@ Example::
     tensor([ 3.,  0., -0., -0.])
 """)
 
-add_docstr(_C.unsqueeze,
+add_docstr(torch.unsqueeze,
            r"""
 unsqueeze(input, dim, out=None) -> Tensor
 
@@ -4844,7 +4843,7 @@ Example::
             [ 4]])
 """)
 
-add_docstr(_C.var,
+add_docstr(torch.var,
            r"""
 .. function:: var(input, unbiased=True) -> Tensor
 
@@ -4898,7 +4897,7 @@ Example::
     tensor([ 1.7444,  1.1363,  0.7356,  0.5112])
 """)
 
-add_docstr(_C.zeros,
+add_docstr(torch.zeros,
            r"""
 zeros(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -4924,7 +4923,7 @@ Example::
     tensor([ 0.,  0.,  0.,  0.,  0.])
 """.format(**factory_common_args))
 
-add_docstr(_C.zeros_like,
+add_docstr(torch.zeros_like,
            r"""
 zeros_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
@@ -4952,7 +4951,7 @@ Example::
             [ 0.,  0.,  0.]])
 """.format(**factory_like_common_args))
 
-add_docstr(_C.btrifact_with_info,
+add_docstr(torch.btrifact_with_info,
            r"""
 btrifact_with_info(A, pivot=True) -> (Tensor, IntTensor, IntTensor)
 
@@ -4978,7 +4977,7 @@ Example::
     LU factorization succeeded for all samples!
 """)
 
-add_docstr(_C.btrisolve,
+add_docstr(torch.btrisolve,
            r"""
 btrisolve(b, LU_data, LU_pivots) -> Tensor
 
@@ -5002,7 +5001,7 @@ Example::
            2.8312)
 """)
 
-add_docstr(_C.empty,
+add_docstr(torch.empty,
            r"""
 empty(*sizes, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -5027,7 +5026,7 @@ Example::
 
 """.format(**factory_common_args))
 
-add_docstr(_C.empty_like,
+add_docstr(torch.empty_like,
            r"""
 empty_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
 
@@ -5050,7 +5049,7 @@ Example::
             [ 7.5751e+18,  7.1428e+18,  7.5955e+18]])
 """.format(**factory_like_common_args))
 
-add_docstr(_C.full,
+add_docstr(torch.full,
            r"""
 full(size, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -5074,7 +5073,7 @@ Example::
 
 """.format(**factory_common_args))
 
-add_docstr(_C.full_like,
+add_docstr(torch.full_like,
            r"""
 full_like(input, fill_value, out=None, dtype=None, layout=torch.strided, device=None, requires_grad=False) -> Tensor
 
@@ -5091,7 +5090,7 @@ Args:
     {requires_grad}
 """.format(**factory_like_common_args))
 
-add_docstr(_C.stft,
+add_docstr(torch.stft,
            r"""
 stft(signal, frame_length, hop, fft_size=None, normalized=False, onesided=True, window=None, pad_end=0) -> Tensor
 
@@ -5143,7 +5142,7 @@ Returns:
     Tensor: A tensor containing the STFT result
 """)
 
-add_docstr(_C.det,
+add_docstr(torch.det,
            r"""
 det(A) -> Tensor
 
@@ -5165,7 +5164,7 @@ Example::
     tensor(3.7641)
 """)
 
-add_docstr(_C.where,
+add_docstr(torch.where,
            r"""
 where(condition, x, y) -> Tensor
 
@@ -5204,7 +5203,7 @@ Example::
             [ 0.0478,  1.0000]])
 """)
 
-add_docstr(_C.logdet,
+add_docstr(torch.logdet,
            r"""
 logdet(A) -> Tensor
 
@@ -5232,7 +5231,7 @@ Example::
     tensor(-1.3430)
 """)
 
-add_docstr(_C.slogdet,
+add_docstr(torch.slogdet,
            r"""
 slogdet(A) -> (Tensor, Tensor)
 
@@ -5265,7 +5264,7 @@ Example::
     (tensor(-1.), tensor(1.5731))
 """)
 
-add_docstr(_C.fft,
+add_docstr(torch.fft,
            r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
 
@@ -5366,7 +5365,7 @@ Example::
 
 """)
 
-add_docstr(_C.ifft,
+add_docstr(torch.ifft,
            r"""
 ifft(input, signal_ndim, normalized=False) -> Tensor
 
@@ -5452,7 +5451,7 @@ Example::
 
 """)
 
-add_docstr(_C.rfft,
+add_docstr(torch.rfft,
            r"""
 rfft(input, signal_ndim, normalized=False, onesided=True) -> Tensor
 
@@ -5522,7 +5521,7 @@ Example::
 """)
 
 
-add_docstr(_C.irfft,
+add_docstr(torch.irfft,
            r"""
 irfft(input, signal_ndim, normalized=False, onesided=True, signal_sizes=None) -> Tensor
 
@@ -5623,7 +5622,7 @@ Example::
 """)
 
 
-add_docstr(_C.hann_window,
+add_docstr(torch.hann_window,
            """
 hann_window(window_length, periodic=True, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -5664,7 +5663,7 @@ Returns:
 """.format(**factory_common_args))
 
 
-add_docstr(_C.hamming_window,
+add_docstr(torch.hamming_window,
            """
 hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -5707,7 +5706,7 @@ Returns:
 """.format(**factory_common_args))
 
 
-add_docstr(_C.bartlett_window,
+add_docstr(torch.bartlett_window,
            """
 bartlett_window(window_length, periodic=True, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor
@@ -5750,7 +5749,7 @@ Returns:
 """.format(**factory_common_args))
 
 
-add_docstr(_C.blackman_window,
+add_docstr(torch.blackman_window,
            """
 blackman_window(window_length, periodic=True, dtype=None, \
 layout=torch.strided, device=None, requires_grad=False) -> Tensor

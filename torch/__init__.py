@@ -186,6 +186,7 @@ from ._tensor_str import set_printoptions
 from .tensor import Tensor
 from .storage import _StorageBase
 
+tensor = _C.tensor  # remove duplicate name, and fix to shortcut function
 
 class DoubleStorage(_C.DoubleStorageBase, _StorageBase):
     pass
