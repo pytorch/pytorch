@@ -146,7 +146,7 @@ TEST_CASE("module/clone") {
       }
 
       Linear l1, l2, l3;
-      Variable buffer;
+      torch::Tensor buffer;
     };
 
     auto module = TestModule().build();
@@ -264,7 +264,7 @@ TEST_CASE("module/buffers") {
       c = register_buffer("c", torch::ones({2, 2}) * 2);
     }
 
-    Variable a, b, c;
+    torch::Tensor a, b, c;
   };
 
   TestModule module;

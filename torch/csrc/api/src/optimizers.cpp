@@ -2,7 +2,7 @@
 
 #include <torch/nn/module.h>
 #include <torch/tensor.h>
-#include <torch/tensor_list_view\.h>
+#include <torch/tensor_list_view.h>
 
 namespace torch {
 

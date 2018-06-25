@@ -70,11 +70,7 @@ class Module {
   virtual bool is_training() const noexcept;
 
   /// Recursively moves all parameters to CPU memory (in place).
-  /// If `non_blocking` is true and the source is in pinned memory and
-  /// destination is on the GPU or vice versa, the copy is performed
-  /// asynchronously with respect to the host. Otherwise, the argument has no
-  /// effect.
-  virtual void cpu(bool non_blocking = false);
+  virtual void cpu();
 
   /// Recursively moves all parameters to CUDA memory (in place).
   /// If `non_blocking` is true and the source is in pinned memory and

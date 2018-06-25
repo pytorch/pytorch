@@ -90,8 +90,8 @@ void Module::eval() {
   is_training_ = false;
 }
 
-void Module::cpu(bool non_blocking) {
-  to(at::Device(at::Device::Type::CPU), non_blocking);
+void Module::cpu() {
+  to(at::Device(at::Device::Type::CPU));
 }
 
 void Module::cuda(int32_t device_index, bool non_blocking) {
