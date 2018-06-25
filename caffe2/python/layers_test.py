@@ -1754,33 +1754,50 @@ class TestLayers(LayersTestCase):
     @given(
         num=st.integers(min_value=10, max_value=100),
         feed_weight=st.booleans(),
-        use_inv_var_parameerization=st.booleans(),
+        use_inv_var_parameterization=st.booleans(),
         use_log_barrier=st.booleans(),
+        enable_diagnose=st.booleans(),
         **hu.gcs
     )
-    def testAdaptiveWeight(self, num, feed_weight, use_inv_var_parameerization,
-            use_log_barrier, gc, dc):
-        kwargs = {}
-        if use_inv_var_parameerization:
-            # mock thrift object for type inference
-            kwargs['estimation_method'] = 'inv_var'
-            kwargs['pos_optim_method'] = 'log_barrier'
+    def testAdaptiveWeight(
+        self, num, feed_weight, use_inv_var_parameterization, use_log_barrier,
+        enable_diagnose, gc, dc
+    ):
         input_record = self.new_record(schema.RawTuple(num))
         data = np.random.random(num)
         schema.FeedRecord(
-            input_record,
-            [np.array(x).astype(np.float32) for x in data]
+            input_record, [np.array(x).astype(np.float32) for x in data]
         )
         weights = np.random.random(num) if feed_weight else None
-        result = self.model.AdaptiveWeight(input_record, weights=weights, **kwargs)
+        result = self.model.AdaptiveWeight(
+            input_record,
+            weights=weights,
+            estimation_method=(
+                'inv_var' if use_inv_var_parameterization else 'log_std'
+            ),
+            pos_optim_method=(
+                'log_barrier' if use_log_barrier else 'pos_grad_proj'
+            ),
+            enable_diagnose=enable_diagnose
+        )
         train_init_net, train_net = self.get_training_nets(True)
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
         result = workspace.FetchBlob(result())
         if not feed_weight:
-            weights = 1. / num
+            weights = np.array([1. / num for _ in range(num)])
         expected = np.sum(weights * data + 0.5 * np.log(1. / 2. / weights))
         npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
+        if enable_diagnose:
+            assert len(self.model.ad_hoc_plot_blobs) == num
+            reconst_weights_from_ad_hoc = np.array(
+                [workspace.FetchBlob(b) for b in self.model.ad_hoc_plot_blobs]
+            ).flatten()
+            npt.assert_allclose(
+                reconst_weights_from_ad_hoc, weights, atol=1e-4, rtol=1e-4
+            )
+        else:
+            assert len(self.model.ad_hoc_plot_blobs) == 0
 
     @given(num=st.integers(min_value=10, max_value=100), **hu.gcs)
     def testConstantWeight(self, num, gc, dc):

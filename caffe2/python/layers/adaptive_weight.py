@@ -50,6 +50,13 @@ class AdaptiveWeight(ModelLayer):
         self.weight_func = getattr(self, self.estimation_method + "_weight")
         self.reg_func = getattr(self, self.estimation_method + "_reg")
         self.init_func()
+        if self.enable_diagnose:
+            self.weight_i = [
+                self.get_next_blob_reference("adaptive_weight_%d" % i)
+                for i in range(self.num)
+            ]
+            for i in range(self.num):
+                self.model.add_ad_hoc_plot_blob(self.weight_i[i])
 
     def concat_data(self, net):
         reshaped = [net.NextScopedBlob("reshaped_data_%d" % i) for i in range(self.num)]
@@ -134,7 +141,7 @@ class AdaptiveWeight(ModelLayer):
         net.Log(self.k, log_k)
         net.Scale(log_k, reg, scale=-0.5)
 
-    def add_ops(self, net):
+    def _add_ops_impl(self, net, enable_diagnose):
         x = self.concat_data(net)
         weight = net.NextScopedBlob("weight")
         reg = net.NextScopedBlob("reg")
@@ -145,7 +152,9 @@ class AdaptiveWeight(ModelLayer):
         net.Mul([weight, x], weighted_x)
         net.Add([weighted_x, reg], weighted_x_add_reg)
         net.SumElements(weighted_x_add_reg, self.output_schema())
-        if self.enable_diagnose:
+        if enable_diagnose:
             for i in range(self.num):
-                weight_i = net.NextScopedBlob("weight_%d" % i)
-                net.Slice(weight, weight_i, starts=[i], ends=[i + 1])
+                net.Slice(weight, self.weight_i[i], starts=[i], ends=[i + 1])
+
+    def add_ops(self, net):
+        self._add_ops_impl(net, self.enable_diagnose)

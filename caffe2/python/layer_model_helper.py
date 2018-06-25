@@ -91,6 +91,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         # additional (hard-coded) diagnose_options to report based on the model
         # TODO(xlwang): it's hack!
         self.ad_hoc_diagnose_blobs_and_operations = []
+        self.ad_hoc_plot_blobs = []
 
     def clear_output_schema(self):
         self._output_schema = None
@@ -104,6 +105,11 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._metrics_schema = self._metrics_schema + schema.Struct(
             (name, value)
         )
+
+    def add_ad_hoc_plot_blob(self, blob, dtype=None):
+        dtype = dtype or (np.float, (1, ))
+        self.add_metric_field(str(blob), schema.Scalar(dtype, blob))
+        self.ad_hoc_plot_blobs.append(blob)
 
     @staticmethod
     def _get_global_constant_initializer_op(
