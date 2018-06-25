@@ -22,7 +22,8 @@ class cudnn_exception : public std::runtime_error {
 inline void cudnnCheck(cudnnStatus_t status, const char* file, int line) {
   if (status != CUDNN_STATUS_SUCCESS) {
     std::stringstream msg;
-    msg << file << ":" << line << ": CuDNN error: " << cudnnGetErrorString(status);
+    msg << file << ":" << line
+        << ": CuDNN error: " << cudnnGetErrorString(status);
     if (status == CUDNN_STATUS_NOT_SUPPORTED) {
       msg << ". This error may appear if you passed in a non-contiguous input.";
       throw cudnn_exception(status, msg.str());
