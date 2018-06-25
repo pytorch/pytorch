@@ -595,6 +595,22 @@ Tensor hann_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ conversions ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+Tensor cpu(const Tensor& self) {
+  return self.to(kCPU);
+}
+
+Tensor cuda(const Tensor& self, int64_t device_id, bool non_blocking) {
+  if (device_id == -1) { // default argument
+    return self.to(kCUDA, non_blocking);
+  } else {
+    return self.to({kCUDA, device_id}, non_blocking);
+  }
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);
@@ -607,7 +623,7 @@ Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
 
 template <typename T>
 Tensor tensor_cuda(ArrayRef<T> values, const TensorOptions& options) {
-  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(at::kCPU));
+  auto cpu_tensor = tensor_cpu(values, TensorOptions(options).device(Device(kCPU)));
   return cpu_tensor.to(options.device());
 }
 
