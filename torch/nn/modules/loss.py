@@ -172,7 +172,7 @@ class NLLLoss(_WeightedLoss):
         >>> data = torch.randn(N, 16, 10, 10)
         >>> m = nn.Conv2d(16, C, (3, 3))
         >>> # each element in target has to have 0 <= value < C
-        >>> target = torch.tensor(N, 8, 8).random_(0, C)
+        >>> target = torch.empty(N, 8, 8, dtype=torch.long).random_(0, C)
         >>> output = loss(m(data), target)
         >>> output.backward()
     """
