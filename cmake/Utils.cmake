@@ -274,7 +274,6 @@ function(target_enable_style_warnings TARGET)
             -Wmissing-include-dirs
             -Woverloaded-virtual
             -Wredundant-decls
-            -Wshadow
             -Wsign-promo
             -Wstrict-overflow=5
             -fdiagnostics-show-option

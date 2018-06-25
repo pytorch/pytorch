@@ -2,6 +2,7 @@
 
 #include <functional>
 #include <iostream>
+#include "caffe2/utils/C++17.h"
 
 namespace c10 {
 
@@ -19,6 +20,7 @@ inline std::ostream& operator<<(std::ostream& stream, DeviceTypeId device_type_i
         case DeviceTypeId::CUDA: return stream << "DeviceTypeId(CUDA)";
         case DeviceTypeId::UNDEFINED: return stream << "DeviceTypeId(UNDEFINED)";
     }
+    throw std::logic_error("Unknown DeviceTypeId: " + guts::to_string(static_cast<int>(device_type_id)));
 }
 
 }
