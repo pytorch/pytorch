@@ -7,8 +7,7 @@ ENDIF()
 
 include("${CMAKE_UTILS_PATH}")
 torch_cuda_get_nvcc_gencode_flag(NVCC_GENCODE)
-string (REPLACE ";" " " NVCC_GENCODE "${NVCC_GENCODE}")
-string (REPLACE "-gencode " "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
+string(REPLACE "-gencode;" "-gencode=" NVCC_GENCODE "${NVCC_GENCODE}")
 message(STATUS "Set NVCC_GENCODE for building NCCL: ${NVCC_GENCODE}")
 
 ADD_CUSTOM_COMMAND(
