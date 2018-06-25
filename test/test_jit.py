@@ -3878,10 +3878,9 @@ def func(t):
         class TracedModule(torch.nn.Module):
             def __init__(self):
                 super(TracedModule, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(4, 3))
 
             def forward(self, x):
-                return torch.mm(x, self.param)
+                return torch.mm(x, torch.zeros(4, 3))
 
         tm = torch.jit.trace(torch.rand(3, 4))(TracedModule())
 
@@ -3889,8 +3888,6 @@ def func(t):
         def script_fn(x):
             return tm(x) + 1
 
-        # Note: the parameter from the traced module should appear as a
-        # parameter on the implicit Module created for script_fn
         self.assertExpected(str(script_fn.graph))
 
     def test_call_script_fn_from_script_fn(self):
@@ -3910,11 +3907,10 @@ def func(t):
         class ScriptMod(torch.jit.ScriptModule):
             def __init__(self):
                 super(ScriptMod, self).__init__()
-                self.param = torch.nn.Parameter(torch.rand(4, 3))
 
             @torch.jit.script_method
             def forward(self, x):
-                return torch.mm(x, self.param)
+                return torch.mm(x, torch.zeros([4, 3]))
 
         sm = ScriptMod()
 
@@ -3922,8 +3918,6 @@ def func(t):
         def script_fn(x):
             return sm(x) + 1
 
-        # Note: the parameter from the script module should appear as a
-        # parameter on the implicit Module created for script_fn
         self.assertExpected(str(script_fn.graph))
 
     @unittest.skip('TODO: Python value resolution broken')
@@ -4074,6 +4068,25 @@ def func(t):
         # input list to the graph. The mm op from ScriptMod1 should be properly
         # inlined
         self.assertExpected(str(sm.graph))
+
+    def test_module_with_params_called_fails(self):
+        with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with parameters. Stateful "
+                "modules to be inlined must be submodules of the callee."):
+            class ScriptMod(torch.jit.ScriptModule):
+                def __init__(self):
+                    super(ScriptMod, self).__init__()
+                    self.param = torch.nn.Parameter(torch.rand(3, 3))
+
+                @torch.jit.script_method
+                def forward(self, x):
+                    return torch.mm(x, self.param)
+
+            sm = ScriptMod()
+
+            @torch.jit.script
+            def some_func(x):
+                return sm(x)
+
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

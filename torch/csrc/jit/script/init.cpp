@@ -82,12 +82,20 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
     if(py::isinstance<Module>(self)) {
       Module& mod = py::cast<Module&>(self);
-      auto& forward = mod.get_method("forward");
-      // return packOutputs(*m.graph(),inlineCallTo(*m.graph(), *forward.graph(), inputs));
-      std::vector<torch::jit::NamedValue> named_inputs;
-      for (auto inp : inputs)
-        named_inputs.push_back(NamedValue(loc, "", inp));
-      return packOutputs(*m.graph(), m.emit_call_to(loc, forward, named_inputs, {}));
+      if (Method * forward = mod.find_method("forward")) {
+        // This code path should only get called for Modules that are really
+        // wrappers around pure script/traced functions. Modules with parameters
+        // should be submodules of the caller, and thus will be represented as
+        // ModuleValue and not go through here.
+        if (mod.get_parameters().size() != 0) {
+          throw ErrorReport(loc) << "Attempted to inline a Module with parameters. "
+            "Stateful modules to be inlined must be submodules of the callee.";
+        }
+        std::vector<torch::jit::NamedValue> named_inputs;
+        for (auto inp : inputs)
+          named_inputs.push_back(NamedValue(loc, "", inp));
+        return packOutputs(*m.graph(), m.emit_call_to(loc, *forward, named_inputs, {}));
+      }
     }
 
     // Release the function object so we can wrap it in a PythonOp

@@ -304,7 +304,7 @@ def trace(*args, **kwargs):
             orig = func
         else:
             # traced functions become a method on an Empty module
-            orig = ScriptModule()
+            orig = Module()
 
         module = TopLevelTracedModule(orig, **executor_options)
         module._create_method_from_trace('forward', func, args)
