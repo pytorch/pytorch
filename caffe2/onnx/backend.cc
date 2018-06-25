@@ -616,7 +616,11 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     BuildOperator(
         c2_op, "MatMul", {input_a, input_b}, {ab}, {arg_trans_a, arg_trans_b});
     c2_op = ret.ops.Add();
-    BuildOperator(c2_op, "Add", {ab, input_c}, {output}, {arg_broadcast});
+    if (opset_version > 6) {
+      BuildOperator(c2_op, "Add", {ab, input_c}, {output});
+    } else {
+      BuildOperator(c2_op, "Add", {ab, input_c}, {output}, {arg_broadcast});
+    }
   }
 
   return ret;

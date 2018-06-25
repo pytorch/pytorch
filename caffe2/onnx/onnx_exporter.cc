@@ -221,6 +221,10 @@ const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
 OnnxExporter::get_special_operators() const {
   const static std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>
       kSpecialOperators = {
+          {"Add", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Sub", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Mul", &OnnxExporter::CreateBinaryElementwiseOpNodes},
+          {"Div", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Cast", &OnnxExporter::CreateCastNodes},
           {"Conv", &OnnxExporter::CreateConvPoolNodes},
           {"ConvTranspose", &OnnxExporter::CreateConvPoolNodes},
@@ -278,7 +282,9 @@ bool OnnxExporter::IsBlackListed(const caffe2::Argument& arg) {
       kBlackListString = {{"order", {"NCHW"}}};
   const static std::unordered_map<std::string, std::unordered_set<int64_t>>
       kBlackListInt = {{"cudnn_exhaustive_search", {0, 1}},
-                       {"use_cudnn", {0, 1}}};
+                       {"use_cudnn", {0, 1}},
+                       {"is_test", {0, 1}},
+                       {"broadcast", {0, 1}}};
 
   if (arg.has_i()) {
     const auto it = kBlackListInt.find(arg.name());
@@ -335,6 +341,53 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
     }
   }
   return result;
+}
+
+ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  int64_t end_dim = 0;
+  const auto& x = def.input(0);
+  const auto& y = def.input(1);
+  const auto& z = def.output(0);
+  const auto& x_shape = shapes.at(x);
+  const auto& y_shape = shapes.at(y);
+  const auto& z_shape = shapes.at(z);
+  for (const auto& arg: def.arg()) {
+    if (arg.name() == "axis") {
+      int64_t axis = arg.i();
+      if (x_shape.dims().size() - axis != y_shape.dims().size()) {
+        end_dim = y_shape.dims().size() - 1 - axis + x_shape.dims().size();
+      }
+      break;
+    }
+  }
+
+  if (end_dim > 0) {
+    ConvertedResult result;
+    auto& nodes = result.first;
+
+    std::vector<int64_t> unsqueezed_dims(y_shape.dims().cbegin(), y_shape.dims().cend());
+    std::vector<int64_t> axes;
+    for (int64_t i = y_shape.dims().size(); i < end_dim; ++i) {
+      axes.emplace_back(i);
+      unsqueezed_dims.emplace_back(1);
+    }
+    const auto unsqueeze_output = dummy_->NewDummyName();
+    nodes.emplace_back(MakeNode(
+          "Unsqueeze",
+          {y},
+          {unsqueeze_output},
+          {MakeAttribute("axes", axes)}));
+    nodes.emplace_back(MakeNode(
+          caffe2::get_default(get_renamed_operators(), def.type(), def.type()),
+          {x, unsqueeze_output},
+          {z}));
+    nodes.back().set_name(def.name());
+    return result;
+  } else {
+    return CommonCaffe2OpToOnnxNodes(def);
+  }
 }
 
 ConvertedResult OnnxExporter::CreateCastNodes(
@@ -747,7 +800,7 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
       "Gemm",
       {x, w, b},
       {gemm_y_output},
-      {MakeAttribute("transB", 1L), MakeAttribute("broadcast", 1)},
+      {MakeAttribute("transB", 1L)},
       def.name()));
 
   if (has_axis) {
