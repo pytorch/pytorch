@@ -37,8 +37,8 @@ find_library(CAFFE2_GPU_LIBRARY caffe2_gpu
 find_library(PROTOBUF_LIBRARY protobuf
   NAMES libprotobuf.a libprotobufd.a libprotobuf.lib libprotobufd.lib
   PATHS ${CAFFE2_BUILD_LIB_DIR} NO_DEFAULT_PATH)
-find_library(NANOPB_LIBRARY protobuf-nanopb
-  PATHS ${NANOPB_BUILD_PATH} NO_DEFAULT_PATH)
+
+add_subdirectory(../third_party/nanopb protobuf-nanopb)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -290,7 +290,7 @@ target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
   ${CAFFE2_LIBRARY}
   ${PROTOBUF_LIBRARY}
-  ${NANOPB_LIBRARY}
+  protobuf-nanopb
 )
 if(USE_CUDA)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
