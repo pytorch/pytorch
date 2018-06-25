@@ -301,11 +301,15 @@ def trace(*args, **kwargs):
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         if isinstance(func, torch.nn.Module):
-            module = TopLevelTracedModule(func, **executor_options)
-            module._create_method_from_trace('forward', func, args)
-            return module
+            orig = func
         else:
-            return torch._C.GraphExecutor(func, args, **executor_options)
+            # traced functions become a method on an Empty module
+            orig = ScriptModule()
+
+        module = TopLevelTracedModule(orig, **executor_options)
+        module._create_method_from_trace('forward', func, args)
+        return module
+
     return wrapper
 
 
@@ -369,7 +373,11 @@ def _script_graph(fn, _frames_up=0):
 
 def script(fn, optimize=True, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-    return functools.wraps(fn)(torch._C.GraphExecutor(graph, optimize))
+    mod = ScriptModule()
+    mod._create_method_from_graph('forward', graph)
+    # Forward docstrings
+    mod.__doc__ = fn.__doc__
+    return mod
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
@@ -688,6 +696,9 @@ class TracedModule(ScriptModule):
 class TopLevelTracedModule(TracedModule):
     def forward(self, *args, **kwargs):
         return self._get_method('forward')(*args, **kwargs)
+
+    def _slow_forward(self, *args, **kwargs):
+        return self.forward(*args, **kwargs)
 
 
 class _ConstModuleList(ScriptModule):
