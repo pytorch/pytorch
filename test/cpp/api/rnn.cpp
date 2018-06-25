@@ -2,7 +2,7 @@
 
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
-#include <torch/optimizers.h>
+#include <torch/optim/adam.h>
 #include <torch/tensor.h>
 
 #include <test/cpp/api/util.h>
@@ -17,7 +17,7 @@ bool test_RNN_xor(Func&& model_maker, bool cuda = false) {
   auto rnn = model->add(model_maker(nhid), "rnn");
   auto lo = model->add(Linear(nhid, 1), "lo");
 
-  optim::Adam optimizer(model->parameters(), 1e-2);
+  torch::optim::Adam optimizer(model->parameters(), 1e-2);
   auto forward_op = [&](torch::Tensor x) {
     auto T = x.size(0);
     auto B = x.size(1);

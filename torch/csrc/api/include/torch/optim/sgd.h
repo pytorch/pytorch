@@ -30,11 +30,7 @@ class SGD : public Optimizer {
   template <typename ParameterContainer>
   explicit SGD(ParameterContainer&& parameters, const SGDOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
-        options_(options) {
-    if (options_.momentum_ > 0) {
-      momentum_buffers_ = detail::zeros_like(parameters_);
-    }
-  }
+        options_(options) {}
 
   void step() override;
 
@@ -50,7 +46,8 @@ class SGD : public Optimizer {
   SGD() : options_(0) {}
 
   SGDOptions options_;
-  std::vector<Variable> momentum_buffers_;
+  std::vector<Tensor> momentum_buffers_;
+  /// Counts how often `step()` is called, for dampening.
   size_t iteration_{0};
 };
 } // namespace optim

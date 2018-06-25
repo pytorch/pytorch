@@ -68,7 +68,8 @@ def run(optimizer_name, iterations, sample_every):
 
 
 def emit(optimizer_parameter_map):
-    print("// @generated from {}".format(__file__))
+    # Don't write generated with an @ in front, else this file is recognized as generated.
+    print("// @{} from {}".format('generated', __file__))
     print(HEADER)
     for optimizer_name, parameters in optimizer_parameter_map.items():
         print(PARAMETERS.format(optimizer_name))

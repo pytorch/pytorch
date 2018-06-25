@@ -26,8 +26,10 @@ void Adam::step() {
       continue;
     }
 
-    auto& exp_average = exp_average_buffers_.at(i).data();
-    auto& exp_average_sq = exp_average_sq_buffers_.at(i).data();
+    auto& exp_average =
+        lazily_create_buffer(exp_average_buffers_, i, parameters_[i]).data();
+    auto& exp_average_sq =
+        lazily_create_buffer(exp_average_sq_buffers_, i, parameters_[i]).data();
 
     step_buffers_.at(i) += 1;
 
@@ -42,9 +44,11 @@ void Adam::step() {
 
     at::Tensor denom;
     if (options_.amsgrad_) {
-      auto& max_exp_average_sq = max_exp_average_sq_buffers_.at(i).data();
-      at::max_out(max_exp_average_sq, max_exp_average_sq, exp_average_sq);
-      denom = max_exp_average_sq.sqrt().add_(options_.eps_);
+      auto& max_exp_average_sq =
+          lazily_create_buffer(max_exp_average_sq_buffers_, i, parameters_[i]);
+      at::max_out(
+          max_exp_average_sq.data(), max_exp_average_sq.data(), exp_average_sq);
+      denom = max_exp_average_sq.data().sqrt().add_(options_.eps_);
     } else {
       denom = exp_average_sq.sqrt().add_(options_.eps_);
     }

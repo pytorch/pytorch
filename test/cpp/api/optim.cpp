@@ -21,9 +21,7 @@
 using namespace torch::nn;
 using namespace torch::optim;
 
-bool test_optimizer_xor(
-    torch::optim::Optimizer&& optimizer,
-    Sequential& model) {
+bool test_optimizer_xor(Optimizer&& optimizer, Sequential& model) {
   float running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
@@ -63,7 +61,8 @@ void check_exact_values(
   const size_t kSampleEvery = 100;
 
   torch::manual_seed(0);
-  Sequential model(SigmoidLinear(Linear(2, 3)), SigmoidLinear(Linear(3, 1)));
+  Sequential model(
+      torch::SigmoidLinear(Linear(2, 3)), torch::SigmoidLinear(Linear(3, 1)));
   model.to(torch::kFloat64);
 
   // Use exact input values because matching random values is hard.
@@ -116,8 +115,7 @@ TEST_CASE("Optim/XORConvergence") {
 
   SECTION("sgd") {
     REQUIRE(test_optimizer_xor(
-        optim::SGD(
-            model.parameters(),
+        SGD(model.parameters(),
             SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(1e-6)),
         model));
   }
@@ -130,7 +128,7 @@ TEST_CASE("Optim/XORConvergence") {
 
   SECTION("adagrad") {
     REQUIRE(test_optimizer_xor(
-        optim::Adagrad(
+        Adagrad(
             model.parameters(),
             AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)),
         model));
@@ -154,13 +152,12 @@ TEST_CASE("Optim/XORConvergence") {
   // https://github.com/pytorch/pytorch/issues/7288
   SECTION("adam") {
     REQUIRE(test_optimizer_xor(
-        optim::Adam(model.parameters(), AdamOptions(1.0).weight_decay(1e-6)),
-        model));
+        Adam(model.parameters(), AdamOptions(1.0).weight_decay(1e-6)), model));
   }
 
   SECTION("amsgrad") {
     REQUIRE(test_optimizer_xor(
-        optim::Adam(
+        Adam(
             model.parameters(),
             AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
         model));
@@ -216,9 +213,9 @@ TEST_CASE("Optim/ZeroGrad") {
 }
 
 TEST_CASE("Optim/ExternalVectorOfParameters") {
-  std::vector<Variable> parameters = {
+  std::vector<torch::Tensor> parameters = {
       torch::randn({2, 2}), torch::randn({3, 3}), torch::randn({4, 4})};
-  std::vector<Variable> original_parameters = {
+  std::vector<torch::Tensor> original_parameters = {
       parameters[0].clone(), parameters[1].clone(), parameters[2].clone()};
 
   // Set all gradients to one

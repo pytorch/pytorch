@@ -22,7 +22,7 @@ const LBFGSOptions& LBFGS::options() const noexcept {
 at::Tensor LBFGS::gather_flat_grad() {
   std::vector<at::Tensor> views;
   for (auto& parameter : parameters_) {
-    views.push_back(Variable(parameter.grad()).data().view(-1));
+    views.push_back(torch::Tensor(parameter.grad()).data().view(-1));
   }
   return at::cat(views);
 }
@@ -37,9 +37,9 @@ void LBFGS::add_grad(const at::Scalar& step_size, const at::Tensor& update) {
   }
 }
 
-Variable LBFGS::step(LossClosure closure) {
-  Variable orig_loss = closure();
-  Variable loss = orig_loss.clone();
+torch::Tensor LBFGS::step(LossClosure closure) {
+  torch::Tensor orig_loss = closure();
+  torch::Tensor loss = orig_loss.clone();
   int64_t current_evals = 1;
   func_evals += 1;
 

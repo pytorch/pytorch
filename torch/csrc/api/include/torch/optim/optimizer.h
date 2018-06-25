@@ -18,10 +18,10 @@ namespace detail {
 /// shall have, such as `zero_grad`.
 class OptimizerBase {
  public:
-  using ParameterCursor = torch::detail::CursorBase<Variable>;
+  using ParameterCursor = torch::detail::CursorBase<Tensor>;
 
   /// Constructs the `Optimizer` from a vector of parameters.
-  explicit OptimizerBase(std::vector<Variable> parameters)
+  explicit OptimizerBase(std::vector<Tensor> parameters)
       : parameters_(std::move(parameters)) {}
 
   /// Constructs the `Optimizer` from a ParameterCursor, such as
@@ -39,26 +39,23 @@ class OptimizerBase {
   virtual void zero_grad();
 
   /// Provides a reference to the parameters this optimizer holds.
-  const std::vector<Variable>& parameters() const noexcept;
+  const std::vector<Tensor>& parameters() const noexcept;
 
  protected:
   OptimizerBase() = default;
 
-  /// The parameters this optimizer optimizes.
-  std::vector<Variable> parameters_;
-};
+  /// Lazily creates a buffer (e.g. for momentum) the first time it would be
+  /// accessed (when the index is equal to the size of the given buffer vector).
+  /// Laziness is important because we want the buffer to have the same dtype,
+  /// device, layout etc. as the corresponding parameter.
+  Tensor& lazily_create_buffer(
+      std::vector<Tensor>& buffers,
+      size_t index,
+      const Tensor& parameter);
 
-/// Helper function to construct a vector of zero-d out variables, each the same
-/// shape as the variable at the corresponding index in the input container.
-template <typename ParameterContainer>
-std::vector<Variable> zeros_like(const ParameterContainer& parameters) {
-  std::vector<Variable> result;
-  result.reserve(parameters.size());
-  for (auto& parameter : parameters) {
-    result.push_back(torch::zeros_like(parameter));
-  }
-  return result;
-}
+  /// The parameters this optimizer optimizes.
+  std::vector<Tensor> parameters_;
+};
 } // namespace detail
 
 /// Optimizer that defines a required `step()` method that takes no arguments
@@ -77,9 +74,9 @@ class Optimizer : public detail::OptimizerBase {
 class LossClosureOptimizer : public detail::OptimizerBase {
  public:
   /// A loss function closure, which is expected to return the loss value.
-  using LossClosure = std::function<Variable()>;
+  using LossClosure = std::function<Tensor()>;
   using detail::OptimizerBase::OptimizerBase;
-  virtual Variable step(LossClosure closure) = 0;
+  virtual Tensor step(LossClosure closure) = 0;
 };
 
 } // namespace optim

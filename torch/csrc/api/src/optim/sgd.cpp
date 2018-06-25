@@ -23,14 +23,14 @@ void SGD::step() {
       continue;
     }
 
-    auto d_p = Variable(grad).data();
+    auto d_p = torch::Tensor(grad).data();
     if (options_.weight_decay_ > 0) {
       d_p.add_(p, options_.weight_decay_);
     }
 
     if (options_.momentum_ != 0) {
-      auto& momentum = momentum_buffers_.at(i).data();
-
+      auto& momentum =
+          lazily_create_buffer(momentum_buffers_, i, parameters_[i]).data();
       if (iteration_ == 0) {
         momentum.mul_(options_.momentum_).add_(d_p);
       } else {

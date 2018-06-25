@@ -35,7 +35,7 @@ class LBFGS : public LossClosureOptimizer {
         ro(options_.history_size_),
         al(options_.history_size_) {}
 
-  Variable step(LossClosure closure) override;
+  torch::Tensor step(LossClosure closure) override;
 
   const LBFGSOptions& options() const noexcept;
 

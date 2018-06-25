@@ -30,10 +30,11 @@ void Adagrad::step() {
       d_p.add_(p, options_.weight_decay_);
     }
     step_.at(i) += 1.0;
-    auto clr =
-        options_.learning_rate_ / (1.0 + (step_.at(i) - 1.0) * options_.lr_decay_);
+    auto clr = options_.learning_rate_ /
+        (1.0 + (step_.at(i) - 1.0) * options_.lr_decay_);
 
-    sum_.at(i).data().addcmul_(d_p, d_p, 1.0);
+    auto& sum = lazily_create_buffer(sum_, i, parameters_[i]);
+    sum.data().addcmul_(d_p, d_p, 1.0);
     auto std = sum_.at(i).data().sqrt().add_(1e-10);
     p.addcdiv_(d_p, std, -clr);
   }

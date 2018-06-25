@@ -30,7 +30,6 @@ class Adagrad : public Optimizer {
       const AdagradOptions& options)
       : Optimizer(std::forward<ParameterContainer>(parameters)),
         options_(options),
-        sum_(detail::zeros_like(parameters_)),
         step_(parameters_.size(), 0) {}
 
   void step() override;
@@ -49,7 +48,7 @@ class Adagrad : public Optimizer {
 
   AdagradOptions options_;
 
-  std::vector<Variable> sum_;
+  std::vector<Tensor> sum_;
   std::vector<double> step_;
 };
 } // namespace optim

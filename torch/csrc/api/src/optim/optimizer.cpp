@@ -1,10 +1,8 @@
 #include <torch/optim/optimizer.h>
 
-#include <torch/nn/module.h>
+#include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
-
-#include <memory>
+#include <ATen/Error.h>
 
 namespace torch {
 namespace optim {
@@ -14,10 +12,22 @@ void OptimizerBase::zero_grad() {
     auto& grad = parameter.grad();
     if (grad.defined()) {
       grad = grad.detach();
-      Variable(grad).data().zero_();
+      Tensor(grad).data().zero_();
     }
   }
 }
+
+Tensor& OptimizerBase::lazily_create_buffer(
+    std::vector<Tensor>& buffers,
+    size_t index,
+    const Tensor& parameter) {
+  AT_ASSERT(index <= buffers.size());
+  if (index == buffers.size()) {
+    buffers.push_back(torch::zeros_like(parameter));
+  }
+  return buffers[index];
+}
+
 } // namespace detail
 } // namespace optim
 } // namespace torch
