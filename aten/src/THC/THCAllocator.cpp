@@ -33,18 +33,9 @@ static cudaError_t THCIpcAllocator_malloc(void* ctx, void** devPtr, size_t size,
 static cudaError_t THCIpcAllocator_free(void* ctx, void* devPtr)
 {
   cudaError_t err;
-  int prev_device;
-  int device = (int)(int64_t)ctx;
-
-  err = cudaGetDevice(&prev_device);
-  if (err != cudaSuccess) { return err; }
-
-  err = cudaSetDevice(device);
-  if (err != cudaSuccess) { return err; }
 
   err = cudaIpcCloseMemHandle(devPtr);
 
-  cudaSetDevice(prev_device);
   return err;
 }
 
