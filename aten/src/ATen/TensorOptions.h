@@ -20,12 +20,16 @@ namespace at {
 /// `type()` to return a variable type instead of a tensor type, such that
 /// variables are created inside factory methods, instead of tensors.
 struct TensorOptions {
-  /// Constructs the `TensorOptions` with valid defaults, which are:
-  /// - dtype: float
-  /// - device: CPU
-  /// - layout: strided
+  TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
+
+  /// Constructs the `TensorOptions` with defaults taken from the thread local
+  /// `TensorOptions` object if `use_thread_local_default_options`, else
+  /// defaults to:
+  /// - dtype: kFloat,
+  /// - device: kCPU,
+  /// - layout: kStrided,
   /// - requires_grad: false
-  TensorOptions() = default;
+  explicit TensorOptions(bool use_thread_local_default_options);
 
   /// Constructs the `TensorOptions` from the type of the given `Tensor`.
   /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
@@ -192,6 +196,7 @@ struct TensorOptions {
     return backend;
   }
 
+ private:
   ScalarType dtype_{kFloat};
   Device device_{Device::Type::CPU};
   Layout layout_{Layout::Strided};
