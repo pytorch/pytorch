@@ -26,7 +26,7 @@ template <size_t D, typename Derived>
 MaxPoolImplBase<D, Derived>::MaxPoolImplBase(
     MaxPoolOptions<D> options,
     MaxPoolFunction max_pool)
-    : FunctionalImpl([this, max_pool](Variable input) {
+    : FunctionalImpl([this, max_pool](Tensor input) {
         // ATen pooling functions return (output, indices).
         return std::get<0>(max_pool(
             input,
@@ -88,7 +88,7 @@ template <size_t D, typename Derived>
 AvgPoolImplBase<D, Derived>::AvgPoolImplBase(
     AvgPoolOptions<D> options,
     AvgPoolFunction avg_pool)
-    : FunctionalImpl([this, avg_pool](Variable input) {
+    : FunctionalImpl([this, avg_pool](Tensor input) {
         // ATen pooling functions return (output, indices).
         return avg_pool(
             input,

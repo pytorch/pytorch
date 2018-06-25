@@ -1,6 +1,5 @@
 #include <catch.hpp>
 
-#include <torch/functions.h>
 #include <torch/nn/modules/pooling.h>
 
 using namespace torch::nn;
