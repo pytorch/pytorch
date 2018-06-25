@@ -9,7 +9,7 @@ if(USE_MKL AND USE_IDEEP AND CAFFE2_COMPILER_SUPPORTS_AVX2_EXTENSIONS)
 
   add_library(Caffe2_ideep_operators OBJECT ${avx2_srcs})
   add_dependencies(Caffe2_ideep_operators Caffe_PROTO Caffe2_PROTO)
-  set_target_properties(Caffe2_ideep_operators PROPERTIES COMPILE_FLAGS "-mavx2")
+  set_target_properties(Caffe2_ideep_operators PROPERTIES COMPILE_FLAGS "-mavx2 -fopenmp")
 
   # ---[ Send the lists to the parent scope.
   set(Caffe2_CPU_SRCS ${Caffe2_CPU_SRCS}
