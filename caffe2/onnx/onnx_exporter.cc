@@ -367,7 +367,7 @@ ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
     ConvertedResult result;
     auto& nodes = result.first;
 
-    std::vector<int64_t> unsqueezed_dims(y_shape.dims().cbegin(), y_shape.dims().cend());
+    std::vector<int64_t> unsqueezed_dims(y_shape.dims().begin(), y_shape.dims().end());
     std::vector<int64_t> axes;
     for (int64_t i = y_shape.dims().size(); i < end_dim; ++i) {
       axes.emplace_back(i);
