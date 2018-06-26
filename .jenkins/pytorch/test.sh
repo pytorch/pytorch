@@ -104,12 +104,12 @@ test_libtorch() {
      echo "Testing libtorch"
      CPP_BUILD="$PWD/../cpp-build"
      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       "$CPP_BUILD"/libtorch/bin/test_jit
+       "$CPP_BUILD"/caffe2/bin/test_jit
      else
-       "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
+       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
      python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-     OMP_NUM_THREADS=2 "$CPP_BUILD"/libtorch/bin/test_api
+     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }
 
