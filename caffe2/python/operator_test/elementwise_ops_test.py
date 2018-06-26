@@ -12,6 +12,46 @@ import numpy as np
 
 class TestElementwiseOps(hu.HypothesisTestCase):
 
+    @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
+    def test_abs(self, X, gc, dc):
+        op = core.CreateOperator(
+            "Abs",
+            ["X"],
+            ["Y"],
+        )
+
+        def abs_ref(X):
+            return [np.absolute(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=abs_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
+    def test_exp(self, X, inplace, gc, dc):
+        op = core.CreateOperator(
+            "Exp",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+        )
+
+        def exp_ref(X):
+            return [np.exp(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=exp_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     def test_log(self, n, m, gc, dc, seed):
@@ -121,6 +161,27 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-2)
 
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
+    def test_softsign(self, X, inplace, gc, dc):
+        op = core.CreateOperator(
+            "Softsign",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+        )
+
+        def softsign_ref(X):
+            return [X / (1.0 + np.absolute(X))]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=softsign_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        if not inplace:
+            self.assertGradientChecks(gc, op, [X], 0, [0])
+
     @given(X=hu.tensor(elements=st.floats(0.1, 10.0), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     def test_rsqrt(self, X, inplace, gc, dc):
@@ -194,30 +255,25 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
-    @given(n=st.integers(0, 6), m=st.integers(4, 6),
-           seed=st.integers(0, 1000), **hu.gcs)
-    def test_sigmoid(self, n, m, gc, dc, seed):
-        np.random.seed(seed)
-        X = np.random.rand(n, m).astype(np.float32)
-
-        def sigmoid(X):
-            return [1. / (1. + np.exp(-X))]
-
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
+    def test_sigmoid(self, X, inplace, gc, dc):
         op = core.CreateOperator(
             "Sigmoid",
             ["X"],
-            ["Z"]
+            ["X"] if inplace else ["Y"],
         )
+
+        def sigmoid_ref(X):
+            return [1.0 / (1.0 + np.exp(-X))]
 
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[X],
-            reference=sigmoid,
+            reference=sigmoid_ref,
         )
-
-        self.assertGradientChecks(
-            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6), **hu.gcs)
     def test_eq(self, n, m, gc, dc):
