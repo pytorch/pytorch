@@ -898,10 +898,12 @@ class TestNN(NNTestCase):
 
     def test_register_buffer_raises_error_if_name_is_not_string(self):
         m = nn.Module()
-        with self.assertRaises(TypeError):
-            m.register_buffer(1, torch.rand(5))
-        with self.assertRaises(TypeError):
-            m.register_buffer(None, torch.rand(5))
+        with self.assertRaisesRegex(TypeError,
+            'buffer name should be a string. Got int'):
+                m.register_buffer(1, torch.rand(5))
+        with self.assertRaises(TypeError,
+            'buffer name should be a string. Got NoneType'):
+                m.register_buffer(None, torch.rand(5))
 
     def test_register_buffer_raises_error_if_attr_exists(self):
         m = nn.Module()
@@ -938,10 +940,12 @@ class TestNN(NNTestCase):
 
     def test_register_parameter_raises_error_if_name_is_not_string(self):
         m = nn.Module()
-        with self.assertRaises(TypeError):
-            m.register_parameter(1, nn.Parameter())
-        with self.assertRaises(TypeError):
-            m.register_parameter(None, nn.Parameter())
+        with self.assertRaisesRegex(TypeError,
+            'parameter name should be a string. Got int'):
+                m.register_parameter(1, nn.Parameter())
+        with self.assertRaisesRegex(TypeError,
+            'parameter name should be a string. Got NoneType'):
+                m.register_parameter(None, nn.Parameter())
 
     def test_register_parameter_raises_error_if_attr_exists(self):
         m = nn.Module()
@@ -1189,8 +1193,10 @@ class TestNN(NNTestCase):
         net.add_module('l', l3)
         self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
-        self.assertRaises(TypeError, lambda: net.add_module(1, l))
-        self.assertRaises(TypeError, lambda: net.add_module(None, l))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
+            lambda: net.add_module(1, l))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
+            lambda: net.add_module(None, l))
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
