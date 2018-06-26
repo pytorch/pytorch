@@ -21,7 +21,8 @@ std::vector<int64_t> infer_size(IntList a, IntList b) {
         ") must match the size of tensor b (", sizeB,
         ") at non-singleton dimension ", i);
 
-    expandedSizes[i] = std::max(sizeA, sizeB);
+      // 1s map to the other size (even 0).
+      expandedSizes[i] = sizeA == 1 ? sizeB : sizeA;
   }
 
   return expandedSizes;

@@ -69,15 +69,8 @@ static std::vector<Tensor> expandByteTensors(const Tensor & self, TensorList ind
       }
       // Replace with nonzeros
       auto nonzero = index.nonzero();
-      auto is_empty = nonzero.numel() == 0;
       for (int64_t j = 0; j < index.dim(); j++) {
-        if (is_empty) {
-          // We can't call select on an empty tensor so we just create an empty
-          // tensor.
-          result.emplace_back(nonzero.type().tensor());
-        } else {
-          result.emplace_back(nonzero.select(1, j));
-        }
+        result.emplace_back(nonzero.select(1, j));
       }
     } else {
       result.emplace_back(index);
@@ -143,13 +136,15 @@ static Tensor unsqueezeN(const Tensor & src, int64_t before, int64_t after) {
 }
 
 static Tensor wrapIndexOnce(const Tensor & index, int64_t dim, int64_t dim_size) {
-  auto max_idx = index.max().toCLong();
-  auto min_idx = index.min().toCLong();
-  if (max_idx >= dim_size) {
-    AT_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
-  }
-  if (min_idx < -dim_size) {
-    AT_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+  if (index.numel() != 0) {
+    auto max_idx = index.max().toCLong();
+    auto min_idx = index.min().toCLong();
+    if (max_idx >= dim_size) {
+      AT_ERROR("index ", max_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
+    if (min_idx < -dim_size) {
+      AT_ERROR("index ", min_idx, " is out of bounds for dimension ", dim, " with size ", dim_size);
+    }
   }
   return index.remainder(dim_size);
 }
@@ -208,22 +203,10 @@ static Tensor computeLinearIndex(const Tensor & src, TensorList indices) {
   return linearIndex;
 }
 
-static bool hasEmptyTensor(TensorList tensors) {
-  for (auto& tensor : tensors) {
-    if (tensor.defined() && tensor.numel() == 0) {
-      return true;
-    }
-  }
-  return false;
-}
-
 static std::tuple<Tensor, Tensor> makeLinearIndex(Tensor self, TensorList orig) {
   checkIndexTensorTypes(orig);
   // first expand ByteTensor (boolean masks) into 1 or more LongTensors
   auto indices = expandByteTensors(self, orig);
-  if (hasEmptyTensor(indices)) {
-    return std::make_tuple(self, self.type().toScalarType(kLong).tensor());
-  }
   // next broadcast all index tensors together
   indices = expand_outplace(indices);
   // add missing null Tensors so that it matches self.dim()

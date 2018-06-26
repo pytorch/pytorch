@@ -212,12 +212,14 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
     if (infer_dim) {
       res[*infer_dim] = numel / newsize;
     }
+#ifndef USE_TH_SIZE_ZERO_DIM
     if (numel == 0) {
       // Collapse zero-element shapes into one dimension because TH handles zeros
       // in sizes strangely: x.resize_(1, 0) has shape (1,). TODO: remove this
       // once we have multi-dimensional empty tensors.
       return {0};
     }
+#endif
     return res;
   }
 
