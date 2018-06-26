@@ -51,7 +51,7 @@ template <typename scalar_t>
     thrust::sort(policy, output_data, output_data + num_inp);
     scalar_t* output_end = thrust::unique(policy, output_data, output_data + num_inp);
     int64_t num_out = output_end - output_data;
-    output.resize_(output_end - output_data);
+    output.resize_(num_out);
 
     Tensor inverse_indices = at::empty({0}, self.type().toScalarType(kLong));
 
@@ -59,7 +59,7 @@ template <typename scalar_t>
       inverse_indices.resize_(input.sizes());
       int64_t* inverse_indices_data = inverse_indices.data<int64_t>();
       int block = 512;
-      int grid = std::min((num_inp * num_out + block - 1) / block, 2048L);
+      int grid = std::min<int64_t>((num_inp * num_out + block - 1) / block, 2048L);
       inverse_indices_kernel<<<grid, block, 0, stream>>>(
         input_data, output_data, inverse_indices_data, num_inp, num_out);
     }
