@@ -6,7 +6,7 @@
 #include <cub/device/device_reduce.cuh>
 #include "caffe2/core/hip/common_hip.h"
 #include "caffe2/core/hip/context_hip.h"
-#include "caffe2/operators/elementwise_op.h"
+#include "caffe2/operators/elementwise_ops.h"
 #include "caffe2/utils/conversions.h"
 
 namespace caffe2 {
