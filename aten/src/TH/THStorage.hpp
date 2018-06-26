@@ -12,14 +12,16 @@
 
 typedef struct THStorage
 {
+    at::Backend backend; // kCPU or kCUDA only
     at::ScalarType scalar_type;
     void *data_ptr;
     ptrdiff_t size;
     std::atomic<int> refcount;
     char flag;
-    THAllocator *allocator;
+    void *allocatorVoidPtr; // Either THDeviceAllocator or THCDeviceAllocator
     void *allocatorContext;
     struct THStorage *view;
+    int device;
 
     template <typename T>
     inline T * data() const {
