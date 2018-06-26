@@ -77,8 +77,8 @@ set(C10D_SRCS
 
 set(C10D_LIBS
   caffe2_gpu
-  ${Gloo_NATIVE_LIBRARY}
   ${Gloo_LIBRARY}
+  ${Gloo_NATIVE_LIBRARY}
   )
 
 if(DISTRIBUTED_NCCL_FOUND)
