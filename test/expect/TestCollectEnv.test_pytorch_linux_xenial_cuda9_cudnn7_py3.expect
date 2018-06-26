@@ -9,7 +9,7 @@ CMake version: version 3.11.X
 Python version: 3.6
 Is CUDA available: Yes
 CUDA runtime version: 9.0.X
-GPU models and configuration:
+GPU models and configuration: 
 GPU 0: Tesla M60
 GPU 1: Tesla M60
 
