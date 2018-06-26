@@ -121,6 +121,7 @@ const T& CursorBase<T>::operator[](const std::string& key) const {
   return at(key);
 }
 
+template <typename T>
 typename CursorBase<T>::Item& CursorBase<T>::operator[](size_t index) {
   return at(index);
 }

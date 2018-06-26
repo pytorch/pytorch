@@ -163,7 +163,7 @@ class CursorBase {
   const T& at(const std::string& key) const;
 
   /// Attempts to return the item at the given index. If the index is in range,
-  //returns a / reference to the item. If not, throws an exception.
+  /// returns a reference to the item. If not, throws an exception.
   Item& at(size_t index);
 
   /// Equivalent to `at(key)`.
