@@ -1,4 +1,4 @@
-## @package optimizer
+# @package optimizer
 # Module caffe2.python.optimizer
 from __future__ import absolute_import
 from __future__ import division
@@ -38,6 +38,7 @@ class Optimizer(object):
     Or by 'param' being a BlobReference and 'grad' being a BlobReference for its
     gradient.
     '''
+
     def __call__(self, net, param_init_net, param, grad=None):
         if grad is None:
             assert isinstance(param, parameter_info.ParameterInfo), (
@@ -109,7 +110,8 @@ class Optimizer(object):
 
         if self._lr_multiplier is not None:
             lr_multiplier = net.CopyFromCPUInput(
-                self._lr_multiplier, self.make_unique_blob_name('lr_multiplier')
+                self._lr_multiplier, self.make_unique_blob_name(
+                    'lr_multiplier')
             )
 
             lr = net.Mul(
@@ -241,7 +243,7 @@ class SgdOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                             and current_scope.device_type == caffe2_pb2.CUDA),
             )
 
         # We need negative sign for LR when used directly with WeightedSum
@@ -262,7 +264,8 @@ class SgdOptimizer(Optimizer):
         # to include device information.
         ONE = param_init_net.ConstantFill(
             [],
-            "ONE_{}_{}{}".format(dev.device_type, dev.cuda_gpu_id, dev.node_name),
+            "ONE_{}_{}{}".format(
+                dev.device_type, dev.cuda_gpu_id, dev.node_name),
             shape=[1],
             value=1.0
         )
@@ -323,7 +326,7 @@ class MultiPrecisionSgdOptimizer(SgdOptimizer):
     def _run(self, net, param_init_net, param_info):
         param = param_info.blob
         param_fp32 = param_info.blob_copy[core.DataType.FLOAT] \
-                if param_info.blob_copy is not None else None
+            if param_info.blob_copy is not None else None
 
         # If we have a straight fp32 parameter, run the base class
         if param_fp32 is None:
@@ -414,7 +417,8 @@ class FP16SgdOptimizer(SgdOptimizer):
                 else:
                     assert (False), (
                         "Unrecognized parameter format to be updated "
-                        "by FP16 Optimizer. Parameter: {}".format(param_info.name)
+                        "by FP16 Optimizer. Parameter: {}".format(
+                            param_info.name)
                     )
 
         grad = param_info.grad
@@ -528,7 +532,7 @@ class AdagradOptimizer(Optimizer):
             self._add_local_lr_multiplier(
                 lr_lars_multiplier,
                 is_gpu_blob=(current_scope is not None
-                    and current_scope.device_type == caffe2_pb2.CUDA),
+                             and current_scope.device_type == caffe2_pb2.CUDA),
             )
 
         lr, _ = self.build_lr(
@@ -650,6 +654,60 @@ class FtrlOptimizer(Optimizer):
             )
         else:
             net.Ftrl(
+                [param, nz, grad],
+                [param, nz],
+                engine=self.engine,
+                alpha=self.alpha,
+                beta=self.beta,
+                lambda1=self.lambda1,
+                lambda2=self.lambda2
+            )
+
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
+
+
+class GFtrlOptimizer(Optimizer):
+    """Group Lasso FTRL Optimizer."""
+
+    def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
+                 sparse_dedup_aggregator=None, engine=''):
+        super(GFtrlOptimizer, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.lambda1 = lambda1
+        self.lambda2 = lambda2
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.engine = engine
+
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
+        if self.alpha <= 0:
+            return
+
+        nz = param_init_net.ConstantFill(
+            [param],
+            str(param) + "_gftrl_nz",
+            extra_shape=[2],
+            value=0.0
+        )
+        self._aux_params.local.append(nz)
+        if isinstance(grad, core.GradientSlice):
+            grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
+            net.GSparseFtrl(
+                [param, nz, grad.indices, grad.values],
+                [param, nz],
+                engine=self.engine,
+                alpha=self.alpha,
+                beta=self.beta,
+                lambda1=self.lambda1,
+                lambda2=self.lambda2
+            )
+        else:
+            net.GFtrl(
                 [param, nz, grad],
                 [param, nz],
                 engine=self.engine,
@@ -1152,7 +1210,8 @@ def _build(
 
         with core.DeviceScope(device):
             if param_info.optimizer and use_param_info_optim:
-                param_info.optimizer(model.net, model.param_init_net, param_info)
+                param_info.optimizer(
+                    model.net, model.param_init_net, param_info)
             else:
                 optimizer(model.net, model.param_init_net, param_info)
     return optimizer
@@ -1221,6 +1280,14 @@ def build_ftrl(model, engine="SIMD", **kwargs):
         assert core.IsOperator('SparseFtrl_ENGINE_SIMD')
     ftrl_optimizer = FtrlOptimizer(engine=engine, **kwargs)
     return _build(model, ftrl_optimizer)
+
+
+def build_gftrl(model, engine="SIMD", **kwargs):
+    if engine == "SIMD":
+        assert core.IsOperator('GFtrl_ENGINE_SIMD')
+        assert core.IsOperator('GSparseFtrl_ENGINE_SIMD')
+    gftrl_optimizer = GFtrlOptimizer(engine=engine, **kwargs)
+    return _build(model, gftrl_optimizer)
 
 
 def build_adagrad(
