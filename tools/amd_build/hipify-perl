@@ -172,13 +172,26 @@ while (@ARGV) {
         my $file_prehip = "$fileName" . ".prehip";
 		my $infile;
 		my $outfile;
-		if (-e $file_prehip) {
-			$infile  = $file_prehip;
-			$outfile = $fileName;
-		} else {
-			$infile = $fileName;
-			$fileName =~ s{\.[^.]+$}{};
-            my $hipName = $fileName . "_hip.cc";
+        if (-e $file_prehip) {
+            $infile  = $file_prehip;
+            $outfile = $fileName;
+        } 
+        else {
+            $infile = $fileName;
+            my ($file_extension) = $infile =~ /(\.[^.]+)$/;
+            $fileName =~ s{\.[^.]+$}{};
+            if($fileName =~ /gpu$/){
+                $fileName =~ s/gpu/hip/;
+                if($file_extension eq ".h"){
+                    $hipName =$fileName . $file_extension;
+                }            
+                else{
+                    $hipName = $fileName . ".cc";  
+                }        
+            }
+            else{
+                $hipName = $fileName . "_hip.cc";  
+            }
             $outfile = $hipName;
 		}
 
