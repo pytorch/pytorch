@@ -1,7 +1,7 @@
 #include <catch.hpp>
 
+#include <torch/nn/modules.h>
 #include <torch/nn/modules/linear.h>
-#include <torch/nn/modules/modules.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/tensor.h>
 

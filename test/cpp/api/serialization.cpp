@@ -1,5 +1,6 @@
 #include <catch.hpp>
 
+#include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optim/optimizer.h>
@@ -21,7 +22,10 @@ using namespace torch::nn;
 namespace {
 std::shared_ptr<Sequential> xor_model() {
   return std::make_shared<Sequential>(
-      torch::SigmoidLinear(2, 8), torch::SigmoidLinear(8, 1));
+      Linear(2, 8),
+      Functional(at::sigmoid),
+      Linear(8, 1),
+      Functional(at::sigmoid));
 }
 } // namespace
 
