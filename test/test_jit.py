@@ -24,7 +24,7 @@ import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
     exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
-
+import random
 
 from torch.jit.frontend import NotSupportedError
 
@@ -1077,6 +1077,27 @@ class TestJit(JitTestCase):
 
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
+
+
+class TestBatched(TestCase):
+    def assertEqual(self, xs, ybs, prec=None, message='', allow_inf=False):
+        if isinstance(ybs, torch.BatchTensor):
+            self.assertEqual(xs, ybs.examples(), prec, message, allow_inf)
+        elif isinstance(ybs, (list, tuple)):
+            for x, yb in zip(xs, ybs):
+                super(TestBatched, self).assertEqual(x, yb, prec, message, allow_inf)
+        else:
+            super(TestBatched, self).assertEqual(x, y, prec, message, allow_inf)
+
+    def mb_rand(self, *dims):
+        dims = [dim for dim in dims if dim != ()]
+        xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
+        xb = torch.BatchTensor(xs, [b for b, d in dims[1:]])
+        return xs, xb
+
+    def test_create_from_list(self):
+        xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+        self.assertEqual(xs, batch)
 
 
 class TestScript(JitTestCase):
