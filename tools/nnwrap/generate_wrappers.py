@@ -104,7 +104,16 @@ def generate_wrappers(nn_root=None, install_dir=None, template_path=None):
 
 def wrap_nn(thnn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n\n\n'
-    nn_functions = thnn_utils.parse_header(thnn_h_path or THNN_H_PATH)
+    # If we have been provided an explicit path for where to find
+    # THNN.h and THCUNN.h, open the header file from that location and
+    # pull in its contents. If we have not been provided an explicit
+    # path, fall back to the default behavior of finding the header
+    # file by relative location to the python sources.
+    if thnn_h_path is not None:
+        with open(thnn_h_path) as f:
+            nn_functions = thnn_utils.parse_header(f.read())
+    else:
+        nn_functions = thnn_utils.parse_header(thnn_utils.THNN_H)
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
@@ -123,7 +132,16 @@ def wrap_nn(thnn_h_path, install_dir, template_path):
 def wrap_cunn(thcunn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n'
     wrapper += '#include <THC/THC.h>\n\n\n'
-    cunn_functions = thnn_utils.parse_header(thcunn_h_path or THCUNN_H_PATH)
+    # If we have been provided an explicit path for where to find
+    # THNN.h and THCUNN.h, open the header file from that location and
+    # pull in its contents. If we have not been provided an explicit
+    # path, fall back to the default behavior of finding the header
+    # file by relative location to the python sources.
+    if thcunn_h_path is not None:
+        with open(thcunn_h_path) as f:
+            cunn_functions = thnn_utils.parse_header(f.read())
+    else:
+        cunn_functions = thnn_utils.parse_header(thnn_utils.THCUNN_H)
     for fn in cunn_functions:
         for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
             wrapper += wrap_function(fn.name, t, fn.arguments)

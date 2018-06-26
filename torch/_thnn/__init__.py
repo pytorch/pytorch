@@ -1,6 +1,6 @@
 import threading
 import torch.cuda
-from .utils import THNN_H_PATH, THCUNN_H_PATH, parse_header, load_backend
+from .utils import THNN_H, THCUNN_H, parse_header, load_backend
 
 
 class Backends(object):
@@ -49,8 +49,8 @@ class THNNCudaBackendStateMixin(object):
 
 type2backend = Backends()
 
-_thnn_headers = parse_header(THNN_H_PATH)
-_thcunn_headers = parse_header(THCUNN_H_PATH)
+_thnn_headers = parse_header(THNN_H)
+_thcunn_headers = parse_header(THCUNN_H)
 
 for t in ['Float', 'Double']:
     backend = Backend(t, '_THNN', _thnn_headers)

@@ -3,16 +3,13 @@ import itertools
 import importlib
 
 try:
-    # when compiling a cffi extension, this works. When compiling
-    # torch itself, it doesn't work because the parent module can't
-    # yet be imported. However that's fine because we don't need it in
-    # that case.
-    from .._utils_internal import get_file_path
-
-    THNN_H_PATH = get_file_path('torch', 'lib', 'THNN.h')
-    THCUNN_H_PATH = get_file_path('torch', 'lib', 'THCUNN.h')
-except Exception:
-    pass
+    from embedded_thnn_h import contents as THNN_H
+    from embedded_thcunn_h import contents as THCUNN_H
+except ImportError:
+    with open(os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')) as THNN_H_PATH:
+        THNN_H = THNN_H_PATH.read()
+    with open(os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')) as THCUNN_H_PATH:
+        THCUNN_H = THCUNN_H_PATH.read()
 
 
 def _unpickle_backend(backend_name):
@@ -67,9 +64,8 @@ class Argument(object):
         return self.type + ' ' + self.name
 
 
-def parse_header(path):
-    with open(path, 'r') as f:
-        lines = f.read().split('\n')
+def parse_header(header):
+    lines = header.split('\n')
 
     # Remove empty lines and preprocessor directives
     lines = filter(lambda l: l and not l.startswith('#'), lines)

@@ -2,7 +2,7 @@ from itertools import repeat
 from collections import defaultdict
 
 import torch
-from torch._thnn.utils import parse_header, THNN_H_PATH
+from torch._thnn.utils import parse_header, THNN_H
 from torch.autograd.function import Function, InplaceFunction, once_differentiable
 from torch._thnn import type2backend
 from .auto_double_backwards import double_backwards_fns
@@ -267,7 +267,7 @@ def _make_function_class(class_name, update_output, update_grad_input, acc_grad_
 
 def _generate_function_classes(scope_dict):
     global function_list, function_by_name
-    function_list = parse_header(THNN_H_PATH)
+    function_list = parse_header(THNN_H)
     function_by_name = {fn.name: fn for fn in function_list}
     classes_to_generate = {fn.name.partition('_')[0] for fn in function_list}
     exceptions = {
