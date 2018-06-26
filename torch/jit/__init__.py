@@ -335,15 +335,15 @@ def createResolutionCallback(frames_up=0):
 
     frames_up is
     """
-    frame = inspect.stack()[1 + frames_up][0]
+    frames = inspect.stack()[1 + frames_up:]
 
     def env(key):
-        if key in frame.f_locals:
-            return frame.f_locals[key]
-        elif key in frame.f_globals:
-            return frame.f_globals[key]
-        else:
-            return None
+        for frame in frames:
+            if key in frame[0].f_locals:
+                return frame[0].f_locals[key]
+            elif key in frame[0].f_globals:
+                return frame[0].f_globals[key]
+        return None
 
     return env
 
