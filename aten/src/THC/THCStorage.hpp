@@ -18,12 +18,13 @@ struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
 
 typedef struct THCStorage
 {
+    at::Backend backend;
     at::ScalarType scalar_type;
     void *data_ptr;
     ptrdiff_t size;
     std::atomic<int> refcount;
     char flag;
-    THCDeviceAllocator *allocator;
+    void *allocatorVoidPtr;
     void *allocatorContext;
     struct THCStorage *view;
     int device;
