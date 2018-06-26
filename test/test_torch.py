@@ -7579,7 +7579,6 @@ class TestTorch(TestCase):
         expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
 
         x_unique = torch.unique(x)
-
         self.assertEqual(
             expected_unique.tolist(), sorted(x_unique.tolist()))
 

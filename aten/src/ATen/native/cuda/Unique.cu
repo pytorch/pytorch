@@ -7,8 +7,6 @@
 #include <tuple>
 #include <thrust/unique.h>
 #include <thrust/sort.h>
-#include <iostream>
-
 
 namespace at {
 namespace native{
