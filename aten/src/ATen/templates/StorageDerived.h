@@ -16,7 +16,7 @@ struct Allocator;
 struct ${Storage} final : public Storage {
 public:
   explicit ${Storage}(Context* context);
-  ${Storage}(Context* context, ${THStorage} *wrapped);
+  ${Storage}(Context* context, THStorage *wrapped);
   ${Storage}(Context* context, size_t size);
   ${Storage}(Context* context, size_t size, Allocator* allocator);
   ${Storage}(Context* context,
@@ -50,7 +50,7 @@ public:
 
 protected:
   friend struct ${Type};
-  ${THStorage} *storage;
+  THStorage *storage;
   Context* context;
 };
 
