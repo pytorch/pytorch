@@ -129,8 +129,8 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
 static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
   THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_ubsan expects an int, "
           "but got %s", THPUtils_typename(arg));
-  int32_t k = 0x7fffffff;
-  k += static_cast<int32_t>(THPUtils_unpackLong(arg));
+  int32_t k = static_cast<int32_t>(THPUtils_unpackLong(arg));
+  k <<= 32;
   return PyLong_FromLong(k);
 }
 
