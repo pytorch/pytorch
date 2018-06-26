@@ -10,12 +10,11 @@ from past.builtins import basestring
 
 import numpy as np
 
-from caffe2.python import core, scope, workspace
+from caffe2.python import core, scope, utils, workspace
 from caffe2.python.modeling import parameter_info
 from caffe2.proto import caffe2_pb2
 
 
-_OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 _LEARNING_RATE_INJECTION = "lr_injection"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
@@ -89,20 +88,11 @@ class Optimizer(object):
         if learning_rate_blob is None:
             learning_rate_blob = self.make_unique_blob_name('lr')
 
-        optimization_iter_blob = _OPTIMIZER_ITERATION_NAME
-        if not param_init_net.BlobIsDefined(optimization_iter_blob):
-            # Add training operators.
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                iteration = param_init_net.ConstantFill(
-                    [], optimization_iter_blob, shape=[1],
-                    value=iter_val,
-                    dtype=core.DataType.INT64)
-                iter_mutex = param_init_net.CreateMutex(
-                    [], ["iteration_mutex"]
-                )
-                net.AtomicIter([iter_mutex, iteration], [iteration])
-        else:
-            iteration = param_init_net.GetBlobRef(optimization_iter_blob)
+        iteration = utils.BuildUniqueMutexIter(
+            param_init_net,
+            net,
+            iter_val=iter_val
+        )
 
         if not net.BlobIsDefined(learning_rate_blob):
             # There is one interesting thing here: since we are minimizing, we are
@@ -865,20 +855,11 @@ class YellowFinOptimizer(Optimizer):
         assert not isinstance(grad, core.GradientSlice), \
             "YellowFin does not support sparse gradients"
 
-        if not param_init_net.BlobIsDefined(_OPTIMIZER_ITERATION_NAME):
-            # Add training operators.
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                iteration = param_init_net.ConstantFill(
-                    [],
-                    _OPTIMIZER_ITERATION_NAME,
-                    shape=[1],
-                    value=0,
-                    dtype=core.DataType.INT64)
-                iter_mutex = param_init_net.CreateMutex([],
-                                                        ["iteration_mutex"])
-                net.AtomicIter([iter_mutex, iteration], [iteration])
-        else:
-            iteration = param_init_net.GetBlobRef(_OPTIMIZER_ITERATION_NAME)
+        iteration = utils.BuildUniqueMutexIter(
+            param_init_net,
+            net,
+            iter_val=0
+        )
 
         self._aux_params.shared.append(iteration)
         self._aux_params.local.append(moment)
