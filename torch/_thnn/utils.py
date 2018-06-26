@@ -2,7 +2,6 @@ import os
 import itertools
 import importlib
 
-# in fbcode, this fails in some cases, but we don't need it, therefore the try-catch
 try:
     # when compiling a cffi extension, this works. When compiling
     # torch itself, it doesn't work because the parent module can't
@@ -12,7 +11,7 @@ try:
 
     THNN_H_PATH = get_file_path('torch', 'lib', 'THNN.h')
     THCUNN_H_PATH = get_file_path('torch', 'lib', 'THCUNN.h')
-except Exception as e:
+except Exception:
     pass
 
 
