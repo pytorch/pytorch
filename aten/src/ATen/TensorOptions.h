@@ -255,15 +255,25 @@ inline Tensor to(
 }
 } // namespace detail
 
-inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking) {
+inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking)
+    const {
+  if (this->device() == device && this->dtype() == dtype) {
+    return *this;
+  }
   return detail::to(*this, options().device(device).dtype(dtype), non_blocking);
 }
 
-inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) {
+inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
+  if (this->dtype() == dtype) {
+    return *this;
+  }
   return detail::to(*this, options().dtype(dtype), non_blocking);
 }
 
-inline Tensor Tensor::to(Device device, bool non_blocking) {
+inline Tensor Tensor::to(Device device, bool non_blocking) const {
+  if (this->device() == device) {
+    return *this;
+  }
   return detail::to(*this, options().device(device), non_blocking);
 }
 } // namespace at
