@@ -8,16 +8,19 @@
 
 namespace at { namespace native {
 
-static void check1d(const char* name, IntList x) {
+static void check1d(
+    const char* function_name,
+    const char* argument_name,
+    IntList x) {
   AT_CHECK(
       x.size() == 1,
-      "max_pool1d() argument '", name,
+      function_name, "() argument '", argument_name,
       "' should contain one int (got ", x.size(), ")");
 }
 
 Tensor adaptive_avg_pool1d(const Tensor & self, IntList output_size) {
   checkDim("adaptive_avg_pool1d", TensorArg(self, "self", 1), 3);
-  check1d("output_size", output_size);
+  check1d("adaptive_avg_pool1d", "output_size", output_size);
 
   auto output = at::adaptive_avg_pool2d(
       self.unsqueeze(2),
@@ -28,7 +31,7 @@ Tensor adaptive_avg_pool1d(const Tensor & self, IntList output_size) {
 
 std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntList output_size) {
   checkDim("adaptive_max_pool1d", TensorArg(self, "self", 1), 3);
-  check1d("output_size", output_size);
+  check1d("adaptive_max_pool1d", "output_size", output_size);
 
   Tensor output, indices;
   std::tie(output, indices) = at::adaptive_max_pool2d(
@@ -46,10 +49,10 @@ std::tuple<Tensor,Tensor> max_pool1d(
     stride = kernel_size;
   }
   checkDim("max_pool1d", TensorArg(self, "self", 1), 3);
-  check1d("kernel_size", kernel_size);
-  check1d("stride", stride);
-  check1d("padding", padding);
-  check1d("dilation", dilation);
+  check1d("max_pool1d", "kernel_size", kernel_size);
+  check1d("max_pool1d", "stride", stride);
+  check1d("max_pool1d", "padding", padding);
+  check1d("max_pool1d", "dilation", dilation);
 
   Tensor output, indices;
   std::tie(output, indices) = at::max_pool2d(
@@ -74,9 +77,9 @@ Tensor avg_pool1d(
     stride = kernel_size;
   }
   checkDim("avg_pool1d", TensorArg(self, "self", 1), 3);
-  check1d("kernel_size", kernel_size);
-  check1d("stride", stride);
-  check1d("padding", padding);
+  check1d("avg_pool1d", "kernel_size", kernel_size);
+  check1d("avg_pool1d", "stride", stride);
+  check1d("avg_pool1d", "padding", padding);
 
   auto output = at::avg_pool2d(
       self.unsqueeze(2),
