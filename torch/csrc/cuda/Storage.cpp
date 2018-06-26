@@ -18,8 +18,22 @@
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #include <THC/THCGenerateAllTypes.h>
 
+#ifndef USE_CUDA
+#error "Compiling torch/csrc/cuda/Storage.cpp without USE_CUDA"
+#endif
+
+// NB: When !USE_CUDA, the implementation of this lives
+// in torch/csrc/Storage.cpp.
+// If you ever divest libtorch of USE_CUDA, you'll have to virtualize
+// the CUDA call.
 template<>
-void THPPointer<THCStorage>::free() {
-  if (ptr)
-    THCStorage_free(LIBRARY_STATE ptr);
+void THPPointer<THStorage>::free() {
+  if (ptr) {
+    if (ptr->backend == at::kCPU) {
+      THStorage_free(ptr);
+    } else {
+      AT_ASSERT(ptr->backend == at::kCUDA);
+      THCStorage_free(LIBRARY_STATE ptr);
+    }
+  }
 }
