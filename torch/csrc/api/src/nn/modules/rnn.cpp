@@ -26,7 +26,7 @@ Tensor linear(Tensor x, Tensor w, Tensor b) {
   if (x.ndimension() == 2 && b.defined()) {
     // Fused op is marginally faster
     assert(x.size(1) == w.size(1));
-    return at::addmm(b, x, w.t());
+    return torch::addmm(b, x, w.t());
   }
 
   auto output = x.matmul(w.t());
@@ -97,7 +97,7 @@ void RNNImplBase<Derived>::reset() {
 
 template <typename Derived>
 RNNOutput RNNImplBase<Derived>::forward(Tensor input, Tensor state) {
-  if (cudnn_mode_.has_value() && at::cudnn_is_acceptable(input) &&
+  if (cudnn_mode_.has_value() && torch::cudnn_is_acceptable(input) &&
       options_.dropout_ == 0) {
     return CUDNN_forward(input, state);
   } else {
@@ -121,7 +121,7 @@ std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
 
 template <typename Derived>
 RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
-  std::vector<at::Tensor> new_state;
+  std::vector<Tensor> new_state;
   auto has_hidden = state.defined();
   auto layer_dimension = has_hidden ? state.ndimension() - 3 : -1;
   for (int64_t layer = 0; layer < options_.layers_; layer++) {
@@ -148,7 +148,7 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
     }
   }
 
-  auto state_output = at::stack(new_state);
+  auto state_output = torch::stack(new_state);
   if (has_cell_state_) {
     state_output.transpose_(0, 1);
   }
@@ -160,7 +160,7 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   data_ptrs_.clear();
   const auto any_parameter = ihw_.at(0);
   if (!cudnn_mode_.has_value() || !any_parameter.is_cuda() ||
-      !at::cudnn_is_acceptable(any_parameter) || options_.dropout_ > 0) {
+      !torch::cudnn_is_acceptable(any_parameter) || options_.dropout_ > 0) {
     return;
   }
   std::unordered_set<void*> unique_data_ptrs;
@@ -179,7 +179,7 @@ void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
 
   {
     NoGradGuard guard;
-    flat_weights_ = at::_cudnn_rnn_flatten_weight(
+    flat_weights_ = torch::_cudnn_rnn_flatten_weight(
         TensorListView(flat_weights()),
         /*weight_stride=*/options_.with_bias_ ? 4 : 2,
         options_.input_size_,
@@ -250,7 +250,7 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
   Tensor hidden_output;
   if (has_cell_state_) {
     hidden_output =
-        at::stack(TensorListView({std::get<1>(tup), std::get<2>(tup)}), 0);
+        torch::stack(TensorListView({std::get<1>(tup), std::get<2>(tup)}), 0);
   } else {
     hidden_output = std::get<1>(tup);
   }
@@ -261,21 +261,21 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
 
 template <typename Derived>
 void RNNImplBase<Derived>::to(
-    at::Device device,
-    at::ScalarType dtype,
+    torch::Device device,
+    torch::Dtype dtype,
     bool non_blocking) {
   nn::Module::to(device, dtype, non_blocking);
   flatten_parameters_for_cudnn();
 }
 
 template <typename Derived>
-void RNNImplBase<Derived>::to(at::ScalarType dtype, bool non_blocking) {
+void RNNImplBase<Derived>::to(torch::Dtype dtype, bool non_blocking) {
   nn::Module::to(dtype, non_blocking);
   flatten_parameters_for_cudnn();
 }
 
 template <typename Derived>
-void RNNImplBase<Derived>::to(at::Device device, bool non_blocking) {
+void RNNImplBase<Derived>::to(torch::Device device, bool non_blocking) {
   nn::Module::to(device, non_blocking);
   flatten_parameters_for_cudnn();
 }
@@ -308,11 +308,11 @@ RNNImpl::RNNImpl(RNNOptions options)
       options_(options) {
   switch (options_.activation_) {
     case RNNActivation::ReLU: {
-      activation_function_ = at::relu;
+      activation_function_ = torch::relu;
       break;
     }
     case RNNActivation::Tanh: {
-      activation_function_ = at::tanh;
+      activation_function_ = torch::tanh;
       break;
     }
   }
@@ -326,7 +326,7 @@ Tensor RNNImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto h = linear(input, ihw_[layer], ihb_[layer]) +
       linear(hx, hhw_[layer], hhb_[layer]);
 
-  return at::stack(activation_function_(h));
+  return torch::stack(activation_function_(h));
 }
 
 const RNNOptions& RNNImpl::options() const noexcept {
@@ -362,7 +362,7 @@ Tensor LSTMImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto cy = (forget_gate * cx) + (in_gate * cell_gate);
   auto hy = out_gate * cy.tanh();
 
-  return at::stack(TensorListView{hy, cy}, 0);
+  return torch::stack(TensorListView{hy, cy}, 0);
 }
 
 const LSTMOptions& LSTMImpl::options() const noexcept {
@@ -392,7 +392,7 @@ Tensor GRUImpl::cell_forward(Tensor input, Tensor state, int64_t layer) {
   auto new_gate = (gic[2] + reset_gate * ghc[2]).tanh_();
   auto hy = new_gate + input_gate * (hx - new_gate);
 
-  return at::stack(TensorListView(hy));
+  return torch::stack(TensorListView(hy));
 }
 
 const GRUOptions& GRUImpl::options() const noexcept {

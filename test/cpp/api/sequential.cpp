@@ -169,7 +169,7 @@ TEST_CASE("sequential") {
       };
 
       Sequential sequential(M{});
-      auto variable = torch::ones({3, 3}, at::requires_grad());
+      auto variable = torch::ones({3, 3}, torch::requires_grad());
       REQUIRE(sequential.forward(variable).equal(variable));
     }
   }
@@ -177,7 +177,7 @@ TEST_CASE("sequential") {
   SECTION("returns the last value") {
     Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
 
-    auto x = torch::randn({1000, 10}, at::requires_grad());
+    auto x = torch::randn({1000, 10}, torch::requires_grad());
     auto y = sequential.forward(x);
     REQUIRE(y.ndimension() == 2);
     REQUIRE(y.size(0) == 1000);

@@ -30,7 +30,7 @@ Tensor LinearImpl::forward(Tensor input) {
   if (input.ndimension() == 2 && options_.with_bias_) {
     // Fused op is marginally faster
     AT_ASSERT(input.size(1) == weight_.size(1));
-    return {at::addmm(bias_, input, weight_.t())};
+    return {torch::addmm(bias_, input, weight_.t())};
   }
 
   auto output = input.matmul(weight_.t());
