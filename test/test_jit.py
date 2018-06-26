@@ -4071,7 +4071,7 @@ def func(t):
 
     def test_module_with_params_called_fails(self):
         with self.assertRaisesRegex(RuntimeError, "Attempted to inline a Module with parameters. Stateful "
-                "modules to be inlined must be submodules of the callee."):
+                                                  "modules to be inlined must be submodules of the callee."):
             class ScriptMod(torch.jit.ScriptModule):
                 def __init__(self):
                     super(ScriptMod, self).__init__()
@@ -4086,7 +4086,6 @@ def func(t):
             @torch.jit.script
             def some_func(x):
                 return sm(x)
-
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
