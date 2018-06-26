@@ -39,7 +39,7 @@ class Context;
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
-constexpr char* CUDA_HELP =
+const std::string CUDA_HELP =
   "PyTorch splits its backend into two shared libraries: a CPU library "
   "and a CUDA library; this error has occurred because you are trying "
   "to use some CUDA functionality, but the CUDA library has not been "
