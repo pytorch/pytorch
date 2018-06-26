@@ -2,7 +2,7 @@
 
 #include <ATen/Context.h>
 
-#include <cstdint>
+#include <cstddef>
 
 namespace torch {
 void manual_seed(uint64_t seed) {

@@ -256,7 +256,12 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
   )
 endif()
 
