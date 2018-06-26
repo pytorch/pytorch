@@ -751,7 +751,7 @@ def TranslateScale(layer, pretrained_blobs, is_test, **kwargs):
             raise RuntimeError("This path has not been verified yet.")
 
         output = mul_op.output[0]
-        mul_op_param = output + '_w'
+        mul_op_param = output + '_scale_w'
         mul_op.input.append(mul_op_param)
         weights = []
         weights.append(utils.NumpyArrayToCaffe2Tensor(
@@ -767,7 +767,7 @@ def TranslateScale(layer, pretrained_blobs, is_test, **kwargs):
             # Include a separate Add op for the bias followed by Mul.
             add_op = copy.deepcopy(mul_op)
             add_op.type = "Add"
-            add_op_param = output + '_b'
+            add_op_param = output + '_scale_b'
             internal_blob = output + "_internal"
             del mul_op.output[:]
             mul_op.output.append(internal_blob)
