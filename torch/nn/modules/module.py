@@ -103,6 +103,9 @@ class Module(object):
         """
         if hasattr(self, name) and name not in self._buffers:
             raise KeyError("attribute '{}' already exists".format(name))
+        elif name is None or not isinstance(name, torch._six.string_classes):
+            raise TypeError("buffer name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("buffer name can't contain \".\"")
         elif name == '':
@@ -130,6 +133,9 @@ class Module(object):
 
         elif hasattr(self, name) and name not in self._parameters:
             raise KeyError("attribute '{}' already exists".format(name))
+        elif name is None or not isinstance(name, torch._six.string_classes):
+            raise TypeError("parameter name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("parameter name can't contain \".\"")
         elif name == '':
@@ -163,6 +169,9 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
+        elif name is None or not isinstance(name, torch._six.string_classes):
+            raise TypeError("module name should be a string. Got {}".format(
+                torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
