@@ -898,7 +898,7 @@ class TestNN(NNTestCase):
 
     def test_register_buffer_raises_error_if_name_is_not_string(self):
         m = nn.Module()
-        expected_error = 'buffer name should be a string. Got ' 
+        expected_error = 'buffer name should be a string. Got '
         with self.assertRaisesRegex(TypeError, expected_error + 'int'):
             m.register_buffer(1, torch.rand(5))
         with self.assertRaisesRegex(TypeError, expected_error + 'NoneType'):
