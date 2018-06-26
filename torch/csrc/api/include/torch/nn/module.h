@@ -5,6 +5,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
+#include <ATen/ATen.h>
 #include <ATen/optional.h>
 
 #include <map>
@@ -72,16 +73,35 @@ class Module {
   virtual void cpu();
 
   /// Recursively moves all parameters to CUDA memory (in place).
-  virtual void cuda();
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void cuda(int32_t device_index = -1, bool non_blocking = false);
 
-  /// Recursively casts all parameters to the given type.
-  virtual void to(at::Type& type);
+  /// Recursively casts all parameters to the given dtype and device.
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void to(
+      at::Device device,
+      at::ScalarType dtype,
+      bool non_blocking = false);
 
-  /// Recursively casts all parameters to the given scalar type.
-  virtual void to(at::ScalarType scalar_type);
+  /// Recursively casts all parameters to the given dtype.
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void to(at::ScalarType dtype, bool non_blocking = false);
 
-  /// Recursively moves all parameters to the given backend.
-  virtual void to(at::Backend backend);
+  /// Recursively moves all parameters to the given device.
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void to(at::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();
@@ -143,6 +163,19 @@ class Module {
   friend class detail::CursorBase;
 
   virtual void clone_(Module& other);
+
+  template <typename... Ts>
+  void to_impl(Ts&&... ts) {
+    for (auto& child : children_) {
+      child.value->to(ts...);
+    }
+    for (auto& parameter : parameters_) {
+      at::detail::set_data(*parameter, parameter->data().to(ts...));
+    }
+    for (auto& buffer : buffers_) {
+      at::detail::set_data(*buffer, buffer->data().to(ts...));
+    }
+  }
 
   OrderedDict<Tensor> parameters_;
   OrderedDict<Tensor> buffers_;

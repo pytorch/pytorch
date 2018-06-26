@@ -5,6 +5,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
+#include <ATen/ATen.h>
 #include <ATen/Error.h>
 #include <ATen/optional.h>
 
@@ -43,9 +44,13 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
   void reset() override;
 
-  void to(at::Type& type) override;
-  void to(at::ScalarType scalar_type) override;
-  void to(at::Backend backend) override;
+  void to(at::Device device, at::ScalarType dtype, bool non_blocking) override;
+
+  /// Recursively casts all parameters to the given dtype.
+  void to(at::ScalarType dtype, bool non_blocking) override;
+
+  /// Recursively moves all parameters to the given device.
+  void to(at::Device device, bool non_blocking) override;
 
   void flatten_parameters_for_cudnn();
 

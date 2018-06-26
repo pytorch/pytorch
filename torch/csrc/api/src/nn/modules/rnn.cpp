@@ -2,7 +2,7 @@
 
 #include <torch/nn/modules/dropout.h>
 #include <torch/tensor.h>
-#include <torch/tensor_range.h>
+#include <torch/tensor_list_view.h>
 #include <torch/utils.h>
 
 #include <ATen/Error.h>
@@ -265,20 +265,23 @@ std::vector<Tensor> RNNImplBase<Derived>::CUDNN_forward(
 }
 
 template <typename Derived>
-void RNNImplBase<Derived>::to(at::Type& type) {
-  nn::Module::to(type);
+void RNNImplBase<Derived>::to(
+    at::Device device,
+    at::ScalarType dtype,
+    bool non_blocking) {
+  nn::Module::to(device, dtype, non_blocking);
   flatten_parameters_for_cudnn();
 }
 
 template <typename Derived>
-void RNNImplBase<Derived>::to(at::ScalarType scalar_type) {
-  nn::Module::to(scalar_type);
+void RNNImplBase<Derived>::to(at::ScalarType dtype, bool non_blocking) {
+  nn::Module::to(dtype, non_blocking);
   flatten_parameters_for_cudnn();
 }
 
 template <typename Derived>
-void RNNImplBase<Derived>::to(at::Backend backend) {
-  nn::Module::to(backend);
+void RNNImplBase<Derived>::to(at::Device device, bool non_blocking) {
+  nn::Module::to(device, non_blocking);
   flatten_parameters_for_cudnn();
 }
 
