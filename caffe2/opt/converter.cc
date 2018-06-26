@@ -128,33 +128,6 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
     nnOp = util::make_unique<repr::BatchNormalization>();
   }
 
-  if (op->type() == "Concat") {
-    nnOp = util::make_unique<repr::Concat>();
-    auto c = dyn_cast<repr::Concat>(nnOp.get());
-    if (argMap.count("axis")) {
-      assert(argMap["axis"].has_i() && "Invalid axis argument");
-      int axis = static_cast<int>(argMap["axis"].i());
-      c->setAxis(axis);
-    }
-    if (argMap.count("add_axis")) {
-      assert(argMap["add_axis"].has_i() && "Invalid add_axis argument");
-      int add_axis = static_cast<int>(argMap["add_axis"].i());
-      c->setAddAxis(!!add_axis);
-    }
-  }
-
-  if (op->type() == "Flatten") {
-    nnOp = util::make_unique<repr::Flatten>();
-  }
-
-  if (op->type() == "BatchGather") {
-    nnOp = util::make_unique<repr::BatchGather>();
-  }
-
-  if (op->type() == "BatchMatMul") {
-    nnOp = util::make_unique<repr::BatchMatMul>();
-  }
-
   if (!nnOp) {
     nnOp = util::make_unique<repr::GenericOperator>(op->type());
   }
