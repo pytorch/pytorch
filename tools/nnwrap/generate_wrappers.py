@@ -104,7 +104,7 @@ def generate_wrappers(nn_root=None, install_dir=None, template_path=None):
 
 def wrap_nn(thnn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n\n\n'
-    nn_functions = thnn_utils.parse_header(THNN_H_PATH)
+    nn_functions = thnn_utils.parse_header(thnn_h_path or THNN_H_PATH)
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
@@ -123,7 +123,7 @@ def wrap_nn(thnn_h_path, install_dir, template_path):
 def wrap_cunn(thcunn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n'
     wrapper += '#include <THC/THC.h>\n\n\n'
-    cunn_functions = thnn_utils.parse_header(THCUNN_H_PATH)
+    cunn_functions = thnn_utils.parse_header(thcunn_h_path or THCUNN_H_PATH)
     for fn in cunn_functions:
         for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
