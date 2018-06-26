@@ -100,10 +100,7 @@ unique_ptr<OperatorBase> TryCreateC2Operator(
 
 unique_ptr<OperatorBase> TryCreateC10Operator(
     const string& key, const OperatorDef& operator_def, Workspace* ws) {
-  if (auto op = C10OperatorRegistry()->Create(key, operator_def, ws)) {
-    return op;
-  }
-  return nullptr;
+  return C10OperatorRegistry()->Create(key, operator_def, ws);
 }
 
 unique_ptr<OperatorBase> TryCreateOperator(
