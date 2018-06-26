@@ -163,31 +163,11 @@ static inline at::optional<int64_t> parse_as_integer(const std::string& s) {
 
 /*
 Parse default value of IntList declared at native_functions.yaml
+
 There are two kinds of default values:
 1. IntList[2] x=1 (where size=2, value={1,1}
-2. IntList x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', '
-to split args)
+2. IntList x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', ' to split args)
 */
-// static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
-//   if (s[0] != '{') {
-//     return std::vector<int64_t>(size, std::stoi(s));
-//   }
-//
-//   auto args = std::vector<int64_t>();
-//   int64_t x = 0;
-//   for (size_t i = 0; i < s.size();) {
-//     if ('0' <= s[i] && s[i] <= '9') {
-//       while ('0' <= s[i] && s[i] <= '9') {
-//         x = x * 10 + (s[i++] - '0');
-//       }
-//       args.emplace_back(x);
-//       x = 0;
-//     }
-//     i += 1;
-//   }
-//   return args;
-// }
-
 static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
   if (s[0] != '{') {
     return std::vector<int64_t>(size, std::stoi(s));
