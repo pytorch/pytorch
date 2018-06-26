@@ -741,11 +741,7 @@ Example:
                                 const vector<TensorShape>& in) {
       std::vector<TensorShape> out(2);
 
-      int total = 1;
-      for (auto d : in[0].dims()) {
-        total *= d;
-      }
-      out[0].add_dims(total);
+      out[0].set_unknown_shape(true);
       out[0].set_data_type(in[0].data_type());
       out[1].add_dims(in[1].dims(0));
       out[1].set_data_type(in[1].data_type());

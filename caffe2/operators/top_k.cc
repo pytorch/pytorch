@@ -213,23 +213,25 @@ OPERATOR_SCHEMA(TopK)
     .NumOutputs(2, 3)
     .TensorInferenceFunction([](const OperatorDef& def,
                                 const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(in.size(), 1, "TopK requires 1 input");
+      CAFFE_ENFORCE_GE(
+          in[0].dims_size(), 1, "TopK requires at least order-1 input tensor");
       vector<TensorShape> out = {in[0], in[0]};
       ArgumentHelper helper(def);
+
       auto k = helper.GetSingleArgument("k", -1);
-      auto dims_size = in[0].dims_size();
-      out[0].set_dims(dims_size - 1, k);
-      out[1].set_dims(dims_size - 1, k);
+      int axis = helper.GetSingleArgument("axis", -1);
+      if (axis == -1) {
+        axis = in[0].dims_size() - 1;
+      }
+
+      out[0].set_dims(axis, k);
+      out[1].set_dims(axis, k);
       out[1].set_data_type(TensorProto_DataType_INT32);
       if (def.output_size() > 2) {
         TensorShape flatten_indices_shape;
         flatten_indices_shape.set_data_type(TensorProto_DataType_INT32);
-        flatten_indices_shape.add_dims(
-            std::accumulate(
-                in[0].dims().begin(),
-                in[0].dims().end() - 1,
-                1,
-                std::multiplies<long>()) *
-            k);
+        flatten_indices_shape.add_dims(nElemFromDim(out[1]));
         out.push_back(flatten_indices_shape);
       }
       return out;

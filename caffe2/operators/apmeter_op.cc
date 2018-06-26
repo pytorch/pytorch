@@ -113,6 +113,15 @@ per class for the average precision of that class.
         "predictions",
         "2-D tensor (Tensor<float>) of size (num_samples x"
         "num_classes) containing prediction scores")
+    .TensorInferenceFunction([](const OperatorDef& /* unused */,
+                                const vector<TensorShape>& in) {
+      CAFFE_ENFORCE_EQ(in.size(), 2, "APMeter requires 2 inputs");
+      CAFFE_ENFORCE_EQ(in[0].dims_size(), 2, "APMeter expects matrix inputs");
+      vector<TensorShape> out(1);
+      out[0].add_dims(in[0].dims(1));
+      out[0].set_data_type(in[0].data_type());
+      return out;
+    })
     .Input(
         1,
         "labels",
