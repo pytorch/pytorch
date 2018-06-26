@@ -186,8 +186,8 @@ class TestGatherRanges(hu.HypothesisTestCase):
             net.GatherRanges(['values', 'ranges'], ['values_output', 'lengths_output'])
             (shapes, types) = workspace.InferShapesAndTypes([net], {})
 
-            assert 'values_output' not in shapes, "values_output has unknown shape"
-            assert 'values_output' not in types, "values_output has unknown shape"
+            self.assertEqual(shapes["values_output"], [64])
+            self.assertEqual(types["values_output"], core.DataType.INT64)
             self.assertEqual(shapes["lengths_output"], [3])
             self.assertEqual(types["lengths_output"], core.DataType.INT32)
 

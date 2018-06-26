@@ -121,7 +121,7 @@ class TestCrossEntropyOps(hu.HypothesisTestCase):
         log_D_trick=st.just(False),
         **hu.gcs_cpu_only
     )
-    def test_cross_entropy_and_unjoined_cross_entropy_relation(
+    def test_cross_entropy_and_unjoied_cross_entropy_relation(
         self, log_D_trick, gc, dc
     ):
         logits = np.array([1.4720, 0.3500, -0.6529, -1.1908, 0.8357,

@@ -520,8 +520,7 @@ inline std::vector<TensorShape> FillerTensorInference(
     // TODO
     bool input_as_shape =
         helper.GetSingleArgument<bool>("input_as_shape", false);
-    bool extra_shape = helper.GetSingleArgument<bool>("extra_shape", false);
-    if (input_as_shape || extra_shape) {
+    if (input_as_shape) {
       out[0].set_unknown_shape(true);
       return out;
     }
