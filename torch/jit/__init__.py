@@ -384,7 +384,19 @@ ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast',
 
 
 def script_method(fn):
-    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn), fn)
+    # NOTE: we need to traverse two frames here because the meta-class frame
+    # for ScriptModule will be present, as opposed to invoking @script on a
+    # a function or invoking define() on a CompilationUnit.
+    # The stack will look like:
+    #
+    # 0. createResolutionCallback()
+    # 1. script_method()
+    # 2. ScriptModule metaclass frame
+    # 3. Surrounding scope
+    #
+    # createResolutionCallback internally adds 1 to get us to the scope of this
+    # function (the calling function). Adding 2 gets us to the proper surrounding scope.
+    return ScriptMethodStub(createResolutionCallback(frames_up=2), get_jit_ast(fn), fn)
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -610,6 +622,14 @@ class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
         return sorted(Module.__dir__(self) + self._method_names())
 
     def define(self, lang):
+        # We use frames_up=1 to get to the proper surrounding scope. The stack
+        # will look like:
+        # 0. createResolutionCallback
+        # 1. define()
+        # 2. surrounding scope.
+        #
+        # createResolutionCallback internally adds 1 to get us to our frame, then
+        # we add 1 to get to the proper surrounding scope.
         rcb = createResolutionCallback(frames_up=1)
         self._define(lang, rcb, True)
 
