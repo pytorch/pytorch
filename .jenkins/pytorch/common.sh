@@ -125,6 +125,7 @@ if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda8-cudnn6-py2 ]] ||
    [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]]; then
   if ! which conda; then
     echo "Expected ${BUILD_ENVIRONMENT} to use conda, but 'which conda' returns empty"
+    exit 1
   else
     conda install -q -y cmake
   fi
