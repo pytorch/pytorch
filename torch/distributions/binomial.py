@@ -77,6 +77,11 @@ class Binomial(Distribution):
     def param_shape(self):
         return self._param.size()
 
+    def _log1pmprobs(self):
+        # Note that: torch.log1p(-self.probs)) = max_val - torch.log1p((self.logits + 2 * max_val).exp()))
+        max_val = (-self.logits).clamp(min=0.0)
+        return max_val - torch.log1p((self.logits + 2 * max_val).exp())
+
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
             max_count = max(int(self.total_count.max()), 1)
@@ -94,11 +99,8 @@ class Binomial(Distribution):
         log_factorial_n = torch.lgamma(self.total_count + 1)
         log_factorial_k = torch.lgamma(value + 1)
         log_factorial_nmk = torch.lgamma(self.total_count - value + 1)
-        max_val = (-self.logits).clamp(min=0.0)
-        # Note that: torch.log1p(-self.probs)) = max_val - torch.log1p((self.logits + 2 * max_val).exp()))
         return (log_factorial_n - log_factorial_k - log_factorial_nmk +
-                value * self.logits + self.total_count * max_val -
-                self.total_count * torch.log1p((self.logits + 2 * max_val).exp()))
+                value * self.logits + self.total_count * self._log1pmprobs())
 
     def enumerate_support(self):
         total_count = int(self.total_count.max())
@@ -109,3 +111,27 @@ class Binomial(Distribution):
         values = values.view((-1,) + (1,) * len(self._batch_shape))
         values = values.expand((-1,) + self._batch_shape)
         return values
+
+    def _Elnchoosek(self):
+        # return expected value of log(nchoosek), log(n!),log(k!), log(n-k!)
+        # where k~Bin(n,p)
+        s = self.enumerate_support()
+        s[0] = 1  # 0! = 1
+        # x is factorial matrix i.e. x[k,...] = k!
+        x = torch.cumsum(s.log(), dim=0)
+        s[0] = 0
+        indices = [slice(None)] * x.dim()
+        indices[0] = torch.arange(x.size(0) - 1, -1, -1,
+                                  dtype=torch.long, device=x.device)
+        # x[tuple(indices)] is x reversed on first axis
+        lnchoosek = x[-1] - x - x[tuple(indices)]
+        elognfac = x[-1]
+        elogkfac = ((lnchoosek + s * self.logits + self.total_count * self._log1pmprobs()).exp() *
+                    x).sum(dim=0)
+        elognmkfac = ((lnchoosek + s * self.logits + self.total_count * self._log1pmprobs()).exp() *
+                      x[tuple(indices)]).sum(dim=0)
+        return elognfac - elogkfac - elognmkfac, (elognfac, elogkfac, elognmkfac)
+
+    def entropy(self):
+        elnchoosek, _ = self._Elnchoosek()
+        return - elnchoosek - self.mean * self.logits - self.total_count * self._log1pmprobs()

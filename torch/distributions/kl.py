@@ -199,10 +199,27 @@ def _kl_binomial_binomial(p, q):
     # kullback-leibler-divergence-for-binomial-distributions-p-and-q
     if (p.total_count < q.total_count).any():
         raise NotImplementedError('KL between Binomials where q.total_count > p.total_count is not implemented')
-    kl = p.total_count * (p.probs * (p.logits - q.logits) + (-p.probs).log1p() - (-q.probs).log1p())
+    kl = p.total_count * (p.probs * (p.logits - q.logits) + p._log1pmprobs() - q._log1pmprobs())
     inf_idxs = p.total_count > q.total_count
     kl[inf_idxs] = _infinite_like(kl[inf_idxs])
     return kl
+
+
+@register_kl(Binomial, Poisson)
+def _kl_binomial_poisson(p, q):
+    _, (e1, _, e3) = p._Elnchoosek()
+    return (e1 - e3 +
+            p.mean * (p.logits - q.rate.log()) +
+            p.total_count * p._log1pmprobs() +
+            q.rate)
+
+
+@register_kl(Binomial, Geometric)
+def _kl_binomial_geometric(p, q):
+    elnchoosek, _ = p._Elnchoosek()
+    return (elnchoosek +
+            (p.logits - (-q.probs).log1p()) * p.mean +
+            p.total_count * p._log1pmprobs() - q.probs.log())
 
 
 @register_kl(Categorical, Categorical)
@@ -271,6 +288,11 @@ def _kl_gumbel_gumbel(p, q):
 @register_kl(Geometric, Geometric)
 def _kl_geometric_geometric(p, q):
     return -p.entropy() - torch.log1p(-q.probs) / p.probs - q.logits
+
+
+@register_kl(Geometric, Binomial)
+def _kl_geometric_infinity(p, q):
+    return _infinite_like(p.probs)
 
 
 @register_kl(HalfNormal, HalfNormal)

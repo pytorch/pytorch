@@ -821,7 +821,6 @@ class TestDistributions(TestCase):
             self._gradcheck_log_prob(lambda p: Binomial(total_count, p), [p])
             self._gradcheck_log_prob(lambda p: Binomial(total_count, None, p.log()), [p])
         self.assertRaises(NotImplementedError, Binomial(10, p).rsample)
-        self.assertRaises(NotImplementedError, Binomial(10, p).entropy)
 
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_binomial_log_prob(self):
@@ -2757,6 +2756,7 @@ class TestKL(TestCase):
                                          [0.33, 0.33, 0.34],
                                          [0.2, 0.2, 0.4]])
         exponential = pairwise(Exponential, [1.0, 2.5, 5.0, 10.0])
+        geometric = pairwise(Geometric, [0.1, 0.2, 0.6, 0.9])
         gamma = pairwise(Gamma, [1.0, 2.5, 1.0, 2.5], [1.5, 1.5, 3.5, 3.5])
         gumbel = pairwise(Gumbel, [-2.0, 4.0, -3.0, 6.0], [1.0, 2.5, 1.0, 2.5])
         halfnormal = pairwise(HalfNormal, [1.0, 2.0, 1.0, 2.0])
@@ -2792,6 +2792,8 @@ class TestKL(TestCase):
             (beta, gamma),
             (beta, normal),
             (binomial30, binomial30),
+            (binomial30, poisson),
+            (binomial30, geometric),
             (binomial_vectorized_count, binomial_vectorized_count),
             (categorical, categorical),
             (chi2, chi2),
