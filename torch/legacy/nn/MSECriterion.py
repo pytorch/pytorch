@@ -1,5 +1,5 @@
 import torch
-from torch.nn import Reduction
+from torch.nn.functional import Reduction
 from .Criterion import Criterion
 
 
@@ -18,7 +18,7 @@ class MSECriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            Reduction.get_reduction_enum(self.sizeAverage, True),
+            Reduction.legacy_get_enum(self.sizeAverage, True),
         )
         self.output = self.output_tensor[0].item()
         return self.output
@@ -32,6 +32,6 @@ class MSECriterion(Criterion):
             target,
             implicit_gradOutput,
             self.gradInput,
-            Reduction.get_reduction_enum(self.sizeAverage, True),
+            Reduction.legacy_get_enum(self.sizeAverage, True),
         )
         return self.gradInput

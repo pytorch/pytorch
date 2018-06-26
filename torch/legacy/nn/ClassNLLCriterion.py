@@ -1,5 +1,5 @@
 import torch
-from torch.nn import Reduction
+from torch.nn.functional import Reduction
 from .Criterion import Criterion
 
 
@@ -25,7 +25,7 @@ class ClassNLLCriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            Reduction.get_reduction_enum(self.sizeAverage, True),
+            Reduction.legacy_get_enum(self.sizeAverage, True),
             self.weights,
             self.total_weight_tensor,
             self.ignore_index,
@@ -44,7 +44,7 @@ class ClassNLLCriterion(Criterion):
             target,
             implicit_gradOutput,
             self.gradInput,
-            Reduction.get_reduction_enum(self.sizeAverage, True),
+            Reduction.legacy_get_enum(self.sizeAverage, True),
             self.weights,
             self.total_weight_tensor,
             self.ignore_index,
