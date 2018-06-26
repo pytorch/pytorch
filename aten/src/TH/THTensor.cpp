@@ -58,11 +58,11 @@ void THTensor_free(THTensor *self)
 }
 
 // On a high level,
-// 1. separate tensor->size into chunks of dimensions, where the dimensions are
-//    ``contiguous'' in each chunk, i.e., stride[i] = size[i+1] * stride[i+1]
-// 2. view_size must be able to be separated into same number of chunks as tensor->size was separated into,
-//    where each chunk of view_size has matching ``numel'', i.e., number of subspaces,
-//    as the corresponding chunk of tensor->size.
+// 1. separate oldshape chunks of dimensions, where the dimensions are
+//    ``contiguous'' in each chunk, i.e., oldstride[i] = oldshape[i+1] * oldstride[i+1]
+// 2. newshape must be able to be separated into same number of chunks as oldshape was separated into,
+//    where each chunk of newshape has matching ``numel'', i.e., number of subspaces,
+//    as the corresponding chunk of oldshape.
 at::optional<std::vector<int64_t>>
 THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride, at::IntList newshape) {
   if (oldshape.empty()) {
