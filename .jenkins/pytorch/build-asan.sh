@@ -14,10 +14,8 @@ clang --version
 # symbolize=1: Gives us much better errors when things go wrong
 export ASAN_OPTIONS=detect_leaks=0:symbolize=1
 
-export PARENT_DIR="$(dirname "$(readlink -fm "$0")")"
-
 # TODO: Make the ASAN flags a more unified env var
 CC="clang" CXX="clang++" LDSHARED="clang --shared" \
-  CFLAGS="-fsanitize=address -fsanitize=undefined -fsanitize-blacklist=${PARENT_DIR}/san-blacklist.txt -fno-sanitize-recover=all -shared-libasan" \
+  CFLAGS="-fsanitize=address -fsanitize=undefined -fno-sanitize-recover=all -shared-libasan" \
   NO_CUDA=1 DEBUG=1 \
   python setup.py install
