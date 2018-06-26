@@ -22,8 +22,18 @@
 using namespace torch::nn;
 using namespace torch::optim;
 
-bool test_optimizer_xor(Optimizer&& optimizer, Sequential& model) {
+template <typename OptimizerClass, typename Options>
+bool test_optimizer_xor(Options options) {
+  Sequential model(
+      Linear(2, 8),
+      Functional(torch::sigmoid),
+      Linear(8, 1),
+      Functional(torch::sigmoid));
+
   const int64_t kBatchSize = 4;
+  const int64_t kMaximumNumberOfEpochs = 3000;
+
+  auto optimizer = OptimizerClass(model.parameters(), options);
 
   float running_loss = 1;
   int epoch = 0;
@@ -43,7 +53,9 @@ bool test_optimizer_xor(Optimizer&& optimizer, Sequential& model) {
     optimizer.step();
 
     running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
-    if (epoch > 3000) {
+    if (epoch > kMaximumNumberOfEpochs) {
+      std::cout << "Loss is too high after epoch " << epoch << ": "
+                << running_loss << std::endl;
       return false;
     }
     epoch++;
@@ -119,6 +131,7 @@ void check_exact_values(
   }
 }
 
+<<<<<<< HEAD
 TEST_CASE("Optim/XORConvergence") {
   Sequential model(
       Linear(2, 8),
@@ -132,107 +145,100 @@ TEST_CASE("Optim/XORConvergence") {
             SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(1e-6)),
         model));
   }
-
-  SECTION("adagrad") {
-    REQUIRE(test_optimizer_xor(
-        Adagrad(
-            model.parameters(),
-            AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)),
-        model));
-  }
-
-  SECTION("rmsprop_simple") {
-    REQUIRE(test_optimizer_xor(
-        RMSprop(model.parameters(), RMSpropOptions(1e-1).centered(true)),
-        model));
-  }
-
-  SECTION("rmsprop") {
-    REQUIRE(test_optimizer_xor(
-        RMSprop(
-            model.parameters(),
-            RMSpropOptions(1e-1).momentum(0.9).weight_decay(1e-6)),
-        model));
-  }
-
-  SECTION("adam") {
-    REQUIRE(test_optimizer_xor(
-        Adam(model.parameters(), AdamOptions(1.0).weight_decay(1e-6)), model));
-  }
-
-  SECTION("amsgrad") {
-    REQUIRE(test_optimizer_xor(
-        Adam(
-            model.parameters(),
-            AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
-        model));
-  }
+=======
+TEST_CASE("Optim/XORConvergence/SGD") {
+  REQUIRE(test_optimizer_xor<SGD>(
+      SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
 }
+>>>>>>> Reduce Adam learning rate to unflake
 
-TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
-  check_exact_values<Adam>(
-      AdamOptions(1.0).weight_decay(1e-6), expected_parameters::Adam);
-}
-
-TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
-  check_exact_values<Adagrad>(
-      AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
-      expected_parameters::Adagrad);
-}
-
-TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
-  check_exact_values<RMSprop>(
-      RMSpropOptions(1e-1).momentum(0.9).weight_decay(1e-6),
-      expected_parameters::RMSprop);
-}
-
-TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
-  check_exact_values<SGD>(
-      SGDOptions(1e-1).momentum(0.9).weight_decay(1e-6),
-      expected_parameters::SGD);
-}
-
-TEST_CASE("Optim/ZeroGrad") {
-  Linear model(2, 8);
-  SGD optimizer(model->parameters(), 0.1);
-
-  for (const auto& parameter : model->parameters()) {
-    REQUIRE(!parameter->grad().defined());
+  TEST_CASE("Optim/XORConvergence/Adagrad") {
+    REQUIRE(test_optimizer_xor<Adagrad>(
+        AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
   }
 
-  auto output = model->forward(torch::ones({5, 2}));
-  auto loss = output.sum();
-  loss.backward();
-
-  for (const auto& parameter : model->parameters()) {
-    REQUIRE(parameter->grad().defined());
-    REQUIRE(parameter->grad().sum().toCFloat() > 0);
+  TEST_CASE("Optim/XORConvergence/RMSprop") {
+    REQUIRE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
   }
 
-  optimizer.zero_grad();
-
-  for (const auto& parameter : model->parameters()) {
-    REQUIRE(parameter->grad().defined());
-    REQUIRE(parameter->grad().sum().toCFloat() == 0);
-  }
-}
-
-TEST_CASE("Optim/ExternalVectorOfParameters") {
-  std::vector<torch::Tensor> parameters = {
-      torch::randn({2, 2}), torch::randn({3, 3}), torch::randn({4, 4})};
-  std::vector<torch::Tensor> original_parameters = {
-      parameters[0].clone(), parameters[1].clone(), parameters[2].clone()};
-
-  // Set all gradients to one
-  for (auto& parameter : parameters) {
-    parameter.grad() = torch::ones_like(parameter);
+  TEST_CASE("Optim/XORConvergence/RMSpropWithMomentum") {
+    REQUIRE(test_optimizer_xor<RMSprop>(
+        RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6)));
   }
 
-  SGD optimizer(parameters, 1.0);
+  TEST_CASE("Optim/XORConvergence/Adam") {
+    REQUIRE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
+  }
 
-  optimizer.step();
+  TEST_CASE("Optim/XORConvergence/AdamWithAmsgrad") {
+    REQUIRE(test_optimizer_xor<Adam>(
+        AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)));
+  }
 
-  REQUIRE(parameters[0].allclose(original_parameters[0] - 1.0));
-  REQUIRE(parameters[1].allclose(original_parameters[1] - 1.0));
-  REQUIRE(parameters[2].allclose(original_parameters[2] - 1.0));
-}
+  TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
+    check_exact_values<Adam>(
+        AdamOptions(1.0).weight_decay(1e-6), expected_parameters::Adam);
+  }
+
+  TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
+    check_exact_values<Adagrad>(
+        AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3),
+        expected_parameters::Adagrad);
+  }
+
+  TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
+    check_exact_values<RMSprop>(
+        RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6),
+        expected_parameters::RMSprop);
+  }
+
+  TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
+    check_exact_values<SGD>(
+        SGDOptions(0.1).momentum(0.9).weight_decay(1e-6),
+        expected_parameters::SGD);
+  }
+
+  TEST_CASE("Optim/ZeroGrad") {
+    Linear model(2, 8);
+    SGD optimizer(model->parameters(), 0.1);
+
+    for (const auto& parameter : model->parameters()) {
+      REQUIRE(!parameter->grad().defined());
+    }
+
+    auto output = model->forward(torch::ones({5, 2}));
+    auto loss = output.sum();
+    loss.backward();
+
+    for (const auto& parameter : model->parameters()) {
+      REQUIRE(parameter->grad().defined());
+      REQUIRE(parameter->grad().sum().toCFloat() > 0);
+    }
+
+    optimizer.zero_grad();
+
+    for (const auto& parameter : model->parameters()) {
+      REQUIRE(parameter->grad().defined());
+      REQUIRE(parameter->grad().sum().toCFloat() == 0);
+    }
+  }
+
+  TEST_CASE("Optim/ExternalVectorOfParameters") {
+    std::vector<torch::Tensor> parameters = {
+        torch::randn({2, 2}), torch::randn({3, 3}), torch::randn({4, 4})};
+    std::vector<torch::Tensor> original_parameters = {
+        parameters[0].clone(), parameters[1].clone(), parameters[2].clone()};
+
+    // Set all gradients to one
+    for (auto& parameter : parameters) {
+      parameter.grad() = torch::ones_like(parameter);
+    }
+
+    SGD optimizer(parameters, 1.0);
+
+    optimizer.step();
+
+    REQUIRE(parameters[0].allclose(original_parameters[0] - 1.0));
+    REQUIRE(parameters[1].allclose(original_parameters[1] - 1.0));
+    REQUIRE(parameters[2].allclose(original_parameters[2] - 1.0));
+  }
