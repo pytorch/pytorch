@@ -23,8 +23,8 @@ void EmbeddingImpl::reset() {
   table_.data().normal_(0, 1);
 }
 
-std::vector<Tensor> EmbeddingImpl::forward(std::vector<Tensor> input) {
-  return {at::embedding(table_, /*indices=*/input[0])};
+Tensor EmbeddingImpl::forward(Tensor input) {
+  return at::embedding(table_, /*indices=*/input);
 }
 
 const EmbeddingOptions& EmbeddingImpl::options() const noexcept {

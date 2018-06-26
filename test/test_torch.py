@@ -5526,7 +5526,7 @@ class TestTorch(TestCase):
         self.assertEqual(flat, src)
 
         # out of bounds index
-        with self.assertRaisesRegex(RuntimeError, 'dimension out of range'):
+        with self.assertRaisesRegex(RuntimeError, 'Dimension out of range'):
             src.flatten(5, 10)
 
         # invalid start and end

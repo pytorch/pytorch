@@ -22,7 +22,7 @@ TEST_CASE("misc") {
     torch::NoGradGuard guard;
     Linear model(5, 2);
     auto x = torch::randn({10, 5}, at::requires_grad());
-    auto y = model->forward({x})[0];
+    auto y = model->forward(x);
     torch::Tensor s = y.sum();
 
     s.backward();

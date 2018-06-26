@@ -21,7 +21,7 @@ class DropoutImplBase : public torch::nn::Cloneable<Derived> {
   explicit DropoutImplBase(DropoutOptions options);
 
   void reset() override;
-  std::vector<Tensor> forward(std::vector<Tensor> input);
+  Tensor forward(Tensor input);
   const DropoutOptions& options() const noexcept;
 
  protected:

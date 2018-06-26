@@ -26,19 +26,18 @@ void LinearImpl::reset() {
   }
 }
 
-std::vector<Tensor> LinearImpl::forward(std::vector<Tensor> input) {
-  auto x = input[0];
-  if (x.ndimension() == 2 && options_.with_bias_) {
+Tensor LinearImpl::forward(Tensor input) {
+  if (input.ndimension() == 2 && options_.with_bias_) {
     // Fused op is marginally faster
-    AT_ASSERT(x.size(1) == weight_.size(1));
-    return {at::addmm(bias_, x, weight_.t())};
+    AT_ASSERT(input.size(1) == weight_.size(1));
+    return {at::addmm(bias_, input, weight_.t())};
   }
 
-  auto output = x.matmul(weight_.t());
+  auto output = input.matmul(weight_.t());
   if (options_.with_bias_) {
     output += bias_;
   }
-  return {output};
+  return output;
 }
 
 const LinearOptions& LinearImpl::options() const noexcept {

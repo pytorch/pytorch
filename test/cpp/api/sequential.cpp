@@ -1,5 +1,6 @@
 #include <catch.hpp>
 
+#include <torch/nn/modules.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/tensor.h>
@@ -177,12 +178,19 @@ TEST_CASE("sequential") {
     Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
 
     auto x = torch::randn({1000, 10}, at::requires_grad());
-    auto y =
-        sequential
-            .forward<std::vector<torch::Tensor>>(std::vector<torch::Tensor>{x})
-            .front();
+    auto y = sequential.forward(x);
     REQUIRE(y.ndimension() == 2);
     REQUIRE(y.size(0) == 1000);
     REQUIRE(y.size(1) == 100);
+  }
+
+  SECTION("can hold other important modules") {
+    Sequential sequential(
+        Linear(10, 3),
+        Conv2d(1, 2, 3),
+        Dropout(0.5),
+        BatchNorm(5),
+        Embedding(4, 10),
+        LSTM(4, 5));
   }
 }

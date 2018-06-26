@@ -230,7 +230,7 @@ bool test_mnist(
   std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of "
             << telabel.size(0) << std::endl;
   return correct.data().sum().toCFloat() > telabel.size(0) * 0.8;
-};
+}
 
 TEST_CASE("integration/cartpole") {
   std::cerr << "Training episodic policy gradient with a critic for up to 3000"
@@ -245,16 +245,16 @@ TEST_CASE("integration/cartpole") {
   std::vector<torch::Tensor> saved_values;
   std::vector<float> rewards;
 
-  auto forward = [&](std::vector<torch::Tensor> inp) {
-    auto x = linear->forward(inp)[0].clamp_min(0);
-    torch::Tensor actions = policyHead->forward({x})[0];
-    torch::Tensor value = valueHead->forward({x})[0];
+  auto forward = [&](torch::Tensor inp) {
+    auto x = linear->forward(inp).clamp_min(0);
+    torch::Tensor actions = policyHead->forward(x);
+    torch::Tensor value = valueHead->forward(x);
     return std::make_tuple(at::softmax(actions, -1), value);
   };
 
-  auto selectAction = [&](torch::Tensor state) {
-    // Only work on single state now, change index to gather for batch
-    auto out = forward({state});
+  auto selectAction = [&](at::Tensor state) {
+    // Only work on single state right now, change index to gather for batch
+    auto out = forward(state);
     auto probs = torch::Tensor(std::get<0>(out));
     auto value = torch::Tensor(std::get<1>(out));
     auto action = probs.data().multinomial(1)[0].toCInt();
@@ -340,16 +340,15 @@ TEST_CASE("integration/mnist", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
-            .clamp_min(0);
-    x = conv2->forward({x})[0];
-    x = drop2d->forward({x})[0];
+    x = std::get<0>(at::max_pool2d(conv1->forward(x), {2, 2})).clamp_min(0);
+    x = conv2->forward(x);
+    x = drop2d->forward(x);
     x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
 
     x = x.view({-1, 320});
-    x = linear1->forward({x})[0].clamp_min(0);
-    x = drop->forward({x})[0];
-    x = linear2->forward({x})[0];
+    x = linear1->forward(x).clamp_min(0);
+    x = drop->forward(x);
+    x = linear2->forward(x);
     x = at::log_softmax(x, 1);
     return x;
   };
@@ -378,16 +377,15 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
-            .clamp_min(0);
-    x = batchnorm2d->forward({x})[0];
-    x = conv2->forward({x})[0];
+    x = std::get<0>(at::max_pool2d(conv1->forward(x), {2, 2})).clamp_min(0);
+    x = batchnorm2d->forward(x);
+    x = conv2->forward(x);
     x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
 
     x = x.view({-1, 320});
-    x = linear1->forward({x})[0].clamp_min(0);
-    x = batchnorm1->forward({x})[0];
-    x = linear2->forward({x})[0];
+    x = linear1->forward(x).clamp_min(0);
+    x = batchnorm1->forward(x);
+    x = linear2->forward(x);
     x = at::log_softmax(x, 1);
     return x;
   };
