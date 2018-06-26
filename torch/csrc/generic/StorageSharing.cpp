@@ -101,10 +101,10 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
     ctx = (libshm_context*)allocator_obj->allocatorContext;
   } else {
     // TODO: retry on collision
-    // TODO: free GIL - but remember to reacquire it when an exception is thrown
+    AutoNoGIL no_gil;
     THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size));
-    THStorage_(copy)(new_storage, storage);
-    THStorage_(swap)(storage, new_storage);
+    THWStorage_(copy)(new_storage, storage);
+    THWStorage_(swap)(storage, new_storage);
     ctx = (libshm_context*)storage->allocatorContext;
   }
 
@@ -182,9 +182,10 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
     auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
     ctx = (THMapAllocatorContext*)allocator_obj->allocatorContext;
   } else {
+    AutoNoGIL no_gil;
     THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size));
-    THStorage_(copy)(new_storage, storage);
-    THStorage_(swap)(storage, new_storage);
+    THWStorage_(copy)(new_storage, storage);
+    THWStorage_(swap)(storage, new_storage);
     ctx = (THMapAllocatorContext*)storage->allocatorContext;
   }
 
