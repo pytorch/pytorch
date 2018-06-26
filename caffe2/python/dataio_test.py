@@ -8,6 +8,7 @@ from caffe2.python.dataio import (
     CompositeReaderBuilder,
     Reader,
     ReaderBuilder,
+    ReaderWithDelay,
     ReaderWithLimit,
     ReaderWithTimeLimit,
 )
@@ -51,26 +52,6 @@ def make_destination_dataset(ws, schema, name=None):
         dst_ds.init_empty(dst_init)
     ws.run(dst_init)
     return dst_ds
-
-
-class ReaderWithDelay(Reader):
-    """Test reader class that inserts a delay between reading batches."""
-    def __init__(self, reader, delay):
-        Reader.__init__(self, schema=reader._schema)
-        self.reader = reader
-        self.delay = delay
-
-    def setup_ex(self, global_init_net, global_finish_net):
-        self.reader.setup_ex(global_init_net, global_finish_net)
-
-    def read_ex(self, local_init_net, local_finish_net):
-        read_net = core.Net('reader_body')
-
-        def sleep_op(*args, **argd):
-            time.sleep(self.delay)
-
-        read_net.Python(sleep_op)([], [])
-        return ([read_net], ) + self.reader.read(read_net)
 
 
 class TestReaderBuilder(ReaderBuilder):
