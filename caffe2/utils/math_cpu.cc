@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -553,10 +554,12 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, vsAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, vdAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, vsInv)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, vsInvSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, InvSqrt, vdInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, vdSqr)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
@@ -571,10 +574,11 @@ DELEGATE_SINCOS_FUNCTION(float, vsSinCos)
 DELEGATE_SINCOS_FUNCTION(double, vdSinCos)
 #undef DELEGATE_SINCOS_FUNCTION
 
-#define DELEGATE_POWX_FUNCTION(T, OriginalFunc)                               \
-  template <>                                                                 \
-  void Powx<T, CPUContext>(const int N, const T* a, T b, T* y, CPUContext*) { \
-    OriginalFunc(N, a, b, y);                                                 \
+#define DELEGATE_POWX_FUNCTION(T, OriginalFunc)                \
+  template <>                                                  \
+  void Powx<T, CPUContext>(                                    \
+      const int N, const T* a, const T b, T* y, CPUContext*) { \
+    OriginalFunc(N, a, b, y);                                  \
   }
 DELEGATE_POWX_FUNCTION(float, vsPowx)
 DELEGATE_POWX_FUNCTION(double, vdPowx)
@@ -594,6 +598,8 @@ DELEGATE_SIMPLE_BINARY_FUNCTION(float, Mul, vsMul)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Mul, vdMul)
 DELEGATE_SIMPLE_BINARY_FUNCTION(float, Div, vsDiv)
 DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
+DELEGATE_SIMPLE_BINARY_FUNCTION(float, Pow, vsPow)
+DELEGATE_SIMPLE_BINARY_FUNCTION(double, Pow, vdPow)
 #undef DELEGATE_SIMPLE_BINARY_FUNCTION
 
 #else // CAFFE2_USE_MKL
@@ -604,17 +610,31 @@ DELEGATE_SIMPLE_BINARY_FUNCTION(double, Div, vdDiv)
     EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).expr();      \
   }
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Exp, exp)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Exp, exp)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Log, log)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Log, log)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cos, cos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cos, cos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Acos, acos)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Acos, acos)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sin, sin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sin, sin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Asin, asin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, tan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tan, tan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, atan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, atan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, abs)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, inverse)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, inverse)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, rsqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, sqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, rsqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, square)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T)                                     \
@@ -628,13 +648,26 @@ DELEGATE_SINCOS_FUNCTION(float)
 DELEGATE_SINCOS_FUNCTION(double)
 #undef DELEGATE_SINCOS_FUNCTION
 
-#define DELEGATE_POWX_FUNCTION(T)                                             \
-  template <>                                                                 \
-  void Powx<T, CPUContext>(const int N, const T* a, T b, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b);       \
+#define DELEGATE_POWX_FUNCTION(T)                                       \
+  template <>                                                           \
+  void Powx<T, CPUContext>(                                             \
+      const int N, const T* a, const T b, T* y, CPUContext*) {          \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b); \
   }
 DELEGATE_POWX_FUNCTION(float)
+DELEGATE_POWX_FUNCTION(double)
 #undef DELEGATE_POWX_FUNCTION
+
+#define DELEGATE_POW_FUNCTION(T)                                     \
+  template <>                                                        \
+  void Pow<T, CPUContext>(                                           \
+      const int N, const T* A, const T* B, T* C, CPUContext*) {      \
+    EigenVectorMap<T>(C, N) = ConstEigenVectorArrayMap<T>(A, N).pow( \
+        ConstEigenVectorArrayMap<T>(B, N));                          \
+  }
+DELEGATE_POW_FUNCTION(float)
+DELEGATE_POW_FUNCTION(double)
+#undef DELEGATE_POW_FUNCTION
 
 #endif // CAFFE2_USE_MKL
 
@@ -1360,7 +1393,7 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DELEGATE_1D_BINARY_FUNCTION
 
-#define DELEGATE_2D_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op)             \
+#define DELEGATE_2D_BROADCAST_1ST_BINARY_FUNCTION(TIn, TOut, Func, Op)         \
   template <>                                                                  \
   void Rowwise##Func<TIn, CPUContext, true>(                                   \
       const int rows,                                                          \
@@ -1372,17 +1405,6 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
     RowwiseBinaryOp<TIn, TOut, Op<TIn>, true>(rows, cols, Op<TIn>(), A, B, C); \
   }                                                                            \
   template <>                                                                  \
-  void Rowwise##Func<TIn, CPUContext, false>(                                  \
-      const int rows,                                                          \
-      const int cols,                                                          \
-      const TIn* A,                                                            \
-      const TIn* B,                                                            \
-      TOut* C,                                                                 \
-      CPUContext*) {                                                           \
-    RowwiseBinaryOp<TIn, TOut, Op<TIn>, false>(                                \
-        rows, cols, Op<TIn>(), A, B, C);                                       \
-  }                                                                            \
-  template <>                                                                  \
   void Colwise##Func<TIn, CPUContext, true>(                                   \
       const int rows,                                                          \
       const int cols,                                                          \
@@ -1391,18 +1413,35 @@ DEFINE_1D_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
       TOut* C,                                                                 \
       CPUContext*) {                                                           \
     ColwiseBinaryOp<TIn, TOut, Op<TIn>, true>(rows, cols, Op<TIn>(), A, B, C); \
-  }                                                                            \
-  template <>                                                                  \
-  void Colwise##Func<TIn, CPUContext, false>(                                  \
-      const int rows,                                                          \
-      const int cols,                                                          \
-      const TIn* A,                                                            \
-      const TIn* B,                                                            \
-      TOut* C,                                                                 \
-      CPUContext*) {                                                           \
-    ColwiseBinaryOp<TIn, TOut, Op<TIn>, false>(                                \
-        rows, cols, Op<TIn>(), A, B, C);                                       \
   }
+
+#define DELEGATE_2D_BROADCAST_2ND_BINARY_FUNCTION(TIn, TOut, Func, Op) \
+  template <>                                                          \
+  void Rowwise##Func<TIn, CPUContext, false>(                          \
+      const int rows,                                                  \
+      const int cols,                                                  \
+      const TIn* A,                                                    \
+      const TIn* B,                                                    \
+      TOut* C,                                                         \
+      CPUContext*) {                                                   \
+    RowwiseBinaryOp<TIn, TOut, Op<TIn>, false>(                        \
+        rows, cols, Op<TIn>(), A, B, C);                               \
+  }                                                                    \
+  template <>                                                          \
+  void Colwise##Func<TIn, CPUContext, false>(                          \
+      const int rows,                                                  \
+      const int cols,                                                  \
+      const TIn* A,                                                    \
+      const TIn* B,                                                    \
+      TOut* C,                                                         \
+      CPUContext*) {                                                   \
+    ColwiseBinaryOp<TIn, TOut, Op<TIn>, false>(                        \
+        rows, cols, Op<TIn>(), A, B, C);                               \
+  }
+
+#define DELEGATE_2D_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op) \
+  DELEGATE_2D_BROADCAST_1ST_BINARY_FUNCTION(TIn, TOut, Func, Op)   \
+  DELEGATE_2D_BROADCAST_2ND_BINARY_FUNCTION(TIn, TOut, Func, Op)
 
 #define DEFINE_2D_COMPARE_FUNCTION(Func, Op)                          \
   DELEGATE_2D_BROADCAST_BINARY_FUNCTION(float, bool, Func, Op)        \
@@ -1435,34 +1474,34 @@ DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DEFINE_2D_BROADCAST_BITWISE_BINARY_FUNCTION
 
-#undef DELEGATE_2D_BROADCAST_BINARY_FUNCTION
+DELEGATE_2D_BROADCAST_1ST_BINARY_FUNCTION(
+    std::int32_t,
+    std::int32_t,
+    Div,
+    std::divides)
+DELEGATE_2D_BROADCAST_1ST_BINARY_FUNCTION(
+    std::int64_t,
+    std::int64_t,
+    Div,
+    std::divides)
 
-#define DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(T)   \
-  template <>                                     \
-  void RowwiseDiv<T, CPUContext, true>(           \
-      const int rows,                             \
-      const int cols,                             \
-      const T* A,                                 \
-      const T* B,                                 \
-      T* C,                                       \
-      CPUContext*) {                              \
-    RowwiseBinaryOp<T, T, std::divides<T>, true>( \
-        rows, cols, std::divides<T>(), A, B, C);  \
-  }                                               \
-  template <>                                     \
-  void ColwiseDiv<T, CPUContext, true>(           \
-      const int rows,                             \
-      const int cols,                             \
-      const T* A,                                 \
-      const T* B,                                 \
-      T* C,                                       \
-      CPUContext*) {                              \
-    ColwiseBinaryOp<T, T, std::divides<T>, true>( \
-        rows, cols, std::divides<T>(), A, B, C);  \
+namespace {
+
+template <typename T>
+struct PowFunctor {
+  T inline operator()(const T& lhs, const T& rhs) const {
+    return std::pow(lhs, rhs);
   }
-DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int32_t)
-DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
-#undef DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION
+};
+
+} // namespace
+
+DELEGATE_2D_BROADCAST_BINARY_FUNCTION(float, float, Pow, PowFunctor)
+DELEGATE_2D_BROADCAST_BINARY_FUNCTION(double, double, Pow, PowFunctor)
+
+#undef DELEGATE_2D_BROADCAST_BINARY_FUNCTION
+#undef DELEGATE_2D_BROADCAST_1ST_BINARY_FUNCTION
+#undef DELEGATE_2D_BROADCAST_2ND_BINARY_FUNCTION
 
 #define DELEGATE_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op) \
   template <>                                                   \
@@ -1590,6 +1629,9 @@ DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseOr, std::bit_or)
 DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DEFINE_BITWISE_BROADCAST_BINARY_FUNCTION
+
+DELEGATE_BROADCAST_BINARY_FUNCTION(float, float, Pow, PowFunctor)
+DELEGATE_BROADCAST_BINARY_FUNCTION(double, double, Pow, PowFunctor)
 
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 

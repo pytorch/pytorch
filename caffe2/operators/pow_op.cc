@@ -1,89 +1,195 @@
 #include "caffe2/operators/pow_op.h"
-#include "caffe2/utils/math.h"
-// definition of NumericTypes and SameTypeAsInput is in below header file
-//#include "caffe2/operators/elementwise_op.h"
-#include <Eigen/Core>
+
+#include <cmath>
+#include <string>
+#include <vector>
 
 namespace caffe2 {
 
-#define EIGEN_POW(x, y) (x.pow(y))
+namespace {
 
-struct EigenPowFunctor {
-  template <int b_is_scalar, typename T1, typename T2, typename R>
-  inline void
-  Run(size_t n, const T1* a, const T2* b, T2 e, R* out, CPUContext*) {
-    if (b == NULL) {
-      EigenVectorArrayMap<R>(out, n) =
-          EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (e));
+template <typename T>
+void ComputePowGradient(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    const int* C_dims,
+    const T* dC,
+    const T* A,
+    const T* B,
+    const T* C,
+    T* dA,
+    T* dB,
+    CPUContext* context) {
+  const int A_size =
+      std::accumulate(A_dims, A_dims + ndim, 1, std::multiplies<int>());
+  const int B_size =
+      std::accumulate(B_dims, B_dims + ndim, 1, std::multiplies<int>());
+  const int C_size =
+      std::accumulate(C_dims, C_dims + ndim, 1, std::multiplies<int>());
+  math::Set<T, CPUContext>(A_size, T(0), dA, context);
+  math::Set<T, CPUContext>(B_size, T(0), dB, context);
+  std::vector<int> index(ndim, 0);
+  for (int C_index = 0; C_index < C_size; ++C_index) {
+    const int A_index =
+        math::utils::GetIndexFromDims(ndim, A_dims, index.data());
+    const int B_index =
+        math::utils::GetIndexFromDims(ndim, B_dims, index.data());
+    dA[A_index] += (B[B_index] == 0 ? 0 : C[C_index] / A[A_index]) *
+        B[B_index] * dC[C_index];
+    dB[B_index] += C[C_index] * std::log(A[A_index]) * dC[C_index];
+    math::utils::IncreaseIndexInDims(ndim, C_dims, index.data());
+  }
+}
+
+} // namespace
+
+template <>
+template <typename T>
+bool PowGradientOp<TensorTypes<float>, CPUContext>::ComputeUnaryPowGradient(
+    const int N,
+    const T& exponent,
+    const T* dY,
+    const T* X,
+    const T* Y,
+    T* dX) {
+  if (exponent == T(0)) {
+    math::Set<T, CPUContext>(N, 0, dX, &context_);
+  } else if (exponent == T(1)) {
+    if (dX != dY) {
+      context_.template Copy<T, CPUContext, CPUContext>(N, dY, dX);
+    }
+  } else if (exponent == T(2)) {
+    if (X == nullptr) {
+      EigenVectorMap<T>(dX, N) = ConstEigenVectorArrayMap<T>(Y, N).sqrt() *
+          ConstEigenVectorArrayMap<T>(dY, N) * T(2);
     } else {
-      if (b_is_scalar) {
-        EigenVectorArrayMap<R>(out, n) =
-            EIGEN_POW((ConstEigenVectorArrayMap<T1>(a, n)), (b[0]));
-      } else {
-        EigenVectorArrayMap<R>(out, n) = EIGEN_POW(
-            (ConstEigenVectorArrayMap<T1>(a, n)),
-            (ConstEigenVectorArrayMap<T2>(b, n)));
-      }
+      EigenVectorMap<T>(dX, N) = ConstEigenVectorArrayMap<T>(X, N) *
+          ConstEigenVectorArrayMap<T>(dY, N) * T(2);
+    }
+  } else if (exponent == T(-1)) {
+    EigenVectorMap<T>(dX, N) = -ConstEigenVectorArrayMap<T>(Y, N).square() *
+        ConstEigenVectorArrayMap<T>(dY, N);
+  } else if (exponent == T(0.5)) {
+    EigenVectorMap<T>(dX, N) = ConstEigenVectorArrayMap<T>(dY, N) /
+        ConstEigenVectorArrayMap<T>(Y, N) * T(0.5);
+  } else if (exponent == T(-0.5)) {
+    EigenVectorMap<T>(dX, N) = ConstEigenVectorArrayMap<T>(Y, N).cube() *
+        ConstEigenVectorArrayMap<T>(dY, N) * T(-0.5);
+  } else {
+    if (X == nullptr) {
+      const T b = (exponent - T(1)) / exponent;
+      EigenVectorMap<T>(dX, N) = ConstEigenVectorArrayMap<T>(Y, N).pow(b) *
+          ConstEigenVectorArrayMap<T>(dY, N) * exponent;
+    } else {
+      EigenVectorMap<T>(dX, N) =
+          ConstEigenVectorArrayMap<T>(X, N).pow(exponent - 1) *
+          ConstEigenVectorArrayMap<T>(dY, N) * exponent;
     }
   }
-  template <typename T1, typename T2, typename R>
-  void RunWithBroadcast(
-      const T1* a,
-      const T2* b,
-      R* out,
-      size_t pre,
-      size_t n,
-      CPUContext*) {
-    EigenArrayMap<R>(out, n, pre) = EIGEN_POW(
-        (ConstEigenArrayMap<T1>(a, n, pre)),
-        (ConstEigenVectorArrayMap<T2>(b, n)).rowwise().replicate(pre));
-    /*
-    //below code only allows elementary ops, such as +, -, * and /,
-    //and does not allow operations, such as pow, exp and log
-    EIGEN_POW(
-       (ConstEigenArrayMap<T>(a, n, pre).colwise()),
-       (ConstEigenVectorArrayMap<T>(b, n)));
-     */
-  }
-  template <typename T1, typename T2, typename R>
-  void RunWithBroadcast2(
-      const T1* a,
-      const T2* b,
-      R* out,
-      size_t pre,
-      size_t n,
-      size_t post,
-      CPUContext*) {
-    for (int i = 0; i < pre; ++i) {
-      EigenArrayMap<R>(out + i * n * post, post, n) = EIGEN_POW(
-          (ConstEigenArrayMap<T1>(a + i * n * post, post, n)),
-          (Eigen::Map<const Eigen::Array<T2, 1, Eigen::Dynamic>>(b, n))
-              .colwise()
-              .replicate(post));
-      /*
-      //below code only allows elementary ops, such as +, -, * and /,
-      //and does not allow for operations, such as pow, exp and log
-      EIEGN_POW(
-        (ConstEigenArrayMap<T>(a + i * n * post, post, n).rowwise()),
-        (Eigen::Map<const Eigen::Array<T, 1, Eigen::Dynamic>>(b, n)));
-      */
-    }
-  }
-};
+  return true;
+}
 
+template <>
+template <typename T>
+bool PowGradientOp<TensorTypes<float>, CPUContext>::ComputeSinglePowBGradient(
+    const int N,
+    const T* dC,
+    const T* A,
+    const T* C,
+    T* dB) {
+  *dB = (ConstEigenVectorArrayMap<T>(C, N) *
+         ConstEigenVectorArrayMap<T>(A, N).log() *
+         ConstEigenVectorArrayMap<T>(dC, N))
+            .sum();
+  return true;
+}
+
+template <>
+template <typename T>
+bool PowGradientOp<TensorTypes<float>, CPUContext>::ComputeBinaryPowGradient(
+    const std::vector<int>& A_dims,
+    const std::vector<int>& B_dims,
+    const T* dC,
+    const T* A,
+    const T* B,
+    const T* C,
+    T* dA,
+    T* dB) {
+  if (A_dims == B_dims) {
+    const int size = std::accumulate(
+        A_dims.cbegin(), A_dims.cend(), 1, std::multiplies<int>());
+    ConstEigenVectorArrayMap<T> dC_arr(dC, size);
+    ConstEigenVectorArrayMap<T> A_arr(A, size);
+    ConstEigenVectorArrayMap<T> B_arr(B, size);
+    ConstEigenVectorArrayMap<T> C_arr(C, size);
+    EigenVectorMap<T>(dA, size) = A_arr.pow(B_arr - T(1)) * B_arr * dC_arr;
+    EigenVectorMap<T>(dB, size) = C_arr * A_arr.log() * dC_arr;
+    return true;
+  }
+  const int ndim = std::max(A_dims.size(), B_dims.size());
+  std::vector<int> A_broadcast_dims(ndim);
+  std::vector<int> B_broadcast_dims(ndim);
+  std::vector<int> C_broadcast_dims(ndim);
+  math::utils::ComputeBroadcastBinaryOpDims(
+      A_dims.size(),
+      A_dims.data(),
+      B_dims.size(),
+      B_dims.data(),
+      A_broadcast_dims.data(),
+      B_broadcast_dims.data(),
+      C_broadcast_dims.data());
+  ComputePowGradient<T>(
+      ndim,
+      A_broadcast_dims.data(),
+      B_broadcast_dims.data(),
+      C_broadcast_dims.data(),
+      dC,
+      A,
+      B,
+      C,
+      dA,
+      dB,
+      &context_);
+  return true;
+}
+
+REGISTER_CPU_OPERATOR(Pow, PowOp<TensorTypes<float>, CPUContext>);
 REGISTER_CPU_OPERATOR(
-    Pow,
-    PowOp<
-        TensorTypes<float> /*NumericTypes*/,
-        CPUContext,
-        EigenPowFunctor,
-        SameTypeAsInput>)
+    PowGradient,
+    PowGradientOp<TensorTypes<float>, CPUContext>);
+
+namespace {
+
+std::vector<TensorShape> PowOpShapeInference(
+    const OperatorDef& def,
+    const std::vector<TensorShape>& in) {
+  std::vector<TensorShape> out(1);
+  out[0].set_data_type(in[0].data_type());
+  ArgumentHelper helper(def);
+  const bool broadcast = helper.GetSingleArgument<bool>("broadcast", false);
+  if (helper.HasArgument("exponent") || broadcast) {
+    out[0].mutable_dims()->CopyFrom(in[0].dims());
+  } else {
+    const std::vector<int> A_dims(in[0].dims().begin(), in[0].dims().end());
+    const std::vector<int> B_dims(in[1].dims().begin(), in[1].dims().end());
+    const std::vector<int> C_dims =
+        elementwise_ops_utils::ComputeBinaryBroadcastForwardDims(
+            A_dims, B_dims);
+    for (const int dim : C_dims) {
+      out[0].add_dims(dim);
+    }
+  }
+  return out;
+}
+
+} // namespace
 
 OPERATOR_SCHEMA(Pow)
     .NumInputs(1, 2)
     .NumOutputs(1)
     .AllowInplace({{0, 0}, {1, 0}})
-    .IdenticalTypeAndShapeOfInput(0)
+    .TensorInferenceFunction(PowOpShapeInference)
     .SetDoc(R"DOC(
 The *Pow* op takes an input data tensor $X$ and an exponent parameter *exponent*, which can be a scalar or another tensor. As output, it produces a single output data tensor $Y$, where the function $f(x) = x^{exponent}$ has been applied to $X$ elementwise.
 
@@ -107,7 +213,6 @@ op = core.CreateOperator(
     "Pow",
     ["X", "exponent"],
     ["Y"],
-    broadcast=1
 )
 
 workspace.FeedBlob("X", np.array([1,2,3,4,5,6]).astype(np.float32))
@@ -136,226 +241,49 @@ Y:  [ 1.  4.  9. 16. 25. 36.]
 
 )DOC")
     .Input(0, "X", "Input data blob to be operated on.")
-    .Input(1, "exponent", "Exponent blob containing the exponent(s) for calculation. Do not use if setting exponent via argument.")
+    .Input(
+        1,
+        "exponent",
+        "Exponent blob containing the exponent(s) for calculation. "
+        "Do not use if setting exponent via argument.")
     .Output(0, "Y", "Output data blob with the same shape as the input.")
-    .Arg("exponent", "The exponent of the power function. Do not use if setting exponent via input.")
+    .Arg(
+        "exponent",
+        "The exponent of the power function. Do not use if setting exponent "
+        "via input.")
     .Arg("axis", "*(type: int; default: -1)*")
     .Arg("broadcast", "*(type: bool; default: False)*");
 
+OPERATOR_SCHEMA(PowGradient)
+    .NumInputs({2, 3, 4})
+    .NumOutputs(1, 2)
+    .AllowInplace({{0, 0}});
+
+namespace {
+
 class GetPowGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+
+  std::vector<OperatorDef> GetGradientDefs() override {
     ArgumentHelper arg_helper(def_);
-    if (arg_helper.HasArgument("exponent")) { // second input is a scalar
-      // function f(w,a) = w^a
-      // gradient operator with respect to first input tensor
-      // df/dw = a * w^(a-1) (all operations are component-wise)
-      float exponent = arg_helper.GetSingleArgument<float>("exponent", 0.0);
-      Argument scale_arg;
-      scale_arg.set_name("scale");
-      scale_arg.set_f(exponent);
-      Argument pow_arg;
-      pow_arg.set_name("exponent");
-      if (I(0) != O(0)) {
-        pow_arg.set_f(exponent - 1);
-      } else {
-        LOG(WARNING) << "In-place Pow gradient, possible loss of precision";
-        constexpr float kEps = 1e-12f;
-        CAFFE_ENFORCE(std::fabs(exponent) > kEps);
-        pow_arg.set_f((exponent - 1) / exponent);
-      }
-      return vector<OperatorDef>{CreateOperatorDef(
-                                     "Pow",
-                                     "",
-                                     std::vector<string>{I(0)},
-                                     std::vector<string>{GI(0)},
-                                     std::vector<Argument>{pow_arg}),
-                                 CreateOperatorDef(
-                                     "Mul",
-                                     "",
-                                     std::vector<string>{GI(0), GO(0)},
-                                     std::vector<string>{GI(0)}),
-                                 CreateOperatorDef(
-                                     "Scale",
-                                     "",
-                                     std::vector<string>{GI(0)},
-                                     std::vector<string>{GI(0)},
-                                     std::vector<Argument>{scale_arg})};
-      /*
-      // Alternative gradient computation
-      return vector<OperatorDef>{CreateOperatorDef(
-                                     "Div",
-                                     "",
-                                     std::vector<string>{O(0), I(0)},
-                                     std::vector<string>{GI(0)}),
-                                 CreateOperatorDef(
-                                     "Mul",
-                                     "",
-                                     std::vector<string>{GI(0), GO(0)},
-                                     std::vector<string>{GI(0)}),
-                                 CreateOperatorDef(
-                                     "Scale",
-                                     "",
-                                     std::vector<string>{GI(0)},
-                                     std::vector<string>{GI(0)},
-                                     std::vector<Argument>{scale_arg})};
-      */
-    } else { // second input is a tensor
-      CAFFE_ENFORCE(
-          Def().input(0) != Def().output(0) &&
-              Def().input(1) != Def().output(0),
-          "Gradient computation cannot be carried out if Pow uses in-place "
-          "computation: ",
-          ProtoDebugString(Def()));
-      vector<OperatorDef> grad_ops;
-      Argument one_arg;
-      one_arg.set_name("value");
-      one_arg.set_f(1);
-      Argument broadcast, axis, axis_str, order;
-      bool bflag = ArgumentHelper::HasArgument(Def(), "broadcast");
-
-      if (bflag) {
-        if (ArgumentHelper::HasArgument(Def(), "broadcast")) {
-          broadcast = GetArgument(Def(), "broadcast");
-        } else {
-          broadcast = MakeArgument<int>("broadcast", 0);
-        }
-        if (ArgumentHelper::HasArgument(Def(), "axis")) {
-          axis = GetArgument(Def(), "axis");
-        } else {
-          axis = MakeArgument<int>("axis", -1);
-        }
-        if (ArgumentHelper::HasArgument(Def(), "axis_str")) {
-          axis_str = GetArgument(Def(), "axis_str");
-        } else {
-          axis_str = MakeArgument<string>("axis_str", "");
-        }
-        if (ArgumentHelper::HasArgument(Def(), "order")) {
-          order = GetArgument(Def(), "order");
-        } else {
-          order = MakeArgument<string>("order", "NCHW");
-        }
-      }
-
-      // function f(w,a) = w^a
-      // gradient operator with respect to first input tensor
-      // df/dw = a * w^(a-1) (all operations are component-wise)
-      grad_ops.push_back(CreateOperatorDef(
-          "ConstantFill",
+    if (arg_helper.HasArgument("exponent")) {
+      return SingleGradientDef(
+          "PowGradient",
           "",
-          std::vector<string>{I(1)},
-          std::vector<string>{GI(1)},
-          std::vector<Argument>{one_arg}));
-      grad_ops.push_back(CreateOperatorDef(
-          "Sub",
+          I(0) == O(0) ? std::vector<std::string>{GO(0), O(0)}
+                       : std::vector<std::string>{GO(0), I(0), O(0)},
+          std::vector<std::string>{GI(0)});
+    } else {
+      return SingleGradientDef(
+          "PowGradient",
           "",
-          std::vector<string>{I(1), GI(1)},
-          std::vector<string>{GI(1)}));
-      if (bflag) {
-        grad_ops.push_back(CreateOperatorDef(
-            "Pow",
-            "",
-            std::vector<string>{I(0), GI(1)},
-            std::vector<string>{GI(0)},
-            vector<Argument>{broadcast, axis, axis_str, order}));
-      } else {
-        grad_ops.push_back(CreateOperatorDef(
-            "Pow",
-            "",
-            std::vector<string>{I(0), GI(1)},
-            std::vector<string>{GI(0)}));
-      }
-
-      grad_ops.push_back(CreateOperatorDef(
-          "Mul",
-          "",
-          std::vector<string>{GI(0), GO(0)},
-          std::vector<string>{GI(0)}));
-      if (bflag) {
-        grad_ops.push_back(CreateOperatorDef(
-            "Mul",
-            "",
-            std::vector<string>{GI(0), I(1)},
-            std::vector<string>{GI(0)},
-            vector<Argument>{broadcast, axis, axis_str, order}));
-      } else {
-        grad_ops.push_back(CreateOperatorDef(
-            "Mul",
-            "",
-            std::vector<string>{GI(0), I(1)},
-            std::vector<string>{GI(0)}));
-      }
-      /*
-      // Alternative gradient computation (no broadcast support)
-      grad_ops.push_back(CreateOperatorDef(
-                           "Div",
-                           "",
-                           std::vector<string>{O(0), I(0)},
-                           std::vector<string>{GI(0)}));
-      grad_ops.push_back(CreateOperatorDef(
-                           "Mul",
-                           "",
-                           std::vector<string>{GI(0), GO(0)},
-                           std::vector<string>{GI(0)}));
-      grad_ops.push_back(CreateOperatorDef(
-                           "Mul",
-                           "",
-                           std::vector<string>{GI(0), I(1)},
-                           std::vector<string>{GI(0)}));
-      */
-      // gradient operator for with respect to second input tensor
-      // df/da =  w^a * ln w (all operations are component-wise)
-      /*
-      // reset GI(1) to zero
-      Argument zero_arg;
-      zero_arg.set_name("value");
-      zero_arg.set_f(0);
-      grad_ops.push_back(CreateOperatorDef(
-          "ConstantFill",
-          "",
-          std::vector<string>{I(1)},
-          std::vector<string>{GI(1)},
-          std::vector<Argument>{zero_arg}));
-      */
-      grad_ops.push_back(CreateOperatorDef(
-          "Log",
-          "",
-          std::vector<string>{I(0)},
-          std::vector<string>{GI(1) + "_autogen_pre_red"}));
-      grad_ops.push_back(CreateOperatorDef(
-          "Mul",
-          "",
-          std::vector<string>{GI(1) + "_autogen_pre_red", O(0)},
-          std::vector<string>{GI(1) + "_autogen_pre_red"}));
-      if (bflag) {
-        grad_ops.push_back(CreateOperatorDef(
-            "Mul",
-            "",
-            std::vector<string>{GI(1) + "_autogen_pre_red", GO(0)},
-            std::vector<string>{GI(1) + "_autogen_pre_red"}));
-        grad_ops.push_back(CreateOperatorDef(
-            "SumReduceLike",
-            "",
-            vector<string>{GI(1) + "_autogen_pre_red", I(1)},
-            vector<string>{GI(1)},
-            vector<Argument>{axis, axis_str, order}));
-      } else {
-        grad_ops.push_back(CreateOperatorDef(
-            "Mul",
-            "",
-            std::vector<string>{GI(1) + "_autogen_pre_red", GO(0)},
-            std::vector<string>{GI(1)}));
-      }
-
-      return grad_ops;
+          std::vector<std::string>{GO(0), I(0), I(1), O(0)},
+          std::vector<std::string>{GI(0), GI(1)});
     }
   }
-
-  // Argument `shape` is no longer needed in backprop.
-  bool CopyArguments() const override {
-    return false;
-  }
 };
+
+} // namespace
 
 REGISTER_GRADIENT(Pow, GetPowGradient);
 

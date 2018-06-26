@@ -37,35 +37,6 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
 
-    @given(n=st.integers(0, 10), m=st.integers(4, 6),
-           d=st.integers(2, 3), seed=st.integers(0, 1000), **hu.gcs)
-    def test_powt(self, n, m, d, gc, dc, seed):
-        np.random.seed(seed)
-        X = np.random.rand(n, m, d).astype(np.float32) + 1.0
-        Y = np.random.rand(n, m, d).astype(np.float32) + 2.0
-
-        def powt_op(X, Y):
-            return [np.power(X, Y)]
-
-        #two gradients Y*X^(Y-1) and X^Y * ln(X)
-        def powt_grad(g_out, outputs, fwd_inputs):
-            [X, Y] = fwd_inputs
-            Z = outputs[0]
-            return ([Y * np.power(X, Y - 1), Z * np.log(X)] * g_out)
-
-        op = core.CreateOperator(
-            "Pow",
-            ["X", "Y"],
-            ["Z"]
-        )
-
-        self.assertReferenceChecks(device_option=gc,
-                                   op=op,
-                                   inputs=[X, Y],
-                                   reference=powt_op,
-                                   output_to_grad="Z",
-                                   grad_reference=powt_grad)
-
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     def test_sqr(self, n, m, gc, dc, seed):
@@ -125,7 +96,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
            inplace=st.booleans(), **hu.gcs)
     def test_rsqrt(self, X, inplace, gc, dc):
         op = core.CreateOperator(
-            "RSqrt",
+            "Rsqrt",
             ["X"],
             ["X"] if inplace else ["Y"],
         )
@@ -133,14 +104,21 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         def rsqrt_ref(X):
             return [1.0 / np.sqrt(X)]
 
+        def rsqrt_grad_ref(g_out, outputs, fwd_inputs):
+            dY = g_out
+            Y = outputs[0]
+            X = fwd_inputs[0]
+            return [-0.5 * Y / X * dY]
+
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[X],
             reference=rsqrt_ref,
+            output_to_grad="X" if inplace else "Y",
+            grad_reference=rsqrt_grad_ref,
         )
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=5e-3)
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
@@ -363,6 +341,70 @@ class TestElementwiseOps(hu.HypothesisTestCase):
            t=st.integers(1, 5), **hu.gcs)
     def test_div(self, n, m, k, t, gc, dc):
         self._test_binary_op("Div", np.divide, n, m, k, t, 1.0, True, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), broadcast=st.booleans(),
+           **hu.gcs)
+    def test_div_legacy_grad(self, n, m, broadcast, gc, dc):
+        op = core.CreateOperator(
+            "DivGradient",
+            ["B", "C", "dC"],
+            ["dA", "dB"],
+        )
+
+        def div_grad_ref(B, C, dC):
+            dA = dC / B
+            dB = -dC * C / B
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
+
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32) + 1.0
+        else:
+            B = np.random.rand(n, m).astype(np.float32) + 1.0
+        C = np.random.randn(n, m).astype(np.float32)
+        dC = np.random.randn(n, m).astype(np.float32)
+        inputs = [B, C, dC]
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=div_grad_ref,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0, 1])
+
+    @given(X=hu.tensor(elements=st.floats(0.1, 5.0), dtype=np.float32),
+           exponent=st.floats(-2.0, 2.0), inplace=st.booleans(), **hu.gcs)
+    def test_pow_unary(self, X, exponent, inplace, gc, dc):
+        op = core.CreateOperator(
+            "Pow",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+            exponent=exponent,
+        )
+
+        def pow_ref(X):
+            return [np.power(X, exponent)]
+
+        def pow_grad_ref(g_out, outputs, fwd_inputs):
+            dY = g_out
+            X = fwd_inputs[0]
+            return [exponent * dY * np.power(X, exponent - 1.0)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=pow_ref,
+            output_to_grad="X" if inplace else "Y",
+            grad_reference=pow_grad_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           t=st.integers(1, 5), **hu.gcs)
+    def test_pow_binary(self, n, m, k, t, gc, dc):
+        self._test_binary_op("Pow", np.power, n, m, k, t, 1.0, True, gc, dc)
 
     def _test_bitwise_binary_op(self, op_name, np_ref, n, m, k, t, gc, dc):
         op = core.CreateOperator(

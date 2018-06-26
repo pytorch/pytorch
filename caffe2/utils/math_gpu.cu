@@ -13,6 +13,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
+#include "caffe2/utils/math_gpu_utils.cuh"
 
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
@@ -22,25 +23,6 @@ namespace caffe2 {
 namespace math {
 
 namespace {
-
-inline __host__ __device__ bool Not(const bool x) {
-  return !x;
-}
-
-template <typename T>
-inline __host__ __device__ T Negate(const T& x) {
-  return -x;
-}
-
-template <typename T>
-inline __host__ __device__ T Square(const T& x) {
-  return x * x;
-}
-
-template <typename T>
-inline __host__ __device__ T Sign(const T& x) {
-  return x > 0 ? T(1) : (x < 0 ? T(-1) : T(0));
-}
 
 #define DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Func, expr)        \
   template <typename T>                                               \
@@ -63,6 +45,26 @@ DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Sub, -)
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Mul, *)
 DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Div, /)
 #undef DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR
+
+template <typename T>
+struct PowFunctor {
+  inline __device__ T operator()(const T& lhs, const T& rhs) const;
+};
+
+template <>
+struct PowFunctor<float> {
+  inline __device__ float operator()(const float& lhs, const float& rhs) const {
+    return powf(lhs, rhs);
+  }
+};
+
+template <>
+struct PowFunctor<double> {
+  inline __device__ double operator()(const double& lhs, const double& rhs)
+      const {
+    return pow(lhs, rhs);
+  }
+};
 
 template <typename T>
 __global__ void SinCosCUDAKernel(const int N, const T* X, T* S, T* C) {
@@ -343,20 +345,35 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, InvSqrt, rsqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, Square<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Rsqrt, rsqrtf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, gpu_utils::Square<float>)
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, Not)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, gpu_utils::Not)
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Neg, Negate<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Neg, Negate<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int32_t, Neg, Negate<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int64_t, Neg, Negate<std::int64_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Neg, gpu_utils::Negate<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Neg, gpu_utils::Negate<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int32_t,
+    Neg,
+    gpu_utils::Negate<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int64_t,
+    Neg,
+    gpu_utils::Negate<std::int64_t>)
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sign, Sign<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sign, Sign<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int32_t, Sign, Sign<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int64_t, Sign, Sign<std::int64_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Inv, gpu_utils::Inv<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, gpu_utils::Inv<double>)
+
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sign, gpu_utils::Sign<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sign, gpu_utils::Sign<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int32_t,
+    Sign,
+    gpu_utils::Sign<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int64_t,
+    Sign,
+    gpu_utils::Sign<std::int64_t>)
 
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
@@ -439,6 +456,9 @@ DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(
     float,
     ElemwiseMax,
     thrust::maximum);
+
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(float, float, Pow, PowFunctor)
+DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION(double, double, Pow, PowFunctor)
 
 #undef DELEGATE_SIMPLE_CUDA_BINARY_FUNCTION
 
@@ -553,6 +573,9 @@ DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
 
 #undef DEFINE_2D_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION
 
+DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(float, float, Pow, PowFunctor)
+DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION(double, double, Pow, PowFunctor)
+
 #undef DELEGATE_2D_BROADCAST_CUDA_BINARY_FUNCTION
 
 #define DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(TIn, TOut, Func, Op)  \
@@ -617,6 +640,9 @@ DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseOr, thrust::bit_or)
 DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION(BitwiseXor, thrust::bit_xor)
 
 #undef DEFINE_BROADCAST_CUDA_BITWISE_BINARY_FUNCTION
+
+DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(float, float, Pow, PowFunctor)
+DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION(double, double, Pow, PowFunctor)
 
 #undef DELEGATE_BROADCAST_CUDA_BINARY_FUNCTION
 
@@ -1770,9 +1796,15 @@ ScaleKernelDeviceAlpha(const int n, const float* alpha, const T* x, T* y) {
 }
 
 template <typename T>
-__global__ void PowKernel(const int n, const T* x, const T exponent, T* y) {
-  CUDA_1D_KERNEL_LOOP(i, n) {
-    y[i] = powf(x[i], exponent);
+__global__ void
+PowxCUDAKernel(const int N, const T* X, const T exponent, T* Y) {
+  const PowFunctor<T> func;
+  CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    Y[i] = func(__ldg(X + i), exponent);
+#else
+    Y[i] = func(X[i], exponent);
+#endif
   }
 }
 
@@ -1791,19 +1823,19 @@ __global__ void ScaleKernelDeviceAlpha(
 
 } // namespace
 
-template <>
-void Powx<float, CUDAContext>(
-    const int N,
-    const float* a,
-    const float b,
-    float* y,
-    CUDAContext* context) {
-  PowKernel<<<
-      CAFFE_GET_BLOCKS(N),
-      CAFFE_CUDA_NUM_THREADS,
-      0,
-      context->cuda_stream()>>>(N, a, b, y);
-}
+#define CAFFE2_SPECIALIZED_CUDA_POWX(T)                                 \
+  template <>                                                           \
+  void Powx<T, CUDAContext>(                                            \
+      const int N, const T* A, const T b, T* C, CUDAContext* context) { \
+    PowxCUDAKernel<T>                                                   \
+        <<<CAFFE_GET_BLOCKS(N),                                         \
+           CAFFE_CUDA_NUM_THREADS,                                      \
+           0,                                                           \
+           context->cuda_stream()>>>(N, A, b, C);                       \
+  }
+CAFFE2_SPECIALIZED_CUDA_POWX(float)
+CAFFE2_SPECIALIZED_CUDA_POWX(double)
+#undef CAFFE2_SPECIALIZED_CUDA_POWX
 
 template <>
 void Scale<float, CUDAContext>(
