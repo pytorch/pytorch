@@ -1136,6 +1136,11 @@ class TestTorch(TestCase):
         self.assertTrue(res.is_contiguous())
         self.assertEqual(res, m1 + m2.contiguous())
 
+        # 1d + empty
+        m1 = torch.tensor([1.0], dtype=torch.float)
+        m2 = torch.tensor([], dtype=torch.float)
+        self.assertEqual(m1 + m2, [])
+
         # [res] torch.add([res,] tensor1, value, tensor2)
 
     def test_csub(self):
