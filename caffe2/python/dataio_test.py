@@ -391,7 +391,6 @@ class TestDBFileReader(TestCase):
         self.assertEqual(sorted(data), list(range(100)))
 
         # Read data from cache.
-        workspace.ResetWorkspace()
         cached_reader2 = CachedReader(
             self._build_source_reader(ws, 200), db_path,
         )
@@ -404,7 +403,6 @@ class TestDBFileReader(TestCase):
         self._delete_path(db_path)
 
         # We removed cache so we expect to receive data from original reader.
-        workspace.ResetWorkspace()
         cached_reader3 = CachedReader(
             self._build_source_reader(ws, 300), db_path,
         )
@@ -431,7 +429,6 @@ class TestDBFileReader(TestCase):
         session.run(build_cache_step)
 
         # Read data from cache DB file.
-        workspace.ResetWorkspace()
         db_file_reader = DBFileReader(
             db_path=db_path,
             db_type='LevelDB',
