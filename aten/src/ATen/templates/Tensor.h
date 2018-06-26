@@ -87,9 +87,10 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toBackend(Backend b) const;
 
   /// New-style `to()` methods.
-  Tensor to(Device device, ScalarType dtype, bool non_blocking = false);
-  Tensor to(ScalarType dtype, bool non_blocking = false);
-  Tensor to(Device device, bool non_blocking = false);
+  /// NB: These methods are defined in TensorOptions.h.
+  Tensor to(Device device, ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(Device device, bool non_blocking = false) const;
 
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
