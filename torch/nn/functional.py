@@ -212,40 +212,33 @@ def conv_tbc(input, weight, bias, pad=0):
 
 
 # Pooling
-def avg_pool1d(input, kernel_size, stride=None, padding=0,
-               ceil_mode=False, count_include_pad=True):
-    r"""Applies a 1D average pooling over an input signal composed of several
-    input planes.
+avg_pool1d = _add_docstr(torch.avg_pool1d, r"""
+avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
-    See :class:`~torch.nn.AvgPool1d` for details and output shape.
+Applies a 1D average pooling over an input signal composed of several
+input planes.
 
-    Args:
-        input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
-        kernel_size: the size of the window. Can be a single number or a
-          tuple `(kW,)`
-        stride: the stride of the window. Can be a single number or a tuple
-          `(sW,)`. Default: :attr:`kernel_size`
-        padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple `(padW,)`. Default: 0
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the
-            output shape. Default: ``False``
-        count_include_pad: when True, will include the zero-padding in the
-            averaging calculation. Default: ``True``
+See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
-    Example::
-        >>> # pool of square window of size=3, stride=2
-        >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
-        >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-        tensor([[[ 2.,  4.,  6.]]])
-    """
-    if input.dim() != 3:
-        raise ValueError('expected 3D input (got {} dimensions)'
-                         .format(input.dim()))
-    kernel_size = _single(kernel_size) + (1,)
-    stride = _single(stride) + (1,) if stride is not None else kernel_size
-    padding = _single(padding) + (0,)
-    return avg_pool2d(input.unsqueeze(3), kernel_size, stride, padding,
-                      ceil_mode, count_include_pad).squeeze(3)
+Args:
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
+    kernel_size: the size of the window. Can be a single number or a
+      tuple `(kW,)`
+    stride: the stride of the window. Can be a single number or a tuple
+      `(sW,)`. Default: :attr:`kernel_size`
+    padding: implicit zero paddings on both sides of the input. Can be a
+      single number or a tuple `(padW,)`. Default: 0
+    ceil_mode: when True, will use `ceil` instead of `floor` to compute the
+        output shape. Default: ``False``
+    count_include_pad: when True, will include the zero-padding in the
+        averaging calculation. Default: ``True``
+
+Example::
+    >>> # pool of square window of size=3, stride=2
+    >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
+    >>> F.avg_pool1d(input, kernel_size=3, stride=2)
+    tensor([[[ 2.,  4.,  6.]]])
+""")
 
 
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
