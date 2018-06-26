@@ -105,7 +105,7 @@ struct AT_API CUDAHooksInterface {
     return -1;
   }
 
-  virtual std::unique_ptr<Allocator> newPinnedMemoryAllocator() const {
+  virtual Allocator* getPinnedMemoryAllocator() const {
     AT_ERROR("pinned memory requires CUDA");
   }
 
