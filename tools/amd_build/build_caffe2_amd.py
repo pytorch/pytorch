@@ -13,7 +13,8 @@ ignore_file_list = {"depthwise_3x3_conv_op.cu",
 					"top_k.cu",
 					"top_k_radix_selection.cuh",
 					"top_k_heap_selection.cuh",
-                    "pool_op_cudnn.cu"}
+                    "pool_op_cudnn.cu",
+                    "max_pool_with_index.cu"}#REVIST THIS FILE
 
 for folder in ["operators", "sgd", "image", "transforms", "video"]:
     for extension in ["/*.cu", "/*.cuh", "/*gpu.cc", "/*gpu.h"]:
