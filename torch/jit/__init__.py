@@ -652,7 +652,7 @@ class TracedModule(ScriptModule):
     __frozen = False
 
     def __init__(self, orig, id_set=None, optimize=True):
-        super(TracedModule, self).__init__(optimize=True)
+        super(TracedModule, self).__init__(optimize=optimize)
         if id_set is None:
             id_set = set()
 

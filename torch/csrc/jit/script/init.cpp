@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
+#include "torch/csrc/jit/pybind_utils.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -327,20 +328,6 @@ private:
 };
 
 
-// TODO: dedup with other init
-
-// we cannot use the default py:cast<autograd::Variable> because it currently
-// unwraps the data tensor in the conversion process
-
-variable_tensor_list createVariableTensorList(py::tuple tuple, size_t reserve_extra_space = 0) {
-  variable_tensor_list result;
-  result.reserve(tuple.size() + reserve_extra_space);
-  for(auto e : tuple) {
-    result.push_back(py::cast<autograd::Variable>(e));
-  }
-  return result;
-}
-
 py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
   // if we don't tell pybind these are variables it chokes on the
   // conversion.
@@ -473,6 +460,12 @@ void initJitScriptBindings(PyObject* module) {
           }
           auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
           self.create_method(name, std::move(graph), std::move(parameters));
+      })
+      .def("graph_for", [](Module& self, py::args args) {
+        if (self.find_method("forward")) {
+          return self.get_method("forward").graph_for(createVariableTensorList(args));
+        }
+        throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -489,7 +482,10 @@ void initJitScriptBindings(PyObject* module) {
     })
     .def("propagate_shapes", &Method::propagate_shapes)
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
-    .def("params", &Method::params);
+    .def("params", &Method::params)
+    .def("graph_for", [](Method& self, py::args args) {
+      return self.graph_for(createVariableTensorList(args));
+    });
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));
