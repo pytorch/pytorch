@@ -1,4 +1,6 @@
 #include "caffe2/operators/listwise_l2r_op.h"
+#include "caffe2/core/context.h"
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
@@ -71,31 +73,50 @@ void LambdaRankNdcgOp<float, CPUContext>::ComputeDiscounts(int* idx, int N) {
 }
 
 template <>
-bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
-  auto& y = Input(PRED);
-  auto& r = Input(REL);
-  auto* loss = Output(LOSS);
-  auto* dy = Output(DPRED);
-
+float LambdaRankNdcgOp<float, CPUContext>::LambdaRankNdcgSession(
+    int start_index,
+    int end_index,
+    const Tensor<CPUContext>& y,
+    const Tensor<CPUContext>& r,
+    Tensor<CPUContext>** dy) {
+  CAFFE_ENFORCE(start_index >= 0);
+  CAFFE_ENFORCE(start_index < y.size());
   const auto* y_data = y.template data<float>();
   const auto* r_data = r.template data<float>();
-  ConstEigenVectorArrayMap<float> y_vec(y_data, y.size());
-  ConstEigenVectorArrayMap<float> r_vec(r_data, r.size());
-  CAFFE_ENFORCE(y.ndim() == 1);
-  CAFFE_ENFORCE(y.size() == r.size());
 
-  int N = y.size();
+  int N = end_index - start_index + 1;
+
+  ConstEigenVectorArrayMap<float> y_vec(&y_data[start_index], N);
+  ConstEigenVectorArrayMap<float> r_vec(&r_data[start_index], N);
+
+  if (N <= 0) {
+    return 0;
+  }
+
   ideal_idx_.Resize(N);
   rank_idx_.Resize(N);
   auto* rank_idx_data = rank_idx_.template mutable_data<int>();
   auto* ideal_idx_data = ideal_idx_.template mutable_data<int>();
-  arg_sort(y_data, rank_idx_data, N, true);
-  arg_sort(r_data, ideal_idx_data, N, true);
+
+  // current ranked list is obtained by sorting by current score
+  arg_sort(&y_data[start_index], rank_idx_data, N, true);
+  // ideal ranked list is same as sorting by label
+  arg_sort(&r_data[start_index], ideal_idx_data, N, true);
+
+  auto* dy_data = (*dy)->template mutable_data<float>();
+  EigenVectorArrayMap<float> dy_vec(&dy_data[start_index], N);
+  float loss = 0;
+  dy_vec = 0;
+  // in case that all docs in a session have zero ratings, no op
+  if (r_vec.abs().sum() < 1e-6) {
+    return 0;
+  }
 
   const double log2f_ = std::log(2.f);
   gain_.Resize(N);
   auto* gain_data = gain_.template mutable_data<float>();
   EigenVectorArrayMap<float> gain_vec(gain_data, gain_.size());
+  // Gain vector = 2^rel = exp{rel * log(2)}
   gain_vec = (r_vec * log2f_).exp();
 
   ResizeInvLogITensor(N);
@@ -103,16 +124,17 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
   auto* ideal_discount_data = discount_.template mutable_data<float>();
   EigenVectorArrayMap<float> ideal_discount_vec(
       ideal_discount_data, discount_.size());
+  // ideal dcg = \sum gain_i * ideal_discount_i
   double idcg = (gain_vec * ideal_discount_vec).sum();
-  // in case that all docs in a session have zero ratings, idcg will be zero.
-  // For that case we will not normalize dcg.
   if (idcg < 1e-5) {
-    idcg = 1.0;
+    idcg = 1e-5;
   }
 
   ComputeDiscounts(rank_idx_data, N);
   auto* discount_data = discount_.template mutable_data<float>();
   EigenVectorArrayMap<float> discount_vec(discount_data, discount_.size());
+  // similar to ideal but replace with actual discounts
+  double dcg = (gain_vec * discount_vec).sum();
 
   lambda_.Resize(N * N);
   auto* lambda_data = lambda_.template mutable_data<float>();
@@ -121,11 +143,6 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
   lambda_mat =
       (PAIRWISE_DIFF(discount_vec, N) * PAIRWISE_DIFF(gain_vec, N)).abs();
 
-  loss->Resize(1);
-  dy->Resize(N);
-  auto* loss_data = loss->template mutable_data<float>();
-  auto* dy_data = dy->template mutable_data<float>();
-  EigenVectorArrayMap<float> dy_vec(dy_data, dy->size());
   // dy_i =
   //    \sum_j lambda_{i, j} -sign(i > j) * sigm( -sign(i > j)*(yi - yj) )
   //                         |++ gradient of rank loss between i & j  ++|
@@ -136,19 +153,47 @@ bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
            .rowwise()
            .sum() /
       idcg;
-  // loss = \sum_{i, j} lambda_{i, j} rank_loss(i, j)
-  *loss_data =
-      -(lambda_mat *
-        CWISE_LOG_SIGM(
-            CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N), 100))
-           .sum() /
-      idcg;
+  if (use_ndcg_as_loss_) {
+    loss = 1 - dcg / idcg;
+  } else {
+    loss = -(lambda_mat *
+             CWISE_LOG_SIGM(
+                 CWISE_SIGN(PAIRWISE_DIFF(r_vec, N)) * PAIRWISE_DIFF(y_vec, N),
+                 100))
+                .sum() /
+        idcg;
+  }
+  return loss;
+}
+
+template <>
+bool LambdaRankNdcgOp<float, CPUContext>::RunOnDevice() {
+  auto& y = Input(PRED);
+  auto& r = Input(REL);
+  auto& sid = Input(SESSION_LENS);
+  auto* loss = Output(LOSS);
+  auto* dy = Output(DPRED);
+
+  const auto* session_lengths = sid.template data<int>();
+  CAFFE_ENFORCE(y.ndim() == 1);
+  CAFFE_ENFORCE(y.size() == r.size());
+  dy->Resize(y.size());
+  loss->Resize(sid.size());
+  auto loss_vec = loss->template mutable_data<float>();
+  int start_id = 0;
+  for (int i = 0; i < sid.size(); i++) {
+    loss_vec[i] = LambdaRankNdcgSession(
+        start_id, session_lengths[i] + start_id - 1, y, r, &dy);
+    start_id += session_lengths[i];
+  }
+
   return true;
 }
 
 template <>
 bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
   auto& y = Input(Y);
+  auto& sids = Input(SESSION_LENS);
   auto& dy_cache = Input(DY_CACHE);
   auto& dLoss = Input(DLOSS);
   auto* dy = Output(DY);
@@ -156,15 +201,22 @@ bool LambdaRankNdcgGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE(dy_cache.ndim() == 1);
   CAFFE_ENFORCE(dy_cache.size() > 0);
   CAFFE_ENFORCE(y.size() == dy_cache.size());
-  CAFFE_ENFORCE(dLoss.size() == 1);
+
+  const auto* session_lengths = sids.template data<int>();
+  CAFFE_ENFORCE(dLoss.size() == sids.size());
 
   ConstEigenVectorArrayMap<float> dy_cache_vec(
       dy_cache.template data<float>(), dy_cache.size());
   dy->Resize(dy_cache.size());
   EigenVectorArrayMap<float> dy_vec(
       dy->template mutable_data<float>(), dy->size());
-  float multiplier = dLoss.template data<float>()[0];
-  dy_vec = multiplier * dy_cache_vec;
+  auto multiplier = dLoss.template data<float>();
+  int count = 0;
+  for (int j = 0; j < sids.size(); j++) {
+    dy_vec.segment(count, session_lengths[j]) =
+        multiplier[j] * dy_cache_vec.segment(count, session_lengths[j]);
+    count += session_lengths[j];
+  }
   return true;
 }
 
@@ -175,13 +227,13 @@ REGISTER_CPU_OPERATOR(
     LambdaRankNdcgGradient,
     LambdaRankNdcgGradientOp<float, CPUContext>);
 
-OPERATOR_SCHEMA(LambdaRankNdcg).NumInputs(2).NumOutputs(2).SetDoc(R"DOC(
+OPERATOR_SCHEMA(LambdaRankNdcg).NumInputs(3).NumOutputs(2).SetDoc(R"DOC(
 It implements the LambdaRank as appeared in Wu, Qiang, et al. "Adapting boosting
 for information retrieval measures." Information Retrieval 13.3 (2010): 254-270.
 
 This method heuristically optimizes the NDCG.
 )DOC");
-OPERATOR_SCHEMA(LambdaRankNdcgGradient).NumInputs(3).NumOutputs(1);
+OPERATOR_SCHEMA(LambdaRankNdcgGradient).NumInputs(4).NumOutputs(1);
 
 class GetLambdaRankNdcgGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
@@ -189,7 +241,7 @@ class GetLambdaRankNdcgGradient : public GradientMakerBase {
     return SingleGradientDef(
         "LambdaRankNdcgGradient",
         "",
-        vector<string>{I(0), O(1), GO(0)},
+        vector<string>{I(0), I(2), O(1), GO(0)},
         vector<string>{GI(0)});
   }
 };

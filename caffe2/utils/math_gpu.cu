@@ -2789,6 +2789,9 @@ void ReduceTensorCUDA(
     T* Y,
     CUDAContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
+  if (X == Y) {
+    return;
+  }
   std::vector<int> transpose_axes(num_dims);
   utils::ComputeTransposeAxesForReduceOp(
       num_dims, num_axes, axes, transpose_axes.data());
@@ -2801,29 +2804,31 @@ void ReduceTensorCUDA(
   for (int i = pivot; i < num_dims; ++i) {
     inner_size *= dims[transpose_axes[i]];
   }
-  if (transpose_axes[pivot] == pivot) {
-    RowwiseReduceKernel<T>
-        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(
-            outer_size, inner_size, reducer, init, X, Y);
-    return;
+  if (outer_size > 0) {
+    if (transpose_axes[pivot] == pivot) {
+      RowwiseReduceKernel<T>
+          <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(
+              outer_size, inner_size, reducer, init, X, Y);
+      return;
+    }
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+        num_dims,
+        ReduceTensorCUDAImpl,
+        T,
+        Reducer,
+        outer_size,
+        inner_size,
+        dims,
+        transpose_axes.data(),
+        reducer,
+        init,
+        X,
+        Y,
+        context);
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      num_dims,
-      ReduceTensorCUDAImpl,
-      T,
-      Reducer,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      reducer,
-      init,
-      X,
-      Y,
-      context);
 }
 
 template <typename T>
@@ -3136,26 +3141,29 @@ void MomentsCUDA(
   for (int i = pivot; i < num_dims; ++i) {
     inner_size *= dims[transpose_axes[i]];
   }
-  if (transpose_axes[pivot] == pivot) {
-    RowwiseMomentsCUDAKernel<T>
-        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(outer_size, inner_size, X, mean, variance);
-    return;
+  if (outer_size > 0) {
+    if (transpose_axes[pivot] == pivot) {
+      RowwiseMomentsCUDAKernel<T>
+          <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(
+              outer_size, inner_size, X, mean, variance);
+      return;
+    }
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+        num_dims,
+        MomentsCUDAImpl,
+        T,
+        outer_size,
+        inner_size,
+        dims,
+        transpose_axes.data(),
+        X,
+        mean,
+        variance,
+        context);
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
-      num_dims,
-      MomentsCUDAImpl,
-      T,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      X,
-      mean,
-      variance,
-      context);
 }
 
 } // namespace

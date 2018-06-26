@@ -7740,7 +7740,8 @@ if num_shards is not None and shard is not None:
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:
-                if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % num_shards == shard:
+                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
+                if hash_id % num_shards == shard:
                     test_suite.addTest(test)
         return test_suite
 
