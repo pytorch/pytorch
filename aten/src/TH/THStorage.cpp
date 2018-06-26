@@ -13,6 +13,8 @@
 #include "THGenerateHalfType.h"
 
 void THStorage_free(THStorage *storage) {
+  AT_ASSERT(storage->backend == at::kCPU);
+
   if(!storage)
     return;
 
@@ -21,7 +23,7 @@ void THStorage_free(THStorage *storage) {
     if(--storage->refcount == 0)
     {
       if(storage->flag & TH_STORAGE_FREEMEM) {
-        storage->allocator->free(storage->allocatorContext, storage->data_ptr);
+        static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
       }
       if(storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);

@@ -67,7 +67,7 @@ public:
     storage.scalar_type = at::CTypeToScalarType<th::from_type<int64_t>>::to();
     storage.refcount = 0;
     storage.flag = 0;
-    storage.allocator = nullptr;
+    storage.allocatorVoidPtr = nullptr;
     storage.allocatorContext = nullptr;
   }
 private:
