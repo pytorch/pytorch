@@ -612,13 +612,10 @@ std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
 std::set<std::string> GetRegisteredOperators() {
   std::set<std::string> all_keys;
 
-  // CPU operators
-  for (const auto& name : CPUOperatorRegistry()->Keys()) {
-    all_keys.emplace(name);
-  }
-  // CUDA operators
-  for (const auto& name : CUDAOperatorRegistry()->Keys()) {
-    all_keys.emplace(name);
+  for (const auto& key_pair : *gDeviceTypeRegistry()) {
+    for (const auto& name : (*gDeviceTypeRegistry())[key_pair.first]->Keys()) {
+      all_keys.emplace(name);
+    }
   }
 
   return all_keys;

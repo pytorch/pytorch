@@ -261,12 +261,6 @@ class BlobReference(object):
                 'You cannot use a blob reference that does not have a net '
                 'source to create operators. Create the operator from an '
                 'explicit net object.')
-        if not IsOperator(op_type):
-            raise RuntimeError(
-                'Method ' + op_type + ' is not a registered operator.' +
-                ' Did you mean: [' +
-                ",".join(workspace.C.nearby_opnames(op_type)) + ']'
-            )
         return lambda *args, **kwargs: self._CreateAndAddToNet(
             op_type, *args, **kwargs)
 
@@ -341,6 +335,16 @@ def CreateOperator(
     operator type. The type should be a string corresponding to an operator
     registered with Caffe2.
     """
+    op_lookup = operator_type
+    if not engine is None:
+        op_lookup += '_ENGINE_' + engine
+    if not IsOperator(op_lookup) and not IsOperator(operator_type):
+        raise AttributeError(
+                'Method ' + operator_type + ' is not a registered operator.' +
+                ' Did you mean: [' +
+                ",".join(workspace.C.nearby_opnames(operator_type)) + ']'
+                )
+
     operator = caffe2_pb2.OperatorDef()
     if (os.environ.get('CAFFE2_DEBUG')):
         stack = traceback.format_stack()
@@ -2072,12 +2076,6 @@ class Net(object):
     def __getattr__(self, op_type):
         if op_type.startswith('__'):
             raise AttributeError('Attribute {} not found.'.format(op_type))
-        if not IsOperator(op_type) and not IsOperatorWithEngine(op_type, "CUDNN"):
-            raise AttributeError(
-                'Method ' + op_type + ' is not a registered operator.' +
-                ' Did you mean: [' +
-                ",".join(workspace.C.nearby_opnames(op_type)) + ']'
-            )
         return lambda *args, **kwargs: self._CreateAndAddToSelf(
             op_type, *args, **kwargs)
 
