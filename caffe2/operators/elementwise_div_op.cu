@@ -202,20 +202,22 @@ void ComputeDivAGradientCUDA(
   for (int i = pivot; i < ndim; ++i) {
     inner_size *= C_dims[A_transpose_axes[i]];
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      ndim,
-      ComputeDivAGradientCUDAImpl,
-      TGrad,
-      TIn,
-      outer_size,
-      inner_size,
-      C_dims.data(),
-      B_dims.data(),
-      A_transpose_axes.data(),
-      dC,
-      B,
-      dA,
-      context);
+  if (outer_size > 0) {
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+        ndim,
+        ComputeDivAGradientCUDAImpl,
+        TGrad,
+        TIn,
+        outer_size,
+        inner_size,
+        C_dims.data(),
+        B_dims.data(),
+        A_transpose_axes.data(),
+        dC,
+        B,
+        dA,
+        context);
+  }
 }
 
 template <typename TGrad, typename TIn, typename TOut>
@@ -240,21 +242,23 @@ void ComputeDivBGradientCUDA(
   for (int i = pivot; i < ndim; ++i) {
     inner_size *= C_dims[B_transpose_axes[i]];
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(
-      ndim,
-      ComputeDivBGradientCUDAImpl,
-      TGrad,
-      TIn,
-      TOut,
-      outer_size,
-      inner_size,
-      C_dims.data(),
-      B_transpose_axes.data(),
-      dC,
-      B,
-      C,
-      dB,
-      context);
+  if (outer_size > 0) {
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(
+        ndim,
+        ComputeDivBGradientCUDAImpl,
+        TGrad,
+        TIn,
+        TOut,
+        outer_size,
+        inner_size,
+        C_dims.data(),
+        B_transpose_axes.data(),
+        dC,
+        B,
+        C,
+        dB,
+        context);
+  }
 }
 
 } // namespace

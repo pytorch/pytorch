@@ -398,25 +398,25 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         B = np.random.rand(n, 1, k, 1).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, test_grad, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_add(self, n, m, k, t, gc, dc):
         self._test_binary_op("Add", np.add, n, m, k, t, -0.5, True, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_sub(self, n, m, k, t, gc, dc):
         self._test_binary_op("Sub", np.subtract, n, m,
                              k, t, -0.5, True, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_mul(self, n, m, k, t, gc, dc):
         self._test_binary_op("Mul", np.multiply, n, m,
                              k, t, -0.5, True, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_div(self, n, m, k, t, gc, dc):
         self._test_binary_op("Div", np.divide, n, m, k, t, 1.0, True, gc, dc)
 
