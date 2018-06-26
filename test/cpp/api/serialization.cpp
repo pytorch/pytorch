@@ -172,21 +172,15 @@ TEST_CASE("serialization") {
 
   SECTION("xor") {
     // We better be able to save and load a XOR model!
-    auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
-      auto inp = torch::empty({bs, 2});
-      auto lab = torch::empty({bs});
-      for (auto i = 0U; i < bs; i++) {
-        auto a = std::rand() % 2;
-        auto b = std::rand() % 2;
-        auto c = a ^ b;
-        inp[i][0] = a;
-        inp[i][1] = b;
-        lab[i] = c;
+    auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t batch_size) {
+      auto inputs = torch::empty({batch_size, 2});
+      auto labels = torch::empty({batch_size});
+      for (size_t i = 0; i < batch_size; i++) {
+        inputs[i] = (torch::rand({2}) >= 0.5).to(torch::kInt64);
+        labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
       }
-
-      // forward
-      auto x = model->forward<torch::Tensor>(inp);
-      return torch::binary_cross_entropy(x, lab);
+      auto x = model->forward<torch::Tensor>(inputs);
+      return torch::binary_cross_entropy(x, labels);
     };
 
     auto model = xor_model();
@@ -282,21 +276,15 @@ TEST_CASE("serialization") {
 
 TEST_CASE("serialization_cuda", "[cuda]") {
   // We better be able to save and load a XOR model!
-  auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
-    auto inp = torch::empty({bs, 2});
-    auto lab = torch::empty({bs});
-    for (auto i = 0U; i < bs; i++) {
-      auto a = std::rand() % 2;
-      auto b = std::rand() % 2;
-      auto c = a ^ b;
-      inp[i][0] = a;
-      inp[i][1] = b;
-      lab[i] = c;
+  auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t batch_size) {
+    auto inputs = torch::empty({batch_size, 2});
+    auto labels = torch::empty({batch_size});
+    for (size_t i = 0; i < batch_size; i++) {
+      inputs[i] = (torch::rand({2}) >= 0.5).to(torch::kInt64);
+      labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
     }
-
-    // forward
-    auto x = model->forward<torch::Tensor>(inp);
-    return torch::binary_cross_entropy(x, lab);
+    auto x = model->forward<torch::Tensor>(inputs);
+    return torch::binary_cross_entropy(x, labels);
   };
 
   auto model = xor_model();

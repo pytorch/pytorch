@@ -180,10 +180,8 @@ TEST_CASE("modules") {
     y.backward();
     REQUIRE(y.ndimension() == 1);
     REQUIRE(y.size(0) == 100);
-    // TODO: These two tests are flaky
-    // https://github.com/pytorch/pytorch/issues/7286
-    // REQUIRE(y.sum().toCFloat() < 130); // Probably
-    // REQUIRE(y.sum().toCFloat() > 70); // Probably
+    REQUIRE(y.sum().toCFloat() < 130); // Probably
+    REQUIRE(y.sum().toCFloat() > 70); // Probably
 
     dropout->eval();
     y = dropout->forward(x);
