@@ -143,15 +143,14 @@ Tensor Conv3dImpl::forward(Tensor input) {
   }
 }
 
-#define CONV_D(D)                 \
-  template struct ConvOptions<D>; \
-  template class ConvImpl<D, Conv##D##dImpl>
+template struct ConvOptions<1>;
+template class ConvImpl<1, Conv1dImpl>;
 
-CONV_D(1);
-CONV_D(2);
-CONV_D(3);
+template struct ConvOptions<2>;
+template class ConvImpl<2, Conv2dImpl>;
 
-#undef CONV_D
+template struct ConvOptions<3>;
+template class ConvImpl<3, Conv3dImpl>;
 
 } // namespace nn
 } // namespace torch
