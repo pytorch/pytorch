@@ -163,9 +163,6 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        elif name is None or not isinstance(name, torch._six.string_types):
-            raise TypeError("{} is not a Module subclass".format(
-                torch.typename(module)))
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
