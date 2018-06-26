@@ -171,8 +171,8 @@ struct Environment {
         << ". Only reassignments to first-class values are allowed";
       }
       if(!as_simple_value->type()->isSubtypeOf(*interpreterType(simple_parent->type()))) {
-        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->name()
-        << " but is now being assigned to a value of type " << as_simple_value->type()->name();
+        throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->str()
+        << " but is now being assigned to a value of type " << as_simple_value->type()->str();
       }
     }
     if (as_simple_value)
@@ -319,11 +319,9 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
   for(size_t i = 0, n = 0; i < schema.arguments.size(); ++i) {
     const auto& arg = schema.arguments[i];
     // this was a builtin with a vararg list lowered,
-    if(arg.type->kind() == TypeKind::ListType) {
-      // we do not support constant lifting of the arg itself
-      if(arg.attribute_info)
-        return;
-      // but we do support it for other values so we need to skip all the vararg nodes:
+    if(*arg.type == *ListType::ofTensors()) {
+      // we need to skip all the vararg nodes, and continue parsing the
+      // possible attribute nodes
       size_t vararg_list_size = node->inputs().size() - (schema.arguments.size() - 1);
       while(n < i + vararg_list_size) {
         new_inputs.push_back(node->input(n++));
@@ -331,38 +329,40 @@ void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
       continue;
     }
     auto input = node->input(n++);
-    if(arg.attribute_info) {
-      switch(arg.attribute_info->kind) {
-        case AttributeKind::i: {
-          auto r = constant_as<int64_t>(input);
-          if(!r)
-            return;
-          attributes.i_(Symbol::attr(arg.name), *r);
-        } break;
-        case AttributeKind::is: {
-          auto r = getIntListAttribute(arg.attribute_info->data, input);
+    switch(arg.type->kind()) {
+      case TypeKind::IntType:{
+        auto r = constant_as<int64_t>(input);
+        if(!r)
+          return;
+        attributes.i_(Symbol::attr(arg.name), *r);
+      } break;
+      case TypeKind::FloatType: {
+        auto r = constant_as<double>(input);
+        if(!r)
+          return;
+        attributes.f_(Symbol::attr(arg.name), *r);
+      } break;
+      case TypeKind::NumberType: {
+        auto r = constant_as<at::Tensor>(input);
+        if(!r)
+          return;
+        attributes.t_(Symbol::attr(arg.name), *r);
+      } break;
+      case TypeKind::ListType: {
+        auto elem = arg.type->expect<ListType>()->getElementType();
+        if(elem->kind() == TypeKind::IntType) {
+          auto r = getIntListAttribute(arg.N, input);
           if(!r)
             return;
           attributes.is_(Symbol::attr(arg.name), *r);
-        } break;
-        case AttributeKind::f: {
-          auto r = constant_as<double>(input);
-          if(!r)
-            return;
-          attributes.f_(Symbol::attr(arg.name), *r);
-        } break;
-        case AttributeKind::t: {
-          auto r = constant_as<at::Tensor>(input);
-          if(!r)
-            return;
-          attributes.t_(Symbol::attr(arg.name), *r);
-        } break;
-        default:
-          barf("AttributeKind not handled in LiftConstantAttributes file a bug report.");
-          return;
-      }
-    } else {
-      new_inputs.push_back(input);
+        } else {
+          // only IntLists can become attributes, other
+          // types are not attribute-able
+          new_inputs.push_back(input);
+        }
+      } break;
+      default:
+        new_inputs.push_back(input);
     }
   }
   // nothing changed no need to modify the node
@@ -415,10 +415,9 @@ static Value* tensorToNum(
 static inline bool isIntUsedAsIntList(
     const Value* value,
     const Argument& arg) {
-  // NB: attribute_info->data equals the "k" in IntList[k]
+  // Look for int[N]
   return value->type()->kind() == TypeKind::IntType &&
-         arg.type->isSubtypeOf(*DynamicType::get()) &&
-         arg.attribute_info && arg.attribute_info->data;
+         *arg.type == *ListType::ofInts() && arg.N;
 }
 
 at::optional<std::vector<Value*>> tryMatchSchema(
@@ -467,13 +466,11 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
         return at::nullopt;
       }
-      if (isNumberSubtype(schema.arguments[i].type)) {
-        positional_inputs[i] = NamedValue(
-            loc, i, createNumber(graph, loc, *default_value));
-      } else {
-        positional_inputs[i] = NamedValue(
-          loc, i, createConstant(graph, loc, *default_value));
-      }
+      positional_inputs[i] = NamedValue(
+          loc,
+          i,
+          createConstant(graph, loc, *default_value)
+              ->setType(schema.arguments[i].type));
     }
 
     // check input types
@@ -482,40 +479,23 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       NamedValue v = *positional_inputs[i];
       const auto& arg = schema.arguments[i];
 
-      // TODO: revisit this.
-      // An IntList[1] is a union of int and IntList. Consider
-      //
-      //     import torch
-      //     @torch.jit.script
-      //     def func(x):
-      //         return x.sum(dim=1)
-      //
-      // dim is specified in native_functions.yaml as a IntList[1].
-      // This means it is okay to pass a python int into to it, or a python
-      // list.
-      //
-      // If we see an IntType being used where an IntList[1] is in the schema,
-      // we reinterpret an int as an "IntList" (which is a tensor right now)
+
+      // some functions that take lists of integers for fixed size arrays
+      // also allow single ints to be passed in their place.
+      // the single int is then repeated to the length of the list
       if (isIntUsedAsIntList(v.value, arg)) {
-        if (v.value->node()->kind() == prim::Constant) {
-          // peephole optimization where we make a Tensor rather than
-          // a prim::TupleConstruct to wrap the int
-          auto* node = v.value->node();
-          v.value = createConstant(graph, loc, node->t(attr::value));
-        } else {
-          auto* node = graph.insertNode(graph.create(prim::TupleConstruct, { v.value }));
-          std::vector<TypePtr> tmp = { IntType::get() };
-          v.value = node->output()->setType(std::make_shared<TupleType>(tmp));
-        }
+        std::vector<Value*> repeated(*arg.N, v.value);
+        v.value = graph.insertNode(graph.createTuple(repeated))->output();
       }
 
-      // implicit conversion from List[int] -> Tensor for when the argument
-      // is an IntList in aten, for things like x.expand(sizes=[3,4,5])
-      if(arg.attribute_info &&
-         arg.attribute_info->kind == AttributeKind::is &&
+      // Tuples of integers are created using TuplePack which we do not actually
+      // support in the interpreter, so we have to replace it with a
+      // stack call, which creates a Tensor to represent the list.
+      if(*ListType::ofInts() == *arg.type &&
+         v.value->type()->kind() == TypeKind::TupleType &&
          v.value->type()->isSubtypeOf(*ListType::ofInts())) {
         auto unpacked = createTupleUnpack(v.value);
-        v.value = createStack(graph, loc, unpacked);
+        v.value = createStack(graph, loc, unpacked)->setType(ListType::ofInts());
       }
 
       // implicit conversion from Tensor to Python Number
@@ -525,14 +505,14 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       }
 
       if(!v.value->type()->isSubtypeOf(*arg.type)) {
-        err() << "expected a value of type " << arg.type->name() << " for argument '" << arg.name << "' but found "
-              << v.value->type()->name() << "\n"
+        err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
+              << v.value->type()->str() << "\n"
               << v.loc;
         return at::nullopt;
       }
 
-      // we only support lists for builtins, where they must be flattened
-      if(arg.type->kind() == TypeKind::ListType) {
+      // we only support tensor lists for builtins, where they must be flattened
+      if(arg.type->isSubtypeOf(*ListType::ofTensors())) {
         auto outputs = createTupleUnpack(v.value);
         flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
       } else {
@@ -698,7 +678,6 @@ struct to_ir {
     pushFrame(graph->block());
 
     std::vector<Argument> arguments, returns; // for schema
-
     // inputs
     auto it = def.params().begin();
     auto end = def.params().end();
@@ -710,7 +689,7 @@ struct to_ir {
     }
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
-      arguments.push_back({name, DynamicType::get(), at::nullopt, at::nullopt});
+      arguments.push_back({name, DynamicType::get()});
       environment_stack->setVar((*it).ident().range(), name, graph->addInput(name));
     }
     // body
@@ -740,7 +719,7 @@ struct to_ir {
       ensureTensors(return_stmt.range(), results);
       for(auto r : results) {
         graph->registerOutput(r);
-        returns.push_back({"", DynamicType::get(), at::nullopt, at::nullopt});
+        returns.push_back({"", DynamicType::get()});
       }
     }
 
@@ -1775,7 +1754,7 @@ std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc,
       return std::make_shared<SimpleValue>(v);
     });
   }
-  throw ErrorReport(loc) << value->type()->name() << " cannot be used as a tuple";
+  throw ErrorReport(loc) << value->type()->str() << " cannot be used as a tuple";
 }
 
 void ensureSizeMatches(SourceRange loc, size_t expected, size_t actual, const std::string& what) {

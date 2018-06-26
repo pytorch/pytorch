@@ -10,5 +10,6 @@ namespace torch { namespace jit {
 
 const std::vector<FunctionSchema>& getOperatorSchema(const std::string& name);
 std::vector<FunctionSchema> & getOperatorSchemas();
+FunctionSchema parseSchema(const std::string& decl);
 
 }}

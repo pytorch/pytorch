@@ -38,8 +38,10 @@ static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
+static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val, TypePtr typ=nullptr) {
   auto n = m.graph()->createConstant(val);
+  if(typ)
+    n->output()->setType(typ);
   n->setSourceLocation(std::make_shared<SourceRange>(loc));
   return std::make_shared<SimpleValue>(m.graph()->insertNode(n)->output());
 }
@@ -67,7 +69,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for (size_t i = 0; i < arg_types.size(); ++i) {
       if (!inputs[i]->type()->isSubtypeOf(*arg_types[i]))
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
-                               << arg_types[i]->name() << ", but got " << inputs[i]->type()->name();
+                               << arg_types[i]->str() << ", but got " << inputs[i]->type()->str();
     }
     // We have to do this check here, because implementation of this function is tightly
     // coupled with the impl for PythonOp in the interpreter. Right now it assumes that
@@ -196,15 +198,15 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     } else if(THPDevice_Check(self.ptr())) {
       auto device = (THPDevice*) self.ptr();
       auto t = as_tensor({static_cast<int64_t>(device->device.type()), device->device.index()});
-      return createConstant(loc, m, t);
+      return createConstant(loc, m, t, ListType::ofInts());
     } else if(THPLayout_Check(self.ptr())) {
       auto layout = (THPLayout*) self.ptr();
       const auto v = static_cast<int64_t>(layout->layout);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v), IntType::get());
     } else if(THPDtype_Check(self.ptr())) {
       auto dtype = (THPDtype*)(self.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v), IntType::get());
     }
     return std::make_shared<ConstantPythonValue>(self);
   }

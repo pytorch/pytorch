@@ -4,22 +4,28 @@
 
 namespace torch { namespace jit {
 
-struct AttributeInfo {
-  AttributeKind kind;
-  at::optional<int32_t> data; // extra data field, current only used for the k in IntList[k]
-};
-
 // schema as used in the compiler for resolving function calls and reporting
 // errors. These objects should be constructed from C10 schema once those
 // are availiable
 struct Argument {
-  const std::string name;
-  const TypePtr type;
+  Argument(
+      std::string name = "",
+      TypePtr type = nullptr,
+      at::optional<int32_t> N = at::nullopt,
+      at::optional<at::Tensor> default_value = at::nullopt,
+      bool kwarg_only = true)
+      : name(std::move(name)),
+        type(type),
+        N(N),
+        default_value(default_value),
+        kwarg_only(kwarg_only) {}
+  std::string name;
+  TypePtr type;
+  at::optional<int32_t> N; // a fixed length for list types, at::nullopt means the list is dynamically sized
   // encoded using as_tensor, use tensor_as<T> to get value for attribute
-  const at::optional<at::Tensor> default_value;
-  // if this can be a graph attribute, the kind of that attribute
-  // that matches it
-  const at::optional<AttributeInfo> attribute_info;
+  at::optional<at::Tensor> default_value;
+  // is this only specifyable as a keyword argument?
+  bool kwarg_only;
 };
 
 struct FunctionSchema {
@@ -38,32 +44,7 @@ struct FunctionSchema {
 
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  // if can report more friendly types if we have an attribute
-  if(arg.attribute_info) {
-    switch(arg.attribute_info->kind) {
-      case AttributeKind::i:
-        out << "int64_t";
-        break;
-      case AttributeKind::is:
-        out << "IntList";
-        if(arg.attribute_info->data)
-          out << "[" << *arg.attribute_info->data << "]";
-        break;
-      case AttributeKind::f:
-        out << "float";
-        break;
-      default:
-        out << arg.type->name();
-        break;
-    }
-  } else {
-    out << arg.type->name();
-  }
-  out << " " << arg.name;
-  if(arg.default_value) {
-    out << "=<default>";
-  }
-  return out;
+  return out << arg.type->str() << " " << arg.name << (arg.default_value ? "=<default>" : "");
 }
 
 inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {

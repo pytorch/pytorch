@@ -3160,7 +3160,7 @@ def func(t):
             def f5(a):
                 torch.cat([[a]])
 
-        with self.assertRaisesRegex(RuntimeError, 'a value of type Tensor for argument \'size\' but found'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a value of type int\\[\\] for argument \'size\''):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
