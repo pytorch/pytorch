@@ -40,12 +40,7 @@ class NeuralNetData;
 /// to use them.
 class Annotation {
  public:
-  enum class AnnotationKind {
-    Generic,
-    Caffe2,
-    ProfilingOperator,
-    ProfilingData
-  };
+  enum class AnnotationKind { Generic, Caffe2 };
 
   Annotation(AnnotationKind K) : Kind(K) {}
   Annotation() : Kind(AnnotationKind::Generic) {}
