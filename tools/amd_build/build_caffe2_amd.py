@@ -23,5 +23,6 @@ for folder in ["operators", "sgd", "image", "transforms", "video"]:
         os.chdir(folder)
         if glob.glob('*hip.cc'):
             os.system("mv -n *hip.cc hip")
+            os.system("rm -f *hip.cc")
         os.chdir(caffe2_root)
 
