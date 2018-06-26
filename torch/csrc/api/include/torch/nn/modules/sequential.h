@@ -6,8 +6,6 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
-
 #include <ATen/Error.h>
 
 #include <cstdint>
