@@ -298,7 +298,7 @@ else()
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=onnx_c2")
 endif()
 
-# CUDA 9.0 & 9.1 requires GCC version <= 5
+# CUDA 9.0 & 9.1 require GCC version <= 5
 # Although they support GCC 6, but a bug that wasn't fixed until 9.2 prevents
 # them from compiling the std::tuple header of GCC 6.
 # See Sec. 2.2.1 of
