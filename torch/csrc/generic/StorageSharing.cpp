@@ -329,7 +329,7 @@ static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *weak_ref_clas
   }
   bool hasWeakAllocator;
 #ifdef THC_GENERIC_FILE
-  hasWeakAllocator = storage->allocator == &THCStorageWeakRefAllocator;
+  hasWeakAllocator = storage->allocatorVoidPtr == &THCStorageWeakRefAllocator;
 #else
   hasWeakAllocator = storage->allocatorVoidPtr == &THStorageWeakRefAllocator;
 #endif
@@ -345,8 +345,8 @@ static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *weak_ref_clas
   if (!ref) return NULL;
 #ifdef THC_GENERIC_FILE
   storage->allocatorContext = new CudaStorageWeakRefAllocator(
-        ref.get(), storage->allocator, storage->allocatorContext);
-  storage->allocator = &THCStorageWeakRefAllocator;
+        ref.get(), static_cast<THCDeviceAllocator*>(storage->allocatorVoidPtr), storage->allocatorContext);
+  storage->allocatorVoidPtr = &THCStorageWeakRefAllocator;
 #else
   storage->allocatorContext = new StorageWeakRefAllocator(
         ref.get(), static_cast<THAllocator*>(storage->allocatorVoidPtr), storage->allocatorContext);
