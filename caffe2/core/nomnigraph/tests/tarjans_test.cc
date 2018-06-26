@@ -5,15 +5,27 @@
 #include "nomnigraph/Graph/Graph.h"
 
 TEST(Tarjans, Simple) {
-    TestClass t1;
-    TestClass t2;
-    nom::Graph<TestClass, int> g;
-    nom::Graph<TestClass, int>::NodeRef n1 = g.createNode(std::move(t1));
-    nom::Graph<TestClass, int>::NodeRef n2 = g.createNode(std::move(t2));
-    g.createEdge(n1, n2);
-    g.createEdge(n2, n1);
-    auto sccs = nom::algorithm::tarjans(&g);
-    EXPECT_EQ(sccs.size(), 1);
+  TestClass t1;
+  TestClass t2;
+  nom::Graph<TestClass> g;
+  nom::Graph<TestClass>::NodeRef n1 = g.createNode(std::move(t1));
+  nom::Graph<TestClass>::NodeRef n2 = g.createNode(std::move(t2));
+  g.createEdge(n1, n2);
+  g.createEdge(n2, n1);
+  auto sccs = nom::algorithm::tarjans(&g);
+  EXPECT_EQ(sccs.size(), 1);
+}
+
+TEST(Tarjans, WithEdgeStorage) {
+  TestClass t1;
+  TestClass t2;
+  nom::Graph<TestClass, TestClass> g;
+  nom::Graph<TestClass, TestClass>::NodeRef n1 = g.createNode(std::move(t1));
+  nom::Graph<TestClass, TestClass>::NodeRef n2 = g.createNode(std::move(t2));
+  g.createEdge(n1, n2, TestClass());
+  g.createEdge(n2, n1, TestClass());
+  auto sccs = nom::algorithm::tarjans(&g);
+  EXPECT_EQ(sccs.size(), 1);
 }
 
 TEST(Tarjans, DAG) {
@@ -29,8 +41,8 @@ TEST(Tarjans, Cycle) {
 }
 
 TEST(Tarjans, Random) {
-  nom::Graph<TestClass, int> g;
-  std::vector<nom::Graph<TestClass, int>::NodeRef> nodes;
+  nom::Graph<TestClass> g;
+  std::vector<nom::Graph<TestClass>::NodeRef> nodes;
   for (auto i = 0; i < 10; ++i) {
     TestClass t;
     nodes.emplace_back(g.createNode(std::move(t)));
@@ -44,4 +56,3 @@ TEST(Tarjans, Random) {
   auto sccs = nom::algorithm::tarjans(&g);
   EXPECT_GE(sccs.size(), 1);
 }
-

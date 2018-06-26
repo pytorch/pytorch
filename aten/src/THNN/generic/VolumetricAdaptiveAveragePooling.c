@@ -104,10 +104,10 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   real *output_data = nullptr;
 
 
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-		"4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+		"non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     istrideB = input->stride[0];
     sizeB = input->size[0];
@@ -129,7 +129,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   istrideW = input->stride[dimW];
 
   /* resize output */
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     THTensor_(resize4d)(output, sizeD, osizeT, osizeH, osizeW);
 
@@ -252,7 +252,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 5) {
+  if (input->dim() == 5) {
     sizeB = input->size[0];
     dimD++;
     dimT++;
@@ -274,7 +274,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   gradOutput_data = THTensor_(data)(gradOutput);
 
   /* backprop */
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     THNN_(VolumetricAdaptiveAveragePooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                          sizeD,

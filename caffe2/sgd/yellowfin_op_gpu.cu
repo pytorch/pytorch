@@ -50,7 +50,7 @@ __global__ void MomentumSgdKernel(
   const float lr = *lr_ptr;
   if (!nesterov) {
     CUDA_1D_KERNEL_LOOP(i, N) {
-      moment_out[i] = mu * moment[i] * lr * grad[i];
+      moment_out[i] = mu * moment[i] + lr * grad[i];
       param_out[i] = param[i] - moment_out[i];
     }
   } else {

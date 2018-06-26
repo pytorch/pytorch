@@ -104,6 +104,10 @@ class TracerGuard {
   Tracer* tracer_;
 };
 
+// Extract the shard id from name of the form "...shard:123..."
+// Return -1 if there is no shard found
+int extractShardId(const std::string& name);
+
 bool isTraceableNet(const std::string& net_name);
 
 std::shared_ptr<Tracer> create(const NetBase* net, const std::string& net_name);

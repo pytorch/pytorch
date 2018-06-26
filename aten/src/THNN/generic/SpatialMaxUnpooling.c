@@ -61,11 +61,11 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   THIndex_t *indices_data;
 
 
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
-		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  AT_CHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4),
+           "non-empty 3D or 4D (batch mode) tensor expected for input, but got sizes: ", input->sizes());
   THNN_CHECK_SHAPE_INDICES(input, indices);
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -82,7 +82,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   indices = THIndexTensor_(newContiguous)(indices);
 
   /* resize output */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THTensor_(resize3d)(output, nslices, oheight, owidth);
     THTensor_(zero)(output);
@@ -183,7 +183,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     nbatch = input->size[0];
     dimw++;
     dimh++;
@@ -205,7 +205,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THNN_(SpatialMaxUnpooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                  indices_data,

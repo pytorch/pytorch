@@ -267,7 +267,8 @@ inline bool getContigReduceGrid(ptrdiff_t elements, dim3& grid) {
 
 // Performs a reduction out[..., 0, ...] = reduce_i(modify(in[..., i, ...])) for
 // all in where i and the out's 0 are indexed at dimension `dim`
-template <typename TensorType, 
+template <typename ScalarType,
+typename TensorType,
 typename ModifyOp, 
 typename ReduceOp,
 typename FinalizeOp,
@@ -281,18 +282,18 @@ bool THC_reduceDim(THCState* state,
                    AccT init,
                    int dim,
                    int keepdim) {
-  ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
+  ptrdiff_t inElements = THCTensor_nElement(state, in);
 
-  int64_t reductionSize = TensorUtils<TensorType>::getSize(state, in, dim);
-  int64_t reductionStride = TensorUtils<TensorType>::getStride(state, in, dim);
+  int64_t reductionSize = THCTensor_size(state, in, dim);
+  int64_t reductionStride = THCTensor_stride(state, in, dim);
   ptrdiff_t outElements = inElements / reductionSize;
 
-  if (TensorUtils<TensorType>::getDims(state, out) > MAX_CUTORCH_DIMS ||
-      TensorUtils<TensorType>::getDims(state, in) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, out) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, in) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (TensorUtils<TensorType>::getDims(state, in) == 0) {
+  if (THCTensor__nDimension(state, in) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -341,13 +342,13 @@ bool THC_reduceDim(THCState* state,
   // Resize out to correspond to the reduced size with keepdim=True.
 
   // Preserve noncontiguities by unsqueezing out if necessary
-  TensorUtils<TensorType>::preserveReduceDimSemantics(
-      state, out, TensorUtils<TensorType>::getDims(state, in), dim, keepdim);
+  THCTensor_preserveReduceDimSemantics(
+      state, out, THCTensor__nDimension(state, in), dim, keepdim);
 
   // Resize out
-  THLongStorage* sizes = TensorUtils<TensorType>::newSizeOf(state, in);
+  THLongStorage* sizes = THCTensor_newSizeOf(state, in);
   THLongStorage_set(sizes, dim, 1);
-  TensorUtils<TensorType>::resize(state, out, sizes, NULL);
+  THCTensor_resize(state, out, sizes, NULL);
   THLongStorage_free(sizes);
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -360,7 +361,7 @@ bool THC_reduceDim(THCState* state,
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, OUT, IN)                                      \
   if (contigReduction) {                                                \
-    kernelReduceContigDim<typename TensorUtils<TensorType>::DataType,   \
+    kernelReduceContigDim<ScalarType,                                   \
                           TYPE, AccT, ModifyOp, ReduceOp, FinalizeOp,   \
                           OUT, IN>                                      \
       <<<grid, block, smemSize, THCState_getCurrentStream(state)>>>     \
@@ -369,7 +370,7 @@ bool THC_reduceDim(THCState* state,
   } else {                                                              \
     if(block.y == 1){                                                   \
         kernelReduceNoncontigDim<                                       \
-                          typename TensorUtils<TensorType>::DataType,   \
+                          ScalarType,                                   \
                           TYPE, AccT, ModifyOp, ReduceOp, FinalizeOp,   \
                           OUT, IN>                                      \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>          \
@@ -377,7 +378,7 @@ bool THC_reduceDim(THCState* state,
         (TYPE) outElements, init, modifyOp, reduceOp, finalizeOp);      \
     }else{                                                              \
         kernelReduceNoncontigDim_shared<                                \
-                          typename TensorUtils<TensorType>::DataType,   \
+                          ScalarType,                                   \
                           TYPE, AccT, ModifyOp, ReduceOp, FinalizeOp,   \
                           OUT, IN>                                      \
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>          \
@@ -416,28 +417,28 @@ bool THC_reduceDim(THCState* state,
     }                                                     \
   }
 
-  if (TensorUtils<TensorType>::canUse32BitIndexMath(state, out) &&
-      TensorUtils<TensorType>::canUse32BitIndexMath(state, in)) {
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+  if (THCTensor_canUse32BitIndexMath(state, out) &&
+      THCTensor_canUse32BitIndexMath(state, in)) {
+    TensorInfo<ScalarType,
                unsigned int> outInfo =
-      getTensorInfo<TensorType, unsigned int>(state, out);
+      getTensorInfo<ScalarType, TensorType, unsigned int>(state, out);
     outInfo.collapseDims();
 
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                unsigned int> inInfo =
-      getTensorInfo<TensorType, unsigned int>(state, in);
+      getTensorInfo<ScalarType, TensorType, unsigned int>(state, in);
     inInfo.reduceDim(dim);
     inInfo.collapseDims();
     HANDLE_OUT_CASE(unsigned int, outInfo.dims, inInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                uint64_t> outInfo =
-      getTensorInfo<TensorType, uint64_t>(state, out);
+      getTensorInfo<ScalarType, TensorType, uint64_t>(state, out);
     outInfo.collapseDims();
 
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                uint64_t> inInfo =
-      getTensorInfo<TensorType, uint64_t>(state, in);
+      getTensorInfo<ScalarType, TensorType, uint64_t>(state, in);
     inInfo.reduceDim(dim);
     inInfo.collapseDims();
 
@@ -457,7 +458,7 @@ bool THC_reduceDim(THCState* state,
 
 
   if (!keepdim) {
-    TensorUtils<TensorType>::squeeze1d(state, out, out, dim);
+    THCTensor_squeeze1d(state, out, out, dim);
   }
   return true;
 }

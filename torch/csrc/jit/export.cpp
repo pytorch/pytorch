@@ -1,11 +1,6 @@
-#ifndef NO_PYTHON
-#include "torch/csrc/python_headers.h"
-#endif
-
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/onnx/onnx.h"
 #include "torch/csrc/autograd/symbolic.h"
-#include "torch/csrc/Exceptions.h"
 
 #include "torch/csrc/utils/functional.h"
 #include <ATen/ATen.h>
@@ -29,7 +24,7 @@ std::string value_name(Value* n) {
 
 struct ExportContext {
   size_t num_blocks = 0;
-  bool export_raw_ir = false;
+  onnx::OperatorExportTypes operator_export_type;
 };
 
 void encodeGraph(onnx::GraphProto * p_g, const std::shared_ptr<Graph> & g,
@@ -229,7 +224,8 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
     encodeValueInfo(v, output);
   }
   for (auto node : b->nodes()) {
-    if (node->kind() == prim::Undefined && !ctx->export_raw_ir) {
+    bool is_raw_export = ctx->operator_export_type == onnx::OperatorExportTypes::RAW;
+    if (node->kind() == prim::Undefined && !is_raw_export) {
       // Undefined nodes are used to implement optional inputs. One
       // way to "not provide" an optional input is to create an
       // Undefined node, and pass its output as that input.
@@ -242,7 +238,7 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
       p_n->set_doc_string(ss.str());
     }
     for(auto input : node->inputs()) {
-      if (input->node()->kind() == prim::Undefined && !ctx->export_raw_ir) {
+      if (input->node()->kind() == prim::Undefined && !is_raw_export) {
         p_n->add_input("");
       } else {
         p_n->add_input(value_name(input));
@@ -251,18 +247,18 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
     for(auto output : node->outputs()) {
       p_n->add_output(value_name(output));
     }
-    if (ctx->export_raw_ir) {
+    if (is_raw_export) {
       JIT_ASSERT(!node->kind().is_onnx());
       p_n->set_domain(node->kind().domainString());
     }
-    else {
+    else if (ctx->operator_export_type != onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK) {
       JIT_ASSERT(node->kind().is_onnx());
     }
     p_n->set_op_type(node->kind().toUnqualString());
     for(auto attr_name : node->attributeNames()) {
       addAttribute(p_n, node, attr_name, ctx);
     }
-    if (ctx->export_raw_ir && node->blocks().size() > 0) {
+    if (is_raw_export && node->blocks().size() > 0) {
       auto blocks = p_n->add_attribute();
       blocks->set_name("_blocks");
       blocks->set_type(onnx::aGRAPHS);
@@ -316,10 +312,11 @@ void encodeBlock(onnx::GraphProto * p_g, Block *b,
 void encodeModel(onnx::ModelProto* p_m, const std::shared_ptr<Graph>& g,
                  const std::vector<at::Tensor>& initializers,
                  RawDataExportMap* raw_data_export_map = nullptr,
-                 bool export_raw_ir = false) {
+                 onnx::OperatorExportTypes operator_export_type
+                   = onnx::OperatorExportTypes::ONNX) {
   onnx::GraphProto* p_g = p_m->mutable_graph();
   ExportContext ctx;
-  ctx.export_raw_ir = export_raw_ir;
+  ctx.operator_export_type = operator_export_type;
   encodeGraph(p_g, g, initializers, &ctx, raw_data_export_map);
 }
 
@@ -335,7 +332,7 @@ std::string getNodeStackTraceString(Node* n) {
 }
 } // namespace
 
-void validateGraph(const std::shared_ptr<Graph>& graph) {
+void validateGraph(const std::shared_ptr<Graph>& graph, onnx::OperatorExportTypes operator_export_type) {
   for (auto node : graph->nodes()) {
       // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
@@ -362,7 +359,8 @@ void validateGraph(const std::shared_ptr<Graph>& graph) {
             "Cannot export individual pack_padded_sequence or pad_packed_sequence; these operations must occur in pairs.\n\nUsage of this operation occurred at:\n" +
             getNodeStackTraceString(node));
       }
-      if (!node->kind().is_onnx() && node->kind() != prim::Undefined) {
+      bool is_aten_fallback = operator_export_type == onnx::OperatorExportTypes::ONNX_ATEN_FALLBACK;
+      if (!node->kind().is_onnx() && !is_aten_fallback && node->kind() != prim::Undefined) {
         FAIL_EXPORT(
             "Couldn't export operator " + node->kind().toDisplayString() + "\n\nDefined at:\n" +
             getNodeStackTraceString(node));
@@ -381,10 +379,10 @@ RawDataExportMap ToModelProto(
     const std::vector<at::Tensor> & initializers,
     int64_t onnx_opset_version,
     bool defer_weight_export,
-    bool export_raw_ir,
+    onnx::OperatorExportTypes operator_export_type,
     onnx::ModelProto *model_proto) {
-  if (!export_raw_ir) {
-    validateGraph(graph);
+  if (operator_export_type != onnx::OperatorExportTypes::RAW) {
+    validateGraph(graph, operator_export_type);
   }
 
   model_proto->set_producer_name("pytorch");
@@ -399,9 +397,9 @@ RawDataExportMap ToModelProto(
   // Set up nanopb callbacks and compute the amount of space needed to store
   // the resulting protobuf
   if (defer_weight_export) {
-    encodeModel(model_proto, graph, initializers, &raw_data_export_map, export_raw_ir);
+    encodeModel(model_proto, graph, initializers, &raw_data_export_map, operator_export_type);
   } else {
-    encodeModel(model_proto, graph, initializers, nullptr, export_raw_ir);
+    encodeModel(model_proto, graph, initializers, nullptr, operator_export_type);
   }
 
   return raw_data_export_map;
@@ -415,11 +413,12 @@ std::string PrettyPrintExportedGraph(
                         const std::vector<at::Tensor> & initializers,
                         int64_t onnx_opset_version,
                         bool defer_weight_export,
-                        bool export_raw_ir) {
+                        ::torch::onnx::OperatorExportTypes operator_export_type) {
   ::torch::onnx::ModelProto model_proto;
   RawDataExportMap raw_data_export_map;
   raw_data_export_map = ToModelProto(
-    graph, initializers, onnx_opset_version, defer_weight_export, export_raw_ir, &model_proto);
+    graph, initializers, onnx_opset_version, defer_weight_export, operator_export_type,
+    &model_proto);
   return model_proto.prettyPrint();
 }
 
@@ -433,11 +432,12 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
                         const std::vector<at::Tensor> & initializers,
                         int64_t onnx_opset_version,
                         bool defer_weight_export,
-                        bool export_raw_ir) {
+                        ::torch::onnx::OperatorExportTypes operator_export_type) {
   ::torch::onnx::ModelProto model_proto;
   RawDataExportMap raw_data_export_map;
   raw_data_export_map = ToModelProto(
-    graph, initializers, onnx_opset_version, defer_weight_export, export_raw_ir, &model_proto);
+    graph, initializers, onnx_opset_version, defer_weight_export, operator_export_type,
+    &model_proto);
 
   size_t out_size;
   pb_get_encoded_size(&out_size, onnx_ModelProto_fields, &model_proto.proto);

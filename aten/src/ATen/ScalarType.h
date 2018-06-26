@@ -8,13 +8,24 @@
 
 namespace at {
 
+// NB: Order matters for this macro; it is relied upon in
+// _promoteTypesLookup and probably other places.
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \
 _(int8_t,Char,i) \
 _(int16_t,Short,i) \
 _(int,Int,i) \
 _(int64_t,Long,i) \
-_(Half,Half,d) \
+_(at::Half,Half,d) \
+_(float,Float,d) \
+_(double,Double,d)
+
+#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
+_(uint8_t,Byte,i) \
+_(int8_t,Char,i) \
+_(int16_t,Short,i) \
+_(int,Int,i) \
+_(int64_t,Long,i) \
 _(float,Float,d) \
 _(double,Double,d)
 
@@ -87,6 +98,18 @@ static inline const char * toString(ScalarType t) {
       return "UNKNOWN_SCALAR";
   }
 #undef DEFINE_CASE
+}
+
+static inline size_t elementSize(ScalarType t) {
+#define CASE_ELEMENTSIZE_CASE(ctype,name,_2) \
+  case ScalarType:: name : return sizeof(ctype);
+
+  switch(t) {
+    AT_FORALL_SCALAR_TYPES(CASE_ELEMENTSIZE_CASE)
+    default:
+      AT_ERROR("Unknown ScalarType");
+  }
+#undef CASE_ELEMENTSIZE_CASE
 }
 
 static inline bool isIntegralType(ScalarType t) {

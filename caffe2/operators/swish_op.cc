@@ -1,17 +1,21 @@
-#include "swish_op.h"
+#include "caffe2/operators/swish_op.h"
+
+#include <string>
+#include <vector>
+
 #include "caffe2/core/types.h"
-#include "caffe2/operators/elementwise_op.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
-struct SwishCPUFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CPUContext* /*device_context*/) {
-    ConstEigenVectorArrayMap<T> xM(x, n);
-    EigenVectorArrayMap<T>(y, n) = xM / (1. + (-xM).exp());
-  }
-};
+
+template <>
+template <typename T>
+bool SwishFunctor<CPUContext>::
+operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
+  ConstEigenVectorArrayMap<T> X_arr(X, N);
+  EigenVectorArrayMap<T>(Y, N) = X_arr / (T(1) + (-X_arr).exp());
+  return true;
+}
 
 template <>
 template <typename T>
@@ -35,16 +39,16 @@ bool SwishGradientOp<CPUContext>::DoRunWithType() {
   ConstEigenVectorArrayMap<float> dYvec(dYdata, DYin.size());
 
   // dx = dy * (y + sigmoid(x)*(1-y))
-  dXvec = dYvec * (Yvec + (1. / (1. + (-Xvec).exp())) * (1. - Yvec));
+  dXvec = dYvec * (Yvec + (T(1) / (T(1) + (-Xvec).exp())) * (T(1) - Yvec));
   return true;
 }
 
 REGISTER_CPU_OPERATOR(
     Swish,
     UnaryElementwiseOp<
-        TensorTypes<float, double>,
+        TensorTypes<float>,
         CPUContext,
-        SwishCPUFunctor>);
+        SwishFunctor<CPUContext>>);
 REGISTER_CPU_OPERATOR(SwishGradient, SwishGradientOp<CPUContext>);
 
 // Input: X, output: Y
@@ -69,5 +73,21 @@ SwishGradient takes X, Y and dY and uses this to update dX according to the
 chain rule and derivatives of the swish function.
 )DOC");
 
+namespace {
+
+class GetSwishGradient : public GradientMakerBase {
+  using GradientMakerBase::GradientMakerBase;
+  std::vector<OperatorDef> GetGradientDefs() override {
+    return SingleGradientDef(
+        "SwishGradient",
+        "",
+        std::vector<std::string>{I(0), O(0), GO(0)},
+        std::vector<std::string>{GI(0)});
+  }
+};
+
+} // namespace
+
 REGISTER_GRADIENT(Swish, GetSwishGradient);
+
 } // namespace caffe2

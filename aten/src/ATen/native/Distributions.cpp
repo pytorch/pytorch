@@ -108,14 +108,49 @@ int64_t sample_poisson(double lambda, THGenerator* generator) {
 
 namespace at {
 namespace native {
-Tensor& bernoulli_(Tensor& self, const Tensor& p, Generator* generator) {
-  self.copy_(at::bernoulli(std::get<0>(expand_inplace(self, p)), generator));
+
+Tensor bernoulli(const Tensor& self, const Tensor& p, Generator* gen) {
+  Tensor result = self.type().tensor();
+  result.resize_(self.sizes());
+  return native::bernoulli_(result, p, gen);
+}
+
+Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
+  Tensor result = self.type().tensor();
+  result.resize_(self.sizes());
+  return native::bernoulli_(result, p, gen);
+}
+
+Tensor bernoulli(const Tensor& self) {
+  Tensor result = self.type().tensor();
+  result.resize_(self.sizes());
+  return native::bernoulli(result, self, nullptr);
+}
+
+Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
+  if (!self.is_cuda() && !p_.is_cuda()) {
+    Tensor p = p_.toType(kDouble);
+    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
+      THGenerator* generator = get_generator(gen);
+      std::lock_guard<std::mutex> lock(generator->mutex);
+      CPU_tensor_apply2<scalar_t, double>(
+          self, p, [generator](scalar_t& ret_val, double& p_val) {
+            ret_val = (scalar_t)THRandom_bernoulli(generator, p_val);
+          });
+    });
+    return self;
+  }
+  self.copy_(at::_th_bernoulli(std::get<0>(expand_inplace(self, p_)), gen));
   return self;
 }
 
-Tensor& bernoulli_(Tensor& self, double p, Generator* generator) {
-  Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
-  return native::bernoulli_(self, probs, generator);
+Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
+    self._bernoulli_(p, gen);
+    return self;
+}
+
+Tensor& bernoulli_(Tensor& self) {
+  return native::bernoulli_(self, 0.5, nullptr);
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
@@ -135,7 +170,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
  */
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
-  Tensor ret = at::zeros(lambda.type(), lambda.sizes());
+  Tensor ret = at::zeros(lambda.sizes(), lambda.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
@@ -149,7 +184,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
 }
 
 Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
-  Tensor ret = alpha.type().zeros(alpha.sizes());
+  Tensor ret = at::zeros(alpha.sizes(), alpha.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);

@@ -80,6 +80,7 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> cudnn_convolution_transpose_backwar
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include "ATen/native/utils/ParamsHash.h"
 
 #include <ATen/TensorUtils.h>
 
@@ -264,9 +265,6 @@ struct ConvolutionParams
   // NB: transposed purposely omitted: transposed just swaps
   // forward and backward, so you can reuse the benchmark entry,
 };
-// ConvolutionParams must be a POD because we read out its memory
-// contenst as char* when hashing
-static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
 // NB: This can't be a constructor, because then ConvolutionParams
 // would not be a POD anymore.
@@ -321,32 +319,11 @@ struct ConvolutionArgs {
 //
 // ---------------------------------------------------------------------
 
-// Hashing machinery for ConvolutionParams
-struct ParamsHash {
-  std::size_t operator()(const ConvolutionParams& params) const {
-    auto ptr = reinterpret_cast<const uint8_t*>(&params);
-    uint32_t value = 0x811C9DC5;
-    for (int i = 0; i < (int)sizeof(ConvolutionParams); ++i) {
-      value ^= ptr[i];
-      value *= 0x01000193;
-    }
-    return (size_t)value;
-  }
-};
-
-struct ParamsEqual {
-  bool operator()(const ConvolutionParams& a, const ConvolutionParams& b) const {
-    auto ptr1 = reinterpret_cast<const uint8_t*>(&a);
-    auto ptr2 = reinterpret_cast<const uint8_t*>(&b);
-    return memcmp(ptr1, ptr2, sizeof(ConvolutionParams)) == 0;
-  }
-};
-
 // TODO: Use something less heavy duty than a big honking mutex
 template <typename T>
 struct BenchmarkCache {
   std::mutex mutex;
-  std::unordered_map<ConvolutionParams, T, ParamsHash, ParamsEqual> map;
+  std::unordered_map<ConvolutionParams, T, ParamsHash<ConvolutionParams>, ParamsEqual<ConvolutionParams>> map;
 
   bool find(const ConvolutionParams& params, T* results) {
     std::lock_guard<std::mutex> guard(mutex);
@@ -372,7 +349,7 @@ BenchmarkCache<cudnnConvolutionBwdFilterAlgo_t> bwd_filter_algos;
 // tensor instead.
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    CUDA_CHECK(THCudaMalloc(globalContext().lazyInitCUDA(), &data, size));
+    AT_CUDA_CHECK(THCudaMalloc(globalContext().lazyInitCUDA(), &data, size));
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
@@ -501,7 +478,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
     Workspace ws(max_ws_size);
-    CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
+    AT_CUDNN_CHECK(cudnnFindConvolutionForwardAlgorithmEx(
         args.handle,
         args.idesc.desc(), args.input.data_ptr(),
         args.wdesc.desc(), args.weight.data_ptr(),
@@ -520,7 +497,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     algo_t* algo)
   {
     cudnnConvolutionFwdPreference_t pref = CUDNN_CONVOLUTION_FWD_PREFER_FASTEST;
-    CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
+    AT_CUDNN_CHECK(cudnnGetConvolutionForwardAlgorithm(
         args.handle,
         args.idesc.desc(),
         args.wdesc.desc(),
@@ -535,7 +512,7 @@ struct algorithm_search<cudnnConvolutionFwdAlgo_t> {
     const ConvolutionArgs& args,
     algo_t algo, size_t* workspaceSize)
   {
-    CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
+    AT_CUDNN_CHECK(cudnnGetConvolutionForwardWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.wdesc.desc(),
@@ -570,7 +547,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
     std::unique_ptr<perf_t[]> perf_results(new perf_t[num_algos]);
     size_t max_ws_size = getMaxWorkspaceSize(args, algos, num_algos);
     Workspace ws(max_ws_size);
-    CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
+    AT_CUDNN_CHECK(cudnnFindConvolutionBackwardDataAlgorithmEx(
         args.handle,
         args.wdesc.desc(), args.weight.data_ptr(),
         args.odesc.desc(), args.output.data_ptr(),
@@ -585,7 +562,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
   }
 
   static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
+    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardDataAlgorithm(
         args.handle,
         args.wdesc.desc(),
         args.odesc.desc(),
@@ -600,7 +577,7 @@ struct algorithm_search<cudnnConvolutionBwdDataAlgo_t> {
     const ConvolutionArgs& args,
     cudnnConvolutionBwdDataAlgo_t algo, size_t* workspaceSize)
   {
-    CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
+    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardDataWorkspaceSize(
         args.handle,
         args.wdesc.desc(),
         args.odesc.desc(),
@@ -640,7 +617,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
     int perf_count;
     Workspace ws(max_ws_size);
 
-    CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
+    AT_CUDNN_CHECK(cudnnFindConvolutionBackwardFilterAlgorithmEx(
         args.handle,
         args.idesc.desc(), args.input.data_ptr(),
         args.odesc.desc(), args.output.data_ptr(),
@@ -655,7 +632,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
   }
 
   static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
+    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterAlgorithm(
         args.handle,
         args.idesc.desc(),
         args.odesc.desc(),
@@ -669,7 +646,7 @@ struct algorithm_search<cudnnConvolutionBwdFilterAlgo_t> {
 
   static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
   {
-    CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
+    AT_CUDNN_CHECK(cudnnGetConvolutionBackwardFilterWorkspaceSize(
         args.handle,
         args.idesc.desc(),
         args.odesc.desc(),
@@ -715,8 +692,11 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   }
   cache.insert(args.params, *algo);
 
+  // These two lines frees the cached blocks in our caching allocator. They are
+  // needed here because the above benchmarking uses a huge amount of memory,
+  // e.g. a few GBs.
   THCDeviceAllocator* allocator = THCCachingAllocator_get();
-  CUDA_CHECK(allocator->emptyCache(allocator->state));
+  AT_CUDA_CHECK(allocator->emptyCache(allocator->state));
 }
 
 template<typename algo_t>
@@ -768,7 +748,7 @@ void cudnn_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const T
   auto dataType = getCudnnDataType(*bias);
   Constant one(dataType, 1);
 
-  CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc(), bias->data_ptr(),
+  AT_CUDNN_CHECK(cudnnAddTensor(handle, &one, bdesc.desc(), bias->data_ptr(),
                                      &one, odesc.desc(), output->data_ptr()));
 }
 
@@ -840,7 +820,7 @@ void raw_cudnn_convolution_forward_out(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  CUDNN_CHECK(cudnnConvolutionForward(
+  AT_CUDNN_CHECK(cudnnConvolutionForward(
     args.handle,
     &one, args.idesc.desc(), input.data_ptr(),
     args.wdesc.desc(), weight.data_ptr(),
@@ -968,7 +948,7 @@ void raw_cudnn_convolution_backward_input_out(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  CUDNN_CHECK(cudnnConvolutionBackwardData(
+  AT_CUDNN_CHECK(cudnnConvolutionBackwardData(
       args.handle,
       &one, args.wdesc.desc(), weight.data_ptr(),
       args.odesc.desc(), grad_output.data_ptr(),
@@ -1112,7 +1092,7 @@ void raw_cudnn_convolution_backward_weight_out(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  CUDNN_CHECK(cudnnConvolutionBackwardFilter(
+  AT_CUDNN_CHECK(cudnnConvolutionBackwardFilter(
       args.handle,
       &one, args.idesc.desc(), input.data_ptr(),
       args.odesc.desc(), grad_output.data_ptr(),
@@ -1214,7 +1194,7 @@ Tensor cudnn_convolution_backward_bias(
   Constant one(dataType, 1);
   Constant zero(dataType, 0);
 
-  CUDNN_CHECK(cudnnConvolutionBackwardBias(handle, &one, odesc.desc(), grad_output->data_ptr(),
+  AT_CUDNN_CHECK(cudnnConvolutionBackwardBias(handle, &one, odesc.desc(), grad_output->data_ptr(),
                                                    &zero, bdesc.desc(), grad_bias->data_ptr()));
   return *grad_bias;
 }

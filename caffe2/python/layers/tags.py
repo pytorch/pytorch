@@ -62,6 +62,12 @@ class Tags(object):
     """
     Valid tag prefixes for distributed training framework.
     """
+    """
+    Used to pass on info to the 'extra_info' field in the net
+    Proto. Typically to provide info for distributed training.
+    """
+    EXTRA_INFO = 'extra_info:'
+
     DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT)
 
     # In certain cases we want to have different schema for training and

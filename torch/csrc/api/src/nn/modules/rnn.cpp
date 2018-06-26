@@ -1,14 +1,28 @@
 #include <torch/nn/modules/rnn.h>
 
 #include <torch/nn/modules/dropout.h>
-#include <torch/nn/modules/linear.h>
+#include <torch/tensor.h>
+#include <torch/tensor_list_view.h>
+#include <torch/utils.h>
 
+#include <ATen/Error.h>
+#include <ATen/optional.h>
+
+#include <array>
 #include <cmath>
+#include <cstdint>
+#include <functional>
+#include <memory>
+#include <string>
+#include <tuple>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 namespace {
-Variable linear(Tensor x, Tensor w, Tensor b) {
+Tensor linear(Tensor x, Tensor w, Tensor b) {
   if (x.ndimension() == 2 && b.defined()) {
     // Fused op is marginally faster
     assert(x.size(1) == w.size(1));
@@ -23,111 +37,331 @@ Variable linear(Tensor x, Tensor w, Tensor b) {
 }
 } // namespace
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNOptionsBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+namespace detail {
+RNNOptionsBase::RNNOptionsBase(int64_t input_size, int64_t hidden_size)
+    : input_size_(input_size), hidden_size_(hidden_size) {}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNNImplBase ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename Derived>
-RNNBase<Derived>::RNNBase(
-    uint32_t input_size,
-    uint32_t hidden_size,
-    int mode,
-    uint32_t nlayers,
-    bool with_bias,
-    float dropout)
-    : input_size_(input_size),
-      hidden_size_(hidden_size),
-      mode_(static_cast<RNNMode>(mode)),
-      nlayers_(nlayers),
-      with_bias_(with_bias),
-      dropout_(dropout) {
-  if (dropout_ > 0) {
-    dropout_module = make(Dropout(dropout_));
+RNNImplBase<Derived>::RNNImplBase(
+    RNNOptionsBase options,
+    at::optional<CuDNNMode> cudnn_mode,
+    int64_t number_of_gates,
+    bool has_cell_state)
+    : options_(options),
+      number_of_gates_(number_of_gates),
+      has_cell_state_(has_cell_state),
+      cudnn_mode_(cudnn_mode) {
+  reset();
+}
+
+template <typename Derived>
+void RNNImplBase<Derived>::reset() {
+  if (options_.dropout_ > 0.0) {
+    dropout_module_ = Dropout(options_.dropout_);
   }
 
-  auto gate_size = hidden_size_;
-  if (mode_ == RNNMode::LSTM) {
-    gate_size *= 4;
-  } else if (mode_ == RNNMode::GRU) {
-    gate_size *= 3;
-  }
+  ihw_.resize(options_.layers_);
+  hhw_.resize(options_.layers_);
+  ihb_.resize(options_.layers_);
+  hhb_.resize(options_.layers_);
 
-  for (size_t i = 0; i < nlayers_; ++i) {
-    const auto input_size = (i == 0) ? input_size_ : hidden_size_;
-    ihw.push_back(
-        add(Var(at::CPU(at::kFloat).empty({gate_size, input_size})),
-            "weight_ih_l" + std::to_string(i)));
-    hhw.push_back(
-        add(Var(at::CPU(at::kFloat).empty({gate_size, hidden_size_})),
-            "weight_hh_l" + std::to_string(i)));
-    if (with_bias_) {
-      ihb.push_back(
-          add(Var(at::CPU(at::kFloat).empty({gate_size})),
-              "bias_ih_l" + std::to_string(i)));
-      hhb.push_back(
-          add(Var(at::CPU(at::kFloat).empty({gate_size})),
-              "bias_hh_l" + std::to_string(i)));
-    } else {
-      ihb.emplace_back();
-      hhb.emplace_back();
+  const int64_t gate_size = options_.hidden_size_ * number_of_gates_;
+
+  for (int64_t layer = 0; layer < options_.layers_; ++layer) {
+    const int64_t input_size =
+        (layer == 0) ? options_.input_size_ : options_.hidden_size_;
+    ihw_[layer] = this->register_parameter(
+        "weight_ih_l" + std::to_string(layer),
+        torch::empty({gate_size, input_size}));
+    hhw_[layer] = this->register_parameter(
+        "weight_hh_l" + std::to_string(layer),
+        torch::empty({gate_size, options_.hidden_size_}));
+
+    if (options_.with_bias_) {
+      ihb_[layer] = this->register_parameter(
+          "bias_ih_l" + std::to_string(layer), torch::empty({gate_size}));
+      hhb_[layer] = this->register_parameter(
+          "bias_hh_l" + std::to_string(layer), torch::empty({gate_size}));
     }
   }
-  flatten_parameters();
 
-  auto stdv = 1.0 / std::sqrt(hidden_size_);
-  for (auto& p : parameters()) {
-    p.second.data().uniform_(-stdv, stdv);
+  const auto stdv = 1.0 / std::sqrt(options_.hidden_size_);
+  for (auto& p : this->parameters()) {
+    p->data().uniform_(-stdv, stdv);
   }
 }
 
 template <typename Derived>
-variable_list RNNBase<Derived>::GRU_cell_forward(variable_list inputs, int i) {
-  auto x = inputs[0];
-  auto hx = inputs[1].defined() ? inputs[1]
-                                : x.type().zeros({x.size(0), hidden_size_});
-
-  auto gi = linear(x, ihw[i], ihb[i]);
-  auto gh = linear(x, hhw[i], hhb[i]);
-  auto gic = gi.chunk(3, 1);
-  auto ghc = gh.chunk(3, 1);
-
-  auto reset_gate = (gic[0] + ghc[0]).sigmoid_();
-  auto input_gate = (gic[1] + ghc[1]).sigmoid_();
-  auto new_gate = (gic[2] + reset_gate * ghc[2]).tanh_();
-  auto hy = new_gate + input_gate * (hx - new_gate);
-
-  return variable_list({hy});
+std::vector<Tensor> RNNImplBase<Derived>::forward(std::vector<Tensor> inputs) {
+  std::vector<Tensor> inp = {inputs[0],
+                             inputs.size() > 1 ? inputs[1] : Tensor()};
+  if (cudnn_mode_.has_value() && at::cudnn_is_acceptable(inp[0]) &&
+      options_.dropout_ == 0) {
+    return {CUDNN_forward(inp)};
+  } else {
+    return {autograd_forward(inp)};
+  }
 }
 
 template <typename Derived>
-variable_list RNNBase<Derived>::RNN_TANH_cell_forward(
-    variable_list inputs,
-    int i) {
-  auto x = inputs[0];
-  auto hx = inputs[1].defined() ? inputs[1]
-                                : x.type().zeros({x.size(0), hidden_size_});
-
-  auto h = (linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i])).tanh();
-  return variable_list({h});
+std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
+  std::vector<Tensor> flat;
+  for (int64_t layer = 0; layer < options_.layers_; layer++) {
+    flat.push_back(ihw_[layer]);
+    flat.push_back(hhw_[layer]);
+    if (options_.with_bias_) {
+      flat.push_back(ihb_[layer]);
+      flat.push_back(hhb_[layer]);
+    }
+  }
+  return flat;
 }
 
 template <typename Derived>
-variable_list RNNBase<Derived>::RNN_RELU_cell_forward(
-    variable_list inputs,
-    int i) {
-  auto x = inputs[0];
-  auto hx = inputs[1].defined() ? inputs[1]
-                                : x.type().zeros({x.size(0), hidden_size_});
+std::vector<Tensor> RNNImplBase<Derived>::autograd_forward(
+    std::vector<Tensor> inputs) {
+  auto inp = inputs[0];
 
-  auto h = at::relu(linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i]));
-  return variable_list({h});
+  std::vector<Tensor> state;
+  auto has_hidden = inputs[1].defined();
+  auto layer_dimension = has_hidden ? inputs[1].ndimension() - 3 : -1;
+  for (int64_t layer = 0; layer < options_.layers_; layer++) {
+    state.push_back(
+        has_hidden ? inputs[1].select(layer_dimension, layer) : Tensor());
+  }
+
+  auto output = torch::zeros(
+      {inp.size(0), inp.size(1), options_.hidden_size_}, inp.options());
+  for (int64_t t = 0; t < inp.size(0); t++) {
+    auto x = inp.select(0, t);
+    for (int64_t i = 0; i < options_.layers_; i++) {
+      // cell_forward() returns a stacked tensor of one or more cell states.
+      auto layer_output = cell_forward({x, state[i]}, i);
+      // If there are multiple cell states, keep all. If there is only one,
+      // the first dimension will be 1, so `.squeeze(0)` will unpack it.
+      state[i] = layer_output[0].squeeze(0);
+      // x should always be the hidden cell state h, assumed to be the zero-th.
+      x = layer_output[0][0];
+      output.select(0, t).copy_(x);
+      if (options_.dropout_ > 0 && i != options_.layers_ - 1) {
+        x = dropout_module_->forward({x})[0];
+      }
+    }
+  }
+
+  auto state_output = at::stack(TensorListView(state));
+  if (has_cell_state_) {
+    state_output.transpose_(0, 1);
+  }
+  return std::vector<Tensor>({output, state_output});
 }
 
 template <typename Derived>
-variable_list RNNBase<Derived>::LSTM_cell_forward(variable_list inputs, int i) {
+void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
+  data_ptrs_.clear();
+  const auto any_parameter = ihw_.at(0);
+  if (!cudnn_mode_.has_value() || !any_parameter.is_cuda() ||
+      !at::cudnn_is_acceptable(any_parameter) || options_.dropout_ > 0) {
+    return;
+  }
+  std::unordered_set<void*> unique_data_ptrs;
+  auto params = this->parameters();
+  for (auto& p : params) {
+    unique_data_ptrs.insert(p->data().data_ptr());
+  }
+  // TODO PyTorch says: If any parameters alias, we fall back to the slower,
+  // copying code path. This is a sufficient check, because overlapping
+  // parameter buffers that don't completely alias would break the assumptions
+  // of the uniqueness check in Module.named_parameters(). But I'm not sure if
+  // this is the case for us
+  if (unique_data_ptrs.size() != params.size()) {
+    return;
+  }
+
+  {
+    NoGradGuard guard;
+    flat_weights_ = at::_cudnn_rnn_flatten_weight(
+        TensorListView(flat_weights()),
+        /*weight_stride=*/options_.with_bias_ ? 4 : 2,
+        options_.input_size_,
+        static_cast<int64_t>(*cudnn_mode_),
+        options_.hidden_size_,
+        options_.layers_,
+        /*batch_first=*/false,
+        /*bidirectional=*/false);
+  }
+  for (auto& p : params) {
+    data_ptrs_.emplace_back(p->data().data_ptr());
+  }
+}
+
+template <typename Derived>
+std::vector<Tensor> RNNImplBase<Derived>::CUDNN_forward(
+    std::vector<Tensor> inputs) {
   auto x = inputs[0];
-  auto hid = inputs[1].defined() ? inputs[1]
-                                 : x.type().zeros({2, x.size(0), hidden_size_});
+  Tensor hx, cx;
+  if (inputs[1].defined()) {
+    if (has_cell_state_) {
+      hx = inputs[1][0];
+      cx = inputs[1][1];
+    } else {
+      hx = inputs[1];
+    }
+  } else {
+    hx = torch::zeros(
+        {options_.layers_, x.size(1), options_.hidden_size_}, x.options());
+    if (has_cell_state_) {
+      cx = torch::zeros(
+          {options_.layers_, x.size(1), options_.hidden_size_}, x.options());
+    }
+  }
+  auto dropout_state = torch::empty({}, x.type());
+
+  std::vector<void*> weight_data_ptrs;
+  for (auto& p : this->parameters()) {
+    weight_data_ptrs.emplace_back(p->data().data_ptr());
+  }
+
+  AT_CHECK(
+      weight_data_ptrs == data_ptrs_,
+      "Parameters are unflattened! Code path might be super slow. "
+      "Please call flatten_parameters_for_cudnn() when you muck "
+      "around with storages!")
+  AT_CHECK(cudnn_mode_.has_value(), "No CuDNN mode has been supplied!");
+
+  // tup = std::tuple of output, hy, cy, reserve, new_weight_buf
+  auto tup = _cudnn_rnn(
+      x,
+      TensorListView(flat_weights()),
+      /*weight_stride=*/options_.with_bias_ ? 4 : 2,
+      flat_weights_,
+      hx,
+      cx,
+      static_cast<int64_t>(*cudnn_mode_),
+      options_.hidden_size_,
+      options_.layers_,
+      /*batch_first=*/false,
+      0, // TODO Use C++ dropout descriptors
+      this->is_training(),
+      /*bidirectional=*/false,
+      /*packed=*/{},
+      dropout_state // TODO waiting on dropout state descriptor in C++ pytorch
+  );
+
+  Tensor hidden_output;
+  if (has_cell_state_) {
+    hidden_output =
+        at::stack(TensorListView({std::get<1>(tup), std::get<2>(tup)}), 0);
+  } else {
+    hidden_output = std::get<1>(tup);
+  }
+
+  Tensor output = std::get<0>(tup);
+  return std::vector<Tensor>({output, hidden_output});
+}
+
+template <typename Derived>
+void RNNImplBase<Derived>::to(
+    at::Device device,
+    at::ScalarType dtype,
+    bool non_blocking) {
+  nn::Module::to(device, dtype, non_blocking);
+  flatten_parameters_for_cudnn();
+}
+
+template <typename Derived>
+void RNNImplBase<Derived>::to(at::ScalarType dtype, bool non_blocking) {
+  nn::Module::to(dtype, non_blocking);
+  flatten_parameters_for_cudnn();
+}
+
+template <typename Derived>
+void RNNImplBase<Derived>::to(at::Device device, bool non_blocking) {
+  nn::Module::to(device, non_blocking);
+  flatten_parameters_for_cudnn();
+}
+
+template class RNNImplBase<LSTMImpl>;
+template class RNNImplBase<GRUImpl>;
+template class RNNImplBase<RNNImpl>;
+} // namespace detail
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ RNN ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+RNNOptions::RNNOptions(int64_t input_size, int64_t hidden_size)
+    : input_size_(input_size), hidden_size_(hidden_size) {}
+
+RNNOptions& RNNOptions::tanh() {
+  return activation(RNNActivation::Tanh);
+}
+
+RNNOptions& RNNOptions::relu() {
+  return activation(RNNActivation::ReLU);
+}
+
+RNNImpl::RNNImpl(RNNOptions options)
+    : detail::RNNImplBase<RNNImpl>(
+          detail::RNNOptionsBase(options.input_size_, options.hidden_size_)
+              .layers(options.layers_)
+              .with_bias(options.with_bias_)
+              .dropout(options.dropout_),
+          /*cudnn_mode=*/static_cast<CuDNNMode>(options.activation_)),
+      options_(options) {
+  switch (options_.activation_) {
+    case RNNActivation::ReLU: {
+      activation_function_ = at::relu;
+      break;
+    }
+    case RNNActivation::Tanh: {
+      activation_function_ = at::tanh;
+      break;
+    }
+  }
+}
+
+std::vector<Tensor> RNNImpl::cell_forward(
+    std::vector<Tensor> inputs,
+    int64_t layer) {
+  auto x = inputs[0];
+  auto hx = inputs[1].defined()
+      ? inputs[1]
+      : torch::zeros({x.size(0), options_.hidden_size_}, x.options());
+
+  auto h = linear(x, ihw_[layer], ihb_[layer]) +
+      linear(hx, hhw_[layer], hhb_[layer]);
+
+  return {at::stack(TensorListView(activation_function_(h)))};
+}
+
+const RNNOptions& RNNImpl::options() const noexcept {
+  return options_;
+}
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ LSTM ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+LSTMImpl::LSTMImpl(LSTMOptions options)
+    : detail::RNNImplBase<LSTMImpl>(
+          options,
+          /*cudnn_mode=*/CuDNNMode::LSTM,
+          /*number_of_gates=*/4,
+          /*has_cell_state=*/true) {}
+
+std::vector<Tensor> LSTMImpl::cell_forward(
+    std::vector<Tensor> inputs,
+    int64_t layer) {
+  auto x = inputs[0];
+  auto hid = inputs[1].defined()
+      ? inputs[1]
+      : torch::zeros({2, x.size(0), options_.hidden_size_}, x.options());
   auto hx = hid[0];
   auto cx = hid[1];
 
-  auto gates = linear(x, ihw[i], ihb[i]) + linear(hx, hhw[i], hhb[i]);
+  auto gates = linear(x, ihw_[layer], ihb_[layer]) +
+      linear(hx, hhw_[layer], hhb_[layer]);
 
   auto chunked = gates.chunk(4, 1);
   auto in_gate = chunked[0].sigmoid();
@@ -138,211 +372,44 @@ variable_list RNNBase<Derived>::LSTM_cell_forward(variable_list inputs, int i) {
   auto cy = (forget_gate * cx) + (in_gate * cell_gate);
   auto hy = out_gate * cy.tanh();
 
-  return variable_list({at::stack({hy, cy}, 0)});
+  return {at::stack(TensorListView({hy, cy}), 0)};
 }
 
-template <typename Derived>
-variable_list RNNBase<Derived>::cell_forward(variable_list inputs, int i) {
-  if (mode_ == RNNMode::LSTM)
-    return LSTM_cell_forward(inputs, i);
-  else if (mode_ == RNNMode::GRU)
-    return GRU_cell_forward(inputs, i);
-  else if (mode_ == RNNMode::RNN_TANH)
-    return RNN_TANH_cell_forward(inputs, i);
-  else if (mode_ == RNNMode::RNN_RELU)
-    return RNN_RELU_cell_forward(inputs, i);
-  else
-    throw std::runtime_error("No such RNN mode");
+const LSTMOptions& LSTMImpl::options() const noexcept {
+  return options_;
 }
 
-template <typename Derived>
-variable_list RNNBase<Derived>::autograd_forward(variable_list inputs) {
-  auto inp = inputs[0];
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GRU ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-  std::vector<Tensor> hidden;
-  auto hasHidden = inputs[1].defined();
-  auto layerDim = hasHidden ? inputs[1].ndimension() - 3 : -1;
-  for (size_t i = 0; i < nlayers_; i++) {
-    hidden.push_back(hasHidden ? inputs[1].select(layerDim, i) : Variable());
-  }
+GRUImpl::GRUImpl(GRUOptions options)
+    : detail::RNNImplBase<GRUImpl>(
+          options,
+          /*cudnn_mode=*/CuDNNMode::GRU,
+          /*number_of_gates=*/3) {}
 
-  auto output =
-      Variable(inp.type().zeros({inp.size(0), inp.size(1), hidden_size_}));
-  output.set_requires_grad(false);
-  for (auto t = 0U; t < inp.size(0); t++) {
-    auto x = inp.select(0, t);
-    for (size_t i = 0; i < nlayers_; i++) {
-      auto layer_output = cell_forward({x, hidden[i]}, i);
-      hidden[i] = layer_output[0];
-      if (mode_ == RNNMode::LSTM) {
-        x = hidden[i][0];
-      } else {
-        x = hidden[i];
-      }
-      auto output_slice = output.select(0, t);
-      output_slice.copy_(x);
-      if (dropout_ > 0 && i != nlayers_ - 1) {
-        x = dropout_module->forward({x})[0];
-      }
-    }
-  }
-
-  auto hidout = at::stack(hidden, 0);
-  if (mode_ == RNNMode::LSTM) {
-    hidout.transpose_(0, 1);
-  }
-  return variable_list({output, hidout});
-}
-
-template <typename Derived>
-bool RNNBase<Derived>::flatten_parameters() {
-  data_ptrs_.clear();
-  auto anyParam = ihw[0];
-  if (!anyParam.is_cuda() || !at::cudnn_is_acceptable(anyParam)) {
-    return false;
-  }
-  std::unordered_set<void*> unique_data_ptrs;
-  auto params = parameters();
-  for (auto& p : params) {
-    unique_data_ptrs.insert(p.second.data().data_ptr());
-  }
-  // TODO PyTorch says:
-  // If any parameters alias, we fall back to the slower, copying code path.
-  // This is
-  // a sufficient check, because overlapping parameter buffers that don't
-  // completely
-  // alias would break the assumptions of the uniqueness check in
-  // Module.named_parameters().
-  // But I'm not sure if this is the case for us
-  if (unique_data_ptrs.size() != params.size()) {
-    return false;
-  }
-
-  std::vector<Tensor> weight_list;
-  for (size_t i = 0; i < nlayers_; i++) {
-    weight_list.push_back(ihw[i]);
-    weight_list.push_back(hhw[i]);
-    if (with_bias_) {
-      weight_list.push_back(ihb[i]);
-      weight_list.push_back(hhb[i]);
-    }
-  }
-  auto weight_stride0 = with_bias_ ? 4 : 2;
-
-  {
-    no_grad_guard guard;
-    flat_weight_ = at::_cudnn_rnn_flatten_weight(
-        weight_list,
-        weight_stride0,
-        input_size_,
-        mode_,
-        hidden_size_,
-        nlayers_,
-        false,
-        false); // batch_first and bidirectional, unsupported
-  }
-  for (auto& p : params) {
-    data_ptrs_.emplace_back(p.second.data().data_ptr());
-  }
-  return true;
-}
-
-template <typename Derived>
-variable_list RNNBase<Derived>::CUDNN_forward(variable_list inputs) {
-  std::vector<Tensor> weight_list;
-  for (size_t i = 0; i < nlayers_; i++) {
-    weight_list.push_back(ihw[i]);
-    weight_list.push_back(hhw[i]);
-    if (with_bias_) {
-      weight_list.push_back(ihb[i]);
-      weight_list.push_back(hhb[i]);
-    }
-  }
-  auto weight_stride0 = with_bias_ ? 4 : 2;
-
+std::vector<Tensor> GRUImpl::cell_forward(
+    std::vector<Tensor> inputs,
+    int64_t layer) {
   auto x = inputs[0];
-  Variable hx, cx;
-  if (!inputs[1].defined()) {
-    hx = x.type().zeros({nlayers_, x.size(1), hidden_size_});
-    if (mode_ == RNNMode::LSTM) {
-      cx = x.type().zeros({nlayers_, x.size(1), hidden_size_});
-    }
-  } else {
-    hx = mode_ == RNNMode::LSTM ? inputs[1][0] : inputs[1];
-    cx = mode_ == RNNMode::LSTM ? inputs[1][1] : Variable();
-  }
-  auto dropout_state = x.type().tensor();
+  auto hx = inputs[1].defined()
+      ? inputs[1]
+      : torch::zeros({x.size(0), options_.hidden_size_}, x.options());
 
-  std::vector<void*> weight_data_ptrs;
-  auto params = parameters();
-  for (auto& p : params) {
-    weight_data_ptrs.emplace_back(p.second.data().data_ptr());
-  }
-  if (weight_data_ptrs != data_ptrs_) {
-    std::cerr << "Parameters are unflattened! Code path might be super slow. "
-                 "Please call flatten_parameters() when you muck around with "
-                 "storages!"
-              << std::endl;
-    flat_weight_ = Variable();
-  }
+  auto gi = linear(x, ihw_[layer], ihb_[layer]);
+  auto gh = linear(x, hhw_[layer], hhb_[layer]);
+  auto gic = gi.chunk(3, 1);
+  auto ghc = gh.chunk(3, 1);
 
-  // tup = std::tuple of output, hy, cy, reserve, new_weight_buf
-  auto tup = _cudnn_rnn(
-      x,
-      weight_list,
-      weight_stride0,
-      flat_weight_,
-      hx,
-      cx,
-      mode_,
-      hidden_size_,
-      nlayers_,
-      false, // batch first
-      0, // TODO Use C++ dropout descriptors
-      is_training(),
-      false, // bidirectional
-      {}, // packing not supported
-      dropout_state // TODO waiting on dropout state descriptor in C++ pytorch
-  );
+  auto reset_gate = (gic[0] + ghc[0]).sigmoid_();
+  auto input_gate = (gic[1] + ghc[1]).sigmoid_();
+  auto new_gate = (gic[2] + reset_gate * ghc[2]).tanh_();
+  auto hy = new_gate + input_gate * (hx - new_gate);
 
-  Variable hidout = mode_ == RNNMode::LSTM
-      ? at::stack({std::get<1>(tup), std::get<2>(tup)}, 0)
-      : std::get<1>(tup);
-  Variable output = std::get<0>(tup);
-  return variable_list({output, hidout});
+  return {at::stack(TensorListView(hy))};
 }
 
-template <typename Derived>
-variable_list RNNBase<Derived>::forward(variable_list inputs) {
-  variable_list inp;
-  inp.push_back(inputs[0]);
-  if (inputs.size() > 1) {
-    inp.push_back(inputs[1]);
-  } else {
-    inp.push_back(Variable());
-  }
-
-  // TODO implement with dropout descriptors
-  auto output = at::cudnn_is_acceptable(inp[0]) && dropout_ == 0
-      ? CUDNN_forward(inp)
-      : autograd_forward(inp);
-
-  return output;
+const GRUOptions& GRUImpl::options() const noexcept {
+  return options_;
 }
-
-template <typename Derived>
-void RNNBase<Derived>::cuda() {
-  nn::Module::cuda();
-  flatten_parameters();
-}
-
-template <typename Derived>
-void RNNBase<Derived>::cpu() {
-  nn::Module::cpu();
-  flatten_parameters();
-}
-
-template class RNNBase<LSTM>;
-template class RNNBase<GRU>;
-template class RNNBase<RNN>;
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

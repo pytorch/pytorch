@@ -1,49 +1,46 @@
-#include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/elementwise_op.h"
 #include "caffe2/operators/logit_op.h"
 
+#include "caffe2/core/context_gpu.h"
+
 namespace caffe2 {
+
+namespace {
 
 template <typename T>
 __global__ void LogitKernel(const int N, const T* X, const float eps, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    Y[i] = fminf(X[i], (1.0 - eps));
+    Y[i] = fminf(X[i], (T(1) - eps));
     Y[i] = fmaxf(Y[i], eps);
-    Y[i] = logf(Y[i] / (1.0 - Y[i]));
+    Y[i] = logf(Y[i] / (T(1) - Y[i]));
   }
 }
 
+template <typename T>
 __global__ void LogitGradientKernel(
     const int N,
-    const float* X,
-    const float* dY,
+    const T* X,
+    const T* dY,
     const float eps,
-    float* dX) {
+    T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    dX[i] = (X[i] < eps || X[i] > 1.0 - eps) ? 0 : (dY[i] / X[i] / (1 - X[i]));
+    dX[i] = (X[i] < eps || X[i] > T(1) - eps) ? T(0)
+                                              : (dY[i] / X[i] / (T(1) - X[i]));
   }
 }
 
-struct LogitCUDAFunctor {
-  explicit LogitCUDAFunctor(OperatorBase& op)
-      : eps_(op.GetSingleArgument<float>("eps", 1e-6)) {
-    CAFFE_ENFORCE_GT(eps_, 0.0);
-    CAFFE_ENFORCE_LT(eps_, 0.5);
-  }
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CUDAContext* device_context) {
-    LogitKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, eps_, y);
-    return;
-  }
+} // namespace
 
- private:
-  float eps_;
-};
+template <>
+template <typename T>
+bool LogitFunctor<CUDAContext>::
+operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
+  LogitKernel<T>
+      <<<CAFFE_GET_BLOCKS(N),
+         CAFFE_CUDA_NUM_THREADS,
+         0,
+         context->cuda_stream()>>>(N, X, eps_, Y);
+  return true;
+}
 
 template <>
 bool LogitGradientOp<float, CUDAContext>::RunOnDevice() {
@@ -66,6 +63,7 @@ REGISTER_CUDA_OPERATOR(
     UnaryElementwiseWithArgsOp<
         TensorTypes<float>,
         CUDAContext,
-        LogitCUDAFunctor>);
+        LogitFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(LogitGradient, LogitGradientOp<float, CUDAContext>);
+
 } // namespace caffe2

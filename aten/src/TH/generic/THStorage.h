@@ -24,6 +24,17 @@
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
 typedef struct THStorage THStorage;
 
+// These used to be distinct types; for some measure of backwards compatibility and documentation
+// alias these to the single THStorage type.
+#define THFloatStorage THStorage
+#define THDoubleStorage THStorage
+#define THHalfStorage THStorage
+#define THByteStorage THStorage
+#define THCharStorage THStorage
+#define THShortStorage THStorage
+#define THIntStorage THStorage
+#define THLongStorage THStorage
+
 TH_API real* THStorage_(data)(const THStorage*);
 TH_API ptrdiff_t THStorage_(size)(const THStorage*);
 TH_API size_t THStorage_(elementSize)(void);

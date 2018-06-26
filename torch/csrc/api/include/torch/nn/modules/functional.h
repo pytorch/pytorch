@@ -1,21 +1,32 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/cloneable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
 #include <functional>
+#include <vector>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace nn {
 
 // Lets you create a container from a function, designed for use in
 // Sequential.
-class Functional : public torch::nn::CloneableModule<Functional> {
+class FunctionalImpl : public torch::nn::Cloneable<FunctionalImpl> {
  public:
-  explicit Functional(std::function<variable_list(variable_list)> fun);
-  explicit Functional(std::function<Variable(Variable)> fun);
+  using Function = std::function<std::vector<Tensor>(std::vector<Tensor>)>;
 
-  variable_list forward(variable_list input) override;
+  explicit FunctionalImpl(Function function);
+  explicit FunctionalImpl(std::function<Tensor(Tensor)> function);
 
-  std::function<variable_list(variable_list)> fun_;
+  void reset() override;
+  std::vector<Tensor> forward(std::vector<Tensor> input);
+
+ private:
+  Function function_;
 };
 
-}} // namespace torch::nn
+TORCH_MODULE(Functional);
+
+} // namespace nn
+} // namespace torch

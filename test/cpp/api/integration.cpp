@@ -1,13 +1,21 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/modules/batchnorm.h>
+#include <torch/nn/modules/conv.h>
+#include <torch/nn/modules/dropout.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/optimizers.h>
+#include <torch/tensor.h>
+#include <torch/tensor_list_view.h>
+#include <torch/utils.h>
 
-#include <ATen/Error.h>
+#include <test/cpp/api/util.h>
 
-using namespace torch;
 using namespace torch::nn;
 
+#include <cmath>
 #include <iostream>
+#include <random>
 
 class CartPole {
   // Translated from openai/gym's cartpole.py
@@ -26,12 +34,12 @@ class CartPole {
   double x_threshold = 2.4;
   int steps_beyond_done = -1;
 
-  at::Tensor state;
+  torch::Tensor state;
   double reward;
   bool done;
   int step_ = 0;
 
-  at::Tensor getState() {
+  torch::Tensor getState() {
     return state;
   }
 
@@ -44,7 +52,7 @@ class CartPole {
   }
 
   void reset() {
-    state = at::CPU(at::kFloat).tensor({4}).uniform_(-0.05, 0.05);
+    state = torch::empty({4}).uniform_(-0.05, 0.05);
     steps_beyond_done = -1;
     step_ = 0;
   }
@@ -72,10 +80,10 @@ class CartPole {
     x_dot = x_dot + tau * xacc;
     theta = theta + tau * theta_dot;
     theta_dot = theta_dot + tau * thetaacc;
-    state[0] = x;
-    state[1] = x_dot;
-    state[2] = theta;
-    state[3] = theta_dot;
+    state.data()[0] = x;
+    state.data()[1] = x_dot;
+    state.data()[2] = theta;
+    state.data()[3] = theta_dot;
     done = x < -x_threshold || x > x_threshold ||
         theta < -theta_threshold_radians || theta > theta_threshold_radians ||
         step_ > 200;
@@ -109,7 +117,7 @@ bool test_mnist(
     FILE* fp_;
 
     explicit MNIST_Reader(const char* path) {
-      fp_ = fopen(path, "rb");
+      fp_ = fopen(path, "rbe");
       if (!fp_)
         throw std::runtime_error("failed to open file");
     }
@@ -144,8 +152,7 @@ bool test_mnist(
     int image_rows = rd.read_int();
     int image_cols = rd.read_int();
 
-    auto data =
-        at::CPU(at::kFloat).tensor({image_count, 1, image_rows, image_cols});
+    auto data = torch::empty({image_count, 1, image_rows, image_cols});
     auto a_data = data.accessor<float, 4>();
 
     for (int c = 0; c < image_count; c++) {
@@ -164,11 +171,11 @@ bool test_mnist(
     /* int label_magic = */ rd.read_int();
     int label_count = rd.read_int();
 
-    auto data = at::CPU(at::kLong).tensor({label_count});
+    auto data = torch::empty({label_count}, torch::kInt64);
     auto a_data = data.accessor<int64_t, 1>();
 
     for (int i = 0; i < label_count; ++i) {
-      a_data[i] = long(rd.read_byte());
+      a_data[i] = static_cast<int64_t>(rd.read_byte());
     }
     return data.toBackend(useGPU ? at::kCUDA : at::kCPU);
   };
@@ -182,153 +189,155 @@ bool test_mnist(
     model->cuda();
   }
 
+  std::random_device device;
+  std::mt19937 generator(device());
+
   for (auto epoch = 0U; epoch < num_epochs; epoch++) {
     auto shuffled_inds = std::vector<int>(trdata.size(0));
     for (int i = 0; i < trdata.size(0); i++) {
       shuffled_inds[i] = i;
     }
-    std::random_shuffle(shuffled_inds.begin(), shuffled_inds.end());
+    std::shuffle(shuffled_inds.begin(), shuffled_inds.end(), generator);
 
-    auto inp = (useGPU ? at::CUDA : at::CPU)(at::kFloat)
-                   .tensor({batch_size, 1, trdata.size(2), trdata.size(3)});
-    auto lab = (useGPU ? at::CUDA : at::CPU)(at::kLong).tensor({batch_size});
+    const auto backend = useGPU ? at::kCUDA : at::kCPU;
+    auto inp =
+        torch::empty({batch_size, 1, trdata.size(2), trdata.size(3)}, backend);
+    auto lab =
+        torch::empty({batch_size}, at::device(backend).dtype(torch::kInt64));
     for (auto p = 0U; p < shuffled_inds.size() - batch_size; p++) {
       inp[p % batch_size] = trdata[shuffled_inds[p]];
       lab[p % batch_size] = trlabel[shuffled_inds[p]];
 
       if (p % batch_size != batch_size - 1)
         continue;
-      Variable x = forward_op(Var(inp));
-      Variable y = Var(lab, false);
-      Variable loss = at::nll_loss(x, y);
+      inp.set_requires_grad(true);
+      torch::Tensor x = forward_op(inp);
+      inp.set_requires_grad(false);
+      torch::Tensor y = lab;
+      torch::Tensor loss = at::nll_loss(x, y);
 
       optim->zero_grad();
-      backward(loss);
+      loss.backward();
       optim->step();
     }
   }
 
-  no_grad_guard guard;
-  auto result = std::get<1>(forward_op(Var(tedata, false)).max(1));
-  Variable correct = (result == Var(telabel)).toType(at::kFloat);
+  torch::NoGradGuard guard;
+  auto result = std::get<1>(forward_op(tedata).max(1));
+  torch::Tensor correct = (result == telabel).toType(torch::kFloat32);
   std::cout << "Num correct: " << correct.data().sum().toCFloat() << " out of "
             << telabel.size(0) << std::endl;
   return correct.data().sum().toCFloat() > telabel.size(0) * 0.8;
 };
 
-TEST_CASE("integration") {
-  SECTION("cartpole") {
-    std::cerr
-        << "Training episodic policy gradient with a critic for up to 3000"
-           " episodes, rest your eyes for a bit!\n";
-    auto model = make(SimpleContainer());
-    auto linear = model->add(make(Linear(4, 128)), "linear");
-    auto policyHead = model->add(make(Linear(128, 2)), "policy");
-    auto valueHead = model->add(make(Linear(128, 1)), "action");
-    auto optim = Adam(model, 1e-3).make();
+TEST_CASE("integration/cartpole") {
+  std::cerr << "Training episodic policy gradient with a critic for up to 3000"
+               " episodes, rest your eyes for a bit!\n";
+  auto model = std::make_shared<torch::SimpleContainer>();
+  auto linear = model->add(Linear(4, 128), "linear");
+  auto policyHead = model->add(Linear(128, 2), "policy");
+  auto valueHead = model->add(Linear(128, 1), "action");
+  auto optim = torch::Adam(model, 1e-3).make();
 
-    std::vector<Variable> saved_log_probs;
-    std::vector<Variable> saved_values;
-    std::vector<float> rewards;
+  std::vector<torch::Tensor> saved_log_probs;
+  std::vector<torch::Tensor> saved_values;
+  std::vector<float> rewards;
 
-    auto forward = [&](variable_list inp) {
-      auto x = linear->forward(inp)[0].clamp_min(0);
-      Variable actions = policyHead->forward({x})[0];
-      Variable value = valueHead->forward({x})[0];
-      return std::make_tuple(at::softmax(actions, -1), value);
-    };
+  auto forward = [&](std::vector<torch::Tensor> inp) {
+    auto x = linear->forward(inp)[0].clamp_min(0);
+    torch::Tensor actions = policyHead->forward({x})[0];
+    torch::Tensor value = valueHead->forward({x})[0];
+    return std::make_tuple(at::softmax(actions, -1), value);
+  };
 
-    auto selectAction = [&](at::Tensor state) {
-      // Only work on single state right now, change index to gather for batch
-      auto out = forward({Var(state, false)});
-      auto probs = Variable(std::get<0>(out));
-      auto value = Variable(std::get<1>(out));
-      auto action = probs.data().multinomial(1)[0].toCInt();
-      // Compute the log prob of a multinomial distribution.
-      // This should probably be actually implemented in autogradpp...
-      auto p = probs / probs.sum(-1, true);
-      auto log_prob = p[action].log();
-      saved_log_probs.push_back(log_prob);
-      saved_values.push_back(value);
-      return action;
-    };
+  auto selectAction = [&](torch::Tensor state) {
+    // Only work on single state now, change index to gather for batch
+    auto out = forward({state});
+    auto probs = torch::Tensor(std::get<0>(out));
+    auto value = torch::Tensor(std::get<1>(out));
+    auto action = probs.data().multinomial(1)[0].toCInt();
+    // Compute the log prob of a multinomial distribution.
+    // This should probably be actually implemented in autogradpp...
+    auto p = probs / probs.sum(-1, true);
+    auto log_prob = p[action].log();
+    saved_log_probs.emplace_back(log_prob);
+    saved_values.push_back(value);
+    return action;
+  };
 
-    auto finishEpisode = [&]() {
-      auto R = 0.;
-      for (int i = rewards.size() - 1; i >= 0; i--) {
-        R = rewards[i] + 0.99 * R;
-        rewards[i] = R;
-      }
-      auto r_t =
-          at::CPU(at::kFloat)
-              .tensorFromBlob(
-                  rewards.data(), {static_cast<int64_t>(rewards.size())});
-      r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
-
-      std::vector<at::Tensor> policy_loss;
-      std::vector<at::Tensor> value_loss;
-      for (auto i = 0U; i < saved_log_probs.size(); i++) {
-        auto r = rewards[i] - saved_values[i].toCFloat();
-        policy_loss.push_back(-r * saved_log_probs[i]);
-        value_loss.push_back(at::smooth_l1_loss(
-            saved_values[i],
-            Var(at::CPU(at::kFloat).scalarTensor(at::Scalar(rewards[i])),
-                false)));
-      }
-      auto loss = at::stack(policy_loss).sum() + at::stack(value_loss).sum();
-
-      optim->zero_grad();
-      backward(loss);
-      optim->step();
-
-      rewards.clear();
-      saved_log_probs.clear();
-      saved_values.clear();
-    };
-
-    auto env = CartPole();
-    double running_reward = 10.0;
-    for (auto episode = 0;; episode++) {
-      env.reset();
-      auto state = env.getState();
-      int t = 0;
-      for (; t < 10000; t++) {
-        auto action = selectAction(state);
-        env.step(action);
-        state = env.getState();
-        auto reward = env.getReward();
-        auto done = env.isDone();
-
-        rewards.push_back(reward);
-        if (done)
-          break;
-      }
-
-      running_reward = running_reward * 0.99 + t * 0.01;
-      finishEpisode();
-      /*
-      if (episode % 10 == 0) {
-        printf("Episode %i\tLast length: %5d\tAverage length: %.2f\n",
-                episode, t, running_reward);
-      }
-      */
-      if (running_reward > 150)
-        break;
-      REQUIRE(episode < 3000);
+  auto finishEpisode = [&]() {
+    auto R = 0.;
+    for (int i = rewards.size() - 1; i >= 0; i--) {
+      R = rewards[i] + 0.99 * R;
+      rewards[i] = R;
     }
+    auto r_t =
+        at::from_blob(rewards.data(), {static_cast<int64_t>(rewards.size())});
+    r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
+
+    std::vector<torch::Tensor> policy_loss;
+    std::vector<torch::Tensor> value_loss;
+    for (auto i = 0U; i < saved_log_probs.size(); i++) {
+      auto r = rewards[i] - saved_values[i].toCFloat();
+      policy_loss.push_back(-r * saved_log_probs[i]);
+      value_loss.push_back(
+          at::smooth_l1_loss(saved_values[i], torch::ones({1}) * rewards[i]));
+    }
+
+    auto loss = at::stack(torch::TensorListView(policy_loss)).sum() +
+        at::stack(torch::TensorListView(value_loss)).sum();
+
+    optim->zero_grad();
+    loss.backward();
+    optim->step();
+
+    rewards.clear();
+    saved_log_probs.clear();
+    saved_values.clear();
+  };
+
+  auto env = CartPole();
+  double running_reward = 10.0;
+  for (auto episode = 0;; episode++) {
+    env.reset();
+    auto state = env.getState();
+    int t = 0;
+    for (; t < 10000; t++) {
+      auto action = selectAction(state);
+      env.step(action);
+      state = env.getState();
+      auto reward = env.getReward();
+      auto done = env.isDone();
+
+      rewards.push_back(reward);
+      if (done)
+        break;
+    }
+
+    running_reward = running_reward * 0.99 + t * 0.01;
+    finishEpisode();
+    /*
+    if (episode % 10 == 0) {
+      printf("Episode %i\tLast length: %5d\tAverage length: %.2f\n",
+              episode, t, running_reward);
+    }
+    */
+    if (running_reward > 150)
+      break;
+    REQUIRE(episode < 3000);
   }
 }
 
 TEST_CASE("integration/mnist", "[cuda]") {
-  auto model = make(SimpleContainer());
-  auto conv1 = model->add(make(Conv2d(1, 10, 5)), "conv1");
-  auto conv2 = model->add(make(Conv2d(10, 20, 5)), "conv2");
-  auto drop = make(Dropout(0.3));
-  auto drop2d = make(Dropout2d(0.3));
-  auto linear1 = model->add(make(Linear(320, 50)), "linear1");
-  auto linear2 = model->add(make(Linear(50, 10)), "linear2");
+  auto model = std::make_shared<torch::SimpleContainer>();
+  auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
+  auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
+  auto drop = Dropout(0.3);
+  auto drop2d = Dropout2d(0.3);
+  auto linear1 = model->add(Linear(320, 50), "linear1");
+  auto linear2 = model->add(Linear(50, 10), "linear2");
 
-  auto forward = [&](Variable x) {
+  auto forward = [&](torch::Tensor x) {
     x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
             .clamp_min(0);
     x = conv2->forward({x})[0];
@@ -343,7 +352,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
     return x;
   };
 
-  auto optim = SGD(model, 1e-2).momentum(0.5).make();
+  auto optim = torch::SGD(model, 1e-2).momentum(0.5).make();
 
   REQUIRE(test_mnist(
       32, // batch_size
@@ -355,17 +364,17 @@ TEST_CASE("integration/mnist", "[cuda]") {
 }
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
-  auto model = make(SimpleContainer());
-  auto conv1 = model->add(make(Conv2d(1, 10, 5)), "conv1");
-  auto batchnorm2d = model->add(
-      make(BatchNorm(10, /*affine=*/true, /*stateful=*/true)), "batchnorm2d");
-  auto conv2 = model->add(make(Conv2d(10, 20, 5)), "conv2");
-  auto linear1 = model->add(make(Linear(320, 50)), "linear1");
-  auto batchnorm1 = model->add(
-      make(BatchNorm(50, /*affine=*/true, /*stateful=*/true)), "batchnorm1");
-  auto linear2 = model->add(make(Linear(50, 10)), "linear2");
+  auto model = std::make_shared<torch::SimpleContainer>();
+  auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
+  auto batchnorm2d =
+      model->add(BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
+  auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
+  auto linear1 = model->add(Linear(320, 50), "linear1");
+  auto batchnorm1 =
+      model->add(BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
+  auto linear2 = model->add(Linear(50, 10), "linear2");
 
-  auto forward = [&](Variable x) {
+  auto forward = [&](torch::Tensor x) {
     x = std::get<0>(at::max_pool2d(conv1->forward({x})[0], {2, 2}))
             .clamp_min(0);
     x = batchnorm2d->forward({x})[0];
@@ -380,7 +389,7 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
     return x;
   };
 
-  auto optim = SGD(model, 1e-2).momentum(0.5).make();
+  auto optim = torch::SGD(model, 1e-2).momentum(0.5).make();
 
   REQUIRE(test_mnist(
       32, // batch_size

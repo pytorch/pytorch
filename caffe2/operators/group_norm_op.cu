@@ -23,7 +23,7 @@ template <typename T>
 using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
 
 template <typename T>
-inline __device__ T CubeCUDA(const T x) {
+inline __host__ __device__ T CubeCUDA(const T x) {
   return x * x * x;
 }
 

@@ -45,12 +45,59 @@ OPERATOR_SCHEMA(Softplus)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Softplus takes one input data (Tensor<T>) and produces one output data
-(Tensor<T>) where the softplus function, y = ln(exp(x) + 1), is applied to
-the tensor elementwise.
+Softplus takes one input data tensor $X$ and produces one output data tensor $Y,$ where the softplus function, $y = ln(e^x + 1)$, is applied to $X$ elementwise.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softplus_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softplus_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Softplus",
+    ["X"],
+    ["Y"],
+)
+
+workspace.FeedBlob("X", np.random.randn(3, 3).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"), "\n")
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[-0.5380011   0.65190786  0.55673236]
+ [-0.16272168  0.5451048   0.30880353]
+ [-0.76606876 -0.6238556  -0.40444514]]
+
+Y:
+ [[0.4598992  1.0713093  1.0097669 ]
+ [0.61509246 1.0023911  0.8594219 ]
+ [0.38174385 0.42909983 0.5112337 ]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "X", "1D input tensor")
-    .Output(0, "Y", "1D input tensor")
+    .Input(0, "X", "Input data blob to be operated on.")
+    .Output(0, "Y", "Output data blob with same shape as input.")
     .InheritOnnxSchema("Softplus");
 
 // Input: Y, dY, output: dX

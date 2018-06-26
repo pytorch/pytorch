@@ -67,10 +67,10 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   real *input_data;
   real *output_data;
 
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
-		"3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+		"non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -86,12 +86,12 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   THArgCheck(pad_l < iwidth && pad_r < iwidth, 4,
              "Padding size should be less than the corresponding input dimension, "
              "but got: padding (%d, %d) at dimension %d of input %s",
-             pad_l, pad_r, dimw, _THSizeDesc(input->size, input->nDimension).str);
+             pad_l, pad_r, dimw, _THSizeDesc(input->size, input->dim()).str);
 
   THArgCheck(pad_t < iheight && pad_b < iheight, 6,
              "Padding size should be less than the corresponding input dimension, "
              "but got: padding (%d, %d) at dimension %d of input %s",
-             pad_t, pad_b, dimh, _THSizeDesc(input->size, input->nDimension).str);
+             pad_t, pad_b, dimh, _THSizeDesc(input->size, input->dim()).str);
 
   /* output sizes */
   oheight = iheight + pad_t + pad_b;
@@ -106,7 +106,7 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
   input = THTensor_(newContiguous)(input);
 
   /* resize output */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THTensor_(resize3d)(output, nslices, oheight, owidth);
 
@@ -211,7 +211,7 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
   int64_t oheight;
   int64_t owidth;
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -241,7 +241,7 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
   THTensor_(zero)(gradInput);
 
   /* backprop */
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     THNN_(SpatialReflectionPadding_updateGradInput_frame)(
       THTensor_(data)(gradInput),
       THTensor_(data)(gradOutput),

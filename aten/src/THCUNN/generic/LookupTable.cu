@@ -22,8 +22,8 @@ void THNN_(LookupTable_accGradParameters)(
     THError("Tensors must be contiguous");
   }
 
-  int nDim = THCIndexTensor_(nDimension)(state, input);
-  if (THCIndexTensor_(nDimension)(state, input) != 1 && THCIndexTensor_(nDimension)(state, input) != 2) {
+  int nDim = THCIndexTensor_(_nDimension)(state, input);
+  if (THCIndexTensor_(_nDimension)(state, input) != 1 && THCIndexTensor_(_nDimension)(state, input) != 2) {
     THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, input);
     THError("input must be a vector or matrix, but is of shape: %s", s1.str);
   }
@@ -34,17 +34,23 @@ void THNN_(LookupTable_accGradParameters)(
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   if (numel <= 768 && !scaleGradByFreq) {
-    dim3 grid(THCCeilDiv(stride, (int64_t) 4));
-    dim3 block(128);
+    const int WARP_SIZE = 32;
+    const int BLOCKDIMY = 32;
+    dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
+    dim3 block(WARP_SIZE, BLOCKDIMY);
 
-    cunn_LookupTable_accGradParametersKernelByFeature<<<grid, block, 0, stream>>>(
-      THCIndexTensor_(data)(state, input),
-      THCTensor_(data)(state, gradOutput),
-      THCTensor_(data)(state, gradWeight),
-      scale,
-      numel,
-      stride,
-      paddingValue);
+    cunn_LookupTable_accGradParametersKernelByFeature<real, accreal>
+    <<<grid, 
+       block, 
+       sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
+       stream>>>
+      (THCIndexTensor_(data)(state, input),
+       THCTensor_(data)(state, gradOutput),
+       THCTensor_(data)(state, gradWeight),
+       scale,
+       numel,
+       stride,
+       paddingValue);
     THCTensor_(free)(state, gradOutput);
     THCudaCheck(cudaGetLastError());
     return;
@@ -164,7 +170,7 @@ void THNN_(LookupTable_renorm)(
     THError("Tensors must be contiguous");
   }
 
-  if (THCIndexTensor_(nDimension)(state, idx) != 1) {
+  if (THCIndexTensor_(_nDimension)(state, idx) != 1) {
     THError("idx must be a vector");
   }
 
@@ -184,7 +190,7 @@ void THNN_(LookupTable_renorm)(
 
   // At launch time figure out what the index type is and norm type
   int Norm = ScalarConvert<accreal, int>::to(normType);
-  if (TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, idx)) {
+  if (THCTensor_canUse32BitIndexMath(state, idx)) {
     if (Norm == 1) {
       RUN(1, unsigned int);
     } else if (Norm == 2) {

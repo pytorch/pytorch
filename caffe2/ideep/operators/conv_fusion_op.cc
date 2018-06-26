@@ -18,15 +18,17 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
   IDEEPConvFusionOp(const OperatorDef& operator_def, Workspace* ws)
       : IDEEPConvPoolOpBase(operator_def, ws),
         fusion_type_(static_cast<FusionType>(
-            OperatorBase::GetSingleArgument<int>("fusion_type", 0))) {
+            OperatorBase::GetSingleArgument<int>("fusion_type", 0))),
+        training_mode_(
+            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
-    OPERATOR_NEEDS_FEATURE(
-        group_ == 1, "Group not supported.");
+    OPERATOR_NEEDS_FEATURE(group_ == 1, "Group not supported.");
     OPERATOR_NEEDS_FEATURE(
         fusion_type_ > FUSION_UNKNOWN && fusion_type_ < FUSION_MAX,
-        "Undefined Conv fusion type.", fusion_type_);
+        "Undefined Conv fusion type.",
+        fusion_type_);
 
     // Check kernel only if we are doing conv. The reason is that a
     // few other ops, like PadImage, are also using this base class. We really
@@ -48,12 +50,16 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
     auto* Y = Output(OUTPUT);
     auto Y_dims_conv = CalcOutputDims(X, filter.get_dim(0));
     auto attr = [this]() {
-      return (fusion_type_ == FUSION_CONV_RELU) ? iattr::fuse_relu() :
-        ((fusion_type_ == FUSION_CONV_SUM) ? iattr::fuse_sum() :
-         ((fusion_type_ == FUSION_CONV_SUM_RELU) ? iattr::residual() :
-          iattr())); };
+      return (fusion_type_ == FUSION_CONV_RELU)
+          ? iattr::fuse_relu()
+          : ((fusion_type_ == FUSION_CONV_SUM)
+                 ? iattr::fuse_sum()
+                 : ((fusion_type_ == FUSION_CONV_SUM_RELU) ? iattr::residual()
+                                                           : iattr()));
+    };
     auto last_input = [this]() {
-      return (fusion_type_ == FUSION_CONV_RELU) ? BIAS_OR_INPUT_S : INPUT_S; };
+      return (fusion_type_ == FUSION_CONV_RELU) ? BIAS_OR_INPUT_S : INPUT_S;
+    };
 
     CAFFE_ENFORCE(4 == X.ndims());
     CAFFE_ENFORCE(4 == filter.ndims());
@@ -69,17 +75,51 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
         "*",
         group_);
 
+    bool weights_changed =
+        (cached_weights_descriptor_ != filter.get_descriptor());
+    if (weights_changed && !training_mode_) {
+      cached_weights_descriptor_ = filter.get_descriptor();
+      filter_ = filter;
+      auto expected_descriptor =
+          ideep::convolution_forward::expected_weights_descriptor(
+              filter.get_dims());
+      if (filter_.get_descriptor() != expected_descriptor) {
+        filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
+            expected_descriptor);
+        ideep::reorder::compute(filter, filter_);
+      }
+    }
+
     if (InputSize() > last_input()) {
       ideep::convolution_forward::compute(
-          X, filter, Input(BIAS_OR_INPUT_S), Y_dims_conv, *Y,
-          stride_, dilation_, pad_tl(), pad_br(), group_, attr());
+          X,
+          training_mode_ ? filter : filter_,
+          Input(BIAS_OR_INPUT_S),
+          Y_dims_conv,
+          *Y,
+          stride_,
+          dilation_,
+          pad_tl(),
+          pad_br(),
+          group_,
+          attr());
     } else {
-      ideep::convolution_forward::compute(X, filter, Y_dims_conv, *Y,
-          stride_, dilation_, pad_tl(), pad_br(), group_, attr());
+      ideep::convolution_forward::compute(
+          X,
+          training_mode_ ? filter : filter_,
+          Y_dims_conv,
+          *Y,
+          stride_,
+          dilation_,
+          pad_tl(),
+          pad_br(),
+          group_,
+          attr());
     }
 
     if (fusion_type_ != FUSION_CONV_RELU) {
-      CAFFE_ENFORCE(Y == &(Input(InputSize() - 1)),
+      CAFFE_ENFORCE(
+          Y == &(Input(InputSize() - 1)),
           "Convolution fusion op: InPlace is enforced for sum fusion.");
     }
 
@@ -88,6 +128,10 @@ class IDEEPConvFusionOp final : public IDEEPConvPoolOpBase {
 
  private:
   FusionType fusion_type_;
+
+  bool training_mode_;
+  ideep::tensor filter_;
+  ideep::tensor::descriptor cached_weights_descriptor_;
 
   INPUT_TAGS(INPUT_X, FILTER, BIAS_OR_INPUT_S, INPUT_S);
   OUTPUT_TAGS(OUTPUT);
@@ -163,4 +207,4 @@ OPERATOR_SCHEMA(ConvFusion)
     .AllowInplace({{2, 0}, {3, 0}})
     .FillUsing(ConvFusionDocGenerator(""));
 
-}  // namespace caffe2
+} // namespace caffe2

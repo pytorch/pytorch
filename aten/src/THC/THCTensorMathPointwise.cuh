@@ -37,7 +37,7 @@ struct TensorSigmoidOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) const {
 #ifdef CUDA_HALF_INSTRUCTIONS
     half one = ScalarConvert<int, half>::to(1);
-    *out = hdiv(one, __hadd(one, hexp(__hneg(*in))));
+    *out = __hdiv(one, __hadd(one, hexp(__hneg(*in))));
 #else
     float fin = __half2float(*in);
     *out = __float2half(1.0f / (1.0f + expf(- fin)));
@@ -47,7 +47,7 @@ struct TensorSigmoidOp<half> {
   __device__ __forceinline__ void operator()(half* v) const {
 #ifdef CUDA_HALF_INSTRUCTIONS
     half one = ScalarConvert<int, half>::to(1);
-    *v = hdiv(one, __hadd(one, hexp(__hneg(*v))));
+    *v = __hdiv(one, __hadd(one, hexp(__hneg(*v))));
 #else
     float fv = __half2float(*v);
     *v = __float2half(1.0f / (1.0f + expf(- fv)));
@@ -655,11 +655,11 @@ struct TensorMaxValueOp {
   TensorMaxValueOp(T v) : val(v) {}
 
   __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::gt(*out, val) ? *out : val;
+    *out = THCNumerics<T>::lt(*out, val) ? val : *out;  // this order propagates NaN
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::gt(*in, val) ? *in : val;
+    *out = THCNumerics<T>::lt(*in, val) ? val : *in;  // this order propagates NaN
   }
 
   T val;
@@ -670,11 +670,11 @@ struct TensorMinValueOp {
   TensorMinValueOp(T v) : val(v) {}
 
   __device__ __forceinline__ void operator()(T* out) {
-    *out = THCNumerics<T>::lt(*out, val) ? *out : val;
+    *out = THCNumerics<T>::gt(*out, val) ? val : *out;  // this order propagates NaN
   }
 
   __device__ __forceinline__ void operator()(T* out, T* in) {
-    *out = THCNumerics<T>::lt(*in, val) ? *in : val;
+    *out = THCNumerics<T>::gt(*in, val) ? val : *in;  // this order propagates NaN
   }
 
   T val;

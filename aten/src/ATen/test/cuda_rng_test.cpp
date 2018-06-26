@@ -8,7 +8,7 @@
 
 void makeRandomNumber() {
   cudaSetDevice(std::rand() % 2);
-  auto x = at::CUDA(at::kFloat).randn({1000});
+  auto x = at::randn({1000});
 }
 
 void testCudaRNGMultithread() {

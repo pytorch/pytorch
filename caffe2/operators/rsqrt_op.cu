@@ -1,5 +1,8 @@
 #include "caffe2/operators/rsqrt_op.h"
 
+#include <algorithm>
+#include <functional>
+
 #include "caffe2/core/context_gpu.h"
 
 namespace caffe2 {
@@ -7,7 +10,7 @@ namespace caffe2 {
 namespace {
 
 template <typename T>
-inline __device__ T CubeCUDA(const T x) {
+inline __host__ __device__ T CubeCUDA(const T x) {
   return x * x * x;
 }
 
@@ -27,17 +30,21 @@ RSqrtGradientCUDAKernel(const int size, const T* dY, const T* Y, T* dX) {
 
 template <>
 template <typename T>
-void RSqrtGradientFunctor<CUDAContext>::Run<T>(
-    const int size,
+bool RSqrtGradientFunctor<CUDAContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* Y_dims */,
     const T* dY,
     const T* Y,
     T* dX,
     CUDAContext* context) const {
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
   RSqrtGradientCUDAKernel<T>
       <<<CAFFE_GET_BLOCKS(size),
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(size, dY, Y, dX);
+  return true;
 }
 
 REGISTER_CUDA_OPERATOR(
@@ -51,6 +58,6 @@ REGISTER_CUDA_OPERATOR(
     BinaryElementwiseOp<
         TensorTypes<float>,
         CUDAContext,
-        WithoutBroadcast<RSqrtGradientFunctor<CUDAContext>>>);
+        RSqrtGradientFunctor<CUDAContext>>);
 
 } // namespace caffe2

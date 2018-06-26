@@ -40,7 +40,7 @@ at::Type& type_from_string(const std::string& str) {
   const std::unordered_map<std::string, Type*>* map = nullptr;
 
   if (str == "torch.Tensor") {
-    return torch::tensor::get_default_tensor_type();
+    return torch::tensors::get_default_tensor_type();
   }
 
   if (std::mismatch(cuda_prefix.begin(), cuda_prefix.end(), str.begin()).first == cuda_prefix.end()) {

@@ -4,7 +4,7 @@
 namespace at {
 
 UndefinedType::UndefinedType(Context* context)
-: Type(context, /*is_variable_or_undefined=*/true) {}
+    : Type(context, /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
@@ -44,7 +44,7 @@ TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-std::size_t UndefinedType::elementSizeInBytes() const {
+size_t UndefinedType::elementSizeInBytes() const {
   AT_ERROR("elementSizeInBytes not defined for UndefinedType");
 }
 

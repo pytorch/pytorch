@@ -1,11 +1,17 @@
-#ifndef NOM_GRAPH_ALGORITHMS_H
-#error "This should only be included by Graph/Algorithms.h"
-#endif
+#ifndef NOM_GRAPH_TARJANSIMPL_H
+#define NOM_GRAPH_TARJANSIMPL_H
 
-template <typename T, typename U>
+#include <unordered_map>
+
+#include "nomnigraph/Graph/Graph.h"
+
+namespace nom {
+namespace algorithm {
+
+template <typename T, typename... U>
 struct GraphWrapper {
   struct NodeWrapper {
-    using NodeRef = typename Graph<T, U>::NodeRef;
+    using NodeRef = typename Graph<T, U...>::NodeRef;
     NodeWrapper(NodeRef n) : node(n) {}
     NodeRef node;
     int Index = -1;
@@ -14,7 +20,7 @@ struct GraphWrapper {
   };
 
   struct EdgeWrapper {
-    typename Graph<T, U>::EdgeRef edge;
+    typename Graph<T, U...>::EdgeRef edge;
   };
 };
 
@@ -34,17 +40,17 @@ struct GraphWrapper {
 /// \note Head/Tail is used in reverse in Tarjan's early papers.
 /// \bug Edges not included in returned subgraphs.
 ///
-template <typename T, typename U = T>
+template <typename T, typename... U>
 class Tarjans {
-  using NodeWrapper = typename GraphWrapper<T, U>::NodeWrapper;
-  using EdgeWrapper = typename GraphWrapper<T, U>::EdgeWrapper;
+  using NodeWrapper = typename GraphWrapper<T, U...>::NodeWrapper;
+  using EdgeWrapper = typename GraphWrapper<T, U...>::EdgeWrapper;
   using WrappedGraph = Graph<NodeWrapper, EdgeWrapper>;
   using WrappedSubgraph = Subgraph<NodeWrapper, EdgeWrapper>;
 
  private:
   int Index = 0;
   std::vector<typename WrappedGraph::NodeRef> Stack;
-  Graph<T, U>* InputGraph;
+  Graph<T, U...>* InputGraph;
   WrappedGraph WrappedInputGraph;
   std::vector<WrappedSubgraph> WrappedSCCs;
 
@@ -52,10 +58,10 @@ class Tarjans {
   /// \brief Constructor wraps the input graph with an annotated graph
   ///        set up with the datastructures needed for the algorithm.
   /// \p g The graph Tarjan's will be run on.
-  Tarjans(Graph<T, U>* g) : InputGraph(g) {
+  Tarjans(Graph<T, U...>* g) : InputGraph(g) {
     // Wrap Graph with node labels
     std::unordered_map<
-        typename Graph<T, U>::NodeRef,
+        typename Graph<T, U...>::NodeRef,
         typename WrappedGraph::NodeRef>
         n_to_wrappedNode;
 
@@ -129,8 +135,9 @@ class Tarjans {
   /// \p wrappedS A wrapped subgraph.
   /// \return A subgraph of the original input graph.
   ///
-  inline Subgraph<T, U> unwrapSubgraph(const WrappedSubgraph& wrappedSubgraph) {
-    Subgraph<T, U> s;
+  inline Subgraph<T, U...> unwrapSubgraph(
+      const WrappedSubgraph& wrappedSubgraph) {
+    Subgraph<T, U...> s;
     for (auto wrappedNode : wrappedSubgraph.getNodes()) {
       s.addNode(wrappedNode->data().node);
     }
@@ -140,14 +147,14 @@ class Tarjans {
     return s;
   }
 
-  std::vector<Subgraph<T, U>> run() {
+  std::vector<Subgraph<T, U...>> run() {
     for (auto n : WrappedInputGraph.getMutableNodes()) {
       if (n->data().Index == -1) {
         connect(n);
       }
     }
 
-    std::vector<Subgraph<T, U>> sccs;
+    std::vector<Subgraph<T, U...>> sccs;
     for (auto wrappedSCC : WrappedSCCs) {
       sccs.emplace_back(unwrapSubgraph(wrappedSCC));
     }
@@ -157,8 +164,13 @@ class Tarjans {
 };
 
 /// \brief A function wrapper to infer the graph template parameters.
-template <typename T, typename U>
-std::vector<Subgraph<T, U>> tarjans(Graph<T, U>* g) {
-  Tarjans<T, U> t(g);
+template <typename T, typename... U>
+std::vector<Subgraph<T, U...>> tarjans(Graph<T, U...>* g) {
+  Tarjans<T, U...> t(g);
   return t.run();
 }
+
+} // namespace algorithm
+} // namespace nom
+
+#endif // NOM_GRAPH_TARJANSIMPL_H

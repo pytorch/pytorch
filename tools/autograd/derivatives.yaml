@@ -84,7 +84,11 @@
 - name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
-- name: add(Tensor self, Tensor other, *, Scalar alpha)
+- name: s_native_add(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: maybe_multiply(grad, alpha)
+
+- name: th_add(Tensor self, Tensor other, *, Scalar alpha)
   self: grad
   other: maybe_multiply(grad, alpha)
 
@@ -103,7 +107,12 @@
   tensor1: grad * tensor2 * value
   tensor2: grad * tensor1 * value
 
-- name: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
+- name: th_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
+  self: maybe_multiply(grad, beta)
+  mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
+  mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
+
+- name: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
   mat1: mm_mat1_backward(grad, mat2, mat1.sizes(), mat1.strides(), alpha)
   mat2: mm_mat2_backward(grad, mat1, mat2.sizes(), mat2.strides(), alpha)
@@ -138,7 +147,7 @@
   batch1: grad.bmm(batch2.transpose(1, 2)) * alpha
   batch2: batch1.transpose(1, 2).bmm(grad) * alpha
 
-- name: bernoulli(Tensor self, Generator generator)
+- name: bernoulli(Tensor self, double p, Generator generator)
   self: zeros_like(grad)
 
 - name: bmm(Tensor self, Tensor mat2)
@@ -270,7 +279,7 @@
   self: grad
 
 - name: gather(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(grad.type(), self.sizes()).scatter_add_(dim, index, grad)
+  self: at::zeros(self.sizes(), grad.type()).scatter_add_(dim, index, grad)
 
 - name: ge_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -327,13 +336,13 @@
   value: grad.index_select(dim, index).sum()
 
 - name: index_select(Tensor self, int64_t dim, Tensor index)
-  self: at::zeros(grad.type(), self.sizes()).index_add_(dim, index, grad)
+  self: at::zeros(self.sizes(), grad.type()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
   self: -at::mm(output.t(), at::mm(grad, output.t()))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
-  self: select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: le_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -398,10 +407,10 @@
   self: zeros_like(self).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
-  self: select_backward(grad, dim, max_indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, max_indices, self.sizes(), keepdim)
 
 - name: max(Tensor self)
-  self: select_backward_scalar(grad, self, result)
+  self: select_equals_backward(grad, self, result)
 
 - name: max(Tensor self, Tensor other)
   self: grad.clone().masked_fill_(self <= other, 0)
@@ -414,16 +423,30 @@
   self: grad.expand(self.sizes()) / self.numel()
 
 - name: median(Tensor self)
-  self: select_backward_scalar(grad, self, result)
+  self: select_equals_backward(grad, self, result)
 
+# This is in theory incorrect in the following case:
+#   sorted list: [..., a, b, b, ..., b, b, c, ...] with median = b and the value
+#                            |                     at middle position of the
+#                            |                     list between two `b`s. E.g.,
+#                            |
+#                            ^the middle position
+# The gradient exists and is essentially 0 in this case.
+#
+# In case where the middle position is at the boundary of `b` range, e.g.,
+#   sorted list: [..., a, b, b, ..., b, b, c, ...]
+#                                       |
+#                                       ^the middle position
+# The backward implementation is correct in the sense that it returns the
+# subgradient on one side.
 - name: median(Tensor self, int64_t dim, bool keepdim)
-  self: select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: min(Tensor self, int64_t dim, bool keepdim)
-  self: select_backward(grad, dim, min_indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, min_indices, self.sizes(), keepdim)
 
 - name: min(Tensor self)
-  self: select_backward_scalar(grad, self, result)
+  self: select_equals_backward(grad, self, result)
 
 - name: min(Tensor self, Tensor other)
   self: grad.clone().masked_fill_(self >= other, 0)
@@ -434,12 +457,16 @@
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
-  self: select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Scalar other)
   self: grad * other
 
-- name: mul(Tensor self, Tensor other)
+- name: s_native_mul(Tensor self, Tensor other)
+  self: grad * other
+  other: grad * self
+
+- name: th_mul(Tensor self, Tensor other)
   self: grad * other
   other: grad * self
 
@@ -467,14 +494,14 @@
   self: zeros_like(grad)
 
 - name: normal(Tensor mean, double std, Generator generator)
-  mean: at::zeros(grad.type(), mean.sizes())
+  mean: at::zeros(mean.sizes(), grad.type())
 
 - name: normal(double mean, Tensor std, Generator generator)
-  std: at::zeros(grad.type(), std.sizes())
+  std: at::zeros(std.sizes(), grad.type())
 
 - name: normal(Tensor mean, Tensor std, Generator generator)
-  mean: at::zeros(grad.type(), mean.sizes())
-  std: at::zeros(grad.type(), std.sizes())
+  mean: at::zeros(mean.sizes(), grad.type())
+  std: at::zeros(std.sizes(), grad.type())
 
 - name: orgqr(Tensor self, Tensor input2)
   self: not_implemented("orgqr")
@@ -548,6 +575,13 @@
 - name: repeat(Tensor self, IntList repeats)
   self: repeat_backward(grad, self.dim(), repeats)
 
+# DO NOT define a backward for reshape!
+# reshape is special in that it sometimes returns a view, and somtimes not.
+# Defining a backward will make codegen spit out the forward call as
+#     as_variable(baseType->reshape(self)),
+# making it impossible (hard) to detect when it is actually a view.
+# - name: reshape(Tensor self, IntList shape)
+
 - name: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale)
   input: RoiPooling2d_backward(input, rois, pooledHeight, pooledWidth, spatialScale, grad, result1)
 
@@ -568,6 +602,9 @@
   self: grad
   src: grad.gather(dim, index)
 
+- name: select(Tensor self, int64_t dim, int64_t index)
+  self: slice_backward(grad.unsqueeze(dim), self.sizes(), dim, index, index + 1, 1)
+
 - name: sigmoid(Tensor self)
   self: _sigmoid_backward(grad, result)
 
@@ -580,11 +617,14 @@
 - name: sinh(Tensor self)
   self: grad * self.cosh()
 
+- name: slice(Tensor self, int64_t dim, int64_t start, int64_t end, int64_t step)
+  self: slice_backward(grad, self.sizes(), dim, start, end, step)
+
 - name: slogdet(Tensor self)
   self: slogdet_backward(grads, self, result0, result1)
 
 - name: sort(Tensor self, int64_t dim, bool descending)
-  self: select_backward(grad, dim, indices, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: split(Tensor self, int64_t split_size, int64_t dim)
   self: split_backward(grads, split_size, dim, self.sizes(), self.type())
@@ -601,6 +641,12 @@
 - name: squeeze(Tensor self, int64_t dim)
   self: unsqueeze_to(grad, dim, self.sizes())
 
+- name: squeeze_(Tensor self)
+  self: unsqueeze_to(grad, self.sizes());
+
+- name: squeeze_(Tensor self, int64_t dim)
+  self: unsqueeze_to(grad, dim, self.sizes())
+
 - name: std(Tensor self, bool unbiased)
   self: var_backward(grad / (result * 2), self, unbiased)
 
@@ -610,7 +656,11 @@
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
 
-- name: sub(Tensor self, Tensor other, *, Scalar alpha)
+- name: s_native_sub(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: -grad * alpha
+
+- name: th_sub(Tensor self, Tensor other, *, Scalar alpha)
   self: grad
   other: -grad * alpha
 
@@ -629,6 +679,9 @@
 - name: t(Tensor self)
   self: grad.t()
 
+- name: flip(Tensor self, IntList dims)
+  self: grad.flip(dims)
+
 - name: take(Tensor self, Tensor index)
   self: zeros_like(self).put_(index, grad, true)
 
@@ -639,12 +692,15 @@
   self: _tanh_backward(grad, result)
 
 - name: topk(Tensor self, int64_t k, int64_t dim, bool largest, bool sorted)
-  self: select_backward(grad, dim, indices, self.sizes(), true)
+  self: index_select_backward(grad, dim, indices, self.sizes(), true)
 
 - name: trace(Tensor self)
   self: trace_backward(grad, self.sizes())
 
 - name: transpose(Tensor self, int64_t dim0, int64_t dim1)
+  self: grad.transpose(dim0, dim1)
+
+- name: transpose_(Tensor self, int64_t dim0, int64_t dim1)
   self: grad.transpose(dim0, dim1)
 
 - name: tril(Tensor self, int64_t diagonal)
@@ -669,9 +725,12 @@
   self: not_implemented("_unique")
 
 - name: _unsafe_view(Tensor self, IntList size)
-  self: grad.contiguous().view(self.sizes())
+  self: grad.reshape(self.sizes())
 
 - name: unsqueeze(Tensor self, int64_t dim)
+  self: grad.squeeze(dim)
+
+- name: unsqueeze_(Tensor self, int64_t dim)
   self: grad.squeeze(dim)
 
 - name: var(Tensor self, bool unbiased)
@@ -681,7 +740,7 @@
   self: var_backward(grad, self, dim, unbiased, keepdim)
 
 - name: view(Tensor self, IntList size)
-  self: grad.contiguous().view(self.sizes())
+  self: grad.reshape(self.sizes())
 
 - name: _s_where(Tensor condition, Tensor self, Tensor other)
   self: where(condition, grad, zeros_like(grad))
@@ -690,7 +749,7 @@
 - name: zero_(Tensor self)
   self: zeros_like(grad)
 
-- name: _sparse_mask(Tensor self, SparseTensor mask)
+- name: _sparse_mask(Tensor self, SparseTensorRef mask)
   self: not_implemented("_sparse_mask")
   mask: not_implemented("_sparse_mask")
 
@@ -718,6 +777,7 @@
 
 - name: kl_div_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: kl_div_backward(grad, self, target, size_average, reduce)
+  target: kl_div_target_backward(grad, self, target, size_average, reduce)
 
 - name: l1_loss_forward(Tensor self, Tensor target, bool size_average, bool reduce)
   self: l1_loss_backward(grad, self, target, size_average, reduce)
@@ -752,8 +812,12 @@
 - name: glu_forward(Tensor self, int64_t dim)
   self: glu_backward(grad, self, dim)
 
-- name: hardshrink_forward(Tensor self, Scalar lambd)
+- name: hardshrink(Tensor self, Scalar lambd)
   self: hardshrink_backward(grad, self, lambd)
+
+- name: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd)
+  grad_out: hardshrink_backward(grad, self, lambd)
+  self: zeros_like(grad)
 
 - name: hardtanh_forward(Tensor self, Scalar min_val, Scalar max_val)
   self: hardtanh_backward(grad, self, min_val, max_val)
@@ -952,10 +1016,6 @@
   grad_output: glu_double_backward_grad_output(grad, self, dim)
   self: glu_double_backward(grad, grad_output, self, dim)
 
-- name: hardshrink_backward(Tensor grad_output, Tensor self, Scalar lambd)
-  grad_output: hardshrink_backward(grad, self, lambd)
-  self: zeros_like(grad)
-
 - name: hardtanh_backward(Tensor grad_output, Tensor self, Scalar min_val, Scalar max_val)
   grad_output: hardtanh_backward(grad, self, min_val, max_val)
   self: zeros_like(grad)
@@ -963,6 +1023,7 @@
 - name: kl_div_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
   grad_output: kl_div_double_backward_grad_output(grad, self, target, size_average, reduce)
   self: zeros_like(grad)
+  target: zeros_like(grad)
 
 - name: l1_loss_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce)
   grad_output: l1_loss_double_backward_grad_output(grad, self, target, size_average, reduce)

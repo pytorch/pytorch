@@ -1,5 +1,5 @@
 #include "torch/csrc/jit/import.h"
-#include "torch/csrc/onnx/onnx.pb.h"
+#include "torch/csrc/onnx/onnx.npb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 
@@ -9,7 +9,7 @@
 #include <vector>
 #include <string>
 
-#include "third_party/nanopb/pb_decode.h"
+#include <pb_decode.h>
 
 namespace torch { namespace jit {
 

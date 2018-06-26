@@ -1,5 +1,5 @@
-#ifndef NOM_CONVERTERS_CAFFE2_H
-#define NOM_CONVERTERS_CAFFE2_H
+#ifndef CAFFE2_OPT_CONVERTER_H
+#define CAFFE2_OPT_CONVERTER_H
 
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
@@ -16,6 +16,7 @@ public:
   Caffe2Annotation() : Annotation(AnnotationKind::Caffe2) {}
   Caffe2Annotation(std::string device)
       : Annotation(AnnotationKind::Caffe2), Device(device) {}
+  virtual ~Caffe2Annotation() {}
 
   void setDevice(std::string device) { Device = device; }
   const std::string getDevice() const { return Device; }
@@ -55,4 +56,4 @@ std::unique_ptr<nom::repr::NeuralNetOperator> convertToOperatorDef(caffe2::Opera
 } // namespace caffe2 
 
 
-#endif // NOM_CONVERTERS_CAFFE2_H
+#endif // CAFFE2_OPT_CONVERTER_H

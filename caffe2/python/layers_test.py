@@ -613,6 +613,17 @@ class TestLayers(LayersTestCase):
             ]
         )
 
+    def testDistillBatchLRLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float64, (1,)))),
+            ('logit', schema.Scalar((np.float32, (2,)))),
+            ('teacher_label', schema.Scalar((np.float32(1,)))),
+            ('weight', schema.Scalar((np.float64, (1,))))
+        ))
+        loss = self.model.BatchDistillLRLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+
     def testBatchLRLoss(self):
         input_record = self.new_record(schema.Struct(
             ('label', schema.Scalar((np.float64, (1,)))),
@@ -757,6 +768,20 @@ class TestLayers(LayersTestCase):
 
         schema.FeedRecord(input_record, [X])
         workspace.RunNetOnce(predict_net)
+
+    @given(
+        X=hu.arrays(dims=[2, 5, 6]),
+    )
+    def testLayerNormalization(self, X):
+        input_record = self.new_record(schema.Scalar((np.float32, (5, 6,))))
+        schema.FeedRecord(input_record, [X])
+        ln_output = self.model.LayerNormalization(input_record)
+        self.assertEqual(schema.Scalar((np.float32, (5, 6,))), ln_output)
+        self.model.output_schema = schema.Struct()
+
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
 
     @given(
         X=hu.arrays(dims=[5, 2]),
@@ -1843,3 +1868,66 @@ class TestLayers(LayersTestCase):
     )
     def testLabelSmoothForBinaryProbLabel(self, bsz, gc, dc):
         self._testLabelSmooth(2, True, bsz)
+
+    @given(
+        num_inputs=st.integers(min_value=2, max_value=10),
+        batch_size=st.integers(min_value=2, max_value=10),
+        input_dim=st.integers(min_value=5, max_value=10),
+        seed=st.integers(1, 10),
+    )
+    def testBlobWeightedSum(self, num_inputs, batch_size, input_dim, seed):
+
+        def get_blob_weighted_sum():
+            weights = []
+            for i in range(num_inputs):
+                w_blob_name = 'blob_weighted_sum/w_{0}'.format(i)
+                assert workspace.HasBlob(w_blob_name), (
+                    "cannot fine blob {}".format(w_blob_name)
+                )
+                w = workspace.FetchBlob(w_blob_name)
+                weights.append(w)
+
+            result = np.sum([
+                input_data[idx] * weights[idx] for idx in range(num_inputs)
+            ], axis=0)
+            return result
+
+        np.random.seed(seed)
+        expected_output_schema = schema.Scalar((np.float32, (input_dim,)))
+        input_schema = schema.Tuple(
+            *[expected_output_schema for _ in range(num_inputs)]
+        )
+        input_data = [
+            np.random.random((batch_size, input_dim)).astype(np.float32)
+            for _ in range(num_inputs)
+        ]
+        input_record = self.new_record(input_schema)
+        schema.FeedRecord(input_record, input_data)
+
+        # test output schema
+        ws_output = self.model.BlobWeightedSum(input_record)
+        self.assertEqual(len(self.model.layers), 1)
+        assert schema.equal_schemas(ws_output, expected_output_schema)
+
+        # test train net
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+        self.run_train_net_forward_only()
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+        # test eval net
+        eval_net = self.get_eval_net()
+        workspace.RunNetOnce(eval_net)
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+        # test pred net
+        pred_net = self.get_predict_net()
+        workspace.RunNetOnce(pred_net)
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)

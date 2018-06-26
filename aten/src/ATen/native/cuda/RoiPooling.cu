@@ -1,5 +1,9 @@
+#include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
+#include "ATen/Error.h"
+
 #include <cfloat>
+#include <tuple>
 
 namespace at {
 namespace native {

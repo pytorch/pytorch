@@ -2,6 +2,8 @@
 
 #include <fstream>
 
+#include <torch/tensor.h>
+
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
 
@@ -129,7 +131,7 @@ namespace cereal {
 namespace agimpl {
 
 template <class Archive>
-void saveBinary(Archive& archive, void const* data, std::size_t size) {
+void saveBinary(Archive& archive, void const* data, size_t size) {
   // In general, there's no direct `saveBinary`-like method on archives
   std::vector<char> v(
       static_cast<char const*>(data), static_cast<char const*>(data) + size);
@@ -137,13 +139,13 @@ void saveBinary(Archive& archive, void const* data, std::size_t size) {
 }
 template <>
 inline void
-saveBinary(BinaryOutputArchive& archive, void const* data, std::size_t size) {
+saveBinary(BinaryOutputArchive& archive, void const* data, size_t size) {
   // Writes to output stream without extra copy
   archive.saveBinary(data, size);
 }
 
 template <class Archive>
-void loadBinary(Archive& archive, void* data, std::size_t size) {
+void loadBinary(Archive& archive, void* data, size_t size) {
   // In general, there's no direct `loadBinary`-like method on archives
   std::vector<char> v(size);
   archive(v);
@@ -151,7 +153,7 @@ void loadBinary(Archive& archive, void* data, std::size_t size) {
 }
 template <>
 inline void
-loadBinary(BinaryInputArchive& archive, void* data, std::size_t size) {
+loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
   // Read from input stream without extra copy
   archive.loadBinary(data, size);
 }
@@ -160,13 +162,13 @@ loadBinary(BinaryInputArchive& archive, void* data, std::size_t size) {
 
 // Gradients will not be saved for variables
 template <class Archive>
-void save(Archive& archive, at::Tensor const& tensor) {
+void save(Archive& archive, torch::Tensor const& tensor) {
   if (!tensor.defined()) {
     int32_t typeId = ::torch::detail::scalarTypeId(at::ScalarType::Undefined);
     archive(CEREAL_NVP(typeId));
     return;
   } else {
-    int32_t typeId = ::torch::detail::scalarTypeId(tensor.type().scalarType());
+    int32_t typeId = ::torch::detail::scalarTypeId(tensor.data().type().scalarType());
     archive(CEREAL_NVP(typeId));
   }
   auto sizes = std::vector<int64_t>();
@@ -175,13 +177,13 @@ void save(Archive& archive, at::Tensor const& tensor) {
     sizes.push_back(s);
   }
   auto contig = tensor.toBackend(at::kCPU).contiguous();
-  int32_t backend = ::torch::detail::backendId(tensor.type().backend());
+  int32_t backend = ::torch::detail::backendId(tensor.data().type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));
   agimpl::saveBinary(
       archive,
       contig.data_ptr(),
-      tensor.numel() * tensor.type().elementSizeInBytes());
+      tensor.numel() * tensor.data().type().elementSizeInBytes());
 }
 
 /**
@@ -191,13 +193,13 @@ void save(Archive& archive, at::Tensor const& tensor) {
  * 2. Otherwise, overwrite the provided tensor with the right type and backend
  **/
 template <class Archive>
-void load(Archive& archive, at::Tensor& tensor) {
+void load(Archive& archive, torch::Tensor& tensor) {
   at::ScalarType type;
   int32_t typeId;
   archive(CEREAL_NVP(typeId));
   type = ::torch::detail::scalarTypeFromId(typeId);
   if (type == at::ScalarType::Undefined) {
-    tensor = at::Tensor();
+    tensor = torch::Tensor();
     return;
   }
 
@@ -207,14 +209,14 @@ void load(Archive& archive, at::Tensor& tensor) {
   archive(CEREAL_NVP(backendId), CEREAL_NVP(sizes));
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
-  if (!tensor.defined() || tensor.type().scalarType() != type) {
-    tensor = at::getType(backend, type).tensor();
+  if (!tensor.defined() || tensor.data().type().scalarType() != type) {
+    tensor = torch::empty({}, at::getType(backend, type));
   }
-  tensor.resize_(sizes);
+  tensor.data().resize_(sizes);
 
   if (tensor.type().is_cuda()) {
     // should actually use cudamemcpy probably
-    auto cputensor = at::CPU(tensor.type().scalarType()).tensor(sizes);
+    auto cputensor = at::empty(sizes, tensor.data().type().scalarType());
     agimpl::loadBinary(
         archive,
         cputensor.data_ptr(),
@@ -224,13 +226,7 @@ void load(Archive& archive, at::Tensor& tensor) {
     agimpl::loadBinary(
         archive,
         tensor.data_ptr(),
-        tensor.numel() * tensor.type().elementSizeInBytes());
+        tensor.numel() * tensor.data().type().elementSizeInBytes());
   }
 }
-
-template <class Archive>
-void load(Archive& archive, tag::Variable& var) {
-  load(archive, var.data());
-}
-
 } // namespace cereal

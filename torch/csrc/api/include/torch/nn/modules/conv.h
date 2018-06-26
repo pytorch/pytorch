@@ -1,63 +1,62 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/expanding_array.h>
+#include <torch/nn/cloneable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
-#include <cstdint>
+#include <cstddef>
+#include <vector>
 
-namespace torch { namespace nn {
-class Conv : public torch::nn::CloneableModule<Conv> {
- public:
-  // TODO: Create a type that can be implicitly constructed from a vector, or an
-  // int, and does the right thing. Then we can remove one overload here.
-  Conv(
-      uint32_t Nd,
-      uint32_t in_chan,
-      uint32_t out_chan,
-      IntVec ks,
-      bool transposed = false,
-      bool with_bias = true,
-      int groups = 1);
+namespace torch {
+namespace nn {
+template <size_t D>
+struct ConvOptions {
+  ConvOptions(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<D> kernel_size);
 
-  Conv(
-      uint32_t Nd,
-      uint32_t in_chan,
-      uint32_t out_chan,
-      int ks,
-      bool transposed = false,
-      bool with_bias = true,
-      int groups = 1);
-
-  variable_list forward(variable_list) override;
-
-  Conv& stride(size_t value);
-  Conv& padding(size_t value);
-  Conv& dilation(size_t value);
-  Conv& output_padding(size_t value);
-
-  Variable weight, bias;
-  uint32_t Nd_;
-  uint32_t in_channels_;
-  uint32_t out_channels_;
-  bool transposed_;
-  int groups_;
-  IntVec ks_;
-  IntVec stride_;
-  IntVec padding_;
-  IntVec dilation_;
-  bool dilated_;
-  IntVec output_padding_;
+  TORCH_ARG(int64_t, input_channels);
+  TORCH_ARG(int64_t, output_channels);
+  TORCH_ARG(ExpandingArray<D>, kernel_size);
+  TORCH_ARG(ExpandingArray<D>, stride) = 1;
+  TORCH_ARG(ExpandingArray<D>, padding) = 0;
+  TORCH_ARG(ExpandingArray<D>, dilation) = 1;
+  TORCH_ARG(ExpandingArray<D>, output_padding) = 0;
+  TORCH_ARG(bool, transposed) = false;
+  TORCH_ARG(bool, with_bias) = true;
+  TORCH_ARG(int64_t, groups) = 1;
 };
 
-#define CONV_D(D)                                                          \
-  class Conv##D##d : public Conv {                                         \
-   public:                                                                 \
-    Conv##D##d(uint32_t i, uint32_t o, int ks) : Conv((D), i, o, ks) {}    \
-    Conv##D##d(uint32_t i, uint32_t o, IntVec ks) : Conv((D), i, o, ks) {} \
-  }
+template <size_t D, typename Derived>
+class ConvImpl : public torch::nn::Cloneable<Derived> {
+ public:
+  explicit ConvImpl(ConvOptions<D> options);
+
+  void reset() override;
+  const ConvOptions<D>& options() const noexcept;
+
+ protected:
+  Tensor weight_;
+  Tensor bias_;
+  ConvOptions<D> options_;
+};
+
+#define CONV_D(D)                                               \
+  class Conv##D##dImpl : public ConvImpl<D, Conv##D##dImpl> {   \
+   public:                                                      \
+    using ConvImpl<D, Conv##D##dImpl>::ConvImpl;                \
+    std::vector<Tensor> forward(std::vector<Tensor> input); \
+  };                                                            \
+  using Conv##D##dOptions = ConvOptions<D>;                     \
+  TORCH_MODULE(Conv##D##d)
 
 CONV_D(1);
 CONV_D(2);
 CONV_D(3);
 
 #undef CONV_D
-}} // namespace torch::nn
+
+} // namespace nn
+} // namespace torch

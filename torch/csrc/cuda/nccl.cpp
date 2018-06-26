@@ -1,7 +1,6 @@
 #include "nccl.h"
 #include "torch/csrc/cuda/device_set.h"
 #include "torch/csrc/utils/functional.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/hash.h"
 
 #include <unordered_map>
@@ -34,6 +33,16 @@ struct NcclCommList {
   }
   NcclCommList(NcclCommList&& foo) = default;
   ~NcclCommList() {
+    /*
+     * TODO(T30279827) Temporarily disable calling ncclCommDestroy
+     * Calling ncclCommDestroy while program exiting is undefined
+     * according to Nvidia, and lead to segfault in NCCL 2
+     * (whether it is called before or after the CUDA runtime destructor).
+     * Temporarily disable it in destructor to avoid segfault.
+     * Following up with Nvidia for long term solution.
+     */
+    return;
+
     if (comms) {
       for (int i = 0; i < ndevices; i++) {
         int dummy_var;
@@ -142,7 +151,7 @@ void _check_inputs(TensorList inputs, TensorList outputs, int input_multiplier, 
 } // namespace detail
 
 bool is_available(TensorList tensors) {
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   device_set devices;
   for (auto & tensor : tensors) {
     auto & type = tensor.type();
@@ -164,7 +173,7 @@ bool is_available(TensorList tensors) {
 std::uint64_t version() {
 #if defined(NCCL_MAJOR)
   return NCCL_MAJOR * 1000 + NCCL_MINOR * 100 + NCCL_PATCH;
-#elif defined(WITH_NCCL)
+#elif defined(USE_NCCL)
   return 1000;
 #else
   return 0;
@@ -172,7 +181,7 @@ std::uint64_t version() {
 }
 
 void broadcast(TensorList tensors, const stream_list& streams, const comm_list& user_comms) {
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   using namespace torch::cuda::nccl::detail;
   _check_inputs(tensors, tensors, 1, 1);
   ncclDataType_t data_type = _get_data_type(tensors[0].type());
@@ -180,10 +189,10 @@ void broadcast(TensorList tensors, const stream_list& streams, const comm_list& 
 
   std::lock_guard<std::mutex> free_mutex(*(THCCachingAllocator_getCudaFreeMutex()));
   const auto comms = user_comms.empty() ? _get_communicators(tensors) : ArrayRef<ncclComm_t>(user_comms);
-  AutoGPU gpu_guard;
+  at::DeviceGuard device_guard;
   AutoNcclGroup nccl_group_guard;
   for (size_t i = 0, num_tensors = tensors.size(); i < num_tensors; i++) {
-    gpu_guard.setDevice(tensors[i].get_device());
+    device_guard.set_index(tensors[i].get_device());
     // TODO: use current stream
     const auto stream = (streams.empty() || !streams[i]) ? NULL : streams[i]->stream;
     CHECK(ncclBcast(tensors[i].data_ptr(), numel, data_type, 0, comms[i], stream));

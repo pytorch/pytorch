@@ -47,8 +47,33 @@ void adam_compute(
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    float ng = lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
-    nw[i] = w[i] + ng;
+    nw[i] = w[i] + lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
+  }
+}
+
+template <typename Context>
+void adam_compute_output_grad(
+    int N,
+    const float* w,
+    const float* g,
+    const float* m,
+    const float* v,
+    float* nw,
+    float* nm,
+    float* nv,
+    float* ng,
+    float beta1,
+    float beta2,
+    float eps_hat,
+    float correction,
+    const float* lr,
+    Context* /*context*/) {
+  for (auto i = 0; i < N; ++i) {
+    float gi = g[i];
+    float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
+    float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
+    float ngi = ng[i] = correction * mi / (std::sqrt(vi) + eps_hat);
+    nw[i] = w[i] + lr[0] * ngi;
   }
 }
 
@@ -78,21 +103,42 @@ class AdamOp final : public Operator<Context> {
     const auto t = iter + 1;
     const auto correction =
         std::sqrt(T(1.) - std::pow(beta2_, t)) / (T(1.) - std::pow(beta1_, t));
-    adam_compute<Context>(
-        Input(GRAD).size(),
-        Input(PARAM).template data<T>(),
-        Input(GRAD).template data<T>(),
-        Input(MOMENT_1).template data<T>(),
-        Input(MOMENT_2).template data<T>(),
-        Output(OUTPUT_PARAM)->template mutable_data<T>(),
-        Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
-        Output(OUTPUT_MOMENT_2)->template mutable_data<T>(),
-        beta1_,
-        beta2_,
-        epsilon_,
-        correction,
-        Input(LR).template data<T>(),
-        &context_);
+    if (OutputSize() == 3) {
+      adam_compute<Context>(
+          Input(GRAD).size(),
+          Input(PARAM).template data<T>(),
+          Input(GRAD).template data<T>(),
+          Input(MOMENT_1).template data<T>(),
+          Input(MOMENT_2).template data<T>(),
+          Output(OUTPUT_PARAM)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_2)->template mutable_data<T>(),
+          beta1_,
+          beta2_,
+          epsilon_,
+          correction,
+          Input(LR).template data<T>(),
+          &context_);
+    } else {
+      Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
+      adam_compute_output_grad<Context>(
+          Input(GRAD).size(),
+          Input(PARAM).template data<T>(),
+          Input(GRAD).template data<T>(),
+          Input(MOMENT_1).template data<T>(),
+          Input(MOMENT_2).template data<T>(),
+          Output(OUTPUT_PARAM)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_1)->template mutable_data<T>(),
+          Output(OUTPUT_MOMENT_2)->template mutable_data<T>(),
+          Output(OUTPUT_GRAD)->template mutable_data<T>(),
+          beta1_,
+          beta2_,
+          epsilon_,
+          correction,
+          Input(LR).template data<T>(),
+          &context_);
+    }
+
     return true;
   }
 
@@ -101,7 +147,7 @@ class AdamOp final : public Operator<Context> {
   T beta2_{0.999};
   T epsilon_{1e-8};
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, GRAD, LR, ITER);
-  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2);
+  OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2, OUTPUT_GRAD);
 };
 
 template <typename T, class Context>
@@ -327,4 +373,5 @@ class RowWiseSparseAdamOp final : public Operator<Context> {
   INPUT_TAGS(PARAM, MOMENT_1, MOMENT_2, INDICES, GRAD, LR, ITER);
   OUTPUT_TAGS(OUTPUT_PARAM, OUTPUT_MOMENT_1, OUTPUT_MOMENT_2);
 };
+
 } // namespace caffe2

@@ -19,6 +19,9 @@ TH_API void THVector_(normal_fill)(real *data,
                                    struct THGenerator *generator,
                                    const real mean,
                                    const real stddev);
+#ifndef TH_REAL_IS_INT
+TH_API void THVector_(cvtFromInt)(real *y, const int *x, const ptrdiff_t n);
+#endif
 
 #if defined(TH_REAL_IS_SHORT) || defined(TH_REAL_IS_INT) || defined(TH_REAL_IS_LONG)
 TH_API void THVector_(abs)(real *y, const real *x, const ptrdiff_t n);

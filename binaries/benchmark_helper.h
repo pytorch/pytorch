@@ -87,5 +87,6 @@ void runNetwork(
     shared_ptr<caffe2::Workspace>,
     caffe2::NetDef&,
     const bool,
+    const bool,
     const int,
     const int);

@@ -82,17 +82,65 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(Pow)
     .NumInputs(1, 2)
     .NumOutputs(1)
-    .Arg("exponent", "The exponent of the power function.")
     .AllowInplace({{0, 0}, {1, 0}})
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
-Pow takes input data (Tensor<T>) and an argument exponent, which can be a
-scalar or another tensor. It produces one output data (Tensor<T>), where
-the function `f(x) = x^exponent` is applied to the data tensor elementwise.
+The *Pow* op takes an input data tensor $X$ and an exponent parameter *exponent*, which can be a scalar or another tensor. As output, it produces a single output data tensor $Y$, where the function $f(x) = x^{exponent}$ has been applied to $X$ elementwise.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pow_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/pow_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Pow",
+    ["X", "exponent"],
+    ["Y"],
+    broadcast=1
+)
+
+workspace.FeedBlob("X", np.array([1,2,3,4,5,6]).astype(np.float32))
+print("X: ", workspace.FetchBlob("X"))
+
+workspace.FeedBlob("exponent", np.array([2]).astype(np.float32))
+print("exponent: ", workspace.FetchBlob("exponent"))
+
+workspace.RunOperatorOnce(op)
+print("Y: ", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:  [1. 2. 3. 4. 5. 6.]
+exponent:  [2.]
+Y:  [ 1.  4.  9. 16. 25. 36.]
+
+```
+
+</details>
+
+
 )DOC")
-    .Input(0, "X", "Input tensor of any shape")
-    .Input(1, "exponent", "The exponent of the power function.")
-    .Output(0, "Y", "Output tensor (same size as X)");
+    .Input(0, "X", "Input data blob to be operated on.")
+    .Input(1, "exponent", "Exponent blob containing the exponent(s) for calculation. Do not use if setting exponent via argument.")
+    .Output(0, "Y", "Output data blob with the same shape as the input.")
+    .Arg("exponent", "The exponent of the power function. Do not use if setting exponent via input.")
+    .Arg("axis", "*(type: int; default: -1)*")
+    .Arg("broadcast", "*(type: bool; default: False)*");
 
 class GetPowGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

@@ -49,6 +49,21 @@ class TestFillerOperator(hu.HypothesisTestCase):
         self.assertTrue(workspace.RunOperatorOnce(op))
         self.assertEqual(workspace.FetchBlob('out'), [2.0])
 
+    @given(**hu.gcs)
+    def test_int64_shape(self, gc, dc):
+        large_dim = 2 ** 31 + 1
+        net = core.Net("test_shape_net")
+        net.UniformFill(
+            [],
+            'out',
+            shape=[0, large_dim],
+            min=0.0,
+            max=1.0,
+        )
+        self.assertTrue(workspace.CreateNet(net))
+        self.assertTrue(workspace.RunNet(net.Name()))
+        self.assertEqual(workspace.blobs['out'].shape, (0, large_dim))
+
     @given(
         shape=hu.dims().flatmap(
             lambda dims: hu.arrays(

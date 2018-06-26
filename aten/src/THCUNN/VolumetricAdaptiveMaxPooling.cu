@@ -80,7 +80,7 @@ __global__ void cunn_VolumetricAdaptiveMaxPooling_updateOutput_kernel(
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
             T val = ptr_input[ih*istrideH + iw*istrideW];
-            if (val > max) {
+            if ((val > max) || THCNumerics<T>::isnan(val)) {
               max = val;
               argmax = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + iw+istartW;
             }

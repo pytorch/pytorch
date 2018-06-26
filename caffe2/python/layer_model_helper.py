@@ -5,7 +5,7 @@ from __future__ import division
 from __future__ import print_function
 from __future__ import unicode_literals
 
-from caffe2.python import core, model_helper, schema, scope, utils
+from caffe2.python import core, model_helper, schema, scope, utils, muji
 from caffe2.python.modeling.parameter_info import (
     ParameterInfo,
 )
@@ -59,6 +59,7 @@ class LayerModelHelper(model_helper.ModelHelper):
 
         self._default_optimizer = None
         self._loss = None
+        self._prediction = []
         self._output_schema = None
 
         self._post_grad_net_modifiers = []
@@ -394,6 +395,15 @@ class LayerModelHelper(model_helper.ModelHelper):
         self._preproc_output_schema = schema
 
     @property
+    def prediction(self):
+        assert self._prediction, "model prediction is empty"
+        return self._prediction
+
+    def add_prediction(self, prediction, weight=1.0):
+        assert prediction is not None, "Added prediction should not be None"
+        self._prediction.append((prediction, weight))
+
+    @property
     def loss(self):
         assert self._loss is not None
         return self._loss
@@ -414,6 +424,11 @@ class LayerModelHelper(model_helper.ModelHelper):
         if self._loss is None:
             self._loss = schema.Struct((name, loss))
         else:
+            # loss could've been set through model.loss directly which could be
+            # a scalar
+            if isinstance(self._loss, schema.Scalar):
+                self._loss = schema.Struct(('unnamed', self._loss))
+
             prefix_base = name + '_auto_'
             index = 0
             prefix = name
@@ -534,12 +549,22 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
+        CPU = muji.OnCPU()
+        # if given, blob_to_device is a map from blob to device_option
+        blob_to_device = blob_to_device or {}
         for param, regularizer in viewitems(self.param_to_reg):
             if regularizer is None or not regularizer.apply_after_optimizer:
                 continue
             assert isinstance(regularizer, Regularizer)
-            regularizer(
-                train_net, train_init_net, param, grad_map.get(str(param)))
+            device = get_param_device(
+                param,
+                grad_map.get(str(param)),
+                param_to_device=blob_to_device,
+                default_device=CPU,
+            )
+            with core.DeviceScope(device):
+                regularizer(
+                    train_net, train_init_net, param, grad_map.get(str(param)))
 
     def apply_post_grad_net_modifiers(
         self,
@@ -577,7 +602,7 @@ class LayerModelHelper(model_helper.ModelHelper):
         grad_map,
         blob_to_device=None,
     ):
-        CPU = core.DeviceOption(caffe2_pb2.CPU)
+        CPU = muji.OnCPU()
         # if given, blob_to_device is a map from blob to device_option
         blob_to_device = blob_to_device or {}
         for param, optimizer in viewitems(self.param_to_optim):

@@ -45,7 +45,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   if (!data || data == Py_None) {
     // For legacy serialization code, create an empty tensor. This is also used
     // by nn.Parameter() with no arguments.
-    auto var = torch::tensor::get_default_tensor_type().tensor();
+    auto var = torch::tensors::get_default_tensor_type().tensor();
     tensor = static_cast<Variable&>(var).data();
   } else if (THPVariable_Check(data)) {
     tensor = ((THPVariable*)data)->cdata.data();
@@ -57,7 +57,7 @@ static PyObject *THPVariable_pynew(PyTypeObject* type, PyObject *args, PyObject 
   Variable var;
   if (grad_fn) {
     auto grad_fn_ = THPFunction_asFunction((THPFunction*)grad_fn);
-    Edge edge(grad_fn_, grad_fn_->bump_inputs());
+    Edge edge(grad_fn_, grad_fn_->add_input_metadata(tensor.type(), tensor.sizes()));
     var = make_variable(std::move(tensor), std::move(edge));
   } else {
     var = make_variable(std::move(tensor), requires_grad);

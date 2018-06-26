@@ -165,7 +165,7 @@ Make sure you continue to pass these flags on subsequent builds.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate 
+When using `python setup.py develop`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -176,12 +176,12 @@ information for the code in `torch/csrc`. More information at:
 
 #### Use Ninja
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project.  If you install the ninja build system with `pip install ninja`, 
+project.  If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
 
 #### Use CCache
 
-Even when dependencies are tracked with file modification, 
+Even when dependencies are tracked with file modification,
 there are many situations where files get rebuilt when a previous
 compilation was exactly the same.
 
@@ -226,9 +226,9 @@ export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
-1. `CUDA_DEBUG=1` will enable CUDA debugging symbols (-g -G). This is particularly
-    helpful in debugging device code. However, it will slow down the build process,
-    so use wisely.
+1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
+    This will be particularly helpful in debugging device code. However, it will
+    slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
 
@@ -247,7 +247,7 @@ than Linux, which are worth keeping in mind when fixing these problems.
    which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
    shared library needs a unique macro name, because symbol visibility is on a per
    shared library basis.)
-   
+
    The upshot is if you see an "unresolved external" error in your Windows build, this
    is probably because you forgot to mark a function with `*_API`.  However, there is
    one important counterexample to this principle: if you want a *templated* function

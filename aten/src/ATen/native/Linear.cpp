@@ -299,7 +299,7 @@ Tensor einsum(std::string eqn, TensorList tensors) {
     // finally, we insert dimensions for idxes not in the operand 
     for (size_t dim = 0; dim < idx_to_dim.size(); dim++) {
       if (idx_to_dim[dim] == -1) {
-        preprocessed_op.unsqueeze_(dim);
+        preprocessed_op = preprocessed_op.unsqueeze(dim);
       }
     }
     preprocessed_operands.push_back(preprocessed_op);

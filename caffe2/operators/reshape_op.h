@@ -58,7 +58,7 @@ class ReshapeOp : public Operator<Context> {
     }
 
     // Copy over the dimensions for those that are specified zero.
-    for (int i = 0; i < actual_new_shape.size(); ++i) {
+    for (int i = 0; i < actual_new_shape.size() && i < input.ndim(); ++i) {
       if (actual_new_shape[i] == 0) {
         actual_new_shape[i] = input.dim(i);
       }
@@ -81,8 +81,17 @@ class ReshapeOp : public Operator<Context> {
         size *= dim;
       }
     }
+    if (size == 0 && total_size != 0) {
+      CAFFE_THROW("Can not reshape a non-zero size (", total_size, ") tensor to zero size.");
+    }
 
     if (unknown_idx != -1) {
+      CAFFE_ENFORCE_NE(
+          size,
+          0,
+          "New shape at dim ",
+          unknown_idx,
+          " can not be inferred since new size is zero.");
       CAFFE_ENFORCE(
           total_size % size == 0,
           "Argument `shape` does not agree with the input data.",

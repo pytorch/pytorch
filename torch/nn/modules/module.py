@@ -296,17 +296,22 @@ class Module(object):
 
         This can be called as
 
-        .. function:: to(device)
+        .. function:: to(device=None, dtype=None, non_blocking=False)
 
-        .. function:: to(dtype)
+        .. function:: to(dtype, non_blocking=False)
 
-        .. function:: to(device, dtype)
+        .. function:: to(tensor, non_blocking=False)
 
-        It has similar signature as :meth:`torch.Tensor.to`, but does not take
-        a Tensor and only takes in floating point :attr:`dtype` s. In
-        particular, this method will only cast the floating point parameters and
-        buffers to :attr:`dtype`. It will still move the integral parameters and
-        buffers to :attr:`device`, if that is given. See below for examples.
+        Its signature is similar to :meth:`torch.Tensor.to`, but only accepts
+        floating point desired :attr:`dtype` s. In addition, this method will
+        only cast the floating point parameters and buffers to :attr:`dtype`
+        (if given). The integral parameters and buffers will be moved
+        :attr:`device`, if that is given, but with dtypes unchanged. When
+        :attr:`non_blocking` is set, it tries to convert/move asynchronously
+        with respect to the host if possible, e.g., moving CPU Tensors with
+        pinned memory to CUDA devices.
+
+        See below for examples.
 
         .. note::
             This method modifies the module in-place.
@@ -316,6 +321,8 @@ class Module(object):
                 and buffers in this module
             dtype (:class:`torch.dtype`): the desired floating point type of
                 the floating point parameters and buffers in this module
+            tensor (torch.Tensor): Tensor whose dtype and device are the desired
+                dtype and device for all parameters and buffers in this module
 
         Returns:
             Module: self
@@ -334,7 +341,7 @@ class Module(object):
             tensor([[ 0.1913, -0.3420],
                     [-0.5113, -0.2325]], dtype=torch.float64)
             >>> gpu1 = torch.device("cuda:1")
-            >>> linear.to(gpu1, dtype=torch.half)
+            >>> linear.to(gpu1, dtype=torch.half, non_blocking=True)
             Linear(in_features=2, out_features=2, bias=True)
             >>> linear.weight
             Parameter containing:
@@ -349,48 +356,18 @@ class Module(object):
                     [-0.5112, -0.2324]], dtype=torch.float16)
 
         """
-        def arg_error():
-            arg_reprs = list(repr(arg) for arg in args)
-            for key, val in kwargs.items():
-                arg_reprs.append("{}={}".format(key, val))
-            return ValueError('module.to expects .to(device), .to(dtype) or '
-                              '.to(device, dtype), where dtype is a floating '
-                              'point type, but got .to({})'
-                              .format(", ".join(arg_reprs)))
 
-        nargs = len(args) + len(kwargs)
-        device = dtype = None
-        if nargs < 1 or nargs > 2:
-            raise arg_error()
-        else:
-            for key, val in kwargs.items():
-                if key == 'dtype':
-                    dtype = kwargs['dtype']
-                elif 'device' in kwargs:
-                    device = kwargs['device']
-                else:
-                    raise arg_error()
-            for arg in args:
-                if isinstance(arg, torch.dtype):
-                    if dtype is not None:
-                        raise arg_error()
-                    dtype = arg
-                else:
-                    if device is not None:
-                        raise arg_error()
-                    device = arg
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
 
         if dtype is not None:
             if not dtype.is_floating_point:
-                raise arg_error()
+                raise TypeError('nn.Module.to only accepts floating point '
+                                'dtypes, but got desired dtype={}'.format(dtype))
 
-            if device is None:
-                return self._apply(lambda t: t.to(dtype) if t.is_floating_point() else t)
-            else:
-                return self._apply(lambda t: t.to(device, dtype) if t.is_floating_point() else t.to(device))
+        def convert(t):
+            return t.to(device, dtype if t.is_floating_point() else None, non_blocking)
 
-        else:
-            return self._apply(lambda t: t.to(device))
+        return self._apply(convert)
 
     def register_backward_hook(self, hook):
         r"""Registers a backward hook on the module.
@@ -610,7 +587,7 @@ class Module(object):
                 destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
-                destination[prefix + name] = buf
+                destination[prefix + name] = buf if keep_vars else buf.data
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
@@ -652,6 +629,14 @@ class Module(object):
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+
+                if input_param.shape != param.shape:
+                    # local shape should match the one in checkpoint
+                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
+                                      'where the shape is {} in current model.'
+                                      .format(key, param.shape, input_param.shape))
+                    continue
+
                 if isinstance(input_param, Parameter):
                     # backwards compatibility for serialized parameters
                     input_param = input_param.data

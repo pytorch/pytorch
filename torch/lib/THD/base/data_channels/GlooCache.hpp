@@ -9,7 +9,7 @@
 #include "gloo/allreduce_ring.h"
 #include "gloo/barrier_all_to_all.h"
 #include "gloo/broadcast_one_to_all.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_halving_doubling.h"
 #include "gloo/cuda_allreduce_halving_doubling_pipelined.h"
@@ -19,7 +19,7 @@
 #include "gloo/rendezvous/store.h"
 #include "gloo/rendezvous/prefix_store.h"
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
 #endif
@@ -37,8 +37,8 @@ using key_type = std::tuple<
   THDGroup,       // group
   DeviceType,     // tensors device type
   int,            // CUDA stream id used in the algorithm
-  std::size_t,    // input buffer bytes
-  std::size_t,    // output buffer bytes
+  size_t,    // input buffer bytes
+  size_t,    // output buffer bytes
   THDReduceOp,    // reduce op
   rank_type       // src/dest rank
 >;
@@ -47,7 +47,7 @@ const DeviceType UNUSED_DEVICE = DeviceType::LAST;
 const THDReduceOp UNUSED_OP = THDReduceMIN;
 const int UNUSED_STREAM = -1;
 const rank_type UNUSED_RANK = -1;
-const std::size_t UNUSED_BYTES = 0;
+const size_t UNUSED_BYTES = 0;
 
 // Forward declaration
 template<CollectiveType D, typename T>
@@ -137,11 +137,11 @@ struct GlooCache {
   }
 
   // NOTE: this function needs to be thread safe
-  std::shared_ptr<buffer_type> createBuffer(std::size_t bytes, DeviceType device) const {
+  std::shared_ptr<buffer_type> createBuffer(size_t bytes, DeviceType device) const {
     if (device == DeviceType::CPU) {
       return std::shared_ptr<buffer_type>(new char[bytes],
                                           std::default_delete<char[]>());
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (device == DeviceType::CUDA) {
       buffer_type *buf;
       THCudaCheck(THCudaMalloc(THDGetCudaState(), (void**)&buf, bytes));
@@ -178,13 +178,13 @@ struct GlooCache {
   }
 
   static void memcpy_input(value_type& info, at::Tensor& t) {
-    std::uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+    uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
     auto t_dev = getDeviceType(t);
     auto input_buffer = GlooCache::input_buffer(info).get();
 
     if (t_dev == DeviceType::CPU) {
       std::memcpy(input_buffer, t.data_ptr(), tensor_bytes);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
       THCudaCheck(cudaMemcpyAsync(input_buffer, t.data_ptr(), tensor_bytes,
@@ -196,13 +196,13 @@ struct GlooCache {
   }
 
   static void memcpy_output(value_type& info, at::Tensor& t) {
-    std::uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
+    uint64_t tensor_bytes = t.type().elementSizeInBytes() * t.numel();
     auto t_dev = getDeviceType(t);
     auto output_buffer = GlooCache::output_buffer(info).get();
 
     if (t_dev == DeviceType::CPU) {
       std::memcpy(t.data_ptr(), output_buffer, tensor_bytes);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
       THCudaCheck(cudaMemcpyAsync(t.data_ptr(), output_buffer, tensor_bytes,
@@ -255,7 +255,7 @@ const ::gloo::ReductionFunction<T>* THDToGlooReduceOp(THDReduceOp op) {
 template<typename T>
 struct algorithm_spec<CollectiveType::ALL_GATHER, T> {
   static GlooCache::key_type key(
-    THDGroup group_id, DeviceType device, std::size_t input_bytes, std::size_t output_bytes, std::size_t unused_count
+    THDGroup group_id, DeviceType device, size_t input_bytes, size_t output_bytes, size_t unused_count
   ) {
     return std::make_tuple(CollectiveType::ALL_GATHER, group_id, device, UNUSED_STREAM,
                            input_bytes, output_bytes, UNUSED_OP, UNUSED_RANK);
@@ -263,7 +263,7 @@ struct algorithm_spec<CollectiveType::ALL_GATHER, T> {
 
   static GlooCache::value_type create(GlooCache& cache,
     const DataChannelGloo::Group& group, const std::string& store_prefix,
-    DeviceType device, std::size_t input_bytes, std::size_t output_bytes, std::size_t count
+    DeviceType device, size_t input_bytes, size_t output_bytes, size_t count
   ) {
     auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
@@ -292,8 +292,8 @@ struct algorithm_spec<CollectiveType::ALL_GATHER, T> {
 template<typename T>
 struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
   static GlooCache::key_type key(
-    THDGroup group_id, DeviceType device, std::size_t input_bytes,
-    std::size_t unused_count, THDReduceOp op
+    THDGroup group_id, DeviceType device, size_t input_bytes,
+    size_t unused_count, THDReduceOp op
   ) {
     int stream = UNUSED_STREAM;
     if (device == DeviceType::CUDA) {
@@ -306,7 +306,7 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
 
   static GlooCache::value_type create(GlooCache& cache,
     const DataChannelGloo::Group& group, const std::string& store_prefix,
-    DeviceType device, std::size_t input_bytes, std::size_t count, THDReduceOp op
+    DeviceType device, size_t input_bytes, size_t count, THDReduceOp op
   ) {
     auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
@@ -318,14 +318,14 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,
         THDToGlooReduceOp<T>(op));
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (device == DeviceType::CUDA) {
       if (op != THDReduceSUM) {
         throw std::runtime_error("Gloo backend only supports sum op for CUDA all reduce");
       }
       auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
       // Only enable GPU direct if the device supports it
       if (context->getDevice()->hasGPUDirect()) {
         algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T,
@@ -362,8 +362,8 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
 template<typename T>
 struct algorithm_spec<CollectiveType::BROADCAST, T> {
   static GlooCache::key_type key(
-    THDGroup group_id, DeviceType device, std::size_t input_bytes,
-    std::size_t unused_count, rank_type src_rank
+    THDGroup group_id, DeviceType device, size_t input_bytes,
+    size_t unused_count, rank_type src_rank
   ) {
     int stream = UNUSED_STREAM;
     if (device == DeviceType::CUDA) {
@@ -376,7 +376,7 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
 
   static GlooCache::value_type create(GlooCache& cache,
     const DataChannelGloo::Group& group, const std::string& store_prefix,
-    DeviceType device, std::size_t input_bytes, std::size_t count, rank_type src_rank
+    DeviceType device, size_t input_bytes, size_t count, rank_type src_rank
   ) {
     auto context = cache.createContext(group, store_prefix);
     auto input_buffer = cache.createBuffer(input_bytes, device);
@@ -388,11 +388,11 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,
         src_rank);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (device == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
       // Only enable GPU direct if the device supports it
       if (context->getDevice()->hasGPUDirect()) {
         algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,

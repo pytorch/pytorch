@@ -1,13 +1,21 @@
 #pragma once
 
+// ${generated_comment}
+
 #include "ATen/Scalar.h"
 #include "ATen/Type.h"
 #include "ATen/Tensor.h"
 #include "ATen/Storage.h"
 #include "ATen/Generator.h"
-
+#include "ATen/Deprecated.h"
+#include "ATen/NativeFunctions.h"
+#include "ATen/DeviceGuard.h"
+#include "ATen/TensorOptions.h"
 
 namespace at {
+
+using native::from_blob;
+using native::tensor;
 
 ${function_declarations}
 

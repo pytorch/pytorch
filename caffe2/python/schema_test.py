@@ -23,6 +23,28 @@ class TestDB(unittest.TestCase):
             self.assertTrue(isinstance(r.field2, schema.List))
             self.assertTrue(getattr(r, 'non_existent', None) is None)
 
+    def testListSubclassClone(self):
+        class Subclass(schema.List):
+            pass
+
+        s = Subclass(schema.Scalar())
+        clone = s.clone()
+        self.assertIsInstance(clone, Subclass)
+        self.assertEqual(s, clone)
+        self.assertIsNot(clone, s)
+
+    def testStructSubclassClone(self):
+        class Subclass(schema.Struct):
+            pass
+
+        s = Subclass(
+            ('a', schema.Scalar()),
+        )
+        clone = s.clone()
+        self.assertIsInstance(clone, Subclass)
+        self.assertEqual(s, clone)
+        self.assertIsNot(clone, s)
+
     def testNormalizeField(self):
         s = schema.Struct(('field1', np.int32), ('field2', str))
         self.assertEquals(

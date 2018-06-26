@@ -6,6 +6,7 @@
 
 #include <functional>
 #include <iostream>
+#include <array>
 
 #include "caffe2/core/common.h"
 

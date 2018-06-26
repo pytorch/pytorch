@@ -29,24 +29,67 @@ OPERATOR_SCHEMA(Tile)
           return out;
         })
     .SetDoc(R"DOC(
-Constructs a tensor by tiling a given tensor along a specified axis.
+Constructs a tensor by tiling a given tensor along a specified axis. This operation creates a new tensor by replicating the input tensor a number of times specified by the `tiles` argument along the `axis` dimension. The output tensor's `axis` dimension has $(X.dims(axis) * tiles)$ elements.
 
-This operation creates a new tensor by replicating the input tensor 'tiles'
-times along dimension 'axis'. The output tensor's 'axis'th dimension has
-input.dims(axis) * tiles elements, and the values of input are replicated
-'tiles' times along the 'axis'th dimension.
-For example, tiling [[a b c d]] by tile=2, axis=0 produces
-[[a b c d], [a b c d]].
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/tile_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Tile",
+    ["X", "tiles", "axis"],
+    ["Y"]
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(5,5)))
+workspace.FeedBlob("tiles", np.array([5]).astype(np.int32))
+workspace.FeedBlob("axis", np.array([1]).astype(np.int32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[9 1 7 1 3]
+ [2 3 6 2 5]
+ [0 9 2 6 4]
+ [5 8 1 5 9]
+ [2 0 1 3 7]]
+Y:
+[[9 1 7 1 3 9 1 7 1 3 9 1 7 1 3 9 1 7 1 3 9 1 7 1 3]
+ [2 3 6 2 5 2 3 6 2 5 2 3 6 2 5 2 3 6 2 5 2 3 6 2 5]
+ [0 9 2 6 4 0 9 2 6 4 0 9 2 6 4 0 9 2 6 4 0 9 2 6 4]
+ [5 8 1 5 9 5 8 1 5 9 5 8 1 5 9 5 8 1 5 9 5 8 1 5 9]
+ [2 0 1 3 7 2 0 1 3 7 2 0 1 3 7 2 0 1 3 7 2 0 1 3 7]]
+
+```
+
+</details>
+
 )DOC")
-    .Arg("tiles", "Number of replicas")
-    .Arg("axis", "Axis to replicate along")
-    .Input(0, "data", "The input tensor.")
-    .Input(1, "tiles", "(optional) Number of replicas (overrides argument)")
-    .Input(2, "axis", "(optional) Axis to replicate along (overrides argument)")
+    .Arg("tiles", "(*int*): number of replicas")
+    .Arg("axis", "(*int*): axis to replicate along")
+    .Input(0, "X", "(*Tensor*): input tensor")
+    .Input(1, "tiles", "(*Tensor`<int>`*): [OPTIONAL] number of replicas (overrides `tiles` argument)")
+    .Input(2, "axis", "(*Tensor`<int>`*): [OPTIONAL] axis to replicate along (overrides `axis` argument)")
     .Output(
         0,
-        "tiled_data",
-        "Tensor that will contain input replicated along the given axis.")
+        "Y",
+        "(*Tensor*): output tensor")
     .InheritOnnxSchema("Tile");
 
 OPERATOR_SCHEMA(TileGradient).NumInputs(1, 3).NumOutputs(1);

@@ -29,7 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     wget \
     && rm -rf /var/lib/apt/lists/*
 
-RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
+RUN pip install --no-cache-dir --upgrade pip==9.0.3 setuptools wheel && \
     pip install --no-cache-dir \
     flask \
     future \
@@ -50,8 +50,8 @@ RUN pip install --no-cache-dir --upgrade pip setuptools wheel && \
     tornado
 
 ########## INSTALLATION STEPS ###################
-RUN git clone --branch master --recursive https://github.com/caffe2/caffe2.git
-RUN cd caffe2 && mkdir build && cd build \
+RUN git clone --branch master --recursive https://github.com/pytorch/pytorch.git
+RUN cd pytorch && mkdir build && cd build \
     && cmake .. \
     -DCUDA_ARCH_NAME=Manual \
     -DCUDA_ARCH_BIN="35 52 60 61" \

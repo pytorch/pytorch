@@ -17,6 +17,25 @@ class TransformedDistribution(Distribution):
     Note that the ``.event_shape`` of a :class:`TransformedDistribution` is the
     maximum shape of its base distribution and its transforms, since transforms
     can introduce correlations among events.
+
+    An example for the usage of :class:`TransformedDistribution` would be::
+
+        # Building a Logistic Distribution
+        # X ~ Uniform(0, 1)
+        # f = a + b * logit(X)
+        # Y ~ f(X) ~ Logistic(a, b)
+        base_distribution = Uniform(0, 1)
+        transforms = [SigmoidTransform().inv, AffineTransform(loc=a, scale=b)]
+        logistic = TransformedDistribution(base_distribution, transforms)
+
+    For more examples, please look at the implementations of
+    :class:`~torch.distributions.gumbel.Gumbel`,
+    :class:`~torch.distributions.half_cauchy.HalfCauchy`,
+    :class:`~torch.distributions.half_normal.HalfNormal`,
+    :class:`~torch.distributions.log_normal.LogNormal`,
+    :class:`~torch.distributions.pareto.Pareto`,
+    :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
+    :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """
     arg_constraints = {}
 

@@ -5,7 +5,7 @@ namespace caffe2 {
 REGISTER_CPU_OPERATOR(Adam, AdamOp<float, CPUContext>);
 OPERATOR_SCHEMA(Adam)
     .NumInputs(6)
-    .NumOutputs(3)
+    .NumOutputs(3, 4)
     .AllowInplace({{0, 0}, {1, 1}, {2, 2}})
     .SetDoc(R"DOC(
 
@@ -14,15 +14,15 @@ input gradient and momentum parameters. Concretely, given inputs
 (param, m1, m2, grad, lr, iters),
 
     t = iters + 1
-    corrected_local_rate = lr * sqrt(1 - power(beta2, t)) /
+    correction_multiplier = sqrt(1 - power(beta2, t)) /
       (1 - power(beta1, t))
     m1_o = (beta1 * m1) + (1 - beta1) * grad
     m2_o = (beta2 * m2) + (1 - beta2) * np.square(grad)
-    grad_o = corrected_local_rate * m1_o / \
+    grad_o = correction_multiplier * m1_o / \
         (sqrt(m2_o) + epsilon)
-    param_o = param + grad_o
+    param_o = param + lr * grad_o
 
-and returns (param_o, m1_o, m2_o)
+and returns (param_o, m1_o, m2_o, grad_o), in which grad_o is an optional output
 
 )DOC")
     .Input(0, "param", "Parameters to be updated")
@@ -34,6 +34,7 @@ and returns (param_o, m1_o, m2_o)
     .Output(0, "output_param", "Updated parameters")
     .Output(1, "output_moment_1", "Updated first moment")
     .Output(2, "output_moment_2", "Updated second moment")
+    .Output(3, "output_grad", "Effective grad")
     .Arg("beta1", "Default 0.9")
     .Arg("beta2", "Default 0.999")
     .Arg("epsilon", "Default 1e-5");
@@ -45,12 +46,12 @@ OPERATOR_SCHEMA(SparseAdam)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
     .SetDoc(R"DOC(
 
-Computes the Adam Update for the sparse case.
-Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the dense
-Adam on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
-(new_param, new_moment1, new_moment2) as in dense case
+    Computes the Adam Update for the sparse case.
+    Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the dense
+    Adam on (param, moment1[indices], momemnt2[indices], lr, iter) and returns
+    (new_param, new_moment1, new_moment2) as in dense case
 
-)DOC")
+    )DOC")
     .Input(0, "param", "Parameters to be updated")
     .Input(1, "moment_1", "First moment history")
     .Input(2, "moment_2", "Second moment history")
@@ -74,16 +75,16 @@ OPERATOR_SCHEMA(RowWiseSparseAdam)
     .EnforceInplace({{0, 0}, {1, 1}, {2, 2}})
     .SetDoc(R"DOC(
 
-Computes a modified Adam Update for the sparse case.
-Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the
-Adam update on (param, moment1[indices], moment2[indices], lr, iter) and returns
-(new_param, new_moment1, new_moment2), where moment2 is a 1D tensor
-with length equal to the number of rows in param:
-shape(moment2) == shape(param)[0]. Each element of  moment2 is
-applied to an entire row of param, and the new moment2 values are
-calculated by averaging across the row.
+    Computes a modified Adam Update for the sparse case.
+    Given inputs (param, moment1, moment2, indices, grad, lr, iter), runs the
+    Adam update on (param, moment1[indices], moment2[indices], lr, iter) and returns
+    (new_param, new_moment1, new_moment2), where moment2 is a 1D tensor
+    with length equal to the number of rows in param:
+    shape(moment2) == shape(param)[0]. Each element of  moment2 is
+    applied to an entire row of param, and the new moment2 values are
+    calculated by averaging across the row.
 
-)DOC")
+    )DOC")
     .Input(0, "param", "Parameters to be updated")
     .Input(1, "moment_1", "First moment history")
     .Input(2, "moment_2", "Second moment history")
@@ -101,4 +102,4 @@ calculated by averaging across the row.
 SHOULD_NOT_DO_GRADIENT(Adam);
 SHOULD_NOT_DO_GRADIENT(SparseAdam);
 SHOULD_NOT_DO_GRADIENT(RowWiseSparseAdam);
-}
+} // namespace caffe2

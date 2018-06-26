@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/aten_dispatch.h"
 
+#include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 
 #include <exception>
@@ -27,6 +28,7 @@ void setDynamicType(Node * node) {
 
 at::Tensor representativeTensor(const TensorType * type) {
   auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
+  at::DeviceGuard device_guard(type->device());
   auto & attype = at::getType(backend, type->scalarType());
   return attype.tensor(type->sizes(), type->strides()).zero_();
 }
@@ -146,7 +148,6 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     default: ; // fall-through
   }
-
   std::vector<TensorType*> types;
   bool present;
   std::tie(types, present) = gatherTypes(node->inputs());
@@ -231,11 +232,11 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     } break;
     case aten::sum: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
-                         {{AKind::i, attr::dim},
+                         {{AKind::is, attr::dim},
                           {AKind::i, attr::keepdim}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
-        int64_t dim = node->i(attr::dim);
+        int64_t dim = node->is(attr::dim).at(0);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         if (node->i(attr::keepdim)) {
           sizes.at(dim) = 1;
@@ -333,6 +334,11 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       node->output()->inferTypeFrom(node->t(attr::value));
       handled = true;
     } break;
+    case prim::TensorToNum:
+    case prim::NumToTensor: {
+      node->output()->setType(node->inputs()[0]->type());
+      handled = true;
+    } break;
     case prim::Undefined: {
       node->output()->setType(DynamicType::get());
       handled = true;
@@ -371,10 +377,10 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     bool shape_inferenceable = !std::any_of(types.begin(), types.end(), [](TensorType* t){
       return at::isIntegralType(t->scalarType());
     });
-    if (!shape_inferenceable) {
-      setDynamicType(node);
-    } else {
+    if (node->kind() == aten::type_as || shape_inferenceable ) {
       PropagateShapeOnNodeByRunningIt(node, types);
+    } else {
+      setDynamicType(node);
     }
   }
 }
@@ -396,7 +402,6 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
 }
 
 }
-
 void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   JIT_ASSERT(graph.inputs().size() == spec.size());
   for(size_t i = 0; i < spec.size(); ++i) {

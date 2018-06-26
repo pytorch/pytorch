@@ -258,7 +258,7 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
 
   // NOTE: msgs are already sorted lexicographically, so we can greedily
   // insert them into free slots
-  std::size_t free_pos = 0;
+  size_t free_pos = 0;
   for (auto& msg : msgs) {
     if (msg.rank >= 0) continue; // These were sorted in the previous loop
     while (sorted_msgs[free_pos] != nullptr) free_pos++;
@@ -266,7 +266,7 @@ InitMethod::Config initTCPMulticast(std::string group_name, rank_type world_size
   }
 
   auto& master_msg = *sorted_msgs[0];
-  for (std::size_t rank = 0; rank < sorted_msgs.size(); ++rank) {
+  for (size_t rank = 0; rank < sorted_msgs.size(); ++rank) {
     if (packed_msg == sorted_msgs[rank]->pack()) {
       config.rank = rank;
       config.world_size = world_size;

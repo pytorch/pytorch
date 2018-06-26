@@ -3,8 +3,8 @@
 #else
 
 #define UPDATE_OUTPUT_KERNEL_WIDTH(KW) case KW:                         \
-  cuda_VolumetricDilatedMaxPooling_updateOutput<KW><<<grid, block,             \
-    0, THCState_getCurrentStream(state)>>>(                             \
+  cuda_VolumetricDilatedMaxPooling_updateOutput<KW>                     \
+  <<<grid, block, 0, THCState_getCurrentStream(state)>>>(               \
     inputData, inputTime, inputHeight, inputWidth, \
     cudaIndices, cudaOutput, kT, kH, dT, dH, dW, padT, padH, padW,\
     dilationT, dilationH, dilationW, offsetZ); \
@@ -20,7 +20,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          int padT, int padW, int padH,
                          int dilationT, int dilationW, int dilationH,
                          bool ceilMode) {
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int inputSlices;
   int inputTime;
   int inputHeight;
@@ -43,7 +43,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than 0, but got dilationT: %d dilationH: %d dilationW: %d",
              dilationT, dilationH, dilationW);
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     dimf++;
     dimt++;
@@ -69,7 +69,7 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
   }
   else
   {
-    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ", input->sizes());
   }
 
   THArgCheck(kT/2 >= padT && kW/2 >= padW && kH/2 >= padH, 13,
@@ -177,7 +177,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   }
   else
   {
-    THArgError(2, "4D or 5D tensor expected, got %d", THCTensor_(nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ", input->sizes());
   }
 
   if (ceilMode)
@@ -234,7 +234,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   } else {
     THCTensor_(retain)(state, output);
   }
-  
+
   real* inputData = THCTensor_(data)(state, input);
 
   THCDeviceTensor<real, 4> cudaOutput;

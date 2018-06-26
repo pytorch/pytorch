@@ -107,7 +107,14 @@ def expand(o):
 
 
 # filter the list of declarations removing things we cannot support
-def supports(o):
+def supports(o, factory_methods):
+    # Ignore all families (!) of functions that have TensorOptions (i.e. tensor factory methods).
+    if o['name'] in factory_methods:
+        if factory_methods[o['name']] == 0:
+            print("Skipping {} because it is a factory method".format(o['name']))
+        factory_methods[o['name']] += 1
+        return False
+
     # skip all in-place operators for now since aten cannot Resize
     # caffe2 memory inside an operator
     if o['inplace']:
@@ -183,9 +190,18 @@ def get_num_inputs(o):
     return str(args)
 
 
+def find_factory_methods(decls):
+    factory_methods = {}
+    for o in decls:
+        if any(arg['dynamic_type'] == 'TensorOptions' for arg in o['arguments']):
+            factory_methods[o['name']] = 0
+    return factory_methods
+
+
 if __name__ == '__main__':
     decls = yaml.load(read(os.path.join(args.yaml_dir, 'Declarations.yaml')), Loader=Loader)
-    filtered = [expanded for o in decls for expanded in expand(o) if supports(expanded)]
+    factory_methods = find_factory_methods(decls)
+    filtered = [expanded for o in decls for expanded in expand(o) if supports(expanded, factory_methods)]
     top_env = {
         'mappings': [],
         'implementations': [],
@@ -235,18 +251,29 @@ if __name__ == '__main__':
             env['initialization'].append(
                 'auto inferred_type = readTypeAttribute("type");')
 
-        i = 0
-        for arg in o['arguments']:
+        static_tensor_inputs = sum(arg['type'] != 'TensorList' and value_is_tensor_type(arg) for arg in o['arguments'])
+        has_tensorlist = any(arg['type'] == 'TensorList' for arg in o['arguments'])
+        if has_tensorlist:
+            tensorlist_idx = [i for i, arg in enumerate(o['arguments']) if arg['type'] == 'TensorList'][0]
+
+        real_inputs = 0
+        for i, arg in enumerate(o['arguments']):
             env['arguments'].append(arg['name'])
+            # Emulate logic in gen_jit_dispatch.py. Pretend the flat argument
+            # list is a stack where the end is the top.
+            view_length = 'InputSize()' if has_tensorlist and i < tensorlist_idx else static_tensor_inputs
             if arg['type'] == 'TensorList':
+                # NOTE: do not advance real_inputs here. After this we will
+                # switch to indexing the "stack" from the end as if we only had
                 env['statements'].append(
-                    'auto {} = loadInputsAtOffset({});'.format(arg['name'], i))
+                    'auto {} = peekSlice({}, InputSize() - {}, InputSize());'
+                        .format(arg['name'], real_inputs, static_tensor_inputs))
             elif value_is_tensor_type(arg):
-                assert(i != '*')  # tensor list is not last argument
                 # load tensor inputs from Caffe2
+
                 env['statements'].append(
-                    "auto {} = loadInput({});".format(arg['name'], i))
-                i += 1
+                    'auto {} = peek({}, {});'.format(arg['name'], real_inputs, view_length))
+                real_inputs += 1
                 if arg['dynamic_type'] == 'Tensor' and not defined_inferred_type:
                     # first tensor input is used to define the output type.
                     defined_inferred_type = True

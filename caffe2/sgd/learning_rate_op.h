@@ -118,7 +118,7 @@ class LearningRateOp final : public Operator<Context> {
           arg_prefix + "start_multiplier", 0.);
       int num_iter = OperatorBase::template GetSingleArgument<int>(
           arg_prefix + "num_iter", 0);
-      DCHECK_GT(start_multiplier, 0);
+      DCHECK_GE(start_multiplier, 0);
       return new LinearWarmupLearningRate<T>(start_multiplier, num_iter);
     } else if (policy == "constantWarmup") {
       T multiplier = OperatorBase::template GetSingleArgument<float>(

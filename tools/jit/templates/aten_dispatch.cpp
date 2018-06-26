@@ -1,12 +1,25 @@
 #include "torch/csrc/jit/aten_dispatch.h"
+
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
-#include <unordered_map>
+#include <ATen/ATen.h>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstring>
+#include <sstream>
+#include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 // ${generated_comment}
 
@@ -18,6 +31,8 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 using at::TensorList;
+using at::TensorOptions;
+using at::DeviceGuard;
 
 namespace {
 
@@ -31,6 +46,10 @@ void pack(Stack & stack, T&& v) {
 }
 template<>
 void pack(Stack & stack, Tensor&& v) {
+  stack.push_back(std::move(v));
+}
+template<>
+void pack(Stack & stack, autograd::Variable&& v) {
   stack.push_back(std::move(v));
 }
 template<>
@@ -77,6 +96,8 @@ int deviceForInputs(Stack & stack, size_t N) {
 std::unordered_set<Symbol> tensor_vararg_fns = {
   aten::cat,
   aten::stack,
+  aten::index,
+  aten::index_put,
 };
 
 template<size_t N>

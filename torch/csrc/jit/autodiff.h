@@ -39,7 +39,7 @@ struct Gradient {
   // Describes how to construct outputs of f from what its graph will return.
   // This is necessary because some trailing outputs are intermediates produced
   // only to be saved for df (and should be ignored).
-  std::size_t f_real_outputs;
+  size_t f_real_outputs;
 
   // df inputs are split into two sections: vjps (aka grad_outputs) and captures.
   // VJPs are "seeds" for the gradient computation given for each input capture
@@ -47,16 +47,16 @@ struct Gradient {
   // Captures are values the need to be saved when f is run. We handle inputs
   // specially, because this allows us to avoid adding extra vjps as df inputs.
 
-  std::vector<std::size_t> df_input_vjps; // Offsets into f's outputs.
+  std::vector<size_t> df_input_vjps; // Offsets into f's outputs.
   // capture can come from inputs or outputs
-  std::vector<std::size_t> df_input_captured_inputs; // Offsets into f's inputs
-  std::vector<std::size_t> df_input_captured_outputs; // Offsets into f's outputs
+  std::vector<size_t> df_input_captured_inputs; // Offsets into f's inputs
+  std::vector<size_t> df_input_captured_outputs; // Offsets into f's outputs
 
 
   // df will produce vjps for a subset of inputs of f that required grad.
   // df_output_vjps[idx] == inp_idx means that idx-th output of df produces a vjp
   // for inp_idx-th input of f.
-  std::vector<std::size_t> df_output_vjps; // Offsets into f's inputs.
+  std::vector<size_t> df_output_vjps; // Offsets into f's inputs.
 
   // How to use gradient to implement a differentiable autograd function:
   // When running f:

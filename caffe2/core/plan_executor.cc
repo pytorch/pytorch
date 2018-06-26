@@ -100,7 +100,7 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initiaized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || !b->meta().id()) { // not exist or uninitialized
+  if (!b || b->meta().id() == CaffeTypeId::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
@@ -437,7 +437,7 @@ bool ExecuteStepRecursive(ExecutionStepWrapper& stepWrapper) {
         if (step.has_num_concurrent_instances()) {
           numThreads *= step.num_concurrent_instances();
         }
-        for (int64_t i = 0; i < numThreads; ++i) {
+        for (size_t i = 0; i < numThreads; ++i) {
           threads.emplace_back(worker);
         }
         for (auto& thread : threads) {
@@ -489,6 +489,7 @@ bool RunPlanOnWorkspace(
 
   NetDefMap net_defs;
   for (const NetDef& net_def : plan.network()) {
+    LOG(INFO) << "Processing net '" << net_def.name() << "'";
     CAFFE_ENFORCE(
         net_defs.count(net_def.name()) == 0,
         "Your plan contains networks of the same name \"",

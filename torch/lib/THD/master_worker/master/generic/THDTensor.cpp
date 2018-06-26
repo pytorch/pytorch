@@ -670,7 +670,7 @@ void THDTensor_(unfold)(THDTensor *self, THDTensor *src,
   newSize[self->nDimension] = size;
   newStride[self->nDimension] = self->stride[dimension];
 
-  for (std::size_t d = 0; d < self->nDimension; d++) {
+  for (size_t d = 0; d < self->nDimension; d++) {
     if (d == dimension) {
       newSize[d] = (self->size[d] - size) / step + 1;
       newStride[d] = step * self->stride[d];
@@ -709,7 +709,7 @@ void THDTensor_(squeeze)(THDTensor *self, THDTensor *src) {
 
   THDTensor_(set)(self, src);
 
-  for (std::size_t d = 0; d < src->nDimension; d++) {
+  for (size_t d = 0; d < src->nDimension; d++) {
     if (src->size[d] != 1) {
       if (d != ndim) {
         self->size[ndim] = src->size[d];
@@ -783,7 +783,7 @@ int THDTensor_(isContiguous)(const THDTensor *self) {
 int THDTensor_(isSameSizeAs)(const THDTensor *self, const THDTensor *src) {
   if (self->nDimension != src->nDimension)
     return 0;
-  for (std::size_t d = 0; d < self->nDimension; d++)
+  for (size_t d = 0; d < self->nDimension; d++)
     if (self->size[d] != src->size[d])
       return 0;
   return 1;
@@ -795,7 +795,7 @@ int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src) {
   if (self->storage == src->storage &&
       self->storageOffset == src->storageOffset &&
       self->nDimension == src->nDimension) {
-    for (std::size_t d = 0; d < self->nDimension; d++) {
+    for (size_t d = 0; d < self->nDimension; d++) {
       if (self->size[d] != src->size[d] || self->stride[d] != src->stride[d])
         return 0;
     }
@@ -807,7 +807,7 @@ int THDTensor_(isSetTo)(const THDTensor *self, const THDTensor *src) {
 int THDTensor_(isSize)(const THDTensor *self, const THLongStorage *dims) {
   if (self->nDimension != THLongStorage_size(dims))
     return 0;
-  for (std::size_t d = 0; d < self->nDimension; d++)
+  for (size_t d = 0; d < self->nDimension; d++)
     if (self->size[d] != THLongStorage_get(dims, d))
       return 0;
   return 1;
@@ -818,7 +818,7 @@ ptrdiff_t THDTensor_(nElement)(const THDTensor *self) {
     return 0;
   } else {
     ptrdiff_t nElement = 1;
-    for (std::size_t d = 0; d < self->nDimension; d++) {
+    for (size_t d = 0; d < self->nDimension; d++) {
       nElement *= self->size[d];
     }
     return nElement;

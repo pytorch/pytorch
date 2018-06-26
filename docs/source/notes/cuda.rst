@@ -92,7 +92,7 @@ relative order, unless explicit synchronization functions (such as
 used.  For example, the following code is incorrect::
 
     cuda = torch.device('cuda')
-    s = torch.cuda.stream()  # Create a new stream.
+    s = torch.cuda.Stream()  # Create a new stream.
     A = torch.empty((100, 100), device=cuda).normal_(0.0, 1.0)
     with torch.cuda.stream(s):
         # sum() may start execution before normal_() finishes!

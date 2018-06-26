@@ -2,22 +2,22 @@
 #define THC_GENERIC_FILE "generic/SparseLinear.cu"
 #else
 
-static bool checkInput(THCTensor* t)
+static bool THNN_(checkInput)(THCTensor* t)
 {
-  return t->nDimension == 2 && t->size[1] == 3;
+  return !t->is_empty() && t->_dim() == 2 && t->size[1] == 3;
 }
 
-static bool checkSize2D(THCTensor* t, int64_t size0, int64_t size1)
+static bool THNN_(checkSize2D)(THCTensor* t, int64_t size0, int64_t size1)
 {
-  return t->nDimension == 2 && t->size[0] == size0 && t->size[1] == size1;
+  return !t->is_empty() && t->_dim() == 2 && t->size[0] == size0 && t->size[1] == size1;
 }
 
-static bool checkSize1D(THCTensor* t, int64_t size0)
+static bool THNN_(checkSize1D)(THCTensor* t, int64_t size0)
 {
-  return t->nDimension == 1 && t->size[0] == size0;
+  return !t->is_empty() && t->_dim() == 1 && t->size[0] == size0;
 }
 
-static inline void copyCudaFloatingType(THCState *state, THCudaIntTensor *buf, THCTensor *t) {
+static inline void THNN_(copyCudaFloatingType)(THCState *state, THCudaIntTensor *buf, THCTensor *t) {
   #ifdef THC_REAL_IS_FLOAT
   THCudaIntTensor_copyCudaFloat(state, buf, t);
   #elif defined(THC_REAL_IS_DOUBLE)
@@ -40,9 +40,10 @@ void THNN_(SparseLinear_updateOutput)(
   int64_t outDim = THCTensor_(size)(state, weight, 0);
   int64_t inDim = THCTensor_(size)(state, weight, 1);
 
-  THArgCheck(checkInput(input), 2, "input size must be nnz x 3");
-  THArgCheck(THCTensor_(nDimension)(state, output) == 2, 3, "output must be batchsize x outputsize");
-  THArgCheck(checkSize1D(bias, outDim), 5, "bias size wrong");
+  THArgCheck(THNN_(checkInput)(input), 2, "input size must be nnz x 3");
+  AT_CHECK(!output->is_empty() && THCTensor_(nDimension)(state, output) == 2,
+           "output must be batchsize x outputsize, got size: ", output->sizes());
+  THArgCheck(THNN_(checkSize1D)(bias, outDim), 5, "bias size wrong");
 
   weight = THCTensor_(newContiguous)(state, weight);
   
@@ -66,9 +67,9 @@ void THNN_(SparseLinear_updateOutput)(
   // If rows might get out of order in future implementations, or if cusparse
   //    complains with an illegal memory access, sort like we do in AccGradParameters
   THCTensor_(select)(state, sel, input, 1, 0);
-  copyCudaFloatingType(state, rowbuf, sel);
+  THNN_(copyCudaFloatingType)(state, rowbuf, sel);
   THCTensor_(select)(state, sel, input, 1, 1);
-  copyCudaFloatingType(state, colInds, sel);
+  THNN_(copyCudaFloatingType)(state, colInds, sel);
   THCTensor_(select)(state, sel, input, 1, 2);
   THCTensor_(copyCuda)(state, values, sel);
 
@@ -136,9 +137,9 @@ void THNN_(SparseLinear_accGradParameters)(
   int64_t outDim = THCTensor_(size)(state, weight, 0);
   int64_t inDim = THCTensor_(size)(state, weight, 1);
 
-  THArgCheck(checkInput(input), 2, "input size must be batchsize x nnz x 2");
-  THArgCheck(checkSize2D(gradWeight, outDim, inDim), 4, "gradWeight size wrong");
-  THArgCheck(checkSize1D(gradBias, outDim), 5, "gradBias size wrong");
+  THArgCheck(THNN_(checkInput)(input), 2, "input size must be batchsize x nnz x 2");
+  THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4, "gradWeight size wrong");
+  THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 5, "gradBias size wrong");
 
   weight = THCTensor_(newContiguous)(state, weight);
   int64_t nnz = THCTensor_(size)(state, input, 0);
@@ -166,9 +167,9 @@ void THNN_(SparseLinear_accGradParameters)(
 
   // Get data ready for cusparse, need CudaInt buffers
   THCTensor_(select)(state, sel, buf, 1, 0);
-  copyCudaFloatingType(state, rowInds, sel);
+  THNN_(copyCudaFloatingType)(state, rowInds, sel);
   THCTensor_(select)(state, sel, buf, 1, 1);
-  copyCudaFloatingType(state, colbuf, sel);
+  THNN_(copyCudaFloatingType)(state, colbuf, sel);
   THCTensor_(select)(state, sel, buf, 1, 2);
   THCTensor_(copyCuda)(state, values, sel);
 

@@ -83,31 +83,75 @@ OPERATOR_SCHEMA(Softmax)
   .NumOutputs(1)
   .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
-The operator computes the softmax normalized values for each layer in the batch
- of the given input. The input is a 2-D tensor (Tensor<float>) of size
-(batch_size x input_feature_dimensions). The output tensor has the same shape
-and contains the softmax normalized values of the corresponding input.
 
-X does not need to explicitly be a 2D vector; rather, it will be
-coerced into one. For an arbitrary n-dimensional tensor
-X \in [a_0, a_1, ..., a_{k-1}, a_k, ..., a_{n-1}] and k is
-the axis provided, then X will be coerced into a 2-dimensional tensor with
-dimensions [a_0 * ... * a_{k-1}, a_k * ... * a_{n-1}]. For the default
-case where axis=1, this means the X tensor will be coerced into a 2D tensor
-of dimensions [a_0, a_1 * ... * a_{n-1}], where a_0 is often the batch size.
-In this situation, we must have a_0 = N and a_1 * ... * a_{n-1} = D.
-Each of these dimensions must be matched correctly, or else the operator
-will throw errors.
+Applies the Softmax function to an n-dimensional input Tensor rescaling them so 
+that the elements of the n-dimensional output Tensor lie in the range (0,1) and 
+sum to 1. The softmax operator is typically the last layer in a classifier network,
+as its output can be interpreted as confidence probabilities of an input belonging
+to each class. The input is a 2-D tensor (Tensor) of size (batch_size x 
+input_feature_dimensions). The output tensor has the same shape and contains the 
+softmax normalized values of the corresponding input. The softmax function is 
+defined as follows:
+
+$$softmax(x_i) = \frac{\exp(x_i)}{\sum_{j} \exp(x_j)}$$
+
+The input does not need to explicitly be a 2D vector; rather, it will be coerced
+into one. For an arbitrary n-dimensional tensor `X` in 
+$[a_0, a_1, ..., a_{k-1}, a_k, ..., a_{n-1}]$, where k is the `axis` provided, 
+then `X` will be coerced into a 2-dimensional tensor with dimensions 
+$[(a_0 * ... * a_{k-1}), (a_k * ... * a_{n-1})]$. For the default case where
+`axis`=1, the `X` tensor will be coerced into a 2D tensor of dimensions 
+$[a_0, (a_1 * ... * a_{n-1})]$, where $a_0$ is often the batch size. In this
+situation, we must have $a_0 = N$ and $a_1 * ... * a_{n-1} = D$. Each of these 
+dimensions must be matched correctly, or else the operator will throw errors.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softmax_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/softmax_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Softmax",
+    ["X"],
+    ["Y"]
+)
+
+workspace.FeedBlob("X", np.random.randn(1, 5).astype(np.float32))
+print("input:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("softmax:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+input: [[ 0.0417839   0.61960053 -0.23150268 -0.64389366 -3.0000346 ]]
+softmax: [[0.24422921 0.43525138 0.18582782 0.12303016 0.01166145]]
+
+```
+
+</details>
+
+
+
 )DOC")
   .Arg("axis",
-       "(int) default to 1; describes the axis of the inputs when coerced "
-       "to 2D; defaults to one because the 0th axis most likely describes "
-       "the batch_size")
-  .Input(0, "input",
-         "The input tensor that's coerced into a 2D matrix of size (NxD) "
-         "as described above.")
-  .Output(0, "output", "The softmax normalized output values with the same "
-          "shape as input tensor.")
+       "*(type: int; default: 1)* Axis of the inputs when coerced to 2D matrix.")
+  .Input(0, "X",
+         "*(type: Tensor`<float>`)* Input tensor that's coerced into a 2D matrix of size (NxD) as described above.")
+  .Output(0, "Y",
+	 "*(type: Tensor`<float>`)* The softmax normalized output tensor with the same shape as input tensor.")
   .InheritOnnxSchema("Softmax");
 
 // Input: Y, dY. Output: dX

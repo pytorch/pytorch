@@ -1,7 +1,11 @@
 r"""
 The ``distributions`` package contains parameterizable probability distributions
 and sampling functions. This allows the construction of stochastic computation
-graphs and stochastic gradient estimators for optimization.
+graphs and stochastic gradient estimators for optimization. This package
+generally follows the design of the `TensorFlow Distributions`_ package.
+
+.. _`TensorFlow Distributions`:
+    https://arxiv.org/abs/1711.10604
 
 It is not possible to directly backpropagate through random samples. However,
 there are two main methods for creating surrogate functions that can be
@@ -82,6 +86,8 @@ from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .half_cauchy import HalfCauchy
+from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace

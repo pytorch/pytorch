@@ -1,10 +1,11 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <thread>
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
-#include <atomic>
-#include <thread>
-#include <condition_variable>
+#include "caffe2/utils/thread_name.h"
 
 #if defined(_MSC_VER)
 #include <intrin.h>
@@ -262,6 +263,7 @@ class alignas(kGEMMLOWPCacheLineSize) Worker {
 
   // Thread entry point.
   void ThreadFunc() {
+    setThreadName("CaffeWorkersPool");
     ChangeState(State::Ready);
 
     // Thread main loop
@@ -331,9 +333,9 @@ class WorkersPool {
     // One of the tasks will be run on the current thread.
     int workers_count = tasks.size() - 1;
     CreateWorkers(workers_count);
-    DCHECK_LE(workers_count, workers_.size());
+    DCHECK_LE(workers_count, (int)workers_.size());
     counter_to_decrement_when_ready_.Reset(workers_count);
-    for (auto task = 1; task < tasks.size(); ++task) {
+    for (size_t task = 1; task < tasks.size(); ++task) {
       workers_[task - 1]->StartWork(tasks[task].get());
     }
     // Execute the remaining workload immediately on the current thread.

@@ -12,13 +12,6 @@
 #include <mutex>
 #include <cstdint>
 
-// Forwarde declare these CUDA types here to avoid including CUDA headers in
-// ATen headers, which would make ATen always require CUDA to build.
-struct THCState;
-struct CUstream_st;
-typedef struct CUstream_st *cudaStream_t;
-struct cudaDeviceProp;
-
 namespace at {
 
 enum class IsVariable {
@@ -30,19 +23,21 @@ enum class IsVariable {
 class AT_API Context {
 public:
   Context();
+  Type* getTypeRaw(Backend p, ScalarType s) {
+    return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
+  }
   Type * getTypeOpt(Backend p, ScalarType s) {
     initCUDAIfNeeded(p);
-    auto & type = type_registry[static_cast<int>(IsVariable::NotVariable)][static_cast<int>(p)][static_cast<int>(s)];
+    auto type = getTypeRaw(p, s);
 
     if(!type) {
       // there is only a single Undefined Type.
       if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        auto & undef = type_registry[static_cast<int>(IsVariable::NotVariable)][static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)];
-        if (undef) return undef.get();
+        return getTypeRaw(Backend::Undefined, ScalarType::Undefined);
       }
-      return nullptr;
     }
-    return type.get();
+
+    return type;
   }
   Type & getType(Backend p, ScalarType s) {
     auto* type = getTypeOpt(p, s);
@@ -86,6 +81,14 @@ public:
   cudaStream_t getCurrentCUDAStream() const {
     return detail::getCUDAHooks().getCurrentCUDAStream(thc_state.get());
   }
+  cudaStream_t getCurrentCUDAStreamOnDevice(int64_t device) const {
+    return detail::getCUDAHooks().getCurrentCUDAStreamOnDevice(thc_state.get(), device);
+  }
+#ifndef __HIP_PLATFORM_HCC__
+  cusparseHandle_t getCurrentCUDASparseHandle() const {
+    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
+  }
+#endif
   cudaDeviceProp* getCurrentDeviceProperties() const {
     return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
   }
@@ -95,7 +98,9 @@ public:
   int getNumGPUs() const {
     return detail::getCUDAHooks().getNumGPUs();
   }
-
+  size_t freshTypeID() {
+    return next_id++;
+  }
   bool setFlushDenormal(bool on);
 
   // NB: This method is *purely* whether or not a user requested
@@ -110,13 +115,12 @@ public:
   void setDeterministicCuDNN(bool);
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
+private:
   // NB: type_registry has nullptr for all CUDA backends until
   // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
-    [static_cast<int>(IsVariable::NumOptions)]
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-private:
   void initCUDAIfNeeded(Backend p) {
     if(p == Backend::CUDA)
       lazyInitCUDA();
@@ -125,7 +129,10 @@ private:
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  std::atomic<size_t> next_id;
   std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
+  friend struct Type;
+  friend void register_cuda_types(Context * context);
 };
 
 AT_API Context & globalContext();

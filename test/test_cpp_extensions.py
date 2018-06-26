@@ -1,7 +1,9 @@
 import unittest
+import sys
 
 import torch
 import torch.utils.cpp_extension
+import torch.backends.cudnn
 try:
     import torch_test_cpp_extension.cpp as cpp_extension
 except ImportError:
@@ -13,6 +15,7 @@ import common
 
 from torch.utils.cpp_extension import CUDA_HOME
 TEST_CUDA = torch.cuda.is_available() and CUDA_HOME is not None
+TEST_CUDNN = TEST_CUDA and torch.backends.cudnn.is_available()
 
 
 class TestCppExtension(common.TestCase):
@@ -99,6 +102,30 @@ class TestCppExtension(common.TestCase):
 
         # 2 * sigmoid(0) = 2 * 0.5 = 1
         self.assertEqual(z, torch.ones_like(z))
+
+    @unittest.skipIf(not TEST_CUDNN, "CuDNN not found")
+    def test_jit_cudnn_extension(self):
+        # implementation of CuDNN ReLU
+        if sys.platform == 'win32':
+            extra_ldflags = ['cudnn.lib']
+        else:
+            extra_ldflags = ['-lcudnn']
+        module = torch.utils.cpp_extension.load(
+            name='torch_test_cudnn_extension',
+            sources=[
+                'cpp_extensions/cudnn_extension.cpp'
+            ],
+            extra_ldflags=extra_ldflags,
+            verbose=True,
+            with_cuda=True)
+
+        x = torch.randn(100, device='cuda', dtype=torch.float32)
+        y = torch.zeros(100, device='cuda', dtype=torch.float32)
+        module.cudnn_relu(x, y)  # y=relu(x)
+        self.assertEqual(torch.nn.functional.relu(x), y)
+        with self.assertRaisesRegex(RuntimeError, "same size"):
+            y_incorrect = torch.zeros(20, device='cuda', dtype=torch.float32)
+            module.cudnn_relu(x, y_incorrect)
 
     def test_optional(self):
         has_value = cpp_extension.function_taking_optional(torch.ones(5))
@@ -214,6 +241,26 @@ class TestCppExtension(common.TestCase):
         with self.assertRaises(ValueError):
             torch.utils.cpp_extension.load_inline(
                 name='invalid_jit_extension', cpp_sources='', functions=5)
+
+    def test_lenient_flag_handling_in_jit_extensions(self):
+        cpp_source = '''
+        at::Tensor tanh_add(at::Tensor x, at::Tensor y) {
+          return x.tanh() + y.tanh();
+        }
+        '''
+
+        module = torch.utils.cpp_extension.load_inline(
+            name='lenient_flag_handling_extension',
+            cpp_sources=cpp_source,
+            functions='tanh_add',
+            extra_cflags=['-g\n\n', '-O0 -Wall'],
+            extra_include_paths=['       cpp_extensions\n', '../'],
+            verbose=True)
+
+        x = torch.zeros(100, dtype=torch.float32)
+        y = torch.zeros(100, dtype=torch.float32)
+        z = module.tanh_add(x, y).cpu()
+        self.assertEqual(z, x.tanh() + y.tanh())
 
 
 if __name__ == '__main__':

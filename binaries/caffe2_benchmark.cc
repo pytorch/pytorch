@@ -66,6 +66,10 @@ CAFFE2_DEFINE_bool(
     false,
     "Whether to write out output in text format for regression purpose.");
 CAFFE2_DEFINE_int(warmup, 0, "The number of iterations to warm up.");
+CAFFE2_DEFINE_bool(
+    wipe_cache,
+    false,
+    "Whether to evict the cache before running network.");
 
 int main(int argc, char** argv) {
   caffe2::GlobalInit(&argc, &argv);
@@ -103,6 +107,7 @@ int main(int argc, char** argv) {
   runNetwork(
       workspace,
       net_def,
+      caffe2::FLAGS_wipe_cache,
       caffe2::FLAGS_run_individual,
       caffe2::FLAGS_warmup,
       caffe2::FLAGS_iter);

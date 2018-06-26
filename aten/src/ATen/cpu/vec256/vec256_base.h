@@ -22,7 +22,7 @@ namespace {
 template <class T>
 struct Vec256 {
   static constexpr int size = 32 / sizeof(T);
-  __at_align32__ T values[32 / sizeof(T)];
+  T values[32 / sizeof(T)] = {0};
   Vec256() {}
   Vec256(T val) {
     for (int i = 0; i != size; i++) {
@@ -117,6 +117,9 @@ struct Vec256 {
   Vec256<T> cos() const {
     return map(std::cos);
   }
+  Vec256<T> cosh() const {
+    return map(std::cosh);
+  }
   Vec256<T> floor() const {
     return map(std::floor);
   }
@@ -126,6 +129,12 @@ struct Vec256 {
   Vec256<T> sin() const {
     return map(std::sin);
   }
+  Vec256<T> sinh() const {
+    return map(std::sinh);
+  }
+  Vec256<T> tan() const {
+    return map(std::tan);
+  }
   Vec256<T> tanh() const {
     return map(std::tanh);
   }
@@ -134,6 +143,9 @@ struct Vec256 {
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
+  }
+  Vec256<T> rsqrt() const {
+    return map([](T x) { return 1 / std::sqrt(x); });
   }
 };
 

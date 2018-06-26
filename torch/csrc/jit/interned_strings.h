@@ -29,7 +29,6 @@ enum class SymbolNamespace : unsigned char {
 //
 // TODO: Consider moving the synthetic onnx operators to their own
 // namespace.
-
 #define FORALL_PRIM_SYMBOLS(_) \
 _(prim, Assign) \
 _(prim, Constant) \
@@ -58,7 +57,12 @@ _(prim, Store) \
 _(prim, Undefined) \
 _(prim, Starred) \
 _(prim, TupleConstruct) \
-_(prim, TupleUnpack)
+_(prim, TupleUnpack) \
+_(prim, NumToTensor) \
+_(prim, TensorToNum) \
+_(prim, AutogradAdd) \
+_(prim, GradOf) \
+_(prim, AnyDefined)
 /* end */
 
 // Workaround for some not-yet-defined ATen symbols, see
@@ -118,7 +122,6 @@ _(attr, Subgraph) \
 _(attr, axes) \
 _(attr, axis) \
 _(attr, broadcast) \
-_(attr, device) \
 _(attr, direction) \
 _(attr, ends) \
 _(attr, inplace) \
@@ -129,6 +132,7 @@ _(attr, sizes) \
 _(attr, starts) \
 _(attr, transA) \
 _(attr, transB) \
+_(attr, name)
 /* end */
 
 #define FORALL_ATTR_SYMBOLS(_) \
@@ -275,7 +279,7 @@ DEFINE_BUILTINS(prim, FORALL_PRIM_SYMBOLS)
 namespace std {
   template<>
   struct hash<torch::jit::Symbol> {
-    std::size_t operator()(torch::jit::Symbol s) const {
+    size_t operator()(torch::jit::Symbol s) const {
       return std::hash<uint32_t>()(static_cast<uint32_t>(s));
     }
   };

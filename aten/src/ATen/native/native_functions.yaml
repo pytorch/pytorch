@@ -5,25 +5,25 @@
 # Type's are not supported in the IR. Instead, we call down to these
 # specialized operators for each datatype.
 # TODO: remove when we have Type support in the IR
-- func: _cast_uint8_t(Tensor self, bool non_blocking=false) -> Tensor
+- func: _cast_Byte(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
-- func: _cast_int8_t(Tensor self, bool non_blocking=false) -> Tensor
+- func: _cast_Char(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
-- func: _cast_double(Tensor self, bool non_blocking=false) -> Tensor
+- func: _cast_Double(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
-- func: _cast_float(Tensor self, bool non_blocking=false) -> Tensor
+- func: _cast_Float(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
-- func: _cast_int(Tensor self, bool non_blocking=false) -> Tensor
+- func: _cast_Int(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
-- func: _cast_int64_t(Tensor self, bool non_blocking=false) -> Tensor
+- func: _cast_Long(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
-- func: _cast_int16_t(Tensor self, bool non_blocking=false) -> Tensor
+- func: _cast_Short(Tensor self, bool non_blocking=false) -> Tensor
   variants: function, method
 
 - func: _cast_Half(Tensor self, bool non_blocking=false) -> Tensor
@@ -75,6 +75,9 @@
     CPU: _acos_out_cpu
     CUDA: _acos_out_cuda
 
+- func: avg_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+  variants: function
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
@@ -82,6 +85,7 @@
   variants: function
 
 - func: allclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> bool
+  device_guard: false
 
 - func: addmv(Tensor self, Tensor mat, Tensor vec, *, Scalar beta=1, Scalar alpha=1) -> Tensor
 
@@ -98,16 +102,38 @@
 - func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
 
-- func: arange(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+- func: arange(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 
-- func: arange_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
+- func: arange(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
   variants: function
 
-- func: arange(Type dtype, Scalar end) -> Tensor
+- func: arange_out(Tensor result, Scalar start, Scalar end) -> Tensor
+  variants: function
+
+- func: arange_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
+  variants: function
+
+- func: arange(Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 
 - func: arange_out(Tensor result, Scalar end) -> Tensor
+  variants: function
+
+- func: arange(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
+  variants: function
+  deprecated: true
+
+- func: arange(Type dtype, Scalar end) -> Tensor
+  variants: function
+  deprecated: true
+
+# This function is a temporary hack to allow tracing of arange like constructs with dynamic
+# bounds on arange.  Normal arange is not traceable because it does not take any tensor inputs;
+# if the range you need is based on another tensor, calling this function directly will
+# preserve tracing.  Get rid of this when arange can directly take tensors for bounds
+# (so that it can be traced directly).
+- func: _dim_arange(Tensor like, int64_t dim) -> Tensor
   variants: function
 
 # `argmin` and `argmax` are exposed in C++ but not in Python, where we only
@@ -122,6 +148,11 @@
 - func: argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 - func: argmin(Tensor self) -> Tensor
 - func: _argmin(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
+# The actual implementations live in Declarations.cwrap. These are just to
+# provide default values for storage_offset=self.storage_offset()
+- func: as_strided(Tensor self, IntList size, IntList stride) -> Tensor
+- func: as_strided_(Tensor self, IntList size, IntList stride) -> Tensor
 
 - func: asin(Tensor self) -> Tensor
 
@@ -149,14 +180,39 @@
     CPU: _atan_out_cpu
     CUDA: _atan_out_cuda
 
+- func: bartlett_window(int64_t window_length, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: bartlett_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
+  variants: function
+
 - func: batch_norm(Tensor input, Tensor? weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double momentum, double eps, bool cudnn_enabled) -> Tensor
   variants: function
 
+- func: bernoulli(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli(Tensor self) -> Tensor
+
 - func: bernoulli_(Tensor self, Tensor p, Generator* generator=nullptr) -> Tensor
 
-- func: bernoulli_(Tensor self, double p=0.5, Generator* generator=nullptr) -> Tensor
+- func: bernoulli_(Tensor self, double p, Generator* generator=nullptr) -> Tensor
+
+- func: bernoulli_(Tensor self) -> Tensor
 
 - func: bilinear(Tensor input1, Tensor input2, Tensor weight, Tensor? bias) -> Tensor
+  variants: function
+
+- func: bincount(Tensor self, Tensor? weights={}, int64_t minlength=0) -> Tensor
+  dispatch:
+    CPU: _bincount_cpu
+    CUDA: _bincount_cuda
+
+- func: blackman_window(int64_t window_length, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: blackman_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
   variants: function
 
 - func: cat(TensorList tensors, int64_t dim=0) -> Tensor
@@ -182,6 +238,7 @@
 
 - func: cudnn_is_acceptable(Tensor self) -> bool
   variants: function
+  device_guard: false
 
 - func: convolution(Tensor input, Tensor weight, Tensor? bias, IntList stride, IntList padding, IntList dilation, bool transposed, IntList output_padding, int64_t groups) -> Tensor
   variants: function
@@ -424,7 +481,7 @@
     CPU: embedding_bag_backward_cpu
     CUDA: embedding_bag_backward_cuda
 
-- func: empty(Type dtype, IntList size) -> Tensor
+- func: empty(IntList size, TensorOptions options={}) -> Tensor
   variants: function
 
 - func: empty_out(Tensor result, IntList size) -> Tensor
@@ -433,10 +490,12 @@
 - func: empty_like(Tensor self) -> Tensor
   variants: function
 
-- func: empty_like(Tensor self, *, Type dtype) -> Tensor
+- func: empty_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    dtype: self.type()
+
+- func: empty(Type dtype, IntList size) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: erf(Tensor self) -> Tensor
 
@@ -483,14 +542,29 @@
 - func: expand_as(Tensor self, Tensor other) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
-- func: eye(Type dtype, int64_t n, int64_t m=-1) -> Tensor
+- func: eye(int64_t n, TensorOptions options={}) -> Tensor
   variants: function
 
-- func: eye_out(Tensor result, int64_t n, int64_t m=-1) -> Tensor
+- func: eye(int64_t n, int64_t m, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: eye_out(Tensor result, int64_t n) -> Tensor
   variants: function
   dispatch:
     CPU: eye_out_cpu
     CUDA: eye_out_cuda
+
+- func: eye_out(Tensor result, int64_t n, int64_t m) -> Tensor
+  variants: function
+  dispatch:
+    CPU: eye_out_cpu
+    CUDA: eye_out_cuda
+
+- func: eye(Type dtype, int64_t n, int64_t m=-1) -> Tensor
+  variants: function
+  deprecated: true
+
+- func: flatten(Tensor self, int64_t start_dim=0, int64_t end_dim=-1) -> Tensor
 
 - func: fill_(Tensor self, Scalar value) -> Tensor
 
@@ -509,7 +583,7 @@
     CPU: _floor_out_cpu
     CUDA: _floor_out_cuda
 
-- func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
+- func: full(IntList size, Scalar fill_value, TensorOptions options={}) -> Tensor
   variants: function
 
 - func: full_out(Tensor result, IntList size, Scalar fill_value) -> Tensor
@@ -518,10 +592,30 @@
 - func: full_like(Tensor self, Scalar fill_value) -> Tensor
   variants: function
 
-- func: full_like(Tensor self, Scalar fill_value, *, Type dtype) -> Tensor
+- func: full_like(Tensor self, Scalar fill_value, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    dtype: self.type()
+
+- func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
+  variants: function
+  deprecated: true
+
+- func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: hann_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: hamming_window(int64_t window_length, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: hamming_window(int64_t window_length, bool periodic, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: hamming_window(int64_t window_length, bool periodic, double alpha, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: hamming_window(int64_t window_length, bool periodic, double alpha, double beta, TensorOptions options={}) -> Tensor
+  variants: function
 
 - func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, bool size_average=true, bool reduce=true) -> Tensor
   variants: function
@@ -537,7 +631,7 @@
   variants: function
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
-- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor) 
+- func: _gesv_helper(Tensor self, Tensor A) -> (Tensor, Tensor)
   dispatch:
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
@@ -560,38 +654,73 @@
     CPU: _fft_mkl
     CUDA: _fft_cufft
 
+- func: _cufft_get_plan_cache_size() -> int64_t
+  variants: function
+  device_guard: false
+
+- func: _cufft_get_plan_cache_max_size() -> int64_t
+  variants: function
+  device_guard: false
+
+- func: _cufft_set_plan_cache_max_size(int64_t max_size)
+  variants: function
+  device_guard: false
+
+- func: _cufft_clear_plan_cache()
+  variants: function
+  device_guard: false
+
 - func: index(Tensor self, TensorList indices) -> Tensor
   # NB: This function is special-cased in tools/autograd/gen_variable_type.py
 
 - func: index_copy_(Tensor self, int64_t dim, IndexTensor index, Tensor source) -> Tensor
   variants: method
 
+- func: index_put(Tensor self, TensorList indices, Tensor values) -> Tensor
+
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
+  device_guard: false
 
 - func: is_distributed(Tensor self) -> bool
+  device_guard: false
 
 - func: is_floating_point(Tensor self) -> bool
+  device_guard: false
 
 - func: is_nonzero(Tensor self) -> bool
+  device_guard: false
 
 - func: is_same_size(Tensor self, Tensor other) -> bool
+  device_guard: false
 
 - func: is_signed(Tensor self) -> bool
+  device_guard: false
 
 - func: is_sparse(Tensor self) -> bool
+  device_guard: false
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
   variants: function
 
-- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+- func: linspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 
-- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+- func: linspace(Scalar start, Scalar end, int64_t steps, TensorOptions options={}) -> Tensor
   variants: function
+
+- func: linspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
+  variants: function
+
+- func: linspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
+  variants: function
+
+- func: linspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: log(Tensor self) -> Tensor
 
@@ -647,11 +776,21 @@
 
 - func: logdet(Tensor self) -> Tensor
 
-- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+- func: logspace(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 
-- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+- func: logspace(Scalar start, Scalar end, int64_t steps, TensorOptions options={}) -> Tensor
   variants: function
+
+- func: logspace_out(Tensor result, Scalar start, Scalar end) -> Tensor
+  variants: function
+
+- func: logspace_out(Tensor result, Scalar start, Scalar end, int64_t steps) -> Tensor
+  variants: function
+
+- func: logspace(Type dtype, Scalar start, Scalar end, int64_t steps=100) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: log_softmax(Tensor self, int64_t dim) -> Tensor
   dispatch:
@@ -681,6 +820,26 @@
 - func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
   variants: function
 
+# FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
+- func: mean(Tensor self, *, ScalarType dtype) -> Tensor
+
+- func: mean(Tensor self) -> Tensor
+
+- func: mean(Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+
+- func: mean(Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+
+- func: mean(Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+
+- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim, *, ScalarType dtype) -> Tensor
+  variants: function
+
+- func: mean_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
+  variants: function
+
+- func: mean_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
+  variants: function
+
 - func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation) -> Tensor
@@ -707,7 +866,7 @@
 
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
 
-- func: ones(Type dtype, IntList size) -> Tensor
+- func: ones(IntList size, TensorOptions options={}) -> Tensor
   variants: function
 
 - func: ones_out(Tensor result, IntList size) -> Tensor
@@ -716,10 +875,12 @@
 - func: ones_like(Tensor self) -> Tensor
   variants: function
 
-- func: ones_like(Tensor self, *, Type dtype) -> Tensor
+- func: ones_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    dtype: self.type()
+
+- func: ones(Type dtype, IntList size) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
@@ -729,30 +890,58 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
-- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+- func: rand(IntList size, *, TensorOptions options={}) -> Tensor
   variants: function
 
-- func: rand_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+- func: rand(IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: rand_out(Tensor result, IntList size, *) -> Tensor
+  variants: function
+
+- func: rand_out(Tensor result, IntList size, *, Generator* generator) -> Tensor
   variants: function
 
 - func: rand_like(Tensor self) -> Tensor
   variants: function
 
-- func: rand_like(Tensor self, *, Type dtype) -> Tensor
+- func: rand_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    dtype: self.type()
+
+- func: rand(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+  deprecated: true
+
+- func: randint(int64_t high, IntList size, *, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: randint(int64_t high, IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: randint(int64_t low, int64_t high, IntList size, *, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: randint(int64_t low, int64_t high, IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
+  variants: function
 
 - func: randint(Type dtype, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
+  deprecated: true
 
 - func: randint(Type dtype, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
   variants: function
+  deprecated: true
 
-- func: randint_out(Tensor result, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+- func: randint_out(Tensor result, int64_t high, IntList size, *) -> Tensor
   variants: function
 
-- func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator=nullptr) -> Tensor
+- func: randint_out(Tensor result, int64_t high, IntList size, *, Generator* generator) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *) -> Tensor
+  variants: function
+
+- func: randint_out(Tensor result, int64_t low, int64_t high, IntList size, *, Generator* generator) -> Tensor
   variants: function
 
 - func: randint_like(Tensor self, int64_t high) -> Tensor
@@ -761,41 +950,68 @@
 - func: randint_like(Tensor self, int64_t low, int64_t high) -> Tensor
   variants: function
 
-- func: randint_like(Tensor self, int64_t high, *, Type dtype) -> Tensor
-  variants: function
-  python_default_init:
-    dtype: self.type()
-
-- func: randint_like(Tensor self, int64_t low, int64_t high, *, Type dtype) -> Tensor
-  variants: function
-  python_default_init:
-    dtype: self.type()
-
-- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+- func: randint_like(Tensor self, int64_t high, *, TensorOptions options) -> Tensor
   variants: function
 
-- func: randn_out(Tensor result, IntList size, *, Generator* generator=nullptr) -> Tensor
+- func: randint_like(Tensor self, int64_t low, int64_t high, *, TensorOptions options) -> Tensor
+  variants: function
+
+- func: randn(IntList size, *, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: randn(IntList size, *, Generator* generator, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: randn_out(Tensor result, IntList size, *) -> Tensor
+  variants: function
+
+- func: randn_out(Tensor result, IntList size, *, Generator* generator) -> Tensor
   variants: function
 
 - func: randn_like(Tensor self) -> Tensor
   variants: function
 
-- func: randn_like(Tensor self, *, Type dtype) -> Tensor
+- func: randn_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    dtype: self.type()
+
+- func: randn(Type dtype, IntList size, *, Generator* generator=nullptr) -> Tensor
+  variants: function
+  deprecated: true
+
+- func: randperm(int64_t n, *, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: randperm(int64_t n, *, Generator* generator, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: randperm_out(Tensor result, int64_t n, *) -> Tensor
+  variants: function
+
+- func: randperm_out(Tensor result, int64_t n, *, Generator* generator) -> Tensor
+  variants: function
+  dispatch:
+    CPU: randperm_out_cpu
+    CUDA: randperm_out_cuda
 
 - func: randperm(Type dtype, int64_t n, *, Generator* generator=nullptr) -> Tensor
   variants: function
+  deprecated: true
 
-- func: randperm_out(Tensor result, int64_t n, *, Generator* generator=nullptr) -> Tensor
+- func: range(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: range(Scalar start, Scalar end, Scalar step, TensorOptions options={}) -> Tensor
+  variants: function
+
+- func: range_out(Tensor result, Scalar start, Scalar end) -> Tensor
+  variants: function
+
+- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step) -> Tensor
   variants: function
 
 - func: range(Type dtype, Scalar start, Scalar end, Scalar step=1) -> Tensor
   variants: function
-
-- func: range_out(Tensor result, Scalar start, Scalar end, Scalar step=1) -> Tensor
-  variants: function
+  deprecated: true
 
 - func: repeat(Tensor self, IntList repeats) -> Tensor
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
@@ -836,6 +1052,16 @@
 - func: relu(Tensor self) -> Tensor
 
 - func: relu_(Tensor self) -> Tensor
+
+- func: hardshrink(Tensor self, Scalar lambd=0.5) -> Tensor
+  dispatch:
+    CPU: hardshrink_cpu
+    CUDA: hardshrink_cuda
+
+- func: hardshrink_backward(Tensor grad_out, Tensor self, Scalar lambd) -> Tensor
+  dispatch:
+    CPU: hardshrink_backward_cpu
+    CUDA: hardshrink_backward_cuda
 
 - func: rsqrt(Tensor self) -> Tensor
 
@@ -885,6 +1111,7 @@
     CUDA: _sinh_out_cuda
 
 - func: size(Tensor self, int64_t dim) -> int64_t
+  device_guard: false
 
 - func: slice(Tensor self, int64_t dim=0, int64_t start=0, int64_t end=9223372036854775807, int64_t step=1) -> Tensor
 
@@ -937,6 +1164,7 @@
     fft_size: frame_length
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
+  device_guard: false
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: sum(Tensor self, *, ScalarType dtype) -> Tensor
@@ -1019,6 +1247,8 @@
     CPU: _prod_out_cpu
     CUDA: _prod_out_cuda
 
+- func: t(Tensor self) -> Tensor
+
 - func: t_(Tensor self) -> Tensor
   variants: method
 
@@ -1048,8 +1278,15 @@
     CPU: _tanh_out_cpu
     CUDA: _tanh_out_cuda
 
+- func: transpose(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
+
 - func: transpose_(Tensor self, int64_t dim0, int64_t dim1) -> Tensor
   variants: method
+
+- func: flip(Tensor self, IntList dims) -> Tensor
+  dispatch:
+    CPU: flip_cpu
+    CUDA: flip_cuda
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
   variants: function
@@ -1098,7 +1335,7 @@
     CPU: _s_where_cpu
     CUDA: _s_where_cuda
 
-- func: zeros(Type dtype, IntList size) -> Tensor
+- func: zeros(IntList size, TensorOptions options={}) -> Tensor
   variants: function
 
 - func: zeros_out(Tensor result, IntList size) -> Tensor
@@ -1107,10 +1344,12 @@
 - func: zeros_like(Tensor self) -> Tensor
   variants: function
 
-- func: zeros_like(Tensor self, *, Type dtype) -> Tensor
+- func: zeros_like(Tensor self, *, TensorOptions options) -> Tensor
   variants: function
-  python_default_init:
-    dtype: self.type()
+
+- func: zeros(Type dtype, IntList size) -> Tensor
+  variants: function
+  deprecated: true
 
 - func: _standard_gamma_grad(Tensor self, Tensor output) -> Tensor
   dispatch:
@@ -1127,3 +1366,429 @@
   dispatch:
     CPU: _s_poisson_cpu
     CUDA: _s_poisson_cuda
+
+# When more variants get ported to native, this dispatch will get more
+# complicated
+
+- func: native_norm(Tensor self, Scalar p=2) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: norm_sparse
+    SparseCUDA: norm_sparse
+
+- func: norm(Tensor self, Scalar p=2) -> Tensor
+  variants: method, function
+
+- func: native_clone(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: clone_sparse
+    SparseCUDA: clone_sparse
+
+- func: clone(Tensor self) -> Tensor
+
+- func: native_resize_as_(Tensor self, Tensor the_template) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: resize_as_sparse_
+    SparseCUDA: resize_as_sparse_
+
+- func: resize_as_(Tensor self, Tensor the_template) -> Tensor
+
+- func: native_pow_out(Tensor result, Tensor self, Scalar exponent) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: pow_out_sparse_scalar
+    SparseCUDA: pow_out_sparse_scalar
+
+- func: native_pow(Tensor self, Scalar exponent) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: pow_sparse_scalar
+    SparseCUDA: pow_sparse_scalar
+
+- func: pow_out(Tensor result, Tensor self, Scalar exponent) -> Tensor
+  variants: function
+
+- func: pow(Tensor self, Scalar exponent) -> Tensor
+  variants: method, function
+
+- func: native_zero_(Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: zero_sparse_
+    SparseCUDA: zero_sparse_
+
+- func: zero_(Tensor self) -> Tensor
+
+
+
+- func: s_native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_add_out_sparse_cpu
+    SparseCUDA: s_add_out_sparse_cuda
+
+- func: native_add_out(Tensor result, Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_out_dense_sparse_cpu
+    CUDA: add_out_dense_sparse_cuda
+
+- func: s_native_add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_add_sparse_cpu
+    SparseCUDA: s_add_sparse_cuda
+
+- func: native_add(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_dense_sparse_cpu
+    CUDA: add_dense_sparse_cuda
+
+- func: s_native_add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_add_sparse_cpu_
+    SparseCUDA: s_add_sparse_cuda_
+
+- func: native_add_(Tensor self, SparseTensorRef other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: add_dense_sparse_cpu_
+    CUDA: add_dense_sparse_cuda_
+
+- func: add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: add(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method, function
+
+- func: add_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method
+
+
+
+- func: s_native_sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_sub_out_sparse_cpu
+    SparseCUDA: s_sub_out_sparse_cuda
+
+- func: s_native_sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_sub_sparse_cpu
+    SparseCUDA: s_sub_sparse_cuda
+
+- func: s_native_sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_sub_sparse_cpu_
+    SparseCUDA: s_sub_sparse_cuda_
+
+- func: sub_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: sub(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method, function
+
+- func: sub_(Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
+  variants: method
+
+
+
+- func: s_native_mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_mul_out_sparse_cpu
+    SparseCUDA: s_mul_out_sparse_cuda
+
+- func: s_native_mul(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_mul_sparse_cpu
+    SparseCUDA: s_mul_sparse_cuda
+
+- func: s_native_mul_(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_mul_sparse_cpu_
+    SparseCUDA: s_mul_sparse_cuda_
+
+- func: native_mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_out_sparse_scalar
+    SparseCUDA: mul_out_sparse_scalar
+
+- func: native_mul(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_sparse_scalar
+    SparseCUDA: mul_sparse_scalar
+
+- func: native_mul_(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: mul_sparse_scalar_
+    SparseCUDA: mul_sparse_scalar_
+
+- func: mul_out(Tensor result, Tensor self, Tensor other) -> Tensor
+  variants: function
+
+- func: mul_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+
+- func: mul(Tensor self, Tensor other) -> Tensor
+  variants: method, function
+
+- func: mul(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: mul_(Tensor self, Tensor other) -> Tensor
+  variants: method
+
+- func: mul_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+
+
+- func: native_div_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: div_out_sparse_scalar
+    SparseCUDA: div_out_sparse_scalar
+
+- func: native_div(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: div_sparse_scalar
+    SparseCUDA: div_sparse_scalar
+
+- func: native_div_(Tensor self, Scalar other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: div_sparse_scalar_
+    SparseCUDA: div_sparse_scalar_
+
+- func: div_out(Tensor result, Tensor self, Scalar other) -> Tensor
+  variants: function
+
+- func: div(Tensor self, Scalar other) -> Tensor
+  variants: method, function
+
+- func: div_(Tensor self, Scalar other) -> Tensor
+  variants: method
+
+
+- func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: s_addmm_out_sparse_dense_cpu
+    CUDA: s_addmm_out_sparse_dense_cuda
+
+- func: s_native_addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: s_addmm_sparse_dense_cpu
+    CUDA: s_addmm_sparse_dense_cuda
+
+- func: s_native_addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+  dispatch:
+    CPU: s_addmm_sparse_dense_cpu_
+    CUDA: s_addmm_sparse_dense_cuda_
+
+- func: addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: function
+
+- func: addmm(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method, function
+
+- func: addmm_(Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
+  variants: method
+
+
+- func: native_tensor(Type self_ty) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: new_sparse
+    SparseCUDA: new_sparse
+
+- func: native_tensor(Type self_ty, IntList size) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: new_with_size_sparse
+    SparseCUDA: new_with_size_sparse
+
+- func: tensor(Type dtype) -> Tensor
+  variants: []
+
+- func: tensor(Type dtype, IntList size) -> Tensor
+  variants: []
+
+
+# NB: I have to decompose sparse_coo_tensor into two functions, because
+# it has custom dispatch logic for which Type to dispatch on (we must
+# use the sparse equivalent of the type of the SECOND argument).
+#
+# The actual dispatcher, native_sparse_coo_tensor, has all of its overloads
+# removed so you don't accidentally trigger the default behavior, which
+# is to infer Type based on the first argument (indices), which is ~never
+# what you want. (I guess hypothetically it would work; you'd
+# just only ever dispatch to CPULongTensor or CUDALongTensor, but that
+# seems a bit too finely balanced.)
+
+- func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
+  variants: []
+  dispatch:
+    SparseCPU: new_with_tensor_sparse
+    SparseCUDA: new_with_tensor_sparse
+
+- func: native_sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
+  variants: []
+  dispatch:
+    SparseCPU: new_with_tensor_and_size_sparse
+    SparseCUDA: new_with_tensor_and_size_sparse
+
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
+  variants: []
+
+- func: sparse_coo_tensor(IndexTensor indices, Tensor values, IntList size) -> Tensor
+  variants: []
+
+
+- func: _native_sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
+  variants: []
+  dispatch:
+    SparseCPU: new_with_tensor_and_size_unsafe_sparse
+    SparseCUDA: new_with_tensor_and_size_unsafe_sparse
+
+- func: _sparse_coo_tensor_unsafe(IndexTensor indices, Tensor values, IntList size) -> Tensor
+  variants: function
+
+
+- func: sparse_raw_resize_(Tensor self, IntList size, int64_t sparseDims, int64_t denseDims) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: raw_resize_sparse_
+    SparseCUDA: raw_resize_sparse_
+
+
+- func: _sparse_mask(Tensor self, SparseTensorRef mask) -> Tensor
+  variants: method
+  dispatch:
+    CPU: sparse_mask_cpu
+    CUDA: sparse_mask_cuda
+
+
+- func: to_dense(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: sparse_to_dense
+    SparseCUDA: sparse_to_dense
+
+
+- func: _sparseDims(Tensor self) -> int64_t
+  variants: method
+  dispatch:
+    SparseCPU: _sparseDims_sparse
+    SparseCUDA: _sparseDims_sparse
+  device_guard: False
+
+# legacy method
+- func: _dimI(Tensor self) -> int64_t
+  variants: method
+  dispatch: _sparseDims_sparse
+  device_guard: False
+
+
+- func: _denseDims(Tensor self) -> int64_t
+  variants: method
+  dispatch:
+    SparseCPU: _denseDims_sparse
+    SparseCUDA: _denseDims_sparse
+  device_guard: False
+
+# legacy method
+- func: _dimV(Tensor self) -> int64_t
+  variants: method
+  dispatch: _denseDims_sparse
+  device_guard: False
+
+
+- func: _nnz(Tensor self) -> int64_t
+  variants: method
+  dispatch:
+    SparseCPU: _nnz_sparse
+    SparseCUDA: _nnz_sparse
+  device_guard: False
+
+
+- func: coalesce(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: coalesce_sparse_cpu
+    SparseCUDA: coalesce_sparse_cuda
+
+
+- func: is_coalesced(Tensor self) -> bool
+  variants: method
+  dispatch:
+    SparseCPU: is_coalesced_sparse
+    SparseCUDA: is_coalesced_sparse
+  device_guard: False
+
+
+- func: _indices(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: _indices_sparse
+    SparseCUDA: _indices_sparse
+  device_guard: False
+
+
+- func: _values(Tensor self) -> Tensor
+  variants: method
+  dispatch:
+    SparseCPU: _values_sparse
+    SparseCUDA: _values_sparse
+  device_guard: False
+
+
+- func: hspmm_out(Tensor result, Tensor mat1, Tensor mat2) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: hspmm_out_sparse_cpu
+    SparseCUDA: hspmm_out_sparse_cuda
+
+- func: hspmm(Tensor mat1, Tensor mat2) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: hspmm_sparse_cpu
+    SparseCUDA: hspmm_sparse_cuda
+
+# This "raw copy" doesn't handle conversions NOR does it handle non-blocking.
+- func: raw_copy_sparse_(Tensor self, Tensor src) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: copy_sparse_
+    SparseCUDA: copy_sparse_
+
+- func: numel(Tensor self) -> int64_t
+  variants:
+    - method
+    - function
+  device_guard: False
+
+
+- func: native_get_device(Tensor self) -> int64_t
+  variants: function
+  dispatch:
+    SparseCUDA: get_device_sparse_cuda
+  device_guard: False
+
+- func: get_device(Tensor self) -> int64_t
+  device_guard: False

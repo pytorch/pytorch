@@ -23,10 +23,63 @@ OPERATOR_SCHEMA(SumElements)
     .NumInputs(1)
     .NumOutputs(1)
     .ScalarType(TensorProto::FLOAT)
-    .SetDoc("Sums the elements of the input tensor.")
-    .Arg("average", "whether to average or not")
-    .Input(0, "X", "Tensor to sum up")
-    .Output(0, "sum", "Scalar sum");
+    .SetDoc(R"DOC(
+Sums the elements of the input tensor. Tensor type must be float32.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+sum_op = core.CreateOperator(
+    "SumElements",
+    ["X"],
+    ["Y"]
+)
+
+avg_op = core.CreateOperator(
+    "SumElements",
+    ["X"],
+    ["Y"],
+    average=True
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(3,3)).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(sum_op)
+print("Y (sum_op):", workspace.FetchBlob("Y"))
+workspace.RunOperatorOnce(avg_op)
+print("Y (avg_op):", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[7. 2. 5.]
+ [9. 4. 2.]
+ [1. 2. 5.]]
+Y (sum_op): 37.0
+Y (avg_op): 4.111111
+
+```
+
+</details>
+
+    )DOC")
+    .Arg("average", "(*bool*): set to True to compute the average of the elements rather than the sum")
+    .Input(0, "X", "(*Tensor`<float>`*): blob pointing to an instance of a counter")
+    .Output(0, "sum", "(*Tensor`<float>`*): Scalar tensor containing the sum (or average)");
 
 OPERATOR_SCHEMA(SumElementsInt)
     .NumInputs(1)
@@ -63,12 +116,75 @@ REGISTER_GRADIENT(SumElements, GetSumElementsGradient);
 OPERATOR_SCHEMA(RowwiseMax)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc("Compute row-wise max reduction of the input tensor.")
+    .SetDoc(R"DOC(
+Compute row-wise max reduction of the input tensor. This op takes one input, $X$, of shape $BxMxN$, where $B$ is the batch size, $M$ is number of rows, and $N$ is number of columns. The output of this op, $Y$, is a matrix of shape $BxM$, with one row for each element of the batch, and the same number of columns as the number of rows of the input tensor.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "RowwiseMax",
+    ["X"],
+    ["Y"]
+)
+
+# Create X, simulating a batch of 2, 4x4 matricies
+X = np.random.randint(0,high=20,size=(2,4,4))
+print("X:\n",X)
+
+# Feed X into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[[ 5 12 10  1]
+  [ 4 16  2 15]
+  [ 5 11 12 15]
+  [15  4 17 19]]
+
+ [[16  5  5 13]
+  [17  2  1 17]
+  [18  3 19  5]
+  [14 16 10 16]]]
+Y:
+ [[12. 16. 15. 19.]
+ [16. 17. 19. 16.]]
+
+```
+
+</details>
+
+    )DOC")
     .Input(
         0,
         "X",
-        "A tenosr of dimensions batch_size x M x N to compute rowwise-max.")
-    .Output(0, "Y", "batch_size x M rowwise-max results matrix.");
+        "A tensor of dimensions $B x M x N$ to compute rowwise-max. Here, $B$ is batch size, and $M$ and $N$ are the number of rows and columns of each element of the batch, respectively.")
+    .Output(
+        0,
+        "Y",
+        "The output tensor of shape $B x M$, where each row represents the row-wise maximums for that element of the input batch.");
 
 OPERATOR_SCHEMA(RowwiseMaxGradient).NumInputs(3).NumOutputs(1);
 class GetRowwiseMaxGradient : public GradientMakerBase {
@@ -88,12 +204,74 @@ OPERATOR_SCHEMA(ColwiseMaxGradient);
 OPERATOR_SCHEMA(ColwiseMax)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc("Compute column-wise max reduction of the input tensor.")
+    .SetDoc(R"DOC(
+Compute column-wise max reduction of the input tensor. This op takes one input, $X$, of shape $BxMxN$, where $B$ is the batch size, $M$ is number of rows, and $N$ is number of columns. The output of this op, $Y$, is a matrix of shape $BxN$, with one row for each element of the batch, and the same number of columns as the input tensor.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduction_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ColwiseMax",
+    ["X"],
+    ["Y"]
+)
+
+# Create X, simulating a batch of 2, 4x4 matricies
+X = np.random.randint(0,high=20,size=(2,4,4))
+print("X:\n",X)
+
+# Feed X into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[[17 15  2  6]
+  [ 8 12  6  0]
+  [ 6  9  7  3]
+  [ 4 13 16 13]]
+
+ [[ 0  3  4 12]
+  [18  1 17 12]
+  [ 7 17 13 14]
+  [12 17  2  1]]]
+Y:
+ [[17. 15. 16. 13.]
+ [18. 17. 17. 14.]]
+
+```
+
+</details>
+
+    )DOC")
     .Input(
         0,
         "X",
-        "A tenosr of dimensions batch_size x M x N to compute colwise-max.")
-    .Output(0, "Y", "batch_size x N column-max results matrix.");
+        "A tensor of dimensions $B x M x N$ to compute columnwise-max. Here, $B$ is batch size, and $M$ and $N$ are the number of rows and columns of each element of the batch, respectively.")
+    .Output(
+        0,
+        "Y",
+        "The output tensor of shape $B x N$, where each row represents the column-wise maximums for that element of the input batch.");
 
 OPERATOR_SCHEMA(ColumnMaxGradient).NumInputs(3).NumOutputs(1);
 class GetColwiseMaxGradient : public GradientMakerBase {

@@ -2,6 +2,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
+#include "caffe2/opt/passes.h"
 
 namespace caffe2 {
 namespace opt {
@@ -140,6 +141,9 @@ void fuseNNPACKConvRelu(repr::NNModule* nn) {
 
   fuseActivation<repr::Conv, repr::Relu>(nn, should_fuse, postprocess);
 }
+
+REGISTER_OPT_PASS_FROM_FUNC(FuseNNPACKConvRelu, fuseNNPACKConvRelu);
+REGISTER_OPT_PASS_FROM_FUNC(AddNNPACK, addNNPACK);
 
 } // namespace opt
 } // namespace caffe2

@@ -155,8 +155,8 @@ struct TransformSubgraph {
   TransformSubgraph& operator=(TransformSubgraph&& rhs) noexcept {
     input_nodes = std::move(rhs.input_nodes);
     nodes = std::move(rhs.nodes);
-    external_input_refs = std::move(external_input_refs);
-    external_output_refs = std::move(external_output_refs);
+    external_input_refs = std::move(rhs.external_input_refs);
+    external_output_refs = std::move(rhs.external_output_refs);
     group_id = rhs.group_id;
     needed = rhs.needed;
     return *this;

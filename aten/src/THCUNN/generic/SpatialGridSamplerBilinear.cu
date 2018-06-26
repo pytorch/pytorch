@@ -7,9 +7,9 @@ static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)(
     THCTensor *input,
     THCTensor *grid,
     THCTensor *gradOutput) {
-  THCUNN_argCheck(state, THCTensor_(nDimension)(state, input) == 4, 2, input,
-      "4D input tensor expected but got: %s");
-  THCUNN_argCheck(state, THCTensor_(nDimension)(state, grid) == 4, 2, grid,
+  THCUNN_argCheck(state, !input->is_empty() && THCTensor_(nDimension)(state, input) == 4, 2, input,
+      "non-empty 4D input tensor expected but got: %s");
+  THCUNN_argCheck(state, !grid->is_empty() && THCTensor_(nDimension)(state, grid) == 4, 2, grid,
       "4D grid tensor expected but got: %s");
 
   int64_t nbatch   = THCTensor_(size)(state, input, 0);

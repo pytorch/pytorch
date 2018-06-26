@@ -55,6 +55,7 @@ OpSchema::Cost CostInferenceForFC(
     const OperatorDef& def,
     const vector<TensorShape>& in,
     bool pretransposed_weight) {
+  CAFFE_ENFORCE_EQ(in.size(), 3, "FC requires three inputs");
   struct OpSchema::Cost c;
   ArgumentHelper helper(def);
 
@@ -69,9 +70,11 @@ OpSchema::Cost CostInferenceForFC(
       ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
 
+  const auto& X = in[0];
   c.flops = 2 * K * M * N + M * N;
-  c.bytes_moved = M * N * sizeof(float);
-  c.params_bytes = (K * N + N) * sizeof(float);
+  c.bytes_read = (K * (M + N) + N) * sizeof(X.data_type());
+  c.bytes_written = M * N * sizeof(X.data_type());
+  c.params_bytes = (K * N + N) * sizeof(X.data_type());
   return c;
 }
 
@@ -134,7 +137,7 @@ OpSchema::Cost CostInferenceForFCGradient(
   }
 
   c.flops = 2 * (M * N * K + M * N);
-  c.bytes_moved = (size_dW + size_db) * sizeof(float);
+  c.bytes_written = (size_dW + size_db) * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
 
   if (out.size() == 3) {
@@ -145,7 +148,7 @@ OpSchema::Cost CostInferenceForFCGradient(
     }
 
     c.flops += M * N * K;
-    c.bytes_moved += size_dX * sizeof(float);
+    c.bytes_written += size_dX * sizeof(float);
   }
   return c;
 }
@@ -169,49 +172,96 @@ OPERATOR_SCHEMA(FC)
     .TensorInferenceFunction(std::bind(FCShapeInference, _1, _2, false))
     .CostInferenceFunction(std::bind(CostInferenceForFC, _1, _2, false))
     .SetDoc(R"DOC(
-Computes the result of passing an input vector X into a fully
-connected layer with 2D weight matrix W and 1D bias vector b. That is,
-the layer computes Y = X * W^T + b, where X has size (M x K),
-W has size (N x K), b has size (N), and Y has size (M x N),
-where M is often the batch size.
+The FC operator computes an output $(Y)$ as a linear combination of the input data blob $(X)$ with a weight blob $(W)$ and bias blob $(b)$. More formally,
 
+$$Y = XW^T+b$$
 
-NOTE: X does not need to explicitly be a 2D vector; rather, it will be
-coerced into one. For an arbitrary n-dimensional tensor
-X \in [a_0, a_1, ...,a_{k-1}, a_k, ..., a_{n-1}] where a_i \in N+ and k is
-the axis provided, then X will be coerced into a 2-dimensional tensor with
-dimensions [a_0 * ... * a_{k-1}, a_k * ... * a_{n-1}]. For the default
-case where axis=1, this means the X tensor will be coerced into a 2D tensor
-of dimensions [a_0, a_1 * ... * a_{n-1}], where a_0 is often the batch size.
-In this situation, we must have a_0 = M and a_1 * ... * a_{n-1} = K.
-Lastly, even though b is a 1D vector of size N, it is copied/resized to
-be size (M x N) implicitly and added to each vector in the batch.
-Each of these dimensions must be matched correctly, or else the operator
-will throw errors.
+Here, $X$ is a matrix of shape $(M,K)$, $W$ is a matrix of shape $(N,K)$, $b$ is a vector of length $N$, and $Y$ is a matrix of shape $(M,N)$. $N$ can be thought of as the number of nodes in the layer, $M$ is the batch size, and $K$ is the number of features in an input observation.
+
+*NOTE: $X$ does not need to explicitly be a 2-dimensional matrix, however, if it is not it will be coerced into one. For an arbitrary $n$-dimensional tensor $X$, e.g. $[a_0, a_1, \ldots ,a_{k-1}, a_k, \ldots , a_{n-1}]$, where $a_i$ in $N$, and $k$ is the $axis$ arg provided, then $X$ will be coerced into a 2-dimensional tensor with dimensions $[a_0 * \ldots * a_{k-1}, a_k * \ldots * a_{n-1}]$. For the default case where axis=1, this means the $X$ tensor will be coerced into a 2D tensor of dimensions $[a_0, a_1 * \ldots * a_{n-1}]$, where $a_0$ is often the batch size. In this situation, we must have $a_0 = M$ and $a_1 * \ldots * a_{n-1} = K$. Lastly, even though $b$ is a vector of length $N$, it is copied and resized to shape $(M x N)$ implicitly, then added to each vector in the batch.*
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/fully_connected_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/fully_connected_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+# In this example, our batch size is 1 (M=1), the input observation will have
+#   6 features (K=6), and the layer will have one hidden node (N=1). The
+#   expected output is Y=7.
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "FC",
+    ["X", "W", "b"],
+    ["Y"]
+)
+
+# Create X: MxK
+data = np.array([1,2,3,4,5,6]).astype(np.float32)
+data = data[np.newaxis,:]
+
+# Create W: NxK
+weights = np.array(np.array([1,1/2.,1/3.,1/4.,1/5.,1/6.])).astype(np.float32)
+weights = weights[np.newaxis,:]
+
+# Create b: N
+bias = np.array([1.]).astype(np.float32)
+
+# Put the inputs into the workspace
+workspace.FeedBlob("X", data)
+workspace.FeedBlob("W", weights)
+workspace.FeedBlob("b", bias)
+
+# Run the operator
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+Y:
+ [[7.]]
+
+```
+
+</details>
+
 )DOC")
     .Arg(
         "axis",
-        "(int32_t) default to 1; describes the axis of the inputs; "
-        "defaults to one because the 0th axis most likely describes "
-        "the batch_size")
+        "*(type: int; default: 1)* Describes the axis of the input data $X$. Defaults to one because in the common case when the input $X$ has shape $(M,K)$, the first axis encodes the batch size.")
     .Arg(
         "axis_w",
-        "(int32_t) default to 1; describes the axis of the weight matrix W; "
-        "defaults to one because the 0th axis most likely describes "
-        "the batch_size")
-    .Arg("float16_compute", "Whether to use float-16 compute kernel")
+        "*(type: int; default: 1)* Describes the axis of the input weight matrix $W$. Defaults to one because the first axis most likely describes the batch_size.")
+    .Arg(
+        "float16_compute",
+        "*(type: bool; default: False)* Whether to use float-16 compute kernel.")
     .Input(
         0,
         "X",
-        "input tensor that's coerced into a 2D matrix of size (MxK) "
-        "as described above")
+        "Input blob to be coerced into a 2D matrix of shape $(M,K)$, where $M$ is the batch size and $K$ is the number of features in a single observation.")
     .Input(
         1,
         "W",
-        "A tensor that is coerced into a 2D blob of size (KxN) "
-        "containing fully connected weight matrix")
-    .Input(2, "b", "1D blob containing bias vector")
-    .Output(0, "Y", "2D output tensor")
+        "Input blob to be coerced into a 2D matrix of shape $(N,K)$ describing a fully connected weight matrix. Here, $K$ is the number of features in a single observation and $N$ is the number of nodes in the FC layer.")
+    .Input(
+        2,
+        "b",
+        "Input blob containing vector of length $N$ which describes one bias for each node in the layer.")
+    .Output(
+        0,
+        "Y",
+        "Ouput blob containing a 2D output matrix of shape $(M,N)$, where $M$ is the batch size and $N$ is the number of nodes in the layer. The ouput is calculated as $Y=XW^T+b$.")
     .InheritOnnxSchema("Gemm");
 
 OPERATOR_SCHEMA(FCGradient)

@@ -65,8 +65,7 @@ using std::vector;
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #ifndef DISABLE_COPY_AND_ASSIGN
-#define DISABLE_COPY_AND_ASSIGN(classname)                              \
-private:                                                                       \
+#define DISABLE_COPY_AND_ASSIGN(classname)                                     \
   classname(const classname&) = delete;                                        \
   classname& operator=(const classname&) = delete
 #endif
@@ -145,6 +144,12 @@ private:                                                                       \
 #define CAFFE2_API CAFFE2_EXPORT
 #else
 #define CAFFE2_API CAFFE2_IMPORT
+#endif
+
+#ifdef CAFFE2_BUILD_OBSERVER_LIB
+#define CAFFE2_OBSERVER_API CAFFE2_EXPORT
+#else
+#define CAFFE2_OBSERVER_API CAFFE2_IMPORT
 #endif
 
 
@@ -252,7 +257,7 @@ class SkipIndices {
   }
   template <int First, int Second, int... Rest>
   static inline bool ContainsInternal(const int i) {
-    return (i == First) && ContainsInternal<Second, Rest...>(i);
+    return (i == First) || ContainsInternal<Second, Rest...>(i);
   }
 
  public:
@@ -274,11 +279,13 @@ class SkipIndices<> {
 // as the underlying boolean variable is going to be switched on when one
 // loads libcaffe2_gpu.so.
 bool HasCudaRuntime();
+bool HasHipRuntime();
 namespace internal {
 // Sets the Cuda Runtime flag that is used by HasCudaRuntime(). You should
 // never use this function - it is only used by the Caffe2 gpu code to notify
 // Caffe2 core that cuda runtime has been loaded.
 void SetCudaRuntimeFlag();
+void SetHipRuntimeFlag();
 }
 // Returns which setting Caffe2 was configured and built with (exported from
 // CMake)

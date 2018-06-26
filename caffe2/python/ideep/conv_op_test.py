@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings, unlimited
+from hypothesis import given, settings
 import numpy as np
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
@@ -25,7 +25,6 @@ class ConvTest(hu.HypothesisTestCase):
            training_mode=st.booleans(),
            group=st.integers(1, 2),
            **mu.gcs)
-    @settings(deadline=None, timeout=unlimited)
     def test_convolution(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, training_mode, group, gc, dc):
@@ -54,6 +53,22 @@ class ConvTest(hu.HypothesisTestCase):
             for i in range(len(inputs)):
                 self.assertGradientChecks(gc, op, inputs, i, [0], threshold=0.01)
 
+    @given(batch_size=st.integers(1, 3), **mu.gcs)
+    def test_depthwise_convolution(self, batch_size, gc, dc):
+        op = core.CreateOperator(
+            "Conv",
+            ["X", "w", "b"],
+            ["Y"],
+            stride=1,
+            pad=0,
+            kernel=1,
+            group=4,
+        )
+        X = np.random.rand(batch_size, 544, 14, 14).astype(np.float32)
+        w = np.random.rand(544, 136, 1, 1).astype(np.float32)
+        b = np.random.rand(544).astype(np.float32)
+        inputs = [X, w, b]
+        self.assertDeviceChecks(dc, op, inputs, [0])
 
 if __name__ == "__main__":
     unittest.main()

@@ -7,7 +7,7 @@ void THNN_(TemporalReplicationPadding_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            int padL, int padR) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
 
   int planeDim = 0;
@@ -15,7 +15,7 @@ void THNN_(TemporalReplicationPadding_updateOutput)(
   int numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 2 || numInputDims == 3, 2, input,
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 2 || numInputDims == 3), 2, input,
                   "2D or 3D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 3) {
@@ -66,9 +66,9 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(
            THCTensor *gradInput,
            int padL, int padR) {
 
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
                 "input tensor must fit into 32-bit index math");
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutput), 3,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutput), 3,
                 "output gradient tensor must fit into 32-bit index math");
 
   int planeDim = 0;

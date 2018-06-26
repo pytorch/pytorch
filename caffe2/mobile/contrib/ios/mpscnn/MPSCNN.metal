@@ -1113,3 +1113,47 @@ kernel void resize_nearest_nonarray(texture2d<half, access::sample> in[[texture(
   const int in_x = (int)(gid.x / width_scale);
   out.write(in.sample(s, float2(in_x, in_y)), gid.xy);
 }
+
+kernel void channel_shuffle(
+                            texture2d<half, access::read> in0[[texture(0), function_constant(in0_is_tex)]],
+                            texture2d_array<half, access::read> ina0[[texture(0), function_constant(in0_is_arr)]],
+                            texture2d<half, access::write> out[[texture(1), function_constant(in0_is_tex)]],
+                            texture2d_array<half, access::write> outa[[texture(1), function_constant(in0_is_arr)]],
+                            ushort3 gid[[thread_position_in_grid]]) {
+  ushort C = ushort_arg_1;
+  ushort K = ushort_arg_2;
+  ushort groups = ushort_arg_3;
+  
+  if (in0_is_tex) {
+    if (gid.x >= out.get_width() || gid.y >= out.get_height()) {
+      return;
+    }
+  } else {
+    if (gid.x >= outa.get_width() || gid.y >= outa.get_height()) {
+      return;
+    }
+  }
+  const ushort n = gid.z / divRoundUp(C, 4);
+  const ushort c = gid.z - n * divRoundUp(C, 4);
+  half4 value;
+  ushort2 gid_ = gid.xy;
+  for (int off = 0; off < 4; ++off) {
+    ushort cur_channel = c * 4 + off;
+    if (cur_channel >= C) {
+      break;
+    }
+    ushort channel_id = cur_channel / groups;
+    ushort group_id = cur_channel % groups;
+    ushort c0 = group_id * K + channel_id;
+    if (in0_is_tex) {
+      value[off] = in0.read(gid_)[c0 % 4];
+    } else {
+      value[off] = ina0.read(gid_, c0 / 4 + n * divRoundUp(C, 4))[c0 % 4];
+    }
+  }
+  if (in0_is_tex) {
+    out.write(value, gid_);
+  } else {
+    outa.write(value, gid_, gid.z);
+  }
+}

@@ -1,6 +1,7 @@
 #include "caffe2/core/logging.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/mobile.h"
+#include "caffe2/opt/passes.h"
 
 namespace caffe2 {
 namespace opt {
@@ -42,6 +43,8 @@ void sinkMaxPool(nom::repr::NNModule* nn) {
     // input -> Relu -> intermediate -> MaxPool -> output
   }
 }
+
+REGISTER_OPT_PASS_FROM_FUNC(SinkMaxPool, sinkMaxPool);
 
 } // namespace opt
 } // namespace caffe2

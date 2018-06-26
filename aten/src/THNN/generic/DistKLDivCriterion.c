@@ -59,7 +59,7 @@ void THNN_(DistKLDivCriterion_updateGradInput)(
   real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.);
 
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
-    *gradInput_data = *target_data > 0 ? norm * (-*target_data) * THTensor_fastGet1d(gradOutput, 0) : 0;
+    *gradInput_data = *target_data > 0 ? norm * (-*target_data) * THTensor_(fastGet1d)(gradOutput, 0) : 0;
   );
 }
 

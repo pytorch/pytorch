@@ -1713,9 +1713,10 @@ class TestOperators(hu.HypothesisTestCase):
 
         if num_iters * num_nets > 0:
             stats_key = self.ws.blobs[("stats_key")].fetch()
-            self.assertEqual(b'atomic_iter/stats/iter/num_iter', stats_key[0])
+            atomic_iter_key = b'atomic_iter/stats/iter/num_iter'
+            self.assertTrue(atomic_iter_key in stats_key)
             stat_val = self.ws.blobs[("stats_val")].fetch()
-            self.assertEqual(num_iters * num_nets, stat_val[0])
+            self.assertEqual(num_iters * num_nets, stat_val[list(stats_key).index(atomic_iter_key)])
 
 
     @given(a=hu.tensor(),

@@ -1,32 +1,35 @@
 #include "caffe2/operators/rsqrt_op.h"
 
+#include <algorithm>
+#include <functional>
 #include <string>
-#include <vector>
 
 namespace caffe2 {
 
 template <>
 struct RSqrtFunctor<CPUContext> {
   template <typename T>
-  inline void operator()(
-      const int size,
-      const T* X,
-      T* Y,
-      CPUContext* /* context */) const {
+  bool operator()(const int size, const T* X, T* Y, CPUContext* /* context */)
+      const {
     EigenArrayMap<T>(Y, 1, size) = ConstEigenArrayMap<T>(X, 1, size).rsqrt();
+    return true;
   }
 };
 
 template <>
 template <typename T>
-void RSqrtGradientFunctor<CPUContext>::Run(
-    const int size,
+bool RSqrtGradientFunctor<CPUContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* Y_dims */,
     const T* dY,
     const T* Y,
     T* dX,
     CPUContext* /* context */) const {
-  EigenArrayMap<T>(dX, 1, size) = ConstEigenArrayMap<T>(dY, 1, size) *
-      ConstEigenArrayMap<T>(Y, 1, size).cube() * static_cast<T>(-0.5);
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+  EigenVectorMap<T>(dX, size) = ConstEigenVectorMap<T>(dY, size).array() *
+      ConstEigenVectorMap<T>(Y, size).array().cube() * static_cast<T>(-0.5);
+  return true;
 }
 
 REGISTER_CPU_OPERATOR(
@@ -40,7 +43,7 @@ REGISTER_CPU_OPERATOR(
     BinaryElementwiseOp<
         TensorTypes<float>,
         CPUContext,
-        WithoutBroadcast<RSqrtGradientFunctor<CPUContext>>>);
+        RSqrtGradientFunctor<CPUContext>>);
 
 OPERATOR_SCHEMA(RSqrt)
     .NumInputs(1)

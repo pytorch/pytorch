@@ -1,61 +1,58 @@
-#include <cmath>
+#include "caffe2/operators/cos_op.h"
+
+#include <algorithm>
+#include <functional>
 
 #include "caffe2/core/context_gpu.h"
-#include "caffe2/operators/elementwise_op.h"
 
 namespace caffe2 {
 
-template <typename T>
-__global__ void CosKernel(const int N, const T* X, T* Y) {
-  CUDA_1D_KERNEL_LOOP(i, N) {
-    Y[i] = cos(X[i]);
-  }
-}
+namespace {
 
 template <typename T>
-__global__ void CosGradientKernel(const int N, const T* X, const T* dY, T* dX) {
+__global__ void
+CosGradientCUDAKernel(const int N, const T* dY, const T* X, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
+#if __CUDA_ARCH__ >= 350
+    dX[i] = -__ldg(dY + i) * sin(__ldg(X + i));
+#else
     dX[i] = -dY[i] * sin(X[i]);
+#endif
   }
 }
 
-struct CosCUDAFunctor {
-  template <typename T>
-  inline void
-  operator()(const int n, const T* x, T* y, CUDAContext* device_context) {
-    CosKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, y);
-    return;
-  }
-};
+} // namespace
 
-struct CosGradientCUDAFunctor {
-  template <typename T>
-  inline void Run(
-      const int n,
-      const T* x,
-      const T* dy,
-      T* dx,
-      CUDAContext* device_context) {
-    CosGradientKernel<T>
-        <<<CAFFE_GET_BLOCKS(n),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           device_context->cuda_stream()>>>(n, x, dy, dx);
-    return;
-  }
-};
+template <>
+template <typename T>
+bool CosGradientFunctor<CUDAContext>::Forward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& /* X_dims */,
+    const T* dY,
+    const T* X,
+    T* dX,
+    CUDAContext* context) const {
+  const int size = std::accumulate(
+      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+  CosGradientCUDAKernel<<<
+      CAFFE_GET_BLOCKS(size),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context->cuda_stream()>>>(size, dY, X, dX);
+  return true;
+}
 
 REGISTER_CUDA_OPERATOR(
     Cos,
-    UnaryElementwiseOp<TensorTypes<float>, CUDAContext, CosCUDAFunctor>);
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CUDAContext,
+        CosFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
     CosGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CUDAContext,
-        WithoutBroadcast<CosGradientCUDAFunctor>>);
+        CosGradientFunctor<CUDAContext>>);
+
 } // namespace caffe2

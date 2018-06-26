@@ -58,7 +58,7 @@ class SubsetRandomSampler(Sampler):
     r"""Samples elements randomly from a given list of indices, without replacement.
 
     Arguments:
-        indices (list): a list of indices
+        indices (sequence): a sequence of indices
     """
 
     def __init__(self, indices):
@@ -75,7 +75,7 @@ class WeightedRandomSampler(Sampler):
     r"""Samples elements from [0,..,len(weights)-1] with given probabilities (weights).
 
     Arguments:
-        weights (list)   : a list of weights, not necessary summing up to one
+        weights (sequence)   : a sequence of weights, not necessary summing up to one
         num_samples (int): number of samples to draw
         replacement (bool): if ``True``, samples are drawn with replacement.
             If not, they are drawn without replacement, which means that when a
@@ -101,7 +101,7 @@ class WeightedRandomSampler(Sampler):
         return self.num_samples
 
 
-class BatchSampler(object):
+class BatchSampler(Sampler):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:

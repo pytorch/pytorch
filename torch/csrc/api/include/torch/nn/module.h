@@ -1,17 +1,28 @@
 #pragma once
 
-#include <torch/csrc/autograd/variable.h>
+#include <torch/detail/ordered_dict.h>
+#include <torch/nn/cursor.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
-#include "torch/detail.h"
-
+#include <ATen/ATen.h>
 #include <ATen/optional.h>
 
 #include <map>
 #include <memory>
 #include <string>
+#include <type_traits>
 #include <unordered_map>
 
-namespace torch { namespace nn {
+namespace torch {
+namespace detail {
+template <typename T>
+class CursorBase;
+} // namespace detail
+} // namespace torch
+
+namespace torch {
+namespace nn {
 
 class Module {
  public:
@@ -28,11 +39,26 @@ class Module {
   /// Returns the name of the `Module`.
   const std::string& name() const noexcept;
 
-  virtual variable_list forward(variable_list) = 0;
-  virtual std::unique_ptr<Module> clone() const;
+  /// Performs a recursive deep copy of the module and all its registered
+  /// parameters, buffers and submodules.
+  virtual std::shared_ptr<Module> clone() const;
 
-  std::map<std::string, Variable> parameters() const;
-  Variable& param(std::string const&);
+  /// Provides a means to traverse the `Module` tree.
+  ModuleCursor modules();
+  ConstModuleCursor modules() const;
+
+  /// Traverses the (immediate) children of the `Module`.
+  ModuleCursor children();
+  ConstModuleCursor children() const;
+
+  /// Provides a means to recursively access the parameters of the `Module`
+  /// tree.
+  ParameterCursor parameters();
+  ConstParameterCursor parameters() const;
+
+  /// Provides a means to recursively access the buffers of the `Module` tree.
+  BufferCursor buffers();
+  ConstBufferCursor buffers() const;
 
   /// Enables training mode.
   virtual void train();
@@ -47,91 +73,119 @@ class Module {
   virtual void cpu();
 
   /// Recursively moves all parameters to CUDA memory (in place).
-  virtual void cuda();
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void cuda(int32_t device_index = -1, bool non_blocking = false);
 
-  /// Recursively casts all parameters to the given type.
-  virtual void to(at::Type& type);
+  /// Recursively casts all parameters to the given dtype and device.
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void to(
+      at::Device device,
+      at::ScalarType dtype,
+      bool non_blocking = false);
 
-  /// Recursively casts all parameters to the given scalar type.
-  virtual void to(at::ScalarType scalar_type);
+  /// Recursively casts all parameters to the given dtype.
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void to(at::ScalarType dtype, bool non_blocking = false);
 
-  /// Recursively moves all parameters to the given backend.
-  virtual void to(at::Backend backend);
+  /// Recursively moves all parameters to the given device.
+  /// If `non_blocking` is true and the source is in pinned memory and
+  /// destination is on the GPU or vice versa, the copy is performed
+  /// asynchronously with respect to the host. Otherwise, the argument has no
+  /// effect.
+  virtual void to(at::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();
 
-  std::unordered_map<std::string, std::shared_ptr<nn::Module>> children_;
-  std::unordered_map<std::string, Variable> parameters_;
-
   template <class Archive>
   void save(Archive& ar) const {
     auto params = parameters();
-    std::size_t size = params.size();
+    size_t size = params.size();
     ar(size);
     for (auto& p : params) {
-      ar(p.first, p.second);
+      ar(p.key, p.value);
     }
   }
 
   template <class Archive>
   void load(Archive& ar) {
     auto params = parameters();
-    std::size_t size;
+    size_t size;
     ar(size);
     std::string name;
-    for (std::size_t i = 0; i < size; i++) {
+    for (size_t i = 0; i < size; i++) {
       ar(name);
       ar(params[name]);
     }
   }
 
  protected:
-  std::shared_ptr<nn::Module> add(
-      std::shared_ptr<nn::Module>,
-      std::string const&);
-  // Be careful when registering Tensors that are not variables
-  Variable& add(Variable, std::string const&);
+  Tensor& register_parameter(
+      std::string name,
+      Tensor tensor,
+      bool requires_grad = true);
+  Tensor& register_buffer(std::string name, Tensor tensor);
+
+  template <
+      typename ModuleType,
+      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
+  std::shared_ptr<ModuleType> register_module(
+      std::string name,
+      std::shared_ptr<ModuleType> module) {
+    auto& base_module = children_.insert(std::move(name), std::move(module));
+    return std::static_pointer_cast<ModuleType>(base_module);
+  }
+
+  template <typename ModuleHolderType>
+  ModuleHolderType register_module(
+      std::string name,
+      ModuleHolderType module_holder) {
+    register_module(std::move(name), module_holder.get());
+    return module_holder;
+  }
 
  private:
+  template <typename T>
+  using OrderedDict = torch::detail::OrderedDict<std::string, T>;
+
+  template <typename Derived>
+  friend class Cloneable;
+  template <typename T>
+  friend class detail::CursorBase;
+
+  virtual void clone_(Module& other);
+
+  template <typename... Ts>
+  void to_impl(Ts&&... ts) {
+    for (auto& child : children_) {
+      child.value->to(ts...);
+    }
+    for (auto& parameter : parameters_) {
+      at::detail::set_data(*parameter, parameter->data().to(ts...));
+    }
+    for (auto& buffer : buffers_) {
+      at::detail::set_data(*buffer, buffer->data().to(ts...));
+    }
+  }
+
+  OrderedDict<Tensor> parameters_;
+  OrderedDict<Tensor> buffers_;
+  OrderedDict<std::shared_ptr<Module>> children_;
+
   /// The module's name (e.g. "LSTM").
   mutable at::optional<std::string> name_;
 
   /// Whether the module is in training mode.
   bool is_training_{true};
 };
-
-/// The `clone()` method in the base `Module` class does not have knowledge of
-/// the concrete runtime type of its subclasses. Therefore, `clone()` must
-/// either be called from within the subclass, or from a base class that has
-/// knowledge of the concrete type. `CloneableModule` uses the CRTP to gain
-/// knowledge of the subclass' static type and provide an implementation of the
-/// `clone()` method. We do not want to use this pattern in the base class,
-/// because then storing a module would always require templatizing it.
-template <typename Derived>
-class CloneableModule : public Module {
- public:
-  using Module::Module;
-
-  // should it also detach the gradients, like a deepcopy? Or maybe let's just
-  // give clone() a boolean for this?
-  std::unique_ptr<Module> clone() const override {
-    auto ptr = std::unique_ptr<Module>(
-        new Derived(*static_cast<const Derived*>(this)));
-    for (auto& parameter : ptr->parameters_) {
-      parameter.second = this->parameters_.at(parameter.first).clone();
-    }
-    for (auto& child : ptr->children_) {
-      child.second = this->children_.at(child.first)->clone();
-    }
-    return ptr;
-  }
-};
-
-template <class Module>
-std::shared_ptr<typename std::decay<Module>::type> make(Module&& module) {
-  auto ptr = std::make_shared<typename std::decay<Module>::type>(
-      std::forward<Module>(module));
-  return ptr;
-}
-}} // namespace torch::nn
+} // namespace nn
+} // namespace torch

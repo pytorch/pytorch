@@ -32,16 +32,6 @@ def _finfo(tensor):
     return _FINFO[tensor.storage_type()]
 
 
-def expand_n(v, n):
-    r"""
-    Cleanly expand float or Tensor parameters.
-    """
-    if isinstance(v, Number):
-        return torch.Tensor([v]).expand(n, 1)
-    else:
-        return v.expand(n, *v.size())
-
-
 def _broadcast_shape(shapes):
     r"""
     Given a list of tensor sizes, returns the size of the resulting broadcasted
@@ -60,25 +50,25 @@ def broadcast_all(*values):
     r"""
     Given a list of values (possibly containing numbers), returns a list where each
     value is broadcasted based on the following rules:
-      - `torch.Tensor` instances are broadcasted as per the `broadcasting rules
+      - `torch.*Tensor` instances are broadcasted as per the `broadcasting rules
         <http://pytorch.org/docs/master/notes/broadcasting.html>`_
-      - numbers.Number instances (scalars) are upcast to Tensors having
+      - numbers.Number instances (scalars) are upcast to tensors having
         the same size and type as the first tensor passed to `values`.  If all the
         values are scalars, then they are upcasted to Tensors having size
         `(1,)`.
 
     Args:
-        values (list of `numbers.Number` or `torch.Tensor`)
+        values (list of `numbers.Number` or `torch.*Tensor`)
 
     Raises:
         ValueError: if any of the values is not a `numbers.Number` or
-            `torch.Tensor` instance
+            `torch.*Tensor` instance
     """
     values = list(values)
     scalar_idxs = [i for i in range(len(values)) if isinstance(values[i], Number)]
-    tensor_idxs = [i for i in range(len(values)) if isinstance(values[i], torch.Tensor)]
+    tensor_idxs = [i for i in range(len(values)) if values[i].__class__.__name__ == 'Tensor']
     if len(scalar_idxs) + len(tensor_idxs) != len(values):
-        raise ValueError('Input arguments must all be instances of numbers.Number or torch.Tensor.')
+        raise ValueError('Input arguments must all be instances of numbers.Number or torch.tensor.')
     if tensor_idxs:
         broadcast_shape = _broadcast_shape([values[i].size() for i in tensor_idxs])
         for idx in tensor_idxs:
@@ -102,28 +92,20 @@ def _sum_rightmost(value, dim):
     """
     if dim == 0:
         return value
-    return value.contiguous().view(value.shape[:-dim] + (-1,)).sum(-1)
+    required_shape = value.shape[:-dim] + (-1,)
+    return value.reshape(required_shape).sum(-1)
 
 
-def softmax(tensor):
-    r"""
-    Returns the result with softmax applied to :attr:`tensor` along the last
-    dimension.
-    """
-    return F.softmax(tensor, -1)
-
-
-def log_sum_exp(tensor, keepdim=True):
+def _log_sum_exp(tensor, keepdim=True):
     r"""
     Numerically stable implementation for the `LogSumExp` operation. The
     summing is done along the last dimension.
 
     Args:
-        tensor (torch.Tensor)
+        tensor (Tensor)
         keepdim (Boolean): Whether to retain the last dimension on summing.
     """
-    max_val = tensor.max(dim=-1, keepdim=True)[0]
-    return max_val + (tensor - max_val).exp().sum(dim=-1, keepdim=keepdim).log()
+    return tensor.logsumexp(dim=-1, keepdim=keepdim)
 
 
 def logits_to_probs(logits, is_binary=False):
@@ -135,7 +117,7 @@ def logits_to_probs(logits, is_binary=False):
     """
     if is_binary:
         return F.sigmoid(logits)
-    return softmax(logits)
+    return F.softmax(logits, dim=-1)
 
 
 def clamp_probs(probs):
@@ -182,6 +164,7 @@ class lazy_property(object):
     def __get__(self, instance, obj_type=None):
         if instance is None:
             return self
-        value = self.wrapped(instance)
+        with torch.enable_grad():
+            value = self.wrapped(instance)
         setattr(instance, self.wrapped.__name__, value)
         return value

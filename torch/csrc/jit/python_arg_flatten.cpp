@@ -22,7 +22,7 @@ template<typename T>
 py::object cast_handle_sequence(std::vector<py::handle> objs) {
   auto num_objs = objs.size();
   T sequence { num_objs };
-  for (std::size_t i = 0; i < num_objs; ++i)
+  for (size_t i = 0; i < num_objs; ++i)
     sequence[i] = py::reinterpret_borrow<py::object>(objs[i]);
   return sequence;
 }
@@ -66,7 +66,7 @@ template<typename T>
 py::object cast_sequence(std::vector<py::object> objs) {
   auto num_objs = objs.size();
   T sequence { num_objs };
-  for (std::size_t i = 0; i < num_objs; ++i)
+  for (size_t i = 0; i < num_objs; ++i)
     sequence[i] = std::move(objs[i]);
   return sequence;
 }

@@ -1,40 +1,58 @@
 #include <torch/nn/modules/dropout.h>
 
-namespace torch { namespace nn {
+#include <torch/tensor.h>
 
-Dropout::Dropout(double p) : p_(p) {
-  assert(p < 1 && p >= 0);
+#include <ATen/Error.h>
+
+#include <cstddef>
+#include <vector>
+
+namespace torch {
+namespace nn {
+namespace detail {
+template <typename Derived>
+DropoutImplBase<Derived>::DropoutImplBase(DropoutOptions options)
+    : options_(options) {
+  AT_CHECK(options_.rate_ >= 0, "Dropout rate must not be less than zero");
+  AT_CHECK(options_.rate_ <= 1, "Dropout rate must not be greater than one");
 }
 
-variable_list Dropout::forward(variable_list inputs) {
-  if (p_ == 0 || !is_training())
-    return inputs;
-  variable_list lst;
-  for (auto x : inputs) {
-    auto noise = x.data().type().tensor(x.sizes());
-    noise = (noise.uniform_(0, 1) > p_)
-                .toType(x.type().scalarType())
-                .mul_(1. / (1 - p_));
-    lst.push_back(x * Var(noise));
+template <typename Derived>
+void DropoutImplBase<Derived>::reset() {}
+
+template <typename Derived>
+std::vector<Tensor> DropoutImplBase<Derived>::forward(
+    std::vector<Tensor> input) {
+  if (options_.rate_ == 0 || !this->is_training()) {
+    return input;
   }
-  return lst;
-}
-
-Dropout2d::Dropout2d(double p) : p_(p) {
-  assert(p < 1 && p >= 0);
-}
-
-variable_list Dropout2d::forward(variable_list inputs) {
-  if (p_ == 0 || !is_training())
-    return inputs;
-  variable_list lst;
-  for (auto x : inputs) {
-    auto noise = x.data().type().tensor({x.size(0), x.size(1), 1, 1});
-    noise = (noise.uniform_(0, 1) > p_)
-                .toType(x.type().scalarType())
-                .mul_(1. / (1 - p_));
-    lst.push_back(x * Var(noise));
+  std::vector<Tensor> output;
+  for (const auto& value : input) {
+    const auto noise = (noise_mask(value).uniform_(0, 1) > options_.rate_)
+                           .toType(value.type().scalarType())
+                           .mul_(1.0f / (1.0f - options_.rate_));
+    output.push_back(value * noise);
   }
-  return lst;
+  return output;
 }
-}} // namespace torch::nn
+
+template <typename Derived>
+const DropoutOptions& DropoutImplBase<Derived>::options() const noexcept {
+  return options_;
+}
+
+template class DropoutImplBase<DropoutImpl>;
+template class DropoutImplBase<Dropout2dImpl>;
+} // namespace detail
+
+DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
+
+Tensor DropoutImpl::noise_mask(Tensor input) const {
+  return at::empty_like(input);
+}
+
+Tensor Dropout2dImpl::noise_mask(Tensor input) const {
+  return torch::empty({input.size(0), input.size(1), 1, 1}, input.options());
+}
+} // namespace nn
+} // namespace torch

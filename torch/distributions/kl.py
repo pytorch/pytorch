@@ -15,8 +15,8 @@ from .exp_family import ExponentialFamily
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .half_normal import HalfNormal
 from .laplace import Laplace
-from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .multivariate_normal import MultivariateNormal, _batch_mahalanobis, _batch_diag, _batch_inverse
 from .normal import Normal
@@ -26,7 +26,6 @@ from .poisson import Poisson
 from .transformed_distribution import TransformedDistribution
 from .uniform import Uniform
 from .utils import _sum_rightmost
-from torch.autograd import Variable
 
 _KL_REGISTRY = {}  # Source of truth mapping a few general (type, type) pairs to functions.
 _KL_MEMOIZE = {}  # Memoized version mapping many specific (type, type) pairs to functions.
@@ -238,7 +237,7 @@ def _kl_expfamily_expfamily(p, q):
     if not type(p) == type(q):
         raise NotImplementedError("The cross KL-divergence between different exponential families cannot \
                             be computed using Bregman divergences")
-    p_nparams = [Variable(np.data, requires_grad=True) for np in p._natural_params]
+    p_nparams = [np.detach().requires_grad_() for np in p._natural_params]
     q_nparams = q._natural_params
     lg_normal = p._log_normalizer(*p_nparams)
     gradients = torch.autograd.grad(lg_normal.sum(), p_nparams, create_graph=True)
@@ -272,6 +271,11 @@ def _kl_gumbel_gumbel(p, q):
 @register_kl(Geometric, Geometric)
 def _kl_geometric_geometric(p, q):
     return -p.entropy() - torch.log1p(-q.probs) / p.probs - q.logits
+
+
+@register_kl(HalfNormal, HalfNormal)
+def _kl_halfnormal_halfnormal(p, q):
+    return _kl_normal_normal(p.base_dist, q.base_dist)
 
 
 @register_kl(Laplace, Laplace)

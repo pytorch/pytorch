@@ -2,7 +2,7 @@ graph(%0 : Float(4, 4)
       %1 : Float(4, 4)) {
   %2 : Float(4!, 2), %3 : Float(4!, 2) = aten::chunk[chunks=2, dim=1](%0)
   %4 : Float(4!, 2), %5 : Float(4!, 2) = aten::chunk[chunks=2, dim=1](%1)
-  %6 : Float(4, 2) = prim::FusionGroup_0(%2, %4, %3, %5)
+  %6 : Float(4, 2) = prim::FusionGroup_0[device=0](%2, %4, %3, %5)
   return (%6);
 }
 with prim::FusionGroup_0 = graph(%3 : Float(4!, 2)

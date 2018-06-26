@@ -5,7 +5,7 @@ from __future__ import unicode_literals
 
 import unittest
 import hypothesis.strategies as st
-from hypothesis import given, settings, unlimited
+from hypothesis import given, settings
 import copy
 import numpy as np
 from caffe2.proto import caffe2_pb2
@@ -27,7 +27,6 @@ class ConvFusionTest(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            group=st.integers(1, 1),
            **mu.gcs)
-    @settings(deadline=None, timeout=unlimited)
     def test_convolution_relu_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, group, gc, dc):
@@ -128,7 +127,6 @@ class ConvFusionTest(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            group=st.integers(1, 1),
            **mu.gcs)
-    @settings(deadline=None, timeout=unlimited)
     def test_convolution_sum_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, group, gc, dc):
@@ -203,7 +201,6 @@ class ConvFusionTest(hu.HypothesisTestCase):
            use_bias=st.booleans(),
            group=st.integers(1, 1),
            **mu.gcs)
-    @settings(deadline=None, timeout=unlimited)
     def test_convolution_sum_relu_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
                              batch_size, use_bias, group, gc, dc):

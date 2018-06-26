@@ -1,17 +1,30 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/module.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/sequential.h>
+#include <torch/optimizers.h>
+#include <torch/tensor.h>
+#include <torch/utils.h>
 
-using namespace torch;
+#include <test/cpp/api/util.h>
+
+#include <cstdlib>
+#include <functional>
+#include <memory>
+#include <random>
+
 using namespace torch::nn;
 
-bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
+bool test_optimizer_xor(
+    torch::Optimizer optim,
+    std::shared_ptr<Sequential> model) {
   float running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
     int64_t bs = 4;
-    auto inp = at::CPU(at::kFloat).tensor({bs, 2});
-    auto lab = at::CPU(at::kFloat).tensor({bs});
+    auto inp = torch::empty({bs, 2});
+    auto lab = torch::empty({bs});
     for (size_t i = 0; i < bs; i++) {
       const int64_t a = std::rand() % 2;
       const int64_t b = std::rand() % 2;
@@ -20,18 +33,19 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
       inp[i][1] = b;
       lab[i] = c;
     }
+    inp.set_requires_grad(true);
     // forward
-    auto x = Var(inp);
-    auto y = Var(lab, false);
-    for (auto& layer : *model)
-      x = layer->forward({x})[0].sigmoid_();
-    Variable loss = at::binary_cross_entropy(x, y);
+    std::function<at::Scalar()> closure = [&] {
+      optim->zero_grad();
+      auto x = model->forward(inp);
+      torch::Tensor loss = at::binary_cross_entropy(x, lab);
+      loss.backward();
+      return at::Scalar(loss.data());
+    };
 
-    optim->zero_grad();
-    backward(loss);
-    optim->step();
+    auto loss = optim->step(closure);
 
-    running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
+    running_loss = running_loss * 0.99 + loss.toFloat() * 0.01;
     if (epoch > 3000) {
       return false;
     }
@@ -41,29 +55,40 @@ bool test_optimizer_xor(Optimizer optim, std::shared_ptr<ContainerList> model) {
 }
 
 TEST_CASE("optim") {
-  ContainerList list;
-  list.append(make(Linear(2, 8)));
-  list.append(make(Linear(8, 1)));
-  auto model = make(list);
+  std::srand(0);
+  torch::manual_seed(0);
+  auto model = std::make_shared<Sequential>(
+      torch::SigmoidLinear(Linear(2, 8)), torch::SigmoidLinear(Linear(8, 1)));
+
+  // Flaky
+  // SECTION("lbfgs") {
+  //   auto optim = LBFGS(model, 5e-2).max_iter(5).make();
+  //   REQUIRE(test_optimizer_xor(optim, model));
+  // }
 
   SECTION("sgd") {
-    auto optim =
-        SGD(model, 1e-1).momentum(0.9).nesterov().weight_decay(1e-6).make();
+    auto optim = torch::SGD(model, 1e-1)
+                     .momentum(0.9)
+                     .nesterov()
+                     .weight_decay(1e-6)
+                     .make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
 
   SECTION("adagrad") {
-    auto optim = Adagrad(model, 1.0).weight_decay(1e-6).lr_decay(1e-3).make();
+    auto optim =
+        torch::Adagrad(model, 1.0).weight_decay(1e-6).lr_decay(1e-3).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
 
   SECTION("rmsprop_simple") {
-    auto optim = RMSprop(model, 1e-1).centered().make();
+    auto optim = torch::RMSprop(model, 1e-1).centered().make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
 
   SECTION("rmsprop") {
-    auto optim = RMSprop(model, 1e-1).momentum(0.9).weight_decay(1e-6).make();
+    auto optim =
+        torch::RMSprop(model, 1e-1).momentum(0.9).weight_decay(1e-6).make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
 
@@ -76,7 +101,7 @@ TEST_CASE("optim") {
   */
 
   SECTION("amsgrad") {
-    auto optim = Adam(model, 0.1).weight_decay(1e-6).amsgrad().make();
+    auto optim = torch::Adam(model, 0.1).weight_decay(1e-6).amsgrad().make();
     REQUIRE(test_optimizer_xor(optim, model));
   }
 }

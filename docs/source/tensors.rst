@@ -241,7 +241,6 @@ view of a storage and defines numeric operations on it.
    .. automethod:: gt_
    .. automethod:: half
    .. automethod:: histc
-   .. automethod:: index
    .. automethod:: index_add_
    .. automethod:: index_copy_
    .. automethod:: index_fill_
@@ -271,6 +270,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: log2
    .. automethod:: log2_
    .. automethod:: log_normal_
+   .. automethod:: logsumexp
    .. automethod:: long
    .. automethod:: lt
    .. automethod:: lt_

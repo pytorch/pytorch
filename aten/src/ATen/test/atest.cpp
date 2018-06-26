@@ -9,7 +9,7 @@ using namespace std;
 using namespace at;
 
 void trace() {
-  Tensor foo = rand(CPU(kFloat), {12,12});
+  Tensor foo = rand({12,12});
 
   // ASSERT foo is 2-dimensional and holds floats.
   auto foo_a = foo.accessor<float,2>();
@@ -27,7 +27,7 @@ TEST_CASE( "atest", "[]" ) {
   manual_seed(123, at::Backend::CPU);
   manual_seed(123, at::Backend::CUDA);
 
-  auto foo = rand(CPU(kFloat), {12,6});
+  auto foo = rand({12,6});
   REQUIRE(foo.data<float>() == foo.toFloatData());
 
   REQUIRE(foo.size(0) == 12);
@@ -56,7 +56,7 @@ TEST_CASE( "atest", "[]" ) {
     }
   }
 
-  REQUIRE(foo.equal(4 * CPU(kByte).ones({12, 6})));
+  REQUIRE(foo.equal(4 * ones({12, 6}, kByte)));
 
   trace();
 

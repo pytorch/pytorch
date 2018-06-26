@@ -35,15 +35,57 @@ OPERATOR_SCHEMA(IsMemberOf)
           out[0].set_data_type(TensorProto_DataType::TensorProto_DataType_BOOL);
           return out;
         })
-    .Arg("value", "Declare one value for the membership test.")
-    .Arg(
-        "dtype",
-        "The data type for the elements of the output tensor."
-        "Strictly must be one of the types from DataType enum in TensorProto.")
+    .Arg("value", "*(type: []; default: -)* List of values to check for membership.")
+    .Arg("dtype", "*(type: TensorProto_DataType; default: -)* The data type for the elements of the output tensor. Strictly must be one of the types from DataType enum in TensorProto.")
     .SetDoc(R"DOC(
-IsMemberOf takes input data (Tensor<T>) and a list of values as argument, and
-produces one output data (Tensor<bool>) where the function `f(x) = x in values`,
-is applied to the data tensor elementwise.
+The *IsMemberOf* op takes an input tensor *X* and a list of values as argument, and produces one output data tensor *Y*. The output tensor is the same shape as *X* and contains booleans. The output is calculated as the function *f(x) = x in value* and is applied to *X* elementwise.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/elementwise_logical_ops.cc
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/elementwise_logical_ops.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "IsMemberOf",
+    ["X"],
+    ["Y"],
+    value=[0,2,4,6,8],
+)
+
+# Use a not-empty tensor
+workspace.FeedBlob("X", np.array([0,1,2,3,4,5,6,7,8]).astype(np.int32))
+print("X:\n", workspace.FetchBlob("X"))
+
+workspace.RunOperatorOnce(op)
+print("Y: \n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+# value=[0,2,4,6,8]
+
+X:
+ [0 1 2 3 4 5 6 7 8]
+Y:
+ [ True False  True False  True False  True False  True]
+
+```
+
+</details>
+
 )DOC")
     .Input(0, "X", "Input tensor of any shape")
     .Output(0, "Y", "Output tensor (same size as X containing booleans)");

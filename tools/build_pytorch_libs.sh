@@ -1,45 +1,52 @@
 #!/usr/bin/env bash
 
-# Shell script used to build the aten/* and third_party/* dependencies prior to
-# linking the libraries and passing the headers to the Python extension
-# compilation stage. This file is used from setup.py, but can also be
+# Shell script used to build the aten/*, caffe2/*, and third_party/*
+# dependencies prior to linking libraries and passing headers to the Python
+# extension compilation stage. This file is used from setup.py, but can also be
 # called standalone to compile the libraries outside of the overall PyTorch
 # build process.
 #
-# TODO: Replace this with a CMakeLists.txt
+# TODO: Replace this with the root-level CMakeLists.txt
 
 set -ex
 
 # Options for building only a subset of the libraries
-WITH_CUDA=0
-if [[ "$1" == "--with-cuda" ]]; then
-  WITH_CUDA=1
-  shift
-fi
-
-WITH_NNPACK=0
-if [[ "$1" == "--with-nnpack" ]]; then
-  WITH_NNPACK=1
-  shift
-fi
-
-WITH_MKLDNN=0
-if [[ "$1" == "--with-mkldnn" ]]; then
-  WITH_MKLDNN=1
-  shift
-fi
-
-WITH_GLOO_IBVERBS=0
-if [[ "$1" == "--with-gloo-ibverbs" ]]; then
-  WITH_GLOO_IBVERBS=1
-  shift
-fi
-
-WITH_DISTRIBUTED_MW=0
-if [[ "$1" == "--with-distributed-mw" ]]; then
-  WITH_DISTRIBUTED_MW=1
-  shift
-fi
+USE_CUDA=0
+USE_ROCM=0
+USE_NNPACK=0
+USE_MKLDNN=0
+USE_GLOO_IBVERBS=0
+USE_DISTRIBUTED_MW=0
+FULL_CAFFE2=0
+while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --use-cuda)
+          USE_CUDA=1
+          ;;
+      --use-rocm)
+          USE_ROCM=1
+          ;;
+      --use-nnpack)
+          USE_NNPACK=1
+          ;;
+      --use-mkldnn)
+          USE_MKLDNN=1
+          ;;
+      --use-gloo-ibverbs)
+          USE_GLOO_IBVERBS=1
+          ;;
+      --use-distributed-mw)
+          USE_DISTRIBUTED_MW=1
+          ;;
+      --full-caffe2)
+          FULL_CAFFE2=1
+          ;;
+      *)
+          break
+          ;;
+    esac
+    shift
+done
 
 CMAKE_INSTALL=${CMAKE_INSTALL-make install}
 
@@ -69,7 +76,7 @@ INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
-C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
+C_FLAGS=" -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
   -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
   -I\"$INSTALL_DIR/include/THNN\" -I\"$INSTALL_DIR/include/THCUNN\""
@@ -78,12 +85,10 @@ C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
 # https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=686926
 C_FLAGS="${C_FLAGS} -DOMPI_SKIP_MPICXX=1"
 LDFLAGS="-L\"$INSTALL_DIR/lib\" "
-LD_POSTFIX=".so.1"
-LD_POSTFIX_UNVERSIONED=".so"
+LD_POSTFIX=".so"
 if [[ $(uname) == 'Darwin' ]]; then
     LDFLAGS="$LDFLAGS -Wl,-rpath,@loader_path"
-    LD_POSTFIX=".1.dylib"
-    LD_POSTFIX_UNVERSIONED=".dylib"
+    LD_POSTFIX=".dylib"
 else
     LDFLAGS="$LDFLAGS -Wl,-rpath,\$ORIGIN"
 fi
@@ -91,16 +96,16 @@ CPP_FLAGS=" -std=c++11 "
 GLOO_FLAGS=""
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
-if [[ $WITH_CUDA -eq 1 ]]; then
+if [[ $USE_CUDA -eq 1 ]]; then
     GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
-if [[ $WITH_GLOO_IBVERBS -eq 1 ]]; then
+if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
-    THD_FLAGS="-DWITH_GLOO_IBVERBS=1"
+    THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-if [[ $WITH_DISTRIBUTED_MW -eq 1 ]]; then
-    THD_FLAGS+="-DWITH_DISTRIBUTED_MW=1"
+if [[ $USE_DISTRIBUTED_MW -eq 1 ]]; then
+    THD_FLAGS+="-DUSE_DISTRIBUTED_MW=1"
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
@@ -108,17 +113,17 @@ $BASE_DIR/torch/lib/THNN/generic/THNN.h;\
 $BASE_DIR/torch/lib/THCUNN/generic/THCUNN.h;\
 $BASE_DIR/torch/lib/ATen/nn.yaml"
 CUDA_NVCC_FLAGS=$C_FLAGS
-if [[ $CUDA_DEBUG -eq 1 ]]; then
-  CUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS -g -G"
+if [[ -z "$CUDA_DEVICE_DEBUG" ]]; then
+  CUDA_DEVICE_DEBUG=0
 fi
 if [ -z "$NUM_JOBS" ]; then
   NUM_JOBS="$(getconf _NPROCESSORS_ONLN)"
 fi
 
 BUILD_TYPE="Release"
-if [[ "$DEBUG" ]]; then
+if [[ -n "$DEBUG" && $DEBUG -ne 0 ]]; then
   BUILD_TYPE="Debug"
-elif [[ "$REL_WITH_DEB_INFO" ]]; then
+elif [[ -n "$REL_WITH_DEB_INFO" && $REL_WITH_DEB_INFO -ne 0 ]]; then
   BUILD_TYPE="RelWithDebInfo"
 fi
 
@@ -136,7 +141,10 @@ function build() {
       nanopb ) BUILD_C_FLAGS=$C_FLAGS" -fPIC -fexceptions";;
       *) BUILD_C_FLAGS=$C_FLAGS" -fexceptions";;
   esac
-  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  # TODO: The *_LIBRARIES cmake variables should eventually be
+  # deprecated because we are using .cmake files to handle finding
+  # installed libraries instead
+  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -146,12 +154,13 @@ function build() {
               -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
               -DCMAKE_INSTALL_LIBDIR="$INSTALL_DIR/lib" \
               -DCUDA_NVCC_FLAGS="$CUDA_NVCC_FLAGS" \
+              -DCUDA_DEVICE_DEBUG=$CUDA_DEVICE_DEBUG \
               -DCMAKE_PREFIX_PATH="$INSTALL_DIR" \
               -Dcwrap_files="$CWRAP_FILES" \
               -DTH_INCLUDE_PATH="$INSTALL_DIR/include" \
               -DTH_LIB_PATH="$INSTALL_DIR/lib" \
               -DTH_LIBRARIES="$INSTALL_DIR/lib/libTH$LD_POSTFIX" \
-              -DATEN_LIBRARIES="$INSTALL_DIR/lib/libATen$LD_POSTFIX" \
+              -DCAFFE2_LIBRARIES="$INSTALL_DIR/lib/libcaffe2$LD_POSTFIX" \
               -DTHNN_LIBRARIES="$INSTALL_DIR/lib/libTHNN$LD_POSTFIX" \
               -DTHCUNN_LIBRARIES="$INSTALL_DIR/lib/libTHCUNN$LD_POSTFIX" \
               -DTHS_LIBRARIES="$INSTALL_DIR/lib/libTHS$LD_POSTFIX" \
@@ -162,8 +171,8 @@ function build() {
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
-              -DNO_CUDA=$((1-$WITH_CUDA)) \
-              -DNO_NNPACK=$((1-$WITH_NNPACK)) \
+              -DUSE_CUDA=$USE_CUDA \
+              -DNO_NNPACK=$((1-$USE_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
@@ -174,9 +183,6 @@ function build() {
   popd
 
   local lib_prefix=$INSTALL_DIR/lib/lib$1
-  if [ -f "$lib_prefix$LD_POSTFIX" ]; then
-    rm -rf -- "$lib_prefix$LD_POSTFIX_UNVERSIONED"
-  fi
 
   if [[ $(uname) == 'Darwin' ]]; then
     pushd "$INSTALL_DIR/lib"
@@ -188,17 +194,26 @@ function build() {
   fi
 }
 
+function path_remove {
+  # Delete path by parts so we can never accidentally remove sub paths
+  PATH=${PATH//":$1:"/":"} # delete any instances in the middle
+  PATH=${PATH/#"$1:"/} # delete any instance at the beginning
+  PATH=${PATH/%":$1"/} # delete any instance in the at the end
+}
+
 function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
-  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
-  ${CMAKE_INSTALL}
+              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
+              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
+              -DNUM_JOBS="$NUM_JOBS"
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
@@ -207,30 +222,36 @@ function build_nccl() {
   popd
 }
 
-# purpusefully not using build() because we need ATen to build the same
-# regardless of whether it is inside pytorch or not, so it
+# purposefully not using build() because we need Caffe2 to build the same
+# regardless of whether it is inside PyTorch or not, so it
 # cannot take any special flags
-# special flags need to be part of the ATen build itself
+# special flags need to be part of the Caffe2 build itself
 #
 # However, we do explicitly pass library paths when setup.py has already
 # detected them (to ensure that we have a consistent view between the
-# PyTorch and ATen builds.)
-function build_aten() {
+# PyTorch and Caffe2 builds.)
+function build_caffe2() {
   mkdir -p build
   pushd build
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
-      -DNO_CUDA=$((1-$WITH_CUDA)) \
-      -DNO_NNPACK=$((1-$WITH_NNPACK)) \
+      -DBUILD_CAFFE2=$FULL_CAFFE2 \
+      -DBUILD_ATEN=ON \
+      -DBUILD_PYTHON=$FULL_CAFFE2 \
+      -DBUILD_BINARY=OFF \
+      -DBUILD_SHARED_LIBS=ON \
+      -DONNX_NAMESPACE=$ONNX_NAMESPACE \
+      -DUSE_CUDA=$USE_CUDA \
+      -DUSE_ROCM=$USE_ROCM \
+      -DUSE_NNPACK=$USE_NNPACK \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-      -DNO_MKLDNN=$((1-$WITH_MKLDNN)) \
+      -DUSE_MKLDNN=$USE_MKLDNN \
       -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \
-      -DATEN_NO_CONTRIB=1 \
       -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
@@ -238,9 +259,20 @@ function build_aten() {
       -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
       -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
-      # to aten/CMakeLists.txt, not here.  We need the vanilla
-      # cmake build to work.
+      # to CMakeLists.txt and aten/CMakeLists.txt, not here.
+      # We need the vanilla cmake build to work.
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
+
+  # Install Python proto files
+  if [[ $FULL_CAFFE2 -ne 0 ]]; then
+    find . -name proto
+    for proto_file in ./caffe/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe/proto/"
+    done
+    for proto_file in ./caffe2/proto/*.py; do
+      cp $proto_file "$BASE_DIR/caffe2/proto/"
+    done
+  fi
   popd
 }
 
@@ -257,9 +289,9 @@ for arg in "$@"; do
         pushd "$THIRD_PARTY_DIR"
         build gloo $GLOO_FLAGS
         popd
-    elif [[ "$arg" == "ATen" ]]; then
-        pushd "$BASE_DIR/aten"
-        build_aten
+    elif [[ "$arg" == "caffe2" ]]; then
+        pushd $BASE_DIR
+        build_caffe2
         popd
     elif [[ "$arg" == "THD" ]]; then
         pushd "$TORCH_LIB_DIR"
@@ -268,6 +300,10 @@ for arg in "$@"; do
     elif [[ "$arg" == "libshm" ]] || [[ "$arg" == "libshm_windows" ]]; then
         pushd "$TORCH_LIB_DIR"
         build $arg
+        popd
+    elif [[ "$arg" == "c10d" ]]; then
+        pushd "$TORCH_LIB_DIR"
+        build c10d
         popd
     else
         pushd "$THIRD_PARTY_DIR"
@@ -282,15 +318,15 @@ pushd torch/lib
 # binaries to torch/lib
 rm -rf "$INSTALL_DIR/lib/cmake"
 rm -rf "$INSTALL_DIR/lib/python"
-cp "$INSTALL_DIR/lib"/* .
+cp -r "$INSTALL_DIR/lib"/* .
 if [ -d "$INSTALL_DIR/lib64/" ]; then
-    cp "$INSTALL_DIR/lib64"/* .
+    cp -r "$INSTALL_DIR/lib64"/* .
 fi
 cp ../../aten/src/THNN/generic/THNN.h .
 cp ../../aten/src/THCUNN/generic/THCUNN.h .
 cp -r "$INSTALL_DIR/include" .
 if [ -d "$INSTALL_DIR/bin/" ]; then
-    cp "$INSTALL_DIR/bin/"/* .
+    cp -r "$INSTALL_DIR/bin/"/* .
 fi
 
 popd

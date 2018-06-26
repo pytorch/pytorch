@@ -1,7 +1,7 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
-from torch.nn import Module, ModuleList, ParameterList, Parameter
+from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
@@ -45,174 +45,6 @@ def scope(scope_name, *vars):
     finally:
         if tracing_state:
             tracing_state.pop_scope()
-
-
-def compile(arg=None, nderivs=1, optimize=True, enabled=True):
-    """
-    Decorator which marks a function or module class as eligible for
-    just-in-time compilation.  The next time the function/module is executed, it
-    is traced, and the trace is compiled into an optimized representation which
-    is run in lieu of the original Python code upon subsequent invocations of
-    the function/module.
-
-    .. note::
-
-        A JIT compiled function/module may be compiled multiple times, as
-        different inputs can result in different traces.  Currently, the
-        JIT compiler conservatively assumes the trace may change if the
-        `size` or `requires_grad` of `Tensor` inputs change, or if
-        any of the non-Tensor inputs change.  For example, if you JIT
-        compile an RNN which takes the number of hidden units as a parameter,
-        we will compile a trace for every RNN length you use at runtime.
-
-        When a module class is JIT compiled, each instantiation of the module
-        gets a separate trace cache.
-
-    .. warning::
-
-        Just-in-time compilation currently only works for functions/modules
-        which are not data dependent (e.g., have conditionals on data in
-        tensors) and do not have any untracked external dependencies (e.g.,
-        perform input/output or access global variables). If you trace such
-        models, you will silently get incorrect results on subsequent
-        invocations of the model.
-
-    Keyword arguments:
-        nderivs (int, optional): the number of derivatives which this function/module
-            will be used with.  You MUST accurately specify this number: set it too
-            low and you will see an error when you attempt to run `backward`;
-            set it too high, and the function/module will never be compiled
-            (as we always wait to see all derivatives before compiling.)
-            Default: 1 (i.e., we will compile forwards and backwards, but not
-            double-backwards).
-        optimize (bool, optional): whether or not to apply optimizations.  Default: ``True``.
-
-    Debug arguments:
-        time (bool, optional): if ``True``, whenever we execute the model in question, we
-            will also print out some timing information for how long the model
-            took to execute.  At the moment, there are three types of timings we
-            emit:
-
-                - unoptimized: the time it took to execute the vanilla Python
-                  model.  This only occurs when tracing is disabled, e.g., via
-                  `enabled=False`
-
-                - tracing: the time it took to execute the vanilla Python model
-                  with tracing enabled.
-
-                - optimized: the time it took to execute the optimized model.
-
-            At the moment, all of these timings are for the forward pass only.
-            Default: ``False``.
-        enabled (bool, optional): if ``False``, compilation is disabled and you
-            will get back your original model.  This is a convenient way to
-            disable tracing without having to delete the annotation. Default: ``True``.
-
-    Example: Compile as class decorator.
-
-        >>> @jit.compile
-        >>> class MyModel(nn.Module):
-        >>>     ...
-        >>> model = MyModel()
-        >>> out1 = model(x)        # interpreted run
-        >>> out1.sum().backward()  # won't compile without this line
-        >>> out2 = model(x)        # compiled run
-        >>> out2.sum().backward()  # also compiled
-
-    Example: Compile forward pass only as class decorator.
-
-        >>> @jit.compile(nderivs=0)
-        >>> class MyModel(nn.Module):
-        >>>     ...
-        >>> model = MyModel()
-        >>> out1 = model(x)        # interpreted run
-        >>> out2 = model(x)        # compiled run
-
-    Example: Compile as function decorator.  The same modes of use for the class
-    decorator are also supported for functions; however, the decorated
-    function must declare *all* Tensor inputs in its arguments.
-
-        >>> @jit.compile
-        >>> def f(x):
-        >>>     return x * 2
-    """
-    def _compile(arg):
-        if inspect.isclass(arg):
-            # NB: It might seem natural to create a subclass here, rather than
-            # make a copy of the class to insert the mixin.  Unfortunately, this
-            # will break many user classes.  Suppose you have:
-            #
-            #     @torch.jit.compile
-            #     class Foo(Module):
-            #         def __init__(self):
-            #             super(Foo, self).__init__() # Python 2 syntax!
-            #
-            # within the class definition, 'Foo' refers to the *decorated*
-            # class, not the undecorated class.  This is bad juju if the
-            # decorator returns a subclass, since super(Foo, self) is going to
-            # refer to the *undecorated* Foo (and thus you have an infinite
-            # loop.)  Python 3's argument-less super() does not have this
-            # problem, but in general we cannot ask users to rewrite their code.
-            #
-            # If we create a *copy* of the class (unrelated to the class the
-            # user passed in), this problem goes away, because the class
-            # __init__ is a part of is indeed Foo.
-
-            old_init = arg.__init__
-            # Python 2 has a concept of unbound methods, which are returned when
-            # you take a method form a class. They behave just like regular functions,
-            # but check the type of the first argument (self). We don't want this here,
-            # because self in our __init__ will be an instance of this new class.
-            # Python 3 already returns a plain function, so nothing has to be done.
-            if sys.version_info[0] == 2:
-                old_init = old_init.im_func
-
-            def __init__(self, *args, **kwargs):
-                torch._C.CompiledFunction.__init__(self,
-                                                   nderivs, optimize, enabled,
-                                                   self.forward,
-                                                   arg.__name__)
-                try:
-                    old_init(self, *args, **kwargs)
-                except TypeError as e:
-                    # If this fails here, the user probably didn't use this as a class decorator
-                    if "super" in str(e):
-                        raise_from(TypeError("torch.jit.compile must be used as a class decorator; "
-                                             "using it on an already defined class is not valid."
-                                             "\n\nOriginal error: {}".format(str(e))), e)
-                    else:
-                        raise
-                # NOTE: This can't be done in CompiledFunction constructor,
-                # because self.parameters() isn't well defined by then
-                # (Module constructor hasn't run yet).
-                self.set_captured_vars(list(self.parameters()))
-
-            new_dict = dict(arg.__dict__)
-            new_dict['__init__'] = __init__
-            new_dict['__call__'] = torch._C.CompiledFunction.__call__
-            # NOTE: we don't need to override casting methods, because we only capture
-            # parameters, and they mutate their data in-place.
-            return type(arg.__name__,
-                        arg.__bases__ + (torch._C.CompiledFunction,),
-                        new_dict)
-        elif isinstance(arg, Module):
-            # It requires work to compile module instances, because you would
-            # like the resulting compiled module to look just like the uncompiled
-            # version; actually achieving this requires a bit of fanciness.
-            # So for now, we just only support the class mechanism.
-            raise TypeError("Compiling model instances is not supported.  "
-                            "Use @torch.jit.compile on a class instead.")
-        elif callable(arg):
-            compiled_fn = torch._C.CompiledFunction(nderivs, optimize, enabled,
-                                                    arg, arg.__name__)
-            return compiled_fn
-        else:
-            raise TypeError("Cannot handle arg with type {}".format(type(arg)))
-    # Make empty parenthesis optional
-    if arg is None:
-        return _compile
-    else:
-        return _compile(arg)
 
 
 def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
@@ -407,7 +239,7 @@ def verify(model, args, loss_fn=torch.sum, devices=None):
             out = (out, )
         if loss_fn == torch.sum and len(out) != 1:
             raise ValueError(("Model returns {} outputs, but default loss function "
-                             "(torch.sum) can only handle a single output").format(len(out)))
+                              "(torch.sum) can only handle a single output").format(len(out)))
         out_vars, _ = _flatten(out)
         saved_outs = [v.data.clone() for v in out_vars]
         loss = loss_fn(*out)
@@ -535,16 +367,16 @@ def _script_graph(fn, _frames_up=0):
     return _jit_script_compile(ast, rcb)
 
 
-def script(fn, _frames_up=0):
+def script(fn, optimize=True, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-    return torch._C.GraphExecutor(graph, True)
+    return functools.wraps(fn)(torch._C.GraphExecutor(graph, optimize))
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
 
 
 def script_method(fn):
-    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn))
+    return ScriptMethodStub(createResolutionCallback(frames_up=1), get_jit_ast(fn), fn)
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
@@ -669,7 +501,7 @@ class OrderedBufferDict(OrderedDictWrapper):
 # in addition, tuples and lists of these base types are also considered constants
 # If you edit this list, then you also need to edit the handlers in
 # ConstantValue in jit/script/init.cpp
-_constant_types = (bool, float, int, types.FunctionType)
+_constant_types = (bool, float, int, types.FunctionType, torch.device, torch.layout, torch.dtype)
 
 
 def _get_valid_constant(v):
@@ -701,11 +533,13 @@ class ScriptMeta(type(torch._C.ScriptModule)):
     # a pybind11 type
     def __init__(cls, name, bases, attrs):
         # find all the script methods
+        cls._original_methods = {}
         methods = []
         for k, v in sorted(attrs.items()):
             if isinstance(v, ScriptMethodStub):
                 delattr(cls, k)
                 methods.append(v)
+                cls._original_methods[v.original_method.__name__] = v.original_method
         # after the user's __init__ register all the script methods
         # with the module
         original_init = getattr(cls, '__init__', lambda self: None)
@@ -738,7 +572,12 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
 
     def __getattr__(self, attr):
         if self._has_method(attr):
-            return self._get_method(attr)
+            if attr in self.__class__._original_methods:
+                original_method = self.__class__._original_methods[attr]
+                script_method = self._get_method(attr)
+                return functools.wraps(original_method)(script_method)
+            else:
+                return self._get_method(attr)
         return Module.__getattr__(self, attr)
 
     def __setattr__(self, attr, value):
@@ -752,6 +591,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
             # contains each of these modules as submodules. The ConstModuleList then
             # is set as an attribute of the parent module.
             super(ScriptModule, self).__setattr__(attr, _ConstModuleList(value))
+        elif isinstance(value, Sequential):
+            super(ScriptModule, self).__setattr__(attr, _ConstSequential(value))
         else:
             super(ScriptModule, self).__setattr__(attr, _get_valid_constant(value))
 
@@ -875,6 +716,25 @@ class _ConstModuleList(ScriptModule):
         keys = super(_ConstModuleList, self).__dir__()
         keys = [key for key in keys if not key.isdigit()]
         return keys
+
+
+class _ConstSequential(_ConstModuleList):
+    __constants__ = ['mods']
+
+    def __init__(self, mods):
+        super(_ConstSequential, self).__init__(mods._modules.values())
+
+        # we define the forward method via self.define rather than
+        # making it a direct class member (with a @script) annotation
+        # because, in optimized runtime environments where only .pyc files
+        # are shipped, we cant retrieve the source code.
+        # TODO: find a workaround for this and remove this hack
+        self.define("""
+        def forward(self, input):
+            for m in self:
+                input = m(input)
+            return input
+        """)
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")

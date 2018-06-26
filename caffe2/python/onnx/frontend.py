@@ -265,7 +265,6 @@ class Caffe2Frontend(object):
             for name in predict_net.external_output
             if name in all_output)
 
-        checker.check_graph(graph_def)
         return graph_def
 
     @classmethod

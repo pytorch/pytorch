@@ -1,12 +1,7 @@
 // included as 'TensorDenseOrSparse' in TensorDerived.cpp
 
 IntList ${Tensor}::strides() const {
-  int64_t d = tensor->nDimension;
-  if (d != 0) {
-    return IntList(reinterpret_cast<int64_t*>(tensor->stride),dim());
-  } else {
-    return IntList(kEmptyStrides);
-  }
+  return IntList(tensor->stride,dim());
 }
 Scalar ${Tensor}::localScalar() {
   int64_t numel = ${THTensor}_nElement(${state,}tensor);

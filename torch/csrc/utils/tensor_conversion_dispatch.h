@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <cstddef>
+
 namespace torch { namespace utils {
 
 // Returns a tensor with the same data as `self` and the specified type and
@@ -23,7 +25,7 @@ namespace torch { namespace utils {
 // w.r.t the host.
 at::Tensor dispatch_type_conversion(const at::Tensor & self,
                                     const at::Type & type,
-                                    at::optional<int> device=at::nullopt,
+                                    at::optional<int32_t> device_index = at::nullopt,
                                     bool non_blocking=false);
 
 }} // namespace torch::utils

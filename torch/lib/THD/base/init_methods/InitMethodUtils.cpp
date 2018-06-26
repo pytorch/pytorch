@@ -84,7 +84,7 @@ std::pair<std::string, std::string> discoverMaster(std::vector<std::string> addr
 }
 
 rank_type getRank(const std::vector<int>& ranks, int assigned_rank,
-                  std::size_t order) {
+                  size_t order) {
   if (assigned_rank >= 0) {
     return assigned_rank;
   } else {

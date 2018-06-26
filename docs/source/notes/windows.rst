@@ -165,15 +165,44 @@ Import error
 
 
 The problem is caused by the missing of the essential files. Actually,
-we include almost all the essential files that PyTorch need except VC2017
-redistributable. You can resolve this by typing the following command.
+we include almost all the essential files that PyTorch need for the conda
+package except VC2017 redistributable and some mkl libraries. 
+You can resolve this by typing the following command.
 
 .. code-block:: bat
 
     conda install -c peterjc123 vc vs2017_runtime
+    conda install mkl_fft intel_openmp numpy mkl
+
+As for the wheels package, since we didn't pack some libaries and VS2017 
+redistributable files in, please make sure you install them manually.
+The VS 2017 redistributable installer can be downloaded `here
+<https://aka.ms/vs/15/release/VC_redist.x64.exe>`_.
+And you should also pay attention to your installation of Numpy. Make sure it
+uses MKL instead of OpenBLAS. You may type in the following command.
+
+.. code-block:: bat
+
+    pip install numpy mkl intel-openmp mkl_fft
 
 Another possible cause may be you are using GPU version without NVIDIA
 graphics cards. Please replace your GPU package with the CPU one.
+
+.. code-block:: py3tb
+
+    from torch._C import *
+
+    ImportError: DLL load failed: The operating system cannot run %1.
+
+
+This is actually an upstream issue of Anaconda. When you initialize your
+environment with conda-forge channel, this issue will emerge. You may fix
+the intel-openmp libraries through this command.
+
+.. code-block:: bat
+
+    conda install -c defaults intel-openmp -f
+
 
 Usage (multiprocessing)
 -------------------------------------------------------

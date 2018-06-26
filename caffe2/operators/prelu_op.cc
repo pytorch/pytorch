@@ -263,18 +263,74 @@ OPERATOR_SCHEMA(PRelu)
     .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
 
-PRelu takes input data (Tensor<T>) and slope tensor as input, and produces one
-output data (Tensor<T>) where the function `f(x) = slope * x for x < 0`,
-`f(x) = x for x >= 0`., is applied to the data tensor elementwise.
+The *PRelu* op takes input data tensor $X$, an input slope tensor $slope$, and produces one output tensor $Y$ of the same shape as $X.$ The op performs the element wise *PRelu* operation, defined as
+
+$$y=prelu(x) =\begin{cases}slope * x & x < 0\\x & otherwise\end{cases}$$
+
+Note, is slope is size 1, the value is shared across the channels, otherwise $X$ and $slope$ must be the same shape. See [Delving Deep into Rectifiers: Surpassing Human-Level Performance on ImageNet Classification](https://arxiv.org/abs/1502.01852) for more information.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/prelu_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "PRelu",
+    ["X","Slope"],
+    ["Y"],
+)
+
+workspace.FeedBlob("X", np.random.randn(3, 3).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"), "\n")
+
+workspace.FeedBlob("Slope", np.array([0.1]).astype(np.float32))
+print("Slope:\n", workspace.FetchBlob("Slope"), "\n")
+
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[ 0.3957382  -0.19725518 -0.26991343]
+ [ 1.5513182  -0.27427664 -0.14584002]
+ [-0.4121164   0.9292345   0.96426094]]
+
+Slope:
+ [0.1]
+
+Y:
+ [[ 0.3957382  -0.01972552 -0.02699134]
+ [ 1.5513182  -0.02742766 -0.014584  ]
+ [-0.04121164  0.9292345   0.96426094]]
+
+```
+
+</details>
+
 
 )DOC")
-    .Input(0, "X", "1D input tensor")
+    .Input(0, "X", "Input tensor of data to be operated on.")
     .Input(
         1,
         "Slope",
-        "1D slope tensor. If `Slope` is of size 1, the value is shared"
-        "across different channels")
-    .Output(0, "Y", "1D input tensor")
+        "1D input slope tensor. If `Slope` is of size 1, the value is shared across different channels")
+    .Output(0, "Y", "Output tensor, with same shape as $X$.")
     .InheritOnnxSchema("PRelu");
 
 // Input: Y, dY, output: dX

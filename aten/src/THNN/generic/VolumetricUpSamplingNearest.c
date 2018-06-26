@@ -9,9 +9,9 @@ static inline void THNN_(VolumetricUpSamplingNearest_shapeCheck)
   THArgCheck(input != NULL, 2, "5D input tensor expected but got NULL");
   THArgCheck(scale_factor > 1, 4,
 	     "scale_factor must be greater than 1, but got: %d", scale_factor);
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-		"4D or 5D input tensor expected but got: %s");
-  if (input->nDimension == 4) {
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+		"non-empty 4D or 5D input tensor expected but got: %s");
+  if (input->dim() == 4) {
     int nChannels    = THTensor_(size)(input, 0);
     int inputDepth   = THTensor_(size)(input, 1);
     int inputHeight  = THTensor_(size)(input, 2);
@@ -51,14 +51,14 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
     int scale_factor)
 {
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(input, NULL, scale_factor);
-  int inputDepth   = THTensor_(size)(input, input->nDimension-3);
-  int inputHeight  = THTensor_(size)(input, input->nDimension-2);
-  int inputWidth   = THTensor_(size)(input,  input->nDimension-1);
+  int inputDepth   = THTensor_(size)(input, input->dim()-3);
+  int inputHeight  = THTensor_(size)(input, input->dim()-2);
+  int inputWidth   = THTensor_(size)(input,  input->dim()-1);
   int outputDepth  = inputDepth * scale_factor;
   int outputHeight = inputHeight * scale_factor;
   int outputWidth  = inputWidth * scale_factor;
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     THTensor_(resize4d)(output,
 			THTensor_(size)(input, 0),
 			outputDepth, outputHeight, outputWidth);    
@@ -72,12 +72,12 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   int dT = scale_factor;
   int dW = scale_factor;
   int dH = scale_factor;
-  int xDim = input->nDimension-3;
-  int yDim = input->nDimension-2;
-  int zDim = input->nDimension-1;
+  int xDim = input->dim()-3;
+  int yDim = input->dim()-2;
+  int zDim = input->dim()-1;
 
   // dims
-  int idim = input->nDimension;
+  int idim = input->dim();
   int osz0 = output->size[0];
   int osz1 = output->size[1];
   int osz2 = output->size[2];
@@ -149,12 +149,12 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   int dW = scale_factor;
   int dH = scale_factor;
   int dT = scale_factor;
-  int xDim = gradInput->nDimension-3;
-  int yDim = gradInput->nDimension-2;
-  int zDim = gradInput->nDimension-1;
+  int xDim = gradInput->dim()-3;
+  int yDim = gradInput->dim()-2;
+  int zDim = gradInput->dim()-1;
 
   // dims
-  int idim = gradInput->nDimension;  // Guaranteed to be between 3 and 5
+  int idim = gradInput->dim();  // Guaranteed to be between 3 and 5
   int isz0 = gradInput->size[0];
   int isz1 = gradInput->size[1];
   int isz2 = gradInput->size[2];

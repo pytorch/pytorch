@@ -1,5 +1,8 @@
+from __future__ import print_function
 import re
 import yaml
+import pprint
+import sys
 
 try:
     # use faster C loader if available
@@ -38,7 +41,15 @@ def parse_arguments(args, func_decl, func_name, func_return):
     arguments = []
     python_default_inits = func_decl.get('python_default_init', {})
     is_out_fn = func_name.endswith('_out')
+    if is_out_fn and func_decl.get('variants', []) not in ['function', ['function']]:
+        raise RuntimeError("Native functions suffixed with _out MUST be declared with only the function variant; "
+                           "e.g., variants: function; otherwise you will tickle a Python argument binding bug "
+                           "(which usually manifests itself as the result variable being undefined.) "
+                           "The culprit was: {}".format(func_name))
     kwarg_only = False
+
+    if len(args.strip()) == 0:
+        return arguments
 
     # TODO: Use a real parser here; this will get bamboozled
     # by signatures that contain things like std::array<bool, 2> (note the space)
@@ -100,22 +111,32 @@ def run(paths):
     for path in paths:
         for func in parse_native_yaml(path):
             declaration = {'mode': 'native'}
-            if '->' in func['func']:
-                func_decl, return_type = [x.strip() for x in func['func'].split('->')]
-                return_type = sanitize_types(return_type)
-            else:
-                func_decl = func['func']
-                return_type = None
-            fn_name, arguments = func_decl.split('(')
-            arguments = arguments.split(')')[0]
-            declaration['name'] = func.get('name', fn_name)
-            declaration['return'] = list(func.get('return', return_type))
-            declaration['variants'] = func.get('variants', ['method', 'function'])
-            declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func,
-                                                declaration['name'], declaration['return']))
-            declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
-            declaration['aten_sparse'] = has_sparse_dispatches(
-                declaration['type_method_definition_dispatch'])
-            declarations.append(declaration)
+            try:
+                if '->' in func['func']:
+                    func_decl, return_type = [x.strip() for x in func['func'].split('->')]
+                    return_type = sanitize_types(return_type)
+                else:
+                    func_decl = func['func']
+                    return_type = [None]
+                fn_name, arguments = func_decl.split('(')
+                arguments = arguments.split(')')[0]
+                declaration['name'] = func.get('name', fn_name)
+                declaration['return'] = list(func.get('return', return_type))
+                declaration['variants'] = func.get('variants', ['method', 'function'])
+                declaration['deprecated'] = func.get('deprecated', False)
+                declaration['device_guard'] = func.get('device_guard', True)
+                declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func,
+                                                    declaration['name'], declaration['return']))
+                declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
+                declaration['aten_sparse'] = has_sparse_dispatches(
+                    declaration['type_method_definition_dispatch'])
+                declarations.append(declaration)
+            except Exception as e:
+                msg = '''Exception raised in processing function:
+{func}
+Generated partial declaration:
+{decl}'''.format(func=pprint.pformat(func), decl=pprint.pformat(declaration))
+                print(msg, file=sys.stderr)
+                raise e
 
     return declarations

@@ -219,7 +219,8 @@ void callReduceAll(THCState* state,
 
 // Reduces the entire tensor to one value. `out` points to
 // host-resident memory.
-template <typename TensorType,
+template <typename ScalarType,
+          typename TensorType,
           typename ModifyOp,
           typename ReduceOp,
           typename AccT>
@@ -230,13 +231,13 @@ bool THC_reduceAll(THCState* state,
                    AccT init,
                    AccT* out,
                    int outOnDevice) {
-  ptrdiff_t inElements = TensorUtils<TensorType>::getNumElements(state, in);
+  ptrdiff_t inElements = THCTensor_nElement(state, in);
 
-  if (TensorUtils<TensorType>::getDims(state, in) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, in) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (TensorUtils<TensorType>::getDims(state, in) == 0) {
+  if (THCTensor__nDimension(state, in) == 0) {
     // Zero-dim tensor; do nothing
     *out = init;
     return true;
@@ -261,7 +262,7 @@ bool THC_reduceAll(THCState* state,
   // dimension, and the loop to translate the linear index to the array
   // index can be similarly collapsed. That is what this unrolling is for.
 #define HANDLE_CASE(TYPE, IN)                                           \
-  callReduceAll<typename TensorUtils<TensorType>::DataType,             \
+  callReduceAll<ScalarType,                                             \
                 TYPE, AccT, ModifyOp, ReduceOp, IN>(                    \
                   state, inInfo, inElements, init, modifyOp,            \
                   reduceOp, devOut);
@@ -281,16 +282,16 @@ bool THC_reduceAll(THCState* state,
     }                                             \
   }
 
-  if (TensorUtils<TensorType>::canUse32BitIndexMath(state, in)) {
-    TensorInfo<typename TensorUtils<TensorType>::DataType, unsigned int> inInfo =
-      getTensorInfo<TensorType, unsigned int>(state, in);
+  if (THCTensor_canUse32BitIndexMath(state, in)) {
+    TensorInfo<ScalarType, unsigned int> inInfo =
+      getTensorInfo<ScalarType, TensorType, unsigned int>(state, in);
     inInfo.collapseDims();
 
     HANDLE_IN_CASE(unsigned int, inInfo.dims);
   } else {
-    TensorInfo<typename TensorUtils<TensorType>::DataType,
+    TensorInfo<ScalarType,
                uint64_t> inInfo =
-      getTensorInfo<TensorType, uint64_t>(state, in);
+      getTensorInfo<ScalarType, TensorType, uint64_t>(state, in);
     inInfo.collapseDims();
 
     /*

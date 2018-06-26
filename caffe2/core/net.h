@@ -84,10 +84,7 @@ class NetBase : public Observable<NetBase> {
   virtual vector<float> TEST_Benchmark(
       const int /*warmup_runs*/,
       const int /*main_runs*/,
-      const bool /*run_individual*/) {
-    LOG(ERROR) << "Benchmark not implemented for this net type.";
-    return vector<float>();
-  }
+      const bool /*run_individual*/);
 
   inline const vector<string>& external_output() const {
     return external_output_;
@@ -133,8 +130,7 @@ class NetBase : public Observable<NetBase> {
 class ExecutorHelper {
  public:
   ExecutorHelper() {}
-  virtual std::shared_ptr<TaskThreadPool> GetPool(
-      const DeviceOption& option) const;
+  virtual TaskThreadPool* GetPool(const DeviceOption& option) const;
   virtual ~ExecutorHelper() {}
 };
 

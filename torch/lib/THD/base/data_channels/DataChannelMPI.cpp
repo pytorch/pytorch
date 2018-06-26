@@ -1,6 +1,8 @@
 #include "DataChannelMPI.hpp"
 #include "DataChannelUtils.hpp"
 
+#include <ATen/ATen.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -10,7 +12,7 @@
 #include <unordered_map>
 #include <iostream>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
@@ -125,7 +127,6 @@ bool DataChannelMPI::init() {
   return true;
 }
 
-
 rank_type DataChannelMPI::getRank() {
   return _rank;
 }
@@ -135,31 +136,12 @@ rank_type DataChannelMPI::getNumProcesses() {
   return _num_processes;
 }
 
-struct AutoGPU {
-  AutoGPU(int new_device) {
-    if (new_device == -1) return;
-#ifdef WITH_CUDA
-    cudaGetDevice(&device_);
-    cudaSetDevice(new_device);
-#endif
-  }
-
-  ~AutoGPU() {
-    if (device_ == -1) return;
-#ifdef WITH_CUDA
-    cudaSetDevice(device_);
-#endif
-  }
-
-  int device_ = -1;
-};
-
 at::Tensor DataChannelMPI::_newLikeFlat(std::vector<at::Tensor>& tensors) const {
   // TODO: check if all outputs are contiguous in memory and skip this step is yes
   if (tensors.size() == 0)
     throw std::runtime_error("received an empty list");
   auto & t = tensors[0];
-  AutoGPU gpu_guard { t.is_cuda() ? static_cast<int>(t.get_device()) : -1 };
+  at::DeviceGuard gpu_guard(t.is_cuda() ? t.get_device() : -1);
   std::vector<int64_t> sizes { static_cast<int64_t>(tensors.size()) };  // sizes = [output.size()] + input.sizes()
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return t.type().tensor(sizes);
@@ -188,7 +170,7 @@ void DataChannelMPI::allGather(std::vector<at::Tensor>& output,
     comm
   );
 
-  for (std::size_t i = 0; i < output.size(); ++i)
+  for (size_t i = 0; i < output.size(); ++i)
     output[i].copy_(recv_buffer[i]);
 }
 
@@ -227,7 +209,7 @@ void DataChannelMPI::gather(std::vector<at::Tensor>& output,
   );
 
   // NOTE: this is a no-op in all processes except dst_rank
-  for (std::size_t i = 0; i < output.size(); ++i)
+  for (size_t i = 0; i < output.size(); ++i)
     output[i].copy_(recv_buffer[i]);
 }
 
@@ -256,7 +238,7 @@ void DataChannelMPI::scatter(std::vector<at::Tensor>& input,
       assertSameSizeAndType(in_tensor, output, "scatter");
 
     send_buffer = _newLikeFlat(input);
-    for (std::size_t i = 0; i < input.size(); ++i)
+    for (size_t i = 0; i < input.size(); ++i)
       send_buffer[i].copy_(input[i]);
     sendbuf = send_buffer.data_ptr();
   }
@@ -424,7 +406,7 @@ THDGroup DataChannelMPI::newGroup(const std::vector<rank_type>& ranks) {
 
     // this vector maps new ranks to ranks in COMM_WORLD (global ranks)
     std::vector<rank_type> new_ranks(size);
-    for (std::size_t i = 0; i < 2 * size; i += 2)
+    for (size_t i = 0; i < 2 * size; i += 2)
       new_ranks[all_mapping_ranks[i]] = all_mapping_ranks[i + 1];
 
     new_group = DataChannel::Group(new_ranks, _num_processes - 1);

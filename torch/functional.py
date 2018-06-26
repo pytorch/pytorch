@@ -6,11 +6,8 @@ import math
 __all__ = [
     'argmax',
     'argmin',
-    'bartlett_window',
     'btrifact',
     'btriunpack',
-    'hamming_window',
-    'hann_window',
     'isnan',
     'split',
     'unbind',
@@ -149,147 +146,6 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         P = None
 
     return P, L, U
-
-
-def hann_window(window_length, periodic=True, dtype=torch.float32):
-    r"""Hann window function.
-
-    This method computes the Hann window function:
-
-    .. math::
-        w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
-                \sin^2 \left( \frac{\pi n}{N - 1} \right),
-
-    where :math:`N` is the full window size.
-
-    The input :attr:`window_length` is a positive integer controlling the
-    returned window size. :attr:`periodic` flag determines whether the returned
-    window trims off the last duplicate value from the symmetric window and is
-    ready to be used as a periodic window with functions like
-    :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
-    ``torch.hann_window(L, periodic=True)`` equal to
-    ``torch.hann_window(L + 1, periodic=False)[:-1])``.
-
-    .. note::
-        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
-
-    Arguments:
-        window_length (int): the size of returned window
-        periodic (bool, optional): If True, returns a window to be used as periodic
-            function. If False, return a symmetric window.
-        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
-            Default: `torch.float32`
-
-    Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
-    """
-    if not dtype.is_floating_point:
-        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
-    if window_length <= 0:
-        raise ValueError('window_length must be positive')
-    return hamming_window(window_length, periodic=periodic, alpha=0.5, beta=0.5, dtype=dtype)
-
-
-def hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=torch.float32):
-    r"""Hamming window function.
-
-    This method computes the Hamming window function:
-
-    .. math::
-        w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
-
-    where :math:`N` is the full window size.
-
-    The input :attr:`window_length` is a positive integer controlling the
-    returned window size. :attr:`periodic` flag determines whether the returned
-    window trims off the last duplicate value from the symmetric window and is
-    ready to be used as a periodic window with functions like
-    :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
-    ``torch.hamming_window(L, periodic=True)`` equal to
-    ``torch.hamming_window(L + 1, periodic=False)[:-1])``.
-
-    .. note::
-        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
-
-    .. note::
-        This is a generalized version of :meth:`torch.hann_window`.
-
-    Arguments:
-        window_length (int): the size of returned window
-        periodic (bool, optional): If True, returns a window to be used as periodic
-            function. If False, return a symmetric window.
-        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
-            Default: `torch.float32`
-
-    Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
-    """
-    if not dtype.is_floating_point:
-        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
-    if window_length <= 0:
-        raise ValueError('window_length must be positive')
-    if window_length == 1:
-        return torch.ones(window_length, dtype=dtype)
-    window_length += int(periodic)
-    window = torch.arange(window_length, dtype=dtype)
-    window = window.mul_(math.pi * 2 / (window_length - 1)).cos_().mul_(-beta).add_(alpha)
-    if periodic:
-        return window[:-1]
-    else:
-        return window
-
-
-def bartlett_window(window_length, periodic=True, dtype=torch.float32):
-    r"""Bartlett window function.
-
-    This method computes the Bartlett window function:
-
-    .. math::
-        w[n] = 1 - \left| \frac{2n}{N-1} - 1 \right| = \begin{cases}
-            \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
-            2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
-        \end{cases},
-
-    where :math:`N` is the full window size.
-
-    The input :attr:`window_length` is a positive integer controlling the
-    returned window size. :attr:`periodic` flag determines whether the returned
-    window trims off the last duplicate value from the symmetric window and is
-    ready to be used as a periodic window with functions like
-    :meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
-    above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
-    ``torch.bartlett_window(L, periodic=True)`` equal to
-    ``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
-
-    .. note::
-        If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
-
-    Arguments:
-        window_length (int): the size of returned window
-        periodic (bool, optional): If True, returns a window to be used as periodic
-            function. If False, return a symmetric window.
-        dtype (:class:`torch.dtype`, optional): the desired type of returned window.
-            Default: `torch.float32`
-
-    Returns:
-        Tensor: A 1-D tensor of size :math:`(\text{window_length},)` containing the window
-    """
-    if not dtype.is_floating_point:
-        raise ValueError("dtype must be a floating point type, but got dtype={}".format(dtype))
-    if window_length <= 0:
-        raise ValueError('window_length must be positive')
-    if window_length == 1:
-        return torch.ones(window_length, dtype=dtype)
-    window_length += int(periodic)
-    window = torch.arange(window_length, dtype=dtype).mul_(2.0 / (window_length - 1))
-    first_half_size = ((window_length - 1) >> 1) + 1
-    window.narrow(0, first_half_size, window_length - first_half_size).mul_(-1).add_(2)
-    if periodic:
-        return window[:-1]
-    else:
-        return window
 
 
 def isnan(tensor):

@@ -17,3 +17,9 @@
 
 #define THC_GENERIC_FILE "torch/csrc/generic/Storage.cpp"
 #include <THC/THCGenerateAllTypes.h>
+
+template<>
+void THPPointer<THCStorage>::free() {
+  if (ptr)
+    THCStorage_free(LIBRARY_STATE ptr);
+}

@@ -2547,6 +2547,63 @@ class MPSCNNResizeNearestOp final : public Operator<CPUContext> {
 
 REGISTER_CPU_OPERATOR(MPSCNNResizeNearest, MPSCNNResizeNearestOp);
 OPERATOR_SCHEMA(MPSCNNResizeNearest).NumInputs(1).NumOutputs(1);
+
+class MPSCNNChannelShuffleOp final : public ConvPoolOpBase<CPUContext> {
+ public:
+  MPSCNNChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
+      : ConvPoolOpBase<CPUContext>(operator_def, ws) {
+    OPERATOR_NEEDS_FEATURE(
+        this->order_ == StorageOrder::NCHW, "Metal only supports NCHW order.");
+    kernel_[0] = kernel_[1] = 1;
+  }
+
+  bool RunOnDeviceWithOrderNCHW() override {
+    caffe2::Timer t;
+    auto inputWrapper = Inputs()[0]->Get<MPSImageWrapper>();
+    MPSImage* X = inputWrapper.getImage();
+    CAFFE_ENFORCE_EQ(X.featureChannels % this->group_, 0);
+    auto output_height = X.height;
+    auto output_width = X.width;
+    auto outputWrapper = MPSImageWrapper(
+        this,
+        &inputWrapper,
+        X.numberOfImages,
+        output_height,
+        output_width,
+        X.featureChannels);
+    auto commandBuffer = outputWrapper.getCommandBuffer();
+    MPSImage* output = outputWrapper.getImage();
+    CAFFE_ENFORCE_EQ(output.height, output_height);
+    CAFFE_ENFORCE_EQ(output.width, output_width);
+    id<MTLComputeCommandEncoder> encoder =
+        [commandBuffer computeCommandEncoder];
+    id<MTLComputePipelineState> state =
+        getMPSCNNContext().getSpecializedPipelineState(
+            @"channel_shuffle",
+            {{
+                ushort(X.numberOfImages),
+                ushort(X.featureChannels),
+                ushort(X.featureChannels / this->group_),
+                ushort(this->group_),
+            }});
+    [encoder setComputePipelineState:state];
+    [encoder setTexture:[X texture] atIndex:0];
+    [encoder setTexture:[output texture] atIndex:1];
+    const auto& launchParams =
+        spatialPointwiseKernelLaunchParams(state, output);
+    [encoder dispatchThreadgroups:launchParams.threadgroupsPerGrid
+            threadsPerThreadgroup:launchParams.threadsPerThreadgroup];
+    [encoder endEncoding];
+    inputWrapper.markRead();
+    outputWrapper.copyToOutputBlob(Outputs()[0]);
+
+    VLOG(2) << "ChannelShuffle took: " << t.MilliSeconds();
+    return true;
+  }
+};
+
+REGISTER_CPU_OPERATOR(MPSCNNChannelShuffle, MPSCNNChannelShuffleOp);
+OPERATOR_SCHEMA(MPSCNNChannelShuffle).NumInputs(1).NumOutputs(1);
 }
 
 CAFFE_KNOWN_TYPE(MPSImageWrapper);

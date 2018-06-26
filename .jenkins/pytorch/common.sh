@@ -62,15 +62,19 @@ declare -f -t trap_add
 trap_add cleanup EXIT
 
 if which sccache > /dev/null; then
-  # Start sccache server in foreground mode, so that we can see better logging
+  # Save sccache logs to file
   sccache --stop-server || true
-  SCCACHE_NO_DAEMON=1 RUST_LOG=sccache::server=error sccache --start-server
+  rm ~/sccache_error.log || true
+  SCCACHE_ERROR_LOG=~/sccache_error.log RUST_LOG=sccache::server=error sccache --start-server
 
   # Report sccache stats for easier debugging
   sccache --zero-stats
-  sccache --show-stats
   function sccache_epilogue() {
-     sccache --show-stats
+    echo '=================== sccache compilation log ==================='
+    python $(dirname "${BASH_SOURCE[0]}")/print_sccache_log.py ~/sccache_error.log
+    echo '=========== If your build fails, please take a look at the log above for possible reasons ==========='
+    sccache --show-stats
+    sccache --stop-server || true
   }
   trap_add sccache_epilogue EXIT
 fi
@@ -109,7 +113,7 @@ else
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-xenial-cuda9-cudnn7-py3 ]] || \
-   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7.2 ]]; then
+   [[ "$BUILD_ENVIRONMENT" == *pytorch-linux-trusty-py3.6-gcc7* ]]; then
   BUILD_TEST_LIBTORCH=1
 else
   BUILD_TEST_LIBTORCH=0

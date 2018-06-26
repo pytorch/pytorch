@@ -12,7 +12,7 @@ from .modules import utils
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
-from .modules.utils import _single, _pair, _triple
+from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 
 
@@ -114,16 +114,16 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sW,)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
-    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple `(out_padW,)`.
-      Default: 0
+      tuple ``(sW,)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padW,)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dW,)`. Default: 1
+      a tuple ``(dW,)``. Default: 1
 
 Examples::
 
@@ -145,16 +145,17 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kH \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padH, padW)`. Default: 0
-    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple
-      `(out_padH, out_padW)`. Default: 0
+      tuple ``(sH, sW)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padH, padW)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple ``(out_padH, out_padW)``.
+      Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dH, dW)`. Default: 1
+      a tuple ``(dH, dW)``. Default: 1
 
 Examples::
 
@@ -177,12 +178,13 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kT \times kH \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Default: 0
-    output_padding: implicit zero-paddings of `0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple
-      `(out_padT, out_padH, out_padW)`. Default: 0
+      tuple ``(sT, sH, sW)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padT, padH, padW)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple
+      ``(out_padT, out_padH, out_padW)``. Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
@@ -210,40 +212,33 @@ def conv_tbc(input, weight, bias, pad=0):
 
 
 # Pooling
-def avg_pool1d(input, kernel_size, stride=None, padding=0,
-               ceil_mode=False, count_include_pad=True):
-    r"""Applies a 1D average pooling over an input signal composed of several
-    input planes.
+avg_pool1d = _add_docstr(torch.avg_pool1d, r"""
+avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
-    See :class:`~torch.nn.AvgPool1d` for details and output shape.
+Applies a 1D average pooling over an input signal composed of several
+input planes.
 
-    Args:
-        input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
-        kernel_size: the size of the window. Can be a single number or a
-          tuple `(kW,)`
-        stride: the stride of the window. Can be a single number or a tuple
-          `(sW,)`. Default: :attr:`kernel_size`
-        padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple `(padW,)`. Default: 0
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the
-            output shape. Default: ``False``
-        count_include_pad: when True, will include the zero-padding in the
-            averaging calculation. Default: ``True``
+See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
-    Example::
-        >>> # pool of square window of size=3, stride=2
-        >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
-        >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-        tensor([[[ 2.,  4.,  6.]]])
-    """
-    if input.dim() != 3:
-        raise ValueError('expected 3D input (got {} dimensions)'
-                         .format(input.dim()))
-    kernel_size = _single(kernel_size) + (1,)
-    stride = _single(stride) + (1,) if stride is not None else kernel_size
-    padding = _single(padding) + (0,)
-    return avg_pool2d(input.unsqueeze(3), kernel_size, stride, padding,
-                      ceil_mode, count_include_pad).squeeze(3)
+Args:
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
+    kernel_size: the size of the window. Can be a single number or a
+      tuple `(kW,)`
+    stride: the stride of the window. Can be a single number or a tuple
+      `(sW,)`. Default: :attr:`kernel_size`
+    padding: implicit zero paddings on both sides of the input. Can be a
+      single number or a tuple `(padW,)`. Default: 0
+    ceil_mode: when True, will use `ceil` instead of `floor` to compute the
+        output shape. Default: ``False``
+    count_include_pad: when True, will include the zero-padding in the
+        averaging calculation. Default: ``True``
+
+Example::
+    >>> # pool of square window of size=3, stride=2
+    >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
+    >>> F.avg_pool1d(input, kernel_size=3, stride=2)
+    tensor([[[ 2.,  4.,  6.]]])
+""")
 
 
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
@@ -407,7 +402,7 @@ def max_unpool1d(input, indices, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxUnpool1d` for details.
     """
     kernel_size = _single(kernel_size)
-    stride = _single(stride)
+    stride = _single(stride or kernel_size)
     padding = _single(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
@@ -421,7 +416,7 @@ def max_unpool2d(input, indices, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxUnpool2d` for details.
     """
     kernel_size = _pair(kernel_size)
-    stride = _pair(stride)
+    stride = _pair(stride or kernel_size)
     padding = _pair(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
@@ -435,7 +430,7 @@ def max_unpool3d(input, indices, kernel_size, stride=None, padding=0,
     See :class:`~torch.nn.MaxUnpool3d` for details.
     """
     kernel_size = _triple(kernel_size)
-    stride = _triple(stride)
+    stride = _triple(stride or kernel_size)
     padding = _triple(padding)
     output_size = _unpool_output_size(input, kernel_size, stride, padding,
                                       output_size)
@@ -490,6 +485,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool2d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -505,6 +501,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool3d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -521,35 +518,38 @@ Args:
     output_size: the target output size (single integer)
 """)
 
-adaptive_avg_pool2d = _add_docstr(torch._C._nn.adaptive_avg_pool2d, r"""
-adaptive_avg_pool2d(input, output_size) -> Tensor
 
-Applies a 2D adaptive average pooling over an input signal composed of
-several input planes.
+def adaptive_avg_pool2d(input, output_size):
+    r"""
+    Applies a 2D adaptive average pooling over an input signal composed of
+    several input planes.
 
-See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
 
-Args:
-    output_size: the target output size (single integer or
-        double-integer tuple)
-""")
+    Args:
+        output_size: the target output size (single integer or
+            double-integer tuple)
+    """
+    output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool2d(input, output_size)
 
-adaptive_avg_pool3d = _add_docstr(torch._C._nn.adaptive_avg_pool3d, r"""
-adaptive_avg_pool3d(input, output_size) -> Tensor
 
-Applies a 3D adaptive average pooling over an input signal composed of
-several input planes.
+def adaptive_avg_pool3d(input, output_size):
+    r"""
+    Applies a 3D adaptive average pooling over an input signal composed of
+    several input planes.
 
-See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
+    See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
 
-Args:
-    output_size: the target output size (single integer or
-        triple-integer tuple)
-""")
+    Args:
+        output_size: the target output size (single integer or
+            triple-integer tuple)
+    """
+    output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
 
 
 # Activation functions
-
 def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
@@ -777,13 +777,16 @@ Applies element-wise :math:`\text{LogSigmoid}(x) = \log \left(\frac{1}{1 + \exp(
 See :class:`~torch.nn.LogSigmoid` for more details.
 """)
 
-hardshrink = _add_docstr(torch._C._nn.hardshrink, r"""
-hardshrink(input, lambd=0.5) -> Tensor
 
-Applies the hard shrinkage function element-wise
+def hardshrink(input, lambd=0.5):
+    r"""
+    hardshrink(input, lambd=0.5) -> Tensor
 
-See :class:`~torch.nn.Hardshrink` for more details.
-""")
+    Applies the hard shrinkage function element-wise
+
+    See :class:`~torch.nn.Hardshrink` for more details.
+    """
+    return torch.hardshrink(input, lambd)
 
 
 def tanhshrink(input):
@@ -891,21 +894,25 @@ def _gumbel_softmax_sample(logits, tau=1, eps=1e-10):
 
 
 def gumbel_softmax(logits, tau=1, hard=False, eps=1e-10):
-    """
+    r"""
     Sample from the Gumbel-Softmax distribution and optionally discretize.
+
     Args:
-      logits: `[batch_size, n_class]` unnormalized log-probs
+      logits: `[batch_size, num_features]` unnormalized log probabilities
       tau: non-negative scalar temperature
-      hard: if ``True``, take `argmax`, but differentiate w.r.t. soft sample y
+      hard: if ``True``, the returned samples will be discretized as one-hot vectors,
+            but will be differentiated as if it is the soft sample in autograd
+
     Returns:
-      [batch_size, n_class] sample from the Gumbel-Softmax distribution.
-      If hard=True, then the returned sample will be one-hot, otherwise it will
-      be a probability distribution that sums to 1 across classes
+      Sampled tensor of shape ``batch_size x num_features`` from the Gumbel-Softmax distribution.
+      If ``hard=True``, the returned samples will be one-hot, otherwise they will
+      be probability distributions that sum to 1 across features
 
     Constraints:
-    - this implementation only works on batch_size x num_features tensor for now
 
-    based on
+    - Currently only work on 2D input :attr:`logits` tensor of shape ``batch_size x num_features``
+
+    Based on
     https://github.com/ericjang/gumbel-softmax/blob/3c8584924603869e90ca74ac20a6a03d99a91ef9/Categorical%20VAE.ipynb ,
     (MIT license)
     """
@@ -979,10 +986,11 @@ def sigmoid(input):
 # etc.
 
 def linear(input, weight, bias=None):
-    """
+    r"""
     Applies a linear transformation to the incoming data: :math:`y = xA^T + b`.
 
     Shape:
+
         - Input: :math:`(N, *, in\_features)` where `*` means any number of
           additional dimensions
         - Weight: :math:`(out\_features, in\_features)`
@@ -1011,29 +1019,28 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     The input to the module is a list of indices, and the embedding matrix,
     and the output is the corresponding word embeddings.
 
+    See :class:`torch.nn.Embedding` for more details.
+
     Args:
-        input: tensor, containing indices into the embedding matrix
-        weight:
+        input (LongTensor): Tensor containing indices into the embedding matrix
+        weight (Tensor): The embedding matrix
             Number of rows should correspond to the maximum possible index + 1,
             number of columns is the embedding size
-        padding_idx (int, optional): Entries at the given index do not contribute to the gradient
-        max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
-        norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
-                                                the words in the mini-batch.
-        sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes for
-                                    more details regarding sparse gradients.
+        padding_idx (int, optional): If given, pads the output with the embedding vector at :attr:`padding_idx`
+                                         (initialized to zeros) whenever it encounters the index.
+        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
+                                    this before extracting. Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The p of the p-norm to compute for the max_norm option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+                                                the words in the mini-batch. Default ``False``.
+        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
+                                 :class:`torch.nn.Embedding` for more details regarding sparse gradients.
 
     Shape:
-        - Input: LongTensor `(N, W)`, N = mini-batch, W = number of indices to extract per mini-batch
-        - Embedding_matrix: FloatTensor `(V, embedding_dim)`, V = maximum index + 1, embedding_dim = embedding size
-        - Output: `(N, W, embedding_dim)`
-
-    Notes:
-        It is advised to only use `sparse=True` if `embedding_matrix` is a leaf Tensor,
-        since some autograd functions may not propagate sparse gradients correctly.
-        Additionally, keep in mind that only a limited number of optimizers support
-        sparse gradients: currently it's :class:`optim.SGD` (`CUDA` and `CPU`), and :class:`optim.Adagrad` (`CPU`)
+        - Input: LongTensor of arbitrary shape containing the indices to extract
+        - Weight: Embedding matrix of floating point type with shape `(V, embedding_dim)`,
+                            where V = maximum index + 1 and embedding_dim = the embedding size
+        - Output: `(*, embedding_dim)`, where `*` is the input shape
 
     Examples::
 
@@ -1078,87 +1085,103 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)
 
 
-def embedding_bag(embedding_matrix, indices, offsets=None,
-                  max_norm=None, norm_type=2, scale_grad_by_freq=False, mode='mean', sparse=False):
+def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
+                  scale_grad_by_freq=False, mode='mean', sparse=False):
     r"""Computes sums or means of 'bags' of embeddings, without instantiating the
-        intermediate embeddings.
+    intermediate embeddings.
 
-        For bags of constant length,
-            * :func:`embedding_bag` with `mode=sum` is equivalent to :func:`nn.functional.embedding` followed by
-              ``torch.sum(dim=1)``
-            * with `mode=mean` is equivalent to :func:`nn.functional.embedding` followed by ``torch.mean(dim=1)``
-            * with `mode=max` is equivalent to :func:`nn.functional.embedding` followed by ``torch.max(dim=1)``
+    See :class:`torch.nn.EmbeddingBag` for more details.
 
-        However, :func:`embedding_bag` is much more time and memory efficient than using a chain of these
-        operations.
+    Args:
+        input (LongTensor): Tensor containing bags of indices into the embedding matrix
+        weight (Tensor): The embedding matrix
+            Number of rows should correspond to the maximum possible index + 1,
+            number of columns is the embedding size
+        offsets (LongTensor, optional): Only used when :attr:`input` is 1D. :attr:`offsets` determines
+                             the starting index position of each bag (sequence) in :attr:`input`.
+        max_norm (float, optional): If given, will renormalize the embedding vectors to have a norm lesser than
+                                    this before extracting. Note: this will modify :attr:`weight` in-place.
+        norm_type (float, optional): The ``p`` in the ``p``-norm to compute for the max_norm option. Default ``2``.
+        scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the inverse of frequency of
+                                                the words in the mini-batch. Default ``False``.
+                                                Note: this option is not supported when ``mode="max"``.
+        mode (string, optional): ``"sum"``, ``"mean"`` or ``"max"``. Specifies the way to reduce the bag.
+                                 Default: ``"mean"``
+        sparse (bool, optional): if ``True``, gradient w.r.t. :attr:`weight` will be a sparse tensor. See Notes under
+                                 :class:`torch.nn.Embedding` for more details regarding sparse gradients.
+                                 Note: this option is not supported when ``mode="max"``.
 
-        Args:
-            embedding_matrix: FloatTensor, where number of rows should correspond to the maximum possible index + 1,
-                              number of columns is the embedding size
-            indices (N or BxN): LongTensor containing the indices of the embeddings to extract.
-                                When `input` is 1D Tensor of shape `N`, an `offsets` Tensor is given, that contains the
-                                starting position of each new sequence in the mini-batch.
-            offsets (B or None): LongTensor containing the starting positions of each sample in a mini-batch of variable
-                                 length sequences. If `input` is 2D (BxN), then offsets does not need to be given,
-                                 as the `input` is treated as a mini-batch of fixed length sequences of length `N` each.
-            max_norm (float, optional): If given, will renormalize the embeddings to always have a norm lesser than this
-            norm_type (float, optional): The p of the p-norm to compute for the max_norm option
-            scale_grad_by_freq (boolean, optional): if given, this will scale gradients by the frequency of
-                                                    the words in the dictionary.
-            mode (string, optional): 'sum' | 'mean' | 'max'. Specifies the way to reduce the bag. Default: 'mean'
-            sparse (boolean, optional): if ``True``, gradient w.r.t. weight matrix will be a sparse tensor. See Notes
-                                        for more details regarding sparse gradients.
+    Shape:
 
-        Shape:
-            - Embedding_matrix: FloatTensor `(V, embedding_dim)`,
-                                V = number of embeddings, embedding_dim = embedding size
-            - Input: LongTensor `N`, N = number of embeddings to extract
-                     (or) LongTensor `BxN`, B = number of sequences in mini-batch,
-                                            N = number of embeddings per sequence
-            - Offsets: LongTensor `B`, B = number of bags. The values are the
-                       offsets in `input` for each bag, i.e. the cumsum of lengths.
-                       Offsets is not given if Input is 2D `BxN` Tensor,
-                       the input is considered to be of fixed-length sequences
-            - Output: `(B, embedding_dim)`
+        - :attr:`input` (LongTensor) and :attr:`offsets` (LongTensor, optional)
 
-        Examples::
+          - If :attr:`input` is 2D of shape ``B x N``,
 
-            >>> # an Embedding module containing 10 tensors of size 3
-            >>> embedding_matrix = torch.rand(10, 3)
-            >>> # a batch of 2 samples of 4 indices each
-            >>> input = torch.tensor([1,2,4,5,4,3,2,9])
-            >>> offsets = torch.tensor([0,4])
-            >>> F.embedding_bag(embedding_matrix, input, offsets)
-            tensor([[ 0.3397,  0.3552,  0.5545],
-                    [ 0.5893,  0.4386,  0.5882]])
-        """
-    if indices.dim() == 2:
+            it will be treated as ``B`` bags (sequences) each of fixed length ``N``, and
+            this will return ``B`` values aggregated in a way depending on the :attr:`mode`.
+            :attr:`offsets` is ignored and required to be ``None`` in this case.
+
+          - If :attr:`input` is 1D of shape ``N``,
+
+            it will be treated as a concatenation of multiple bags (sequences).
+            :attr:`offsets` is required to be a 1D tensor containing the
+            starting index positions of each bag in :attr:`input`. Therefore,
+            for :attr:`offsets` of shape ``B``, :attr:`input` will be viewed as
+            having ``B`` bags. Empty bags (i.e., having 0-length) will have
+            returned vectors filled by zeros.
+
+        - :attr:`weight` (Tensor): the learnable weights of the module of
+          shape ``(num_embeddings x embedding_dim)``
+
+        - :attr:`output`: aggregated embedding values of shape ``B x embedding_dim``
+
+    Examples::
+
+        >>> # an Embedding module containing 10 tensors of size 3
+        >>> embedding_matrix = torch.rand(10, 3)
+        >>> # a batch of 2 samples of 4 indices each
+        >>> input = torch.tensor([1,2,4,5,4,3,2,9])
+        >>> offsets = torch.tensor([0,4])
+        >>> F.embedding_bag(embedding_matrix, input, offsets)
+        tensor([[ 0.3397,  0.3552,  0.5545],
+                [ 0.5893,  0.4386,  0.5882]])
+    """
+    # Check for backward compatibility.
+    # Used to be embedding_bag(weight, input, ...)
+    # Now is     embedding_bag(input, weight, ...)
+    if weight.dtype == torch.long and input.is_floating_point():
+        warnings.warn("Argument order of nn.functional.embedding_bag was changed. "
+                      "Usage `embedding_bag(weight, input, ...)` is deprecated, "
+                      "and should now be `embedding_bag(input, weight, ...)`.")
+        weight, input = input, weight
+
+    if input.dim() == 2:
         if offsets is not None:
             raise ValueError("if input is 2D, then offsets has to be None"
                              ", as input is treated is a mini-batch of"
                              " fixed length sequences. However, found "
                              "offsets of type {}".format(type(offsets)))
         else:
-            offsets = torch.arange(0, indices.numel(), indices.size(1),
-                                   dtype=torch.long, device=indices.device)
+            offsets = torch.arange(0, input.numel(), input.size(1),
+                                   dtype=torch.long, device=input.device)
 
-            indices = indices.view(-1)
-    elif indices.dim() == 1:
+            input = input.view(-1)
+    elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
         if offsets.dim() != 1:
             raise ValueError("offsets has to be a 1D Tensor")
-        if offsets[0] != 0:
-            raise ValueError("offsets[0] has to be 0, i.e. the first sequence"
-                             " in the mini-batch has to start from position 0."
-                             "However, got {}".format(offsets[0]))
-        if offsets[-1] > indices.size(0):
-            raise ValueError("offsets[-1] has to be smaller than indices's length"
+        if offsets[0].item() != 0:
+            raise ValueError("offsets[0] has to be 0, i.e., the first sequence "
+                             "in the mini-batch has to start from position 0. "
+                             "However, got {}".format(offsets[0].item()))
+        if offsets[-1].item() > input.size(0):
+            raise ValueError("offsets[-1] can not be greater than input's length"
                              " ({}), but got offsets[-1] of {}"
-                             .format(indices.size(0), offsets[-1]))
+                             .format(input.size(0), offsets[-1].item()))
     else:
         raise ValueError("input has to be 1D or 2D Tensor,"
-                         " but got Tensor of dimension {}".format(indices.dim()))
+                         " but got Tensor of dimension {}".format(input.dim()))
 
     if mode == 'sum':
         mode = 0
@@ -1181,8 +1204,8 @@ def embedding_bag(embedding_matrix, indices, offsets=None,
             torch.embedding_renorm_(weight, input, max_norm, norm_type)
 
     ret, _, _, _ = torch.embedding_bag(
-        embedding_matrix,
-        indices,
+        weight,
+        input,
         offsets,
         scale_grad_by_freq,
         mode,
@@ -1655,7 +1678,9 @@ def pixel_shuffle(input, upscale_factor):
 
     Examples::
 
-        >>> ps = nn.PixelShuffle(3)
+        
+        
+   ps = nn.PixelShuffle(3)
         >>> input = torch.empty(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
@@ -1877,8 +1902,10 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros', kernel_size=
     """
     if mode == 'bilinear':
         return vision.grid_sampler(input, grid, padding_mode)
-    else:
+    elif mode == 'gaussian':
         return vision.gaussian_grid_sampler(input, grid, padding_mode, kernel_size=kernel_size, kernel_std=kernel_std)
+    else
+        raise NotImplementedError("nn.functional.grid_sample got unsupported mode: '{}'".format(mode))
 
 
 def affine_grid(theta, size):
@@ -2046,7 +2073,8 @@ def assert_int_or_pair(arg, arg_name, message):
 
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Creates array of convolution patches from :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Unfold` for details
     """
 
@@ -2064,7 +2092,8 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Combines array of convolution patches to :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Fold` for details
     """
     if input is not None and input.dim() == 3:

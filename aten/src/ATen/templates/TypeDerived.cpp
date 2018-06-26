@@ -4,24 +4,27 @@
 #define __STDC_FORMAT_MACROS
 
 #include "ATen/${Type}.h"
-#include "ATen/${Storage}.h"
-#include "ATen/${Tensor}.h"
+
+// ${generated_comment}
+
+$storage_tensor_headers
 #include "ATen/${Generator}.h"
-#include "ATen/${Backend}ByteTensor.h"
-#include "ATen/${Backend}IntTensor.h"
-#include "ATen/${Backend}LongTensor.h"
-#include "ATen/${SparseTensor}.h"
 #include "ATen/${DenseTensor}.h"
 #include "ATen/${DenseBackend}LongTensor.h"
 #include "ATen/Allocator.h"
-#include "ATen/Utils.h"
 #include "ATen/Half.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/NativeFunctions.h"
 #include "ATen/THLongStorageView.h"
 #include "ATen/UndefinedTensor.h"
-#include "ATen/NativeFunctions.h"
-#include <iostream>
-#include <sstream>
+#include "ATen/Utils.h"
+#include "ATen/DeviceGuard.h"
+#include "ATen/optional.h"
+
+#include <cstddef>
+#include <functional>
+#include <memory>
+#include <utility>
 
 #include "ATen/Config.h"
 $extra_cuda_headers
@@ -29,7 +32,7 @@ $extra_cuda_headers
 namespace at {
 
 ${Type}::${Type}(Context* context)
-: Type(context, /*is_variable_or_undefined=*/false) {}
+  : Type(context, /*is_variable=*/false, /*is_undefined=*/false) {}
 ScalarType ${Type}::scalarType() const {
   return ScalarType::${ScalarName};
 }
@@ -75,7 +78,7 @@ TypeID ${Type}::ID() const {
   return ${TypeID};
 }
 
-std::size_t ${Type}::elementSizeInBytes() const {
+size_t ${Type}::elementSizeInBytes() const {
   return sizeof(${ScalarType});
 }
 

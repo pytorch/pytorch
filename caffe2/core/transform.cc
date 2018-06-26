@@ -20,7 +20,7 @@ std::vector<std::vector<int>> Transform::PatternMatch(const Graph& graph) {
   std::vector<std::vector<int>> matches;
 
   // Consider every possible node as the starting point.
-  for (int idx = 0; idx < graph.size(); ++idx) {
+  for (int idx = 0; idx < (int)graph.size(); ++idx) {
     // The current working subgraph. We will try to add new nodes to this,
     // when invoking the PatternRule.
     std::vector<int> subgraph;
@@ -81,7 +81,7 @@ void Transform::PatternMatchHelper(
     best_subgraph = subgraph;
   }
 
-  int size_before = subgraph.size();
+  size_t size_before = subgraph.size();
 
   if (pattern_match_type_ == CONNECTED_SUBGRAPH) {
     // Connected Component Order Pattern Matching
@@ -89,7 +89,7 @@ void Transform::PatternMatchHelper(
 
     // Try adding each parent and child of every node in the subgraph,
     // and see if we can accept it.
-    for (int i = 0; i < subgraph.size(); i++) {
+    for (size_t i = 0; i < subgraph.size(); i++) {
       int x = subgraph[i];
       TryNeighbors(
           graph,
@@ -119,11 +119,11 @@ void Transform::PatternMatchHelper(
     // node in our current subgraph.
     // Thus, we simply iterate over the nodes that come AFTER the last node of
     // our current subgraph.
-    int start_idx = 0;
+    size_t start_idx = 0;
     if (subgraph.size() > 0) {
       start_idx = subgraph.back() + 1;
     }
-    for (int i = start_idx; i < graph.size(); i++) {
+    for (size_t i = start_idx; i < graph.size(); i++) {
       if (!matched.at(i) && PatternRule(graph, subgraph, i)) {
         subgraph.push_back(i);
         PatternMatchHelper(graph, matched, subgraph_ptr, best_subgraph_ptr);
@@ -136,7 +136,7 @@ void Transform::PatternMatchHelper(
 
     // For every current subgraph, we consider all nodes to be
     // the next candidate node, as long as it isn't already matched.
-    for (int i = 0; i < graph.size(); i++) {
+    for (size_t i = 0; i < graph.size(); i++) {
       if (std::find(subgraph.begin(), subgraph.end(), i) == subgraph.end()) {
         // Then we try appending it to the subgraph.
         if (!matched.at(i) && PatternRule(graph, subgraph, i)) {

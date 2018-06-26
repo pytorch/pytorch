@@ -23,7 +23,7 @@ struct TensorSigmoidOp<half> {
   __device__ __forceinline__ void operator()(half* out, half* in) const {
 #ifdef CUDA_HALF_INSTRUCTIONS
     half one = ScalarConvert<int, half>::to(1);
-    *out = hdiv(one, __hadd(one, hexp(__hneg(*in))));
+    *out = __hdiv(one, __hadd(one, hexp(__hneg(*in))));
 #else
     float fin = ScalarConvert<half, float>::to(*in);
     *out = ScalarConvert<float, half>::to(1.0f / (1.0f + expf(- fin)));
@@ -33,7 +33,7 @@ struct TensorSigmoidOp<half> {
   __device__ __forceinline__ void operator()(half* v) const {
 #ifdef CUDA_HALF_INSTRUCTIONS
     half one = ScalarConvert<int, half>::to(1);
-    *v = hdiv(one, __hadd(one, hexp(__hneg(*v))));
+    *v = __hdiv(one, __hadd(one, hexp(__hneg(*v))));
 #else
     float fv = ScalarConvert<half, float>::to(*v);
     *v = ScalarConvert<float, half>::to(1.0f / (1.0f + expf(- fv)));

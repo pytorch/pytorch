@@ -12,7 +12,6 @@ class __PrinterOptions(object):
 
 
 PRINT_OPTS = __PrinterOptions()
-SCALE_FORMAT = '{:.5e} *\n'
 
 
 # We could use **kwargs, but this will give better docs
@@ -65,135 +64,142 @@ def set_printoptions(
         PRINT_OPTS.linewidth = linewidth
 
 
-def _get_min_log_scale():
-    min_positive = float_info.min * float_info.epsilon  # get smallest denormal
-    if min_positive == 0:  # use smallest normal if DAZ/FTZ is set
-        min_positive = float_info.min
-    return math.ceil(math.log(min_positive, 10))
+class _Formatter(object):
+    def __init__(self, tensor):
+        self.floating_dtype = tensor.dtype.is_floating_point
+        self.int_mode = True
+        self.sci_mode = False
+        self.max_width = 1
 
+        if not self.floating_dtype:
+            copy = torch.empty(tensor.size(), dtype=torch.long).copy_(tensor).view(tensor.nelement())
+            for value in copy.tolist():
+                value_str = '{}'.format(value)
+                self.max_width = max(self.max_width, len(value_str))
 
-def _get_format_fn(format, nonfinite_format):
-    return lambda x: format.format(x) if math.isinf(x) or math.isnan(x) else nonfinite_format.format(x)
-
-
-def _number_format(tensor, min_sz=-1):
-    floating_dtype = tensor.dtype.is_floating_point  # save this because we cast later
-    _min_log_scale = _get_min_log_scale()
-    min_sz = max(min_sz, 2)
-    tensor = torch.DoubleTensor(tensor.size()).copy_(tensor).abs_().view(tensor.nelement())
-
-    pos_inf_mask = tensor.eq(float('inf'))
-    neg_inf_mask = tensor.eq(float('-inf'))
-    nan_mask = tensor.ne(tensor)
-    invalid_value_mask = pos_inf_mask + neg_inf_mask + nan_mask
-    if invalid_value_mask.all():
-        example_value = 0
-    else:
-        example_value = tensor[invalid_value_mask.eq(0)][0]
-    tensor[invalid_value_mask] = example_value
-    if invalid_value_mask.any():
-        min_sz = max(min_sz, 3)
-
-    int_mode = True
-    # TODO: use fmod?
-    for value in tensor.tolist():
-        if value != math.ceil(value):
-            int_mode = False
-            break
-
-    exp_min = tensor.min()
-    if exp_min != 0:
-        exp_min = math.floor(math.log10(exp_min)) + 1
-    else:
-        exp_min = 1
-    exp_max = tensor.max()
-    if exp_max != 0:
-        exp_max = math.floor(math.log10(exp_max)) + 1
-    else:
-        exp_max = 1
-    include_decimal_int_mode = floating_dtype and int_mode
-
-    scale = 1
-    exp_max = int(exp_max)
-    prec = PRINT_OPTS.precision
-    if int_mode:
-        if exp_max > prec + 1:
-            format = '{{:11.{}e}}'.format(prec)
-            fmt_fn = format.format
-            sz = max(min_sz, 7 + prec)
         else:
-            sz = max(min_sz, exp_max + 1 + include_decimal_int_mode)
-            format = '{:' + str(sz) + '.0f}'
-            fmt_fn = format.format
-            if include_decimal_int_mode:
-                format = '{:' + str(sz - 1) + '.0f}'
-                nonfinite_format = format + '.'
-                fmt_fn = _get_format_fn(format, nonfinite_format)
-    else:
-        if exp_max - exp_min > prec:
-            sz = 7 + prec
-            if abs(exp_max) > 99 or abs(exp_min) > 99:
-                sz = sz + 1
-            sz = max(min_sz, sz)
-            format = '{{:{}.{}e}}'.format(sz, prec)
-            fmt_fn = format.format
-        else:
-            if exp_max > prec + 1 or exp_max < 0:
-                sz = max(min_sz, 7)
-                scale = math.pow(10, max(exp_max - 1, _min_log_scale))
+            copy = torch.empty(tensor.size(), dtype=torch.float64).copy_(tensor).view(tensor.nelement())
+            copy_list = copy.tolist()
+            try:
+                for value in copy_list:
+                    if value != math.ceil(value):
+                        self.int_mode = False
+                        break
+            # nonfinites will throw errors
+            except (ValueError, OverflowError):
+                self.int_mode = False
+
+            if self.int_mode:
+                for value in copy_list:
+                    value_str = '{:.0f}'.format(value)
+                    if math.isnan(value) or math.isinf(value):
+                        self.max_width = max(self.max_width, len(value_str))
+                    else:
+                        # in int_mode for floats, all numbers are integers, and we append a decimal to nonfinites
+                        # to indicate that the tensor is of floating type. add 1 to the len to account for this.
+                        self.max_width = max(self.max_width, len(value_str) + 1)
+
             else:
-                if exp_max == 0:
-                    sz = 7
+                copy_abs = copy.abs()
+                pos_inf_mask = copy_abs.eq(float('inf'))
+                neg_inf_mask = copy_abs.eq(float('-inf'))
+                nan_mask = copy_abs.ne(copy)
+                invalid_value_mask = pos_inf_mask + neg_inf_mask + nan_mask
+                if invalid_value_mask.all():
+                    example_value = 0
                 else:
-                    sz = exp_max + 6
-                sz = max(min_sz, sz)
-            format = '{{:{}.{}f}}'.format(sz, prec)
-            fmt_fn = format.format
-    return fmt_fn, scale, sz
+                    example_value = copy_abs[invalid_value_mask.eq(0)][0]
+                copy_abs[invalid_value_mask] = example_value
+
+                exp_min = copy_abs.min()
+                if exp_min != 0:
+                    exp_min = math.floor(math.log10(exp_min)) + 1
+                else:
+                    exp_min = 1
+                exp_max = copy_abs.max()
+                if exp_max != 0:
+                    exp_max = math.floor(math.log10(exp_max)) + 1
+                else:
+                    exp_max = 1
+
+                # these conditions for using scientific notation are based on numpy
+                if exp_max - exp_min > PRINT_OPTS.precision or exp_max > 8 or exp_min < -4:
+                    self.sci_mode = True
+                    for value in copy_list:
+                        value_str = ('{{:.{}e}}').format(PRINT_OPTS.precision).format(value)
+                        self.max_width = max(self.max_width, len(value_str))
+                else:
+                    for value in copy_list:
+                        value_str = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+                        self.max_width = max(self.max_width, len(value_str))
+
+    def width(self):
+        return self.max_width
+
+    def format(self, value):
+        if self.floating_dtype:
+            if self.int_mode:
+                ret = '{:.0f}'.format(value)
+                if not (math.isinf(value) or math.isnan(value)):
+                    ret += '.'
+            elif self.sci_mode:
+                ret = ('{{:{}.{}e}}').format(self.max_width, PRINT_OPTS.precision).format(value)
+            else:
+                ret = ('{{:.{}f}}').format(PRINT_OPTS.precision).format(value)
+        else:
+            ret = '{}'.format(value)
+        return (self.max_width - len(ret)) * ' ' + ret
 
 
-def _scalar_str(self, fmt, scale):
-    scalar_str = fmt(self.item() / scale)
-    # The leading space for positives is ugly on scalars, so we strip it
-    return scalar_str.lstrip()
+def _scalar_str(self, formatter):
+    return formatter.format(self.item())
 
 
-def _vector_str(self, indent, fmt, scale, sz, summarize):
-    element_length = sz + 3
-    elements_per_line = int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length)))
+def _vector_str(self, indent, formatter, summarize):
+    # length includes spaces and comma between elements
+    element_length = formatter.width() + 2
+    elements_per_line = max(1, int(math.floor((PRINT_OPTS.linewidth - indent) / (element_length))))
     char_per_line = element_length * elements_per_line
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        data = ([fmt(val / scale) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
+        data = ([formatter.format(val) for val in self[:PRINT_OPTS.edgeitems].tolist()] +
                 [' ...'] +
-                [fmt(val / scale) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
+                [formatter.format(val) for val in self[-PRINT_OPTS.edgeitems:].tolist()])
     else:
-        data = [fmt(val / scale) for val in self.tolist()]
+        data = [formatter.format(val) for val in self.tolist()]
 
     data_lines = [data[i:i + elements_per_line] for i in range(0, len(data), elements_per_line)]
     lines = [', '.join(line) for line in data_lines]
     return '[' + (',' + '\n' + ' ' * (indent + 1)).join(lines) + ']'
 
 
-def _tensor_str(self, indent, fmt, scale, sz, summarize):
+def _tensor_str(self, indent, formatter, summarize):
     dim = self.dim()
 
     if dim == 0:
-        return _scalar_str(self, fmt, scale)
+        return _scalar_str(self, formatter)
     if dim == 1:
-        return _vector_str(self, indent, fmt, scale, sz, summarize)
+        return _vector_str(self, indent, formatter, summarize)
 
     if summarize and self.size(0) > 2 * PRINT_OPTS.edgeitems:
-        slices = ([_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize)
+        slices = ([_tensor_str(self[i], indent + 1, formatter, summarize)
                    for i in range(0, PRINT_OPTS.edgeitems)] +
                   ['...'] +
-                  [_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize)
+                  [_tensor_str(self[i], indent + 1, formatter, summarize)
                    for i in range(len(self) - PRINT_OPTS.edgeitems, len(self))])
     else:
-        slices = [_tensor_str(self[i], indent + 1, fmt, scale, sz, summarize) for i in range(0, self.size(0))]
+        slices = [_tensor_str(self[i], indent + 1, formatter, summarize) for i in range(0, self.size(0))]
 
     tensor_str = (',' + '\n' * (dim - 1) + ' ' * (indent + 1)).join(slices)
     return '[' + tensor_str + ']'
+
+
+def _maybe_wrap_suffix(suffix, indent, tensor_str):
+    suffix_len = len(suffix)
+    last_line_len = len(tensor_str) - tensor_str.rfind('\n') + 1
+    if suffix_len > 2 and last_line_len + suffix_len > PRINT_OPTS.linewidth:
+        return ',\n' + ' ' * indent + suffix[2:]
+    return suffix
 
 
 def get_summarized_data(self):
@@ -224,27 +230,38 @@ def _str(self):
     indent = len(prefix)
     summarize = self.numel() > PRINT_OPTS.threshold
 
-    suffix = ')'
+    suffix = ''
     if not torch._C._is_default_type_cuda():
         if self.device.type == 'cuda':
-            suffix = ', device=\'' + str(self.device) + '\'' + suffix
+            suffix += ', device=\'' + str(self.device) + '\''
     else:
         if self.device.type == 'cpu' or torch.cuda.current_device() != self.device.index:
-            suffix = ', device=\'' + str(self.device) + '\'' + suffix
+            suffix += ', device=\'' + str(self.device) + '\''
 
     if self.numel() == 0:
+        # Explicitly print the shape if it is not (0,), to match NumPy behavior
+        if self.dim() != 1:
+            suffix += ', size=' + str(tuple(self.shape))
+
         # In an empty tensor, there are no elements to infer if the dtype should be int64,
         # so it must be shown explicitly.
         if self.dtype != torch.get_default_dtype():
-            suffix = ', dtype=' + str(self.dtype) + suffix
+            suffix += ', dtype=' + str(self.dtype)
         tensor_str = '[]'
     else:
         if self.dtype != torch.get_default_dtype() and self.dtype != torch.int64:
-            suffix = ', dtype=' + str(self.dtype) + suffix
+            suffix += ', dtype=' + str(self.dtype)
 
-        fmt, scale, sz = _number_format(get_summarized_data(self) if summarize else self)
-        if scale != 1:
-            prefix = prefix + SCALE_FORMAT.format(scale) + ' ' * indent
-        tensor_str = _tensor_str(self, indent, fmt, scale, sz, summarize)
+        formatter = _Formatter(get_summarized_data(self) if summarize else self)
+        tensor_str = _tensor_str(self, indent, formatter, summarize)
+
+    if self.grad_fn is not None:
+        suffix += ', grad_fn=<{}>'.format(type(self.grad_fn).__name__)
+    elif self.requires_grad:
+        suffix += ', requires_grad=True'
+
+    suffix += ')'
+
+    suffix = _maybe_wrap_suffix(suffix, indent, tensor_str)
 
     return prefix + tensor_str + suffix

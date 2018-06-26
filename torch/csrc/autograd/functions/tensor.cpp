@@ -1,15 +1,16 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/auto_gpu.h"
 
-#include <cstdint>
+#include <ATen/ATen.h>
+
+#include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace torch { namespace autograd {
@@ -22,7 +23,7 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     grad_inputs[0] = at::zeros_like(grad);
   }
   if (should_compute_output(1)) {
-    AutoGPU autoGPU(src_device);
+    at::DeviceGuard device_guard(src_device);
     if (grad.is_cuda() && grad.get_device() != src_device) {
       grad_inputs[1] = src_type->copy(grad);
     } else {
@@ -36,12 +37,13 @@ CopySlices::CopySlices(
     const Variable& base_var,
     at::TensorGeometry view_,
     std::shared_ptr<Function> fn_)
-    : Function(/*num_inputs=*/1),
+    : Function(),
       base(base_var),
       view(std::move(view_)),
       fn(std::move(fn_)) {
   // Take the next_edges of fn as our own, except for index 0 which goes
   // to base instead of the view.
+  add_input_metadata(base_var.type(), base_var.sizes());
   const auto num_outputs = fn->num_outputs();
   next_edges_.reserve(num_outputs);
   add_next_edge(base_var.gradient_edge());

@@ -386,6 +386,7 @@ class TestConvolution(hu.HypothesisTestCase):
                     order=order,
                     engine=engine,
                     device_option=gc,
+                    exhaustive_search=True,
                 )
                 if order == "NCHW":
                     X_f = X.transpose((0, 3, 1, 2))

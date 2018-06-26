@@ -97,34 +97,144 @@ OPERATOR_SCHEMA(ArgMax)
     .NumOutputs(1)
     .TensorInferenceFunction(InferTensor)
     .SetDoc(R"DOC(
-Retrive the argmax of the axis dimension. Given an input tensor of shape
-[a_0, a_1, ..., a_{n-1}] and two arguments axis as int and keepdims as bool,
-returns one output:
-- Index tensor which contains the indices of the largest element. It has the
-  same dims as X.dims() with the dimension along axis equals 1 when
-  keepdims == true otherwise removed.
+Retrieve the argmax of an axis dimension specified by the `axis`
+argument. Given an input tensor and two arguments (`axis` and
+`keepdims`), returns a tensor containing the indices of the largest
+element along the given axis. If the `keepdims` arg is *True* (default),
+the shape of the output tensor matches the input tensor except the
+`axis` dimension equals 1. Else, the `axis` dimension of the output
+tensor is removed.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/arg_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ArgMax",
+    ["X"],
+    ["Indices"],
+    axis=2,
+    keepdims=False
+)
+
+workspace.FeedBlob("X", (np.random.randint(10, size=(3,3,3))).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Indices:", workspace.FetchBlob("Indices"))
+
+```
+
+**Result**
+
+```
+X: [[[4. 9. 6.]
+  [6. 6. 1.]
+  [9. 5. 4.]]
+
+ [[6. 7. 4.]
+  [7. 9. 1.]
+  [3. 2. 8.]]
+
+ [[3. 4. 6.]
+  [5. 2. 7.]
+  [1. 5. 7.]]]
+Indices: [[1 0 0]
+ [1 1 2]
+ [2 2 2]]
+
+```
+
+</details>
+
     )DOC")
-    .Input(0, "X", "Tenor of shape [a_0, a_1, ..., a_{n-1}].")
-    .Output(0, "Indices", "Tensor of indices for the largest values.")
-    .Arg("axis", "The axis to get argmax.")
-    .Arg("keepdims", "Whether to keep the axis dim in the output.");
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
+    .Output(0,
+      "Indices",
+      "*(type: Tensor`<float>`)* Tensor of indices for the largest values.")
+    .Arg("axis", "*(type: int; default: -1)* The axis to get argmax.")
+    .Arg("keepdims",
+      "*(type: bool; default: True)* If True (default), the output tensor "
+      "shape will match the input tensor shape except the `axis` dimension "
+      "equals 1. Else, the `axis` dimension of the output tensor is removed.");
 
 OPERATOR_SCHEMA(ArgMin)
     .NumInputs(1)
     .NumOutputs(1)
     .TensorInferenceFunction(InferTensor)
     .SetDoc(R"DOC(
-Retrive the argmin of the axis dimension. Given an input tensor of shape
-[a_0, a_1, ..., a_{n-1}] and two arguments axis as int and keepdims as bool,
-returns one output:
-- Index tensor which contains the indices of the largest element. It has the
-  same dims as X.dims() with the dimension along axis equals 1 when
-  keepdims == true otherwise removed.
+Retrieve the argmin of an axis dimension specified by the `axis`
+argument. Given an input tensor and two arguments (`axis` and
+`keepdims`), returns a tensor containing the indices of the smallest
+element along the given axis. If the `keepdims` arg is *True* (default),
+the shape of the output tensor matches the input tensor except the
+`axis` dimension equals 1. Else, the `axis` dimension of the output
+tensor is removed.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/arg_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ArgMin",
+    ["X"],
+    ["Indices"],
+    axis=1
+)
+
+workspace.FeedBlob("X", (np.random.randint(10, size=(5,5))).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Indices:", workspace.FetchBlob("Indices"))
+
+```
+
+**Result**
+
+```
+
+X: [[9. 4. 6. 4. 1.]
+  [5. 9. 8. 3. 4.]
+  [6. 1. 0. 2. 9.]
+  [7. 8. 2. 4. 9.]
+  [3. 9. 4. 9. 4.]]
+Indices: [[4]
+  [3]
+  [2]
+  [2]
+  [0]]
+
+```
+
+</details>
+
     )DOC")
-    .Input(0, "X", "Tenor of shape [a_0, a_1, ..., a_{n-1}].")
-    .Output(0, "Indices", "Tensor of indices for the largest values.")
-    .Arg("axis", "The axis to get argmin.")
-    .Arg("keepdims", "Whether to keep the axis dim in the output.");
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
+    .Output(0,
+      "Indices",
+      "*(type: Tensor`<float>`)* Tensor of indices for the smallest values.")
+    .Arg("axis", "*(type: int; default: -1)* The axis to get argmin.")
+    .Arg("keepdims",
+      "*(type: bool; default: True)* If True (default), the output tensor "
+      "shape will match the input tensor shape except the `axis` dimension "
+      "equals 1. Else, the `axis` dimension of the output tensor is removed.");
 
 NO_GRADIENT(ArgMax);
 NO_GRADIENT(ArgMin);

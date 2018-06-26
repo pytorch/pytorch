@@ -140,12 +140,12 @@ IMPLEMENT_THFILE_SCALAR(Half, THHalf)
 #define IMPLEMENT_THFILE_STORAGE(TYPEC, TYPE)                           \
   size_t THFile_read##TYPEC(THFile *self, TH##TYPEC##Storage *storage)    \
   {                                                                     \
-    return THFile_read##TYPEC##Raw(self, storage->data, storage->size); \
+    return THFile_read##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->size); \
   }                                                                     \
                                                                         \
   size_t THFile_write##TYPEC(THFile *self, TH##TYPEC##Storage *storage)   \
   {                                                                     \
-    return THFile_write##TYPEC##Raw(self, storage->data, storage->size); \
+    return THFile_write##TYPEC##Raw(self, TH##TYPEC##Storage_data(storage), storage->size); \
   }
 
 IMPLEMENT_THFILE_STORAGE(Byte, uint8_t)
