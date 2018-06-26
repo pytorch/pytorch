@@ -63,3 +63,5 @@ typedef struct THTensor
 #include "THGenerateAllTypes.h"
 
 TH_API void THTensor_free(THTensor *self);
+TH_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
+                                                                  at::IntList newshape);
