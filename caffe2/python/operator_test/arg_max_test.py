@@ -5,6 +5,8 @@ from __future__ import unicode_literals
 
 from caffe2.python import core, workspace
 import caffe2.python.hypothesis_test_util as hu
+from hypothesis import given
+import hypothesis.strategies as st
 import numpy as np
 
 
@@ -69,6 +71,22 @@ class TestArgMaxOp(hu.HypothesisTestCase):
             original_inp=X,
             expected_values=[[0]],
         )
+
+    @given(
+        x=hu.tensor(
+            min_dim=2, max_dim=2, dtype=np.float32,
+            elements=st.integers(min_value=-100, max_value=100)),
+    )
+    def test_rowwise_argmax_shape_inference(self, x):
+        workspace.FeedBlob('x', x)
+
+        net = core.Net("rowwise_argmax_test")
+        result = net.RowWiseArgMax(['x'])
+        (shapes, types) = workspace.InferShapesAndTypes([net])
+        workspace.RunNetOnce(net)
+
+        self.assertEqual(shapes[result], list(workspace.blobs[result].shape))
+        self.assertEqual(types[result], core.DataType.INT64)
 
 
 if __name__ == "__main__":

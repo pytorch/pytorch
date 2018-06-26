@@ -79,7 +79,7 @@ sigmoid: [0.8284105  0.57842743 0.85621804 0.80923885 0.10222916]
 OPERATOR_SCHEMA(SigmoidGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .AllowInplace({{0, 0}})
+    .AllowInplace({{1, 0}})
     .SetDoc(R"DOC(
 SigmoidGradient takes both Y and dY and uses this to update dX according to the
 chain rule and derivatives of the sigmoid function.

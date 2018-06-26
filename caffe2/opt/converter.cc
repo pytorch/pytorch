@@ -1,4 +1,6 @@
 #include "caffe2/opt/converter.h"
+#include "caffe2/core/logging.h"
+
 #include "nomnigraph/Graph/Algorithms.h"
 
 #include "nomnigraph/Support/Casting.h"
@@ -34,7 +36,7 @@ std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) 
   // There are literally three ways to define shapes in Conv in Caffe2
   std::vector<int> kernelShape;
   if (argMap.count("kernel")) {
-    assert(argMap["kernel"].has_i() && "Invalid kernel argument");
+    CAFFE_ENFORCE(argMap["kernel"].has_i(), "Invalid kernel argument");
     int kernel = static_cast<int>(argMap["kernel"].i());
     kernelShape = {kernel, kernel};
   } else if (argMap.count("kernels")) {
@@ -42,13 +44,11 @@ std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) 
       kernelShape.push_back(static_cast<int>(i));
     }
   } else if (argMap.count("kernel_h") && argMap.count("kernel_w")) {
-    assert(argMap["kernel_h"].has_i() && "Invalid kernel argument");
-    assert(argMap["kernel_w"].has_i() && "Invalid kernel argument");
+    CAFFE_ENFORCE(argMap["kernel_h"].has_i(), "Invalid kernel argument");
+    CAFFE_ENFORCE(argMap["kernel_w"].has_i(), "Invalid kernel argument");
     int kernelH = static_cast<int>(argMap["kernel_h"].i());
     int kernelW = static_cast<int>(argMap["kernel_w"].i());
     kernelShape = {kernelH, kernelW};
-  } else {
-    assert(0 && "Could not parse kernel argument");
   }
   return kernelShape;
 }
@@ -58,7 +58,7 @@ std::vector<int> getStrides(std::map<std::string, caffe2::Argument> argMap) {
   // TODO: include all the other ways of adding these args.
   // e.g. strides, stride_h, etc.
   if (argMap.count("stride")) {
-    assert(argMap["stride"].has_i() && "Invalid stride argument");
+    CAFFE_ENFORCE(argMap["stride"].has_i(), "Invalid stride argument");
     int stride = static_cast<int>(argMap["stride"].i());
     strides = {stride, stride};
   }
@@ -68,7 +68,7 @@ std::vector<int> getStrides(std::map<std::string, caffe2::Argument> argMap) {
 std::vector<int> getPads(std::map<std::string, caffe2::Argument> argMap) {
   std::vector<int> pads;
   if (argMap.count("pad")) {
-    assert(argMap["pad"].has_i() && "Invalid pad argument");
+    CAFFE_ENFORCE(argMap["pad"].has_i(), "Invalid pad argument");
     int pad = static_cast<int>(argMap["pad"].i());
     pads = {pad, pad, pad, pad};
   }
@@ -78,7 +78,7 @@ std::vector<int> getPads(std::map<std::string, caffe2::Argument> argMap) {
 std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
   std::vector<int> dilations;
   if (argMap.count("dilation")) {
-    assert(argMap["dilation"].has_i() && "Invalid dilation argument");
+    CAFFE_ENFORCE(argMap["dilation"].has_i(), "Invalid dilation argument");
     int dilation = static_cast<int>(argMap["dilation"].i());
     dilations = {dilation, dilation};
   }
@@ -90,12 +90,12 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
 namespace caffe2 {
 
 std::unique_ptr<repr::NeuralNetOperator>
-convertToOperatorDef(caffe2::OperatorDef op) {
-  auto argMap = getArgumentsFromOperator(op);
+convertToNeuralNetOperator(caffe2::OperatorDef* op) {
+  auto argMap = getArgumentsFromOperator(*op);
 
   std::unique_ptr<repr::NeuralNetOperator> nnOp;
 
-  if (op.type() == "Conv") {
+  if (op->type() == "Conv") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::Conv>(kernelShape);
     auto c = dyn_cast<repr::Conv>(nnOp.get());
@@ -106,34 +106,44 @@ convertToOperatorDef(caffe2::OperatorDef op) {
 
   }
 
-  if (op.type() == "Relu") {
+  if (op->type() == "Relu") {
     nnOp = util::make_unique<repr::Relu>();
   }
 
-  if (op.type() == "AveragePool") {
+  if (op->type() == "AveragePool") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::AveragePool>(kernelShape);
   }
 
-  if (op.type() == "MaxPool") {
+  if (op->type() == "MaxPool") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::MaxPool>(kernelShape);
   }
 
-  if (op.type() == "Sum") {
+  if (op->type() == "Sum") {
     nnOp = util::make_unique<repr::Sum>();
   }
 
-  if (op.type() == "SpatialBN") {
+  if (op->type() == "SpatialBN") {
     nnOp = util::make_unique<repr::BatchNormalization>();
   }
 
   if (!nnOp) {
-    nnOp = util::make_unique<repr::GenericOperator>(op.type());
+    nnOp = util::make_unique<repr::GenericOperator>(op->type());
   }
 
   // Generic attributes associated with Ops here
   nnOp->setLayout(getLayout(argMap));
+
+  auto annotation = util::make_unique<Caffe2Annotation>();
+  annotation->setOperatorDef(op);
+
+  auto device_name = op->device_option().node_name();
+  if (device_name != "") {
+    annotation->setDevice(device_name);
+  }
+
+  nnOp->setAnnotation(std::move(annotation));
 
   return nnOp;
 }
@@ -196,13 +206,13 @@ void handleWhileOp(
     }
   }
 
-  assert(rev_sorted.front().getNodes().size() == 1 &&
+  CAFFE_ENFORCE(rev_sorted.front().getNodes().size() == 1,
       "More than one exit node.");
-  assert(rev_sorted.back().getNodes().size() == 1 &&
+  CAFFE_ENFORCE(rev_sorted.back().getNodes().size() == 1,
       "More than one entry node.");
 
   auto exit_tensor = *(rev_sorted.front().getNodes().begin());
-  assert(isa<repr::NeuralNetData>(exit_tensor->data()) &&
+  CAFFE_ENFORCE(isa<repr::NeuralNetData>(exit_tensor->data()),
       "Exit node is not a tensor.");
 
   auto bodyNodes = bodyGraph.getMutableNodes();
@@ -326,24 +336,10 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     if (op.type() == "While") {
       handleWhileOp(dfg, cfg, opNode, bbNode, op, blobMap);
     } else {
-      opNode->resetData(convertToOperatorDef(op));
+      opNode->resetData(convertToNeuralNetOperator(&op));
       auto currentBasicBlock = bbNode->mutableData()->get();
       currentBasicBlock->pushInstructionNode(opNode);
     }
-    auto opRef = dyn_cast<repr::NeuralNetOperator>(opNode->data().get());
-
-    assert(opNode->data());
-
-    auto annotation = util::make_unique<Caffe2Annotation>();
-    annotation->setOperatorDef(&op);
-
-    auto device_name = op.device_option().node_name();
-    if (device_name != "") {
-      annotation->setDevice(device_name);
-    }
-
-    opRef->setAnnotation(std::move(annotation));
-
   }
 
   repr::NNModule module;
@@ -409,7 +405,7 @@ caffe2::OperatorDef convertToOperatorDef(repr::NNGraph::NodeRef instrNode) {
         break;
       default:
         op.set_type("__NOMNIGRAPH_CONVERSION_ERROR__");
-        assert(0 && "Couldn't convert operator annotation to Caffe2 operator def");
+        CAFFE_THROW("Couldn't convert operator annotation to Caffe2 operator def");
         break;
     }
   }
@@ -436,7 +432,7 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
   // with the DFG
   for (const auto &bbNode : m.controlFlow.getMutableNodes()) {
     if (bbNode->getOutEdges().size() > 1) {
-      assert(0 && "Control flow not yet supported in Caffe2 converter.");
+      CAFFE_THROW("Control flow not yet supported in Caffe2 converter.");
     }
     auto bb = bbNode->data().get();
     for (const auto &instrNode : bb->getInstructions()) {
@@ -487,4 +483,4 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
   return predictNet;
 }
 
-} // namespace caffe2 
+} // namespace caffe2
