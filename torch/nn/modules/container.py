@@ -226,6 +226,9 @@ class ModuleDict(Module):
         return self._modules[key]
 
     def __setitem__(self, key, module):
+        if not isinstance(key, torch._six.string_types):
+            raise TypeError("ModuleDict.__setitem__ key should be string, but got " +
+                            type(key).__name__)
         self.add_module(key, module)
 
     def __delitem__(self, key):
@@ -429,6 +432,9 @@ class ParameterDict(Module):
         return self._parameters[key]
 
     def __setitem__(self, key, parameter):
+        if not isinstance(key, torch._six.string_types):
+            raise TypeError("ParameterDict.__setitem__ key should be string,"
+                            " but got " + type(key).__name__)
         self.register_parameter(key, parameter)
 
     def __delitem__(self, key):
