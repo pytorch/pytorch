@@ -31,7 +31,7 @@ bool test_optimizer_xor(Optimizer&& optimizer, Sequential& model) {
     auto inputs = torch::empty({kBatchSize, 2});
     auto labels = torch::empty({kBatchSize});
     for (size_t i = 0; i < kBatchSize; i++) {
-      inputs[i] = (torch::rand({2}) >= 0.5).to(torch::kInt64);
+      inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
     }
     inputs.set_requires_grad(true);

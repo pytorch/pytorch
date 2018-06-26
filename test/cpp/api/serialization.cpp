@@ -176,7 +176,7 @@ TEST_CASE("serialization") {
       auto inputs = torch::empty({batch_size, 2});
       auto labels = torch::empty({batch_size});
       for (size_t i = 0; i < batch_size; i++) {
-        inputs[i] = (torch::rand({2}) >= 0.5).to(torch::kInt64);
+        inputs[i] = torch::randint(2, {2}, torch::kInt64);
         labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
       }
       auto x = model->forward<torch::Tensor>(inputs);
@@ -280,7 +280,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
     auto inputs = torch::empty({batch_size, 2});
     auto labels = torch::empty({batch_size});
     for (size_t i = 0; i < batch_size; i++) {
-      inputs[i] = (torch::rand({2}) >= 0.5).to(torch::kInt64);
+      inputs[i] = torch::randint(2, {2}, torch::kInt64);
       labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
     }
     auto x = model->forward<torch::Tensor>(inputs);
