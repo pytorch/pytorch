@@ -160,9 +160,6 @@ class Module(object):
                 accessed from this module using the given name
             parameter (Module): child module to be added to the module.
         """
-        if not isinstance(key, torch._six.string_types):
-            raise TypeError("ModuleDict.__setitem__ key should be string, but got " +
-
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
