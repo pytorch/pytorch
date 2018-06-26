@@ -389,7 +389,7 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
 
-    def testPairwiseDotProductWithAllEmbeddings(self):
+    def testPairwiseSimilarityWithAllEmbeddings(self):
         embedding_dim = 64
         N = 5
         record = schema.NewRecord(self.model.net, schema.Struct(
@@ -397,7 +397,7 @@ class TestLayers(LayersTestCase):
                 ((np.float32, (N, embedding_dim)))
             )),
         ))
-        current = self.model.PairwiseDotProduct(
+        current = self.model.PairwiseSimilarity(
             record, N * N)
 
         self.assertEqual(
@@ -412,7 +412,7 @@ class TestLayers(LayersTestCase):
             OpSpec("Flatten", None, None),
         ])
 
-    def testPairwiseDotProductWithXandYEmbeddings(self):
+    def testPairwiseSimilarityWithXandYEmbeddings(self):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
@@ -422,7 +422,7 @@ class TestLayers(LayersTestCase):
                 ((np.float32, (6, embedding_dim)))
             )),
         ))
-        current = self.model.PairwiseDotProduct(
+        current = self.model.PairwiseSimilarity(
             record, 5 * 6)
 
         self.assertEqual(
@@ -437,7 +437,7 @@ class TestLayers(LayersTestCase):
             OpSpec("Flatten", None, None),
         ])
 
-    def testPairwiseDotProductWithXandYEmbeddingsAndGather(self):
+    def testPairwiseSimilarityWithXandYEmbeddingsAndGather(self):
         embedding_dim = 64
 
         output_idx = [1, 3, 5]
@@ -460,11 +460,11 @@ class TestLayers(LayersTestCase):
             )),
             ('indices_to_gather', indices_to_gather),
         ))
-        current = self.model.PairwiseDotProduct(
+        current = self.model.PairwiseSimilarity(
             record, len(output_idx))
 
         # This assert is not necessary,
-        # output size is passed into PairwiseDotProduct
+        # output size is passed into PairwiseSimilarity
         self.assertEqual(
             schema.Scalar((np.float32, (len(output_idx), ))),
             current
@@ -478,7 +478,7 @@ class TestLayers(LayersTestCase):
             OpSpec("BatchGather", None, None),
         ])
 
-    def testPairwiseDotProductIncorrectInput(self):
+    def testPairwiseSimilarityIncorrectInput(self):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
@@ -486,14 +486,14 @@ class TestLayers(LayersTestCase):
             )),
         ))
         with self.assertRaises(AssertionError):
-            self.model.PairwiseDotProduct(
+            self.model.PairwiseSimilarity(
                 record, 25)
 
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('all_embeddings', schema.List(np.float32))
         ))
         with self.assertRaises(AssertionError):
-            self.model.PairwiseDotProduct(
+            self.model.PairwiseSimilarity(
                 record, 25)
 
     def testConcat(self):
