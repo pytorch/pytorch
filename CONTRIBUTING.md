@@ -146,9 +146,7 @@ working on:
 
 - Working on `torch/lib` and want to run your changes / rerun cmake?  Run
   `python setup.py build_deps`.  Note that this will rerun cmake for
-  every subdirectory in TH; if you are only working on one project,
-  consider editing `torch/lib/build_all.sh` and commenting out the
-  `build` lines of libraries you are not working on.
+  every subdirectory in TH.
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG` and `NO_CUDA`.

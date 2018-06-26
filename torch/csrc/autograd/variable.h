@@ -7,6 +7,7 @@
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable_version.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
 #include <ATen/Error.h>
@@ -280,7 +281,7 @@ struct Variable : public at::Tensor {
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 struct Variable::Impl : public at::TensorImpl {
-  explicit Impl(
+  TORCH_API explicit Impl(
       at::Tensor data,
       bool requires_grad = false,
       Edge edge = Edge());
