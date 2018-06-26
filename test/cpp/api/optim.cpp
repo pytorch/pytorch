@@ -85,15 +85,13 @@ void check_exact_values(
   auto parameters = model.parameters();
   assign_parameter(
       parameters,
-      "0.linear.weight",
+      "0.weight",
       torch::tensor({-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}));
   assign_parameter(
-      parameters, "0.linear.bias", torch::tensor({-0.1085, -0.2979, 0.6892}));
+      parameters, "0.bias", torch::tensor({-0.1085, -0.2979, 0.6892}));
   assign_parameter(
-      parameters,
-      "1.linear.weight",
-      torch::tensor({-0.0508, -0.3941, -0.2843}));
-  assign_parameter(parameters, "1.linear.bias", torch::tensor({-0.0711}));
+      parameters, "2.weight", torch::tensor({-0.0508, -0.3941, -0.2843}));
+  assign_parameter(parameters, "2.bias", torch::tensor({-0.0711}));
 
   auto optimizer = OptimizerClass(parameters, options);
   torch::Tensor input =
