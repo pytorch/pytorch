@@ -90,12 +90,12 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
 namespace caffe2 {
 
 std::unique_ptr<repr::NeuralNetOperator>
-convertToOperatorDef(caffe2::OperatorDef op) {
-  auto argMap = getArgumentsFromOperator(op);
+convertToNeuralNetOperator(caffe2::OperatorDef* op) {
+  auto argMap = getArgumentsFromOperator(*op);
 
   std::unique_ptr<repr::NeuralNetOperator> nnOp;
 
-  if (op.type() == "Conv") {
+  if (op->type() == "Conv") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::Conv>(kernelShape);
     auto c = dyn_cast<repr::Conv>(nnOp.get());
@@ -106,34 +106,44 @@ convertToOperatorDef(caffe2::OperatorDef op) {
 
   }
 
-  if (op.type() == "Relu") {
+  if (op->type() == "Relu") {
     nnOp = util::make_unique<repr::Relu>();
   }
 
-  if (op.type() == "AveragePool") {
+  if (op->type() == "AveragePool") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::AveragePool>(kernelShape);
   }
 
-  if (op.type() == "MaxPool") {
+  if (op->type() == "MaxPool") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::MaxPool>(kernelShape);
   }
 
-  if (op.type() == "Sum") {
+  if (op->type() == "Sum") {
     nnOp = util::make_unique<repr::Sum>();
   }
 
-  if (op.type() == "SpatialBN") {
+  if (op->type() == "SpatialBN") {
     nnOp = util::make_unique<repr::BatchNormalization>();
   }
 
   if (!nnOp) {
-    nnOp = util::make_unique<repr::GenericOperator>(op.type());
+    nnOp = util::make_unique<repr::GenericOperator>(op->type());
   }
 
   // Generic attributes associated with Ops here
   nnOp->setLayout(getLayout(argMap));
+
+  auto annotation = util::make_unique<Caffe2Annotation>();
+  annotation->setOperatorDef(op);
+
+  auto device_name = op->device_option().node_name();
+  if (device_name != "") {
+    annotation->setDevice(device_name);
+  }
+
+  nnOp->setAnnotation(std::move(annotation));
 
   return nnOp;
 }
@@ -326,24 +336,10 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     if (op.type() == "While") {
       handleWhileOp(dfg, cfg, opNode, bbNode, op, blobMap);
     } else {
-      opNode->resetData(convertToOperatorDef(op));
+      opNode->resetData(convertToNeuralNetOperator(&op));
       auto currentBasicBlock = bbNode->mutableData()->get();
       currentBasicBlock->pushInstructionNode(opNode);
     }
-    auto opRef = dyn_cast<repr::NeuralNetOperator>(opNode->data().get());
-
-    assert(opNode->data());
-
-    auto annotation = util::make_unique<Caffe2Annotation>();
-    annotation->setOperatorDef(&op);
-
-    auto device_name = op.device_option().node_name();
-    if (device_name != "") {
-      annotation->setDevice(device_name);
-    }
-
-    opRef->setAnnotation(std::move(annotation));
-
   }
 
   repr::NNModule module;
@@ -487,4 +483,4 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
   return predictNet;
 }
 
-} // namespace caffe2 
+} // namespace caffe2
