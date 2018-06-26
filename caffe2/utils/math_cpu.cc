@@ -741,9 +741,6 @@ void ReduceTensor(
     T* Y,
     CPUContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
-  if (X == Y) {
-    return;
-  }
   std::vector<int> Y_dims(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
     Y_dims[axes[i]] = 1;
