@@ -420,6 +420,37 @@ class TestElementwiseOps(hu.HypothesisTestCase):
     def test_div(self, n, m, k, t, gc, dc):
         self._test_binary_op("Div", np.divide, n, m, k, t, 1.0, True, gc, dc)
 
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), broadcast=st.booleans(),
+           **hu.gcs)
+    def test_div_legacy_grad(self, n, m, broadcast, gc, dc):
+        op = core.CreateOperator(
+            "DivGradient",
+            ["B", "C", "dC"],
+            ["dA", "dB"],
+        )
+
+        def div_grad_ref(B, C, dC):
+            dA = dC / B
+            dB = -dC * C / B
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
+
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32) + 1.0
+        else:
+            B = np.random.rand(n, m).astype(np.float32) + 1.0
+        C = np.random.randn(n, m).astype(np.float32)
+        dC = np.random.randn(n, m).astype(np.float32)
+        inputs = [B, C, dC]
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=div_grad_ref,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0, 1])
+
     def _test_bitwise_binary_op(self, op_name, np_ref, n, m, k, t, gc, dc):
         op = core.CreateOperator(
             op_name,
