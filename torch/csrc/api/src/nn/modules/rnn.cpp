@@ -148,7 +148,7 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
     }
   }
 
-  auto state_output = torch::stack(new_state);
+  auto state_output = torch::stack(TensorListView(new_state));
   if (has_cell_state_) {
     state_output.transpose_(0, 1);
   }

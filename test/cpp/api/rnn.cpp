@@ -190,7 +190,7 @@ TEST_CASE("rnn_cuda", "[cuda]") {
     model->cuda();
     auto x = torch::randn(
         {10, 16, 128}, torch::requires_grad().device(torch::kCUDA));
-    auto tup = model->forward({x});
+    auto output = model->forward(x);
     auto y = x.mean();
 
     y.backward();
