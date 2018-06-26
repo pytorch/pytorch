@@ -29,10 +29,39 @@ struct Argument {
 };
 
 struct FunctionSchema {
+  FunctionSchema(
+      std::string name,
+      std::vector<Argument> arguments,
+      std::vector<Argument> returns,
+      bool is_vararg = false,
+      bool is_varret = false)
+      : name(std::move(name)),
+        arguments(std::move(arguments)),
+        returns(std::move(returns)),
+        is_vararg(is_vararg),
+        is_varret(is_varret) {}
+  FunctionSchema(
+      Symbol name,
+      std::vector<Argument> arguments,
+      std::vector<Argument> returns,
+      bool is_vararg = false,
+      bool is_varret = false)
+      : FunctionSchema(
+            name.toQualString(),
+            std::move(arguments),
+            std::move(returns),
+            is_vararg,
+            is_varret) {}
+
   const std::string name;
   const std::vector<Argument> arguments;
   const std::vector<Argument> returns;
-
+  // if true then this schema takes an arbitrary number of additional arguments
+  // after the argument specified in arguments
+  // currently this is used primarily to represent 'primtive' operators whose
+  // arguments are not checked by schema
+  const bool is_vararg;
+  const bool is_varret;
   at::optional<int> argumentIndexWithName(const std::string& name) const {
     for(size_t i = 0; i < arguments.size(); ++i) {
       if(name == arguments[i].name)
@@ -68,8 +97,5 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
   }
   return out;
 }
-
-const std::vector<FunctionSchema>& getFunctionSchema(const std::string& name);
-std::vector<FunctionSchema> & getFunctionSchemas();
 
 }}

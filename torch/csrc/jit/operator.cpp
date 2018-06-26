@@ -1,7 +1,7 @@
 #include "ATen/ATen.h"
 #include "torch/csrc/jit/script/lexer.h"
 #include "torch/csrc/jit/script/tree.h"
-#include "torch/csrc/jit/aten_schema.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/script/error_report.h"
 
@@ -14,6 +14,10 @@ struct SchemaParser {
 
   FunctionSchema parseDeclaration() {
     auto name = L.expect(TK_IDENT).text();
+    if(L.nextIf(':')) {
+      L.expect(':');
+      name = name + "::" + L.expect(TK_IDENT).text();
+    }
     std::vector<Argument> arguments;
     std::vector<Argument> returns;
     kwarg_only = false;
@@ -103,10 +107,10 @@ struct SchemaParser {
     switch(L.cur().kind) {
       case TK_TRUE:
         L.next();
-        return one;
+        return one();
       case TK_FALSE:
         L.next();
-        return zero;
+        return zero();
       case TK_FLOAT:
         L.next();
         return as_tensor(static_cast<int64_t>(at::kFloat));
@@ -203,49 +207,179 @@ struct SchemaParser {
   }
   Lexer L;
   bool kwarg_only;
-  at::Tensor one = at::full({}, 1, at::kLong);
-  at::Tensor zero = at::full({}, 0, at::kLong);
+  static at::Tensor one() {
+    static at::Tensor v = at::full({}, 1, at::kLong);
+    return v;
+  }
+  static at::Tensor zero() {
+    static at::Tensor v = at::full({}, 0, at::kLong);
+    return v;
+  }
 };
 }
 
-using SchemaMap = std::unordered_map<std::string, std::vector<FunctionSchema>>;
 
-// defined in aten_schema_declarations.cpp
-extern const char * schema_declarations;
+namespace {
 
-std::vector<FunctionSchema> createOperatorSchemas() {
-  return script::SchemaParser(schema_declarations).parseDeclarations();
-}
-
-std::vector<FunctionSchema> & getOperatorSchemas() {
-  static std::vector<FunctionSchema> schema = createOperatorSchemas();
-  return schema;
-}
-
-static SchemaMap createSchemaMap() {
-  auto& schemas = getOperatorSchemas();
-  SchemaMap result;
-  for(auto & schema : schemas) {
-    auto it = result.find(schema.name);
-    if(it == result.end()) {
-      it = result.insert({schema.name, {}}).first;
+using OperatorMap = std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>>;
+struct OperatorRegistry  {
+  OperatorMap operators;
+  std::mutex lock;
+  void registerOperator(Operator&& op){
+    std::lock_guard<std::mutex> guard(lock);
+    Symbol sym = Symbol::fromQualString(op.schema.name);
+    auto it = operators.find(sym);
+    if(it == operators.end()) {
+      it = operators.insert({sym, {}}).first;
     }
-    it->second.push_back(std::move(schema));
+    it->second.push_back(std::make_shared<Operator>(std::move(op)));
   }
-  return result;
+  const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
+    std::lock_guard<std::mutex> guard(lock);
+    static std::vector<std::shared_ptr<Operator>> empty;
+    auto it = operators.find(name);
+    if(it != operators.end())
+      return it->second;
+    return empty;
+  }
+};
+
+OperatorRegistry& getRegsitry() {
+  static OperatorRegistry r;
+  return r;
 }
 
-const std::vector<FunctionSchema>& getOperatorSchema(const std::string& name) {
-  static SchemaMap map = createSchemaMap();
-  static std::vector<FunctionSchema> empty;
-  auto it = map.find(name);
-  if(it != map.end())
-    return it->second;
-  return empty;
+}
+
+void registerOperator(Operator&& op) {
+  getRegsitry().registerOperator(std::move(op));
+}
+
+const std::vector<std::shared_ptr<Operator>>& getOperatorsFor(Symbol name) {
+  return getRegsitry().getOperators(name);
 }
 
 FunctionSchema parseSchema(const std::string& schema) {
   return script::SchemaParser(schema).parseDeclarations().at(0);
+}
+
+at::optional<AttributeKind> attributeKindOf(TypePtr type) {
+  switch(type->kind()) {
+    case TypeKind::IntType: return AttributeKind::i;
+    case TypeKind::FloatType: return AttributeKind::f;
+    case TypeKind::NumberType: return AttributeKind::t;
+    case TypeKind::ListType:
+      if(type->isSubtypeOf(*ListType::ofInts()))
+        return AttributeKind::is;
+      else
+        return at::nullopt;
+    default:
+      return at::nullopt;
+  }
+}
+
+bool typeMatches(TypePtr actual, TypePtr formal) {
+  if(actual->isSubtypeOf(*formal))
+    return true;
+
+  // XXX - this is here because we allow tensors to be used in place of numbers
+  // or lists of numbers in the script because of the restriction that all inputs to script must be tensors.
+  // Once numbers are always treated as seperate types from Tensors, this line
+  // should be removed, since it opens up the possibility of ambigous declarations
+  // dispatching to the wrong implementation.
+  if ((formal->isSubtypeOf(*NumberType::get()) ||
+       formal->isSubtypeOf(*ListType::ofInts())) &&
+      actual->isSubtypeOf(*DynamicType::get()))
+    return true;
+
+  return false;
+}
+
+bool Operator::matchesNode(Node* node) const {
+  size_t attributes_size = node->numAttributes();
+  size_t attributes_seen = 0;
+  auto inputs_size = node->inputs().size();
+  size_t input_i = 0;
+  for(size_t arg_i = 0; arg_i < schema.arguments.size(); ++arg_i) {
+    at::optional<AttributeKind> attribute_kind;
+    const Argument& arg = schema.arguments[arg_i];
+    if(attributes_size > 0 && (attribute_kind = attributeKindOf(arg.type))) {
+      auto name = Symbol::fromQualString("attr::" + arg.name);
+      if(!node->hasAttribute(name) || node->kindOf(name) != *attribute_kind) {
+        // std::cout << "missing attribute: " << name << "\n";
+        return false;
+      }
+      attributes_seen++;
+    } else if(*arg.type == *ListType::ofTensors()) {
+      // Tensor[] is handled as varargs, consume inputs until the remaining required arguments
+      // XXX - there can only be a single Tensor[] in a declaration
+      size_t remaining_required = 0;
+      for(size_t j = arg_i + 1; j < schema.arguments.size(); ++j){
+        // remaining arguments are only those that won't be consumed from attributes
+        if(attributes_size == 0 || !attributeKindOf(schema.arguments[j].type))
+          remaining_required++;
+      }
+      while(inputs_size - input_i > remaining_required) {
+        auto input = node->inputs()[input_i++];
+        if(!typeMatches(input->type(), DynamicType::get())) {
+          // std::cout << "vararg argument is not Dynamic\n";
+          return false;
+        }
+      }
+    } else {
+      if(input_i == inputs_size) {
+        // std::cout << "not enough inputs\n";
+        return false;
+      }
+      auto input = node->inputs()[input_i++];
+      if(!typeMatches(input->type(), arg.type)) {
+        // std::cout << "argument " << arg_i << " has the wrong type\n";
+        return false;
+      }
+    }
+  }
+
+  if(!schema.is_vararg && input_i != inputs_size) {
+    // std::cout << "not all inputs used\n" << input_i << " " << inputs_size << "\n";
+    return false;
+  }
+  if(!schema.is_vararg && attributes_seen != attributes_size) {
+    // std::cout << "not all attributes used\n" << attributes_seen << " " << attributes_size << "\n";
+    return false;
+  }
+  return true;
+}
+
+std::shared_ptr<Operator> findOperatorFor(Node* node) {
+  const auto& candidates = getOperatorsFor(node->kind());
+  for(const auto& candidate : candidates) {
+    if(candidate->matchesNode(node)) {
+      return candidate;
+    }
+  }
+  return nullptr;
+}
+
+const Operator& getOperatorFor(Node* node) {
+  auto op = findOperatorFor(node);
+  if(op)
+    return *op;
+
+  auto er = script::ErrorReport(node->getSourceLocation());
+  er << "Schema not found for node. File a bug report.\n";
+  er << "Node: " << *node << "\n";
+  er << "Input types:";
+  for(size_t i = 0; i < node->inputs().size(); ++i) {
+    if(i > 0)
+      er << ", ";
+    er << *node->inputs()[i]->type();
+  }
+  er << "\ncandidates were:\n";
+  const auto& candidates = getOperatorsFor(node->kind());
+  for(auto & candidate : candidates) {
+    er << "  " << candidate->schema << "\n";
+  }
+  throw er;
 }
 
 }}

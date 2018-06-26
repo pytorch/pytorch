@@ -156,8 +156,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp"
-  "${TORCH_SRC_DIR}/csrc/jit/generated/aten_schema_declarations.cpp"
+  "${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
   COMMAND
   python tools/setup_helpers/generate_code.py
@@ -183,7 +182,7 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/gen_autograd.py"
   "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
   "${TOOLS_PATH}/autograd/gen_variable_type.py"
-  "${TOOLS_PATH}/jit/templates/aten_dispatch.cpp"
+  "${TOOLS_PATH}/jit/templates/register_aten_ops.cpp"
   "${TOOLS_PATH}/jit/templates/aten_interned_strings.h"
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
@@ -206,11 +205,11 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/assertions.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/aten_schema.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/generated/aten_schema_declarations.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/variable_flags.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp

@@ -1,25 +1,80 @@
 import os
 import argparse
+import re
 from itertools import count, combinations, groupby
 from ..autograd.utils import CodeTemplate, write, uninplace_api_name
 from ..autograd.gen_autograd import load_aten_declarations
 from collections import OrderedDict
 
+# JIT has a type system of
+# Scalar = int | float | bool # int is the largest int (int64_t),
+# float is the largest float (double) we don't have the others because they are never held in tensors
+# Type = Scalar # primitive numbers
+#      | Tensor # any tensor, as defined by at::Tensor
+#      | Type[] # a dynamically sizes list of a type
+#      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
+#      | (Type1, Type2, ...) # a heterogenous tuple
+#      | Layout | ScalarType | Device | Generator # special singleton types for built-in concepts in tensor lib
+
+# clean up the variety of C++ types in the ATen declarations
+# to be in the restricted set of types that the IR represents
+# note: no default values for this map, to make it clear what types
+# can be passedthrough
+
+TYPE_MAP = {
+    'std::array<bool,2>': 'bool[2]',
+    'std::array<bool,3>': 'bool[3]',
+    'std::array<bool,4>': 'bool[4]',
+    'Scalar': 'Scalar',
+    'Tensor': 'Tensor',
+    'TensorList': 'Tensor[]',
+    # this appears in return values instead of TensorList
+    # since TensorList is a ArrayRef in arguments but a vector
+    # in returns
+    'std::vector<Tensor>': 'Tensor[]',
+    'IntList': 'int[]',
+    'Layout': 'Layout',
+    'Device': 'Device',
+    'ScalarType': 'ScalarType',
+    'int64_t': 'int',
+    'double': 'float',
+    'bool': 'bool',
+    'Generator': 'Generator',
+}
+
+
+def jit_type_of(arg):
+    typ = TYPE_MAP[arg['simple_type']]
+    if is_sized_intlist_arg(arg):
+        typ = 'int[{}]'.format(arg['size'])
+
+    if arg.get('is_nullable'):
+        typ = '{}?'.format(typ)
+    return typ
+
+# map from _jit type_, generated from jit_type_of to attribute used to store it
 ATTR_METHOD_MAP = {
-    'int64_t': 'i',
-    'IntList': 'is',
-    'Scalar': 't',
+    'int': 'i',
+    'float': 'f',
     'bool': 'i',
-    'double': 'f',
-    'std::array<bool,2>': 'is',
-    'std::array<bool,3>': 'is',
-    'std::array<bool,4>': 'is',
+    'Scalar': 't',
+    'int[]': 'is',
+    'bool[]': 'is',
     'Layout': 'i',
     'Device': 'is',
     'ScalarType': 'i',
 }
 
-TYPE_CASTS = {
+
+def attr_of(jit_type):
+    # for attributes, we dont care about the length of an array,
+    # so strip it from the type
+    jit_type = re.sub("\\[\d+\\]", "[]", jit_type)
+    return ATTR_METHOD_MAP[jit_type]
+
+# map from aten 'simple_type' to the function that will cast a attribute value
+# to that type
+FROM_ATTRIBUTE = {
     'std::array<bool,2>': 'as_bool_array<2>',
     'std::array<bool,3>': 'as_bool_array<3>',
     'std::array<bool,4>': 'as_bool_array<4>',
@@ -30,11 +85,22 @@ TYPE_CASTS = {
     'ScalarType': 'int64_t',
 }
 
+# map from aten 'simple_type' to the function that will turn a tensor into
+# that type
 FROM_TENSOR = {
     'Device': 'tensor_as<IntList>',
     'ScalarType': 'tensor_as<int64_t>',
     'Layout': 'tensor_as<int64_t>',
 }
+
+
+def from_tensor(arg):
+    simple_type = arg['simple_type']
+    if simple_type in FROM_TENSOR:
+        return FROM_TENSOR[simple_type]
+    else:
+        return 'tensor_as<{}>'.format(arg['simple_type'])
+
 
 KW_ASSIGNMENT = CodeTemplate("""\
 auto ${name} = ${type_cast}(node->${method}(Symbol::attr("${name}")));\
@@ -61,17 +127,24 @@ auto result = torch::${name}(${args}, options);
 """)
 
 CONSTRUCTOR = CodeTemplate("""\
-{"${descriptor}", [](Node *node) {
+[](Node *node) {
   ${kw_assignments}
-  return TensorOp([=](Stack & stack) {
+  return Operation([=](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
     ${pos_assignments}
     ${call}
     drop(stack, ${num_dynamic_inputs});
     pack(stack, std::move(result));
     return 0;
-  }, "${name}", ${num_dynamic_inputs}, ${num_outputs});
-}},
+  });
+}
+""")
+
+OPERATOR = CodeTemplate("""\
+Operator(
+    "${signature}",
+    ${ops}
+),
 """)
 
 
@@ -112,19 +185,6 @@ def is_jit_op(decl):
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['arguments'])) and
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['returns'])))
 
-# Scalar overloads like add(Tensor self, Scalar other) are not supported atm.
-# TODO: Why are they not supported?
-skip_scalar_overload = {
-    'lt-2': [1], 'gt-2': [1], 'le-2': [1], 'ge-2': [1], 'eq-2': [1], 'ne-2': [1],
-    'pow-2': [0, 1], 'add-3': [1], 'sub-3': [1],
-    'mul-2': [1], 'th_mul-2': [1], 'native_mul-2': [1],
-    'div-2': [1], 'th_div-2': [1], 'native_div-2': [1],
-    'fmod-2': [1], 'remainder-2': [1], '__and__-2': [1], '__or__-2': [1],
-    '__iand__-2': [1], '__ior__-2': [1], '__xor__-2': [1], '__ixor__-2': [1],
-    '__lshift__-2': [1], '__ilshift__-2': [1], '__rshift__-2': [1], '__irshift__-2': [1],
-    'normal-2': [0, 1], 'bernoulli-2': [0, 1],
-}
-
 
 def is_tensor_arg(arg):
     return arg['simple_type'] in {'Tensor', 'TensorList'}
@@ -136,10 +196,10 @@ def is_sized_intlist_arg(arg):
 
 
 def gen_jit_dispatch(declarations, out, template_path):
-    ATEN_DISPATCH_CPP = CodeTemplate.from_file(template_path + '/aten_dispatch.cpp')
+    REGISTER_ATEN_OPS_CPP = CodeTemplate.from_file(template_path + '/register_aten_ops.cpp')
     ATEN_INTERNED_STRINGS_H = CodeTemplate.from_file(template_path + '/aten_interned_strings.h')
 
-    ops = {}
+    ops = []
 
     def get_invocation(decl, args, num_dynamic_inputs):
         if decl.get('has_tensor_options'):
@@ -156,7 +216,6 @@ def gen_jit_dispatch(declarations, out, template_path):
         # that indicates if the argument should come from the postional list
         # of inputs. If false, the argument comes from the constant attributes
         kw_assignments = []
-        attr_names = []
         pos_assignments = []
         arguments = []
 
@@ -210,8 +269,7 @@ def gen_jit_dispatch(declarations, out, template_path):
                 arguments.append('std::move(peek(stack, {}, {}))'.format(real_inputs, view_length))
                 real_inputs += 1
             elif is_positional_arg[i]:
-                from_tensor = FROM_TENSOR.get(arg['simple_type'], 'tensor_as<{}>'.format(arg['simple_type']))
-                template_kwargs = dict(from_tensor=from_tensor,
+                template_kwargs = dict(from_tensor=from_tensor(arg),
                                        name=arg['name'],
                                        i=real_inputs,
                                        N=view_length)
@@ -222,46 +280,25 @@ def gen_jit_dispatch(declarations, out, template_path):
                 pos_assignments.append(assign)
                 arguments.append(arg['name'])
             else:
+                attr_method = attr_of(jit_type_of(arg))
                 simple_type = arg['simple_type']
-
-                assert simple_type in ATTR_METHOD_MAP, (decl['name'], simple_type)
-                attr_method = ATTR_METHOD_MAP[simple_type]
-                assign = KW_ASSIGNMENT.substitute(type_cast=TYPE_CASTS.get(simple_type, simple_type),
+                assign = KW_ASSIGNMENT.substitute(type_cast=FROM_ATTRIBUTE.get(simple_type, simple_type),
                                                   name=arg['name'],
                                                   method=attr_method)
                 kw_assignments.append(assign)
-                attr_names.append('{}_{}'.format(arg['name'], attr_method))
                 arguments.append(arg['name'])
 
         call = get_invocation(decl, arguments, num_dynamic_inputs)
 
-        # Descriptor is a unique identifier for a particular overload of an op.
-        attr_names = sorted(attr_names)
-        num_inputs = '*' if has_tensorlist else static_inputs
-        descriptor = '-'.join([decl['name'], str(num_inputs)] + attr_names)
-
-        # If there are two overloads with the same descriptor, that differ only by a type of a
-        # single argument, where one of them takes a tensor, while another one takes an
-        # at::Scalar as a positional scalar arg, then prefer the tensor overload.
-        # It should get broadcasted correctly.
-        if descriptor in skip_scalar_overload:
-            if any(decl['arguments'][idx]['simple_type'] in {'Scalar', 'double'}
-                   for idx in skip_scalar_overload[descriptor]):
-                return
-
         returns = decl['returns']
         all_scalars = all(r['dynamic_type'] != 'TensorList' for r in returns)
-        num_outputs = str(len(returns)) if all_scalars else 'UNKNOWN_OUTPUTS'
 
-        constructor = CONSTRUCTOR.substitute(descriptor=descriptor, name=decl['name'],
-                                             call=call,
+        constructor = CONSTRUCTOR.substitute(name=decl['name'],
+                                             call=[call],
                                              kw_assignments=kw_assignments,
                                              pos_assignments=pos_assignments,
-                                             num_dynamic_inputs=num_dynamic_inputs,
-                                             num_outputs=num_outputs)
-
-        assert descriptor not in ops, descriptor
-        ops[descriptor] = constructor
+                                             num_dynamic_inputs=num_dynamic_inputs)
+        return constructor
 
     def emit_decl(decl):
         arguments = decl['arguments']
@@ -277,9 +314,12 @@ def gen_jit_dispatch(declarations, out, template_path):
         all_real_arguments_are_inputs = tuple(arg['simple_type'] not in default_only_types for arg in arguments)
         only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
 
-        # NB: if there are no scalar args then both options on LHS are equivalent, so deduplicate them.
-        for variant in {all_real_arguments_are_inputs, only_tensors_are_inputs}:
-            emit_decl_variant(decl, variant, has_tensorlist)
+        variants = [emit_decl_variant(decl, all_real_arguments_are_inputs, has_tensorlist)]
+        if all_real_arguments_are_inputs != only_tensors_are_inputs:
+            variants += [',', emit_decl_variant(decl, only_tensors_are_inputs, has_tensorlist)]
+
+        ops.append(OPERATOR.substitute(signature=signature(decl),
+                                       ops=variants))
 
     # This function declares an order on declarations. This is necessary because
     # there is some ambiguity in the choice of overload: if an argument is overloaded
@@ -347,11 +387,9 @@ def gen_jit_dispatch(declarations, out, template_path):
 
     # Sort the generated snippets to ensure that the generation is deterministic
     env = {
-        'constructors': sorted(ops.values()),
+        'constructors': ops,
     }
-    write(out, 'aten_dispatch.cpp', ATEN_DISPATCH_CPP, env)
-
-    emit_schema(jit_decls, out, template_path)
+    write(out, 'register_aten_ops.cpp', REGISTER_ATEN_OPS_CPP, env)
 
     # NB: Operate on aten_decls, not jit_decls, because VariableType is
     # a client for these symbols as well
@@ -371,50 +409,13 @@ def gen_jit_dispatch(declarations, out, template_path):
     }
     write(out, 'aten_interned_strings.h', ATEN_INTERNED_STRINGS_H, strings_env)
 
-
-# JIT has a type system of
-# Scalar = int | float | bool # int is the largest int (int64_t),
-# float is the largest float (double) we don't have the others because they are never held in tensors
-# Type = Scalar # primitive numbers
-#      | Tensor # any tensor, as defined by at::Tensor
-#      | Type[] # a dynamically sizes list of a type
-#      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
-#      | (Type1, Type2, ...) # a heterogenous tuple
-#      | Layout | ScalarType | Device | Generator # special singleton types for built-in concepts in tensor lib
-
-# clean up the variety of C++ types in the ATen declarations
-# to be in the restricted set of types that the IR represents
-# note: no default values for this map, to make it clear what types
-# can be passedthrough
-
-TYPE_MAP = {
-    'std::array<bool,2>': 'bool[2]',
-    'std::array<bool,3>': 'bool[3]',
-    'std::array<bool,4>': 'bool[4]',
-    'Scalar': 'Scalar',
-    'Tensor': 'Tensor',
-    'TensorList': 'Tensor[]',
-    # this appears in return values instead of TensorList
-    # since TensorList is a ArrayRef in arguments but a vector
-    # in returns
-    'std::vector<Tensor>': 'Tensor[]',
-    'IntList': 'int[]',
-    'Layout': 'Layout',
-    'Device': 'Device',
-    'ScalarType': 'ScalarType',
-    'int64_t': 'int',
-    'double': 'float',
-    'bool': 'bool',
-    'Generator': 'Generator',
-}
-
 default_map = {'{}': 'None', 'nullptr': 'None'}
 
 
 def signature(decl):
     def format_arg(arg):
         name = arg['name']
-        typ = format_type(arg)
+        typ = jit_type_of(arg)
         decl = '{} {}'.format(typ, name)
         if 'default' in arg:
             # clean up initializer lists {{true, true}} -> [true, true]
@@ -430,16 +431,6 @@ def signature(decl):
             decl = '{}={}'.format(decl, default)
         return decl
 
-    def format_type(arg):
-        typ = TYPE_MAP[arg['simple_type']]
-        if is_sized_intlist_arg(arg):
-            typ = 'int[{}]'.format(arg['size'])
-
-        if arg.get('is_nullable'):
-            typ = '{}?'.format(typ)
-
-        return typ
-
     args = []
     kwarg_only = False
     for a in decl['arguments']:
@@ -450,24 +441,10 @@ def signature(decl):
 
     arg_list = ', '.join(args)
     if len(decl['returns']) == 1:
-        ret_list = format_type(decl['returns'][0])
+        ret_list = jit_type_of(decl['returns'][0])
     else:
-        ret_list = '({})'.format(', '.join(format_type(r) for r in decl['returns']))
-    return '{}({}) -> {}'.format(decl['name'], arg_list, ret_list)
-
-
-def emit_schema(jit_decls, out, template_path):
-    ATEN_SCHEMA_CPP = CodeTemplate.from_file(template_path + '/aten_schema_declarations.cpp')
-
-    # see [aten_schema encoding] for how this gets translated to C++ object
-    env = {
-        'declarations': [],
-    }
-
-    for decl in jit_decls:
-        env['declarations'].append(signature(decl))
-
-    write(out, 'aten_schema_declarations.cpp', ATEN_SCHEMA_CPP, env)
+        ret_list = '({})'.format(', '.join(jit_type_of(r) for r in decl['returns']))
+    return 'aten::{}({}) -> {}'.format(decl['name'], arg_list, ret_list)
 
 
 def main():

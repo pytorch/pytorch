@@ -1,11 +1,11 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/passes/lower_tuples.h"
-#include "torch/csrc/jit/aten_dispatch.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/utils/object_ptr.h"
-#include "torch/csrc/jit/aten_schema.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 
 #include "ATen/optional.h"
@@ -567,7 +567,7 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
 
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
-  getTensorOp(n);
+  getOperation(n);
 
   return packOutputs(*graph, n->outputs());
 }
@@ -594,11 +594,11 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   // otherwise it will return nullptr if the builtin is not found.
   bool required) {
 
-  auto variants = getOperatorSchema(name);
+  auto variants = getOperatorsFor(Symbol::aten(name));
   std::stringstream failure_messages;
-  for (const FunctionSchema& schema : variants) {
+  for (auto op : variants) {
     if (auto result = tryEmitBuiltin(
-            schema, failure_messages, loc, method, name, inputs, attributes)) {
+            op->schema, failure_messages, loc, method, name, inputs, attributes)) {
       return result;
     }
   }
@@ -1596,37 +1596,6 @@ private:
     return n;
   }
 
-  void matchSchemaAndLiftConstantAttributes(
-      const SourceRange& loc,
-      Node* n,
-      std::vector<Value*> input_vals,
-      const std::string& name) {
-    std::vector<NamedValue> named_input_vals;
-    for (Value* inp : input_vals) {
-      named_input_vals.push_back(NamedValue(loc, "", inp));
-    }
-
-    // Match schema and lift constant attributes
-    auto variants = getOperatorSchema(name);
-    bool schema_valid = false;
-    std::stringstream failure_messages;
-    for (const FunctionSchema& schema : variants) {
-      if (tryMatchSchema(
-              schema, loc, *graph, named_input_vals, {}, failure_messages)) {
-        schema_valid = true;
-        liftConstantAttributes(schema, n);
-        break;
-      }
-    }
-
-    // none of the options worked
-    if (!schema_valid) {
-      throw ErrorReport(loc)
-          << "arguments for call are not valid:\n"
-          << prefixLine(failure_messages.str(), "  ") << "for call at";
-    }
-  }
-
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
   // end).
   Value* emitSlice(
@@ -1634,24 +1603,20 @@ private:
       TreeList&& inputs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getValues(applyInputs->trees(),
-                                        /*maybe_unpack*/false,
-                                        ensureTensorOrNumber);
-    Value* tensor = input_values[0];
-    Value* begin = input_values[1];
-    Value* end = input_values[2];
-    Value* dim =
-        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0));
-    Value* step =
-        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(1));
-    std::vector<Value*> input_vals{tensor, dim, begin, end, step};
-    Value* sliced_val =
-        emitNode(Symbol::aten("slice"), loc, input_vals, 1)->output();
+    const auto input_values = getNamedValues(applyInputs->trees(),
+                                             /*maybe_unpack*/false,
+                                             ensureTensorOrNumber);
+    NamedValue tensor = input_values[0];
+    NamedValue begin = input_values[1];
+    NamedValue end = input_values[2];
+    NamedValue dim = NamedValue(loc, "dim",
+        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0)));
+    NamedValue step = NamedValue(loc, "step",
+        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(1)));
 
-    matchSchemaAndLiftConstantAttributes(
-        loc, sliced_val->node(), input_vals, "slice");
-
-    return sliced_val;
+    return emitBuiltinCall(
+               loc, method, "slice", {tensor, dim, begin, end, step}, {}, true)
+        ->asValue(loc, method);
   }
 
   // Desugars gather syntactic sugar tensor[idx] -> tensor.select(idx).
@@ -1660,19 +1625,18 @@ private:
       TreeList&& inputs) {
     const auto applyInputs =
         Compound::create(TK_LIST, loc, std::move(inputs));
-    const auto input_values = getValues(applyInputs->trees(),
+    auto input_values = getNamedValues(applyInputs->trees(),
                                         /*maybe_unpack*/false,
                                         ensureTensorOrNumber);
-    Value* tensor = input_values[0];
-    Value* dim =
-        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0));
-    Value* idx = input_values[1];
-    std::vector<Value*> input_vals{tensor, dim, idx};
-    Value* gathered_val =
-        emitNode(Symbol::aten("select"), loc, input_vals, 1)->output();
-    matchSchemaAndLiftConstantAttributes(
-        loc, gathered_val->node(), input_vals, "select");
-    return gathered_val;
+    NamedValue tensor = input_values[0];
+    NamedValue dim = NamedValue(
+        loc,
+        "dim",
+        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0)));
+    NamedValue idx = input_values[1];
+
+    return emitBuiltinCall(loc, method, "select", {tensor, dim, idx}, {}, true)
+        ->asValue(loc, method);
   }
 };
 

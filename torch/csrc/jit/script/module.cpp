@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/error_report.h"
-#include "torch/csrc/jit/aten_schema.h"
+#include "torch/csrc/jit/operator.h"
 
 namespace torch { namespace jit { namespace script {
 
@@ -24,7 +24,7 @@ static FunctionSchema defaultSchemaFor(Method& method) {
   for(size_t i = 0; i < g.outputs().size(); ++i) {
     returns.push_back({"", DynamicType::get()});
   }
-  return { method.name(), std::move(args), std::move(returns) };
+  return { "", std::move(args), std::move(returns) };
 }
 
 std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {
