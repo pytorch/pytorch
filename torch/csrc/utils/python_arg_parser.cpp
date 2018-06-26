@@ -173,23 +173,29 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
     return std::vector<int64_t>(size, std::stoi(s));
   }
 
+  size_t n = s.size();
+  AT_CHECK(s[0] == '{', "Default value of IntList is missing left brace '{', found ", s[0]);
+  AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
+
   auto args = std::vector<int64_t>();
   int64_t x = 0, sign = 1;
-  for (size_t i = 0; i < s.size(); i++) {
+  for (size_t i = 1; i < n - 1; i++) {
     if (s[i] == '-') {
       sign *= -1;
     }
     else if ('0' <= s[i] && s[i] <= '9') {
       x = x * 10 + (s[i] - '0');
     }
-    else if (s[i] == ',' || s[i] == '}') {
+    else if (s[i] == ',') {
       args.emplace_back(sign * x);
       sign = 1;
       x = 0;
     }
-    else { // '{'
+    else {
+      AT_ERROR("Illegal char in IntList default value: ", s[i]);
     }
   }
+  args.emplace_back(sign * x);
   return args;
 }
 
