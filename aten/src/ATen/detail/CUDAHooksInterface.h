@@ -39,6 +39,18 @@ class Context;
 // NB: Class must live in `at` due to limitations of Registry.h.
 namespace at {
 
+constexpr char* CUDA_HELP =
+  "PyTorch splits its backend into two shared libraries: a CPU library "
+  "and a CUDA library; this error has occurred because you are trying "
+  "to use some CUDA functionality, but the CUDA library has not been "
+  "loaded by the dynamic linker for some reason.  The CUDA library MUST "
+  "be loaded, EVEN IF you don't directly use any symbols from the CUDA library! "
+  "One common culprit is a lack of -Wl,--no-as-needed in your link arguments; many "
+  "dynamic linkers will delete dynamic library dependencies if you don't "
+  "depend on any of their symbols.  You can check if this has occurred by "
+  "using ldd on your binary to see if there is a dependency on *_cuda.so "
+  "library.";
+
 // The CUDAHooksInterface is an omnibus interface for any CUDA functionality
 // which we may want to call into from CPU code (and thus must be dynamically
 // dispatched, to allow for separate compilation of CUDA code).  How do I
@@ -62,11 +74,11 @@ struct AT_API CUDAHooksInterface {
 
   // Initialize THCState and, transitively, the CUDA state
   virtual std::unique_ptr<THCState, void (*)(THCState*)> initCUDA() const {
-    AT_ERROR("cannot initialize CUDA without ATen_cuda library");
+    AT_ERROR("Cannot initialize CUDA without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual std::unique_ptr<Generator> initCUDAGenerator(Context*) const {
-    AT_ERROR("cannot initialize CUDA generator without ATen_cuda library");
+    AT_ERROR("Cannot initialize CUDA generator without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool hasCUDA() const {
@@ -78,27 +90,27 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual cudaStream_t getCurrentCUDAStream(THCState*) const {
-    AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
+    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
   }
 
 #ifndef __HIP_PLATFORM_HCC__
   virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
-    AT_ERROR("cannot getCurrentCUDASparseHandle() without ATen_cuda library");
+    AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
   }
 #endif
 
   virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
       const {
-    AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
+    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const {
-    AT_ERROR("cannot getCurrentDeviceProperties() without ATen_cuda library");
+    AT_ERROR("Cannot getCurrentDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual struct cudaDeviceProp* getDeviceProperties(THCState*, int device)
       const {
-    AT_ERROR("cannot getDeviceProperties() without ATen_cuda library");
+    AT_ERROR("Cannot getDeviceProperties() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int64_t current_device() const {
@@ -106,11 +118,11 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual Allocator* getPinnedMemoryAllocator() const {
-    AT_ERROR("pinned memory requires CUDA");
+    AT_ERROR("Pinned memory requires CUDA. ", CUDA_HELP);
   }
 
   virtual void registerCUDATypes(Context*) const {
-    AT_ERROR("cannot registerCUDATypes() without ATen_cuda library");
+    AT_ERROR("Cannot registerCUDATypes() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual bool compiledWithCuDNN() const {
@@ -122,28 +134,28 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual long versionCuDNN() const {
-    AT_ERROR("cannot query cuDNN version without ATen_cuda library");
+    AT_ERROR("Cannot query cuDNN version without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual double batchnormMinEpsilonCuDNN() const {
     AT_ERROR(
-        "cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library");
+        "Cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int64_t cuFFTGetPlanCacheMaxSize() const {
-    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
-    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int64_t cuFFTGetPlanCacheSize() const {
-    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual void cuFFTClearPlanCache() const {
-    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+    AT_ERROR("Cannot access cuFFT plan cache without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual int getNumGPUs() const {
