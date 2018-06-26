@@ -11,7 +11,7 @@ hipify_tool = "../tools/amd_build/hipify-perl"
 os.chdir(caffe2_root)
 
 for folder in ["operators", "sgd", "image", "transforms", "video"]:
-    for extension in ["/*.cu", "/*.cuh", "/*gpu.cc"]:
+    for extension in ["/*.cu", "/*.cuh", "/*gpu.cc", "/*gpu.h"]:
         target = folder + extension
         if glob.glob(target):
             os.system(hipify_tool + ' --inplace ' + target)
