@@ -232,6 +232,10 @@ TEST_CASE("modules") {
       REQUIRE(functional(torch::ones({})).toCFloat() == 1);
       REQUIRE(functional(torch::ones({}) * -1).toCFloat() == 0);
     }
+    {
+      auto functional = Functional(at::elu, /*alpha=*/1, /*scale=*/0);
+      REQUIRE(functional(torch::ones({})).toCFloat() == 0);
+    }
   }
 }
 

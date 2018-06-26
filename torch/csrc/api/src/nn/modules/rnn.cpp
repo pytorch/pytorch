@@ -95,7 +95,7 @@ void RNNImplBase<Derived>::reset() {
   }
 }
 
-template<typename Derived>
+template <typename Derived>
 RNNOutput RNNImplBase<Derived>::forward(Tensor input, Tensor state) {
   if (cudnn_mode_.has_value() && at::cudnn_is_acceptable(input) &&
       options_.dropout_ == 0) {
