@@ -22,9 +22,20 @@ class Normalizer(object):
 class BatchNormalizer(Normalizer):
     def __init__(self, momentum):
         super(BatchNormalizer, self).__init__()
-        self._momentum = momentum
+        self._momentum = float(momentum)
 
     def _run(self, layer_model, param):
         return layer_model.BatchNormalization(
             param, momentum=self._momentum
+        )
+
+
+class LayerNormalizer(Normalizer):
+    def __init__(self, epsilon):
+        super(LayerNormalizer, self).__init__()
+        self._epsilon = float(epsilon)
+
+    def _run(self, layer_model, param):
+        return layer_model.LayerNormalization(
+            param, epsilon=self._epsilon
         )
