@@ -1902,6 +1902,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         output (Tensor): output Tensor
 
     """
+    if mode != 'bilinear':
+        raise NotImplementedError("nn.functional.grid_sample got unsupported mode: '{}'".format(mode))
     return vision.grid_sampler(input, grid, padding_mode)
 
 
