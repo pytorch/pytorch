@@ -340,10 +340,10 @@ TEST_CASE("integration/mnist", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = std::get<0>(at::max_pool2d(conv1->forward(x), {2, 2})).clamp_min(0);
+    x = at::max_pool2d(conv1->forward(x), {2, 2}).relu();
     x = conv2->forward(x);
     x = drop2d->forward(x);
-    x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
+    x = at::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
@@ -377,10 +377,10 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = std::get<0>(at::max_pool2d(conv1->forward(x), {2, 2})).clamp_min(0);
+    x = at::max_pool2d(conv1->forward(x), {2, 2}).relu();
     x = batchnorm2d->forward(x);
     x = conv2->forward(x);
-    x = std::get<0>(at::max_pool2d(x, {2, 2})).clamp_min(0);
+    x = at::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
