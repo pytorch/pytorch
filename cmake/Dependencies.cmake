@@ -1,6 +1,25 @@
+set(UBSAN_FLAG "-fsanitize=undefined")
+
+macro(disable_ubsan)
+  if (CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
+    set(CAFFE2_UBSAN_ENABLED ON)
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  endif()
+endmacro()
+
+macro(enable_ubsan)
+  if (CAFFE2_UBSAN_ENABLED)
+    set(CMAKE_C_FLAGS "${UBSAN_FLAG} ${CMAKE_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${UBSAN_FLAG} ${CMAKE_CXX_FLAGS}")
+  endif()
+endmacro()
+
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
+  enable_ubsan()
 endif()
 
 # ---[ Threads
