@@ -4435,20 +4435,20 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
             # TODO: could not support tensor constructors in script
             # see https://github.com/pytorch/pytorch/issues/8814
-            def test_tensor():
+            def test_tensor(self):
                 return torch.tensor([], dtype=torch.double)
 
             @torch.jit.script_method
             def forward(self, input):
                 # TODO: add future as input with default val
                 # see https://github.com/pytorch/pytorch/issues/8724
-                outputs = test_tensor()
+                outputs = self.test_tensor()
                 h_t = torch.zeros((3, 51), dtype=torch.double)
                 c_t = torch.zeros((3, 51), dtype=torch.double)
                 h_t2 = torch.zeros((3, 51), dtype=torch.double)
                 c_t2 = torch.zeros((3, 51), dtype=torch.double)
 
-                output = None
+                output = torch.zeros([3, 51])
                 future = 2
 
                 # TODO: chunk call should be input.chunk(input.size(1), dim=1)
