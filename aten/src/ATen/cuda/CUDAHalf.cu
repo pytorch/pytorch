@@ -14,12 +14,12 @@ half convert(Half aten_half) {
 
 template <> AT_CUDA_API
 half convert(double value) {
-  return half{convert<Half, double>(value).x};
+  return half{Half(value).x};
 }
 
 template <> AT_CUDA_API
 Half convert(half cuda_half) {
-  return Half{cuda_half.x};
+  return Half(cuda_half.x, Half::from_bits);
 }
 #else
 template <> AT_CUDA_API
@@ -32,13 +32,13 @@ half convert(Half aten_half) {
 template <> AT_CUDA_API
 Half convert(half cuda_half) {
   __half_raw raw(cuda_half);
-  return Half{raw.x};
+  return Half(raw.x, Half::from_bits);
 }
 
 template <> AT_CUDA_API
 half convert(double value) {
   __half_raw raw;
-  raw.x = convert<Half, double>(value).x;
+  raw.x = Half(value).x;
   return half {raw};
 }
 
@@ -50,7 +50,7 @@ template <> __half HalfFix(Half h) {
 
 template <> Half HalfFix(__half h) {
   __half_raw raw(h);
-  return Half{raw.x};
+  return Half(raw.x, Half::from_bits);
 }
 #endif
 } // namespace at

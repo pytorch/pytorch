@@ -682,20 +682,47 @@ struct CodeImpl {
         stack.push_back(t);
         return 0;
       };
-    IR_ELSEIF(Undefined)
+    IR_ELSEIF(TensorToNum)
+      // no-op
       return [](Stack & stack) {
-        stack.push_back(at::Tensor());
         return 0;
       };
-    IR_ELSEIF(ReplaceIfUndef)
+    IR_ELSEIF(NumToTensor)
+      // no-op
       return [](Stack & stack) {
-        auto alternate = pop(stack);
-        auto result = pop(stack);
-        if(result.defined()) {
-          stack.push_back(std::move(result));
-        } else {
-          stack.push_back(std::move(alternate));
+        return 0;
+      };
+    IR_ELSEIF(Undefined)
+    return [](Stack & stack) {
+      stack.push_back(at::Tensor());
+      return 0;
+    };
+    IR_ELSEIF(AnyDefined)
+      size_t num_inputs = value->inputs().size();
+      auto true_ = at::full({}, 1, at::kLong);
+      auto false_ = at::full({}, 0, at::kLong);
+      return [=](Stack & stack) {
+        bool result = false;
+        for(const at::Tensor& t : last(stack, num_inputs)) {
+          if(t.defined()) {
+            result = true;
+            break;
+          }
         }
+        drop(stack, num_inputs);
+        stack.push_back(result ? true_ : false_);
+        return 0;
+      };
+    IR_ELSEIF(AutogradAdd)
+      return [=](Stack & stack) {
+        auto a = pop(stack);
+        auto b = pop(stack);
+        if(!a.defined())
+          stack.push_back(b);
+        else if(!b.defined())
+          stack.push_back(a);
+        else
+          stack.push_back(a + b);
         return 0;
       };
     IR_ELSEIF(Print)

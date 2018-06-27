@@ -7,7 +7,6 @@
 #include <algorithm>
 #include <string>
 
-using namespace torch;
 using namespace torch::nn;
 using namespace torch::detail;
 
@@ -16,7 +15,7 @@ using Catch::StartsWith;
 
 TEST_CASE("any-module") {
   SECTION("int()") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       int forward() {
         return 123;
       }
@@ -25,7 +24,7 @@ TEST_CASE("any-module") {
     REQUIRE(any.forward().get<int>() == 123);
   }
   SECTION("int(int)") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       int forward(int x) {
         return x;
       }
@@ -34,7 +33,7 @@ TEST_CASE("any-module") {
     REQUIRE(any.forward(5).get<int>() == 5);
   }
   SECTION("const char*(const char*)") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       const char* forward(const char* x) {
         return x;
       }
@@ -44,7 +43,7 @@ TEST_CASE("any-module") {
   }
 
   SECTION("string(int, const double)") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       std::string forward(int x, const double f) {
         return std::to_string(static_cast<int>(x + f));
       }
@@ -54,9 +53,9 @@ TEST_CASE("any-module") {
     REQUIRE(any.forward(x, 3.14).get<std::string>() == std::string("7"));
   }
 
-  SECTION("Variable(string, const string&, string&&)") {
-    struct M : nn::Module {
-      autograd::Variable forward(
+  SECTION("Tensor(string, const string&, string&&)") {
+    struct M : torch::nn::Module {
+      torch::Tensor forward(
           std::string a,
           const std::string& b,
           std::string&& c) {
@@ -67,12 +66,12 @@ TEST_CASE("any-module") {
     AnyModule any(M{});
     REQUIRE(
         any.forward(std::string("a"), std::string("ab"), std::string("abc"))
-            .get<autograd::Variable>()
+            .get<torch::Tensor>()
             .sum()
             .toCInt() == 6);
   }
   SECTION("wrong argument type") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       int forward(float x) {
         return x;
       }
@@ -84,7 +83,7 @@ TEST_CASE("any-module") {
                    "but received value of type double"));
   }
   SECTION("wrong number of arguments") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       int forward(int a, int b) {
         return a + b;
       }
@@ -101,8 +100,8 @@ TEST_CASE("any-module") {
         Contains("M's forward() method expects 2 arguments, but received 3"));
   }
   SECTION("get()") {
-    struct M : nn::Module {
-      explicit M(int value_) : nn::Module("M"), value(value_) {}
+    struct M : torch::nn::Module {
+      explicit M(int value_) : torch::nn::Module("M"), value(value_) {}
       int value;
       int forward(float x) {
         return x;
@@ -115,13 +114,13 @@ TEST_CASE("any-module") {
     }
 
     SECTION("bad cast") {
-      struct N : nn::Module {};
+      struct N : torch::nn::Module {};
       REQUIRE_THROWS_WITH(any.get<N>(), StartsWith("Attempted to cast module"));
     }
   }
   SECTION("ptr()") {
-    struct M : nn::Module {
-      explicit M(int value_) : nn::Module("M"), value(value_) {}
+    struct M : torch::nn::Module {
+      explicit M(int value_) : torch::nn::Module("M"), value(value_) {}
       int value;
       int forward(float x) {
         return x;
@@ -142,12 +141,12 @@ TEST_CASE("any-module") {
     }
 
     SECTION("bad downcast") {
-      struct N : nn::Module {};
+      struct N : torch::nn::Module {};
       REQUIRE_THROWS_WITH(any.ptr<N>(), StartsWith("Attempted to cast module"));
     }
   }
   SECTION("default state is empty") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       explicit M(int value_) : value(value_) {}
       int value;
       int forward(float x) {
@@ -161,7 +160,7 @@ TEST_CASE("any-module") {
     REQUIRE(any.get<M>().value == 5);
   }
   SECTION("all methods throw for empty AnyModule") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       int forward(int x) {
         return x;
       }
@@ -182,12 +181,12 @@ TEST_CASE("any-module") {
         StartsWith("Cannot call forward() on an empty AnyModule"));
   }
   SECTION("can move assign differentm modules") {
-    struct M : nn::Module {
+    struct M : torch::nn::Module {
       std::string forward(int x) {
         return std::to_string(x);
       }
     };
-    struct N : nn::Module {
+    struct N : torch::nn::Module {
       int forward(float x) {
         return 3 + x;
       }
@@ -202,12 +201,29 @@ TEST_CASE("any-module") {
     REQUIRE(any.forward(5.0f).get<int>() == 8);
   }
   SECTION("has reference semantics") {
-    Sequential first(
-        Linear(2, 3).build(), Linear(4, 4).build(), Linear(4, 5).build());
+    Sequential first(Linear(2, 3), Linear(4, 4), Linear(4, 5));
     Sequential second(first);
 
     REQUIRE(first.size() == second.size());
     REQUIRE(std::equal(first.begin(), first.end(), second.begin()));
+  }
+  SECTION("constructs from ModuleHolder") {
+    struct MImpl : torch::nn::Module {
+      explicit MImpl(int value_) : torch::nn::Module("M"), value(value_) {}
+      int value;
+      int forward(float x) {
+        return x;
+      }
+    };
+
+    struct M : torch::nn::ModuleHolder<MImpl> {
+      using torch::nn::ModuleHolder<MImpl>::ModuleHolder;
+      using torch::nn::ModuleHolder<MImpl>::get;
+    };
+
+    AnyModule any(M{5});
+    REQUIRE(any.get<MImpl>().value == 5);
+    REQUIRE(any.get<M>()->value == 5);
   }
 }
 

@@ -22,7 +22,7 @@ namespace {
 template <class T>
 struct Vec256 {
   static constexpr int size = 32 / sizeof(T);
-  T values[32 / sizeof(T)];
+  T values[32 / sizeof(T)] = {0};
   Vec256() {}
   Vec256(T val) {
     for (int i = 0; i != size; i++) {
@@ -143,6 +143,9 @@ struct Vec256 {
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
+  }
+  Vec256<T> rsqrt() const {
+    return map([](T x) { return 1 / std::sqrt(x); });
   }
 };
 

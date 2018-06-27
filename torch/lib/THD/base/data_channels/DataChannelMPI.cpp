@@ -1,6 +1,8 @@
 #include "DataChannelMPI.hpp"
 #include "DataChannelUtils.hpp"
 
+#include <ATen/ATen.h>
+
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
@@ -103,6 +105,7 @@ bool DataChannelMPI::init() {
   if (provided != MPI_THREAD_MULTIPLE) {
     std::cerr << "WARNING: Used MPI implementation doesn't support multithreading, "
               << "so distributed functions might not work properly."
+              << "If you are using mpich, try setting environment MPICH_MAX_THREAD_SAFETY=multiple and rerun."
               << std::endl;
   }
 
@@ -125,7 +128,6 @@ bool DataChannelMPI::init() {
   return true;
 }
 
-
 rank_type DataChannelMPI::getRank() {
   return _rank;
 }
@@ -135,31 +137,12 @@ rank_type DataChannelMPI::getNumProcesses() {
   return _num_processes;
 }
 
-struct DeviceGuard {
-  DeviceGuard(int new_device) {
-    if (new_device == -1) return;
-#ifdef USE_CUDA
-    cudaGetDevice(&device_);
-    cudaSetDevice(new_device);
-#endif
-  }
-
-  ~DeviceGuard() {
-    if (device_ == -1) return;
-#ifdef USE_CUDA
-    cudaSetDevice(device_);
-#endif
-  }
-
-  int device_ = -1;
-};
-
 at::Tensor DataChannelMPI::_newLikeFlat(std::vector<at::Tensor>& tensors) const {
   // TODO: check if all outputs are contiguous in memory and skip this step is yes
   if (tensors.size() == 0)
     throw std::runtime_error("received an empty list");
   auto & t = tensors[0];
-  DeviceGuard gpu_guard { t.is_cuda() ? static_cast<int>(t.get_device()) : -1 };
+  at::DeviceGuard gpu_guard(t.is_cuda() ? t.get_device() : -1);
   std::vector<int64_t> sizes { static_cast<int64_t>(tensors.size()) };  // sizes = [output.size()] + input.sizes()
   sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
   return t.type().tensor(sizes);

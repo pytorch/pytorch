@@ -7,6 +7,7 @@
 #include "THStorage.hpp"
 
 #include <atomic>
+#include <ATen/ATen.h>
 
 typedef struct THTensor
 {
@@ -32,13 +33,13 @@ typedef struct THTensor
       return storage->unsafe_data<T>() + storageOffset;
     }
 
-    // NOTE: this returns the "old" TH dimension view where no dimensions represents an empty tensor.
-    // There will be a dim() function that gives the new view that supports 0-sized dimensions.
+    // [NOTE: _dim() vs dim()]
+    // _dim() returns the "old" TH dimension view where no dimensions represents an empty tensor.
+    // dim()  returns the ATen view of the dimensionality, i.e. 0-sized dimensions are supported.
     inline int64_t _dim() const {
       return is_empty() ? 0 : dim_;
     }
 
-    // NOTE: this is the ATen view of the dimensionality, i.e. 0-sized dimensions are supported.
     inline int64_t dim() const {
       return dim_;
     }
@@ -52,9 +53,15 @@ typedef struct THTensor
       }
       return false;
     }
+
+    inline at::IntList sizes() {
+      return at::IntList(size, dim_);
+    }
 } THTensor;
 
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
 
 TH_API void THTensor_free(THTensor *self);
+at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
+                                                           at::IntList newshape);

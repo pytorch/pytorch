@@ -2,8 +2,6 @@
 
 #include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <cstddef>
 #include <vector>
@@ -79,12 +77,11 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   if (flip_dims_size == 1 && in_tensor.is_contiguous() && (dims[0] == 0 || dims[0] == total_dims - 1)) {
     auto out_tensor = at::empty_like(self);
     AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
-      using cuda_scalar_t = cuda::into_type<scalar_t>;
-      auto in_tensor_info = cuda::detail::getTensorInfo<cuda_scalar_t, int64_t>(in_tensor);
-      auto out_tensor_info = cuda::detail::getTensorInfo<cuda_scalar_t, int64_t>(out_tensor);
+      auto in_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(in_tensor);
+      auto out_tensor_info = cuda::detail::getTensorInfo<scalar_t, int64_t>(out_tensor);
       int flip_dim = in_tensor_info.collapseDims(dims[0]);
       out_tensor_info.collapseDims(dims[0]);
-      kernel_pointwise_flip_apply2<cuda_scalar_t, int64_t>
+      kernel_pointwise_flip_apply2<scalar_t, int64_t>
         <<<dim_grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(
           in_tensor_info, out_tensor_info, N, flip_dim, total_dims);
     });
@@ -112,9 +109,8 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   }
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
-    using cuda_scalar_t = cuda::into_type<scalar_t>;
     flip_cuda_kernel<<<dim_grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(
-      in_tensor.data<cuda_scalar_t>(), out_tensor.data<cuda_scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size, strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
+      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size, strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
   });
 
   return out_tensor;

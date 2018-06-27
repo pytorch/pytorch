@@ -2,6 +2,8 @@
 #
 # This writes one file: variable_factories.h
 
+import re
+
 from .utils import CodeTemplate, write
 
 FUNCTION_TEMPLATE = CodeTemplate("""\
@@ -10,6 +12,17 @@ inline autograd::Variable ${name}(${formals}) {
   return autograd::make_variable(tensor, /*requires_grad=*/${requires_grad});
 }
 """)
+
+
+TYPE_PATTERN = re.compile(r"(?:const\s+)?([A-Z]\w+)")
+
+
+def fully_qualified_type(argument_type):
+    match = TYPE_PATTERN.match(argument_type)
+    if match is None:
+        return argument_type
+    index = match.start(1)
+    return "{}at::{}".format(argument_type[:index], argument_type[index:])
 
 
 def gen_variable_factories(out, declarations, template_path):
@@ -28,8 +41,9 @@ def process_function(decl, has_tensor_options):
     formals = []
     actuals = []
     for argument in decl["arguments"]:
-        default = "= {}".format(argument["default"]) if "default" in argument else ""
-        formals.append("{} {} {}".format(argument["type"], argument["name"], default))
+        type = fully_qualified_type(argument["type"])
+        default = " = {}".format(argument["default"]) if "default" in argument else ""
+        formals.append("{} {}{}".format(type, argument["name"], default))
         actual = argument["name"]
         if argument["simple_type"] == "TensorOptions":
             # We want to discard the runtime type so that `at::{name}` always returns a
@@ -38,7 +52,7 @@ def process_function(decl, has_tensor_options):
         actuals.append(actual)
     requires_grad = "options.requires_grad()" if has_tensor_options else "false"
     if decl['name'].endswith('_like') and not has_tensor_options:
-        actuals.append('TensorOptions({}, /*discard_runtime_type=*/true)'.format(actuals[0]))
+        actuals.append('at::TensorOptions({}, /*discard_runtime_type=*/true)'.format(actuals[0]))
     return FUNCTION_TEMPLATE.substitute(
         name=decl["name"], formals=formals, actuals=actuals, requires_grad=requires_grad
     )

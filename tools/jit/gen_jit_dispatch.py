@@ -1,6 +1,6 @@
 import os
 import argparse
-from itertools import count, combinations
+from itertools import count, combinations, groupby
 from ..autograd.utils import CodeTemplate, write, uninplace_api_name
 from ..autograd.gen_autograd import load_aten_declarations
 from collections import OrderedDict
@@ -90,6 +90,10 @@ def is_jit_arg(i, arg):
 
 
 def is_jit_op(decl):
+    # We currently don't support functions that return nothing
+    if all(r['type'] == 'void' for r in decl['returns']):
+        return False
+
     # we currently only support vararg tensor lists when they are the _first_ argument
     # and the only tensor argument
     arguments = decl['arguments']
@@ -274,6 +278,34 @@ def gen_jit_dispatch(declarations, out, template_path):
         for variant in {all_real_arguments_are_inputs, only_tensors_are_inputs}:
             emit_decl_variant(decl, variant, has_tensorlist)
 
+    # This function declares an order on declarations. This is necessary because
+    # there is some ambiguity in the choice of overload: if an argument is overloaded
+    # to accept both Scalar and Tensor, the schema with the Tensor should come first
+    # TODO: this can (probably) be removed when we remove the implicit conversion
+    # from Tensor -> Number.
+    def sort_decls(jit_decls):
+        def declkey(decl):
+            # key = sum_{i < len(args)} {1 if arg is tensor else 2} * (3 ** i)
+            # This is a ternary encoding where
+            # 0: No argument at this position
+            # 1: Tensor argument at this position
+            # 2: Some other argument at this position.
+            args = decl['arguments']
+            result = 0
+            for i in range(len(args)):
+                result += (3 ** i) * (1 if args[i]['simple_type'] == 'Tensor' else 2)
+            return result
+
+        # NB: itertools.groupby requires the list be sorted.
+        sorted_decls = sorted(jit_decls, key=lambda decl: decl['name'])
+        grouped_decls = [list(g) for _, g in
+                         groupby(sorted_decls, key=lambda decl: decl['name'])]
+        result = []
+        for group in grouped_decls:
+            sorted_decls = sorted(group, key=declkey)
+            result.extend(sorted_decls)
+        return result
+
     # We need to add methods implemented manually in TensorImpl
     tensor_impl_methods = [{
         'name': name,
@@ -303,6 +335,7 @@ def gen_jit_dispatch(declarations, out, template_path):
                 ])
                 decl['has_tensor_options'] = True
 
+    jit_decls = sort_decls(jit_decls)
     for decl in jit_decls:
         emit_decl(decl)
 
@@ -363,6 +396,12 @@ def emit_schema(jit_decls, out, template_path):
         n = get_name(arg['name'])
         if arg.get('type') == 'TensorList':
             typ = 'ListType::ofTensors()'
+        elif arg.get('type') == 'int64_t':
+            typ = 'IntType::get()'
+        elif arg.get('type') == 'bool':
+            typ = 'IntType::get()'
+        elif arg.get('type') == 'Scalar':
+            typ = 'NumberType::get()'
         else:
             typ = 'DynamicType::get()'
         tensor = 'at::nullopt'

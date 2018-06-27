@@ -2,8 +2,8 @@
 
 #include <fstream>
 
-#include <torch/functions.h>
 #include <torch/tensor.h>
+#include <torch/optim.h>
 
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
@@ -114,18 +114,22 @@ inline at::Backend backendFromId(int32_t id) {
 } // namespace torch
 
 // This is super ugly and I don't know how to simplify it
-CEREAL_REGISTER_TYPE(torch::SGD);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::SGD);
-CEREAL_REGISTER_TYPE(torch::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::SGD);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::Adagrad);
-CEREAL_REGISTER_TYPE(torch::RMSprop);
+    torch::optim::Optimizer,
+    torch::optim::SGD);
+CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::RMSprop);
-CEREAL_REGISTER_TYPE(torch::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::Adam);
+    torch::optim::Optimizer,
+    torch::optim::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::RMSprop);
+CEREAL_REGISTER_TYPE(torch::optim::Adam);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::Adam);
 
 namespace cereal {
 
@@ -163,13 +167,13 @@ loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
 
 // Gradients will not be saved for variables
 template <class Archive>
-void save(Archive& archive, at::Tensor const& tensor) {
+void save(Archive& archive, torch::Tensor const& tensor) {
   if (!tensor.defined()) {
     int32_t typeId = ::torch::detail::scalarTypeId(at::ScalarType::Undefined);
     archive(CEREAL_NVP(typeId));
     return;
   } else {
-    int32_t typeId = ::torch::detail::scalarTypeId(tensor.type().scalarType());
+    int32_t typeId = ::torch::detail::scalarTypeId(tensor.data().type().scalarType());
     archive(CEREAL_NVP(typeId));
   }
   auto sizes = std::vector<int64_t>();
@@ -178,13 +182,13 @@ void save(Archive& archive, at::Tensor const& tensor) {
     sizes.push_back(s);
   }
   auto contig = tensor.toBackend(at::kCPU).contiguous();
-  int32_t backend = ::torch::detail::backendId(tensor.type().backend());
+  int32_t backend = ::torch::detail::backendId(tensor.data().type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));
   agimpl::saveBinary(
       archive,
       contig.data_ptr(),
-      tensor.numel() * tensor.type().elementSizeInBytes());
+      tensor.numel() * tensor.data().type().elementSizeInBytes());
 }
 
 /**
@@ -194,13 +198,13 @@ void save(Archive& archive, at::Tensor const& tensor) {
  * 2. Otherwise, overwrite the provided tensor with the right type and backend
  **/
 template <class Archive>
-void load(Archive& archive, at::Tensor& tensor) {
+void load(Archive& archive, torch::Tensor& tensor) {
   at::ScalarType type;
   int32_t typeId;
   archive(CEREAL_NVP(typeId));
   type = ::torch::detail::scalarTypeFromId(typeId);
   if (type == at::ScalarType::Undefined) {
-    tensor = at::Tensor();
+    tensor = torch::Tensor();
     return;
   }
 
@@ -210,14 +214,14 @@ void load(Archive& archive, at::Tensor& tensor) {
   archive(CEREAL_NVP(backendId), CEREAL_NVP(sizes));
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
-  if (!tensor.defined() || tensor.type().scalarType() != type) {
-    tensor = at::empty({}, at::getType(backend, type));
+  if (!tensor.defined() || tensor.data().type().scalarType() != type) {
+    tensor = torch::empty({}, at::getType(backend, type));
   }
-  tensor.resize_(sizes);
+  tensor.data().resize_(sizes);
 
   if (tensor.type().is_cuda()) {
     // should actually use cudamemcpy probably
-    auto cputensor = at::empty(sizes, tensor.type().scalarType());
+    auto cputensor = at::empty(sizes, tensor.data().type().scalarType());
     agimpl::loadBinary(
         archive,
         cputensor.data_ptr(),
@@ -227,13 +231,7 @@ void load(Archive& archive, at::Tensor& tensor) {
     agimpl::loadBinary(
         archive,
         tensor.data_ptr(),
-        tensor.numel() * tensor.type().elementSizeInBytes());
+        tensor.numel() * tensor.data().type().elementSizeInBytes());
   }
 }
-
-template <class Archive>
-void load(Archive& archive, torch::autograd::Variable& var) {
-  load(archive, var.data());
-}
-
 } // namespace cereal

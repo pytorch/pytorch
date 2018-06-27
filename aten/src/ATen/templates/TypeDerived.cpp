@@ -7,13 +7,8 @@
 
 // ${generated_comment}
 
-#include "ATen/${Storage}.h"
-#include "ATen/${Tensor}.h"
+$storage_tensor_headers
 #include "ATen/${Generator}.h"
-#include "ATen/${Backend}ByteTensor.h"
-#include "ATen/${Backend}IntTensor.h"
-#include "ATen/${Backend}LongTensor.h"
-#include "ATen/${SparseTensor}.h"
 #include "ATen/${DenseTensor}.h"
 #include "ATen/${DenseBackend}LongTensor.h"
 #include "ATen/Allocator.h"
@@ -58,9 +53,9 @@ std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, con
     return std::unique_ptr<Storage>(
       new ${Storage}(context,data,size,deleter));
 }
-std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const {
     return std::unique_ptr<Storage>(
-        new ${Storage}(context, size, std::move(allocator)));
+        new ${Storage}(context, size, allocator));
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)

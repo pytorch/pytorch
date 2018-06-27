@@ -79,7 +79,7 @@ void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator
 #endif
   } else {
     intTensor = THIntTensor_new();
-    THIntTensor_resizeNdLegacy(intTensor, self->_dim(), self->size, NULL);
+    THIntTensor_resizeNd(intTensor, self->dim(), self->size, NULL);
     tmp = THIntTensor_data(intTensor);
   }
 
@@ -357,7 +357,7 @@ void THTensor_(multinomialAliasDraw)(THLongTensor *self, THGenerator *_generator
 void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTensor *prob_dist, int n_sample, int with_replacement)
 {
   std::lock_guard<std::mutex> lock(_generator->mutex);
-  int64_t start_dim = THTensor_(nDimension)(prob_dist);
+  int64_t start_dim = THTensor_(_nDimension)(prob_dist);
   int64_t n_dist;
   int64_t n_categories;
   THDoubleTensor* cum_dist;

@@ -5,6 +5,7 @@
 #include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
@@ -103,6 +104,11 @@ cudaStream_t CUDAHooks::getCurrentCUDAStreamOnDevice(
     int64_t device) const {
   return THCState_getCurrentStreamOnDevice(thc_state, device);
 }
+#ifndef __HIP_PLATFORM_HCC__
+cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) const {
+  return THCState_getCurrentSparseHandle(thc_state);
+}
+#endif
 struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
     THCState* thc_state) const {
   return THCState_getCurrentDeviceProperties(thc_state);
@@ -122,8 +128,8 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-std::unique_ptr<Allocator> CUDAHooks::newPinnedMemoryAllocator() const {
-  return std::unique_ptr<Allocator>(new PinnedMemoryAllocator());
+Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
+  return at::cuda::getPinnedMemoryAllocator();
 }
 
 void CUDAHooks::registerCUDATypes(Context* context) const {
@@ -162,6 +168,38 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #else
   AT_ERROR(
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_max_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_set_plan_cache_max_size_impl(max_size);
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTClearPlanCache() const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_clear_plan_cache_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
 #endif
 }
 

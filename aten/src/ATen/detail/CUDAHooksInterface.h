@@ -16,6 +16,22 @@ struct CUstream_st;
 typedef struct CUstream_st* cudaStream_t;
 struct cudaDeviceProp;
 
+#ifndef __HIP_PLATFORM_HCC__
+// pyHIPIFY rewrites this as:
+//
+//    struct cusparseContext;
+//    typedef struct cusparseContext *hipsparseHandle_t;
+//
+// however, this forward declaration is wrong
+// the way that the HIP headers define hipsparseHandle_t is
+//
+//    typedef cusparseHandle_t hipsparseHandle_t
+//
+// so the rewrite is wrong.
+struct cusparseContext;
+typedef struct cusparseContext *cusparseHandle_t;
+#endif
+
 namespace at {
 class Context;
 }
@@ -65,6 +81,12 @@ struct AT_API CUDAHooksInterface {
     AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
   }
 
+#ifndef __HIP_PLATFORM_HCC__
+  virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
+    AT_ERROR("cannot getCurrentCUDASparseHandle() without ATen_cuda library");
+  }
+#endif
+
   virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
       const {
     AT_ERROR("cannot getCurrentCUDAStream() without ATen_cuda library");
@@ -83,7 +105,7 @@ struct AT_API CUDAHooksInterface {
     return -1;
   }
 
-  virtual std::unique_ptr<Allocator> newPinnedMemoryAllocator() const {
+  virtual Allocator* getPinnedMemoryAllocator() const {
     AT_ERROR("pinned memory requires CUDA");
   }
 
@@ -106,6 +128,22 @@ struct AT_API CUDAHooksInterface {
   virtual double batchnormMinEpsilonCuDNN() const {
     AT_ERROR(
         "cannot query batchnormMinEpsilonCuDNN() without ATen_cuda library");
+  }
+
+  virtual int64_t cuFFTGetPlanCacheMaxSize() const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+  }
+
+  virtual void cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+  }
+
+  virtual int64_t cuFFTGetPlanCacheSize() const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
+  }
+
+  virtual void cuFFTClearPlanCache() const {
+    AT_ERROR("cannot access cuFFT plan cache without ATen_cuda library");
   }
 
   virtual int getNumGPUs() const {

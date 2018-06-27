@@ -74,7 +74,7 @@ void THC_logicalValue(THCState *state,
                       TensorType *src,
                       Op op) {
   THLongStorage* st = THCTensor_newSizeOf(state, src);
-  THCTensor_resizeLegacy(state, self_, st, NULL);
+  THCTensor_resize(state, self_, st, NULL);
   THLongStorage_free(st);
 
   if (!THC_pointwiseApply2<ScalarTypeOut, ScalarType>(state, self_, src, op)) {
