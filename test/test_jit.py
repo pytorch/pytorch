@@ -1101,6 +1101,7 @@ class TestBatched(TestCase):
         batch2 = torch.BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
         self.assertEqual(xs, batch2)
 
+
 class TestScript(JitTestCase):
 
     @contextmanager

@@ -43,17 +43,18 @@ BatchTensor::BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims
 
 std::vector<at::Tensor> BatchTensor::examples() {
   std::vector<at::Tensor> result;
-  // calculate
-  auto mask_sum = [](at::Tensor a) -> int64_t{
-    while(a.dim() >= 1)
-      a = a[0];
-    return *a.toLongData();
+  // calculate number of valid entries in dth dimension of data
+  auto mask_sum = [](at::Tensor data, int d) -> int64_t{
+    data = data.sum(d, /*keepdim=*/true);
+    while(data.dim() >= 1)
+      data = data[0];
+    return *data.toLongData();
   };
   for(int64_t i = 0; i < data.size(0); i++){
     auto data_tmp = data.narrow(0, i, 1);
     for(int64_t d = 0; d < dims.size(0); d++){
       if(*dims[d].toByteData()){
-        data_tmp = data_tmp.narrow(d + 1, 0, mask_sum(mask[i].sum(d, true)));
+        data_tmp = data_tmp.narrow(d + 1, 0, mask_sum(mask[i], d));
       }
     }
     result.push_back(data_tmp);
