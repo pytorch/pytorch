@@ -70,9 +70,13 @@ struct SoftsignGradientHIPFunctor
 };
 
 REGISTER_HIP_OPERATOR(Softsign,
-                      UnaryElementwiseOp<TensorTypes<float>, HIPContext, SoftsignHIPFunctor<HIPContext>>);
+                      UnaryElementwiseOp<
+                        TensorTypes<float>,
+                        HIPContext,
+                        SoftsignHIPFunctor<HIPContext>>);
 REGISTER_HIP_OPERATOR(SoftsignGradient,
-                      BinaryElementwiseOp<TensorTypes<float>,
-                                          HIPContext,
-                                          SoftsignGradientHIPFunctor<HIPContext>>);
+                      BinaryElementwiseOp<
+                        TensorTypes<float>,
+                        HIPContext,
+                        SoftsignGradientHIPFunctor<HIPContext>>);
 } // namespace caffe2
