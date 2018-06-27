@@ -1,5 +1,5 @@
 #include "hip/hip_runtime.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/weighted_sample_op.h"
 #include "caffe2/utils/math.h"
 
