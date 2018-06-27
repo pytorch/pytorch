@@ -201,7 +201,8 @@ void elementwiseNot() {
   EXPECT_TRUE(op->Run());
   auto* blob = ws.GetBlob("Y");
   EXPECT_NE(nullptr, blob);
-  const auto& Y = blob->Get<caffe2::Tensor<Context>>();
+  caffe2::CPUContext context;
+  caffe2::TensorCPU Y(blob->Get<caffe2::Tensor<Context>>(), &context);
   EXPECT_EQ(Y.size(), N);
   std::vector<bool> result{false, true};
   for (size_t i = 0; i < Y.size(); ++i) {
