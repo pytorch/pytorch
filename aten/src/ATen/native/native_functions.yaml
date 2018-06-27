@@ -611,6 +611,9 @@
   variants: function
   deprecated: true
 
+- func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
+  variants: function
+
 - func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
   variants: function
 
