@@ -569,7 +569,7 @@ class ScriptMeta(type(torch._C.ScriptModule)):
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
 
 
-class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
+class ScriptModule(with_metaclass(ScriptMeta, torch._C.ScriptModule, Module)):
     def __init__(self, optimize=True):
         # must be before Module.init since the field is used in __getattr__
         Module.__init__(self)
@@ -608,9 +608,6 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
 
     def __dir__(self):
         return sorted(Module.__dir__(self) + self._method_names())
-
-    def forward(self, *args, **kwargs):
-        return self._forward(*args, **kwargs)
 
     def define(self, lang):
         rcb = createResolutionCallback(frames_up=1)

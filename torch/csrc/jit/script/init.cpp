@@ -473,7 +473,7 @@ void initJitScriptBindings(PyObject* module) {
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
-      .def("_forward", [](Module& self, py::args args) {
+      .def("forward", [](Module& self, py::args args) {
         // We implement this in C++ to avoid incurring the pybind11 dispatch
         // overhead twice: once to call into the method lookup for "forward"
         // and once to actually invoke the method.
