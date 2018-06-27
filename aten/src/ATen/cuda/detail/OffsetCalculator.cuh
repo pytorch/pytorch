@@ -13,7 +13,7 @@ struct OffsetCalculator {
 
   // The offset for each argument (in bytes). Wrapper around fixed-size array.
   struct offsets_t {
-    __device__ uint32_t& operator[](int idx) {
+    __host__ __device__ uint32_t& operator[](int idx) {
       return values[idx];
     }
     uint32_t values[NARGS];

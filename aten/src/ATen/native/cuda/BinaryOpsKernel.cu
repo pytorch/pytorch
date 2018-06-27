@@ -1,15 +1,16 @@
 #include <ATen/Context.h>
-#include <ATen/Dispatch.h>
+#include <ATen/Dispatch_cuda8_compat.h>
 #include <ATen/native/cuda/Loops.cuh>
 #include <ATen/native/DispatchStub.h>
 #include <ATen/native/TensorIterator.h>
 #include <ATen/native/BinaryOps.h>
 #include <limits>
 
+
 namespace at { namespace native {
 
 static void add_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(iter.type(), "add", [&]() {
+  _AT_DISPATCH_ALL_TYPES_AND_HALF(iter.type(), "add", {
     auto alpha = alpha_scalar.to<scalar_t>();
     gpu_binary_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a + alpha * b;
@@ -23,7 +24,7 @@ static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 
 static void div_kernel_cuda(TensorIterator& iter) {
   if (isIntegralType(iter.type().scalarType())) {
-    AT_DISPATCH_INTEGRAL_TYPES(iter.type(), "div", [&]() {
+    _AT_DISPATCH_INTEGRAL_TYPES(iter.type(), "div", {
       gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a / b;
       });
@@ -32,7 +33,7 @@ static void div_kernel_cuda(TensorIterator& iter) {
     // optimization for floating-point types: if the second operand is a CPU
     // scalar, compute a * reciprocal(b). Note that this may lose one bit of
     // precision compared to computing the division.
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "div", [&]() {
+    _AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "div", {
       auto inv_b = scalar_t(1.0 / iter.scalar_value<scalar_t>(2));
       iter.remove_operand(2);
       gpu_unary_kernel(iter, [inv_b]GPU_LAMBDA(scalar_t a) -> scalar_t {
@@ -40,7 +41,7 @@ static void div_kernel_cuda(TensorIterator& iter) {
       });
     });
   } else {
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "div", [&]() {
+    _AT_DISPATCH_FLOATING_TYPES_AND_HALF(iter.type(), "div", {
       gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
         return a / b;
       });
@@ -49,7 +50,7 @@ static void div_kernel_cuda(TensorIterator& iter) {
 }
 
 static void mul_kernel_cuda(TensorIterator& iter) {
-  AT_DISPATCH_ALL_TYPES_AND_HALF(iter.type(), "mul", [&]() {
+  _AT_DISPATCH_ALL_TYPES_AND_HALF(iter.type(), "mul", {
     gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
       return a * b;
     });
