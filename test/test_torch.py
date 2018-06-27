@@ -21,7 +21,6 @@ from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
-import io
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
