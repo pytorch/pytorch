@@ -37,6 +37,7 @@ outputs = [
     'torch/csrc/autograd/generated/python_nn_functions_dispatch.h',
     'torch/csrc/autograd/generated/python_variable_methods.cpp',
     'torch/csrc/autograd/generated/python_variable_methods_dispatch.h',
+    'torch/csrc/autograd/generated/variable_factories.h',
     'torch/csrc/autograd/generated/VariableType.cpp',
     'torch/csrc/autograd/generated/VariableType.h',
     'torch/csrc/jit/generated/aten_dispatch.cpp',

@@ -128,6 +128,49 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
     nnOp = util::make_unique<repr::BatchNormalization>();
   }
 
+  if (op->type() == "Concat") {
+    nnOp = util::make_unique<repr::Concat>();
+    auto c = dyn_cast<repr::Concat>(nnOp.get());
+    if (argMap.count("axis")) {
+      CAFFE_ENFORCE(argMap["axis"].has_i(), "Invalid axis argument");
+      int axis = static_cast<int>(argMap["axis"].i());
+      c->setAxis(axis);
+    }
+    if (argMap.count("add_axis")) {
+      CAFFE_ENFORCE(argMap["add_axis"].has_i(), "Invalid add_axis argument");
+      int add_axis = static_cast<int>(argMap["add_axis"].i());
+      c->setAddAxis(!!add_axis);
+    }
+  }
+
+  if (op->type() == "Flatten") {
+    nnOp = util::make_unique<repr::Flatten>();
+  }
+
+  if (op->type() == "BatchGather") {
+    nnOp = util::make_unique<repr::BatchGather>();
+  }
+
+  if (op->type() == "BatchMatMul") {
+    nnOp = util::make_unique<repr::BatchMatMul>();
+    auto c = dyn_cast<repr::BatchMatMul>(nnOp.get());
+    if (argMap.count("trans_a")) {
+      CAFFE_ENFORCE(argMap["trans_a"].has_i(), "Invalid axis argument");
+      int trans_a = static_cast<int>(argMap["trans_a"].i());
+      c->setTransA(!!trans_a);
+    }
+    if (argMap.count("trans_b")) {
+      CAFFE_ENFORCE(argMap["trans_b"].has_i(), "Invalid add_axis argument");
+      int trans_b = static_cast<int>(argMap["trans_b"].i());
+      c->setTransB(!!trans_b);
+    }
+    if (argMap.count("broadcast")) {
+      CAFFE_ENFORCE(argMap["broadcast"].has_i(), "Invalid add_axis argument");
+      int broadcast = static_cast<int>(argMap["broadcast"].i());
+      c->setBroadcast(!!broadcast);
+    }
+  }
+
   if (!nnOp) {
     nnOp = util::make_unique<repr::GenericOperator>(op->type());
   }

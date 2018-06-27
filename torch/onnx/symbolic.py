@@ -396,11 +396,11 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
-def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool1d_with_indices", "ceil_mode")
+        return _unimplemented("max_pool1d", "ceil_mode")
     if set(_single(dilation)) != {1}:
-        return _unimplemented("max_pool1d_with_indices", "dilation")
+        return _unimplemented("max_pool1d", "dilation")
     if stride is None:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -410,11 +410,11 @@ def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     return r, None
 
 
-def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool2d_with_indices", "ceil_mode")
+        return _unimplemented("max_pool2d", "ceil_mode")
     if set(_pair(dilation)) != {1}:
-        return _unimplemented("max_pool2d_with_indices", "dilation")
+        return _unimplemented("max_pool2d", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -424,11 +424,11 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
     return r, None
 
 
-def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool3d_with_indices", "ceil_mode")
+        return _unimplemented("max_pool3d", "ceil_mode")
     if set(_triple(dilation)) != {1}:
-        return _unimplemented("max_pool3d_with_indices", "dilation")
+        return _unimplemented("max_pool3d", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,

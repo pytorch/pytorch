@@ -22,7 +22,9 @@ class AdaptiveWeight(ModelLayer):
         optimizer=None,
         weights=None,
         enable_diagnose=False,
-        estimation_method=None,
+        estimation_method="log_std",
+        pos_optim_method="log_barrier",
+        reg_lambda=0.1,
         **kwargs
     ):
         super(AdaptiveWeight, self).__init__(model, name, input_record, **kwargs)
@@ -38,20 +40,23 @@ class AdaptiveWeight(ModelLayer):
             weights = [1. / self.num for _ in range(self.num)]
         assert min(weights) > 0, "initial weights must be positive"
         self.weights = np.array(weights).astype(np.float32)
-        self.estimation_method = estimation_method
-        if self.estimation_method is not None:
-            self.estimation_method_type = infer_thrift_union_selection(
-                estimation_method
-            ).lower()
-            self.estimation_method_value = estimation_method.value
-        else:
-            self.estimation_method_type = "log_std"
-            self.estimation_method_value = None
+        self.estimation_method = str(estimation_method).lower()
+        # used in positivity-constrained parameterization as when the estimation method
+        # is inv_var, with optimization method being either log barrier, or grad proj
+        self.pos_optim_method = str(pos_optim_method).lower()
+        self.reg_lambda = float(reg_lambda)
         self.enable_diagnose = enable_diagnose
-        self.init_func = getattr(self, self.estimation_method_type + "_init")
-        self.weight_func = getattr(self, self.estimation_method_type + "_weight")
-        self.reg_func = getattr(self, self.estimation_method_type + "_reg")
+        self.init_func = getattr(self, self.estimation_method + "_init")
+        self.weight_func = getattr(self, self.estimation_method + "_weight")
+        self.reg_func = getattr(self, self.estimation_method + "_reg")
         self.init_func()
+        if self.enable_diagnose:
+            self.weight_i = [
+                self.get_next_blob_reference("adaptive_weight_%d" % i)
+                for i in range(self.num)
+            ]
+            for i in range(self.num):
+                self.model.add_ad_hoc_plot_blob(self.weight_i[i])
 
     def concat_data(self, net):
         reshaped = [net.NextScopedBlob("reshaped_data_%d" % i) for i in range(self.num)]
@@ -110,15 +115,15 @@ class AdaptiveWeight(ModelLayer):
             "GivenTensorFill",
             {"values": values, "dtype": core.DataType.FLOAT},
         )
-        pos_optim_method = self.estimation_method_value.pos_optim_method.getType()
-        pos_optim_option = self.estimation_method_value.pos_optim_method.value
-        if pos_optim_method == "LOG_BARRIER":
-            regularizer = LogBarrier(float(reg_lambda=pos_optim_option.reg_lambda))
-        elif pos_optim_method == "POS_GRAD_PROJ":
+        if self.pos_optim_method == "log_barrier":
+            regularizer = LogBarrier(reg_lambda=self.reg_lambda)
+        elif self.pos_optim_method == "pos_grad_proj":
             regularizer = BoundedGradientProjection(lb=0, left_open=True)
         else:
             raise TypeError(
-                "unknown positivity optimization method: {}".format(pos_optim_method)
+                "unknown positivity optimization method: {}".format(
+                    self.pos_optim_method
+                )
             )
         self.k = self.create_param(
             param_name="k",
@@ -136,7 +141,7 @@ class AdaptiveWeight(ModelLayer):
         net.Log(self.k, log_k)
         net.Scale(log_k, reg, scale=-0.5)
 
-    def add_ops(self, net):
+    def _add_ops_impl(self, net, enable_diagnose):
         x = self.concat_data(net)
         weight = net.NextScopedBlob("weight")
         reg = net.NextScopedBlob("reg")
@@ -147,21 +152,9 @@ class AdaptiveWeight(ModelLayer):
         net.Mul([weight, x], weighted_x)
         net.Add([weighted_x, reg], weighted_x_add_reg)
         net.SumElements(weighted_x_add_reg, self.output_schema())
-        if self.enable_diagnose:
+        if enable_diagnose:
             for i in range(self.num):
-                weight_i = net.NextScopedBlob("weight_%d" % i)
-                net.Slice(weight, weight_i, starts=[i], ends=[i + 1])
+                net.Slice(weight, self.weight_i[i], starts=[i], ends=[i + 1])
 
-
-def infer_thrift_union_selection(ttype_union):
-    # TODO(xlwang): this is a hack way to infer the type str of a thrift union
-    # struct
-    assert ttype_union.isUnion(), "type {} is not a thrift union".format(
-        type(ttype_union)
-    )
-    field = ttype_union.field
-    for attr in dir(ttype_union):
-        v = getattr(ttype_union, attr)
-        if isinstance(v, int) and attr != "field" and v == field:
-            return attr
-    raise ValueError("Fail to infer the thrift union type")
+    def add_ops(self, net):
+        self._add_ops_impl(net, self.enable_diagnose)

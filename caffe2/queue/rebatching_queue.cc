@@ -163,7 +163,7 @@ bool RebatchingQueue::enqueueOne(
   auto& tensorVector = splittedInputs.back();
   tensorVector.reserve(inputs.size());
   for (const auto* tensorPtr : inputs) {
-    tensorVector.push_back(*tensorPtr);
+    tensorVector.push_back(tensorPtr->Clone());
   }
 
   return enqueue(std::move(splittedInputs));

@@ -84,3 +84,9 @@ case NNKind::Int8AveragePoolRelu:
   return "Int8AveragePoolRelu";
 case NNKind::Int8MaxPoolRelu:
   return "Int8MaxPoolRelu";
+case NNKind::BatchMatMul:
+  return "BatchMatMul";
+case NNKind::BatchGather:
+  return "BatchGather";
+case NNKind::ConcatBatchMatMulBatchGatherOp:
+  return "ConcatBatchMatMulBatchGatherOp";
