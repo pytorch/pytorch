@@ -5839,12 +5839,18 @@ add_docstr(torch.meshgrid,
            r"""
 meshgrid(seq) -> seq
 
-Create N N-dimensional grid coordinates with the ith coordinates defined by the ith vector.
-
-All tensors need to be either scalar or 1-dimensional vector.
+Take a sequence of :math:`N` tensors, each of which be either scalar or 1-dimensional vector,
+and create :math:`N` grids, where the :math:`i`th grid is defined by expanding the :math:`i`th
+input over dimensions defined by other inputs.
 
 Arguments:
-    seq (sequence of Tensors): sequence of tensors to do grid mesh
+    seq (sequence of Tensors): sequence of scalars or 1 dimensional tensors. Scalars will be
+        treated as tensors of size :math:`(1,)` automatically.
+
+Returns:
+    seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
 
 Example::
 
