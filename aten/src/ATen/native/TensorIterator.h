@@ -54,6 +54,10 @@ struct OperandInfo {
 
   /// True if the kernel needs to handle a cast operation for this operand.
   bool needs_cast_ = false;
+
+  bool is_output_ = false;
+
+  bool is_read_write_ = false;
 };
 
 enum class IteratorFlags {
@@ -143,6 +147,7 @@ struct TensorIterator {
   SplitUntil32Bit with_32bit_indexing() const;
 
 protected:
+  void mark_outputs();
   void compute_shape();
   void compute_strides();
   void reorder_dimensions();

@@ -337,9 +337,31 @@ TensorIterator TensorIterator::reduce_op(const Tensor& a, IntList dims) {
   return TensorIterator();
 }
 
+void TensorIterator::mark_outputs() {
+  for (int i = 0; i < num_outputs_; i++) {
+    operands_[i].is_output_ = true;
+    auto output = *operands_[i].tensor_;
+    if (!output.defined()) continue;
+
+    // check if output is also an input
+    for (int arg = num_outputs_; arg < ntensors(); arg++) {
+      auto input = *operands_[arg].tensor_;
+      if (output.get() == input.get()) {
+        operands_[i].is_read_write_ = true;
+      }
+    }
+  }
+}
+
 void TensorIterator::compute_shape() {
   for (auto& op : operands_) {
     if (!op.tensor_->defined()) continue;
+
+    // For now, don't include output tensors that are not also input tensors.
+    // This preserves the legacy behavior where torch.add(..., out=dst) resizes
+    // the destination tensor.
+    if (op.is_output_ && !op.is_read_write_) continue;
+
     auto shape = op.tensor_->sizes();
     if (shape_.empty()) {
       shape_ = shape;
@@ -349,10 +371,16 @@ void TensorIterator::compute_shape() {
   }
 
   // Outputs cannot be broadcasted. Check that the shape of the outputs matches
-  // the inferred shape.
+  // the inferred shape. There's
   for (int i = 0; i < num_outputs_; i++) {
     auto& tensor = *operands_[i].tensor_;
     if (tensor.defined() && !tensor.sizes().equals(shape_)) {
+      if (!operands_[i].is_read_write_) {
+        // Preserve legacy resizing behavior of out=... arguments
+        // TODO: issue warning
+        tensor.resize_(shape_);
+        continue;
+      }
       AT_ERROR("output with shape ", tensor.sizes(), " doesn't match the broadcast shape ",
                shape_);
     }
@@ -429,6 +457,8 @@ SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
 }
 
 std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
+  // compute the broadcasted shape
+  iter_->mark_outputs();
   // compute the broadcasted shape
   iter_->compute_shape();
   // compute each tensor's stride after broadcasting
