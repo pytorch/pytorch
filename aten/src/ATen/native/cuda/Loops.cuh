@@ -40,6 +40,9 @@ static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
 
 template<int nt, int vt, typename func_t>
 static void launch_kernel(int64_t N, func_t f) {
+  if (N == 0) {
+    return;
+  }
   dim3 block(nt);
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = globalContext().getCurrentCUDAStream();
