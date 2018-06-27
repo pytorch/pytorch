@@ -466,6 +466,17 @@ void initJitScriptBindings(PyObject* module) {
           return self.get_method("forward").graph_for(createVariableTensorList(args));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
+      })
+      .def("_forward", [](Module& self, py::args args) {
+        // We implement this in C++ to avoid incurring the pybind11 dispatch
+        // overhead twice: once to call into the method lookup for "forward"
+        // and once to actually invoke the method.
+        //
+        // There is a thin wrapper on top of this method in the C++ version of
+        // ScriptModule.
+        auto inputs = createVariableTensorList(args);
+        auto outputs = self.get_method("forward").run(std::move(inputs));
+        return unpackVariableTensorList(std::move(outputs));
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

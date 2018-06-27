@@ -609,10 +609,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __dir__(self):
         return sorted(Module.__dir__(self) + self._method_names())
 
-    # Module already has this method defined, so we
-    # need to override it and send it through the ScriptModule lookup
     def forward(self, *args, **kwargs):
-        return self.__getattr__('forward')(*args, **kwargs)
+        return self._forward(*args, **kwargs)
 
     def define(self, lang):
         rcb = createResolutionCallback(frames_up=1)
