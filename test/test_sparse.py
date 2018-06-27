@@ -659,6 +659,42 @@ class TestSparse(TestCase):
             self.assertEqual(out._sparseDims(), len(shape))
             self.assertEqual(out._denseDims(), 0)
 
+    def test_log1p(self):
+        import math
+        # test cuda
+        input_cuda = torch.cuda.sparse.DoubleTensor(
+            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).cuda(),
+            torch.FloatTensor([3, 4, 5]).cuda(),
+            torch.Size([3]))
+        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
+                         input_cuda.log1p().to_dense())
+        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
+                         input_cuda.log1p_().to_dense())
+
+        # test cpu
+        input = torch.sparse.DoubleTensor(
+            torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
+            torch.FloatTensor([3, 4, 5]),
+            torch.Size([3]))
+        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
+                         input.log1p().to_dense())
+        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
+                         input.log1p_().to_dense())
+
+        # test autograd
+        input_variable = torch.sparse.DoubleTensor(
+            torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
+            torch.FloatTensor([3, 4, 5]),
+            torch.Size([3])).requires_grad_()
+        self.assertTrue(input_variable.requires_grad)
+
+        y = input_variable.log1p()
+        with self.assertRaisesRegex(RuntimeError,
+                                    "log1p of a sparse tensor is made to be non-differentiable since.*"):
+            y.backward(torch.sparse.DoubleTensor(torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
+                                                 torch.FloatTensor([3, 4, 5]),
+                                                 torch.Size([3])))
+
     def test_zeros(self):
         i_shapes = [2, 3, 4]
         v_shapes = [3, 4, 5, 6]
@@ -731,6 +767,7 @@ class TestSparse(TestCase):
             '_sparseDims': lambda x: x._sparseDims(),
             '_denseDims': lambda x: x._denseDims(),
             'norm': lambda x: x.norm(),
+            'log1p': lambda x: x.log1p(),
         }
 
         for test_name, test_fn in to_test_one_arg.items():

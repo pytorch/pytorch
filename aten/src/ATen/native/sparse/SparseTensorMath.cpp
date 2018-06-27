@@ -6,6 +6,8 @@
 
 #include <TH/THBlasUtils.h>
 
+#include <torch/csrc/variable_tensor_functions.h>
+
 namespace at { namespace native {
 
 // --------------------------------------------------------------------
@@ -92,6 +94,27 @@ SparseTensor mul_sparse_scalar(const SparseTensor& t, Scalar value) {
 
 SparseTensor& mul_sparse_scalar_(SparseTensor& t, Scalar v) {
   return mul_out_sparse_scalar(t, t, v);
+}
+
+// --------------------------------------------------------------------
+// log1p(SparseTensor)
+// --------------------------------------------------------------------
+
+SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
+  AT_ASSERT(r.is_sparse());
+  AT_ASSERT(t.is_sparse());
+
+  if (isSameTensor(r, t)) {
+    r._values().log1p_();
+  } else {
+    r = raw_copy_sparse_(r, t);
+    r._values().log1p_();
+  }
+  return r;
+}
+
+SparseTensor& log1p_sparse_(SparseTensor& t) {
+  return log1p_out_sparse(t, t);
 }
 
 // --------------------------------------------------------------------

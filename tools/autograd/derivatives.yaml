@@ -371,7 +371,7 @@
   self: grad / (self * 2.3025850929940456)
 
 - name: log1p(Tensor self)
-  self: grad / (self + 1)
+  self: log1p_backward(grad, self)
 
 - name: log2(Tensor self)
   self: grad / (self * 0.6931471805599453)

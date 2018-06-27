@@ -156,7 +156,6 @@ Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
   }
 }
 
-
 Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (_has_native(self)) {
     Tensor b_self, b_other;
