@@ -234,6 +234,18 @@ class ArgumentHelper {
     return ArgumentHelper(def).GetRepeatedMessageArgument<MessageType>(name);
   }
 
+  template <typename Def>
+  static bool RemoveArgument(Def& def, int index) {
+    if (index >= def.arg_size()) {
+      return false;
+    }
+    if (index < def.arg_size() - 1) {
+      def.mutable_arg()->SwapElements(index, def.arg_size() - 1);
+    }
+    def.mutable_arg()->RemoveLast();
+    return true;
+  }
+
   explicit ArgumentHelper(const OperatorDef& def);
   explicit ArgumentHelper(const NetDef& netdef);
   bool HasArgument(const string& name) const;

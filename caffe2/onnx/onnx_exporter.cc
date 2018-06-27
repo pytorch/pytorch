@@ -3,6 +3,7 @@
 #include "caffe2/onnx/helper.h"
 #include "caffe2/proto/caffe2_legacy.pb.h"
 #include "caffe2/utils/map_utils.h"
+#include "caffe2/utils/proto_utils.h"
 
 #include <unordered_set>
 
@@ -353,21 +354,15 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
 ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
-  // The upper bound (excluded) of expanded y.
-  // 0 indicates that no need to unsqueeze y, otherwise, we have to do the unsqueeze.
   caffe2::OperatorDef mdef(def);  // The modified def without broadcast and axis
   const auto& x = mdef.input(0);
   const auto& y = def.input(1);  // Refer to the old def, later won't change it.
-  const auto& z = mdef.output(0);
   const auto& x_shape = shapes.at(x);
   const auto& y_shape = shapes.at(y);
   for (int i = 0; i < mdef.arg_size(); ++i) {
     const auto& arg = mdef.arg(i);
     if (arg.name() == "broadcast") {
-      if (i < mdef.arg_size() - 1) {
-        mdef.mutable_arg()->SwapElements(i, mdef.arg_size() - 1);
-      }
-      mdef.mutable_arg()->RemoveLast();
+      ArgumentHelper::RemoveArgument(mdef, i);
       break;
     }
   }
@@ -377,16 +372,13 @@ ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
     if (arg.name() == "axis") {
       int64_t axis = arg.i();
       if (x_shape.dims().size() - axis != y_shape.dims().size()) {
+        // The upper bound (excluded) of expanded y.
         int64_t end_dim = y_shape.dims().size() - 1 - axis + x_shape.dims().size();
-        for (int64_t j = y_shape.dims().size(); j < end_dim; ++j) {
-          axes.emplace_back(j);
-        }
+        axes.resize(end_dim - y_shape.dims().size());
+        std::iota(axes.begin(), axes.end(), y_shape.dims().size());
         mdef.set_input(1, dummy_->NewDummyName());
       }
-      if (i < mdef.arg_size() - 1) {
-        mdef.mutable_arg()->SwapElements(i, mdef.arg_size() - 1);
-      }
-      mdef.mutable_arg()->RemoveLast();
+      ArgumentHelper::RemoveArgument(mdef, i);
       break;
     }
   }

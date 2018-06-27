@@ -613,7 +613,7 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     BuildOperator(
         c2_op, "MatMul", {input_a, input_b}, {ab}, {arg_trans_a, arg_trans_b});
     c2_op = ret.ops.Add();
-    if (opset_version > 6) {
+    if (opset_version >= 7) {
       BuildOperator(c2_op, "Add", {ab, input_c}, {output});
     } else {
       caffe2::Argument arg_broadcast;
@@ -858,7 +858,7 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     attributes.remove("consumed_inputs");
   }
 
-  if (opset_version > 6) {
+  if (opset_version >= 7) {
     auto& attributes = onnx_node->attributes;
     auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
@@ -918,7 +918,7 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
 }
 
 Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {
-  if (opset_version > 6) {
+  if (opset_version >= 7) {
     auto& attributes = onnx_node->attributes;
     auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
