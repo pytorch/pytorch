@@ -1092,13 +1092,14 @@ class TestBatched(TestCase):
     def mb_rand(self, *dims):
         dims = [dim for dim in dims if dim != ()]
         xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
-        xb = torch.BatchTensor(xs, [b for b, d in dims[1:]])
+        xb = torch.BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
         return xs, xb
 
     def test_create_from_list(self):
-        xs, batch = self.mb_rand(4, (True, 3), (False, 2))
+        xs, batch = self.mb_rand(4, (True, 3), (False, 2), (True, 5))
         self.assertEqual(xs, batch)
-
+        batch2 = torch.BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
+        self.assertEqual(xs, batch2)
 
 class TestScript(JitTestCase):
 

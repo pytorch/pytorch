@@ -8,8 +8,8 @@
 namespace torch { namespace jit {
 struct BatchTensor {
 public:
-  BatchTensor(at::Tensor data, at::Tensor mask, std::vector<bool> dims);
-  BatchTensor(std::vector<at::Tensor>, std::vector<bool> dims);
+  BatchTensor(at::Tensor data, at::Tensor mask, at::Tensor dims);
+  BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims);
   ~BatchTensor(){};
   const char * toString() const {
     return "BatchTensor";
@@ -21,11 +21,20 @@ public:
     return data.dim();
   }
   std::vector<at::Tensor> examples();
+  at::Tensor getData(){
+    return data;
+  }
+  at::Tensor getMask(){
+    return mask;
+  }
+  at::Tensor getDims(){
+    return dims;
+  }
 
 public:
   at::Tensor data;
   at::Tensor mask;
-  std::vector<bool> dims;
+  at::Tensor dims;
 };
 
 void initBatchTensorBindings(PyObject* module);
