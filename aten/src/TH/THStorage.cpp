@@ -67,3 +67,30 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   }
   return copy;
 }
+
+THStorage* THStorage_new(at::ScalarType scalar_type)
+{
+  return THStorage_newWithSize(scalar_type, 0);
+}
+
+THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
+{
+  return THStorage_newWithAllocator(scalar_type, size, &THDefaultAllocator, NULL);
+}
+
+THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
+                                      THAllocator *allocator,
+                                      void *allocatorContext)
+{
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
+  storage->backend = at::kCPU;
+  storage->scalar_type = scalar_type;
+  storage->data_ptr = allocator->malloc(allocatorContext, at::elementSize(scalar_type)*size);
+  storage->size = size;
+  new (&storage->refcount) std::atomic<int>(1);
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  storage->allocatorVoidPtr = allocator;
+  storage->allocatorContext = allocatorContext;
+  storage->device = 0;  // device is not meaningful on CPU
+  return storage;
+}
