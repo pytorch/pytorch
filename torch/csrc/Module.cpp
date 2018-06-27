@@ -129,7 +129,7 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
 
 static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
   int32_t i = INT_MIN;
-  int32_t j = -i
+  int32_t j = -i;
   return PyLong_FromLong(j);
 }
 
