@@ -354,6 +354,12 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
   }
 }
 
+py::object runMethodFromPython(Method& m, py::args args) {
+  auto inputs = createVariableTensorList(args);
+  auto outputs = m.run(std::move(inputs));
+  return unpackVariableTensorList(std::move(outputs));
+}
+
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
   // torch.jit.ScriptModule is a subclass of this C++ object.
@@ -474,9 +480,7 @@ void initJitScriptBindings(PyObject* module) {
         //
         // There is a thin wrapper on top of this method in the C++ version of
         // ScriptModule.
-        auto inputs = createVariableTensorList(args);
-        auto outputs = self.get_method("forward").run(std::move(inputs));
-        return unpackVariableTensorList(std::move(outputs));
+        return runMethodFromPython(self.get_method("forward"), args);
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -484,9 +488,7 @@ void initJitScriptBindings(PyObject* module) {
       return self.graph();
     })
     .def("__call__", [](Method& m, py::args args) -> py::object {
-      auto inputs = createVariableTensorList(args);
-      auto outputs = m.run(std::move(inputs));
-      return unpackVariableTensorList(std::move(outputs));
+      return runMethodFromPython(m, args);
     })
     .def_property_readonly("graph", [](Method& m) {
       return m.graph();
