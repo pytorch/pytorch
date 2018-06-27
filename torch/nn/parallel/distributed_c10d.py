@@ -15,7 +15,7 @@ from .scatter_gather import scatter_kwargs, gather
 from .parallel_apply import parallel_apply
 
 
-class DistributedDataParallelC10d(Module):
+class _DistributedDataParallelC10d(Module):
     r"""Implements distributed data parallelism that is based on c10d at the
     module level.
 
@@ -111,13 +111,13 @@ class DistributedDataParallelC10d(Module):
     Example::
         >>> store = torch.distributed.c10d.FileStore("/tmp/tempfile.txt")
         >>> pg = torch.distributed.c10d.ProcessGroupGloo(store, rank, world_size)
-        >>> net = torch.nn.DistributedDataParallel(model, pg)
+        >>> net = torch.nn._DistributedDataParallelC10d(model, pg)
     """
     def __init__(self, module, process_group, device_ids=None,
                  output_device=None, dim=0, broadcast_buffers=True,
                  bucket_cap_mb=25):
 
-        super(DistributedDataParallelC10d, self).__init__()
+        super(_DistributedDataParallelC10d, self).__init__()
 
         # Use all devices by default
         if device_ids is None:
@@ -170,8 +170,7 @@ class DistributedDataParallelC10d(Module):
         # This is a triply-nested list where the "dimensions" are: devices, buckets, bucket_elems
         param_buckets = []
         # Split the parameters into buckets and by types as well
-        for dev_idx, module in enumerate(self._module_copies):
-            param_buckets.append(list(_take_tensors(module.parameters(), bucket_bytes_cap)))
+        param_buckets = [list(_take_tensors(m.parameters(), bucket_bytes_cap)) for m in self._module_copies]
 
         self.bucket_sizes = []
         self.bucket_map = {}
@@ -186,18 +185,20 @@ class DistributedDataParallelC10d(Module):
                 if not param_tuple[0].requires_grad:
                     continue
                 for p in param_tuple:
-                    self.bucket_map[p] = bucket_idx
+                    self.bucket_map[p] = (bucket_idx, idx)
                 self.bucket_sizes[bucket_idx] += 1
 
-        self.buckets = [[[] for _ in range(len(self.device_ids))] for _ in range(len(self.bucket_sizes))]
+        self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
+                        for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
+        # The number of params ready in each bucket
+        self.buckets_ready_size = [[0 for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
+
         # coalesced bucket for only device 0
         self.buckets_coalesced = [[] for _ in range(len(self.bucket_sizes))]
-
         # We will always reduce the bucket following the reverse order
-        self.bucket_order = list(range(len(self.bucket_sizes)))
-        self.buckets_to_reduce = copy.copy(self.bucket_order)
-
-        self.buckets_ready = set()
+        # that is, alway reduces following the order of: n - 1, n - 2, ..., 0
+        self.next_bucket = len(self.bucket_sizes) - 1
+        self.ready_buckets_not_reduced = set()
         self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
 
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
@@ -216,7 +217,7 @@ class DistributedDataParallelC10d(Module):
         return attrs
 
     def __setstate__(self, state):
-        super(DistributedDataParallelC10d, self).__setstate__(state)
+        super(_DistributedDataParallelC10d, self).__setstate__(state)
         self._register_grad_hooks()
 
     def forward(self, *inputs, **kwargs):
@@ -237,7 +238,7 @@ class DistributedDataParallelC10d(Module):
         return gather(outputs, output_device, dim=self.dim)
 
     def train(self, mode=True):
-        super(DistributedDataParallelC10d, self).train(mode)
+        super(_DistributedDataParallelC10d, self).train(mode)
         for module in self._module_copies[1:]:
             module.train(mode)
 
@@ -284,14 +285,15 @@ class DistributedDataParallelC10d(Module):
                     self._grad_accs.append(grad_acc)
 
     def _make_param_hook(self, param, device_idx):
-        bucket_idx = self.bucket_map[param]
+        bucket_idx, bucket_offset = self.bucket_map[param]
 
         def distributed_data_parallel_hook(*unused):
             if param.grad.requires_grad:
                 raise RuntimeError("DistributedDataParallelC10d only works "
                                    "with gradients that don't require grad")
             bucket = self.buckets[bucket_idx][device_idx]
-            bucket.append(param.grad.data)
+            bucket[bucket_offset] = param.grad.data
+            self.buckets_ready_size[bucket_idx][device_idx] += 1
 
             # We can flush these and save memory for replicas
             if device_idx > 0:
@@ -299,26 +301,33 @@ class DistributedDataParallelC10d(Module):
                 param.data.set_()
 
             # Current device's bucket is full
-            if len(bucket) == self.bucket_sizes[bucket_idx]:
+            if self.buckets_ready_size[bucket_idx][device_idx] == self.bucket_sizes[bucket_idx]:
                 self.devs_ready[bucket_idx] += 1
                 if self.devs_ready[bucket_idx] < len(self.device_ids):
                     return
 
-                if bucket_idx not in self.buckets_ready:
-                    self.buckets_ready.add(bucket_idx)
-                    if len(self.buckets_to_reduce) > 0 and self.buckets_to_reduce[-1] == bucket_idx:
-                        # Reduce the bucket
-                        self._queue_reduction(bucket_idx)
-                        self.buckets_to_reduce.pop()
+                # Now all devices's buckets with index: bucket_idx are ready
+                if bucket_idx == self.next_bucket:
+                    self._queue_reduction(bucket_idx)
+                    self.next_bucket -= 1
+                    # Now reduce anything that is ready but not yet reduced
+                    if len(self.ready_buckets_not_reduced) > 0:
+                        sorted_todo = sorted(self.ready_buckets_not_reduced, reverse=True)
+                        for i in sorted_todo:
+                            # Nothing can be reduced now
+                            if i < self.next_bucket:
+                                break
+                            self._queue_reduction(i)
+                            self.ready_buckets_not_reduced.remove(i)
+                            if i == self.next_bucket:
+                                self.next_bucket -= 1
+                else:
+                    self.ready_buckets_not_reduced.add(bucket_idx)
 
-                    # If all buckets are ready
-                    if len(self.buckets_ready) == len(self.bucket_order):
-                        # In case there are unreduced buckets, reduce them all
-                        if len(self.buckets_to_reduce) > 0:
-                            for b_idx in reversed(self.buckets_to_reduce):
-                                self._queue_reduction(b_idx)
-                        # A final sync for all the reduction works
-                        self._sync_reduction_works()
+                # When all devices' buckets
+                if self.next_bucket == -1:
+                    # A final sync for all the reduction works
+                    self._sync_reduction_works()
 
         return distributed_data_parallel_hook
 
@@ -355,12 +364,13 @@ class DistributedDataParallelC10d(Module):
             for grad, reduced in zip(grads_batch[0], grads_batch_reduced):
                 grad.copy_(reduced)
 
-            # Reset bucket state
-            self.buckets[bucket_idx] = [[] for _ in range(len(self.device_ids))]
-            self.buckets_coalesced[bucket_idx] = []
-
         # Reset the module states
-        self.buckets_to_reduce = copy.copy(self.bucket_order)
-        self.buckets_ready = set()
+        self.next_bucket = len(self.bucket_sizes) - 1
+        self.ready_buckets_not_reduced = set()
         self.reduction_works = [None for _ in range(len(self.bucket_sizes))]
         self.devs_ready = [0 for _ in range(len(self.bucket_sizes))]
+
+        self.buckets = [[[None for _ in range(self.bucket_sizes[i])]
+                        for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
+        self.buckets_coalesced = [[] for _ in range(len(self.bucket_sizes))]
+        self.buckets_ready_size = [[0 for _ in range(len(self.device_ids))] for i in range(len(self.bucket_sizes))]
