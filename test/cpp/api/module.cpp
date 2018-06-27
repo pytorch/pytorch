@@ -66,6 +66,23 @@ TEST_CASE("module/name") {
   }
 }
 
+TEST_CASE("module/is") {
+  Linear module(3, 4);
+  REQUIRE(module->is<Linear>());
+  REQUIRE(module->is<LinearImpl>());
+  REQUIRE(!module->is<AGIUnit>());
+
+  std::shared_ptr<Module> raw = module.get();
+  REQUIRE(raw->is<Linear>());
+  REQUIRE(raw->is<LinearImpl>());
+  REQUIRE(!raw->is<AGIUnit>());
+
+  AGIUnit unit;
+  REQUIRE(!unit.is<Linear>());
+  REQUIRE(!unit.is<LinearImpl>());
+  REQUIRE(unit.is<AGIUnit>());
+}
+
 TEST_CASE("module/conversions", "[cuda]") {
   Linear module(128, 64);
   SECTION("starts as float on CPU") {

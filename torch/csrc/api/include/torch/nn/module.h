@@ -128,6 +128,25 @@ class Module {
     }
   }
 
+  /// Returns true if the dynamic type of this module is of the given
+  /// `ModuleType`. Performs a `dynamic_cast` to check this.
+  template <
+      typename ModuleType,
+      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
+  bool is() const noexcept {
+    return dynamic_cast<const ModuleType*>(this) != nullptr;
+  }
+
+  /// Returns true if the dynamic type of this module is of the given
+  /// `ModuleType`. Performs a `dynamic_cast` to check this.
+  template <typename ModuleType>
+  torch::enable_if_t<torch::detail::is_module_holder<ModuleType>::value, bool>
+  is() const noexcept {
+    // Use the contained type of the `ModuleHolder`, e.g. `LinearImpl` for
+    // `Linear`, since `LinearImpl` inherits `nn::Module`.
+    return is<typename ModuleType::ContainedType>();
+  }
+
  protected:
   Tensor& register_parameter(
       std::string name,
