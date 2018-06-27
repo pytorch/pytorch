@@ -101,7 +101,7 @@ class Module(object):
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
-        if name is None or not isinstance(name, torch._six.string_classes):
+        if not isinstance(name, torch._six.string_classes):
             raise TypeError("buffer name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -131,7 +131,7 @@ class Module(object):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        elif name is None or not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, torch._six.string_classes):
             raise TypeError("parameter name should be a string. "
                             "Got {}".format(torch.typename(name)))
         elif '.' in name:
@@ -169,7 +169,7 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
-        elif name is None or not isinstance(name, torch._six.string_classes):
+        elif not isinstance(name, torch._six.string_classes):
             raise TypeError("module name should be a string. Got {}".format(
                 torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
