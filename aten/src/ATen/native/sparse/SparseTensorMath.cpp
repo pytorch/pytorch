@@ -6,8 +6,6 @@
 
 #include <TH/THBlasUtils.h>
 
-#include <torch/csrc/variable_tensor_functions.h>
-
 namespace at { namespace native {
 
 // --------------------------------------------------------------------
