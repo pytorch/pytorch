@@ -74,7 +74,7 @@ Tensor Conv1dImpl::forward(Tensor input) {
   AT_ASSERT(input.ndimension() == 3);
 
   if (options_.transposed_) {
-    return at::conv_transpose1d(
+    return torch::conv_transpose1d(
         input,
         weight_,
         bias_,
@@ -84,7 +84,7 @@ Tensor Conv1dImpl::forward(Tensor input) {
         options_.groups_,
         options_.dilation_);
   }
-  return at::conv1d(
+  return torch::conv1d(
       input,
       weight_,
       bias_,
@@ -98,7 +98,7 @@ Tensor Conv2dImpl::forward(Tensor input) {
   AT_ASSERT(input.ndimension() == 4);
 
   if (options_.transposed_) {
-    return at::conv_transpose2d(
+    return torch::conv_transpose2d(
         input,
         weight_,
         bias_,
@@ -108,7 +108,7 @@ Tensor Conv2dImpl::forward(Tensor input) {
         options_.groups_,
         options_.dilation_);
   }
-  return at::conv2d(
+  return torch::conv2d(
       input,
       weight_,
       bias_,
@@ -122,7 +122,7 @@ Tensor Conv3dImpl::forward(Tensor input) {
   AT_ASSERT(input.ndimension() == 5);
 
   if (options_.transposed_) {
-    return at::conv_transpose3d(
+    return torch::conv_transpose3d(
         input,
         weight_,
         bias_,
@@ -132,7 +132,7 @@ Tensor Conv3dImpl::forward(Tensor input) {
         options_.groups_,
         options_.dilation_);
   } else {
-    return at::conv3d(
+    return torch::conv3d(
         input,
         weight_,
         bias_,

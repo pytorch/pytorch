@@ -45,19 +45,19 @@ TEST_CASE("serialization") {
   }
 
   SECTION("cputypes") {
-    for (int i = 0; i < static_cast<int>(at::ScalarType::NumOptions); i++) {
-      if (i == static_cast<int>(at::ScalarType::Half)) {
+    for (int i = 0; i < static_cast<int>(torch::Dtype::NumOptions); i++) {
+      if (i == static_cast<int>(torch::Dtype::Half)) {
         // XXX can't serialize half tensors at the moment since contiguous() is
         // not implemented for this type;
         continue;
-      } else if (i == static_cast<int>(at::ScalarType::Undefined)) {
+      } else if (i == static_cast<int>(torch::Dtype::Undefined)) {
         // We can't construct a tensor for this type. This is tested in
         // serialization/undefined anyway.
         continue;
       }
 
       auto x = torch::ones(
-          {5, 5}, at::getType(at::kCPU, static_cast<at::ScalarType>(i)));
+          {5, 5}, torch::getType(torch::kCPU, static_cast<torch::Dtype>(i)));
       auto y = torch::empty({});
 
       std::stringstream ss;
@@ -66,7 +66,7 @@ TEST_CASE("serialization") {
 
       REQUIRE(y.defined());
       REQUIRE(x.sizes().vec() == y.sizes().vec());
-      if (at::isIntegralType(static_cast<at::ScalarType>(i))) {
+      if (torch::isIntegralType(static_cast<torch::Dtype>(i))) {
         REQUIRE(x.equal(y));
       } else {
         REQUIRE(x.allclose(y));
@@ -186,7 +186,7 @@ TEST_CASE("serialization") {
 
       // forward
       auto x = model->forward<torch::Tensor>(inp);
-      return at::binary_cross_entropy(x, lab);
+      return torch::binary_cross_entropy(x, lab);
     };
 
     auto model = xor_model();
@@ -244,7 +244,7 @@ TEST_CASE("serialization") {
     auto optim3_2 = torch::optim::SGD(
         model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
 
-    auto x = torch::ones({10, 5}, at::requires_grad());
+    auto x = torch::ones({10, 5}, torch::requires_grad());
 
     auto step = [&](torch::optim::Optimizer& optimizer, Linear model) {
       optimizer.zero_grad();
@@ -296,7 +296,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
 
     // forward
     auto x = model->forward<torch::Tensor>(inp);
-    return at::binary_cross_entropy(x, lab);
+    return torch::binary_cross_entropy(x, lab);
   };
 
   auto model = xor_model();
