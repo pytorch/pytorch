@@ -53,6 +53,30 @@ TEST_CASE("module/zero-grad") {
   }
 }
 
+TEST_CASE("module/zero-grad-with-undefined") {
+  struct TestModule : torch::nn::Module {
+    TestModule() {
+      x = register_parameter("x", torch::ones(5, at::requires_grad()));
+      y = register_parameter("y", torch::ones(5, at::requires_grad()));
+    }
+    torch::Tensor x, y;
+  };
+
+  TestModule module;
+  auto z = module.x * 2;
+  z.sum().backward();
+
+  REQUIRE(module.x.grad().defined());
+  REQUIRE(!module.y.grad().defined());
+
+  module.zero_grad();
+
+  REQUIRE(module.x.grad().defined());
+  REQUIRE(!module.y.grad().defined());
+
+  REQUIRE(module.x.grad().sum().toCFloat() == 0);
+}
+
 TEST_CASE("module/name") {
   // CHECK instead of REQUIRE because demangling may fail.
   AGIUnit agi;
