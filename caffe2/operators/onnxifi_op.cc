@@ -37,7 +37,7 @@ void BlobToTensorDescriptor(
   // Set dims
   const auto shape = GetTensorShapeOfBlob(blob);
   desc->dimensions = shape.dims_size();
-  shapes->emplace_back(shape.dims().cbegin(), shape.dims().cend());
+  shapes->emplace_back(shape.dims().begin(), shape.dims().end());
   auto& shape_tmp = shapes->back();
   desc->shape = shapes->back().data();
 }
