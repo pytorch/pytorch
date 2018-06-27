@@ -44,7 +44,7 @@ void Adam::step() {
     if (options_.amsgrad_) {
       auto max_exp_average_sq =
           buffer_at(max_exp_average_sq_buffers_, i).data();
-      at::max_out(max_exp_average_sq, max_exp_average_sq, exp_average_sq);
+      torch::max_out(max_exp_average_sq, max_exp_average_sq, exp_average_sq);
       denom = max_exp_average_sq.sqrt().add_(options_.eps_);
     } else {
       denom = exp_average_sq.sqrt().add_(options_.eps_);

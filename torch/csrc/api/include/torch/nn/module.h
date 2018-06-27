@@ -85,8 +85,8 @@ class Module {
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
   virtual void to(
-      at::Device device,
-      at::ScalarType dtype,
+      torch::Device device,
+      torch::Dtype dtype,
       bool non_blocking = false);
 
   /// Recursively casts all parameters to the given dtype.
@@ -94,14 +94,14 @@ class Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  virtual void to(at::ScalarType dtype, bool non_blocking = false);
+  virtual void to(torch::Dtype dtype, bool non_blocking = false);
 
   /// Recursively moves all parameters to the given device.
   /// If `non_blocking` is true and the source is in pinned memory and
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  virtual void to(at::Device device, bool non_blocking = false);
+  virtual void to(torch::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();

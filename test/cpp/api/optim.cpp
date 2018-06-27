@@ -40,7 +40,7 @@ bool test_optimizer_xor(Optimizer&& optimizer, Sequential& model) {
     inp.set_requires_grad(true);
     optimizer.zero_grad();
     auto x = model.forward(inp);
-    torch::Tensor loss = at::binary_cross_entropy(x, lab);
+    torch::Tensor loss = torch::binary_cross_entropy(x, lab);
     loss.backward();
 
     optimizer.step();
@@ -54,10 +54,21 @@ bool test_optimizer_xor(Optimizer&& optimizer, Sequential& model) {
   return true;
 }
 
+template <typename Parameters>
+void assign_parameter(
+    const Parameters& parameters,
+    const char* name,
+    torch::Tensor new_tensor) {
+  auto parameter = parameters.at(name);
+  parameter.set_requires_grad(false);
+  parameter.flatten().copy_(new_tensor);
+  parameter.set_requires_grad(true);
+}
+
 template <typename OptimizerClass, typename Options>
 void check_exact_values(
     Options options,
-    std::vector<std::vector<at::Tensor>> expected_parameters) {
+    std::vector<std::vector<torch::Tensor>> expected_parameters) {
   const size_t kIterations = 1001;
   const size_t kSampleEvery = 100;
 
@@ -72,23 +83,23 @@ void check_exact_values(
 
   // Use exact input values because matching random values is hard.
   auto parameters = model.parameters();
-  parameters.at("0.weight").data().flatten() = at::tensor(
-      {-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}, torch::kFloat64);
-  parameters.at("0.bias").data() =
-      at::tensor({-0.1085, -0.2979, 0.6892}, torch::kFloat64);
-  parameters.at("2.weight").data().flatten() =
-      at::tensor({-0.0508, -0.3941, -0.2843}, torch::kFloat64);
-  parameters.at("2.bias").data() =
-      at::tensor({-0.0711}, torch::kFloat64);
+  assign_parameter(
+      parameters,
+      "0.weight",
+      torch::tensor({-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}));
+  assign_parameter(
+      parameters, "0.bias", torch::tensor({-0.1085, -0.2979, 0.6892}));
+  assign_parameter(
+      parameters, "2.weight", torch::tensor({-0.0508, -0.3941, -0.2843}));
+  assign_parameter(parameters, "2.bias", torch::tensor({-0.0711}));
 
   auto optimizer = OptimizerClass(parameters, options);
-
-  auto input = at::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}, torch::kFloat64)
-                   .reshape({3, 2});
+  torch::Tensor input =
+      torch::tensor({0.1, 0.2, 0.3, 0.4, 0.5, 0.6}).reshape({3, 2});
 
   for (size_t i = 0; i < kIterations; ++i) {
     optimizer.zero_grad();
-    auto output = model.forward(torch::autograd::make_variable(input));
+    auto output = model.forward(input);
     auto loss = output.sum();
     loss.backward();
 
@@ -99,7 +110,7 @@ void check_exact_values(
           expected_parameters.at(i / kSampleEvery).size() == parameters.size());
       for (size_t p = 0; p < parameters.size(); ++p) {
         REQUIRE(parameters.at(p)->defined());
-        auto computed = parameters.at(p)->data().flatten();
+        auto computed = parameters.at(p)->flatten();
         auto expected = expected_parameters.at(i / kSampleEvery).at(p);
         if (!computed.allclose(expected, /*rtol=*/1e-3, /*atol=*/1e-5)) {
           std::cout << "Iteration " << i << ": " << computed
