@@ -741,6 +741,10 @@ def slice(g, self, dim, start, end, step):
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
 
 
+def hardtanh(g, self, min_val, max_val):
+    return g.op("Clip", self, min=min_val, max=max_val)
+
+
 def alias(g, self):
     return self
 
