@@ -89,9 +89,9 @@ void binary_kernel(TensorIterator& iter, func_t f) {
   using arg2_t = typename traits::arg2_t;
 
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
-    char* __restrict__ out_ptr = data[0];
-    const char* __restrict__ in1_ptr = data[1];
-    const char* __restrict__ in2_ptr = data[2];
+    char* out_ptr = data[0];
+    const char* in1_ptr = data[1];
+    const char* in2_ptr = data[2];
     int64_t s0 = strides[0], s1 = strides[1], s2 = strides[2];
     int64_t i = 0;
     // Specializations to encourage auto-vectorization (trick from Numpy's loops.c.src)
@@ -117,9 +117,9 @@ void binary_kernel_vec(TensorIterator& iter, func_t f, vec_func_t vf) {
   static_assert(std::is_same<arg0_t, arg2_t>::value, "all types must match");
 
   iter.for_each([&](int ntensor, char** data, const int64_t* strides, int64_t n) {
-    char* __restrict__ out_ptr = data[0];
-    const char* __restrict__ in1_ptr = data[1];
-    const char* __restrict__ in2_ptr = data[2];
+    char* out_ptr = data[0];
+    const char* in1_ptr = data[1];
+    const char* in2_ptr = data[2];
     int64_t s0 = strides[0], s1 = strides[1], s2 = strides[2];
     int64_t i = 0;
     if (s0 == sizeof(arg0_t) && s1 == sizeof(arg1_t) && s2 == sizeof(arg2_t)) {
