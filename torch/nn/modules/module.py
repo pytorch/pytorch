@@ -25,7 +25,7 @@ def _addindent(s_, numSpaces):
 
 class _ModuleMeta(type):
     """Metaclass for the Module class.
-    
+
     Saves all `__init__` arguments to `_args` and `_kwargs` module attributes.
     """
     def __call__(cls, *args, **kwargs):
