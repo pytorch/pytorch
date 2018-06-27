@@ -314,7 +314,10 @@ OPERATOR_SCHEMA(Div)
     .TensorInferenceFunction(ElementwiseOpShapeInference)
     .FillUsing(MathDocGenerator("division", kDivExample))
     .InheritOnnxSchema("Div");
-OPERATOR_SCHEMA(DivGradient).NumInputs(4).NumOutputs(2).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(DivGradient)
+    .NumInputs(3, 4)
+    .NumOutputs(2)
+    .AllowInplace({{0, 0}});
 
 OPERATOR_SCHEMA(SumReduceLike)
     .NumInputs(2)

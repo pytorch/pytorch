@@ -23,21 +23,20 @@ namespace caffe2 {
  * You need to register your types using CAFFE_KNOWN_TYPE(MyType) to be able to use CaffeTypeId with custom types.
  * This is for example used to store the dtype of tensors.
  */
-class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, intptr_t> {
+class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, uint16_t> {
 public:
-  constexpr explicit CaffeTypeId(intptr_t id): IdWrapper(id) {}
+  static CaffeTypeId createTypeId();
 
   friend std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId);
   friend bool operator<(CaffeTypeId lhs, CaffeTypeId rhs);
-
-  // Don't use this default constructor!
-  // Unfortunately, a default constructor needs to be defined because of https://reviews.llvm.org/D41223
-  constexpr CaffeTypeId(): IdWrapper(0) {}
 
   // TODO Can we get rid of uninitialized?
   static constexpr CaffeTypeId uninitialized() {
     return CaffeTypeId(0);
   }
+
+private:
+    constexpr explicit CaffeTypeId(uint16_t id): IdWrapper(id) {}
 };
 
 inline std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId) {
@@ -131,7 +130,7 @@ class TypeMeta {
    * type, use TypeMeta::Make<T>().
    */
   TypeMeta() noexcept
-      : id_(0), itemsize_(0), ctor_(nullptr), copy_(nullptr), dtor_(nullptr) {}
+      : id_(CaffeTypeId::uninitialized()), itemsize_(0), ctor_(nullptr), copy_(nullptr), dtor_(nullptr) {}
 
   /**
    * Copy constructor.
@@ -381,24 +380,20 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 // and as a result, we define these two macros slightly differently.
 
 #ifdef _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                                   \
-  template <>                                                                 \
+#define CAFFE_KNOWN_TYPE(T)                                                        \
+  template <>                                                                      \
   CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() {                                    \
-    static bool type_id_bit[1];                                               \
-    static const CaffeTypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
-    static TypeNameRegisterer<T> registerer(                                  \
-        type_id, #T);                                                         \
-    return type_id;                                                           \
+    static const CaffeTypeId type_id = CaffeTypeId::createTypeId();                \
+    static TypeNameRegisterer<T> registerer(type_id, #T);                          \
+    return type_id;                                                                \
   }
 #else // _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                                   \
-  template <>                                                                 \
+#define CAFFE_KNOWN_TYPE(T)                                                        \
+  template <>                                                                      \
   CaffeTypeId TypeMeta::Id<T>() {                                                  \
-      static bool type_id_bit[1];                                             \
-    static const CaffeTypeId type_id(reinterpret_cast<intptr_t>(type_id_bit));     \
-    static TypeNameRegisterer<T> registerer(                                  \
-        type_id, #T);                                                         \
-    return type_id;                                                           \
+    static const CaffeTypeId type_id = CaffeTypeId::createTypeId();                \
+    static TypeNameRegisterer<T> registerer(type_id, #T);                          \
+    return type_id;                                                                \
   }
 #endif
 

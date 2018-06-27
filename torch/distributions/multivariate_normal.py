@@ -126,7 +126,8 @@ class MultivariateNormal(Distribution):
     has_rsample = True
 
     def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
-        loc = loc.unsqueeze(0) if loc.dim() < 1 else loc
+        if loc.dim() < 1:
+            loc = loc.unsqueeze(0)
         event_shape = loc.shape[-1:]
         if (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) != 1:
             raise ValueError("Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified.")

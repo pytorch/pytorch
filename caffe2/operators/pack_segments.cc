@@ -21,8 +21,8 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     presence_mask = Output(1);
   }
 
-  CAFFE_ENFORCE(data.ndim() >= 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
 
   // Find the length of the longest sequence.
   const T* l = lengths.template data<T>();
@@ -109,16 +109,16 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   const auto& lengths = Input(LENGTHS);
   auto* output = Output(0);
 
-  CAFFE_ENFORCE(data.ndim() >= 2, "DATA should be at least 2-D");
-  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.ndim(), 2, "DATA should be at least 2-D");
+  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
 
   const T* l = lengths.template data<T>();
 
   TIndex total_l = std::accumulate(l, l + lengths.dim(0), (TIndex)0);
 
   auto shape = data.dims();
-  CAFFE_ENFORCE(
-      shape[0] == lengths.dim(0), "LENGTH should match DATA in dimension 0");
+  CAFFE_ENFORCE_EQ(
+      shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = total_l;
   output->Resize(shape);

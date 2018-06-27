@@ -65,8 +65,7 @@ using std::vector;
 // Disable the copy and assignment operator for a class. Note that this will
 // disable the usage of the class in std containers.
 #ifndef DISABLE_COPY_AND_ASSIGN
-#define DISABLE_COPY_AND_ASSIGN(classname)                              \
-private:                                                                       \
+#define DISABLE_COPY_AND_ASSIGN(classname)                                     \
   classname(const classname&) = delete;                                        \
   classname& operator=(const classname&) = delete
 #endif

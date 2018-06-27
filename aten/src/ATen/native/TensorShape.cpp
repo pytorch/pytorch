@@ -4,6 +4,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/optional.h"
+#include <TH/THTensor.hpp>
 
 #include <algorithm>
 
@@ -112,16 +113,28 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
+Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
+  return self.as_strided(size, stride, self.storage_offset());
+}
+
+Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
+  return self.as_strided_(size, stride, self.storage_offset());
+}
+
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
-  if (start < 0 || start >= cur_size) {
+  if (start < 0) {
     AT_ERROR("start out of range");
   }
+#ifndef USE_TH_SIZE_ZERO_DIM
   if (length <= 0 || start > cur_size - length) {
-    AT_ERROR("length out of range");
+#else
+  if (length < 0 || start > cur_size - length) {
+#endif
+    AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   }
-  return at::native::slice(self, dim, start, start + length, 1);
+  return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor permute(const Tensor& self, IntList dims) {
@@ -212,53 +225,12 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
   throw std::runtime_error(ss.str());
 }
 
-static at::optional<std::vector<int64_t>>
-compute_stride(const Tensor& self, IntList newshape) {
-  auto oldstride = self.strides();
-  auto oldshape = self.sizes();
-  if (oldshape.empty()) {
-    return std::vector<int64_t>(newshape.size(), 1);
-  }
-
-  std::vector<int64_t> newstride(newshape.size());
-  int64_t view_d = newshape.size() - 1;
-  // stride for each subspace in the chunk
-  int64_t chunk_base_stride = oldstride.back();
-  // numel in current chunk
-  int64_t tensor_numel = 1;
-  int64_t view_numel = 1;
-  for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
-    tensor_numel *= oldshape[tensor_d];
-    // if end of tensor size chunk, check view
-    if ((tensor_d == 0) ||
-        (oldshape[tensor_d - 1] != 1 && oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
-      while (view_d >= 0 && (view_numel < tensor_numel || newshape[view_d] == 1)) {
-        newstride[view_d] = view_numel * chunk_base_stride;
-        view_numel *= newshape[view_d];
-        view_d--;
-      }
-      if (view_numel != tensor_numel) {
-        return {};
-      }
-      if (tensor_d > 0) {
-        chunk_base_stride = oldstride[tensor_d - 1];
-        tensor_numel = 1;
-        view_numel = 1;
-      }
-    }
-  }
-  if (view_d != -1) {
-    return {};
-  }
-  return newstride;
-}
-
 Tensor reshape(const Tensor& self, IntList proposed_shape) {
   if (self.type().is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
   auto shape = infer_size(proposed_shape, self.numel());
-  if (auto stride = compute_stride(self, shape)) {
+  if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }
   return at::_unsafe_view(self.clone(), shape);
@@ -314,10 +286,12 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   }
   auto storage_offset = self.storage_offset() + start * strides[dim];
   auto len = end - start;
+#ifndef USE_TH_SIZE_ZERO_DIM
   if (len == 0) {
     // TODO: currently we don't have support for 0-sized dims, return size 0 tensor for now
     return self.type().tensor();
   }
+#endif
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   return self.as_strided(sizes, strides, storage_offset);
@@ -598,6 +572,28 @@ Tensor & unsqueeze_(Tensor& self, int64_t dim) {
 
   auto g = inferUnsqueezeGeometry(self, dim);
   return self.as_strided_(std::get<0>(g), std::get<1>(g));
+}
+
+Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
+  start_dim = maybe_wrap_dim(start_dim, self.dim());
+  end_dim = maybe_wrap_dim(end_dim, self.dim());
+  AT_CHECK(start_dim <= end_dim, "flatten() has invalid args: start_dim cannot come after end_dim");
+
+  if (start_dim == end_dim) {
+    return self;
+  }
+
+  std::vector<int64_t> shape;
+  shape.reserve(self.dim() - end_dim + start_dim);
+  for (int64_t i = 0; i < start_dim; i++) {
+    shape.push_back(self.size(i));
+  }
+  shape.push_back(-1);
+  for (int64_t i = end_dim + 1; i < self.dim(); i++) {
+    shape.push_back(self.size(i));
+  }
+
+  return self.reshape(shape);
 }
 
 Tensor view_as(const Tensor& self, const Tensor& other) {

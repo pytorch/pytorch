@@ -92,7 +92,8 @@ class LowRankMultivariateNormal(Distribution):
     has_rsample = True
 
     def __init__(self, loc, scale_factor, scale_diag, validate_args=None):
-        loc = loc.unsqueeze(0) if loc.dim() < 1 else loc
+        if loc.dim() < 1:
+            loc = loc.unsqueeze(0)
         event_shape = loc.shape[-1:]
         if scale_factor.dim() < 2:
             raise ValueError("scale_factor must be at least two-dimensional, "

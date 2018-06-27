@@ -21,10 +21,10 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   int64_t t, d;
   real sum;
 
-  THArgCheck((input->_dim() == 1) || (input->_dim() == 2), 2,
-	     "vector or matrix expected");
+  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+           "non-empty vector or matrix expected, got size: ", input->sizes());
 
-  if (input->_dim() == 1)
+  if (input->dim() == 1)
   {
     nframe = 1;
     dim = input->size[0];
@@ -33,8 +33,8 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   {
     nframe = input->size[0];
     dim = input->size[1];
-    THArgCheck((target->_dim() == 1) && (target->size[0] == nframe), 3,
-	       "inconsistent target size");
+    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe),
+             "inconsistent target size, got: ", target->sizes());
   }
 
   for (t = 0; t < nframe; t++)
@@ -138,10 +138,10 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   int64_t t, d;
   real g;
 
-  THArgCheck((input->_dim() == 1) || (input->_dim() == 2), 2,
-	     "vector or matrix expected");
+  AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
+           "non-empty vector or matrix expected, got size: ", input->sizes());
 
-  if (input->_dim() == 1)
+  if (input->dim() == 1)
   {
     nframe = 1;
     dim = input->size[0];
@@ -150,8 +150,8 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   {
     nframe = input->size[0];
     dim = input->size[1];
-    THArgCheck((target->_dim() == 1) && (target->size[0] == nframe), 3,
-	       "inconsistent target size");
+    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe),
+             "inconsistent target size, got: ", target->sizes());
   }
 
   g = (sizeAverage && reduce ? 1./((real)(nframe*dim)) : 1./((real)dim));

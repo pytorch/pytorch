@@ -31,7 +31,7 @@ TORCH_AUTOGRAD_CONTAINER_CLASS(MyModel) {
     myConv_ = add(Conv2d(1, 50, 3, 3).stride(2).make(), "conv");
     myLinear_ = add(Linear(50, 1).make(), "linear");
   }
-  std::vector<Variable> forward(std::vector<Variable> x) override {
+  std::vector<Tensor> forward(std::vector<Tensor> x) override {
     auto v = myConv_->forward(x);
     v = v.mean(-1).mean(-1);
     return myLinear_.forward({v});

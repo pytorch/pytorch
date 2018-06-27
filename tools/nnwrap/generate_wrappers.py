@@ -3,17 +3,16 @@ import sys
 from string import Template, ascii_lowercase
 from ..cwrap import cwrap
 from ..cwrap.plugins import NNExtension, NullableArguments, AutoGPU
+from ..shared import import_module
 
-BASE_PATH = os.path.realpath(os.path.join(__file__, '..', '..', '..'))
-WRAPPER_PATH = os.path.join(BASE_PATH, 'torch', 'csrc', 'nn')
-THNN_UTILS_PATH = os.path.join(BASE_PATH, 'torch', '_thnn', 'utils.py')
+from ..shared._utils_internal import get_file_path
 
+THNN_H_PATH = get_file_path('torch', 'lib', 'THNN.h')
+THCUNN_H_PATH = get_file_path('torch', 'lib', 'THCUNN.h')
 
-try:
-    from torch._thnn import utils as thnn_utils
-except ImportError:
-    from ..shared import import_module
-    thnn_utils = import_module('torch._thnn.utils', THNN_UTILS_PATH)
+THNN_UTILS_PATH = get_file_path('torch', '_thnn', 'utils.py')
+
+thnn_utils = import_module('torch._thnn.utils', THNN_UTILS_PATH)
 
 FUNCTION_TEMPLATE = Template("""\
 [[
@@ -105,7 +104,7 @@ def generate_wrappers(nn_root=None, install_dir=None, template_path=None):
 
 def wrap_nn(thnn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n\n\n'
-    nn_functions = thnn_utils.parse_header(thnn_h_path or thnn_utils.THNN_H_PATH)
+    nn_functions = thnn_utils.parse_header(thnn_h_path or THNN_H_PATH)
     for fn in nn_functions:
         for t in ['Float', 'Double']:
             wrapper += wrap_function(fn.name, t, fn.arguments)
@@ -124,7 +123,7 @@ def wrap_nn(thnn_h_path, install_dir, template_path):
 def wrap_cunn(thcunn_h_path, install_dir, template_path):
     wrapper = '#include <TH/TH.h>\n'
     wrapper += '#include <THC/THC.h>\n\n\n'
-    cunn_functions = thnn_utils.parse_header(thcunn_h_path or thnn_utils.THCUNN_H_PATH)
+    cunn_functions = thnn_utils.parse_header(thcunn_h_path or THCUNN_H_PATH)
     for fn in cunn_functions:
         for t in ['CudaHalf', 'Cuda', 'CudaDouble']:
             wrapper += wrap_function(fn.name, t, fn.arguments)

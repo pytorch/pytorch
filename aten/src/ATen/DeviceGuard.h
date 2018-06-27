@@ -56,7 +56,7 @@ struct DeviceGuard {
     }
   }
 
-  /// Sets the device to the given one if its index is not `nullopt`.
+  /// Sets the device to the given one.
   void set_index(int32_t index) {
     if (index == -1) {
       return;

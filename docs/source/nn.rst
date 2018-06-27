@@ -80,6 +80,18 @@ Convolution layers
 .. autoclass:: ConvTranspose3d
     :members:
 
+:hidden:`Fold`
+~~~~~~~~~~~~~~
+
+.. autoclass:: Fold
+    :members:
+
+:hidden:`Unfold`
+~~~~~~~~~~~~~~~
+
+.. autoclass:: Unfold
+    :members:
+
 
 Pooling layers
 ----------------------------------
@@ -822,6 +834,16 @@ Convolution functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: conv_transpose3d
+
+:hidden:`fold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fold
+
+:hidden:`unfold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: unfold
 
 Pooling functions
 ----------------------------------

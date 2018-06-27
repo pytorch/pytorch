@@ -145,12 +145,8 @@ Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-  if (!self.is_cuda()) {
-    self._cpu_bernoulli_(p, gen);
+    self._bernoulli_(p, gen);
     return self;
-  }
-  Tensor probs = at::full({}, p, self.type().toScalarType(kDouble));
-  return native::bernoulli_(self, probs, gen);
 }
 
 Tensor& bernoulli_(Tensor& self) {

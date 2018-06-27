@@ -12,7 +12,7 @@ from .modules import utils
 from ._functions.padding import ConstantPadNd
 from ._functions import vision
 from ._functions.thnn.fold import Col2Im, Im2Col
-from .modules.utils import _single, _pair, _triple
+from .modules.utils import _single, _pair, _triple, _list_with_default
 from . import grad
 
 
@@ -114,16 +114,16 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sW,)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
-    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple `(out_padW,)`.
-      Default: 0
+      tuple ``(sW,)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padW,)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple ``(out_padW)``. Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dW,)`. Default: 1
+      a tuple ``(dW,)``. Default: 1
 
 Examples::
 
@@ -145,16 +145,17 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kH \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padH, padW)`. Default: 0
-    output_padding: implicit zero-paddings of :math:`0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple
-      `(out_padH, out_padW)`. Default: 0
+      tuple ``(sH, sW)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padH, padW)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple ``(out_padH, out_padW)``.
+      Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
-      a tuple `(dH, dW)`. Default: 1
+      a tuple ``(dH, dW)``. Default: 1
 
 Examples::
 
@@ -177,12 +178,13 @@ Args:
     weight: filters of shape (:math:`in\_channels \times \frac{out\_channels}{groups} \times kT \times kH \times kW`)
     bias: optional bias of shape (:math:`out\_channels`). Default: None
     stride: the stride of the convolving kernel. Can be a single number or a
-      tuple `(sT, sH, sW)`. Default: 1
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`. Default: 0
-    output_padding: implicit zero-paddings of `0 \leq padding < stride` on both
-      sides of the output. Can be a single number or a tuple
-      `(out_padT, out_padH, out_padW)`. Default: 0
+      tuple ``(sT, sH, sW)``. Default: 1
+    padding: ``kernel_size - 1 - padding`` zero-padding will be added to both
+      sides of each dimension in the input. Can be a single number or a tuple
+      ``(padT, padH, padW)``. Default: 0
+    output_padding: additional size added to one side of each dimension in the
+      output shape. Can be a single number or a tuple
+      ``(out_padT, out_padH, out_padW)``. Default: 0
     groups: split input into groups, :math:`in\_channels` should be divisible by the
       number of groups. Default: 1
     dilation: the spacing between kernel elements. Can be a single number or
@@ -210,40 +212,33 @@ def conv_tbc(input, weight, bias, pad=0):
 
 
 # Pooling
-def avg_pool1d(input, kernel_size, stride=None, padding=0,
-               ceil_mode=False, count_include_pad=True):
-    r"""Applies a 1D average pooling over an input signal composed of several
-    input planes.
+avg_pool1d = _add_docstr(torch.avg_pool1d, r"""
+avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_include_pad=True) -> Tensor
 
-    See :class:`~torch.nn.AvgPool1d` for details and output shape.
+Applies a 1D average pooling over an input signal composed of several
+input planes.
 
-    Args:
-        input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
-        kernel_size: the size of the window. Can be a single number or a
-          tuple `(kW,)`
-        stride: the stride of the window. Can be a single number or a tuple
-          `(sW,)`. Default: :attr:`kernel_size`
-        padding: implicit zero paddings on both sides of the input. Can be a
-          single number or a tuple `(padW,)`. Default: 0
-        ceil_mode: when True, will use `ceil` instead of `floor` to compute the
-            output shape. Default: ``False``
-        count_include_pad: when True, will include the zero-padding in the
-            averaging calculation. Default: ``True``
+See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
-    Example::
-        >>> # pool of square window of size=3, stride=2
-        >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
-        >>> F.avg_pool1d(input, kernel_size=3, stride=2)
-        tensor([[[ 2.,  4.,  6.]]])
-    """
-    if input.dim() != 3:
-        raise ValueError('expected 3D input (got {} dimensions)'
-                         .format(input.dim()))
-    kernel_size = _single(kernel_size) + (1,)
-    stride = _single(stride) + (1,) if stride is not None else kernel_size
-    padding = _single(padding) + (0,)
-    return avg_pool2d(input.unsqueeze(3), kernel_size, stride, padding,
-                      ceil_mode, count_include_pad).squeeze(3)
+Args:
+    input: input tensor of shape (:math:`minibatch \times in\_channels \times iW`)
+    kernel_size: the size of the window. Can be a single number or a
+      tuple `(kW,)`
+    stride: the stride of the window. Can be a single number or a tuple
+      `(sW,)`. Default: :attr:`kernel_size`
+    padding: implicit zero paddings on both sides of the input. Can be a
+      single number or a tuple `(padW,)`. Default: 0
+    ceil_mode: when True, will use `ceil` instead of `floor` to compute the
+        output shape. Default: ``False``
+    count_include_pad: when True, will include the zero-padding in the
+        averaging calculation. Default: ``True``
+
+Example::
+    >>> # pool of square window of size=3, stride=2
+    >>> input = torch.tensor([[[1,2,3,4,5,6,7]]])
+    >>> F.avg_pool1d(input, kernel_size=3, stride=2)
+    tensor([[[ 2.,  4.,  6.]]])
+""")
 
 
 avg_pool2d = _add_docstr(torch._C._nn.avg_pool2d, r"""
@@ -346,7 +341,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    ret = torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -357,7 +352,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool2d` for details.
     """
-    ret = torch._C._nn.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -368,7 +363,7 @@ def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool3d` for details.
     """
-    ret = torch._C._nn.max_pool3d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -490,6 +485,7 @@ def adaptive_max_pool2d(input, output_size, return_indices=False):
             double-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool2d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -505,6 +501,7 @@ def adaptive_max_pool3d(input, output_size, return_indices=False):
             triple-integer tuple)
         return_indices: whether to return pooling indices. Default: ``False``
     """
+    output_size = _list_with_default(output_size, input.size())
     ret = torch._C._nn.adaptive_max_pool3d(input, output_size)
     return ret if return_indices else ret[0]
 
@@ -521,35 +518,38 @@ Args:
     output_size: the target output size (single integer)
 """)
 
-adaptive_avg_pool2d = _add_docstr(torch._C._nn.adaptive_avg_pool2d, r"""
-adaptive_avg_pool2d(input, output_size) -> Tensor
 
-Applies a 2D adaptive average pooling over an input signal composed of
-several input planes.
+def adaptive_avg_pool2d(input, output_size):
+    r"""
+    Applies a 2D adaptive average pooling over an input signal composed of
+    several input planes.
 
-See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
+    See :class:`~torch.nn.AdaptiveAvgPool2d` for details and output shape.
 
-Args:
-    output_size: the target output size (single integer or
-        double-integer tuple)
-""")
+    Args:
+        output_size: the target output size (single integer or
+            double-integer tuple)
+    """
+    output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool2d(input, output_size)
 
-adaptive_avg_pool3d = _add_docstr(torch._C._nn.adaptive_avg_pool3d, r"""
-adaptive_avg_pool3d(input, output_size) -> Tensor
 
-Applies a 3D adaptive average pooling over an input signal composed of
-several input planes.
+def adaptive_avg_pool3d(input, output_size):
+    r"""
+    Applies a 3D adaptive average pooling over an input signal composed of
+    several input planes.
 
-See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
+    See :class:`~torch.nn.AdaptiveAvgPool3d` for details and output shape.
 
-Args:
-    output_size: the target output size (single integer or
-        triple-integer tuple)
-""")
+    Args:
+        output_size: the target output size (single integer or
+            triple-integer tuple)
+    """
+    output_size = _list_with_default(output_size, input.size())
+    return torch._C._nn.adaptive_avg_pool3d(input, output_size)
 
 
 # Activation functions
-
 def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
@@ -1518,7 +1518,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
     return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
-def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True):
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True, pos_weight=None):
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1537,6 +1537,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 observations for each minibatch depending on :attr:`size_average`. When :attr:`reduce`
                 is ``False``, returns a loss per input/target element instead and ignores
                 :attr:`size_average`. Default: ``True``
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
 
     Examples::
 
@@ -1549,7 +1551,12 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
     max_val = (-input).clamp(min=0)
-    loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
+
+    if pos_weight is None:
+        loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
+    else:
+        log_weight = 1 + (pos_weight - 1) * target
+        loss = input - input * target + log_weight * (max_val + ((-max_val).exp() + (-input - max_val).exp()).log())
 
     if weight is not None:
         loss = loss * weight
@@ -1895,6 +1902,8 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
         output (Tensor): output Tensor
 
     """
+    if mode != 'bilinear':
+        raise NotImplementedError("nn.functional.grid_sample got unsupported mode: '{}'".format(mode))
     return vision.grid_sampler(input, grid, padding_mode)
 
 
@@ -2063,7 +2072,8 @@ def assert_int_or_pair(arg, arg_name, message):
 
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Creates array of convolution patches from :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Unfold` for details
     """
 
@@ -2081,7 +2091,8 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
-    r"""
+    r"""Combines array of convolution patches to :math:`(N,C,H,W)`-tensor
+
     See :class:`torch.nn.Fold` for details
     """
     if input is not None and input.dim() == 3:
