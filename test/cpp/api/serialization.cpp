@@ -7,6 +7,7 @@
 #include <torch/optim/sgd.h>
 #include <torch/serialization.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
 
@@ -30,6 +31,7 @@ std::shared_ptr<Sequential> xor_model() {
 } // namespace
 
 TEST_CASE("serialization") {
+  torch::manual_seed(0);
   SECTION("undefined") {
     auto x = torch::Tensor();
 
@@ -275,6 +277,7 @@ TEST_CASE("serialization") {
 }
 
 TEST_CASE("serialization_cuda", "[cuda]") {
+  torch::manual_seed(0);
   // We better be able to save and load a XOR model!
   auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t batch_size) {
     auto inputs = torch::empty({batch_size, 2});

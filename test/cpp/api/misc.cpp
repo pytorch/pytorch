@@ -18,6 +18,7 @@ using OrderedDict = torch::detail::OrderedDict<std::string, T>;
 using Catch::StartsWith;
 
 TEST_CASE("NoGrad") {
+  torch::manual_seed(0);
   torch::NoGradGuard guard;
   Linear model(5, 2);
   auto x = torch::randn({10, 5}, torch::requires_grad());
@@ -29,6 +30,7 @@ TEST_CASE("NoGrad") {
 }
 
 TEST_CASE("autograd") {
+  torch::manual_seed(0);
   auto x = torch::randn({3, 3}, torch::requires_grad());
   auto y = torch::randn({3, 3});
   auto z = x * y;
@@ -48,6 +50,7 @@ TEST_CASE("autograd") {
 }
 
 TEST_CASE("expanding-array") {
+  torch::manual_seed(0);
   SECTION("successful construction") {
     SECTION("initializer_list") {
       torch::ExpandingArray<5> e({1, 2, 3, 4, 5});

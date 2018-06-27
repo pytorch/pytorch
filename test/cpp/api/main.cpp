@@ -2,7 +2,6 @@
 #include <catch.hpp>
 
 #include <torch/cuda.h>
-#include <torch/utils.h>
 
 #include <iostream>
 
@@ -22,9 +21,6 @@ int main(int argc, char* argv[]) {
     // ~ disables the [cuda] tag.
     session.configData().testsOrTags.emplace_back("~[cuda]");
   }
-
-  // Set a deterministic random seed for all tests.
-  torch::manual_seed(0);
 
   return session.run();
 }

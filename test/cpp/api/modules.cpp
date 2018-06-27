@@ -8,6 +8,7 @@
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
 
@@ -38,6 +39,7 @@ class NestedModel : public torch::nn::Module {
 };
 
 TEST_CASE("modules") {
+  torch::manual_seed(0);
   SECTION("conv") {
     SECTION("1d") {
       Conv1d model(Conv1dOptions(3, 2, 3).stride(2));
@@ -238,6 +240,7 @@ TEST_CASE("modules") {
 }
 
 TEST_CASE("modules_cuda", "[cuda]") {
+  torch::manual_seed(0);
   SECTION("1") {
     Linear model(5, 2);
     model->cuda();

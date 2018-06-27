@@ -233,6 +233,7 @@ bool test_mnist(
 }
 
 TEST_CASE("integration/cartpole") {
+  torch::manual_seed(0);
   std::cerr << "Training episodic policy gradient with a critic for up to 3000"
                " episodes, rest your eyes for a bit!\n";
   auto model = std::make_shared<torch::SimpleContainer>();
@@ -331,6 +332,7 @@ TEST_CASE("integration/cartpole") {
 }
 
 TEST_CASE("integration/mnist", "[cuda]") {
+  torch::manual_seed(0);
   auto model = std::make_shared<torch::SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
@@ -366,6 +368,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
 }
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
+  torch::manual_seed(0);
   auto model = std::make_shared<torch::SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto batchnorm2d =
