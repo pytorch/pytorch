@@ -1,6 +1,7 @@
 #pragma once
 
 #include "onnx/onnxifi_loader.h"
+#include <mutex>
 #include <string>
 #include <unordered_map>
 
@@ -15,6 +16,7 @@ class OnnxifiManager {
 
     static OnnxifiManager* get_onnxifi_manager();
   private:
+    mutable std::mutex m_;
     std::unordered_map<std::string, onnxifi_library> onnxifi_interfaces_;
 };
 

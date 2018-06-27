@@ -9,6 +9,7 @@ namespace onnx {
 
 onnxifi_library* OnnxifiManager::AddOnnxifiLibrary(
     const std::string& name) {
+  std::lock_guard<std::mutex> lock(m_);
   auto it = onnxifi_interfaces_.find(name);
   if (it != onnxifi_interfaces_.end()) {
     LOG(INFO) << "Onnx interface " << name <<  " already exists";
@@ -25,6 +26,7 @@ onnxifi_library* OnnxifiManager::AddOnnxifiLibrary(
 }
 
 void OnnxifiManager::RemoveOnnxifiLibrary(const std::string& name) {
+  std::lock_guard<std::mutex> lock(m_);
   auto it = onnxifi_interfaces_.find(name);
   if (it == onnxifi_interfaces_.end()) {
     LOG(WARNING) << "Onnxifi lib " << name << "has not been registered";
@@ -34,6 +36,7 @@ void OnnxifiManager::RemoveOnnxifiLibrary(const std::string& name) {
 }
 
 void OnnxifiManager::ClearAll() {
+  std::lock_guard<std::mutex> lock(m_);
   for (auto& kv : onnxifi_interfaces_) {
     onnxifi_unload(&kv.second);
   }
@@ -41,14 +44,8 @@ void OnnxifiManager::ClearAll() {
 }
 
 OnnxifiManager* OnnxifiManager::get_onnxifi_manager() {
-  static OnnxifiManager* core = nullptr;
-  static std::mutex m;
-  std::lock_guard<std::mutex> lock(m);
-  // leaky singleton
-  if (!core) {
-    core = new OnnxifiManager();
-  }
-  return core;
+  static OnnxifiManager core{};
+  return &core;
 }
 
 } // namespace onnx
