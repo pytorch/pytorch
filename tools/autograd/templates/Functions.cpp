@@ -118,7 +118,7 @@ Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) 
 }
 
 Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & exponent) {
-  return at::where(exponent == 0.0, zeros_like(self), grad * exponent * self.pow(exponent - 1));
+  return at::where(exponent == 0.0, at::zeros({}, grad.type()), grad * exponent * self.pow(exponent - 1));
 }
 
 Tensor pow_backward_exponent(Tensor grad, const Tensor & self, const Tensor & exponent) {
