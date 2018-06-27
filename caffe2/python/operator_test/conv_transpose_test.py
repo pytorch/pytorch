@@ -347,6 +347,72 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         for i in outputs_to_check:
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
+    # Testing when using output_shape instead of pad
+    @given(stride=st.integers(1, 3),
+           output_size=st.integers(10, 30),
+           kernel=st.integers(1, 5),
+           adj=st.integers(0, 2),
+           size=st.integers(7, 10),
+           input_channels=st.integers(1, 8),
+           output_channels=st.integers(1, 8),
+           batch_size=st.integers(1, 3),
+           engine=st.sampled_from(["", "CUDNN", "BLOCK"]),
+           shared_buffer=st.booleans(),
+           use_bias=st.booleans(),
+           **hu.gcs)
+    def test_convolution_transpose_layout_output_shape(
+            self, strideutput_size, kernel, adj,
+            size, input_channels,
+            output_channels, batch_size,
+            engine, shared_buffer, use_bias, gc, dc):
+        assume(adj < stride)
+        assume(output_size >= size)
+        X = np.random.rand(
+            batch_size, size, size, input_channels).astype(np.float32) - 0.5
+        w = np.random.rand(
+            input_channels, kernel, kernel, output_channels)\
+            .astype(np.float32) - 0.5
+        b = np.random.rand(output_channels).astype(np.float32) - 0.5
+        outputs = {}
+        for order in ["NCHW", "NHWC"]:
+            op = core.CreateOperator(
+                "ConvTranspose",
+                ["X", "w", "b"] if use_bias else ["X", "w"],
+                ["Y"],
+                strides=[stride] * 2,
+                kernels=[kernel] * 2,
+                output_shape=[output_size] * 2,
+                adjs=[adj] * 2,
+                order=order,
+                engine=engine,
+                shared_buffer=int(shared_buffer),
+                device_option=gc,
+            )
+            if order == "NCHW":
+                X_f = X.transpose((0, 3, 1, 2))
+                w_f = w.transpose((0, 3, 1, 2))
+            else:
+                X_f = X
+                w_f = w
+            self.assertDeviceChecks(
+                dc,
+                op,
+                [X_f, w_f, b] if use_bias else [X_f, w_f],
+                [0])
+            self.ws.create_blob("X").feed(X_f, device_option=gc)
+            self.ws.create_blob("w").feed(w_f, device_option=gc)
+            self.ws.create_blob("b").feed(b, device_option=gc)
+            self.ws.run(op)
+            outputs[order] = self.ws.blobs["Y"].fetch()
+        self.assertEqual(
+            outputs["NCHW"].shape,
+            (batch_size, output_channels, output_size, output_size))
+        np.testing.assert_allclose(
+            outputs["NCHW"],
+            outputs["NHWC"].transpose((0, 3, 1, 2)),
+            atol=1e-4,
+            rtol=1e-4)
+
 if __name__ == "__main__":
     import unittest
     unittest.main()

@@ -96,12 +96,14 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
 	if (has_pad){
       if (OperatorBase::HasArgument("pad")) {
+        std::cout << "Liar liar pants on fire 2" << std::endl;
         pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
       } else {
-		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
-		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
-		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
-		pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
+        std::cout << "3 Liar liar pants on fire" << std::endl;
+        pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
+        pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
+        pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
+        pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
 	  }
 	} else
 	if (has_output_shape){
@@ -109,10 +111,15 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 		use_pad_ = false;
 	  }
 	  if (OperatorBase::HasArgument("output_shape")){
-		output_shape_.resize(2, OperatorBase::GetSingleArgument<int>("output_shape", 0));
-	  } else{
-		output_shape_.push_back(OperatorBase::GetSingleArgument<int>("output_shape_h", 0));
-		output_shape_.push_back(OperatorBase::GetSingleArgument<int>("output_shape_w", 0));
+            std::cout << "5 Liar liar pants on fire" << std::endl;
+            output_shape_.resize(
+                2, OperatorBase::GetSingleArgument<int>("output_shape", 0));
+          } else{
+            std::cout << "4 Liar liar pants on fire" << std::endl;
+            output_shape_.push_back(
+                OperatorBase::GetSingleArgument<int>("output_shape_h", 0));
+            output_shape_.push_back(
+                OperatorBase::GetSingleArgument<int>("output_shape_w", 0));
 	  }
 	}
     // Fill default values.
@@ -126,9 +133,12 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
     if (pads_.size() == 0) {
       pads_.resize(kernel_.size() * 2, 0);
+      std::cout << "1 Liar liar pants on fire" << std::endl;
     }
-
-	std::cout << "Half..." << std::endl;
+    if (output_shape_.size() == 0) {
+      output_shape_.resize(kernel_.size(), 0);
+    }
+        std::cout << "Half..." << std::endl;
     if (adj_.size() == 0) {
       adj_.resize(kernel_.size(), 0);
     }
@@ -182,15 +192,17 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       default:
         LOG(FATAL) << "Unknown Storage order: " << order_;
     }
-	ComputeSizeAndPad(
+    std::cout << "log set" << std::endl;
+    ComputeSizeAndPad(
         H,
         stride_[0],
         kernel_[0],
         adj_[0],
         use_pad_,
-		&pads_[0],
+        &pads_[0],
         &pads_[2],
         &output_shape_[0]);
+    std::cout << "size half" << std::endl;
     ComputeSizeAndPad(
         W,
         stride_[1],
@@ -200,6 +212,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 		&pads_[1],
         &pads_[3],
         &output_shape_[1]);
+    std::cout << "size end" << std::endl;
     if (channel_first) {
       output->Resize(N, output_channel, output_shape_[0], output_shape_[1]);
     } else {
@@ -208,6 +221,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     VLOG(2) << "In: N " << N << " M " << M << " H " << H << " W " << W;
     VLOG(2) << "Out: output_channel " << output_channel << " H "
             << output_shape_[0] << " W " << output_shape_[1];
+    std::cout << "set end" << std::endl;
   }
 
   bool RunOnDevice() override {
@@ -336,20 +350,15 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       int* pad_head,
       int* pad_tail,
       int* out_size) {
-    if (use_pad_ == false){
-	  ComputePadUsingSize(
-		in_size,
-		stride,
-		kernel,
-		adj,
-		pad_head,
-		pad_tail,
-		out_size);
-	} else
-	{
-	  switch (legacy_pad_) {
-		case LegacyPadding::NOTSET:
-		  CAFFE_ENFORCE(*pad_head >= 0);
+    if (use_pad == false) {
+      std::cout << "Liar Liar liar pants on fire" << std::endl;
+      ComputePadUsingSize(
+          in_size, stride, kernel, adj, pad_head, pad_tail, out_size);
+    } else {
+      std::cout << "calc begin" << std::endl;
+      switch (legacy_pad_) {
+        case LegacyPadding::NOTSET:
+          CAFFE_ENFORCE(*pad_head >= 0);
           CAFFE_ENFORCE(*pad_tail >= 0);
           *out_size =
               (in_size - 1) * stride + kernel + adj - *pad_head - *pad_tail;
@@ -365,6 +374,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         case LegacyPadding::CAFFE_LEGACY_POOLING:
           LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
           break;
+          std::cout << "calc end" << std::endl;
       }
     }
   }
@@ -378,10 +388,9 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   using ConvTransposeUnpoolBase<Context>::adj_;           \
   using ConvTransposeUnpoolBase<Context>::order_;         \
   using ConvTransposeUnpoolBase<Context>::shared_buffer_; \
-  using ConvTransposeUnpoolBase<Context>::ws_;			  \
-  using ConvTransposeUnpoolBase<Context>::output_shape_;  \
-  using ConvTransposeUnpoolBase<Context>::use_pad_;		  \
-
+  using ConvTransposeUnpoolBase<Context>::ws_;            \
+  using ConvTransposeUnpoolBase<Context>::use_pad_;       \
+  using ConvTransposeUnpoolBase<Context>::output_shape_;
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_CONV_TRANSPOSE_UNPOOL_OP_BASE_H_
