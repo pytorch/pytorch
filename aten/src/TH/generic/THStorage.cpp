@@ -21,30 +21,21 @@ size_t THStorage_(elementSize)()
 
 THStorage* THStorage_(new)(void)
 {
-  return THStorage_(newWithSize)(0);
+  return THStorage_new(at::CTypeToScalarType<th::from_type<real>>::to());
 }
 
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
-  return THStorage_(newWithAllocator)(size, &THDefaultAllocator, NULL);
+  return THStorage_newWithSize(at::CTypeToScalarType<th::from_type<real>>::to(), size);
 }
 
 THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         THAllocator *allocator,
                                         void *allocatorContext)
 {
-  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->backend = at::kCPU;
-  storage->scalar_type = at::CTypeToScalarType<th::from_type<real>>::to();
-  storage->data_ptr = allocator->malloc(allocatorContext, sizeof(real)*size);
-  storage->size = size;
-  new (&storage->refcount) std::atomic<int>(1);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocatorVoidPtr = allocator;
-  storage->allocatorContext = allocatorContext;
-  storage->device = 0;  // device is not meaningful on CPU
-  return storage;
+  return THStorage_newWithAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), size, allocator, allocatorContext);
 }
+
 
 THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int flags)
 {

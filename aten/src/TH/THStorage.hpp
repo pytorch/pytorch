@@ -5,8 +5,8 @@
 
 #include "THStorage.h"
 
-#include "ATen/ScalarType.h"
-#include "ATen/ScalarTypeUtils.h"
+#include <ATen/ScalarType.h>
+#include <ATen/ScalarTypeUtils.h>
 #include "THTypeConversion.hpp"
 #include <atomic>
 
@@ -38,3 +38,9 @@ typedef struct THStorage
       return static_cast<T*>(this->data_ptr);
     }
 } THStorage;
+
+TH_API THStorage* THStorage_new(at::ScalarType scalar_type);
+TH_API THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size);
+TH_API THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
+                                             THAllocator *allocator,
+                                             void *allocatorContext);
