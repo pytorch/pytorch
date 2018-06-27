@@ -128,7 +128,9 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
 }
 
 static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
+  #ifndef _WIN32
   __builtin_unreachable();
+  #endif
   return PyLong_FromLong(0);
 }
 
