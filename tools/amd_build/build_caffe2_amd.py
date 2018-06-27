@@ -16,7 +16,7 @@ ignore_file_list = {"depthwise_3x3_conv_op.cu",
                     "pool_op_cudnn.cu",
                     "max_pool_with_index.cu"}#REVIST THIS FILE
 
-for folder in ["operators", "sgd", "image", "transforms", "video"]:
+for folder in ["operators", "sgd", "image", "transforms", "video", "distributed"]:
     for extension in ["/*.cu", "/*.cuh", "/*gpu.cc", "/*gpu.h"]:
         target = folder + extension
         for file in glob.glob(target):
