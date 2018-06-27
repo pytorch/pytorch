@@ -529,11 +529,11 @@
   input2: not_implemented("potri")
 
 - name: pow(Tensor self, Scalar exponent)
-  self: grad * exponent * self.pow(exponent.toDouble() - 1)
+  self: pow_backward(grad, self, exponent)
 
 - name: pow(Tensor self, Tensor exponent)
-  self: grad * exponent * self.pow(exponent - 1)
-  exponent: grad * self.pow(exponent) * self.log()
+  self: pow_backward_self(grad, self, exponent)
+  exponent: pow_backward_exponent(grad, self, exponent)
 
 - name: _prod(Tensor self, int64_t dim, bool keepdim)
   self: prod_backward(grad, self, result, dim, keepdim)
