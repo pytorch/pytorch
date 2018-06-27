@@ -565,8 +565,14 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
     num_outputs = *value;
   }
 
-  for(size_t i = 0; i < num_outputs; ++i)
-    n->addOutput();
+  for(size_t i = 0; i < num_outputs; ++i) {
+    if (n->kind() == aten::chunk) {
+      // special case for chunk as the schema return only have one Tensor[] type
+      n->addOutput()->setType(DynamicType::get());
+    } else {
+      n->addOutput()->setType(schema.returns[i].type);
+    }
+  }
 
   liftConstantAttributes(schema, n);
 
