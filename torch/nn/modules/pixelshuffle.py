@@ -34,7 +34,6 @@ class PixelShuffle(Module):
 
     def __init__(self, upscale_factor):
         super(PixelShuffle, self).__init__()
-        self.set_arguments(upscale_factor=upscale_factor)
         self.upscale_factor = upscale_factor
 
     def forward(self, input):

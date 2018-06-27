@@ -7,8 +7,6 @@ class _InstanceNorm(_BatchNorm):
                  track_running_stats=False):
         super(_InstanceNorm, self).__init__(
             num_features, eps, momentum, affine, track_running_stats)
-        self.set_arguments(num_features=num_features, eps=eps, momentum=momentum,
-                           affine=affine, track_running_stats=track_running_stats)
 
     def _check_input_dim(self, input):
         raise NotImplementedError

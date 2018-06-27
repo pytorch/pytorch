@@ -15,16 +15,6 @@ class RNNBase(Module):
                  num_layers=1, bias=True, batch_first=False,
                  dropout=0, bidirectional=False):
         super(RNNBase, self).__init__()
-        self.set_arguments(
-            mode=mode,
-            input_size=input_size,
-            hidden_size=hidden_size,
-            num_layers=num_layers,
-            bias=bias,
-            batch_first=batch_first,
-            dropout=dropout,
-            bidirectional=bidirectional,
-        )
         self.mode = mode
         self.input_size = input_size
         self.hidden_size = hidden_size
@@ -323,25 +313,19 @@ class RNN(RNNBase):
     """
 
     def __init__(self, *args, **kwargs):
-        has_nonlinearity = 'nonlinearity' in kwargs
-        if has_nonlinearity:
-            nonlinearity = kwargs['nonlinearity']
-            if nonlinearity == 'tanh':
+        if 'nonlinearity' in kwargs:
+            if kwargs['nonlinearity'] == 'tanh':
                 mode = 'RNN_TANH'
-            elif nonlinearity == 'relu':
+            elif kwargs['nonlinearity'] == 'relu':
                 mode = 'RNN_RELU'
             else:
-                raise ValueError("Unknown nonlinearity '{}'".format(nonlinearity))
+                raise ValueError("Unknown nonlinearity '{}'".format(
+                    kwargs['nonlinearity']))
             del kwargs['nonlinearity']
         else:
             mode = 'RNN_TANH'
 
         super(RNN, self).__init__(mode, *args, **kwargs)
-        parent_arguments = self.arguments
-        del parent_arguments['mode']
-        if has_nonlinearity:
-            parent_arguments['nonlinearity'] = nonlinearity
-        self.set_arguments(**parent_arguments)
 
 
 class LSTM(RNNBase):
@@ -600,8 +584,6 @@ class RNNCell(RNNCellBase):
 
     def __init__(self, input_size, hidden_size, bias=True, nonlinearity="tanh"):
         super(RNNCell, self).__init__()
-        self.set_arguments(input_size=input_size, hidden_size=hidden_size,
-                           bias=bias, nonlinearity=nonlinearity)
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
@@ -698,7 +680,6 @@ class LSTMCell(RNNCellBase):
 
     def __init__(self, input_size, hidden_size, bias=True):
         super(LSTMCell, self).__init__()
-        self.set_arguments(input_size=input_size, hidden_size=hidden_size, bias=bias)
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias
@@ -779,7 +760,6 @@ class GRUCell(RNNCellBase):
 
     def __init__(self, input_size, hidden_size, bias=True):
         super(GRUCell, self).__init__()
-        self.set_arguments(input_size=input_size, hidden_size=hidden_size, bias=bias)
         self.input_size = input_size
         self.hidden_size = hidden_size
         self.bias = bias

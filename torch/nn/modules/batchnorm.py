@@ -11,13 +11,6 @@ class _BatchNorm(Module):
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
         super(_BatchNorm, self).__init__()
-        self.set_arguments(
-            num_features=num_features,
-            eps=eps,
-            momentum=momentum,
-            affine=affine,
-            track_running_stats=track_running_stats,
-        )
         self.num_features = num_features
         self.eps = eps
         self.momentum = momentum

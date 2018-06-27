@@ -1,7 +1,7 @@
 import torch._C
 from torch import Tensor
 from torch.autograd import Variable, function
-from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
+from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential, _ModuleMeta
 from torch.jit.frontend import get_jit_ast
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
@@ -527,7 +527,7 @@ def _get_valid_constant(v):
 # resolve references to `self.param` or `self.module`.
 
 
-class ScriptMeta(type(torch._C.ScriptModule)):
+class ScriptMeta(type(torch._C.ScriptModule), _ModuleMeta):
     # this has to inherit from pybind11's metaclass otherwise we get
     # issues because ScriptModule inherits from torch._C.ScriptModule,
     # a pybind11 type

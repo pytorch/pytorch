@@ -1,6 +1,9 @@
 from collections import OrderedDict
 import functools
+import inspect
 import itertools
+
+from six import with_metaclass
 
 import torch
 from ..backends.thnn import backend as thnn_backend
@@ -20,7 +23,24 @@ def _addindent(s_, numSpaces):
     return s
 
 
-class Module(object):
+class _ModuleMeta(type):
+    """Metaclass for the Module class.
+    
+    Saves all `__init__` arguments to `_args` and `_kwargs` module attributes.
+    """
+    def __call__(cls, *args, **kwargs):
+        # Move positional to keyword arguments, but check for name clashes first.
+        # If there are any, call __init__ as-is to get a standard exception.
+        argnames = inspect.getfullargspec(cls.__init__).args[1:]
+        for name, value in zip(argnames, args):
+            kwargs.setdefault(name, value)
+        args = args[len(argnames):]
+        obj = type.__call__(cls, *args, **kwargs)
+        obj.__dict__.update(_args=args, _kwargs=kwargs)
+        return obj
+
+
+class Module(with_metaclass(_ModuleMeta, object)):
     r"""Base class for all neural network modules.
 
     Your models should also subclass this class.
@@ -150,56 +170,28 @@ class Module(object):
         else:
             self._parameters[name] = param
 
-    def set_arguments(self, **kwargs):
-        r"""Assign arguments for this module instance.
-
-        Arguments are key-value pairs that define the module behaviour.
-        They are usually passed to `__init__`.
-        Call `set_arguments` in `__init__` to register the arguments.
-
-        Example:
-            class MyModule(Module):
-                def __init__(self, spam=42, eggs=False):
-                    self(MyModule, self).__init__()
-                    self.set_arguments(spam=spam, eggs=eggs)
-
-        Args:
-            **kwargs: argument values for this module instance.
-        """
-        self._arguments = kwargs.copy()
-
-    @property
-    def arguments(self):
-        r"""Get arguments of this module instance.
-
-        Returns:
-            dict with module arguments.
-        """
-        if not hasattr(self, '_arguments'):
-            raise NotImplementedError
-        return self._arguments.copy()
-
     def new_module(self, **kwargs):
         r"""Create a new instance of this module.
 
         The new instance will have different, freshly initialized
         parameter values.
-        Module arguments will be the same, except ones specified
-        in the keyword arguments of this method.
+        Module arguments will be the same, except the ones specified
+        in the positional and keyword arguments of this method.
+
+        Some modules, like Sequential, cannot be copied.
 
         Args:
-            **kwargs: arguments to replace in the new module.
+            **kwargs: keyword arguments to replace in the new module.
 
         Returns:
             new instance of this module.
         """
-        if not hasattr(self, '_arguments'):
-            raise NotImplementedError("cannot create new module '{}': "
-                                      "set_arguments() has not been called"
-                                      .format(type(self).__name__))
-        new_arguments = self.arguments
-        new_arguments.update(**kwargs)
-        return type(self)(**new_arguments)
+        if not hasattr(self, '_args') or not hasattr(self, '_kwargs'):
+            raise TypeError("module '{}' can't be copied"
+                            .format(self.__class__.__name__))
+        new_kwargs = self._kwargs.copy()
+        new_kwargs.update(kwargs)
+        return self.__class__(*self._args, **new_kwargs)
 
     def add_module(self, name, module):
         r"""Adds a child module to the current module.
@@ -564,6 +556,9 @@ class Module(object):
             for d in dicts:
                 if name in d:
                     del d[name]
+
+        if name == '_args' or name == '_kwargs':
+            raise AttributeError("cannot directly assign _args or _kwargs")
 
         params = self.__dict__.get('_parameters')
         if isinstance(value, Parameter):

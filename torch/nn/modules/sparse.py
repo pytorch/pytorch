@@ -78,16 +78,6 @@ class Embedding(Module):
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
                  sparse=False, _weight=None):
         super(Embedding, self).__init__()
-        self.set_arguments(
-            num_embeddings=num_embeddings,
-            embedding_dim=embedding_dim,
-            padding_idx=padding_idx,
-            max_norm=max_norm,
-            norm_type=norm_type,
-            scale_grad_by_freq=scale_grad_by_freq,
-            sparse=sparse,
-            _weight=_weight,
-        )
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         if padding_idx is not None:
@@ -234,15 +224,6 @@ class EmbeddingBag(Module):
                  max_norm=None, norm_type=2, scale_grad_by_freq=False,
                  mode='mean', sparse=False):
         super(EmbeddingBag, self).__init__()
-        self.set_arguments(
-            num_embeddings=num_embeddings,
-            embedding_dim=embedding_dim,
-            max_norm=max_norm,
-            norm_type=norm_type,
-            scale_grad_by_freq=scale_grad_by_freq,
-            mode=mode,
-            sparse=sparse,
-        )
         self.num_embeddings = num_embeddings
         self.embedding_dim = embedding_dim
         self.max_norm = max_norm

@@ -31,7 +31,6 @@ class PairwiseDistance(Module):
     """
     def __init__(self, p=2, eps=1e-6, keepdim=False):
         super(PairwiseDistance, self).__init__()
-        self.set_arguments(p=p, eps=eps, keepdim=keepdim)
         self.norm = p
         self.eps = eps
         self.keepdim = keepdim
@@ -65,7 +64,6 @@ class CosineSimilarity(Module):
     """
     def __init__(self, dim=1, eps=1e-8):
         super(CosineSimilarity, self).__init__()
-        self.set_arguments(dim=dim, eps=eps)
         self.dim = dim
         self.eps = eps
 

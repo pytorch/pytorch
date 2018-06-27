@@ -12,18 +12,6 @@ class _ConvNd(Module):
     def __init__(self, in_channels, out_channels, kernel_size, stride,
                  padding, dilation, transposed, output_padding, groups, bias):
         super(_ConvNd, self).__init__()
-        self.set_arguments(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            transposed=transposed,
-            output_padding=output_padding,
-            groups=groups,
-            bias=bias,
-        )
         if in_channels % groups != 0:
             raise ValueError('in_channels must be divisible by groups')
         if out_channels % groups != 0:
@@ -182,16 +170,6 @@ class Conv1d(_ConvNd):
         super(Conv1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _single(0), groups, bias)
-        self.set_arguments(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            bias=bias,
-        )
 
     def forward(self, input):
         return F.conv1d(input, self.weight, self.bias, self.stride,
@@ -317,16 +295,6 @@ class Conv2d(_ConvNd):
         super(Conv2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _pair(0), groups, bias)
-        self.set_arguments(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            bias=bias,
-        )
 
     def forward(self, input):
         return F.conv2d(input, self.weight, self.bias, self.stride,
@@ -447,16 +415,6 @@ class Conv3d(_ConvNd):
         super(Conv3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             False, _triple(0), groups, bias)
-        self.set_arguments(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            dilation=dilation,
-            groups=groups,
-            bias=bias,
-        )
 
     def forward(self, input):
         return F.conv3d(input, self.weight, self.bias, self.stride,
@@ -592,17 +550,6 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         super(ConvTranspose1d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
-        self.set_arguments(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            output_padding=output_padding,
-            groups=groups,
-            bias=bias,
-            dilation=dilation,
-        )
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
@@ -735,17 +682,6 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         super(ConvTranspose2d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
-        self.set_arguments(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            output_padding=output_padding,
-            groups=groups,
-            bias=bias,
-            dilation=dilation,
-        )
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)
@@ -873,17 +809,6 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         super(ConvTranspose3d, self).__init__(
             in_channels, out_channels, kernel_size, stride, padding, dilation,
             True, output_padding, groups, bias)
-        self.set_arguments(
-            in_channels=in_channels,
-            out_channels=out_channels,
-            kernel_size=kernel_size,
-            stride=stride,
-            padding=padding,
-            output_padding=output_padding,
-            groups=groups,
-            bias=bias,
-            dilation=dilation,
-        )
 
     def forward(self, input, output_size=None):
         output_padding = self._output_padding(input, output_size)

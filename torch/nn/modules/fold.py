@@ -58,8 +58,6 @@ class Fold(Module):
 
     def __init__(self, output_size, kernel_size, dilation=1, padding=0, stride=1):
         super(Fold, self).__init__()
-        self.set_arguments(output_size=output_size, kernel_size=kernel_size,
-                           dilation=dilation, padding=padding, stride=stride)
         self.output_size = output_size
         self.kernel_size = kernel_size
         self.dilation = dilation
@@ -131,8 +129,6 @@ class Unfold(Module):
 
     def __init__(self, kernel_size, dilation=1, padding=0, stride=1):
         super(Unfold, self).__init__()
-        self.set_arguments(kernel_size=kernel_size, dilation=dilation,
-                           padding=padding, stride=stride)
         self.kernel_size = kernel_size
         self.dilation = dilation
         self.padding = padding

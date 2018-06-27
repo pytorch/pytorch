@@ -36,8 +36,6 @@ class Linear(Module):
 
     def __init__(self, in_features, out_features, bias=True):
         super(Linear, self).__init__()
-        self.set_arguments(in_features=in_features, out_features=out_features,
-                           bias=bias)
         self.in_features = in_features
         self.out_features = out_features
         self.weight = Parameter(torch.Tensor(out_features, in_features))
@@ -96,8 +94,6 @@ class Bilinear(Module):
 
     def __init__(self, in1_features, in2_features, out_features, bias=True):
         super(Bilinear, self).__init__()
-        self.set_arguments(in1_features=in1_features, in2_features=in2_features,
-                           out_features=out_features, bias=bias)
         self.in1_features = in1_features
         self.in2_features = in2_features
         self.out_features = out_features

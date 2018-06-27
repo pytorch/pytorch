@@ -102,13 +102,6 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
     def __init__(self, in_features, n_classes, cutoffs, div_value=4., head_bias=False):
         super(AdaptiveLogSoftmaxWithLoss, self).__init__()
-        self.set_arguments(
-            in_features=in_features,
-            n_classes=n_classes,
-            cutoffs=cutoffs,
-            div_value=div_value,
-            head_bias=head_bias,
-        )
 
         cutoffs = list(cutoffs)
 

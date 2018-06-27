@@ -6,7 +6,6 @@ class _DropoutNd(Module):
 
     def __init__(self, p=0.5, inplace=False):
         super(_DropoutNd, self).__init__()
-        self.set_arguments(p=p, inplace=inplace)
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
@@ -170,7 +169,6 @@ class AlphaDropout(Module):
 
     def __init__(self, p=0.5):
         super(AlphaDropout, self).__init__()
-        self.set_arguments(p=p)
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))

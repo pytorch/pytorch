@@ -110,8 +110,6 @@ class Upsample(Module):
 
     def __init__(self, size=None, scale_factor=None, mode='nearest', align_corners=None):
         super(Upsample, self).__init__()
-        self.set_arguments(size=size, scale_factor=scale_factor,
-                           mode=mode, align_corners=align_corners)
         self.size = size
         self.scale_factor = scale_factor
         self.mode = mode
@@ -170,7 +168,6 @@ class UpsamplingNearest2d(Upsample):
     """
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
-        self.set_arguments(size=size, scale_factor=scale_factor)
 
     def forward(self, input):
         warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.Upsample instead.")
@@ -219,7 +216,6 @@ class UpsamplingBilinear2d(Upsample):
     """
     def __init__(self, size=None, scale_factor=None):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
-        self.set_arguments(size=size, scale_factor=scale_factor)
 
     def forward(self, input):
         warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.Upsample instead.")

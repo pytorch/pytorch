@@ -37,7 +37,6 @@ class LocalResponseNorm(Module):
 
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
         super(LocalResponseNorm, self).__init__()
-        self.set_arguments(size=size, alpha=alpha, beta=beta, k=k)
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -55,7 +54,6 @@ class CrossMapLRN2d(Module):
 
     def __init__(self, size, alpha=1e-4, beta=0.75, k=1):
         super(CrossMapLRN2d, self).__init__()
-        self.set_arguments(size=size, alpha=alpha, beta=beta, k=k)
         self.size = size
         self.alpha = alpha
         self.beta = beta
@@ -125,8 +123,6 @@ class LayerNorm(Module):
     """
     def __init__(self, normalized_shape, eps=1e-5, elementwise_affine=True):
         super(LayerNorm, self).__init__()
-        self.set_arguments(normalized_shape=normalized_shape, eps=eps,
-                           elementwise_affine=elementwise_affine)
         if isinstance(normalized_shape, numbers.Integral):
             normalized_shape = (normalized_shape,)
         self.normalized_shape = torch.Size(normalized_shape)
@@ -197,8 +193,6 @@ class GroupNorm(Module):
     """
     def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
         super(GroupNorm, self).__init__()
-        self.set_arguments(num_groups=num_groups, num_channels=num_channels,
-                           eps=eps, affine=affine)
         self.num_groups = num_groups
         self.num_channels = num_channels
         self.eps = eps

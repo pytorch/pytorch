@@ -3,11 +3,23 @@ from collections import OrderedDict, Iterable
 from itertools import islice
 import operator
 
+from six import with_metaclass
+
 import torch
-from .module import Module
+from .module import Module, _ModuleMeta
 
 
-class Container(Module):
+class _ContainerMeta(_ModuleMeta):
+    """Metaclass for the container modules.
+
+    Doesn't save '_args' and '_kwargs' attributes because containers
+    accept other modules or parameters in __init__.
+    """
+    def __call__(cls, *args, **kwargs):
+        return type.__call__(cls, *args, **kwargs)
+
+
+class Container(with_metaclass(_ContainerMeta, Module)):
 
     def __init__(self, **kwargs):
         super(Container, self).__init__()
@@ -18,7 +30,7 @@ class Container(Module):
             self.add_module(key, value)
 
 
-class Sequential(Module):
+class Sequential(with_metaclass(_ContainerMeta, Module)):
     r"""A sequential container.
     Modules will be added to it in the order they are passed in the constructor.
     Alternatively, an ordered dict of modules can also be passed in.
@@ -92,7 +104,7 @@ class Sequential(Module):
         return input
 
 
-class ModuleList(Module):
+class ModuleList(with_metaclass(_ContainerMeta, Module)):
     r"""Holds submodules in a list.
 
     ModuleList can be indexed like a regular Python list, but modules it
@@ -187,7 +199,7 @@ class ModuleList(Module):
         return self
 
 
-class ParameterList(Module):
+class ParameterList(with_metaclass(_ContainerMeta, Module)):
     r"""Holds parameters in a list.
 
     ParameterList can be indexed like a regular Python list, but parameters it

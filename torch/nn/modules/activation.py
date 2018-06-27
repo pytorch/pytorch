@@ -37,7 +37,6 @@ class Threshold(Module):
 
     def __init__(self, threshold, value, inplace=False):
         super(Threshold, self).__init__()
-        self.set_arguments(threshold=threshold, value=value, inplace=inplace)
         self.threshold = threshold
         self.value = value
         self.inplace = inplace
@@ -76,7 +75,6 @@ class ReLU(Threshold):
 
     def __init__(self, inplace=False):
         super(ReLU, self).__init__(0, 0, inplace)
-        self.set_arguments(inplace=inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
@@ -122,7 +120,6 @@ class RReLU(Module):
     """
     def __init__(self, lower=1. / 8, upper=1. / 3, inplace=False):
         super(RReLU, self).__init__()
-        self.set_arguments(lower=lower, upper=upper, inplace=inplace)
         self.lower = lower
         self.upper = upper
         self.inplace = inplace
@@ -181,7 +178,6 @@ class Hardtanh(Module):
             warnings.warn("keyword argument max_value is deprecated and renamed to max_val")
             max_val = max_value
 
-        self.set_arguments(min_val=min_val, max_val=max_val, inplace=inplace)
         self.min_val = min_val
         self.max_val = max_val
         self.inplace = inplace
@@ -219,7 +215,6 @@ class ReLU6(Hardtanh):
 
     def __init__(self, inplace=False):
         super(ReLU6, self).__init__(0, 6, inplace)
-        self.set_arguments(inplace=inplace)
 
     def extra_repr(self):
         inplace_str = 'inplace' if self.inplace else ''
@@ -293,7 +288,6 @@ class ELU(Module):
 
     def __init__(self, alpha=1., inplace=False):
         super(ELU, self).__init__()
-        self.set_arguments(alpha=alpha, inplace=inplace)
         self.alpha = alpha
         self.inplace = inplace
 
@@ -334,7 +328,6 @@ class SELU(Module):
 
     def __init__(self, inplace=False):
         super(SELU, self).__init__()
-        self.set_arguments(inplace=inplace)
         self.inplace = inplace
 
     def forward(self, input):
@@ -367,7 +360,6 @@ class GLU(Module):
 
     def __init__(self, dim=-1):
         super(GLU, self).__init__()
-        self.set_arguments(dim=dim)
         self.dim = dim
 
     def forward(self, input):
@@ -408,7 +400,6 @@ class Hardshrink(Module):
 
     def __init__(self, lambd=0.5):
         super(Hardshrink, self).__init__()
-        self.set_arguments(lambd=lambd)
         self.lambd = lambd
 
     def forward(self, input):
@@ -449,7 +440,6 @@ class LeakyReLU(Module):
 
     def __init__(self, negative_slope=1e-2, inplace=False):
         super(LeakyReLU, self).__init__()
-        self.set_arguments(negative_slope=negative_slope, inplace=inplace)
         self.negative_slope = negative_slope
         self.inplace = inplace
 
@@ -511,7 +501,6 @@ class Softplus(Module):
 
     def __init__(self, beta=1, threshold=20):
         super(Softplus, self).__init__()
-        self.set_arguments(beta=beta, threshold=threshold)
         self.beta = beta
         self.threshold = threshold
 
@@ -554,7 +543,6 @@ class Softshrink(Module):
 
     def __init__(self, lambd=0.5):
         super(Softshrink, self).__init__()
-        self.set_arguments(lambd=lambd)
         self.lambd = lambd
 
     def forward(self, input):
@@ -602,9 +590,8 @@ class PReLU(Module):
     """
 
     def __init__(self, num_parameters=1, init=0.25):
-        super(PReLU, self).__init__()
-        self.set_arguments(num_parameters=num_parameters, init=init)
         self.num_parameters = num_parameters
+        super(PReLU, self).__init__()
         self.weight = Parameter(torch.Tensor(num_parameters).fill_(init))
 
     def forward(self, input):
@@ -683,7 +670,6 @@ class Softmin(Module):
     """
     def __init__(self, dim=None):
         super(Softmin, self).__init__()
-        self.set_arguments(dim=dim)
         self.dim = dim
 
     def forward(self, input):
@@ -724,7 +710,6 @@ class Softmax(Module):
 
     def __init__(self, dim=None):
         super(Softmax, self).__init__()
-        self.set_arguments(dim=dim)
         self.dim = dim
 
     def __setstate__(self, state):
@@ -790,7 +775,6 @@ class LogSoftmax(Module):
 
     def __init__(self, dim=None):
         super(LogSoftmax, self).__init__()
-        self.set_arguments(dim=dim)
         self.dim = dim
 
     def __setstate__(self, state):
