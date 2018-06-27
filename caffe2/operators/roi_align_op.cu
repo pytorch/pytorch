@@ -1,4 +1,4 @@
-#include "roi_align_op.h"
+#include "caffe2/operators/roi_align_op.h"
 
 #include <stdio.h>
 #include <cfloat>
