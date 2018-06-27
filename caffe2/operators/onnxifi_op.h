@@ -135,31 +135,6 @@ class OnnxifiOp final : public Operator<Context> {
       std::vector<uint64_t>* property_list,
       std::vector<int64_t>* int_args,
       std::vector<float>* float_args) {
-    for (const auto& arg: operator_def.arg()) {
-      if (!StartsWith(arg.name(), "custom_")) {
-        continue;
-      }
-      // Pick the name as ABC if the arg name is custom_ABC
-      property_list->push_back((uint64_t)(arg.name().c_str() + 7));
-
-      if (arg.has_s()) {
-        property_list->push_back((uint64_t)(arg.s().c_str()));
-      } else if (arg.has_i()) {
-        int_args->push_back(arg.i());
-        property_list->push_back((uint64_t)(&int_args->back()));
-      } else if (arg.has_f()) {
-        float_args->push_back(arg.f());
-        property_list->push_back((uint64_t)(&float_args->back()));
-      } else if (arg.floats_size()) {
-        property_list->push_back((uint64_t)(arg.floats().data()));
-      } else if (arg.ints_size()) {
-        property_list->push_back((uint64_t)(arg.ints().data()));
-      } else {
-        // TODO: support string lists
-        CAFFE_THROW(
-            "Cannot pass string list to onnxifi backend yet");
-      }
-    }
     property_list->push_back(ONNXIFI_BACKEND_PROPERTY_NONE);
   }
 
