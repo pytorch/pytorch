@@ -37,7 +37,7 @@ TEST_CASE("module/training-mode") {
 
 TEST_CASE("module/zero-grad") {
   Linear module(3, 4);
-  auto weight = torch::ones({8, 3}, at::requires_grad());
+  auto weight = torch::ones({8, 3}, torch::requires_grad());
   auto loss = module->forward(weight).sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
@@ -70,26 +70,26 @@ TEST_CASE("module/conversions", "[cuda]") {
   Linear module(128, 64);
   SECTION("starts as float on CPU") {
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device() == at::Device(at::kCPU));
+      REQUIRE(parameter->device() == torch::Device(torch::kCPU));
       REQUIRE(parameter->dtype() == torch::kFloat32);
     }
   }
   SECTION("to(CUDA)") {
-    module->to({at::kCUDA, 0});
+    module->to({torch::kCUDA, 0});
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == at::Device::Type::CUDA);
+      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
       REQUIRE(parameter->device().index() == 0);
     }
     module->cuda(1);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == at::Device::Type::CUDA);
+      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
       REQUIRE(parameter->device().index() == 1);
     }
   }
   SECTION("to(CPU)") {
-    module->to(at::Device(at::kCPU));
+    module->to(torch::Device(torch::kCPU));
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == at::Device::Type::CPU);
+      REQUIRE(parameter->device().type() == torch::Device::Type::CPU);
     }
   }
   SECTION("to(Int32)") {
@@ -105,9 +105,9 @@ TEST_CASE("module/conversions", "[cuda]") {
     }
   }
   SECTION("to(CUDA, Byte)") {
-    module->to(at::Device(at::kCUDA, 1), torch::kUInt8);
+    module->to(torch::Device(torch::kCUDA, 1), torch::kUInt8);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->device().type() == at::Device::Type::CUDA);
+      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
       REQUIRE(parameter->device().index() == 1);
     }
     for (auto& parameter : module->parameters()) {
