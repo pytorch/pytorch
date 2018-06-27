@@ -59,7 +59,7 @@ void elementwiseAnd() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), N);
     std::vector<bool> result{true, false, false, false};
@@ -80,7 +80,7 @@ void elementwiseAnd() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), M * N);
     std::vector<bool> result{
@@ -107,7 +107,7 @@ void elementwiseOr() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), N);
     std::vector<bool> result{true, true, true, false};
@@ -128,7 +128,7 @@ void elementwiseOr() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), M * N);
     std::vector<bool> result{true, true, true, false, true, true, true, false};
@@ -154,7 +154,7 @@ void elementwiseXor() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), N);
     std::vector<bool> result{false, true, true, false};
@@ -175,7 +175,7 @@ void elementwiseXor() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), M * N);
     std::vector<bool> result{
@@ -223,7 +223,7 @@ void elementwiseEQ() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), N);
     std::vector<bool> result{false, true, false, true};
@@ -241,7 +241,7 @@ void elementwiseEQ() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), N);
     std::vector<bool> result{true, true, false, false};
@@ -261,7 +261,7 @@ void elementwiseEQ() {
     EXPECT_TRUE(op->Run());
     auto* blob = ws.GetBlob("Z");
     EXPECT_NE(nullptr, blob);
-    CPUContext context;
+    caffe2::CPUContext context;
     caffe2::TensorCPU Z(blob->Get<caffe2::Tensor<Context>>(), &context);
     EXPECT_EQ(Z.size(), M * N);
     std::vector<bool> result{
