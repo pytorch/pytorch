@@ -6,15 +6,15 @@
 #include <ATen/native/BinaryOps.h>
 #include <limits>
 
-// NOTE: CUDA 8 does not allow __device__ lambdas (GPU_LAMBDA) to be defined
-// inside other lambdas. This is fixed in CUDA 9, but for now we need to keep
-// `add_kernel_impl` inside
 
+// NOTE: CUDA 8 does not allow __device__ lambdas (GPU_LAMBDA) to be defined
+// inside other lambdas. CUDA on Windows requires that the enclosing function
+// of a __device__ lambda not have internal linkage.
 
 namespace at { namespace native {
 
 template <typename scalar_t>
-static void add_kernel_impl(TensorIterator& iter, Scalar alpha_scalar) {
+void add_kernel_impl(TensorIterator& iter, Scalar alpha_scalar) {
   auto alpha = alpha_scalar.to<scalar_t>();
   gpu_binary_kernel(iter, [alpha]GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
     return a + alpha * b;
@@ -32,14 +32,14 @@ static void sub_kernel_cuda(TensorIterator& iter, Scalar alpha_scalar) {
 }
 
 template <typename scalar_t>
-static void div_kernel_impl(TensorIterator& iter) {
+void div_kernel_impl(TensorIterator& iter) {
   gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
     return a / b;
   });
 }
 
 template <typename scalar_t>
-static void div_constant_impl(TensorIterator& iter, scalar_t inv_b) {
+void div_constant_impl(TensorIterator& iter, scalar_t inv_b) {
   gpu_unary_kernel(iter, [inv_b]GPU_LAMBDA(scalar_t a) -> scalar_t {
     return a * inv_b;
   });
@@ -67,7 +67,7 @@ static void div_kernel_cuda(TensorIterator& iter) {
 }
 
 template <typename scalar_t>
-static void mul_kernel_impl(TensorIterator& iter) {
+void mul_kernel_impl(TensorIterator& iter) {
   gpu_binary_kernel(iter, []GPU_LAMBDA(scalar_t a, scalar_t b) -> scalar_t {
     return a * b;
   });
