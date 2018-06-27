@@ -342,7 +342,10 @@ class ExprBuilder(Builder):
             return TrueLiteral(r)
         elif expr.value is False:
             return FalseLiteral(r)
-        return Var(Ident(r, "None"))
+        elif expr.value is None:
+            return Var(Ident(r, "None"))
+        else:
+            raise ValueError("Name constant value unsupported: " + str(expr.value))
 
     @staticmethod
     def build_BinOp(ctx, expr):
