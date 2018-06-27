@@ -1,6 +1,7 @@
 #include <caffe2/ideep/operators/operator_fallback_ideep.h>
 #include <caffe2/ideep/utils/ideep_operator.h>
 
+#include <caffe2/operators/accuracy_op.h>
 #include <caffe2/operators/bbox_transform_op.h>
 #include <caffe2/operators/box_with_nms_limit_op.h>
 #include <caffe2/operators/channel_shuffle_op.h>
@@ -108,4 +109,7 @@ REGISTER_IDEEP_OPERATOR(
     PRelu,
     IDEEPFallbackOp<PReluOp<float, CPUContext>>);
 
+REGISTER_IDEEP_OPERATOR(
+    Accuracy,
+    IDEEPFallbackOp<AccuracyOp<float, CPUContext>>);
 } // namespace caffe2
