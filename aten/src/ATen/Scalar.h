@@ -77,7 +77,7 @@ private:
   Tag tag;
   union {
     double d;
-    int64_t i;
+    int64_t i = 0;
   } v;
   detail::TensorBase t;
   friend struct Type;
