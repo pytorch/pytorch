@@ -16,6 +16,7 @@
 
 #include "caffe2/core/net_async_tracing.h"
 
+#include "caffe2/utils/proto_utils.h"
 #include "caffe2/utils/string_utils.h"
 
 CAFFE2_DEFINE_string(
@@ -30,14 +31,33 @@ CAFFE2_DEFINE_string(
 
 CAFFE2_DEFINE_int(caffe2_net_async_tracing_nth, 100, "Trace every Nth batch");
 
+// For every Nth iterations, we will dump the tracing results to a json file
+// The file is appended with the iteration number.
+CAFFE2_DEFINE_int(
+    caffe2_net_async_tracing_dumping_nth,
+    10000,
+    "Dump profiling result file every Nth batch");
+
 namespace caffe2 {
 namespace tracing {
+
+int getCounterForNetName(const std::string& net_name) {
+  // Append a unique number suffix because there could be multiple instances
+  // of the same net and we want to uniquely associate each instance with
+  // a profiling trace.
+  static std::unordered_map<std::string, int> net_name_to_counter;
+  static std::mutex map_mutex;
+  std::unique_lock<std::mutex> map_lock(map_mutex);
+  int counter = net_name_to_counter[net_name] + 1;
+  net_name_to_counter[net_name] = counter;
+  return counter;
+}
 
 Tracer::Tracer(const NetBase* net, const std::string& net_name)
     : net_(net), filename_(net_name), iter_(0) {
   std::replace(filename_.begin(), filename_.end(), '/', '_');
-  filename_ =
-      FLAGS_caffe2_net_async_tracing_filepath + "/" + filename_ + ".json";
+  filename_ = FLAGS_caffe2_net_async_tracing_filepath + "/" + filename_ +
+      +"_id_" + caffe2::to_string(getCounterForNetName(net_name));
   timer_.Start();
 }
 
@@ -230,7 +250,7 @@ int Tracer::bumpIter() {
   return iter_++;
 }
 
-Tracer::~Tracer() {
+void Tracer::dumpTracingResultAndClearEvents(const std::string& file_suffix) {
   if (events_.empty() || filename_.empty()) {
     return;
   }
@@ -245,7 +265,15 @@ Tracer::~Tracer() {
     }
   }
   serialized << "\n]\n";
-  WriteStringToFile(serialized.str(), filename_.c_str());
+
+  auto output_file_name = filename_ + "_iter_" + file_suffix + ".json";
+  LOG(INFO) << "Dumping profiling result file to " << output_file_name;
+  WriteStringToFile(serialized.str(), output_file_name.c_str());
+  events_.clear();
+}
+
+Tracer::~Tracer() {
+  dumpTracingResultAndClearEvents("final_batch");
 }
 
 void TracerGuard::init(Tracer* tracer) {
@@ -345,17 +373,27 @@ int getUniqueShardId(const OperatorDef& op_def) {
   return unique_shard_id;
 }
 
-bool isTraceableNet(const std::string& net_name) {
+bool isTraceableNetName(const std::string& net_name) {
   auto tracing_nets = caffe2::split(',', FLAGS_caffe2_net_async_names_to_trace);
   return !net_name.empty() &&
       std::find(tracing_nets.begin(), tracing_nets.end(), net_name) !=
       tracing_nets.end();
 }
 
+bool hasEnableTracingFlag(const NetBase* net) {
+  if (!net->has_debug_def()) {
+    return false;
+  }
+  return GetFlagArgument(net->debug_def(), "enable_tracing", false);
+}
+
 std::shared_ptr<Tracer> create(
     const NetBase* net,
     const std::string& net_name) {
-  bool trace_net = isTraceableNet(net_name);
+  // Enable the tracer if the net has the "enable_tracing" argument set OR
+  // if the command line option includes the net name option in the list of
+  // tracable nets.
+  bool trace_net = hasEnableTracingFlag(net) || isTraceableNetName(net_name);
   return trace_net ? std::make_shared<Tracer>(net, net_name) : nullptr;
 }
 
@@ -366,6 +404,10 @@ bool startIter(const std::shared_ptr<Tracer>& tracer) {
   auto iter = tracer->bumpIter();
   auto is_enabled = iter % FLAGS_caffe2_net_async_tracing_nth == 0;
   tracer->setEnabled(is_enabled);
+  if (iter % FLAGS_caffe2_net_async_tracing_dumping_nth == 0) {
+    int dumping_iter = iter / FLAGS_caffe2_net_async_tracing_dumping_nth;
+    tracer->dumpTracingResultAndClearEvents(caffe2::to_string(dumping_iter));
+  }
   return is_enabled;
 }
 
