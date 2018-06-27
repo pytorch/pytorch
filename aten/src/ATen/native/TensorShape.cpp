@@ -618,7 +618,7 @@ std::vector<Tensor> meshgrid(TensorList tensors) {
       shape[i] = tensors[i].size(0);
       break;
     default:
-      AT_ERROR("input tensor of meshgrid must be scalar or vector");
+      AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
     }
   }
   std::vector<Tensor> grids;

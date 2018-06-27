@@ -5839,9 +5839,9 @@ add_docstr(torch.meshgrid,
            r"""
 meshgrid(seq) -> seq
 
-Take a sequence of :math:`N` tensors, each of which be either scalar or 1-dimensional vector,
-and create :math:`N` grids, where the :math:`i`th grid is defined by expanding the :math:`i`th
-input over dimensions defined by other inputs.
+Take a sequence of :math:`N` tensors, each of which can be either scalar or 1-dimensional
+vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
+expanding the :math:`i`th input over dimensions defined by other inputs.
 
 Arguments:
     seq (sequence of Tensors): sequence of scalars or 1 dimensional tensors. Scalars will be
