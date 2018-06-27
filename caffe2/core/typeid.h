@@ -27,7 +27,9 @@ class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, uint16_t> {
 public:
   static CaffeTypeId createTypeId();
 
-  friend std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId);
+  friend std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId) {
+    return stream << typeId.underlyingId();
+  }
   friend bool operator<(CaffeTypeId lhs, CaffeTypeId rhs);
 
   // TODO Can we get rid of uninitialized?
@@ -38,10 +40,6 @@ public:
 private:
     constexpr explicit CaffeTypeId(uint16_t id): IdWrapper(id) {}
 };
-
-inline std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId) {
-  return stream << typeId.underlyingId();
-}
 
 // Allow usage in std::map / std::set
 // TODO Disallow this and rather use std::unordered_map/set everywhere

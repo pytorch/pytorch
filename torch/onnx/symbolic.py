@@ -599,6 +599,10 @@ def index_select(g, self, index, dim):
     return g.op("Gather", self, index, axis_i=dim)
 
 
+def index_put(g, *inputs, **kwargs):
+    return g.op("ATen", *inputs, operator_s='index_put', **kwargs)
+
+
 def type_as(g, self, other):
     if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
         return self

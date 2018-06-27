@@ -70,7 +70,7 @@ class ExpandingArray {
   }
 
   /// Returns an `ArrayRef` to the underlying `std::array`.
-  operator at::ArrayRef<T>() {
+  operator at::ArrayRef<T>() const {
     return values_;
   }
 

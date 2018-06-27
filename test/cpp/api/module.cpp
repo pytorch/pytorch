@@ -38,7 +38,7 @@ TEST_CASE("module/training-mode") {
 TEST_CASE("module/zero-grad") {
   Linear module(3, 4);
   auto weight = torch::ones({8, 3}, at::requires_grad());
-  auto loss = module->forward({weight}).front().sum();
+  auto loss = module->forward(weight).sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
     auto grad = parameter->grad();

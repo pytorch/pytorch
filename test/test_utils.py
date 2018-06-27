@@ -673,7 +673,6 @@ class TestCollectEnv(TestCase):
         self.assertTrue(info_output.count('\n') >= 17)
 
     @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
-    @unittest.skip('temporarily skip to change cmake version in CI')
     def test_expect(self):
         info_output = get_pretty_env_info()
 

@@ -1,6 +1,7 @@
 #include <catch.hpp>
 
 #include <torch/nn/module.h>
+#include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optim.h>
@@ -62,18 +63,22 @@ void check_exact_values(
 
   torch::manual_seed(0);
   Sequential model(
-      torch::SigmoidLinear(Linear(2, 3)), torch::SigmoidLinear(Linear(3, 1)));
+      Linear(2, 3),
+      Functional(at::sigmoid),
+      Linear(3, 1),
+      Functional(at::sigmoid));
+
   model.to(torch::kFloat64);
 
   // Use exact input values because matching random values is hard.
   auto parameters = model.parameters();
-  parameters.at("0.linear.weight").data().flatten() = at::tensor(
+  parameters.at("0.weight").data().flatten() = at::tensor(
       {-0.2109, -0.4976, -0.1413, -0.3420, -0.2524, 0.6976}, torch::kFloat64);
-  parameters.at("0.linear.bias").data() =
+  parameters.at("0.bias").data() =
       at::tensor({-0.1085, -0.2979, 0.6892}, torch::kFloat64);
-  parameters.at("1.linear.weight").data().flatten() =
+  parameters.at("2.weight").data().flatten() =
       at::tensor({-0.0508, -0.3941, -0.2843}, torch::kFloat64);
-  parameters.at("1.linear.bias").data() =
+  parameters.at("2.bias").data() =
       at::tensor({-0.0711}, torch::kFloat64);
 
   auto optimizer = OptimizerClass(parameters, options);
@@ -111,7 +116,10 @@ TEST_CASE("Optim/XORConvergence") {
   std::srand(0);
   torch::manual_seed(0);
   Sequential model(
-      torch::SigmoidLinear(Linear(2, 8)), torch::SigmoidLinear(Linear(8, 1)));
+      Linear(2, 8),
+      Functional(at::sigmoid),
+      Linear(8, 1),
+      Functional(at::sigmoid));
 
   SECTION("sgd") {
     REQUIRE(test_optimizer_xor(
@@ -195,7 +203,7 @@ TEST_CASE("Optim/ZeroGrad") {
     REQUIRE(!parameter->grad().defined());
   }
 
-  auto output = model->forward({torch::ones({5, 2})}).front();
+  auto output = model->forward(torch::ones({5, 2}));
   auto loss = output.sum();
   loss.backward();
 

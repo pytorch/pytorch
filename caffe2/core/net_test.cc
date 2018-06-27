@@ -542,7 +542,7 @@ TEST(NetTest, DISABLED_ChainingForHogwildModel) {
   checkNumChainsAndRun(spec, 2);
 }
 
-TEST(NetTest, FailingOperator) {
+TEST(NetTest, DISABLED_FailingOperator) {
   const auto spec = R"DOC(
         name: "example"
         type: "dag"
@@ -635,7 +635,7 @@ TEST(NetTest, OperatorWithExecutorHelper) {
   ASSERT_TRUE(net->Run());
 }
 
-TEST(NetTest, OperatorWithDisabledEvent) {
+TEST(NetTest, DISABLED_OperatorWithDisabledEvent) {
   const auto spec = R"DOC(
         name: "example"
         type: "async_scheduling"
@@ -718,7 +718,7 @@ TEST(NetTest, AsyncEmptyNet) {
   }
 }
 
-TEST(NetTest, RunAsyncFailure) {
+TEST(NetTest, DISABLED_RunAsyncFailure) {
   const auto spec = R"DOC(
         name: "example"
         type: "async_scheduling"

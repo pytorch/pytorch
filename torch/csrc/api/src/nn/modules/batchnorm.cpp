@@ -33,11 +33,13 @@ void BatchNormImpl::reset() {
   }
 }
 
-std::vector<Tensor> BatchNormImpl::forward(std::vector<Tensor> inputs) {
-  auto& input = inputs[0];
-  auto& running_mean_ = (options_.stateful_ ? this->running_mean_ : inputs[1]);
-  auto& running_variance_ =
-      (options_.stateful_ ? this->running_variance_ : inputs[2]);
+Tensor BatchNormImpl::forward(Tensor input) {
+  return pure_forward(input, Tensor(), Tensor());
+}
+
+Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
+  auto& running_mean = options_.stateful_ ? running_mean_ : mean;
+  auto& running_variance = options_.stateful_ ? running_variance_ : variance;
 
   if (is_training()) {
     const auto num_channels = input.dim() > 1 ? input.size(1) : 1;
@@ -46,18 +48,16 @@ std::vector<Tensor> BatchNormImpl::forward(std::vector<Tensor> inputs) {
         "BatchNorm expected more than 1 value per channel when training!");
   }
 
-  auto output = at::batch_norm(
+  return at::batch_norm(
       input,
       weight_,
       bias_,
-      running_mean_,
-      running_variance_,
+      running_mean,
+      running_variance,
       is_training(),
       options_.momentum_,
       options_.eps_,
       torch::cuda::cudnn_is_available());
-
-  return std::vector<Tensor>({output});
 }
 
 const BatchNormOptions& BatchNormImpl::options() const noexcept {

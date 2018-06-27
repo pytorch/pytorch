@@ -16,6 +16,12 @@
 
 namespace torch {
 namespace nn {
+
+struct RNNOutput {
+  Tensor output;
+  Tensor state;
+};
+
 namespace detail {
 struct RNNOptionsBase {
   RNNOptionsBase(int64_t input_size, int64_t hidden_size);
@@ -40,7 +46,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
       int64_t number_of_gates = 1,
       bool has_cell_state = false);
 
-  std::vector<Tensor> forward(std::vector<Tensor>);
+  RNNOutput forward(Tensor input, Tensor state = {});
 
   void reset() override;
 
@@ -55,12 +61,10 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   void flatten_parameters_for_cudnn();
 
  protected:
-  virtual std::vector<Tensor> cell_forward(
-      std::vector<Tensor>,
-      int64_t layer) = 0;
+  virtual Tensor cell_forward(Tensor input, Tensor state, int64_t layer) = 0;
 
-  std::vector<Tensor> CUDNN_forward(std::vector<Tensor>);
-  std::vector<Tensor> autograd_forward(std::vector<Tensor>);
+  RNNOutput CUDNN_forward(Tensor input, Tensor state);
+  RNNOutput autograd_forward(Tensor input, Tensor state);
 
   std::vector<Tensor> flat_weights() const;
 
@@ -114,7 +118,7 @@ class RNNImpl : public detail::RNNImplBase<RNNImpl> {
   const RNNOptions& options() const noexcept;
 
  private:
-  std::vector<Tensor> cell_forward(std::vector<Tensor>, int64_t layer) override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 
   RNNOptions options_;
   std::function<Tensor(Tensor)> activation_function_;
@@ -133,7 +137,7 @@ class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   const LSTMOptions& options() const noexcept;
 
  private:
-  std::vector<Tensor> cell_forward(std::vector<Tensor>, int64_t layer) override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 };
 
 TORCH_MODULE(LSTM);
@@ -149,7 +153,7 @@ class GRUImpl : public detail::RNNImplBase<GRUImpl> {
   const GRUOptions& options() const noexcept;
 
  private:
-  std::vector<Tensor> cell_forward(std::vector<Tensor>, int64_t layer) override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 };
 
 TORCH_MODULE(GRU);

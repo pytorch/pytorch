@@ -7,6 +7,9 @@
 namespace caffe2 {
 
 std::vector<std::string> split(char separator, const std::string& string);
+
+std::string trim(const std::string& str);
+
 size_t editDistance(
   const std::string& s1, const std::string& s2, size_t max_distance = 0);
 

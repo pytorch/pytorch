@@ -79,8 +79,19 @@ class AdagradOp final : public Operator<Context> {
         decay_(OperatorBase::GetSingleArgument<T>("decay", 1.0f)) {}
 
   bool RunOnDevice() override {
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENT_1).size());
-    CAFFE_ENFORCE(Input(GRAD).size() == Input(PARAM).size());
+    CAFFE_ENFORCE_EQ(
+        Input(GRAD).size(),
+        Input(MOMENT_1).size(),
+        "PARAM size: ",
+        Input(PARAM).size(),
+        ", GRAD size: ",
+        Input(GRAD).size(),
+        ", MOMENT_1 size: ",
+        Input(MOMENT_1).size(),
+        ", LR size: ",
+        Input(LR).size());
+
+    CAFFE_ENFORCE_EQ(Input(GRAD).size(), Input(PARAM).size());
     Output(OUTPUT_PARAM)->ResizeLike(Input(PARAM));
     Output(OUTPUT_MOMENT_1)->ResizeLike(Input(MOMENT_1));
     if (OutputSize() == 2) {
