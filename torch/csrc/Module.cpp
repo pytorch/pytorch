@@ -5,6 +5,7 @@
 #include <sys/socket.h>
 #endif
 
+#include <limits.h>
 #include <stdbool.h>
 #include <unordered_map>
 #include <cstdlib>
@@ -127,15 +128,13 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
 }
 
 static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
-  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_ubsan expects an int, "
-          "but got %s", THPUtils_typename(arg));
-  int32_t k = static_cast<int32_t>(THPUtils_unpackLong(arg));
-  k <<= 32;
-  return PyLong_FromLong(k);
+  int32_t i = INT_MIN;
+  int32_t j = -i
+  return PyLong_FromLong(j);
 }
 
 static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
-  THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
+  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_aten_asan expects an int, "
           "but got %s", THPUtils_typename(arg));
   return PyLong_FromLong(at::_crash_if_asan(static_cast<int>(THPUtils_unpackLong(arg))));
 }
