@@ -31,7 +31,7 @@ class _ModuleMeta(type):
     def __call__(cls, *args, **kwargs):
         # Move positional to keyword arguments, but check for name clashes first.
         # If there are any, call __init__ as-is to get a standard exception.
-        argnames = inspect.getfullargspec(cls.__init__).args[1:]
+        argnames = inspect.getargspec(cls.__init__).args[1:]
         for name, value in zip(argnames, args):
             kwargs.setdefault(name, value)
         args = args[len(argnames):]
