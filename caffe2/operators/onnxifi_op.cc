@@ -38,7 +38,6 @@ void BlobToTensorDescriptor(
   const auto& shape = cpu_tensor.dims();
   desc->dimensions = shape.size();
   shapes->emplace_back(shape.cbegin(), shape.cend());
-  auto& shape_tmp = shapes->back();
   desc->shape = shapes->back().data();
 }
 } // namespace
