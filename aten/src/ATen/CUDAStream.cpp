@@ -115,18 +115,18 @@ namespace at {
     return CUDAStream_getCurrentStreamOnDeviceUnsafe(current_device());
   }
 
-  void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* internals) {
+  void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* ptr) {
     initCUDAStreamsOnce();
     check_gpu(device);
-    AT_CHECK(internals);
-    AT_CHECK(internals->device == device);
-    AT_CHECK(CUDAStream_retain(internals));
+    AT_CHECK(ptr);
+    AT_CHECK(ptr->device == device);
+    AT_CHECK(CUDAStream_retain(ptr));
 
     CUDAStream_free(current_streams[device]);
-    current_streams[device] = internals;
+    current_streams[device] = ptr;
   }
-  void CUDAStream_setStream(CUDAStreamInternals* internals) {
-    CUDAStream_setStreamOnDevice(current_device(), internals);
+  void CUDAStream_setStream(CUDAStreamInternals* ptr) {
+    CUDAStream_setStreamOnDevice(current_device(), ptr);
   }
 
   // Getters
@@ -148,7 +148,7 @@ namespace at {
     return true;
   }
 
-  void CUDAStream_free(CUDAStreamInternals* ptr) {
+  void CUDAStream_free(CUDAStreamInternals*& ptr) {
     if (ptr && ptr->stream && ptr->is_destructible && --ptr->refcount <= 0) {
       AT_CHECK(ptr->refcount == 0);
       detail::DynamicCUDAInterface::cuda_stream_destroy(ptr->stream);
@@ -157,30 +157,13 @@ namespace at {
     }
   }
 
-  /*
-  * CUDAStream RAII
-  */
-
-  // Copy constructor and copy-assignment operator
-  void CUDAStream::copyInternal(const CUDAStream& other) {
-    AT_CHECK(CUDAStream_retain(other.internals_));
-    internals_ = other.internals_;
+  CUDAStreamInternals* CUDAStream_copy(CUDAStreamInternals* ptr) {
+    AT_CHECK(CUDAStream_retain(ptr));
+    return ptr;
   }
-  CUDAStream::CUDAStream(const CUDAStream& other) { copyInternal(other); }
-  CUDAStream& CUDAStream::operator=(const CUDAStream& other) {
-    copyInternal(other);
-    return *this;
+  
+  void CUDAStream_move(CUDAStreamInternals*& src, CUDAStreamInternals*& dst) {
+    AT_CHECK(src);
+    std::swap(src, dst);
   }
-
-  // Move constructor and move-assignment operator
-  void CUDAStream::moveInternal(CUDAStream&& other) {
-    AT_CHECK(other.internals_);
-    std::swap(internals_, other.internals_);
-  }
-  CUDAStream::CUDAStream(CUDAStream&& other) { moveInternal(std::move(other)); }
-  CUDAStream& CUDAStream::operator=(CUDAStream&& other) {
-    moveInternal(std::move(other));
-    return *this;
-  }
-
 } // namespace at
