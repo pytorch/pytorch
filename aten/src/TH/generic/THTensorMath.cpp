@@ -2236,8 +2236,8 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
 {
   int64_t batch;
 
-  THArgCheck(!batch1->is_empty() && THTensor_(nDimension)(batch1) == 3, 1, "expected non-empty 3D tensor");
-  THArgCheck(!batch2->is_empty() && THTensor_(nDimension)(batch2) == 3, 2, "expected non-empty 3D tensor");
+  THArgCheck(THTensor_(_nDimension)(batch1) == 3, 1, "expected 3D tensor");
+  THArgCheck(THTensor_(_nDimension)(batch2) == 3, 2, "expected 3D tensor");
   THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
              THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
@@ -2826,9 +2826,9 @@ void THTensor_(onesLike)(THTensor *r_, THTensor *input)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-  THArgCheck(!t->is_empty() && (THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2), 1, "non-empty matrix or a vector expected");
+  THArgCheck(THTensor_(_nDimension)(t) == 1 || THTensor_(_nDimension)(t) == 2, 1, "matrix or a vector expected");
 
-  if(THTensor_(nDimension)(t) == 1)
+  if(THTensor_(_nDimension)(t) == 1)
   {
     real *t_data = THTensor_(data)(t);
     int64_t t_stride_0 = THTensor_(stride)(t, 0);

@@ -35,11 +35,11 @@
   int64_t *TENSOR##_counter = NULL, *TENSOR##_sizes = NULL, *TENSOR##_strides = NULL, *TENSOR##_dimOffset = NULL; \
   int64_t TENSOR##_stride = 0, TENSOR##_size = 0, TENSOR##_dim = 0, TENSOR##_i, TENSOR##_n; \
   int TENSOR##_contiguous = ALLOW_CONTIGUOUS && DIM < 0; \
-  TENSOR##_n = 1; \
-  for(TENSOR##_i = 0; TENSOR##_i < TENSOR->dim(); TENSOR##_i++) \
+  TENSOR##_n = (TENSOR->_dim() ? 1 : 0); \
+  for(TENSOR##_i = 0; TENSOR##_i < TENSOR->_dim(); TENSOR##_i++) \
     TENSOR##_n *= TENSOR->size[TENSOR##_i]; \
 \
-  if(TENSOR->is_empty()) \
+  if(TENSOR->_dim() == 0) \
     TH_TENSOR_APPLY_hasFinished = 1; \
   else \
   { \
@@ -160,9 +160,9 @@
     elements_equal = 0;                                                 \
   }                                                                     \
   if (elements_equal == 0) {                                            \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->dim()); \
+    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
+    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
+    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->_dim()); \
     THError("inconsistent tensor size, expected %s %s, %s %s and %s %s to have the same " \
             "number of elements, but got %d, %d and %d elements respectively", \
             #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, \
@@ -199,8 +199,8 @@
   __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, DIM, 1) \
 \
     if(TENSOR1##_n != TENSOR2##_n) {                                    \
-      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
+      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
+      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
       THError("inconsistent tensor size, expected %s %s and %s %s to have the same " \
               "number of elements, but got %d and %d elements respectively", \
               #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, TENSOR1##_n, TENSOR2##_n); \
