@@ -754,12 +754,16 @@
   dispatch:
     CPU: _log1p__cpu
     CUDA: _log1p__cuda
+    SparseCPU: log1p_sparse_
+    SparseCUDA: log1p_sparse_
 
 - func: log1p_out(Tensor result, Tensor self) -> Tensor
   variants: function
   dispatch:
     CPU: _log1p_out_cpu
     CUDA: _log1p_out_cuda
+    SparseCPU: log1p_out_sparse
+    SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
 
@@ -1420,8 +1424,6 @@
     SparseCUDA: zero_sparse_
 
 - func: zero_(Tensor self) -> Tensor
-
-
 
 - func: s_native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function
