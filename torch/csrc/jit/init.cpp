@@ -22,6 +22,7 @@
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/python_interpreter.h"
+#include "torch/csrc/jit/pybind_utils.h"
 
 
 namespace torch  { namespace jit {
@@ -38,18 +39,6 @@ bool loadPythonClasses() {
   //PyObject *jit_dict = PyModule_GetDict(jit_module);
 
   return true;
-}
-
-// we cannot use the default py:cast<autograd::Variable> because it currently
-// unwraps the data tensor in the conversion process
-// TODO: replace with bs type
-variable_tensor_list createVariableTensorList(py::tuple tuple, size_t reserve_extra_space = 0) {
-  variable_tensor_list result;
-  result.reserve(tuple.size() + reserve_extra_space);
-  for(auto e : tuple) {
-    result.push_back(py::cast<autograd::Variable>(e));
-  }
-  return result;
 }
 
 } // anonymous namespace
