@@ -416,7 +416,12 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
       grad_fn->src_device = src.get_device();
     }
   }
-  baseType->s_copy_(self_, src_, non_blocking);
+  if (is_sparse()) {
+    baseType->copy_sparse_to_sparse_(self_, src_, non_blocking);
+  }
+  else {
+    baseType->s_copy_(self_, src_, non_blocking);
+  }
   increment_version(self);
   rebase_history(as_variable_ref( self ), std::move(grad_fn));
   if(torch::jit::tracer::isTracing()) {
