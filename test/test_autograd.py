@@ -2364,14 +2364,18 @@ class TestAutograd(TestCase):
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, True)
         with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
-            with detect_anomaly():
-                out.backward()
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    out.backward()
+            self.assertIn('No forward pass information', str(w[0].message))
 
         inp = torch.rand(size, requires_grad=True)
-        out = MyFunc.apply(inp, inp, False)
         with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
-            with detect_anomaly():
-                out.backward()
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    out = MyFunc.apply(inp, inp, False)
+                    out.backward()
+            self.assertIn('MyFunc.apply', str(w[0].message))
 
 
 def index_variable(shape, max_indices):
