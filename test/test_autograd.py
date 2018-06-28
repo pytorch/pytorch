@@ -2300,22 +2300,13 @@ class TestAutograd(TestCase):
         test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
 
     def test_as_strided_fast_path(self):
-        # Test that expand, squeeze, unsqueeze, permute, transpose will trigger
-        # fast path, i.e., only returning a view of grad (after reducing on
-        # input/output expanded dims) and not creating the underlying storage).
+        # Test that squeeze, unsqueeze, permute, transpose will trigger the fast
+        # path, i.e., only returning a view of grad instead of creating new
+        # tensors, if the input doesn't have overlapping memory.
         # This is a bit of an awkward test as it tests the internal behavior of
         # a backward function. However, since <AsStridedBackward> is used to
         # replace grad_fn of in-place modified views, it is important to make
         # sure that it runs fast for these common ops.
-        def expand(x):
-            shape = list(x.size())
-            for i in range(len(shape)):
-                if shape[i] == 1:
-                    shape[i] = 2
-                    break
-            else:
-                raise RuntimeError("rewrite test so it changes x")
-            return x.expand(shape)
 
         def squeeze(x):
             shape = list(x.size())
@@ -2342,22 +2333,21 @@ class TestAutograd(TestCase):
             else:
                 raise RuntimeError("rewrite test so it changes x")
 
-        def test(x, fast_grad_storage_size, do_gradcheck):
+        def test(x):
             fast_fn_seqs = (
-                [expand],
                 [squeeze],
                 [unsqueeze],
                 [permute],
-                [expand, unsqueeze, permute],
-                [squeeze, expand, unsqueeze, expand, unsqueeze, expand],
+                [unsqueeze, permute],
+                [squeeze, unsqueeze, unsqueeze],
+                [squeeze, permute, transpose, unsqueeze, permute],
                 [unsqueeze, unsqueeze, unsqueeze, permute, unsqueeze, unsqueeze],
-                [expand, squeeze, transpose, unsqueeze, permute, expand],
-                [permute, expand, squeeze, permute, unsqueeze, expand, unsqueeze],
+                [permute, squeeze, permute, unsqueeze, unsqueeze, permute, squeeze],
             )
 
             slow_fn_seqs = (
                 [unfold],
-                [permute, unfold, expand],
+                [permute, unfold, unsqueeze],
             )
 
             all_fn_seqs = [(True, s) for s in fast_fn_seqs] + [(False, s) for s in slow_fn_seqs]
@@ -2372,29 +2362,24 @@ class TestAutograd(TestCase):
                     return x.as_strided(y.size(), y.stride(), y.storage_offset())
 
                 as_strided_y = tested_fn(x)
-                g, = torch.autograd.grad(as_strided_y, x, torch.ones_like(as_strided_y))
+                gO = torch.ones_like(as_strided_y)
+                gI, = torch.autograd.grad(as_strided_y, x, gO)
                 if is_fast:
-                    self.assertEqual(g.storage().size(), fast_grad_storage_size)
+                    self.assertEqual(gI.storage().data_ptr(), gO.storage().data_ptr())
                 else:
                     # makes sure that this test is valid, i.e., slow path is
-                    # actually allocating larger storage tensor
-                    assert g.storage().size() > fast_grad_storage_size
-                if do_gradcheck:
-                    gradcheck(tested_fn, [x])
-                    gradgradcheck(tested_fn, [x])
+                    # actually allocating new storage tensor for gI.
+                    assert gI.storage().data_ptr() != gO.storage().data_ptr()
+                gradcheck(tested_fn, [x])
+                gradgradcheck(tested_fn, [x])
 
         full = torch.randn(1, 3, 3, 5, dtype=torch.double)
+        # Shape: [2, 3, 1, 2]
+        x = full.transpose(1, 3)[0, 1::3, :, None, 1:].requires_grad_()
+        test(x)
         # Shape: [1, 2, 1, 3, 3, 1]
-        # Fast path: (not allocating "storage")   : x.numel() = 12
-        # Slow path: (min storage size to store x): full.numel() = 45
         x = full[:, ::2, None, :, ::2, None].requires_grad_()
-        test(x, x.numel(), True)
-        # Expand dim 2 from size 1 to size 10
-        # Shape: [1, 2, 10, 3, 3, 1]
-        # Fast path: (not allocating "storage")   : x.numel() / 10 = 12
-        # Slow path: (min storage size to store x): full.numel() = 45
-        x = x.detach().expand(1, 2, 10, 3, 3, 1).requires_grad_()
-        test(x, x.numel() / 10, False)  # skip gradcheck since input is expanded
+        test(x)
 
     def _test_where_functional(self, t):
         x = Variable(t(torch.randn(5, 5)), requires_grad=True)
