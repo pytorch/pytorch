@@ -9,6 +9,12 @@
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/assertions.h"
 
+#if defined(__clang__)
+#define __ubsan_ignore_vptr__ __attribute__((no_sanitize("vptr")))
+#else
+#define __ubsan_ignore_vptr__
+#endif
+
 namespace torch { namespace jit {
 
 enum class AttributeKind {
@@ -195,7 +201,7 @@ struct Attributes {
   }
 
 private:
-  Derived* This() {
+  Derived* __ubsan_ignore_vptr__ This() {
     return static_cast<Derived*>(this);
   }
   template<typename T>
