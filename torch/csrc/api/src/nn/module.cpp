@@ -119,7 +119,11 @@ void Module::zero_grad() {
     child.value->zero_grad();
   }
   for (auto& parameter : parameters_) {
-    parameter->grad().zero_();
+    auto& grad = parameter->grad();
+    if (grad.defined()) {
+      grad = grad.detach();
+      grad.zero_();
+    }
   }
 }
 
