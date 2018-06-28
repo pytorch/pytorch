@@ -36,7 +36,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 	   	ws_(ws){
     // For the padding, they should either be the legacy padding strategy
     // (VALID or SAME), or an explicit, non-negative value.
-	std::cout << "Comming..." << std::endl;
 	if (legacy_pad_ == LegacyPadding::VALID ||
         legacy_pad_ == LegacyPadding::SAME) {
       CAFFE_ENFORCE(
@@ -96,10 +95,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
 	if (has_pad){
       if (OperatorBase::HasArgument("pad")) {
-        std::cout << "Liar liar pants on fire 2" << std::endl;
         pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
       } else {
-        std::cout << "3 Liar liar pants on fire" << std::endl;
         pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
         pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
         pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
@@ -111,7 +108,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 		use_pad_ = false;
 	  }
           if (!OperatorBase::HasArgument("output_shape")) {
-            std::cout << "4 Liar liar pants on fire" << std::endl;
             output_shape_.push_back(
                 OperatorBase::GetSingleArgument<int>("output_shape_h", 0));
             output_shape_.push_back(
@@ -132,14 +128,12 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
     if (pads_.size() == 0) {
       pads_.resize(default_size * 2, 0);
-      std::cout << "1 Liar liar pants on fire" << std::endl;
     }
     if (output_shape_.size() == 0) {
       output_shape_.resize(default_size, 0);
     }
-        std::cout << "Half..." << std::endl;
     if (adj_.size() == 0) {
-      adj_.resize(default_size), 0);
+      adj_.resize(default_size, 0);
     }
 
     CAFFE_ENFORCE_EQ(stride_.size(), default_size);
@@ -147,7 +141,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 
     if (legacy_pad_ != LegacyPadding::VALID &&
         legacy_pad_ != LegacyPadding::SAME) {
-      CAFFE_ENFORCE_EQ(pads_.size(), 2 * default_size());
+      CAFFE_ENFORCE_EQ(pads_.size(), 2 * default_size);
     }
 
     for (int dim = 0; dim < default_size; ++dim) {
@@ -162,7 +156,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
-	std::cout << pads_[0] << pads_[1] << pads_[2] << pads_[3] << std::endl;
   }
   // Sets the output size. The output channel is manually specified.
   void SetOutputSize(
@@ -191,7 +184,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       default:
         LOG(FATAL) << "Unknown Storage order: " << order_;
     }
-    std::cout << "log set" << std::endl;
     ComputeSizeAndPad(
         H,
         stride_[0],
@@ -201,7 +193,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         &pads_[0],
         &pads_[2],
         &output_shape_[0]);
-    std::cout << "size half" << std::endl;
     ComputeSizeAndPad(
         W,
         stride_[1],
@@ -211,7 +202,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 		&pads_[1],
         &pads_[3],
         &output_shape_[1]);
-    std::cout << "size end" << std::endl;
     if (channel_first) {
       output->Resize(N, output_channel, output_shape_[0], output_shape_[1]);
     } else {
@@ -220,7 +210,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     VLOG(2) << "In: N " << N << " M " << M << " H " << H << " W " << W;
     VLOG(2) << "Out: output_channel " << output_channel << " H "
             << output_shape_[0] << " W " << output_shape_[1];
-    std::cout << "set end" << std::endl;
   }
 
   bool RunOnDevice() override {
@@ -320,7 +309,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 	  int *pad_tail,
 	  int *out_size) {
 	const int total_padding = (in_size - 1) * stride + kernel + adj - *out_size;
-        std::cout << "total: " << total_padding << std::endl;
         CAFFE_ENFORCE(*out_size >= 0);
 	CAFFE_ENFORCE(total_padding >= 0);
 	//Caffe2::LegacyPadding::SAME corresponds to ONNX::auto_pad::SAME_UPPER
@@ -351,11 +339,9 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       int* pad_tail,
       int* out_size) {
     if (use_pad == false) {
-      std::cout << "Liar Liar liar pants on fire" << std::endl;
       ComputePadUsingSize(
           in_size, stride, kernel, adj, pad_head, pad_tail, out_size);
     } else {
-      std::cout << "calc begin" << std::endl;
       switch (legacy_pad_) {
         case LegacyPadding::NOTSET:
           CAFFE_ENFORCE(*pad_head >= 0);
