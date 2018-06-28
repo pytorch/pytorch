@@ -287,7 +287,7 @@ OPERATOR_SCHEMA(AddPadding)
     .SetDoc(R"DOC(
 Given a partitioned tensor $T<N, D_1, ..., D_n>$, where the partitions are
 defined as ranges on its outer-most (slowest varying) dimension $N$,
-return a tensor $T<(N + 2 * padding\_width), D_1, ..., D_n>$ with paddings
+return a tensor $T<(N + 2 * padding\\_width), D_1, ..., D_n>$ with paddings
 added to the start and end of each range.
 
 Optionally, different paddings can be provided for beginning and end.

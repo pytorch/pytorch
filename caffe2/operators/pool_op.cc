@@ -737,7 +737,7 @@ size and downsampling the data into the output blob for further processing. The
 Pooling layers reduce the spatial dimensionality of the input blob. Each of the
 output blob's dimensions will reduce according to:
 
-$$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
+$$dim_{out}=\\frac{dim_{in}-kernel+2*pad}{stride}+1$$
 
 Github Links:
 
@@ -764,9 +764,9 @@ op = core.CreateOperator(
 )
 
 workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
-print("X:\n", workspace.FetchBlob("X"), "\n")
+print("X:\\n", workspace.FetchBlob("X"), "\\n")
 workspace.RunOperatorOnce(op)
-print("Y:\n", workspace.FetchBlob("Y"))
+print("Y:\\n", workspace.FetchBlob("Y"))
 ```
 
 **Result**
@@ -806,7 +806,7 @@ size and downsampling the data into the output blob for further processing. The
 Pooling layers reduce the spatial dimensionality of the input blob. Each of the
 output blob's dimensions will reduce according to:
 
-$$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
+$$dim_{out}=\\frac{dim_{in}-kernel+2*pad}{stride}+1$$
 
 Github Links:
 
@@ -832,9 +832,9 @@ op = core.CreateOperator(
 )
 
 workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
-print("X:\n", workspace.FetchBlob("X"), "\n")
+print("X:\\n", workspace.FetchBlob("X"), "\\n")
 workspace.RunOperatorOnce(op)
-print("Y:\n", workspace.FetchBlob("Y"))
+print("Y:\\n", workspace.FetchBlob("Y"))
 ```
 
 **Result**

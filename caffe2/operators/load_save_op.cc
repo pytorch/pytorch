@@ -70,7 +70,7 @@ OPERATOR_SCHEMA(Load)
     .NumOutputs(0, INT_MAX)
     .SetDoc(R"DOC(
 The Load operator loads a set of serialized blobs from a db or multiple dbs. It
-takes $[0, \infty)$ number of inputs and $[0, \infty)$ number of outputs, using
+takes $[0, \\infty)$ number of inputs and $[0, \\infty)$ number of outputs, using
 the db keys to match the db entries with the outputs.
 
 If at least one input is passed, then it is assumed that that input blobs are a
@@ -165,7 +165,7 @@ OPERATOR_SCHEMA(Save)
     .NumInputs(1, INT_MAX)
     .NumOutputs(0)
     .SetDoc(R"DOC(
-Saves a set of blobs to a db. It takes $[1, \infty)$ number of inputs and has
+Saves a set of blobs to a db. It takes $[1, \\infty)$ number of inputs and has
 no output. The contents of the inputs are written into the db using the
 settings specified by the arguments.
 

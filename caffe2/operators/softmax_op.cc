@@ -84,25 +84,25 @@ OPERATOR_SCHEMA(Softmax)
   .IdenticalTypeAndShape()
   .SetDoc(R"DOC(
 
-Applies the Softmax function to an n-dimensional input Tensor rescaling them so 
-that the elements of the n-dimensional output Tensor lie in the range (0,1) and 
+Applies the Softmax function to an n-dimensional input Tensor rescaling them so
+that the elements of the n-dimensional output Tensor lie in the range (0,1) and
 sum to 1. The softmax operator is typically the last layer in a classifier network,
 as its output can be interpreted as confidence probabilities of an input belonging
-to each class. The input is a 2-D tensor (Tensor) of size (batch_size x 
-input_feature_dimensions). The output tensor has the same shape and contains the 
-softmax normalized values of the corresponding input. The softmax function is 
+to each class. The input is a 2-D tensor (Tensor) of size (batch_size x
+input_feature_dimensions). The output tensor has the same shape and contains the
+softmax normalized values of the corresponding input. The softmax function is
 defined as follows:
 
-$$softmax(x_i) = \frac{\exp(x_i)}{\sum_{j} \exp(x_j)}$$
+$$softmax(x_i) = \\frac{\\exp(x_i)}{\\sum_{j} \\exp(x_j)}$$
 
 The input does not need to explicitly be a 2D vector; rather, it will be coerced
-into one. For an arbitrary n-dimensional tensor `X` in 
-$[a_0, a_1, ..., a_{k-1}, a_k, ..., a_{n-1}]$, where k is the `axis` provided, 
-then `X` will be coerced into a 2-dimensional tensor with dimensions 
+into one. For an arbitrary n-dimensional tensor `X` in
+$[a_0, a_1, ..., a_{k-1}, a_k, ..., a_{n-1}]$, where k is the `axis` provided,
+then `X` will be coerced into a 2-dimensional tensor with dimensions
 $[(a_0 * ... * a_{k-1}), (a_k * ... * a_{n-1})]$. For the default case where
-`axis`=1, the `X` tensor will be coerced into a 2D tensor of dimensions 
+`axis`=1, the `X` tensor will be coerced into a 2D tensor of dimensions
 $[a_0, (a_1 * ... * a_{n-1})]$, where $a_0$ is often the batch size. In this
-situation, we must have $a_0 = N$ and $a_1 * ... * a_{n-1} = D$. Each of these 
+situation, we must have $a_0 = N$ and $a_1 * ... * a_{n-1} = D$. Each of these
 dimensions must be matched correctly, or else the operator will throw errors.
 
 Github Links:

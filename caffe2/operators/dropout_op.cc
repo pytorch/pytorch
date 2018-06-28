@@ -84,7 +84,7 @@ with random elements zeroed. The probability that a given element is zeroed is
 determined by the `ratio` argument.
 
 If the `is_test` argument is set to non-zero, the output `Y` is exactly the same as the
-input `X`. Note that outputs are scaled by a factor of $\frac{1}{1-ratio}$ during
+input `X`. Note that outputs are scaled by a factor of $\\frac{1}{1-ratio}$ during
 training, so that during test time, we can simply compute an identity function. This
 scaling is important because we want the output at test time to equal the expected value
 at training time. Dropout has been proven to be an effective regularization technique to
@@ -154,7 +154,7 @@ mask: [[False False False  True  True]
         1,
         "mask",
         "*(type: Tensor`<bool>`)* The output mask containing boolean values for"
-        "each element, signifying which elements are dropped out. If `is_test` is" 
+        "each element, signifying which elements are dropped out. If `is_test` is"
         "nonzero, this output is not filled.")
     .InheritOnnxSchema("Dropout");
 

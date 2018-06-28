@@ -309,15 +309,15 @@ OPERATOR_SCHEMA(LRN)
   .SetDoc(R"DOC(
 
 `LRN` applies Local Response Normalization to an input blob. This operation performs
-a kind of "lateral inhibition" by normalizing over local input regions, where 
-normalization is applied across channels. This operator is typically used to 
+a kind of "lateral inhibition" by normalizing over local input regions, where
+normalization is applied across channels. This operator is typically used to
 normalize an unbounded activation (such as ReLU). The output shape is the same as
 the input shape. The `brew` module has a wrapper for this operator for use in a
 `ModelHelper` object.
 
 The formula for LRN is as follows:
 
-$$b_{c} = a_{c}(bias + \frac{\alpha}{n}\sum_{c'=max(0,c-n/2)}^{min(N-1,c+n/2)} a_{c'}^2 )^{-\beta}$$
+$$b_{c} = a_{c}(bias + \\frac{\\alpha}{n}\\sum_{c'=max(0,c-n/2)}^{min(N-1,c+n/2)} a_{c'}^2 )^{-\\beta}$$
 
 
 Github Links:
@@ -346,10 +346,10 @@ op = core.CreateOperator("LRN",
 )
 
 workspace.FeedBlob("X", np.random.randn(1, 6, 6, 1).astype(np.float32)) # NCHW
-print("X:\n", workspace.FetchBlob("X"), "\n")
+print("X:\\n", workspace.FetchBlob("X"), "\\n")
 workspace.RunOperatorOnce(op)
-print("Y:\n", workspace.FetchBlob("Y"))
-print("Y_scale:\n", workspace.FetchBlob("Y_scale"))
+print("Y:\\n", workspace.FetchBlob("Y"))
+print("Y_scale:\\n", workspace.FetchBlob("Y_scale"))
 ```
 
 **Result**
@@ -396,7 +396,7 @@ X:
    [ 0.45961624]
    [-1.0201577 ]
    [ 0.62854475]
-   [-0.6395456 ]]]] 
+   [-0.6395456 ]]]]
 
 Y:
  [[[[ 0.5160766 ]
@@ -494,7 +494,7 @@ Y_scale:
   .Arg("order", "*(type: float; default: 'NCHW')* Order of blob dimensions.")
   .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor (ReLU output).")
   .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
-  .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.") 
+  .Output(1, "Y_scale", "*(type: Tensor`<float>`)* Output scale.")
   .InheritOnnxSchema("LRN");
 OPERATOR_SCHEMA(LRNGradient).NumInputs(3).NumOutputs(1);
 

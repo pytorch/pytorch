@@ -29,7 +29,7 @@ Apply the Sigmoid function element-wise to the input tensor. This is often used
 as a non-linear activation function in a neural network. The sigmoid function is
 defined as:
 
-$$Sigmoid(x) = \frac{1}{1+\exp(-x)}$$
+$$Sigmoid(x) = \\frac{1}{1+\\exp(-x)}$$
 
 Github Links:
 

@@ -74,7 +74,7 @@ print("Initial 'done' value:", workspace.FetchBlob("done"))
 
 
 # Test CountUp operator
-print("\nTesting CountUp operator...")
+print("\\nTesting CountUp operator...")
 for i in range(5):
     workspace.RunOperatorOnce(countup_op)
     print("'previous_count' after CountUp:", workspace.FetchBlob("previous_count"))
@@ -84,11 +84,11 @@ print("'count' value after CountUp test:", workspace.FetchBlob("count"))
 
 
 # Test CountDown operator
-print("\nTesting CountDown operator...")
+print("\\nTesting CountDown operator...")
 for i in range(11):
     workspace.RunOperatorOnce(countdown_op)
     workspace.RunOperatorOnce(retrievecount_op)
-    print("'count' value after CountDown: {}\t'done' value: {}".format(workspace.FetchBlob("count"), workspace.FetchBlob("done")))
+    print("'count' value after CountDown: {}\\t'done' value: {}".format(workspace.FetchBlob("count"), workspace.FetchBlob("done")))
 ```
 
 **Result**
