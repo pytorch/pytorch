@@ -7,7 +7,6 @@
 #include "THStorage.hpp"
 
 #include <atomic>
-#include <ATen/ATen.h>
 
 typedef struct THTensor
 {
@@ -52,10 +51,6 @@ typedef struct THTensor
         }
       }
       return false;
-    }
-
-    inline at::IntList sizes() {
-      return at::IntList(size, dim_);
     }
 } THTensor;
 
