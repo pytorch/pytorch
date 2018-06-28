@@ -1,7 +1,6 @@
 import copy
 
 import torch
-from torch.autograd import Variable
 from torch._utils import _flatten_dense_tensors, _unflatten_dense_tensors, \
     _take_tensors
 
