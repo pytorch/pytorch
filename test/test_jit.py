@@ -1080,26 +1080,18 @@ class TestJit(JitTestCase):
 
 
 class TestBatched(TestCase):
-    def assertEqual(self, xs, ybs, prec=None, message='', allow_inf=False):
-        if isinstance(ybs, torch.BatchTensor):
-            self.assertEqual(xs, ybs.examples(), prec, message, allow_inf)
-        elif isinstance(ybs, (list, tuple)):
-            for x, yb in zip(xs, ybs):
-                super(TestBatched, self).assertEqual(x, yb, prec, message, allow_inf)
-        else:
-            super(TestBatched, self).assertEqual(x, y, prec, message, allow_inf)
-
-    def mb_rand(self, *dims):
+    # generate random examples and create an batchtensor with them
+    def rand_batch(self, *dims):
         dims = [dim for dim in dims if dim != ()]
         xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
         xb = torch.BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
         return xs, xb
 
-    def test_create_from_list(self):
-        xs, batch = self.mb_rand(4, (True, 3), (False, 2), (True, 5))
-        self.assertEqual(xs, batch)
+    def test_create_batchtensor(self):
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2), (True, 5))
+        self.assertEqual(xs, batch.examples())
         batch2 = torch.BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
-        self.assertEqual(xs, batch2)
+        self.assertEqual(xs, batch2.examples())
 
 
 class TestScript(JitTestCase):

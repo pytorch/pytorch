@@ -68,9 +68,9 @@ void initBatchTensorBindings(PyObject* module) {
       .def(py::init<at::Tensor, at::Tensor, at::Tensor>())
       .def(py::init<std::vector<at::Tensor>, at::Tensor>())
       .def("examples", &BatchTensor::examples)
-      .def("get_data", &BatchTensor::getData)
-      .def("get_mask", &BatchTensor::getMask)
-      .def("get_dims", &BatchTensor::getDims);
+      .def("get_data", &BatchTensor::get_data)
+      .def("get_mask", &BatchTensor::get_mask)
+      .def("get_dims", &BatchTensor::get_dims);
 }
 
 }} // namespace torch::jit
