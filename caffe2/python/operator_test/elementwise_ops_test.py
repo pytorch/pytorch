@@ -444,7 +444,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._test_binary_op("Sub", np.subtract, n, m,
                              k, t, -0.5, True, gc, dc)
         self._test_binary_op_in_place(
-            "Sub", np.subtract, n, m,  -0.5, True, True, gc, dc)
+            "Sub", np.subtract, n, m, -0.5, True, True, gc, dc)
 
     @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
            t=st.integers(0, 5), **hu.gcs)
