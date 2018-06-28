@@ -439,6 +439,10 @@
 - func: dot_out(Tensor result, Tensor self, Tensor tensor) -> Tensor
   variants: function
 
+- func: dropout(Tensor self, double p=0.5, bool featurewise=false, bool train=False, Generator* generator=nullptr) -> Tensor
+
+- func: dropout_(Tensor self, double p=0.5, bool featurewise=false, bool train=False, Generator* generator=nullptr) -> Tensor
+
 - func: einsum(std::string equation, TensorList tensors) -> Tensor
   variants: function
 
