@@ -4291,7 +4291,6 @@ class TestNN(NNTestCase):
         nn.BCEWithLogitsLoss(pos_weight=pos_weight, size_average=False)(output, target).backward()
         expected_grad = torch.empty(3, 1).fill_(0.5)
         grad = output.grad
-        print(grad)
         self.assertEqual(grad, expected_grad)
 
     def test_bce_loss_broadcasts_weights(self):

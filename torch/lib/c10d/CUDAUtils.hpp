@@ -6,7 +6,10 @@
 #include <cuda_runtime.h>
 
 // Forward declaration
-struct THCStream;
+namespace at {
+  struct CUDAStreamInternals;
+}
+typedef at::CUDAStreamInternals THCStream;
 
 namespace c10d {
 
