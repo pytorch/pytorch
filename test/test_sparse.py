@@ -661,39 +661,44 @@ class TestSparse(TestCase):
 
     def test_log1p(self):
         import math
-        # test cuda
-        input_cuda = torch.cuda.sparse.DoubleTensor(
-            torch.LongTensor([[0], [1], [2]]).transpose(1, 0).cuda(),
-            torch.FloatTensor([3, 4, 5]).cuda(),
-            torch.Size([3]))
-        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
-                         input_cuda.log1p().to_dense())
-        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
-                         input_cuda.log1p_().to_dense())
 
-        # test cpu
-        input = torch.sparse.DoubleTensor(
-            torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
-            torch.FloatTensor([3, 4, 5]),
-            torch.Size([3]))
-        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
-                         input.log1p().to_dense())
-        self.assertEqual(torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)]),
-                         input.log1p_().to_dense())
+        if self.is_cuda:
+            input = torch.cuda.sparse.DoubleTensor(
+                torch.LongTensor([[0], [1], [2]]).transpose(1, 0).cuda(),
+                torch.FloatTensor([3, 4, 5]).cuda(),
+                torch.Size([3]))
+        else:
+            input = torch.sparse.DoubleTensor(
+                torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
+                torch.FloatTensor([3, 4, 5]),
+                torch.Size([3]))
+
+        expected_output = torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)])
+        self.assertEqual(expected_output, input.log1p().to_dense())
+        self.assertEqual(expected_output, input.coalesce().log1p_().to_dense())
+
+        # test in-place op on uncoalesced input
+        with self.assertRaisesRegex(RuntimeError,
+                                    "log1p only applies to coalesced sparse tensor!"):
+            input.log1p_()
+
+        input.requires_grad_()
+        self.assertTrue(input.requires_grad)
 
         # test autograd
-        input_variable = torch.sparse.DoubleTensor(
-            torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
-            torch.FloatTensor([3, 4, 5]),
-            torch.Size([3])).requires_grad_()
-        self.assertTrue(input_variable.requires_grad)
-
-        y = input_variable.log1p()
+        x = input.clone()
+        y = input.log1p()
         with self.assertRaisesRegex(RuntimeError,
                                     "log1p of a sparse tensor is made to be non-differentiable since.*"):
-            y.backward(torch.sparse.DoubleTensor(torch.LongTensor([[0], [1], [2]]).transpose(1, 0),
-                                                 torch.FloatTensor([3, 4, 5]),
-                                                 torch.Size([3])))
+            y.backward(x)
+
+        # test uncoalesced input
+        input_uncoalesced = torch.sparse.DoubleTensor(
+            torch.LongTensor([[0], [1], [2], [0], [1], [2]]).transpose(1, 0),
+            torch.FloatTensor([2, 3, 4, 1, 1, 1]),
+            torch.Size([3]))
+        self.assertEqual(expected_output, input_uncoalesced.log1p().to_dense())
+        self.assertEqual(expected_output, input_uncoalesced.coalesce().log1p_().to_dense())
 
     def test_zeros(self):
         i_shapes = [2, 3, 4]

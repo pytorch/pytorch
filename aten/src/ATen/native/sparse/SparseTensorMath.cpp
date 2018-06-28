@@ -98,20 +98,25 @@ SparseTensor& mul_sparse_scalar_(SparseTensor& t, Scalar v) {
 // log1p(SparseTensor)
 // --------------------------------------------------------------------
 
+// TODO: add in-place variant
+
 SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
 
   if (isSameTensor(r, t)) {
-    r._values().log1p_();
-  } else {
-    r = raw_copy_sparse_(r, t);
-    r._values().log1p_();
+    // don't have in-place log1p because coalesce() is not in-place
+    AT_CHECK(r.is_coalesced(), "log1p only applies to coalesced sparse tensor!");
   }
+  else {
+    r = raw_copy_sparse_(r, t.coalesce());
+  }
+  r._values().log1p_();
   return r;
 }
 
 SparseTensor& log1p_sparse_(SparseTensor& t) {
+  AT_CHECK(t.is_coalesced(), "log1p only applies to coalesced sparse tensor!");
   return log1p_out_sparse(t, t);
 }
 
