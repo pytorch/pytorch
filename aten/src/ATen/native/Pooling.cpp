@@ -41,10 +41,13 @@ std::tuple<Tensor,Tensor> adaptive_max_pool1d(const Tensor & self, IntList outpu
   return std::make_tuple(output.squeeze(2), indices.squeeze(2));
 }
 
-std::tuple<Tensor,Tensor> max_pool1d(
-    const Tensor & self, IntList kernel_size, IntList stride, IntList padding,
-    IntList dilation, bool ceil_mode) {
-
+std::tuple<Tensor, Tensor> max_pool1d_with_indices(
+    const Tensor& self,
+    IntList kernel_size,
+    IntList stride,
+    IntList padding,
+    IntList dilation,
+    bool ceil_mode) {
   if (stride.empty()) {
     stride = kernel_size;
   }
@@ -55,7 +58,7 @@ std::tuple<Tensor,Tensor> max_pool1d(
   check1d("max_pool1d", "dilation", dilation);
 
   Tensor output, indices;
-  std::tie(output, indices) = at::max_pool2d(
+  std::tie(output, indices) = at::max_pool2d_with_indices(
       self.unsqueeze(2),
       {1, kernel_size[0]},
       {1, stride[0]},
@@ -90,6 +93,42 @@ Tensor avg_pool1d(
       count_include_pad);
 
   return output.squeeze(2);
+}
+
+Tensor max_pool1d(
+    const Tensor& self,
+    IntList kernel_size,
+    IntList stride,
+    IntList padding,
+    IntList dilation,
+    bool ceil_mode) {
+  auto output_and_indices = at::max_pool1d_with_indices(
+      self, kernel_size, stride, padding, dilation, ceil_mode);
+  return std::get<0>(output_and_indices);
+}
+
+Tensor max_pool2d(
+    const Tensor& self,
+    IntList kernel_size,
+    IntList stride,
+    IntList padding,
+    IntList dilation,
+    bool ceil_mode) {
+  auto output_and_indices = at::max_pool2d_with_indices(
+      self, kernel_size, stride, padding, dilation, ceil_mode);
+  return std::get<0>(output_and_indices);
+}
+
+Tensor max_pool3d(
+    const Tensor& self,
+    IntList kernel_size,
+    IntList stride,
+    IntList padding,
+    IntList dilation,
+    bool ceil_mode) {
+  auto output_and_indices = at::max_pool3d_with_indices(
+      self, kernel_size, stride, padding, dilation, ceil_mode);
+  return std::get<0>(output_and_indices);
 }
 } // namespace native
 } // namespace at
