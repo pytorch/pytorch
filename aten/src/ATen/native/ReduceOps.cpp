@@ -10,7 +10,6 @@
 #include <functional>
 #include <numeric>
 #include <vector>
-
 #include <map>
 
 namespace at {
@@ -377,7 +376,8 @@ Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
 
 // MULTI DIM REDUCE ###########################################################
 
-template <Tensor (reduce_1)(const Tensor &, int64_t, bool)>
+template <Tensor (reduce_1)(const Tensor &, int64_t, bool),
+    Tensor& (reduce_1_out)(Tensor& result, const Tensor &, int64_t, bool)>
 inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool keepdim) {
   if (dims_.size() == 1) {
     return reduce_1(self, dims_[0], keepdim);
@@ -386,51 +386,108 @@ inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool k
     return self;
   }
   int64_t ndims = self.dim();
-  auto reduce_dims = dim_list_to_bitset(dims_, ndims);
-  Tensor result = self;
-  for (int64_t dim = ndims-1; dim >= 0; dim--) {
-    if (reduce_dims[dim])
-      result = reduce_1(result, dim, keepdim);
+  auto reduced_size = self.sizes().vec();
+  auto dims = dims_.vec();
+  maybe_wrap_dims(dims, ndims);
+  // Sort the reduced dimensions so that we reduce the largest dimension first.
+  std::sort(dims.begin(), dims.end(),
+        [&](int64_t i, int64_t j){ return reduced_size[i] > reduced_size[j]; });
+  int64_t reduced_numel = self.numel();
+  int64_t max_reduced_numel = reduced_numel / reduced_size[dims[0]];
+  int64_t buffer_size = max_reduced_numel + max_reduced_numel / reduced_size[dims[1]];
+  // We separate `buffer` into two regions, one starting at 0, and another
+  // starting at max_reduced_numel. These two regions are used alternatively as
+  // the output of a `reduce_1` along a particular dimension. `offset` will
+  // indicate which region we should use next.
+  // Have keepdim=true when reducing. We will squeeze later.
+  auto buffer = at::empty({buffer_size}, self.type());
+  int64_t offset = 0;
+  Tensor t = self;
+  for (auto& dim : dims) {
+    reduced_numel /= reduced_size[dim];
+    reduced_size[dim] = 1;
+    auto res = buffer.narrow(0, offset, reduced_numel).view(reduced_size);
+    t = reduce_1_out(res, t, dim, true);
+    offset = max_reduced_numel - offset;
   }
-  return result;
+  // squeeze if needed
+  if (!keepdim) {
+    std::vector<int64_t> squeezed_shape;
+    squeezed_shape.reserve(ndims - dims.size());
+    auto reduce_dims = dim_list_to_bitset(dims_, ndims);
+    for (int64_t dim = 0; dim < ndims; dim++) {
+      if (!reduce_dims[dim]) {
+        squeezed_shape.emplace_back(reduced_size[dim]);
+      }
+    }
+    return t.view(squeezed_shape);
+  }
+  return t;
 }
 
 template <Tensor (reduce_1)(const Tensor &, int64_t, bool),
-	  Tensor& (reduce_1_out)(Tensor& result, const Tensor &, int64_t, bool)>
+    Tensor& (reduce_1_out)(Tensor& result, const Tensor &, int64_t, bool)>
 inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, IntList dims_, bool keepdim) {
   if (dims_.size() == 1) {
     return reduce_1_out(result, self, dims_[0], keepdim);
   }
+  if (dims_.size() == 0) {
+    return result;
+  }
   int64_t ndims = self.dim();
-  auto reduce_dims = dim_list_to_bitset(dims_, ndims);
+  auto reduced_size = self.sizes().vec();
+  auto dims = dims_.vec();
+  maybe_wrap_dims(dims, ndims);
+  // Sort the reduced dimensions so that we reduce the largest dimension first.
+  std::sort(dims.begin(), dims.end(),
+        [&](int64_t i, int64_t j){ return reduced_size[i] > reduced_size[j]; });
+  int64_t reduced_numel = self.numel();
+  int64_t max_reduced_numel = reduced_numel / reduced_size[dims[0]];
+  int64_t buffer_size = max_reduced_numel + max_reduced_numel / reduced_size[dims[1]];
+  // We separate `buffer` into two regions, one starting at 0, and another
+  // starting at max_reduced_numel. These two regions are used alternatively as
+  // the output of a `reduce_1` along a particular dimension. `offset` will
+  // indicate which region we should use next.
+  // Have keepdim=true when reducing. We will squeeze later.
+  auto buffer = at::empty({buffer_size}, self.type());
+  int64_t offset = 0;
   Tensor t = self;
-  int64_t last_reduction = dims_.size()-1;
+  int64_t last_reduction = dims.size() - 1;
   int64_t num_reduction = 0;
-  for (int64_t dim = ndims-1; dim >= 0; dim--) {
-    if (reduce_dims[dim]) {
-      if (num_reduction < last_reduction) {
-	t = reduce_1(t, dim, keepdim);
-      } else {
-	reduce_1_out(result, t, dim, keepdim);
+  for (auto& dim : dims) {
+    reduced_numel /= reduced_size[dim];
+    reduced_size[dim] = 1;
+    auto res = buffer.narrow(0, offset, reduced_numel).view(reduced_size);
+    if (num_reduction < last_reduction) {
+      t = reduce_1_out(res, t, dim, true);
+    } else {
+      reduce_1_out(result, t, dim, true);
+    }
+    offset = max_reduced_numel - offset;
+    num_reduction++;
+  }
+  // squeeze if needed (use in-place squeeze_)
+  if (!keepdim) {
+    auto reduce_dims = dim_list_to_bitset(dims_, ndims);
+    for (int64_t dim = ndims - 1; dim >= 0; dim--) {
+      if (reduce_dims[dim]) {
+        result.squeeze_(dim);
       }
-      num_reduction++;
     }
   }
   return result;
 }
 
-
 Tensor& _sum_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   if (self.is_cuda()) {
     return at::_sum_cuda_out(result, self, dim, keepdim);
-  }
-  else {
+  } else {
     return _sum_out_cpu(result, self, dim, keepdim);
   }
 }
 
 Tensor _sum(const Tensor &self, IntList dims, bool keepdim) {
-  return reduce_multi_associative<_sum>(self, dims, keepdim);
+  return reduce_multi_associative<_sum, _sum_out>(self, dims, keepdim);
 }
 
 Tensor& _sum_out(Tensor &result, const Tensor &self, IntList dims, bool keepdim)

@@ -45,6 +45,15 @@ static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<
   return maybe_wrap_dim(dim, tensor_sizes[0].size());
 }
 
+// wrap negative dims in to_transform_dims
+static inline void maybe_wrap_dims(std::vector<int64_t>& to_transform_dims, int64_t tensor_total_dims) {
+  for (size_t i = 0; i < to_transform_dims.size(); i++) {
+    if (to_transform_dims[i] < 0) {
+      to_transform_dims[i] = (tensor_total_dims + (to_transform_dims[i] % tensor_total_dims)) % tensor_total_dims;
+    }
+  }
+}
+
 // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
 // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
 // to be "skipped" (both for wrap dimension behavior and dimension size checking).
