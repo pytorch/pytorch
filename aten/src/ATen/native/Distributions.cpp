@@ -109,48 +109,37 @@ int64_t sample_poisson(double lambda, THGenerator* generator) {
 namespace at {
 namespace native {
 
-Tensor bernoulli(const Tensor& self, const Tensor& p, Generator* gen) {
-  Tensor result = self.type().tensor();
-  result.resize_(self.sizes());
-  return native::bernoulli_(result, p, gen);
+Tensor bernoulli(const Tensor& self, Generator* gen) {
+  return at::empty_like(self).bernoulli_(self, gen);
 }
 
-Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
-  Tensor result = self.type().tensor();
-  result.resize_(self.sizes());
-  return native::bernoulli_(result, p, gen);
+Tensor& bernoulli_out(Tensor& result, const Tensor& self, Generator* gen) {
+  return result.resize_as_(self).bernoulli_(self, gen);
 }
 
-Tensor bernoulli(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  result.resize_(self.sizes());
-  return native::bernoulli(result, self, nullptr);
-}
-
-Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
-  if (!self.is_cuda() && !p_.is_cuda()) {
-    Tensor p = p_.toType(kDouble);
-    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
-      THGenerator* generator = get_generator(gen);
-      std::lock_guard<std::mutex> lock(generator->mutex);
-      CPU_tensor_apply2<scalar_t, double>(
-          self, p, [generator](scalar_t& ret_val, double& p_val) {
-            ret_val = (scalar_t)THRandom_bernoulli(generator, p_val);
-          });
-    });
-    return self;
-  }
-  self.copy_(at::_th_bernoulli(std::get<0>(expand_inplace(self, p_)), gen));
+Tensor& bernoulli_tensor_cpu_(Tensor& self, const Tensor& p_, Generator* gen) {
+  auto p = std::get<0>(expand_inplace(self, p_.toType(CPU(kDouble))));
+  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_tensor_cpu_", [&] {
+    THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    CPU_tensor_apply2<scalar_t, double>(
+        self, p, [generator](scalar_t& ret_val, double& p_val) {
+          ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, p_val));
+        });
+  });
   return self;
 }
 
-Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-    at::_bernoulli_(self, p, gen);
-    return self;
-}
-
-Tensor& bernoulli_(Tensor& self) {
-  return native::bernoulli_(self, 0.5, nullptr);
+Tensor& bernoulli_scalar_cpu_(Tensor& self, double p, Generator* gen) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_scalar_cpu_", [&] {
+    THGenerator* generator = get_generator(gen);
+    std::lock_guard<std::mutex> lock(generator->mutex);
+    CPU_tensor_apply1<scalar_t>(
+        self, [generator, p](scalar_t& ret_val) {
+          ret_val = static_cast<scalar_t>(THRandom_bernoulli(generator, p));
+        });
+  });
+  return self;
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {

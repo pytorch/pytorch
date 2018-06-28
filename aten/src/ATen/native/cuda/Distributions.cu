@@ -1,4 +1,5 @@
 #include "ATen/Dispatch.h"
+#include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 #include "ATen/AccumulateType.h"
@@ -16,14 +17,18 @@
 #include <THC/THCTensorRandom.h>
 #include <THC/THCGenerator.hpp>
 #include <THC/THCApply.cuh>
+#include <THC/THCDeviceUtils.cuh>
 
 #include <cstdint>
 #include <limits>
 #include <utility>
+#include <type_traits>
 
 THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace {
+// increment should be at least the number of curand() random numbers used in
+// each thread.
 std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
   auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
   uint64_t offset = gen_->state.philox_seed_offset.fetch_add(increment);
@@ -92,6 +97,49 @@ void gamma_grad_cuda_kernel(
       });
 }
 
+template<typename scalar_t, typename prob_t>
+void bernoulli_tensor_cuda_kernel(
+    at::Tensor& ret, const at::Tensor& p,
+    std::pair<uint64_t, uint64_t> seeds) {
+  at::cuda::CUDA_tensor_apply2<scalar_t, prob_t>(
+      ret, p,
+      [seeds] __device__(
+          scalar_t& ret_val, const prob_t& p_val) {
+        curandStatePhilox4_32_10_t state;
+        curand_init(
+            seeds.first,
+            blockIdx.x * blockDim.x + threadIdx.x,
+            seeds.second,
+            &state);
+        if (std::is_same<prob_t, double>::value) {
+          double x = curand_uniform_double(&state);
+          ret_val = static_cast<scalar_t>(x <= p_val);
+        } else {
+          float x = curand_uniform(&state);
+          ret_val = static_cast<scalar_t>(x <= p_val);
+        }
+      });
+}
+
+template<typename scalar_t>
+void bernoulli_scalar_cuda_kernel(
+    at::Tensor& ret, double p,
+    std::pair<uint64_t, uint64_t> seeds) {
+  at::cuda::CUDA_tensor_apply1<scalar_t>(
+      ret,
+      [seeds, p] __device__(
+          scalar_t& ret_val) {
+        curandStatePhilox4_32_10_t state;
+        curand_init(
+            seeds.first,
+            blockIdx.x * blockDim.x + threadIdx.x,
+            seeds.second,
+            &state);
+        double x = curand_uniform_double(&state);
+        ret_val = static_cast<scalar_t>(x <= p);
+      });
+}
+
 } // namespace
 
 namespace at { namespace native {
@@ -118,5 +166,33 @@ Tensor _standard_gamma_grad_cuda(const Tensor& self, const Tensor& output) {
    });
   return ret;
 }
+
+Tensor& bernoulli_tensor_cuda_(Tensor &self, const Tensor& p_, Generator* gen) {
+  auto p = std::get<0>(expand_inplace(self, p_.toBackend(kCUDA)));
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "bernoulli_tensor_cuda_", [&] {
+    const at::Type& t = p.type();
+    auto seeds = next_philox_seed(gen, 10);
+    switch (the_type.scalarType()) {
+      case at::ScalarType::Double: {
+        return bernoulli_tensor_cuda_kernel<scalar_t, double>(self, p, seeds);
+      }
+      case at::ScalarType::Float: {
+        return bernoulli_tensor_cuda_kernel<scalar_t, float>(self, p, seeds);
+      }
+      default:
+        AT_ERROR("bernoulli_cuda_ doesn't support tensor p of dtype ", the_type.toString());
+    }
+   });
+  return self;
+}
+
+Tensor& bernoulli_scalar_cuda_(Tensor &self, double p, Generator* gen) {
+  AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "bernoulli_scalar_cuda_", [&] {
+    auto seeds = next_philox_seed(gen, 10);
+    bernoulli_scalar_cuda_kernel<scalar_t>(self, p, seeds);
+   });
+  return self;
+}
+
 
 }} // namespace at::native

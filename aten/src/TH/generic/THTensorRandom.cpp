@@ -132,33 +132,6 @@ void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator
 
 #endif
 
-void THTensor_(bernoulli)(THTensor *self, THGenerator *_generator, double p)
-{
-#ifdef TH_BLAS_MKL
-  if(cpuinfo_initialize() && cpuinfo_vendor_intel == cpuinfo_get_processor(0)->core->vendor) {
-    std::lock_guard<std::mutex> lock(_generator->mutex);
-    THTensor_(iBernoulli_generate_copy)(self, _generator, p);
-  } else {
-    std::lock_guard<std::mutex> lock(_generator->mutex);
-    TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_bernoulli(_generator, p););
-  }
-#else
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY(scalar_t, self, *self_data = (scalar_t)THRandom_bernoulli(_generator, p););
-#endif
-}
-
-void THTensor_(bernoulli_FloatTensor)(THTensor *self, THGenerator *_generator, THFloatTensor *p)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY2(scalar_t, self, float, p, *self_data = (scalar_t)THRandom_bernoulli(_generator, (double)*p_data););
-}
-
-void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, THDoubleTensor *p)
-{
-  std::lock_guard<std::mutex> lock(_generator->mutex);
-  TH_TENSOR_APPLY2(scalar_t, self, double, p, *self_data = (scalar_t)THRandom_bernoulli(_generator, (double)*p_data););
-}
 
 #if defined(TH_REAL_IS_FLOAT) || defined(TH_REAL_IS_DOUBLE)
 
@@ -167,15 +140,6 @@ void THTensor_(bernoulli_DoubleTensor)(THTensor *self, THGenerator *_generator, 
 #elif defined(TH_REAL_IS_DOUBLE)
 #define TH_REAL_MIN DBL_MIN
 #endif
-
-void THTensor_(bernoulli_Tensor)(THTensor *self, THGenerator *_generator, THTensor* p)
-{
-#if defined(TH_REAL_IS_FLOAT)
-  THTensor_(bernoulli_FloatTensor)(self, _generator, p);
-#else
-  THTensor_(bernoulli_DoubleTensor)(self, _generator, p);
-#endif
-}
 
 void THTensor_(uniform)(THTensor *self, THGenerator *_generator, double a, double b)
 {

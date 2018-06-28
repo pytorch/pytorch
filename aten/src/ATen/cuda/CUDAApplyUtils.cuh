@@ -127,6 +127,28 @@ void rearrangeDims(detail::TensorInfo<T1, IndexType>* aInfo,
 #define AT_APPLY_BLOCKS_PER_SM 4
 
 template <typename Op,
+          typename scalar,
+          typename IndexType,
+          int ADims>
+#if __CUDA_ARCH__ >= 350
+__launch_bounds__(AT_APPLY_THREADS_PER_BLOCK, AT_APPLY_BLOCKS_PER_SM)
+#endif
+__global__ void
+kernelPointwiseApply1(detail::TensorInfo<scalar, IndexType> a,
+                      IndexType totalElements,
+                      Op op) {
+  for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
+       linearIndex < totalElements;
+       linearIndex += gridDim.x * blockDim.x) {
+    // Convert `linearIndex` into an offset of `a`
+    const IndexType aOffset =
+      detail::IndexToOffset<scalar, IndexType, ADims>::get(linearIndex, a);
+
+    op(a.data[aOffset]);
+  }
+}
+
+template <typename Op,
           typename scalar1,
           typename scalar2,
           typename IndexType,
@@ -249,6 +271,135 @@ inline bool getApplyGrid(uint64_t totalElements, dim3& grid, int64_t curDevice) 
 
 inline dim3 getApplyBlock() {
   return dim3(AT_APPLY_THREADS_PER_BLOCK);
+}
+
+/*
+  Apply a pointwise operator to one tensor.
+
+  The calling convention for op is a function/functor that takes takes one reference to
+  type scalar; the references should be non-const in order to write the output.
+  For example, to compute a = a^2, op would be of the form:
+  [] __device__ (scalar &a_val) { a_val = a_val * a_val; };
+*/
+template <typename scalar, typename Op>
+bool CUDA_tensor_apply1(at::Tensor a,
+                        Op op,
+                        TensorArgType aType = TensorArgType::ReadWrite) {
+  checkBackend("CUDA_tensor_apply1", {a}, Backend::CUDA);
+  int64_t totalElements = a.numel();
+
+  if (a.dim() > MAX_TENSORINFO_DIMS) {
+    return false;
+  }
+
+  if (a.numel() == 0) {
+    // Empty tensor; do nothing
+    return true;
+  }
+  const dim3 block = getApplyBlock();
+
+  dim3 grid;
+  int64_t curDevice = current_device();
+  if (curDevice == -1) return false;
+  if (!getApplyGrid(totalElements, grid, curDevice)) {
+    return false;
+  }
+
+  /*
+  Expands readable/writable tensors whose indices may be "overlapped."
+  This ensures that each element of the tensor is operated on once and only
+  once.
+  */
+  Tensor oldA;
+
+  if (aType == TensorArgType::ReadWrite && detail::maybeOverlappingIndices(a)) {
+    // Must perform in contiguous space
+    oldA = a;
+    a = a.contiguous();
+  }
+
+  // It is possible that the tensor dimensions are able to be collapsed,
+  // and thus we can reduce the actual code complexity of the copy by
+  // exploiting this knowledge statically, since the div/mod is the
+  // most expensive part of the operation, more so than memory accesses.
+  // For instance, when copying a non-contiguous to a contiguous tensor
+  // (or vice versa), the contiguous tensor can be collapsed to one
+  // dimension, and the loop to translate the linear index to the array
+  // index can be similarly collapsed. That is what this unrolling is for.
+
+#define HANDLE_CASE(TYPE, A)                                            \
+  kernelPointwiseApply1<Op,                                             \
+                        scalar,                                         \
+                        TYPE, A>                                        \
+   <<<grid, block, 0, at::cuda::getCurrentCUDAStreamOnDevice(curDevice)>>>(    \
+       aInfo, (TYPE) totalElements, op);
+
+#define HANDLE_A_CASE(TYPE, A) {            \
+  switch (A) {                              \
+    case 1:                                 \
+      HANDLE_CASE(TYPE, 1);                 \
+      break;                                \
+    case 2:                                 \
+      HANDLE_CASE(TYPE, 2);                 \
+      break;                                \
+    default:                                \
+      HANDLE_CASE(TYPE, -1);                \
+      break;                                \
+  }                                         \
+}
+
+  if (detail::canUse32BitIndexMath(a)) {
+    detail::TensorInfo<scalar, unsigned int> aInfo =
+      detail::getTensorInfo<scalar, unsigned int>(a);
+
+    rearrangeDims(&aInfo);
+    aInfo.collapseDims();
+#if CUDA_VERSION < 9000
+    if (!aInfo.isContiguous())
+        grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
+
+    HANDLE_A_CASE(unsigned int, aInfo.dims);
+  } else {
+    detail::TensorInfo<scalar, uint64_t> aInfo =
+      detail::getTensorInfo<scalar, uint64_t>(a);
+
+    rearrangeDims(&aInfo);
+    aInfo.collapseDims();
+
+    /*
+    Only instantiates the all 1D special case and the fallback all nD case for
+    large (64-bit indexed) tensors to reduce compilation time.
+    */
+    if (aInfo.dims == 1) {
+      kernelPointwiseApply1<Op,
+                            scalar,
+                          uint64_t, 1>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+           aInfo, (uint64_t) totalElements, op);
+    } else {
+#if CUDA_VERSION < 9000
+      grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
+#endif
+      kernelPointwiseApply1<Op,
+                            scalar,
+                            uint64_t, -1>
+        <<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
+           aInfo, (uint64_t) totalElements, op);
+    }
+  }
+#undef HANDLE_CASE
+#undef HANDLE_A_CASE
+
+  if (oldA.defined()) {
+    // Ignore overlaps when copying back; if we use copy
+    // instead, it will recursively try and invoke ourselves to make
+    // oldA contiguous.
+    oldA._copy_ignoring_overlaps_(a);
+    a = oldA;
+  }
+
+  return true;
 }
 
 /*
@@ -602,7 +753,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
-	kernelPointwiseApply3<Op,
+  kernelPointwiseApply3<Op,
                         scalar1,
                         scalar2,
                         scalar3,
@@ -854,7 +1005,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * AT_APPLY_BLOCKS_PER_SM , grid.x);
 #endif
 
-	kernelPointwiseApply4<Op,
+  kernelPointwiseApply4<Op,
                         scalar1,
                         scalar2,
                         scalar3,

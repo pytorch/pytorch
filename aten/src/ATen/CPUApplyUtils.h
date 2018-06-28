@@ -207,7 +207,7 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
   for (size_t i = 0; i < tensors.size() - 1; i++) {
     oss << tensors[i].sizes() << ", ";
   }
-  oss << "and " << tensors[tensors.size() - 1]
+  oss << "and " << tensors[tensors.size() - 1].sizes()
       << " to have the same number of elements, but got ";
   for (size_t i = 0; i < tensors.size() - 1; i++) {
     oss << tensors[i].numel() << ", ";
@@ -220,7 +220,7 @@ inline std::string _all_equal_numel_error(at::ArrayRef<Tensor> tensors) {
 inline bool _apply_preamble(ArrayRef<Tensor> tensors) {
   checkBackend("CPU_tensor_apply", tensors, Backend::CPU);
   if (!_all_equal_numel(tensors))
-    throw std::runtime_error(_all_equal_numel_error(tensors));
+    AT_ERROR(_all_equal_numel_error(tensors));
   // An empty tensor has no elements
   for (auto& t : tensors)
     if (t.numel() == 0)
