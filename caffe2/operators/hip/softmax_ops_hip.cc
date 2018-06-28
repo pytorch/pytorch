@@ -18,7 +18,7 @@
 #include <cub/block/block_reduce.cuh>
 #include "hip/hip_runtime.h"
 #include "caffe2/core/hip/context_hip.h"
-#include "softmax_op.h"
+#include "caffe2/operators/softmax_op.h"
 #include "softmax_with_loss_op.h"
 #include "spatial_softmax_with_loss_op.h"
 
