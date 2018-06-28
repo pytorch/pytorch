@@ -17,10 +17,10 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   istarget = THCTensor_(newContiguous)(state, istarget);
   THCTensor_(resizeAs)(state, istarget, input);
 
-  if(input->dim() == 1)
+  if(input->_dim() == 1)
   {
     int dim = input->size[0];
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == dim), 3,
+    THArgCheck((target->_dim() == 1) && (target->size[0] == dim), 3,
         "inconsistent target size");
     THCTensor_(resize1d)(state, output, 1);
 
@@ -38,11 +38,11 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         );
     THCudaCheck(cudaGetLastError());
   }
-  else if(input->dim() == 2)
+  else if(input->_dim() == 2)
   {
     int nframe = input->size[0];
     int dim = input->size[1];
-    THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size[0] == nframe)
+    THArgCheck((target->_dim() == 2) && (target->size[0] == nframe)
                && (target->size[1] == dim), 3, "inconsistent target size");
 
     dim3 blocks(input->size[0]);
@@ -83,7 +83,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     }
   }
   else
-    AT_ERROR("non-empty vector or matrix expected, got size: ", input->sizes());
+    THError("vector or matrix expected");
 
   THCTensor_(free)(state, input);
   THCIndexTensor_(free)(state, target);
@@ -106,12 +106,12 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if(gradInput->dim() == 1)
+  if(gradInput->_dim() == 1)
   {
     int dim = gradInput->size[0];
-    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == dim), 3,
+    THArgCheck((target->_dim() == 1) && (target->size[0] == dim), 3,
                "inconsistent target size");
-    THArgCheck(!istarget->is_empty() && (istarget->dim() == 1) && (istarget->size[0] == dim), 3,
+    THArgCheck((istarget->_dim() == 1) && (istarget->size[0] == dim), 3,
                "inconsistent isTarget size");
     dim3 blocks(1);
     dim3 threads(MULTILABELMARGIN_THREADS);
@@ -128,13 +128,13 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         reduce);
 
   }
-  else if(gradInput->dim() == 2)
+  else if(gradInput->_dim() == 2)
   {
     int nframe = gradInput->size[0];
     int dim = gradInput->size[1];
-    THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size[0] == nframe)
+    THArgCheck((target->_dim() == 2) && (target->size[0] == nframe)
                && (target->size[1] == dim), 3, "inconsistent target size");
-    THArgCheck(!istarget->is_empty() && (istarget->dim() == 2) && (istarget->size[0] == nframe)
+    THArgCheck((istarget->_dim() == 2) && (istarget->size[0] == nframe)
                && (istarget->size[1] == dim), 3, "inconsistent isTarget size");
     dim3 blocks(gradInput->size[0]);
     dim3 threads(MULTILABELMARGIN_THREADS);
@@ -151,7 +151,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         reduce);
   }
   else
-    AT_ERROR("non-empty vector or matrix expected, got size: ", gradInput->sizes());
+    THError("vector or matrix expected");
 
   THCudaCheck(cudaGetLastError());
 

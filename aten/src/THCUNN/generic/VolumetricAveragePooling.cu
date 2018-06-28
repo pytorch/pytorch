@@ -16,13 +16,13 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   int inputHeight;
   int inputWidth;
 
-  int ndim = input->dim();
+  int ndim = input->_dim();
   int dimN = 0;
   int dimt = 1;
   int dimh = 2;
   int dimw = 3;
 
-  if (input->dim() == 5)
+  if (input->_dim() == 5)
   {
     dimN++;
     dimt++;
@@ -30,7 +30,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
     dimw++;
   }
 
-  if (!input->is_empty() && THCTensor_(nDimension)(state, input) == 4)
+  if (THCTensor_(_nDimension)(state, input) == 4)
   {
     THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
                && input->size[dimt] >= kT, 2,
@@ -45,7 +45,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (!input->is_empty() && THCTensor_(nDimension)(state, input) == 5)
+  else if (THCTensor_(_nDimension)(state, input) == 5)
   {
     THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
                && input->size[dimt] >= kT, 2,
@@ -62,7 +62,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   }
   else
   {
-    AT_ERROR("non-empty 4D or 5D tensor expected, but got size: ", input->sizes());
+    THArgError(2, "4D or 5D tensor expected, but got: %d", input->_dim());
   }
 
   // The second argument is the index of padH.
@@ -128,7 +128,7 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   int dimh = 2;
   int dimw = 3;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(_nDimension)(state, input) == 5;
   if (fiveDimensionalInput)
   {
     dimt++;
@@ -284,7 +284,7 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   int outputHeight;
   int outputWidth;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(_nDimension)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;

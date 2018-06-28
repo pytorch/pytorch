@@ -15,9 +15,9 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
   int dimw = 2;
   int numBatch = 1;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 3 || numInputDims == 4), 2, input,
-                  "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s")
+  int numInputDims = THCTensor_(_nDimension)(state, input);
+  THCUNN_argCheck(state, numInputDims == 3 || numInputDims == 4, 2, input,
+                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 4) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -91,7 +91,7 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(
   int dimh = 1;
   int dimw = 2;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int numInputDims = THCTensor_(_nDimension)(state, input);
   if (numInputDims == 4) {
     planeDim++;
     dimh++;
