@@ -68,6 +68,8 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
   std::vector<Tensor> flat_weights() const;
 
+  bool use_cudnn(Tensor sample) const;
+
   RNNOptionsBase options_;
 
   std::vector<Tensor> ihw_;

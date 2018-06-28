@@ -97,8 +97,7 @@ void RNNImplBase<Derived>::reset() {
 
 template <typename Derived>
 RNNOutput RNNImplBase<Derived>::forward(Tensor input, Tensor state) {
-  if (cudnn_mode_.has_value() && torch::cudnn_is_acceptable(input) &&
-      options_.dropout_ == 0) {
+  if (use_cudnn(/*sample=*/input)) {
     return CUDNN_forward(input, state);
   } else {
     return autograd_forward(input, state);
@@ -117,6 +116,12 @@ std::vector<Tensor> RNNImplBase<Derived>::flat_weights() const {
     }
   }
   return flat;
+}
+
+template <typename Derived>
+bool RNNImplBase<Derived>::use_cudnn(Tensor sample) const {
+  return cudnn_mode_.has_value() && sample.is_cuda() &&
+      torch::cudnn_is_acceptable(sample);
 }
 
 template <typename Derived>
@@ -158,9 +163,7 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
 template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   data_ptrs_.clear();
-  const auto any_parameter = ihw_.at(0);
-  if (!cudnn_mode_.has_value() || !any_parameter.is_cuda() ||
-      !torch::cudnn_is_acceptable(any_parameter) || options_.dropout_ > 0) {
+  if (!use_cudnn(/*sample=*/ihw_.at(0))) {
     return;
   }
   std::unordered_set<void*> unique_data_ptrs;
@@ -228,34 +231,33 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
       "around with storages!")
   AT_CHECK(cudnn_mode_.has_value(), "No CuDNN mode has been supplied!");
 
-  // tup = std::tuple of output, hy, cy, reserve, new_weight_buf
-  auto tup = _cudnn_rnn(
-      input,
-      TensorListView(flat_weights()),
-      /*weight_stride=*/options_.with_bias_ ? 4 : 2,
-      flat_weights_,
-      hx,
-      cx,
-      static_cast<int64_t>(*cudnn_mode_),
-      options_.hidden_size_,
-      options_.layers_,
-      /*batch_first=*/false,
-      0, // TODO Use C++ dropout descriptors
-      this->is_training(),
-      /*bidirectional=*/false,
-      /*packed=*/{},
-      dropout_state // TODO waiting on dropout state descriptor in C++ pytorch
-  );
+  std::cout << "Using cuDNN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
 
-  Tensor hidden_output;
+  // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
+  auto cudnn_output = torch::_cudnn_rnn(
+      /*input=*/input,
+      /*weight=*/TensorListView(flat_weights()),
+      /*weight_stride0=*/options_.with_bias_ ? 4 : 2,
+      /*weight_buf=*/flat_weights_,
+      /*hx=*/hx,
+      /*cx=*/cx,
+      /*mode=*/static_cast<int64_t>(*cudnn_mode_),
+      /*hidden_size=*/options_.hidden_size_,
+      /*num_layers=*/options_.layers_,
+      /*batch_first=*/false,
+      /*dropout=*/0, // TODO Use C++ dropout descriptors
+      /*train=*/this->is_training(),
+      /*bidirectional=*/false,
+      /*batch_sizes=*/{},
+      /*dropout_state=*/dropout_state);
+
+  Tensor hidden_output = std::get<1>(cudnn_output);
   if (has_cell_state_) {
-    hidden_output =
-        torch::stack(TensorListView({std::get<1>(tup), std::get<2>(tup)}), 0);
-  } else {
-    hidden_output = std::get<1>(tup);
+    auto cy = std::get<2>(cudnn_output);
+    hidden_output = torch::stack(TensorListView({hidden_output, cy}));
   }
 
-  Tensor output = std::get<0>(tup);
+  Tensor output = std::get<0>(cudnn_output);
   return {output, hidden_output};
 }
 
