@@ -11,7 +11,7 @@
 #define GPU_LAMBDA __host__ __device__
 #endif
 
-#ifdef __CUDACC__
+#ifdef __NVCC__
 #define ASSERT_HOST_DEVICE_LAMBDA(type) \
   static_assert(__nv_is_extended_host_device_lambda_closure_type(type), \
                 #type " must be a __host__ __device__ lambda")
