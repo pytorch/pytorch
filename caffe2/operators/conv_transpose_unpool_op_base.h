@@ -110,48 +110,47 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 	  if (!has_legacy){
 		use_pad_ = false;
 	  }
-	  if (OperatorBase::HasArgument("output_shape")){
-            std::cout << "5 Liar liar pants on fire" << std::endl;
-            output_shape_.resize(
-                2, OperatorBase::GetSingleArgument<int>("output_shape", 0));
-          } else{
+          if (!OperatorBase::HasArgument("output_shape")) {
             std::cout << "4 Liar liar pants on fire" << std::endl;
             output_shape_.push_back(
                 OperatorBase::GetSingleArgument<int>("output_shape_h", 0));
             output_shape_.push_back(
                 OperatorBase::GetSingleArgument<int>("output_shape_w", 0));
-	  }
-	}
-    // Fill default values.
-    if (kernel_.size() == 0) {
-      kernel_.assign({0, 0});
+          }
+        }
+
+        const int default_size = kernel_.size() > 0 ? kernel_.size() : 2;
+
+        // Fill default values.
+        if (kernel_.size() == 0) {
+          kernel_.assign({0, 0});
     }
 
     if (stride_.size() == 0) {
-      stride_.resize(kernel_.size(), 1);
+      stride_.resize(default_size, 1);
     }
 
     if (pads_.size() == 0) {
-      pads_.resize(kernel_.size() * 2, 0);
+      pads_.resize(default_size * 2, 0);
       std::cout << "1 Liar liar pants on fire" << std::endl;
     }
     if (output_shape_.size() == 0) {
-      output_shape_.resize(kernel_.size(), 0);
+      output_shape_.resize(default_size, 0);
     }
         std::cout << "Half..." << std::endl;
     if (adj_.size() == 0) {
-      adj_.resize(kernel_.size(), 0);
+      adj_.resize(default_size), 0);
     }
 
-    CAFFE_ENFORCE_EQ(stride_.size(), kernel_.size());
-    CAFFE_ENFORCE_EQ(adj_.size(), kernel_.size());
+    CAFFE_ENFORCE_EQ(stride_.size(), default_size);
+    CAFFE_ENFORCE_EQ(adj_.size(), default_size);
 
     if (legacy_pad_ != LegacyPadding::VALID &&
         legacy_pad_ != LegacyPadding::SAME) {
-      CAFFE_ENFORCE_EQ(pads_.size(), 2 * kernel_.size());
+      CAFFE_ENFORCE_EQ(pads_.size(), 2 * default_size());
     }
 
-    for (int dim = 0; dim < kernel_.size(); ++dim) {
+    for (int dim = 0; dim < default_size; ++dim) {
       CAFFE_ENFORCE_GT(kernel_[dim], 0);
       CAFFE_ENFORCE_GT(stride_[dim], 0);
       CAFFE_ENFORCE_GE(adj_[dim], 0);
@@ -321,7 +320,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 	  int *pad_tail,
 	  int *out_size) {
 	const int total_padding = (in_size - 1) * stride + kernel + adj - *out_size;
-	CAFFE_ENFORCE(*out_size >= 0);
+        std::cout << "total: " << total_padding << std::endl;
+        CAFFE_ENFORCE(*out_size >= 0);
 	CAFFE_ENFORCE(total_padding >= 0);
 	//Caffe2::LegacyPadding::SAME corresponds to ONNX::auto_pad::SAME_UPPER
 	//We handle Caffe2::LegacyPadding::NOTSET and SAME the same way
@@ -374,7 +374,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         case LegacyPadding::CAFFE_LEGACY_POOLING:
           LOG(FATAL) << "CAFFE_LEGACY_POOLING is no longer supported.";
           break;
-          std::cout << "calc end" << std::endl;
       }
     }
   }
