@@ -4605,6 +4605,27 @@ class TestNN(NNTestCase):
         self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduce=False),
                          loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduce=False))
 
+    def test_loss_reduction_arg(self):
+        # NB: This is a sanity test to check that the new reduction arg works the same as size_average and reduce
+        # Remove this when size_average and reduce are deprecated and tests are ported to the new arg
+        input1 = torch.randn(5, 10, requires_grad=True)
+        input2 = torch.randn(5, 10, requires_grad=True)
+        input3 = torch.randn(5, 10, requires_grad=True)
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduction='elementwise_mean'), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduction='elementwise_mean'),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3))
+
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduction='sum'), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduction='sum'),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, size_average=False))
+
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduction='none'), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduction='none'),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, reduce=False))
+
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
