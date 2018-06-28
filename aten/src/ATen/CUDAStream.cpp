@@ -4,15 +4,17 @@
 
 #include <mutex>
 
+// Internal implementation is entirely hidden 
+struct CUDAStreamInternals {
+  bool is_destructible;
+  std::atomic<int> refcount;
+  int32_t device; // Note: cudaGetDevice works with int32_t, not int64_t
+  cudaStream_t stream;
+};
+
 namespace at {
 
-  // Internal implementation is entirely hidden 
-  struct CUDAStreamInternals {
-    bool is_destructible;
-    std::atomic<int> refcount;
-    int32_t device; // Note: cudaGetDevice works with int32_t, not int64_t
-    cudaStream_t stream;
-  };
+  
 
   /*
   * Stream state

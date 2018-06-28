@@ -2,13 +2,13 @@
 #define THC_STREAM_INC
 
 #include "THCGeneral.h"
-#include "ATen/CUDAStream.h"
 
 /*
 * Note: legacy API.
 *
 * Stream usage should be done through ATen's Context or CUDAHooks where possible.
 */
+typedef struct CUDAStreamInternals THCStream;
 
 // Stream creation
 THC_API THCStream* THCStream_defaultStream(int device);

@@ -1,15 +1,11 @@
 #pragma once
 
+#include "THC/THCStream.h"
+
 #include <algorithm>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-// Forward declaration
-namespace at {
-  struct CUDAStreamInternals;
-}
-typedef at::CUDAStreamInternals THCStream;
 
 namespace c10d {
 

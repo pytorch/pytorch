@@ -2,9 +2,11 @@
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
-#include "THCStream.h"
 #include "THCThreadLocal.h"
 #include "THCTensorRandom.h"
+
+#include "ATen/CUDAStream.h"
+
 #include <stdlib.h>
 #include <stdint.h>
 

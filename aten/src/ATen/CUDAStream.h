@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
-
+ 
 /*
 * A CPU-friendly CUDAStream interface.
 * 
@@ -15,10 +15,10 @@
 struct CUstream_st;
 typedef struct CUstream_st* cudaStream_t;
 
-namespace at {
-
 // Forward-declares internals
 struct CUDAStreamInternals;
+
+namespace at {
 
 // Pointer-based API (for internal use)
 // Consumers of streams should generally use ATen/Context to work with them safely

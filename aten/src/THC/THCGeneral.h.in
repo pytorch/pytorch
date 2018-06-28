@@ -45,10 +45,7 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
-namespace at {
-  struct CUDAStreamInternals;
-}
-typedef at::CUDAStreamInternals THCStream;
+typedef struct CUDAStreamInternals THCStream;
 typedef struct THCState THCState;
 
 typedef struct _THCDeviceAllocator {

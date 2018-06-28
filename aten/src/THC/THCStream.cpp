@@ -1,4 +1,5 @@
 #include "THCStream.h"
+#include "ATen/CUDAStream.h"
 
 THC_API THCStream* THCStream_defaultStream(int device) {
   return at::CUDAStream_getDefaultStreamOnDevice(device);
