@@ -125,6 +125,17 @@ bool RNNImplBase<Derived>::use_cudnn(Tensor sample) const {
 }
 
 template <typename Derived>
+Tensor RNNImplBase<Derived>::create_dropout_state(Tensor input) const {
+  static const int64_t dropout_seed =
+      torch::ones({}, torch::kInt64).random_().toCLong();
+  if (options_.dropout_ > 0) {
+    return torch::_cudnn_init_dropout_state(
+        input.type(), options_.dropout_, this->is_training(), dropout_seed);
+  }
+  return torch::empty({}, input.type());
+}
+
+template <typename Derived>
 RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
   std::vector<Tensor> new_state;
   auto has_hidden = state.defined();
@@ -217,8 +228,6 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
           input.options());
     }
   }
-  auto dropout_state = torch::empty({}, input.type());
-
   std::vector<void*> weight_data_ptrs;
   for (auto& p : this->parameters()) {
     weight_data_ptrs.emplace_back(p->data().data_ptr());
@@ -229,9 +238,6 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
       "Parameters are unflattened! Code path might be super slow. "
       "Please call flatten_parameters_for_cudnn() when you muck "
       "around with storages!")
-  AT_CHECK(cudnn_mode_.has_value(), "No CuDNN mode has been supplied!");
-
-  std::cout << "Using cuDNN!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!" << std::endl;
 
   // cudnn_output = std::tuple<output, hy, cy, reserve, new_weight_buf>
   auto cudnn_output = torch::_cudnn_rnn(
@@ -245,11 +251,11 @@ RNNOutput RNNImplBase<Derived>::CUDNN_forward(Tensor input, Tensor state) {
       /*hidden_size=*/options_.hidden_size_,
       /*num_layers=*/options_.layers_,
       /*batch_first=*/false,
-      /*dropout=*/0, // TODO Use C++ dropout descriptors
+      /*dropout=*/options_.dropout_,
       /*train=*/this->is_training(),
       /*bidirectional=*/false,
       /*batch_sizes=*/{},
-      /*dropout_state=*/dropout_state);
+      /*dropout_state=*/create_dropout_state(input));
 
   Tensor hidden_output = std::get<1>(cudnn_output);
   if (has_cell_state_) {

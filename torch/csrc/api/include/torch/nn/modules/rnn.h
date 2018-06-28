@@ -67,8 +67,8 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   RNNOutput autograd_forward(Tensor input, Tensor state);
 
   std::vector<Tensor> flat_weights() const;
-
   bool use_cudnn(Tensor sample) const;
+  Tensor create_dropout_state(Tensor input) const;
 
   RNNOptionsBase options_;
 
