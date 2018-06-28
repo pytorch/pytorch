@@ -2377,6 +2377,12 @@ class TestAutograd(TestCase):
                     out.backward()
             self.assertIn('MyFunc.apply', str(w[0].message))
 
+    def test_symeig_no_eigenvectors(self):
+        A = torch.tensor([[1., 2.], [2., 4.]], dtype=torch.float32, requires_grad=True)
+        w, v = torch.symeig(A, eigenvectors=False)
+        with self.assertRaisesRegex(RuntimeError, 'backward without computing eigenvectors'):
+            torch.autograd.backward([w, v], [torch.ones_like(w), torch.ones_like(v)])
+
 
 def index_variable(shape, max_indices):
     if not isinstance(shape, tuple):

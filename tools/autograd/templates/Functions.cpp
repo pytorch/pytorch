@@ -1519,6 +1519,11 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
     
     auto vt = v.t();
     
+    if (!eigenvectors) {
+        throw std::runtime_error(std::string("cannot compute backward without "
+                                             "computing eigenvectors in forward pass"));
+    }
+    
     Tensor result = at::zeros_like(self);
     if (gv.defined()) {
         Tensor F = at::zeros_like(self);
