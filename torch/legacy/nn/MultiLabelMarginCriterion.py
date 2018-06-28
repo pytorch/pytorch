@@ -1,5 +1,5 @@
 import torch
-from torch.nn.functional import Reduction
+from torch.nn.functional import _Reduction
 from .Criterion import Criterion
 
 
@@ -21,7 +21,7 @@ class MultiLabelMarginCriterion(Criterion):
             target,
             self.output_tensor,
             self.isTarget,
-            Reduction.legacy_get_enum(self.sizeAverage, True),
+            _Reduction.legacy_get_enum(self.sizeAverage, True),
         )
         self.output = self.output_tensor[0].item()
         return self.output
@@ -36,6 +36,6 @@ class MultiLabelMarginCriterion(Criterion):
             implicit_gradOutput,
             self.gradInput,
             self.isTarget,
-            Reduction.legacy_get_enum(self.sizeAverage, True),
+            _Reduction.legacy_get_enum(self.sizeAverage, True),
         )
         return self.gradInput

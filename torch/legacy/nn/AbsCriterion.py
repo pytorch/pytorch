@@ -1,5 +1,5 @@
 import torch
-from torch.nn.functional import Reduction
+from torch.nn.functional import _Reduction
 from .Criterion import Criterion
 
 
@@ -18,7 +18,7 @@ class AbsCriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            Reduction.legacy_get_enum(self.sizeAverage, True),
+            _Reduction.legacy_get_enum(self.sizeAverage, True),
         )
         self.output = self.output_tensor[0].item()
         return self.output
@@ -31,6 +31,6 @@ class AbsCriterion(Criterion):
             target,
             implicit_gradOutput,
             self.gradInput,
-            Reduction.legacy_get_enum(self.sizeAverage, True),
+            _Reduction.legacy_get_enum(self.sizeAverage, True),
         )
         return self.gradInput
