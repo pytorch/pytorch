@@ -329,7 +329,7 @@ bool CosineSimilarityOp<float, CUDAContext>::RunOnDevice() {
   math::Maximum<float, CUDAContext>(N, kEps, x2, x2, &context_);
   math::Maximum<float, CUDAContext>(N, kEps, y2, y2, &context_);
   math::Mul(N, x2, y2, scale, &context_);
-  math::InvSqrt(N, scale, scale, &context_);
+  math::Rsqrt(N, scale, scale, &context_);
   math::Mul(N, result_data, scale, result_data, &context_);
   return true;
 }

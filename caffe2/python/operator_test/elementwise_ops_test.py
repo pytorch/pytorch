@@ -186,7 +186,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
            inplace=st.booleans(), **hu.gcs)
     def test_rsqrt(self, X, inplace, gc, dc):
         op = core.CreateOperator(
-            "RSqrt",
+            "Rsqrt",
             ["X"],
             ["X"] if inplace else ["Y"],
         )
@@ -202,6 +202,62 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         )
         self.assertDeviceChecks(dc, op, [X], [0])
         self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=5e-3)
+
+    @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
+    def test_cube(self, X, gc, dc):
+        op = core.CreateOperator(
+            "Cube",
+            ["X"],
+            ["Y"],
+        )
+
+        def cube_ref(X):
+            return [np.power(X, 3)]
+
+        def cube_grad_ref(g_out, outputs, fwd_inputs):
+            dY = g_out
+            [X] = fwd_inputs
+            return [dY * np.square(X) * 3]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=cube_ref,
+            output_to_grad="Y",
+            grad_reference=cube_grad_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+
+    @given(X=hu.tensor(dtype=np.float32), in_place=st.booleans(), **hu.gcs)
+    def test_cbrt(self, X, in_place, gc, dc):
+        op = core.CreateOperator(
+            "Cbrt",
+            ["X"],
+            ["X"] if in_place else ["Y"],
+        )
+
+        def cbrt_ref(X):
+            return [np.cbrt(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=cbrt_ref,
+        )
+
+    @given(X=hu.tensor(elements=st.floats(1.0, 10.0), dtype=np.float32),
+           in_place=st.booleans(), **hu.gcs)
+    def test_cbrt_grad(self, X, in_place, gc, dc):
+        op = core.CreateOperator(
+            "Cbrt",
+            ["X"],
+            ["X"] if in_place else ["Y"],
+        )
+
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+        self.assertGradientChecks(gc, op, [-X], 0, [0])
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
