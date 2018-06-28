@@ -304,7 +304,7 @@ if (USE_MKL AND USE_IDEEP)
   
   if (MKLDNN_INCLUDE_DIR)
     list(APPEND IDEEP_INCLUDE_DIR ${MKLDNN_INCLUDE_DIR})
-    list(APPEND __ideep_looked_fo ${MKLDNN_INCLUDE_DIR})
+    list(APPEND __ideep_looked_for ${MKLDNN_INCLUDE_DIR})
     # to avoid adding conflicting submodels
     set(ORIG_WITH_TEST ${WITH_TEST})
     set(WITH_TEST OFF)
