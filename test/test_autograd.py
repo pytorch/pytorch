@@ -2032,7 +2032,7 @@ class TestAutograd(TestCase):
 
     def test_pow_zero_tensor_gradient(self):
         def run_test(input_size, exponent):
-            input = torch.randn(*input_size, requires_grad=True)
+            input = torch.zeros(*input_size, requires_grad=True)
             input.pow(exponent).sum().backward()
             self.assertEqual(input.grad.data.abs().sum(), 0)
 
