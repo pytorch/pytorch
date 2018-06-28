@@ -17,6 +17,12 @@
 #include "caffe2/utils/IdWrapper.h"
 
 namespace caffe2 {
+class CaffeTypeId;
+}
+
+std::ostream& operator<<(std::ostream& stream, caffe2::CaffeTypeId typeId);
+
+namespace caffe2 {
 
 /**
  * A type id is a unique id for a given C++ type.
@@ -27,9 +33,7 @@ class CaffeTypeId final : public c10::guts::IdWrapper<CaffeTypeId, uint16_t> {
 public:
   static CaffeTypeId createTypeId();
 
-  friend std::ostream& operator<<(std::ostream& stream, CaffeTypeId typeId) {
-    return stream << typeId.underlyingId();
-  }
+  friend std::ostream& ::operator<<(std::ostream& stream, CaffeTypeId typeId);
   friend bool operator<(CaffeTypeId lhs, CaffeTypeId rhs);
 
   // TODO Can we get rid of uninitialized?
@@ -50,6 +54,10 @@ inline bool operator<(CaffeTypeId lhs, CaffeTypeId rhs) {
 }
 
 C10_DEFINE_HASH_FOR_IDWRAPPER(caffe2::CaffeTypeId)
+
+inline std::ostream& operator<<(std::ostream& stream, caffe2::CaffeTypeId typeId) {
+  return stream << typeId.underlyingId();
+}
 
 namespace caffe2 {
 

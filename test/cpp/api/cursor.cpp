@@ -3,6 +3,7 @@
 #include <torch/nn/cursor.h>
 #include <torch/nn/module.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <iostream>
 #include <iterator>
@@ -58,6 +59,7 @@ struct Container : public torch::nn::Module {
 };
 
 TEST_CASE("cursor/module") {
+  torch::manual_seed(0);
   SECTION("Works for flat models (depth = 1)") {
     Container model(TestModule(1), TestModule(2), TestModule(3));
     auto cursor = model.modules();
@@ -250,6 +252,7 @@ TEST_CASE("cursor/module") {
 }
 
 TEST_CASE("cursor/parameter") {
+  torch::manual_seed(0);
   SECTION("Works for single models") {
     TestModule model(1);
     auto cursor = model.parameters();
@@ -357,6 +360,7 @@ TEST_CASE("cursor/parameter") {
 }
 
 TEST_CASE("cursor/non-const-to-const-conversion") {
+  torch::manual_seed(0);
   auto first = std::make_shared<TestModule>(1);
   auto second = std::make_shared<TestModule>(2);
   Container model(first, second);
@@ -385,6 +389,7 @@ TEST_CASE("cursor/non-const-to-const-conversion") {
 }
 
 TEST_CASE("cursor/can-invoke-const-method-on-const-cursor") {
+  torch::manual_seed(0);
   TestModule model(1);
 
   /// This will only compile if `Cursor` has the appropriate const methods.

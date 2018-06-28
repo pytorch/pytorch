@@ -8,7 +8,7 @@ import torch.optim
 
 
 HEADER = """
-#include <ATen/ATen.h>
+#include <torch/tensor.h>
 
 #include <vector>
 
@@ -17,7 +17,7 @@ namespace expected_parameters {
 
 FOOTER = "} // namespace expected_parameters"
 
-PARAMETERS = "static std::vector<std::vector<at::Tensor>> {} = {{"
+PARAMETERS = "static std::vector<std::vector<torch::Tensor>> {} = {{"
 
 OPTIMIZERS = {
     "Adam": lambda p: torch.optim.Adam(p, 1.0, weight_decay=1e-6),
@@ -77,7 +77,7 @@ def emit(optimizer_parameter_map):
             print("  {")
             for parameter in sample:
                 parameter_values = "{{{}}}".format(", ".join(map(str, parameter)))
-                print("      at::tensor({}),".format(parameter_values))
+                print("      torch::tensor({}),".format(parameter_values))
             print("  },")
         print("};\n")
     print(FOOTER)

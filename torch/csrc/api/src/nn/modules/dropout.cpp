@@ -45,7 +45,7 @@ template class DropoutImplBase<Dropout2dImpl>;
 DropoutOptions::DropoutOptions(double rate) : rate_(rate) {}
 
 Tensor DropoutImpl::noise_mask(Tensor input) const {
-  return at::empty_like(input);
+  return torch::empty_like(input);
 }
 
 Tensor Dropout2dImpl::noise_mask(Tensor input) const {

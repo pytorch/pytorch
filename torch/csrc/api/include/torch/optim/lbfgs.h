@@ -55,15 +55,15 @@ class LBFGS : public LossClosureOptimizer {
   LBFGS() : options_(0) {}
 
   at::Tensor gather_flat_grad();
-  void add_grad(const at::Scalar& step_size, const at::Tensor& update);
+  void add_grad(const torch::Scalar& step_size, const at::Tensor& update);
 
   LBFGSOptions options_;
 
   at::Tensor d{torch::empty({0})};
   at::Tensor H_diag{torch::empty({0})};
   at::Tensor prev_flat_grad{torch::empty({0})};
-  at::Scalar t{0};
-  at::Scalar prev_loss{0};
+  torch::Scalar t{0};
+  torch::Scalar prev_loss{0};
   std::vector<at::Tensor> ro;
   std::vector<at::Tensor> al;
   std::deque<at::Tensor> old_dirs;
