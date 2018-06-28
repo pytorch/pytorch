@@ -4,6 +4,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <memory>
 #include <vector>
@@ -175,6 +176,7 @@ TEST_CASE("sequential") {
   }
 
   SECTION("returns the last value") {
+    torch::manual_seed(0);
     Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
 
     auto x = torch::randn({1000, 10}, torch::requires_grad());

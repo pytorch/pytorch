@@ -1,7 +1,7 @@
 #include <catch.hpp>
 
 #include <torch/torch.h>
-
+#include <torch/utils.h>
 #include <torch/nn/modules/any.h>
 
 #include <algorithm>
@@ -14,6 +14,7 @@ using Catch::Contains;
 using Catch::StartsWith;
 
 TEST_CASE("any-module") {
+  torch::manual_seed(0);
   SECTION("int()") {
     struct M : torch::nn::Module {
       int forward() {
@@ -245,6 +246,7 @@ AnyModule::Value make_value(T&& value) {
 } // namespace torch
 
 TEST_CASE("any-value") {
+  torch::manual_seed(0);
   SECTION("gets the correct value for the right type") {
     SECTION("int") {
       auto value = make_value(5);

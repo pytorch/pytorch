@@ -22,31 +22,42 @@
 using namespace torch::nn;
 using namespace torch::optim;
 
-bool test_optimizer_xor(Optimizer&& optimizer, Sequential& model) {
+template <typename OptimizerClass, typename Options>
+bool test_optimizer_xor(Options options) {
+  torch::manual_seed(0);
+
+  Sequential model(
+      Linear(2, 8),
+      Functional(torch::sigmoid),
+      Linear(8, 1),
+      Functional(torch::sigmoid));
+
+  const int64_t kBatchSize = 4;
+  const int64_t kMaximumNumberOfEpochs = 3000;
+
+  auto optimizer = OptimizerClass(model.parameters(), options);
+
   float running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
-    int64_t bs = 4;
-    auto inp = torch::empty({bs, 2});
-    auto lab = torch::empty({bs});
-    for (size_t i = 0; i < bs; i++) {
-      const int64_t a = std::rand() % 2;
-      const int64_t b = std::rand() % 2;
-      const int64_t c = static_cast<uint64_t>(a) ^ static_cast<uint64_t>(b);
-      inp[i][0] = a;
-      inp[i][1] = b;
-      lab[i] = c;
+    auto inputs = torch::empty({kBatchSize, 2});
+    auto labels = torch::empty({kBatchSize});
+    for (size_t i = 0; i < kBatchSize; i++) {
+      inputs[i] = torch::randint(2, {2}, torch::kInt64);
+      labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
     }
-    inp.set_requires_grad(true);
+    inputs.set_requires_grad(true);
     optimizer.zero_grad();
-    auto x = model.forward(inp);
-    torch::Tensor loss = torch::binary_cross_entropy(x, lab);
+    auto x = model.forward(inputs);
+    torch::Tensor loss = torch::binary_cross_entropy(x, labels);
     loss.backward();
 
     optimizer.step();
 
     running_loss = running_loss * 0.99 + loss.toCFloat() * 0.01;
-    if (epoch > 3000) {
+    if (epoch > kMaximumNumberOfEpochs) {
+      std::cout << "Loss is too high after epoch " << epoch << ": "
+                << running_loss << std::endl;
       return false;
     }
     epoch++;
@@ -73,11 +84,12 @@ void check_exact_values(
   const size_t kSampleEvery = 100;
 
   torch::manual_seed(0);
+
   Sequential model(
       Linear(2, 3),
-      Functional(at::sigmoid),
+      Functional(torch::sigmoid),
       Linear(3, 1),
-      Functional(at::sigmoid));
+      Functional(torch::sigmoid));
 
   model.to(torch::kFloat64);
 
@@ -123,64 +135,32 @@ void check_exact_values(
   }
 }
 
-TEST_CASE("Optim/XORConvergence") {
-  std::srand(0);
-  torch::manual_seed(0);
-  Sequential model(
-      Linear(2, 8),
-      Functional(at::sigmoid),
-      Linear(8, 1),
-      Functional(at::sigmoid));
+TEST_CASE("Optim/XORConvergence/SGD") {
+  REQUIRE(test_optimizer_xor<SGD>(
+      SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));
+}
 
-  SECTION("sgd") {
-    REQUIRE(test_optimizer_xor(
-        SGD(model.parameters(),
-            SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(1e-6)),
-        model));
-  }
+TEST_CASE("Optim/XORConvergence/Adagrad") {
+  REQUIRE(test_optimizer_xor<Adagrad>(
+      AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)));
+}
 
-  // // Flaky
-  SECTION("lbfgs") {
-    auto optimizer = LBFGS(model.parameters(), LBFGSOptions(5e-2).max_iter(5));
-    // REQUIRE(test_optimizer_xor(optimizer, model));
-  }
+TEST_CASE("Optim/XORConvergence/RMSprop") {
+  REQUIRE(test_optimizer_xor<RMSprop>(RMSpropOptions(0.1).centered(true)));
+}
 
-  SECTION("adagrad") {
-    REQUIRE(test_optimizer_xor(
-        Adagrad(
-            model.parameters(),
-            AdagradOptions(1.0).weight_decay(1e-6).lr_decay(1e-3)),
-        model));
-  }
+TEST_CASE("Optim/XORConvergence/RMSpropWithMomentum") {
+  REQUIRE(test_optimizer_xor<RMSprop>(
+      RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6)));
+}
 
-  SECTION("rmsprop_simple") {
-    REQUIRE(test_optimizer_xor(
-        RMSprop(model.parameters(), RMSpropOptions(1e-1).centered(true)),
-        model));
-  }
+TEST_CASE("Optim/XORConvergence/Adam") {
+  REQUIRE(test_optimizer_xor<Adam>(AdamOptions(0.1).weight_decay(1e-6)));
+}
 
-  SECTION("rmsprop") {
-    REQUIRE(test_optimizer_xor(
-        RMSprop(
-            model.parameters(),
-            RMSpropOptions(1e-1).momentum(0.9).weight_decay(1e-6)),
-        model));
-  }
-
-  // This test appears to be flaky, see
-  // https://github.com/pytorch/pytorch/issues/7288
-  SECTION("adam") {
-    REQUIRE(test_optimizer_xor(
-        Adam(model.parameters(), AdamOptions(1.0).weight_decay(1e-6)), model));
-  }
-
-  SECTION("amsgrad") {
-    REQUIRE(test_optimizer_xor(
-        Adam(
-            model.parameters(),
-            AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)),
-        model));
-  }
+TEST_CASE("Optim/XORConvergence/AdamWithAmsgrad") {
+  REQUIRE(test_optimizer_xor<Adam>(
+      AdamOptions(0.1).weight_decay(1e-6).amsgrad(true)));
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/Adam") {
@@ -196,17 +176,19 @@ TEST_CASE("Optim/ProducesPyTorchValues/Adagrad") {
 
 TEST_CASE("Optim/ProducesPyTorchValues/RMSprop") {
   check_exact_values<RMSprop>(
-      RMSpropOptions(1e-1).momentum(0.9).weight_decay(1e-6),
+      RMSpropOptions(0.1).momentum(0.9).weight_decay(1e-6),
       expected_parameters::RMSprop);
 }
 
 TEST_CASE("Optim/ProducesPyTorchValues/SGD") {
   check_exact_values<SGD>(
-      SGDOptions(1e-1).momentum(0.9).weight_decay(1e-6),
+      SGDOptions(0.1).momentum(0.9).weight_decay(1e-6),
       expected_parameters::SGD);
 }
 
 TEST_CASE("Optim/ZeroGrad") {
+  torch::manual_seed(0);
+
   Linear model(2, 8);
   SGD optimizer(model->parameters(), 0.1);
 
@@ -232,6 +214,8 @@ TEST_CASE("Optim/ZeroGrad") {
 }
 
 TEST_CASE("Optim/ExternalVectorOfParameters") {
+  torch::manual_seed(0);
+
   std::vector<torch::Tensor> parameters = {
       torch::randn({2, 2}), torch::randn({3, 3}), torch::randn({4, 4})};
   std::vector<torch::Tensor> original_parameters = {
