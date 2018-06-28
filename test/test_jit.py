@@ -4413,36 +4413,59 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
         net = Net(upscale_factor=4)
         self.checkTrace(net, (torch.rand(5, 1, 64, 64),))
 
-    @unittest.skip('This needs to be re-written into a script module')
     def test_time_sequence_prediction(self):
-        class Sequence(nn.Module):
+        class Sequence(torch.jit.ScriptModule):
             def __init__(self):
                 super(Sequence, self).__init__()
                 self.lstm1 = nn.LSTMCell(1, 51)
                 self.lstm2 = nn.LSTMCell(51, 51)
                 self.linear = nn.Linear(51, 1)
 
-            def forward(self, input, future=0):
-                outputs = []
-                h_t = torch.zeros(input.size(0), 51, dtype=torch.double)
-                c_t = torch.zeros(input.size(0), 51, dtype=torch.double)
-                h_t2 = torch.zeros(input.size(0), 51, dtype=torch.double)
-                c_t2 = torch.zeros(input.size(0), 51, dtype=torch.double)
+            # TODO: could not pass tuple to a python Op and type annotations
+            # is not descending to python signature, hence the wrapper
+            # see https://github.com/pytorch/pytorch/issues/8778
+            # and https://github.com/pytorch/pytorch/issues/8777
+            def test_lstm1(self, input, hx, cx):
+                # type: (Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
+                return self.lstm1(input, (hx, cx))
 
-                for _, input_t in enumerate(input.chunk(input.size(1), dim=1)):
-                    h_t, c_t = self.lstm1(input_t, (h_t, c_t))
-                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+            def test_lstm2(self, input, hx, cx):
+                # type: (Tensor, Tensor, Tensor) -> Tuple[Tensor, Tensor]
+                return self.lstm2(input, (hx, cx))
+
+            # TODO: could not support tensor constructors in script
+            # see https://github.com/pytorch/pytorch/issues/8814
+            def test_tensor(self):
+                return torch.tensor([], dtype=torch.double)
+
+            @torch.jit.script_method
+            def forward(self, input):
+                # TODO: add future as input with default val
+                # see https://github.com/pytorch/pytorch/issues/8724
+                outputs = self.test_tensor()
+                h_t = torch.zeros((3, 51), dtype=torch.double)
+                c_t = torch.zeros((3, 51), dtype=torch.double)
+                h_t2 = torch.zeros((3, 51), dtype=torch.double)
+                c_t2 = torch.zeros((3, 51), dtype=torch.double)
+
+                output = torch.zeros([3, 51])
+                future = 2
+
+                # TODO: chunk call should be input.chunk(input.size(1), dim=1)
+                # see https://github.com/pytorch/pytorch/issues/8775
+                for input_t in input.chunk(4, dim=1):
+                    h_t, c_t = self.test_lstm1(input_t, h_t, c_t)
+                    h_t2, c_t2 = self.test_lstm2(h_t, h_t2, c_t2)
                     output = self.linear(h_t2)
-                    outputs += [output]
+                    outputs = torch.cat((outputs, output), 1)
                 for _ in range(future):  # if we should predict the future
-                    h_t, c_t = self.lstm1(output, (h_t, c_t))
-                    h_t2, c_t2 = self.lstm2(h_t, (h_t2, c_t2))
+                    h_t, c_t = self.test_lstm1(output, h_t, c_t)
+                    h_t2, c_t2 = self.test_lstm2(h_t, h_t2, c_t2)
                     output = self.linear(h_t2)
-                    outputs += [output]
-                outputs = torch.stack(outputs, 1).squeeze(2)
+                    outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(97, 999),), verbose=True)
+        self.checkTrace(Sequence(), (torch.rand(3, 4),), verbose=True)
 
     def test_vae(self):
         class VAE(nn.Module):
