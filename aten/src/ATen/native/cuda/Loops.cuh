@@ -11,11 +11,20 @@
 #define GPU_LAMBDA __host__ __device__
 #endif
 
+#ifdef __CUDACC__
+#define ASSERT_HOST_DEVICE_LAMBDA(type) \
+  static_assert(__nv_is_extended_host_device_lambda_closure_type(type), \
+                #type " must be a __host__ __device__ lambda")
+#else
+#define ASSERT_HOST_DEVICE_LAMBDA(type)
+#endif
+
+
 namespace at { namespace native {
 
 template<int nt, int vt, typename func_t>
 __launch_bounds__(nt, 4)
-__global__ void elementwise_kernel(int N, func_t f) {
+__global__ void elementwise_kernel(int N, const func_t& f) {
   int tid = threadIdx.x;
   int nv = nt * vt;
   int idx = nv * blockIdx.x + tid;
@@ -39,20 +48,19 @@ static OffsetCalculator<N> make_offset_calculator(const TensorIterator& iter) {
 }
 
 template<int nt, int vt, typename func_t>
-static void launch_kernel(int64_t N, func_t f) {
+static void launch_kernel(int64_t N, const func_t& f) {
   if (N == 0) {
     return;
   }
   dim3 block(nt);
   dim3 grid((N + block.x * vt - 1) / (block.x * vt));
   auto stream = globalContext().getCurrentCUDAStream();
-  elementwise_kernel<nt, vt><<<grid, block, 0, stream>>>(N, f);
+  elementwise_kernel<nt, vt, func_t><<<grid, block, 0, stream>>>(N, f);
 }
 
 template<typename func_t>
-inline void gpu_nullary_kernel(TensorIterator& iter, func_t f) {
-  static_assert(__nv_is_extended_host_device_lambda_closure_type(func_t),
-                "func_t must be a __host__ __device__ lambda");
+inline void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
+  ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   char* out_data = (char*)iter.data_ptr(0);
 
@@ -78,9 +86,8 @@ inline void gpu_nullary_kernel(TensorIterator& iter, func_t f) {
 }
 
 template<typename func_t>
-inline void gpu_unary_kernel(TensorIterator& iter, func_t f) {
-  static_assert(__nv_is_extended_host_device_lambda_closure_type(func_t),
-                "func_t must be a __host__ __device__ lambda");
+inline void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
+  ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   char* out_data = (char*)iter.data_ptr(0);
   const char* in1_data = (char*)iter.data_ptr(1);
@@ -117,9 +124,8 @@ inline void gpu_unary_kernel(TensorIterator& iter, func_t f) {
 }
 
 template<typename func_t>
-inline void gpu_binary_kernel(TensorIterator& iter, func_t f) {
-  static_assert(__nv_is_extended_host_device_lambda_closure_type(func_t),
-                "func_t must be a __host__ __device__ lambda");
+inline void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
+  ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   if (!iter.can_use_32bit_indexing()) {
     for (auto& sub_iter : iter.with_32bit_indexing()) {
