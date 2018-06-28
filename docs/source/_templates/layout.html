@@ -1,6 +1,9 @@
 {% extends "!layout.html" %}
 
+
+
 <link rel="canonical" href="{{ theme_canonical_url }}{{ pagename }}.html" />
+
 {% block menu %}
 <div>
   <a style="color:#F05732" href="{{ theme_canonical_url }}{{ pagename }}.html">
@@ -8,8 +11,42 @@
     Click here to view docs for latest stable release.
   </a>
 </div>
+
 {{ super() }}
 {% endblock %}
+
+{% block sidebartitle %}
+
+{% if logo and theme_logo_only %}
+  <a href="http://pytorch.org">
+{% else %}
+  <a href="http://pytorch.org" class="icon icon-home"> {{ project }}
+{% endif %}
+
+{% if logo %}
+  {# Not strictly valid HTML, but it's the only way to display/scale
+     it properly, without weird scripting or heaps of work
+  #}
+  <img src="{{ pathto('_static/' + logo, 1) }}" class="logo" alt="Logo"/>
+{% endif %}
+</a>
+
+{% if theme_display_version %}
+  {%- set nav_version = version %}
+  {% if READTHEDOCS and current_version %}
+    {%- set nav_version = current_version %}
+  {% endif %}
+  {% if nav_version %}
+    <div class="version">
+      {{ nav_version }}
+    </div>
+  {% endif %}
+{% endif %}
+
+{% include "searchbox.html" %}
+
+{% endblock %}
+
 
 {% block footer %}
 {{ super() }}
