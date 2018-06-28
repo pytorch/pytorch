@@ -24,7 +24,7 @@ void EmbeddingImpl::reset() {
 }
 
 Tensor EmbeddingImpl::forward(Tensor input) {
-  return at::embedding(table_, /*indices=*/input);
+  return torch::embedding(table_, /*indices=*/input);
 }
 
 const EmbeddingOptions& EmbeddingImpl::options() const noexcept {

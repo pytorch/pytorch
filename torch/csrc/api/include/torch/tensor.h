@@ -6,7 +6,10 @@
 #include <torch/csrc/autograd/variable.h>
 
 namespace torch {
+using namespace at;
+
 using Tensor = autograd::Variable;
+using Dtype = at::ScalarType;
 
 /// Fixed width dtypes.
 constexpr auto kUInt8 = at::kByte;

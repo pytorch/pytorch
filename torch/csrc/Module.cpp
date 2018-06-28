@@ -484,6 +484,14 @@ PyMethodDef* THCUDNN_methods() {
 }
 #endif
 
+// ATen warning handler for Python
+static void warning_handler(const at::SourceLocation& source_location, const char* msg) {
+  AutoGIL gil;
+  if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
+    throw python_error();
+  }
+}
+
 static PyObject* initModule() {
   HANDLE_TH_ERRORS
   THInferNumThreads();
@@ -587,6 +595,9 @@ static PyObject* initModule() {
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
+
+  // Set ATen warnings to issue Python warnings
+  at::Warning::set_warning_handler(&warning_handler);
 
   ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
 

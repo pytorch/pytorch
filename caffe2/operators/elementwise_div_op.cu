@@ -278,12 +278,12 @@ bool DivFunctor<CUDAContext>::Backward(
   if (A_dims == B_dims) {
     const int size = std::accumulate(
         A_dims.cbegin(), A_dims.cend(), 1, std::multiplies<int>());
-    math::Div(size, dC, B, dA, context);
     ComputeSimpleDivBGradientCUDAKernel<TGrad, TIn, TOut>
         <<<CAFFE_GET_BLOCKS(size),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context->cuda_stream()>>>(size, dC, B, C, dB);
+    math::Div(size, dC, B, dA, context);
     return true;
   }
   const int ndim = std::max(A_dims.size(), B_dims.size());
@@ -302,10 +302,10 @@ bool DivFunctor<CUDAContext>::Backward(
   std::vector<int> B_axes;
   elementwise_ops_utils::ComputeBinaryBroadcastBackwardAxes(
       A_dims, B_dims, &A_axes, &B_axes);
-  ComputeDivAGradientCUDA<TGrad, TIn>(
-      C_broadcast_dims, B_broadcast_dims, A_axes, dC, B, dA, context);
   ComputeDivBGradientCUDA<TGrad, TIn, TOut>(
       C_broadcast_dims, B_axes, dC, B, C, dB, context);
+  ComputeDivAGradientCUDA<TGrad, TIn>(
+      C_broadcast_dims, B_broadcast_dims, A_axes, dC, B, dA, context);
   return true;
 }
 
