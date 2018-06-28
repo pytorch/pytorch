@@ -1,5 +1,5 @@
-#ifndef CAFFE2_OPERATORS_RSQRT_OP_H_
-#define CAFFE2_OPERATORS_RSQRT_OP_H_
+#ifndef CAFFE2_OPERATORS_CBRT_OP_H_
+#define CAFFE2_OPERATORS_CBRT_OP_H_
 
 #include <vector>
 
@@ -9,16 +9,16 @@
 namespace caffe2 {
 
 template <class Context>
-struct RsqrtFunctor {
+struct CbrtFunctor {
   template <typename T>
   bool operator()(const int N, const T* X, T* Y, Context* context) const {
-    math::Rsqrt<T, Context>(N, X, Y, context);
+    math::Cbrt<T, Context>(N, X, Y, context);
     return true;
   }
 };
 
 template <class Context>
-struct RsqrtGradientFunctor {
+struct CbrtGradientFunctor {
   template <typename T>
   bool Forward(
       const std::vector<int>& dY_dims,
@@ -31,4 +31,4 @@ struct RsqrtGradientFunctor {
 
 } // namespace caffe2
 
-#endif // CAFFE2_OPERATORS_RSQRT_OP_H_
+#endif
