@@ -195,4 +195,22 @@ TEST_CASE("sequential") {
         Embedding(4, 10),
         LSTM(4, 5));
   }
+
+  SECTION("converts at::Tensor to torch::Tensor correctly") {
+    struct M : torch::nn::Module {
+      torch::Tensor forward(torch::Tensor input) {
+        return input;
+      }
+    };
+
+    Sequential sequential(M{});
+    torch::Tensor variable = torch::ones(5);
+    REQUIRE(sequential.forward(variable).sum().toCFloat() == 5);
+
+    at::Tensor tensor_that_is_actually_a_variable = variable * 2;
+    REQUIRE(
+        sequential.forward(tensor_that_is_actually_a_variable)
+            .sum()
+            .toCFloat() == 10);
+  }
 }
