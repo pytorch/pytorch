@@ -3,12 +3,11 @@
 #include <unordered_map>
 
 #include "onnx/onnx_pb.h"
-#include "onnx/onnxifi.h"
 
 #include "caffe2/core/context.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/onnx/onnxifi_manager.h"
+#include "caffe2/onnx/onnxifi_init.h"
 #include "caffe2/utils/string_utils.h"
 
 namespace caffe2 {
@@ -19,11 +18,8 @@ class OnnxifiOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   OnnxifiOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    onnxifi_backend_ =
-        OperatorBase::GetSingleArgument<std::string>("onnxifi_backend", "");
-    CAFFE_ENFORCE(!onnxifi_backend_.empty(), "Unspecified onnxifi_backend");
-    auto* onnxifi_manager = onnx::OnnxifiManager::get_onnxifi_manager();
-    lib_ = onnxifi_manager->AddOnnxifiLibrary(onnxifi_backend_);
+    lib_ = onnx::initOnnxifiLibrary();
+    CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
     auto onnx_model_str =
         OperatorBase::GetSingleArgument<std::string>("onnx_model", "");
     CAFFE_ENFORCE(!onnx_model_str.empty(), "onnx_model cannot be empty");
@@ -90,7 +86,8 @@ class OnnxifiOp final : public Operator<Context> {
         num_backends_, 0, "At least 1 onnxifi backend should be available");
     // TODO: choose backedn id
     CAFFE_ENFORCE_EQ(
-        lib_->onnxInitBackend(backend_ids_[0], property_pointers.data(), &backend_),
+        lib_->onnxInitBackend(
+            backend_ids_[0], property_pointers.data(), &backend_),
         ONNXIFI_STATUS_SUCCESS);
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitGraph(
@@ -105,19 +102,23 @@ class OnnxifiOp final : public Operator<Context> {
 
   ~OnnxifiOp() {
     if (graph_) {
-      CAFFE_ENFORCE_EQ(lib_->onnxReleaseGraph(graph_), ONNXIFI_STATUS_SUCCESS);
+      if (lib_->onnxReleaseGraph(graph_) != ONNXIFI_STATUS_SUCCESS) {
+        LOG(ERROR) << "Error when calling onnxReleaseGraph";
+      }
       graph_ = nullptr;
     }
     if (backend_) {
-      CAFFE_ENFORCE_EQ(
-          lib_->onnxReleaseBackend(backend_), ONNXIFI_STATUS_SUCCESS);
+      if (lib_->onnxReleaseBackend(backend_) != ONNXIFI_STATUS_SUCCESS) {
+        LOG(ERROR) << "Error when calling onnxReleaseBackend";
+      }
       backend_ = nullptr;
     }
-    for (unsigned i = 0U; i < num_backends_; ++i) {
-      CAFFE_ENFORCE_EQ(
-          lib_->onnxReleaseBackendID(backend_ids_[i]), ONNXIFI_STATUS_SUCCESS);
+    for (unsigned i = 0; i < num_backends_; ++i) {
+      if (lib_->onnxReleaseBackendID(backend_ids_[i]), ONNXIFI_STATUS_SUCCESS) {
+        LOG(ERROR) << "Error when calling onnxReleaseBackendID";
+      }
+      backend_ids_ = nullptr;
     }
-    backend_ids_ = nullptr;
   }
 
   bool RunOnDevice() override;
@@ -131,10 +132,10 @@ class OnnxifiOp final : public Operator<Context> {
   }
 
   void BuildPropertyList(
-      const OperatorDef& operator_def,
+      const OperatorDef& /* unused */,
       std::vector<uint64_t>* property_list,
-      std::vector<int64_t>* int_args,
-      std::vector<float>* float_args) {
+      std::vector<int64_t>* /* unused */,
+      std::vector<float>* /* unused */) {
     property_list->push_back(ONNXIFI_BACKEND_PROPERTY_NONE);
   }
 
@@ -144,7 +145,7 @@ class OnnxifiOp final : public Operator<Context> {
       std::vector<std::string>* weight_names,
       std::vector<std::vector<uint64_t>>* weight_shapes);
 
-  std::string onnxifi_backend_;
+  // pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};
 
   onnxBackendID* backend_ids_{nullptr};

@@ -144,7 +144,6 @@ OPERATOR_SCHEMA(Onnxifi)
     .SetDoc(R"DOC(
     The Onnxifi operator is a black-box operator to lower the computation to Onnxifi backend
     )DOC")
-    .Arg("onnxifi_backend", "(string default=\"\") Name of the backend")
     .Arg(
         "onnx_model",
         "(string default=\"\") Serialized ONNX model to be converted to backend representation")
