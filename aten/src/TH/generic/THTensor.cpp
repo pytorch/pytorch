@@ -243,20 +243,58 @@ THTensor *THTensor_(newUnfold)(THTensor *tensor, int dimension_, int64_t size_, 
   return self;
 }
 
+// Also sets new_stride if viewable.
+//
+// On a high level,
+// 1. separate tensor->size into chunks of dimensions, where the dimensions are
+//    ``contiguous'' in each chunk, i.e., stride[i] = size[i+1] * stride[i+1]
+// 2. view_size must be able to be separated into same number of chunks, where
+//    each chunk pair has matching ``numel'', i.e., number of subspaces.
+static int THTensor_(isViewable)(THTensor *tensor, THLongStorage *view_size, THLongStorage *new_stride) {
+  // dim indices
+  int64_t tensor_d = tensor->_dim() - 1;
+  if (tensor_d < 0) {
+    return 1;
+  }
+  int64_t view_d = view_size->size - 1;
+  // stride for each subspace in the chunk
+  int64_t chunk_base_stride = tensor->stride[tensor_d];
+  // numel in current chunk
+  int64_t tensor_numel = 1;
+  int64_t view_numel = 1;
+  for (; tensor_d >= 0; tensor_d--) {
+    tensor_numel *= tensor->size[tensor_d];
+    // if end of tensor size chunk, check view
+    if ((tensor_d == 0) ||
+        (tensor->size[tensor_d - 1] != 1 && tensor->stride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
+      while (view_d >= 0 && (view_numel < tensor_numel || THLongStorage_data(view_size)[view_d] == 1)) {
+        THLongStorage_data(new_stride)[view_d] = view_numel * chunk_base_stride;
+        view_numel *= THLongStorage_data(view_size)[view_d];
+        view_d--;
+      }
+      if (view_numel != tensor_numel) {
+        return 0;
+      }
+      if (tensor_d > 0) {
+        chunk_base_stride = tensor->stride[tensor_d - 1];
+        tensor_numel = 1;
+        view_numel = 1;
+      }
+    }
+  }
+  // check that we iterated through all view size
+  return view_d == -1;
+}
+
 THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
 {
   ptrdiff_t numel = THTensor_(nElement)(tensor);
   THTensor *self = THTensor_(new)();
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
-  auto stride = THTensor_compute_stride(at::IntList(tensor->size, tensor->dim()),
-                                        at::IntList(tensor->stride, tensor->dim()),
-                                        at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
-  THArgCheck(stride.has_value(), 2, "view size is "
+  THLongStorage *new_stride = THLongStorage_newWithSize(size->size);
+  THArgCheck(THTensor_(isViewable)(tensor, inferred_size, new_stride), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
     "across two contiguous subspaces). Call .contiguous() before .view().");
-  auto stride_value = *stride;
-  THLongStorage *new_stride = THLongStorage_newWithSize(stride_value.size());
-  THLongStorage_rawCopy(new_stride, stride_value.data());
   THTensor_(setStorage)(self, tensor->storage, tensor->storageOffset, inferred_size, new_stride);
   THLongStorage_free(inferred_size);
   THLongStorage_free(new_stride);
