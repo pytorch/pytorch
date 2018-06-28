@@ -77,7 +77,7 @@
 #include <cub/block/block_reduce.cuh>
 #include <vector>
 #include "caffe2/core/common.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/deform_conv_op.h"
 #include "caffe2/operators/deform_conv_op_impl.h"
 #include "hip/hip_runtime.h"
