@@ -36,7 +36,13 @@ void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n) {
   }
 }
 
-void THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) {
+#if defined(__clang__)
+#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+#else
+#define __ubsan_ignore_float_divide_by_zero__
+#endif
+
+void __ubsan_ignore_float_divide_by_zero__ THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256d YMM0, YMM1, YMM2, YMM3;
   for (i=0; i<=((n)-8); i+=8) {
@@ -54,7 +60,7 @@ void THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const 
   }
 }
 
-void THDoubleVector_divs_AVX(double *y, const double *x, const double c, const ptrdiff_t n) {
+void __ubsan_ignore_float_divide_by_zero__ THDoubleVector_divs_AVX(double *y, const double *x, const double c, const ptrdiff_t n) {
   ptrdiff_t i;
   __m256d YMM15 = _mm256_set_pd(c, c, c, c);
   __m256d YMM0, YMM1;
