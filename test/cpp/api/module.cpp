@@ -4,6 +4,7 @@
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/rnn.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 using namespace torch::nn;
 
@@ -23,6 +24,7 @@ bool pointer_equal(torch::Tensor first, torch::Tensor second) {
 }
 
 TEST_CASE("module/training-mode") {
+  torch::manual_seed(0);
   Linear module(3, 4);
   REQUIRE(module->is_training());
   SECTION("Enable eval mode") {
@@ -36,6 +38,7 @@ TEST_CASE("module/training-mode") {
 }
 
 TEST_CASE("module/zero-grad") {
+  torch::manual_seed(0);
   Linear module(3, 4);
   auto weight = torch::ones({8, 3}, torch::requires_grad());
   auto loss = module->forward(weight).sum();
@@ -67,6 +70,7 @@ TEST_CASE("module/name") {
 }
 
 TEST_CASE("module/conversions", "[cuda]") {
+  torch::manual_seed(0);
   Linear module(128, 64);
   SECTION("starts as float on CPU") {
     for (auto& parameter : module->parameters()) {
@@ -117,6 +121,7 @@ TEST_CASE("module/conversions", "[cuda]") {
 }
 
 TEST_CASE("module/clone") {
+  torch::manual_seed(0);
   SECTION(
       "a module that does not override clone() throws when clone() is called") {
     struct UnCloneable : Module {};
@@ -232,6 +237,7 @@ TEST_CASE("module/clone") {
 }
 
 TEST_CASE("module/parameters") {
+  torch::manual_seed(0);
   struct TestModule : Module {
     TestModule() {
       a = register_parameter("a", torch::zeros({2, 2}));
@@ -257,6 +263,7 @@ TEST_CASE("module/parameters") {
 }
 
 TEST_CASE("module/buffers") {
+  torch::manual_seed(0);
   struct TestModule : Module {
     TestModule() {
       a = register_buffer("a", torch::zeros({2, 2}));
