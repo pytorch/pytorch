@@ -660,8 +660,6 @@ class TestSparse(TestCase):
             self.assertEqual(out._denseDims(), 0)
 
     def test_log1p(self):
-        import math
-
         if self.is_cuda:
             input = torch.cuda.sparse.DoubleTensor(
                 torch.LongTensor([[0], [1], [2]]).transpose(1, 0).cuda(),
@@ -673,13 +671,13 @@ class TestSparse(TestCase):
                 torch.FloatTensor([3, 4, 5]),
                 torch.Size([3]))
 
-        expected_output = torch.tensor([math.log(3 + 1), math.log(4 + 1), math.log(5 + 1)])
+        expected_output = torch.tensor([3., 4., 5.]).log1p_()
         self.assertEqual(expected_output, input.log1p().to_dense())
         self.assertEqual(expected_output, input.coalesce().log1p_().to_dense())
 
         # test in-place op on uncoalesced input
         with self.assertRaisesRegex(RuntimeError,
-                                    "log1p only applies to coalesced sparse tensor!"):
+                                    "in-place log1p on uncoalesced tensors is not supported yet!"):
             input.log1p_()
 
         input.requires_grad_()
