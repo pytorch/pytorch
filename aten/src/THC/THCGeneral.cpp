@@ -142,7 +142,6 @@ void THCudaInit(THCState* state)
 
 void THCudaShutdown(THCState* state)
 {
-  // std::cerr << "THCudaShutdown" << std::endl;
   THCRandom_shutdown(state);
 
   free(state->rngState);
@@ -689,7 +688,6 @@ void THCudaHostFree(THCState *state, void *ptr)
 }
 
 void THCudaHostRecord(THCState *state, void *ptr) {
-  // std::cerr << "THCudaHostRecord" << std::endl;
   if (state->cudaHostAllocator == &THCCachingHostAllocator) {
     THCStream* stream = THCState_getStream(state);
     THCCachingHostAllocator_recordEvent(ptr, stream);
