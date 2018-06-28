@@ -7,7 +7,6 @@
 #include "THStorage.hpp"
 
 #include <atomic>
-#include <ATen/ATen.h>
 
 typedef struct THTensor
 {
@@ -53,15 +52,9 @@ typedef struct THTensor
       }
       return false;
     }
-
-    inline at::IntList sizes() {
-      return at::IntList(size, dim_);
-    }
 } THTensor;
 
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
 
 TH_API void THTensor_free(THTensor *self);
-at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
-                                                           at::IntList newshape);

@@ -1113,9 +1113,6 @@ class TestCuda(TestCase):
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
 
-    def test_cat_empty_legacy(self):
-        TestTorch._test_cat_empty_legacy(self, use_cuda=True)
-
     def test_cat_empty(self):
         TestTorch._test_cat_empty(self, use_cuda=True)
 

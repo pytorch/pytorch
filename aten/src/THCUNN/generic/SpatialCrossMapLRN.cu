@@ -17,7 +17,7 @@ void THNN_(LRNforward)(THCState* state, THCTensor* input, THCTensor* output,
   int imsize_h;
   int imsize_w;
 
-  if (input->dim() == 3) {
+  if (input->_dim() == 3) {
     batchSize = 1;
     nInputPlane = input->size[0];
     imsize_h = input->size[1];
@@ -62,7 +62,7 @@ void THNN_(LRNbackward)(THCState* state, THCTensor* input, THCTensor* output,
   int imsize_h;
   int imsize_w;
 
-  if (input->dim() == 3) {
+  if (input->_dim() == 3) {
     batchSize = 1;
     nInputPlane = input->size[0];
     imsize_h = input->size[1];

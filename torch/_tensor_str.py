@@ -239,10 +239,6 @@ def _str(self):
             suffix += ', device=\'' + str(self.device) + '\''
 
     if self.numel() == 0:
-        # Explicitly print the shape if it is not (0,), to match NumPy behavior
-        if self.dim() != 1:
-            suffix += ', size=' + str(tuple(self.shape))
-
         # In an empty tensor, there are no elements to infer if the dtype should be int64,
         # so it must be shown explicitly.
         if self.dtype != torch.get_default_dtype():

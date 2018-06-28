@@ -71,8 +71,8 @@ void THCTensor_(check_shape_except_dim)(THCState *state,
 inline void THCTensor_(check_shape_except_dim)(THCState *state, 
     THCTensor *first, THCTensor *second, int dimension)
 {
-  int first_dims = first->dim();
-  int second_dims = second->dim();
+  int first_dims = THCTensor_(_nDimension)(state, first);
+  int second_dims = THCTensor_(_nDimension)(state, second);
   THArgCheck(first_dims == second_dims, 0,
       "Tensors must have same number of dimensions: got %d and %d",
       first_dims, second_dims);
@@ -91,36 +91,45 @@ inline void THCTensor_(check_shape_except_dim)(THCState *state,
 void THCTensor_(catArray)(THCState *state, THCTensor *result,
 			  THCTensor **inputs, int numInputs, int dimension)
 {
-  // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible
-  // to cat empty tensors unless all the other tensors were 1-dimensional, so we allowed these tensors
-  // to be "skipped".  We maintain this behavior for backwards compatibility, but only for this specific
-  // size (i.e. other empty sizes are not skipped).
-  // FIXME: warn if this is the case
   THLongStorage *size;
   int i, j, cohortMax;
   int64_t offset;
-  bool hasSkippedInput = false;
-  THCTensor *notSkippedTensor = NULL;  // non-owning reference
-  auto should_skip = [](THCTensor *t) { return t->is_empty() && t->dim() == 1; };
-  int nDims = 0;
+  bool hasEmptyInput = false;
+  THCTensor *notEmptyTensor = NULL;
+
+  // Even in the case where dimension is negative (i.e. when we want
+  // to cat along the last dimension), this logic still works, as the
+  // loop below will overwrite the value
+  int nDims = dimension + 1;
+
+  // cat_dimension is the actual dimension we cat along
+  int cat_dimension = dimension;
 
   for (i = 0; i < numInputs; i++)
   {
-    if (should_skip(inputs[i])) {
-      hasSkippedInput = true;
-      continue;
+    int inputDim = THCTensor_(_nDimension)(state, inputs[i]);
+    hasEmptyInput |= !inputDim;
+    if (inputDim > 0) {
+      nDims = inputDim;
+      notEmptyTensor = inputs[i];
     }
-    nDims = inputs[i]->dim();
-    notSkippedTensor = inputs[i];
   }
 
   // If all inputs are empty tensors, return an empty tensor
-  if (notSkippedTensor == NULL) {
+  if (notEmptyTensor == NULL) {
     return;
   }
 
+  // In the event that the user specified -1 as the concat dimension, then
+  // we want to pick the nDims as dimension to cat along (and thus nDims - 1 as the
+  // value due to 0-based indexing). If the nDims is // 0 (i.e. we are catting all
+  // empty tensors), then we set cat_dimension to be 0
+  if (dimension + TH_INDEX_BASE == -1) {
+    cat_dimension = nDims ? (nDims - 1) : 0;
+  }
+
   THArgCheck(numInputs > 0, 3, "invalid number of inputs %d", numInputs);
-  THArgCheck(dimension >= 0, 4, "invalid dimension %d", dimension);
+  THArgCheck(cat_dimension >= 0, 4, "invalid dimension %d", dimension + TH_INDEX_BASE);
   
   size = THLongStorage_newWithSize(nDims);
   
@@ -128,22 +137,22 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   int64_t cat_dim_size = 0;
   for (int i = 0; i < numInputs; i++) {
     THCTensor *tensor = inputs[i];
-    if (should_skip(tensor)) {
+    if (THCTensor_(_nDimension)(state, tensor) == 0) {
       continue;
     }
-    THCTensor_(check_shape_except_dim)(state, notSkippedTensor, tensor, dimension);
-    cat_dim_size += THCTensor_(size)(state, tensor, dimension);
+    THCTensor_(check_shape_except_dim)(state, notEmptyTensor, tensor, cat_dimension);
+    cat_dim_size += THCTensor_(size)(state, tensor, cat_dimension);
   }
 
   // Compute the size of the result
   for (int dim = 0; dim < nDims; dim++) {
-    int64_t result_dim_size = THCTensor_(size)(state, notSkippedTensor, dim);
-    if (dim == dimension) {
+    int64_t result_dim_size = THCTensor_(size)(state, notEmptyTensor, dim);
+    if (dim == cat_dimension) {
       result_dim_size = cat_dim_size;
     }
     THLongStorage_data(size)[dim] = result_dim_size;
   }
-  THCTensor_(resize)(state, result, size, NULL);
+  THCTensor_(resizeLegacy)(state, result, size, NULL);
   THLongStorage_free(size);
 
   // We parallelize the copy if all 6 conditions pass:
@@ -157,8 +166,8 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
   // 7. All input tensors are on the same device
 
   if (numInputs > 1 &&
-      !hasSkippedInput &&
-      result->dim() <= CAT_ARRAY_MAX_INPUT_DIMS &&
+      !hasEmptyInput &&
+      THCTensor_(_nDimension)(state, result) <= CAT_ARRAY_MAX_INPUT_DIMS &&
       THCTensor_canUse32BitIndexMath(state, result) &&
       THCTensor_allContiguous(state, inputs, numInputs) &&
       THCTensor_all32BitIndexable(state, inputs, numInputs) &&
@@ -185,7 +194,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, dimension, param.outputStride[dimension]);
+  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, cat_dimension, param.outputStride[cat_dimension]);
 
     // Now we loop
     offset = 0;
@@ -194,7 +203,9 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       CatArrInputTensor<real, unsigned int>* stackInputs = (CatArrInputTensor<real, unsigned int>*) THCudaHostAlloc(state, tensorMetadataSize);
       cohortMax = 0;
       for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
-        int64_t dimSize = THCTensor_(size)(state, inputs[i+j], dimension);
+        int64_t dimSize = cat_dimension < THCTensor_(_nDimension)(state, inputs[i+j])
+          ? THCTensor_(size)(state, inputs[i+j], cat_dimension)
+          : 1;
 
         stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
         stackInputs[j].offset = offset;
@@ -248,10 +259,15 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     offset = 0;
     for (j = 0; j < numInputs; j++)
     {
-      if (should_skip(inputs[j])) continue;
-      int64_t dimSize = THCTensor_(size)(state, inputs[j], dimension);
+      // No reason to copy when input is empty
+      if (!THCTensor_(_nDimension)(state, inputs[j])) continue;
+
+      int64_t dimSize = cat_dimension < THCTensor_(_nDimension)(state, inputs[j])
+               ? THCTensor_(size)(state, inputs[j], cat_dimension)
+               : 1;
+
       THCTensor *nt = THCTensor_(newWithTensor)(state, result);
-      THCTensor_(narrow)(state, nt, NULL, dimension, offset, dimSize);
+      THCTensor_(narrow)(state, nt, NULL, cat_dimension, offset, dimSize);
       THCTensor_(copy)(state, nt, inputs[j]);
       THCTensor_(free)(state, nt);
       offset += dimSize;
@@ -271,7 +287,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
-  int num_dim = THCTensor_(nDimension)(state, self);
+  int num_dim = THCTensor_(_nDimension)(state, self);
   int64_t N = THCTensor_(nElement)(state, self);
 
   THCudaLongTensor_resize2d(state, tensor, N, num_dim);
