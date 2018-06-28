@@ -398,6 +398,11 @@ CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
 
 template <>
+bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
+template <>
+bool ArgumentHelper::RemoveArgument(NetDef& def, int index);
+
+template <>
 Argument MakeArgument(const string& name, const MessageLite& value) {
   Argument arg;
   arg.set_name(name);
