@@ -301,11 +301,15 @@ def trace(*args, **kwargs):
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
         if isinstance(func, torch.nn.Module):
-            module = TopLevelTracedModule(func, **executor_options)
-            module._create_method_from_trace('forward', func, args)
-            return module
+            orig = func
         else:
-            return torch._C.GraphExecutor(func, args, **executor_options)
+            # traced functions become a method on an Empty module
+            orig = Module()
+
+        module = TopLevelTracedModule(orig, **executor_options)
+        module._create_method_from_trace('forward', func, args)
+        return module
+
     return wrapper
 
 
@@ -331,15 +335,15 @@ def createResolutionCallback(frames_up=0):
 
     frames_up is
     """
-    frame = inspect.stack()[1 + frames_up][0]
+    frames = inspect.stack()[1 + frames_up:]
 
     def env(key):
-        if key in frame.f_locals:
-            return frame.f_locals[key]
-        elif key in frame.f_globals:
-            return frame.f_globals[key]
-        else:
-            return None
+        for frame in frames:
+            if key in frame[0].f_locals:
+                return frame[0].f_locals[key]
+            elif key in frame[0].f_globals:
+                return frame[0].f_globals[key]
+        return None
 
     return env
 
@@ -369,7 +373,11 @@ def _script_graph(fn, _frames_up=0):
 
 def script(fn, optimize=True, _frames_up=0):
     graph = _script_graph(fn, _frames_up=_frames_up + 1)
-    return functools.wraps(fn)(torch._C.GraphExecutor(graph, optimize))
+    mod = ScriptModule()
+    mod._create_method_from_graph('forward', graph)
+    # Forward docstrings
+    mod.__doc__ = fn.__doc__
+    return mod
 
 
 ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
@@ -578,6 +586,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
                 return functools.wraps(original_method)(script_method)
             else:
                 return self._get_method(attr)
+        if attr == 'graph' and self._has_method('forward'):
+            return self.__getattr__('forward').graph
         return Module.__getattr__(self, attr)
 
     def __setattr__(self, attr, value):
@@ -599,10 +609,8 @@ class ScriptModule(with_metaclass(ScriptMeta, Module, torch._C.ScriptModule)):
     def __dir__(self):
         return sorted(Module.__dir__(self) + self._method_names())
 
-    # Module already has this method defined, so we
-    # need to override it and send it through the ScriptModule lookup
     def forward(self, *args, **kwargs):
-        return self.__getattr__('forward')(*args, **kwargs)
+        return self._forward(*args, **kwargs)
 
     def define(self, lang):
         rcb = createResolutionCallback(frames_up=1)
@@ -620,7 +628,8 @@ _compiled_methods_whitelist = {
     '_apply', 'apply', 'cuda', 'cpu', 'type', 'float', 'double', 'half',
     'state_dict', 'load_state_dict', '_load_from_state_dict', 'parameters',
     'named_parameters', '_all_buffers', 'children', 'named_children', 'modules',
-    'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr'
+    'named_modules', 'zero_grad', 'share_memory', '_get_name', 'extra_repr',
+    '_slow_forward', '_tracing_name'
 }
 
 
@@ -641,7 +650,7 @@ class TracedModule(ScriptModule):
     __frozen = False
 
     def __init__(self, orig, id_set=None, optimize=True):
-        super(TracedModule, self).__init__(optimize=True)
+        super(TracedModule, self).__init__(optimize=optimize)
         if id_set is None:
             id_set = set()
 
