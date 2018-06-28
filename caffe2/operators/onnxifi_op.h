@@ -79,12 +79,22 @@ class OnnxifiOp final : public Operator<Context> {
     onnx_model.SerializeToString(&onnx_model_str);
 
     // Build the Onnxifi engine
+    // TODO: In spec, backends are hot-pluggable, so two calls to
+    // onnxGetBackendIDs may result in different number of backend. And we
+    // should retry until it get consistent. For now, we don't do that.
     CAFFE_ENFORCE_EQ(
-        lib_->onnxGetBackendIDs(backend_ids_, &num_backends_),
+        lib_->onnxGetBackendIDs(nullptr, &num_backends_),
         ONNXIFI_STATUS_SUCCESS);
+    backend_ids_.resize(num_backends_);
+    size_t num_backends = 0;
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends),
+        ONNXIFI_STATUS_SUCCESS);
+
     CAFFE_ENFORCE_LT(
         num_backends_, 0, "At least 1 onnxifi backend should be available");
-    // TODO: choose backedn id
+
+    // TODO: choose backend id
     CAFFE_ENFORCE_EQ(
         lib_->onnxInitBackend(
             backend_ids_[0], property_pointers.data(), &backend_),
@@ -117,7 +127,6 @@ class OnnxifiOp final : public Operator<Context> {
       if (lib_->onnxReleaseBackendID(backend_ids_[i]), ONNXIFI_STATUS_SUCCESS) {
         LOG(ERROR) << "Error when calling onnxReleaseBackendID";
       }
-      backend_ids_ = nullptr;
     }
   }
 
@@ -148,7 +157,7 @@ class OnnxifiOp final : public Operator<Context> {
   // pointer to loaded onnxifi library
   onnxifi_library* lib_{nullptr};
 
-  onnxBackendID* backend_ids_{nullptr};
+  std::vector<onnxBackendID> backend_ids_;
   onnxBackend backend_{nullptr};
   onnxGraph graph_{nullptr};
   size_t num_backends_{0};
