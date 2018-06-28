@@ -15,7 +15,7 @@ void THNN_(TemporalReplicationPadding_updateOutput)(
   int numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 2 || numInputDims == 3, 2, input,
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 2 || numInputDims == 3), 2, input,
                   "2D or 3D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 3) {

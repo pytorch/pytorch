@@ -199,17 +199,22 @@ void ProcessGroupGloo::WorkGloo::finishWithException(
 }
 
 ProcessGroupGloo::Options::Options()
-    : timeout(std::chrono::milliseconds(10 * 1000)), threads(2) {}
+    : timeout(std::chrono::milliseconds(10 * 1000)),
+      threads(2),
+      cacheNumAlgorithmEntries(1) {}
 
 ProcessGroupGloo::ProcessGroupGloo(
     const std::shared_ptr<Store>& store,
     int rank,
     int size,
     Options options)
-    : ProcessGroup(rank, size), store_(new GlooStore(store)), stop_(false) {
+    : ProcessGroup(rank, size),
+      store_(new GlooStore(store)),
+      stop_(false),
+      cacheNumAlgorithmEntries_(options.cacheNumAlgorithmEntries) {
   auto& devices = options.devices;
   if (devices.empty()) {
-    devices.push_back(::gloo::transport::tcp::CreateDevice("localhost"));
+    throw std::runtime_error("No device(s) specified");
   }
 
   for (auto& device : options.devices) {
@@ -411,17 +416,23 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
 }
 
 AlgorithmEntry* ProcessGroupGloo::checkout(const AlgorithmKey& key) {
-  auto it = cache_.find(key);
+  auto& vec = cache_[key];
+  const auto i = cacheCurrentEntry_[key];
 
-  // If there is no entry for this key yet, it must be the first time
-  // we see and can create a new entry. Use hard limit of 1 instance
-  // per key until we add support for a dynamic limit.
-  if (it == cache_.end()) {
-    cache_[key] = construct(key);
-    it = cache_.find(key);
+  // Ensure the cache vector is appropriately sized
+  if (vec.size() != cacheNumAlgorithmEntries_) {
+    vec.resize(cacheNumAlgorithmEntries_);
   }
 
-  auto& entry = it->second;
+  // The next call must use the next entry
+  cacheCurrentEntry_[key] = (i + 1) % cacheNumAlgorithmEntries_;
+
+  // If there is no entry for this key, create a new one
+  if (!vec[i]) {
+    vec[i] = construct(key);
+  }
+
+  auto& entry = vec[i];
 
   // Ensure entry is not in use
   std::unique_lock<std::mutex> lock(entry->m);

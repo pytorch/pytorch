@@ -14,6 +14,9 @@
 
 namespace at {
 
+using native::from_blob;
+using native::tensor;
+
 ${function_declarations}
 
 static inline Type & infer_type(const Tensor & t) {

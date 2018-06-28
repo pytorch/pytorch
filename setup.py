@@ -355,7 +355,6 @@ class build_deps(PytorchCommand):
         check_file(os.path.join(third_party_path, "nanopb", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, "pybind11", "CMakeLists.txt"))
         check_file(os.path.join(third_party_path, 'cpuinfo', 'CMakeLists.txt'))
-        check_file(os.path.join(third_party_path, 'tbb', 'Makefile'))
         check_file(os.path.join(third_party_path, 'catch', 'CMakeLists.txt'))
         check_file(os.path.join(third_party_path, 'onnx', 'CMakeLists.txt'))
 
@@ -380,8 +379,8 @@ class build_deps(PytorchCommand):
 
         # Use copies instead of symbolic files.
         # Windows has very poor support for them.
-        sym_files = ['tools/shared/cwrap_common.py']
-        orig_files = ['aten/src/ATen/common_with_cwrap.py']
+        sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
+        orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
         for sym_file, orig_file in zip(sym_files, orig_files):
             if os.path.exists(sym_file):
                 os.remove(sym_file)
@@ -673,7 +672,6 @@ if USE_ROCM:
 THD_LIB = os.path.join(lib_path, 'libTHD.a')
 NCCL_LIB = os.path.join(lib_path, 'libnccl.so.1')
 C10D_LIB = os.path.join(lib_path, 'libc10d.a')
-C10D_GLOO_LIB = os.path.join(lib_path, 'libc10d_gloo.a')
 
 # static library only
 NANOPB_STATIC_LIB = os.path.join(lib_path, 'libprotobuf-nanopb.a')
@@ -770,12 +768,15 @@ main_sources = [
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
+    "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/decompose_addmm.cpp",
+    "torch/csrc/jit/passes/specialize_undef.cpp",
+    "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
@@ -818,7 +819,7 @@ main_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
-    "torch/csrc/onnx/onnx.pb.cpp",
+    "torch/csrc/onnx/onnx.npb.cpp",
     "torch/csrc/onnx/onnx.cpp",
     "torch/csrc/onnx/init.cpp",
 ]
@@ -848,7 +849,7 @@ if USE_DISTRIBUTED:
 if USE_C10D:
     extra_compile_args += ['-DUSE_C10D']
     main_sources += ['torch/csrc/distributed/c10d/init.cpp']
-    main_link_args += [C10D_GLOO_LIB, C10D_LIB]
+    main_link_args += [C10D_LIB]
 
 if USE_CUDA:
     nvtoolext_lib_name = None

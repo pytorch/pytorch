@@ -65,7 +65,7 @@ void LoadModule(const string& name, const string& filename="");
 
 #define CAFFE2_MODULE(name, description)                                    \
   extern "C" {                                                              \
-    const bool gCaffe2ModuleSanityCheck##name() { return true; }            \
+    bool gCaffe2ModuleSanityCheck##name() { return true; }                  \
   }                                                                         \
   namespace {                                                               \
     static ::caffe2::ModuleSchema module_schema_##name(#name, description); \

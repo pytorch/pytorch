@@ -350,7 +350,7 @@ namespace {
   int64_t get_num_weights(cudnnHandle_t handle, const RNNDescriptor& rnn_desc,
                           const TensorDescriptor& x_desc, cudnnDataType_t datatype) {
     size_t weight_size;
-    CUDNN_CHECK(cudnnGetRNNParamsSize(handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
+    AT_CUDNN_CHECK(cudnnGetRNNParamsSize(handle, rnn_desc.desc(), x_desc.desc(), &weight_size, datatype));
     auto elem_size = dataSize(datatype);
     AT_ASSERTM(weight_size % elem_size == 0, "cudnnGetRNNParamsSize returned nonsensical weight_size");
     return weight_size / elem_size;
@@ -410,7 +410,7 @@ namespace {
         for (int64_t linear_id = 0; linear_id < num_linear_layers; linear_id++) {
           FilterDescriptor lin_layer_mat_desc;
           void* matrix_pointer;
-          CUDNN_CHECK(cudnn_method(
+          AT_CUDNN_CHECK(cudnn_method(
                 handle,
                 rnn_desc.desc(),
                 layer,
@@ -429,7 +429,7 @@ namespace {
           // some sort of alloca would be good enough except that it is
           // kind of convenient to be able to prod() on it.
           Tensor filter_dim_a = at::CPU(kInt).tensor(min_dim);
-          CUDNN_CHECK(cudnnGetFilterNdDescriptor(
+          AT_CUDNN_CHECK(cudnnGetFilterNdDescriptor(
                 lin_layer_mat_desc.desc(),
                 min_dim,
                 &data_type,
@@ -659,7 +659,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();
-  CUDNN_CHECK(cudnnGetRNNWorkspaceSize(
+  AT_CUDNN_CHECK(cudnnGetRNNWorkspaceSize(
         handle,
         descs.rnn_desc.desc(),
         fn.tensors.seq_length,
@@ -673,7 +673,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
   // this information.  Use 'train' as a proxy.
   if (fn_train) {
     size_t reserve_size;
-    CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
+    AT_CUDNN_CHECK(cudnnGetRNNTrainingReserveSize(
           handle,
           descs.rnn_desc.desc(),
           fn.tensors.seq_length,
@@ -681,7 +681,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           &reserve_size
           ));
     reserve = input.type().toScalarType(kByte).tensor(reserve_size);
-    CUDNN_CHECK(cudnnRNNForwardTraining(
+    AT_CUDNN_CHECK(cudnnRNNForwardTraining(
           handle,
           descs.rnn_desc.desc(),
           fn.tensors.seq_length,
@@ -697,7 +697,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor> _cudnn_rnn(
           ));
   } else { // inference
     reserve = input.type().toScalarType(kByte).tensor();
-    CUDNN_CHECK(cudnnRNNForwardInference(
+    AT_CUDNN_CHECK(cudnnRNNForwardInference(
           handle,
           descs.rnn_desc.desc(),
           fn.tensors.seq_length,
@@ -779,7 +779,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   auto dcx = cx.defined() ? cx.type().tensor(hidden_size) : Tensor();
 
   if (!fn_train) {
-    throw std::runtime_error("backward_input can only be called in training mode");
+    throw std::runtime_error("cudnn RNN backward can only be called in training mode");
   }
   if (!input.sizes().equals(input_size)) {
     std::ostringstream oss;
@@ -823,7 +823,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();
-  CUDNN_CHECK(cudnnGetRNNWorkspaceSize(
+  AT_CUDNN_CHECK(cudnnGetRNNWorkspaceSize(
         handle,
         descs.rnn_desc.desc(),
         fn.tensors.seq_length,
@@ -833,7 +833,7 @@ std::tuple<Tensor, Tensor, Tensor> _cudnn_rnn_backward_input(
   // TODO: put this in the correct device???
   Tensor workspace = input.type().toScalarType(kByte).tensor(workspace_size);
 
-  CUDNN_CHECK(cudnnRNNBackwardData(
+  AT_CUDNN_CHECK(cudnnRNNBackwardData(
         handle,
         descs.rnn_desc.desc(),
         fn.tensors.seq_length,
@@ -899,7 +899,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   auto hidden_size = _hidden_size(fn.rnn, fn.tensors);
 
   if (!fn_train) {
-    throw std::runtime_error("backward_input can only be called in training mode");
+    throw std::runtime_error("cudnn RNN backward can only be called in training mode");
   }
   if (!input.sizes().equals(input_size)) {
     std::ostringstream oss;
@@ -933,7 +933,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
   size_t workspace_size;
   auto x_descs_arr = descs.get_x_descs();
   auto y_descs_arr = descs.get_y_descs();
-  CUDNN_CHECK(cudnnGetRNNWorkspaceSize(
+  AT_CUDNN_CHECK(cudnnGetRNNWorkspaceSize(
         handle,
         descs.rnn_desc.desc(),
         fn.tensors.seq_length,
@@ -942,7 +942,7 @@ std::vector<Tensor> _cudnn_rnn_backward_weight(
         ));
   Tensor workspace = input.type().toScalarType(kByte).tensor(workspace_size);
 
-  CUDNN_CHECK(cudnnRNNBackwardWeights(
+  AT_CUDNN_CHECK(cudnnRNNBackwardWeights(
         handle,
         descs.rnn_desc.desc(),
         fn.tensors.seq_length,

@@ -530,6 +530,7 @@ class TestLuaReader(TestCase):
         return input, target.sub(1)
 
 
+@unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command):
         """Returns (return-code, stdout, stderr)"""

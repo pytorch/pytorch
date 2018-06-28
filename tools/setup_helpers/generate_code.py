@@ -37,6 +37,7 @@ outputs = [
     'torch/csrc/autograd/generated/python_nn_functions_dispatch.h',
     'torch/csrc/autograd/generated/python_variable_methods.cpp',
     'torch/csrc/autograd/generated/python_variable_methods_dispatch.h',
+    'torch/csrc/autograd/generated/variable_factories.h',
     'torch/csrc/autograd/generated/VariableType.cpp',
     'torch/csrc/autograd/generated/VariableType.h',
     'torch/csrc/jit/generated/aten_dispatch.cpp',
@@ -77,6 +78,7 @@ def generate_code(ninja_global=None,
     sys.path.insert(0, root)
     from tools.autograd.gen_autograd import gen_autograd
     from tools.jit.gen_jit_dispatch import gen_jit_dispatch
+
     from tools.nnwrap import generate_wrappers as generate_nn_wrappers
 
     # Build THNN/THCUNN.cwrap and then THNN/THCUNN.cpp. These are primarily

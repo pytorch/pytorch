@@ -27,7 +27,7 @@ We are in an early-release beta. Expect some adventures and rough edges.
 | Linux GPU | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-master/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-master/) |
 | Windows GPU | <center>—</center> | [![Build Status](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/badge/icon)](https://ci.pytorch.org/jenkins/job/pytorch-builds/job/pytorch-win-ws2016-cuda9-cudnn7-py3-trigger/)
 
-See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master)
+See also the [ci.pytorch.org HUD](https://ezyang.github.io/pytorch-ci-hud/build/pytorch-master).
 
 
 ## More about PyTorch
@@ -141,9 +141,8 @@ and with minimal abstractions.
 You can write new neural network layers in Python using the torch API
 [or your favorite NumPy-based libraries such as SciPy](http://pytorch.org/tutorials/advanced/numpy_extensions_tutorial.html).
 
-If you want to write your layers in C/C++, we provide an extension API based on
-[cffi](http://cffi.readthedocs.io/en/latest/) that is efficient and with minimal boilerplate.
-There is no wrapper code that needs to be written. You can see [a tutorial here](http://pytorch.org/tutorials/advanced/c_extension.html) and [an example here](https://github.com/pytorch/extension-ffi).
+If you want to write your layers in C/C++, we provide a convenient extension API that is efficient and with minimal boilerplate.
+There is no wrapper code that needs to be written. You can see [a tutorial here](http://pytorch.org/tutorials/advanced/cpp_extension.html) and [an example here](https://github.com/pytorch/extension-cpp).
 
 
 ## Installation
