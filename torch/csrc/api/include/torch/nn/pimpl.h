@@ -16,6 +16,9 @@ namespace detail {
 struct ModuleHolderIndicator {};
 
 template <typename T>
+using is_module_holder = std::is_base_of<ModuleHolderIndicator, decay_t<T>>;
+
+template <typename T>
 using disable_if_module_holder_t =
     disable_if_t<std::is_base_of<ModuleHolderIndicator, decay_t<T>>::value>;
 } // namespace detail
