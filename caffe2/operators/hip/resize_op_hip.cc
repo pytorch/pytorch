@@ -17,7 +17,7 @@
 
 #include "caffe2/core/context_hip.h"
 #include "caffe2/utils/math.h"
-#include "resize_op.h"
+#include "caffe2/operators/resize_op.h"
 
 namespace caffe2 {
 

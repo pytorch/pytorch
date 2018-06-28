@@ -11,9 +11,9 @@
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
 #include "caffe2/core/hip/context_hip.h"
-#include "flatten_op.h"
-#include "minmax_ops.h"
-#include "utility_ops.h"
+#include "caffe2/operators/flatten_op.h"
+#include "caffe2/operators/minmax_ops.h"
+#include "caffe2/operators/utility_ops.h"
 
 namespace caffe2 {
 CAFFE_KNOWN_TYPE(const float*);
