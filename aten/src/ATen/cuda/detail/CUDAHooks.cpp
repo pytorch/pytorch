@@ -28,14 +28,11 @@ namespace {
 
 void check_status(int32_t status) {
   AT_CHECK(
-    static_cast<cudaError_t>(status) == cudaSuccess,
-    "CUDA error "
-    "file=", __FILE__, " " 
-    "line=", __LINE__, " "
-    "error=", static_cast<int32_t>(status), " "
-    ": ",
-    cudaGetErrorString(static_cast<cudaError_t>(status)),
-    "\n");
+      static_cast<cudaError_t>(status) == cudaSuccess,
+      "CUDA error (",
+      static_cast<int32_t>(status),
+      "): ",
+      cudaGetErrorString(static_cast<cudaError_t>(status)));
 }
 
 void set_device(int32_t device) {
