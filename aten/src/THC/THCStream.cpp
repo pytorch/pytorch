@@ -5,7 +5,7 @@ THC_API THCStream* THCStream_defaultStream(int device) {
 }
 
 THC_API THCStream* THCStream_new(int flags) { 
-  return THCStream_newWithPriority(flags, 0);
+  return THCStream_newWithPriority(flags, at::CUDAStream::DEFAULT_PRIORITY);
 }
 
 THC_API THCStream* THCStream_newWithPriority(int flags, int priority) {
