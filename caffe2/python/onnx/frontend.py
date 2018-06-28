@@ -136,7 +136,6 @@ class Caffe2Frontend(object):
     @classmethod
     def caffe2_op_to_onnx_node(cls, op_def, shapes):
         if C.support_onnx_export(op_def.type):
-            shape_list = list(shapes.values())
             node_strs, tensor_strs = C.export_to_onnx(cls._dummy_name, op_def.SerializeToString(), shapes)
             nodes = []
             for s in node_strs:

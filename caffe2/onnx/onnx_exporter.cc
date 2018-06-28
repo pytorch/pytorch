@@ -354,9 +354,9 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
 ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
     const caffe2::OperatorDef& def,
     const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
-  caffe2::OperatorDef mdef(def);  // The modified def without broadcast and axis
+  caffe2::OperatorDef mdef(def); // The modified def without broadcast and axis
   const auto& x = mdef.input(0);
-  const auto& y = def.input(1);  // Refer to the old def, later won't change it.
+  const auto& y = def.input(1); // Refer to the old def, later won't change it.
   const auto& x_shape = shapes.at(x);
   const auto& y_shape = shapes.at(y);
   for (int i = 0; i < mdef.arg_size(); ++i) {
@@ -373,7 +373,8 @@ ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
       int64_t axis = arg.i();
       if (x_shape.dims().size() - axis != y_shape.dims().size()) {
         // The upper bound (excluded) of expanded y.
-        int64_t end_dim = y_shape.dims().size() - 1 - axis + x_shape.dims().size();
+        int64_t end_dim =
+            y_shape.dims().size() - 1 - axis + x_shape.dims().size();
         axes.resize(end_dim - y_shape.dims().size());
         std::iota(axes.begin(), axes.end(), y_shape.dims().size());
         mdef.set_input(1, dummy_->NewDummyName());
@@ -385,11 +386,10 @@ ConvertedResult OnnxExporter::CreateBinaryElementwiseOpNodes(
 
   auto result = CommonCaffe2OpToOnnxNodes(mdef);
   if (axes.size() != 0) {
-    result.first.insert(result.first.begin(), MakeNode(
-          "Unsqueeze",
-          {y},
-          {mdef.input(1)},
-          {MakeAttribute("axes", axes)}));
+    result.first.insert(
+        result.first.begin(),
+        MakeNode(
+            "Unsqueeze", {y}, {mdef.input(1)}, {MakeAttribute("axes", axes)}));
   }
   return result;
 }
