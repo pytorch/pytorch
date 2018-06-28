@@ -114,9 +114,6 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
   onnxMemoryFence output_fence;
   output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
   output_fence.event = nullptr;
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxInitEvent(backend_, output_fence.event),
-      ONNXIFI_STATUS_SUCCESS);
 
   // Call the asycn run on backend, singal event on input fence and wait for the
   // event on output fence
