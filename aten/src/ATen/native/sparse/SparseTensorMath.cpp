@@ -106,7 +106,8 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
 
   if (isSameTensor(r, t)) {
     // don't have in-place log1p for uncoalesced input because coalesce() is not in-place
-    AT_CHECK(r.is_coalesced(), "in-place log1p on uncoalesced tensors is not supported yet!");
+    AT_CHECK(
+      r.is_coalesced(), "in-place log1p on uncoalesced tensors is not supported yet!");
   }
   else {
     r = raw_copy_sparse_(r, t.coalesce());
