@@ -25,7 +25,7 @@ using at::Storage;
 using at::TensorOptions;
 
 static at::Type& default_type() {
-  return torch::tensor::get_default_tensor_type();
+  return torch::tensors::get_default_tensor_type();
 }
 
 static void maybe_initialize_cuda(const at::Type &type) {

@@ -208,7 +208,7 @@ bool CUDA_tensor_histogram(
   detail::TensorInfo<output_t, IndexType> pInfo(nullptr, 0, {}, {});
   Tensor partial_output;
   if (memType == CUDAHistogramMemoryType::MULTI_BLOCK) {
-    partial_output = native::zeros({grid.x, nbins}, TensorOptions(a));
+    partial_output = native::zeros({grid.x, nbins}, a.options());
     pInfo = detail::getTensorInfo<output_t, IndexType>(partial_output);
   }
 
@@ -261,7 +261,7 @@ Tensor _bincount_cuda_template(
   // alloc output counter on GPU
   Tensor output;
   if (has_weights) {
-    output = native::zeros({nbins}, TensorOptions(weights));
+    output = native::zeros({nbins}, weights.options());
     auto ret = cuda::CUDA_tensor_histogram<weights_t, input_t, true>(
         output, self, weights, nbins, 1);
   } else {

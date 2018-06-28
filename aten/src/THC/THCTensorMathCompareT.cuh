@@ -57,7 +57,7 @@ void THC_logicalTensor(THCState *state,
                        TensorType *src2,
                        Op op) {
   THLongStorage* st = THCTensor_newSizeOf(state, src1);
-  THCTensor_resizeLegacy(state, self_, st, NULL);
+  THCTensor_resize(state, self_, st, NULL);
   THLongStorage_free(st);
 
   THArgCheck(THCTensor_nElement(state, src1) ==

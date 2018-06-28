@@ -1,5 +1,6 @@
 #pragma once
 #include "ATen/Config.h"
+#include "ATen/Half.h"
 
 // Defines the accumulation type for a scalar type.
 // Example:
@@ -18,6 +19,7 @@ struct AccumulateType { };
 #ifdef __CUDACC__
 template <> struct AccumulateType<half, true> { using type = float; };
 #endif
+template <> struct AccumulateType<Half, true> { using type = float; };
 template <> struct AccumulateType<float, true> { using type = float; };
 template <> struct AccumulateType<double, true> { using type = double; };
 template <> struct AccumulateType<int8_t, true> { using type = int64_t; };

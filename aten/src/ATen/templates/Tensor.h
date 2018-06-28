@@ -17,6 +17,7 @@
 namespace at {
 struct Type;
 struct Tensor;
+struct TensorOptions;
 namespace detail {
 void set_data(Tensor& tensor, Tensor new_data);
 } // namespace detail
@@ -85,6 +86,12 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
+  /// New-style `to()` methods.
+  /// NB: These methods are defined in TensorOptions.h.
+  Tensor to(Device device, ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(Device device, bool non_blocking = false) const;
+
   /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
   /// Defined in Type.h because of include order issues.
   bool is_variable() const noexcept;
@@ -97,6 +104,10 @@ struct Tensor : public detail::TensorBase {
 
   /// Returns a `Tensor`'s device.
   Device device() const;
+
+  /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
+  /// TensorOptions.h.
+  TensorOptions options() const;
 
   template<typename T>
   T * data() const;

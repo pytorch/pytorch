@@ -12,6 +12,46 @@ import numpy as np
 
 class TestElementwiseOps(hu.HypothesisTestCase):
 
+    @given(X=hu.tensor(dtype=np.float32), **hu.gcs)
+    def test_abs(self, X, gc, dc):
+        op = core.CreateOperator(
+            "Abs",
+            ["X"],
+            ["Y"],
+        )
+
+        def abs_ref(X):
+            return [np.absolute(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=abs_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
+    def test_exp(self, X, inplace, gc, dc):
+        op = core.CreateOperator(
+            "Exp",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+        )
+
+        def exp_ref(X):
+            return [np.exp(X)]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=exp_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
+
     @given(n=st.integers(0, 6), m=st.integers(4, 6),
            seed=st.integers(0, 1000), **hu.gcs)
     def test_log(self, n, m, gc, dc, seed):
@@ -121,6 +161,27 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-2)
 
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
+    def test_softsign(self, X, inplace, gc, dc):
+        op = core.CreateOperator(
+            "Softsign",
+            ["X"],
+            ["X"] if inplace else ["Y"],
+        )
+
+        def softsign_ref(X):
+            return [X / (1.0 + np.absolute(X))]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=[X],
+            reference=softsign_ref,
+        )
+        self.assertDeviceChecks(dc, op, [X], [0])
+        if not inplace:
+            self.assertGradientChecks(gc, op, [X], 0, [0])
+
     @given(X=hu.tensor(elements=st.floats(0.1, 10.0), dtype=np.float32),
            inplace=st.booleans(), **hu.gcs)
     def test_rsqrt(self, X, inplace, gc, dc):
@@ -194,30 +255,25 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
-    @given(n=st.integers(0, 6), m=st.integers(4, 6),
-           seed=st.integers(0, 1000), **hu.gcs)
-    def test_sigmoid(self, n, m, gc, dc, seed):
-        np.random.seed(seed)
-        X = np.random.rand(n, m).astype(np.float32)
-
-        def sigmoid(X):
-            return [1. / (1. + np.exp(-X))]
-
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
+    def test_sigmoid(self, X, inplace, gc, dc):
         op = core.CreateOperator(
             "Sigmoid",
             ["X"],
-            ["Z"]
+            ["X"] if inplace else ["Y"],
         )
+
+        def sigmoid_ref(X):
+            return [1.0 / (1.0 + np.exp(-X))]
 
         self.assertReferenceChecks(
             device_option=gc,
             op=op,
             inputs=[X],
-            reference=sigmoid,
+            reference=sigmoid_ref,
         )
-
-        self.assertGradientChecks(
-            gc, op, [X], 0, [0], stepsize=1e-4, threshold=1e-2)
+        self.assertDeviceChecks(dc, op, [X], [0])
+        self.assertGradientChecks(gc, op, [X], 0, [0])
 
     @given(n=st.integers(0, 6), m=st.integers(4, 6), **hu.gcs)
     def test_eq(self, n, m, gc, dc):
@@ -342,27 +398,58 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         B = np.random.rand(n, 1, k, 1).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, test_grad, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_add(self, n, m, k, t, gc, dc):
         self._test_binary_op("Add", np.add, n, m, k, t, -0.5, True, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_sub(self, n, m, k, t, gc, dc):
         self._test_binary_op("Sub", np.subtract, n, m,
                              k, t, -0.5, True, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_mul(self, n, m, k, t, gc, dc):
         self._test_binary_op("Mul", np.multiply, n, m,
                              k, t, -0.5, True, gc, dc)
 
-    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
-           t=st.integers(1, 5), **hu.gcs)
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), **hu.gcs)
     def test_div(self, n, m, k, t, gc, dc):
         self._test_binary_op("Div", np.divide, n, m, k, t, 1.0, True, gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), broadcast=st.booleans(),
+           **hu.gcs)
+    def test_div_legacy_grad(self, n, m, broadcast, gc, dc):
+        op = core.CreateOperator(
+            "DivGradient",
+            ["B", "C", "dC"],
+            ["dA", "dB"],
+        )
+
+        def div_grad_ref(B, C, dC):
+            dA = dC / B
+            dB = -dC * C / B
+            if broadcast:
+                dB = np.sum(dB, axis=0)
+            return [dA, dB]
+
+        if broadcast:
+            B = np.random.rand(m).astype(np.float32) + 1.0
+        else:
+            B = np.random.rand(n, m).astype(np.float32) + 1.0
+        C = np.random.randn(n, m).astype(np.float32)
+        dC = np.random.randn(n, m).astype(np.float32)
+        inputs = [B, C, dC]
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=div_grad_ref,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0, 1])
 
     def _test_bitwise_binary_op(self, op_name, np_ref, n, m, k, t, gc, dc):
         op = core.CreateOperator(

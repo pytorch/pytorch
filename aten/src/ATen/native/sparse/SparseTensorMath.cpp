@@ -2,49 +2,17 @@
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/ExpandUtils.h>
 #include <ATen/NativeFunctions.h>
+#include <ATen/native/sparse/SparseUtils.h>
 
 #include <TH/THBlasUtils.h>
 
 namespace at { namespace native {
-
-// Just for documentary purposes
-using SparseTensor = Tensor;
-using LongTensor = Tensor;
 
 // --------------------------------------------------------------------
 // Utility functions
 // --------------------------------------------------------------------
 
 namespace {
-  // TODO: Expose this for real in ATen, some day?
-  // NB: Doesn't preserve data.
-  Tensor _new_values_with_size_of(const Tensor& values, int64_t nnz) {
-    if (values.dim() == 0) { // values tensor uninitialized
-      return values.type().tensor({nnz});
-    } else {
-      std::vector<int64_t> size = values.sizes();
-      size[0] = nnz;
-      return values.type().tensor(size);
-    }
-  }
-
-  bool _is_same_density(const SparseTensor& self, const SparseTensor& src) {
-    return self._sparseDims() == src._sparseDims() && self._denseDims() == src._denseDims();
-  }
-
-  // TODO: This is a temporary stop-gap, to allow us to perform some private
-  // functionality.  Our eventual plan is to fill out the PUBLIC API with
-  // enough functions so that math functions don't need to rely on this.
-  SparseTensorImpl* _get_sparse_impl(const SparseTensor& self) {
-    if (!self.is_sparse()) AT_ERROR("_internal_get_SparseTensorImpl: not a sparse tensor");
-    return static_cast<SparseTensorImpl*>(self.unsafeGetTensorImpl());
-  }
-
-  // TODO: put this into the public API
-  bool isSameTensor(const Tensor& lhs, const Tensor& rhs) {
-    return lhs.unsafeGetTensorImpl() == rhs.unsafeGetTensorImpl();
-  }
-
   LongTensor _to_csr(const int64_t* indices, int64_t dim, int64_t nnz) {
     int64_t h, i, hp0, hp1;
     LongTensor csr = native::zeros({dim + 1}, kLong);
@@ -309,7 +277,7 @@ SparseTensor& s_add_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar
 }
 
 // --------------------------------------------------------------------
-// add(Tensor, SparseTensorRef, Scalar)
+// add(Tensor, SparseTensor, Scalar)
 //    formerly known as spcadd
 // --------------------------------------------------------------------
 
@@ -413,7 +381,7 @@ SparseTensor& s_sub_sparse_cpu_(SparseTensor& t, const SparseTensor& src, Scalar
 // --------------------------------------------------------------------
 
 SparseTensor& s_mul_out_sparse_cpu(SparseTensor& r, const SparseTensor& t_, const SparseTensor& src_) {
-  AT_CHECK(t_.sizes().equals(src_.sizes()), "cmul operands have incompatible sizes");
+  AT_CHECK(t_.sizes().equals(src_.sizes()), "mul operands have incompatible sizes");
   if (src_._nnz() == 0 || t_._nnz() == 0) {
     return r.zero_();
   }
@@ -571,6 +539,7 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   // TODO: This error message seems awfully opaque
   AT_CHECK(sparse_._sparseDims() == 2, "matrices expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0, "scalar values expected, got ", sparse_._denseDims(), "D values");
+  AT_CHECK(dense.numel() != 0, "matrices expected, got empty tensor");
   AT_CHECK(dense.dim() == 2, "matrices expected, got ", dense.dim(), "D tensor");
 
   SparseTensor sparse = sparse_.coalesce();
@@ -645,7 +614,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   AT_CHECK(sparse_._denseDims() == 0,
       "Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
-      "Argument #2: matrices expected, got ", dense.dim(), "D tensor");
+      "Argument #3: matrices expected, got ", dense.dim(), "D tensor");
 
   int64_t m = sparse_.size(0);
   int64_t k = sparse_.size(1);
@@ -747,7 +716,7 @@ SparseTensor& _sspaddmm_out_cpu(
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
   LongTensor newi = native::empty({2, r_nnz}, kLong);
-  LongTensor newv = native::zeros({r_nnz}, TensorOptions(values));
+  LongTensor newv = native::zeros({r_nnz}, values.options());
 
   if (t_nnz != 0) {
     LongTensor narrowi = newi.narrow(1, 0, t_nnz);

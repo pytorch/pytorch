@@ -16,6 +16,7 @@ private:
 
 
 struct AnomalyMetadata {
+  virtual ~AnomalyMetadata(){};
   virtual void store_stack() = 0;
   virtual void print_stack() = 0;
 };

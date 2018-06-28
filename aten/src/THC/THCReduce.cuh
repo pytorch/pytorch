@@ -288,12 +288,12 @@ bool THC_reduceDim(THCState* state,
   int64_t reductionStride = THCTensor_stride(state, in, dim);
   ptrdiff_t outElements = inElements / reductionSize;
 
-  if (THCTensor_nDimension(state, out) > MAX_CUTORCH_DIMS ||
-      THCTensor_nDimension(state, in) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, out) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, in) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, in) == 0) {
+  if (THCTensor__nDimension(state, in) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -343,12 +343,12 @@ bool THC_reduceDim(THCState* state,
 
   // Preserve noncontiguities by unsqueezing out if necessary
   THCTensor_preserveReduceDimSemantics(
-      state, out, THCTensor_nDimension(state, in), dim, keepdim);
+      state, out, THCTensor__nDimension(state, in), dim, keepdim);
 
   // Resize out
   THLongStorage* sizes = THCTensor_newSizeOf(state, in);
   THLongStorage_set(sizes, dim, 1);
-  THCTensor_resizeLegacy(state, out, sizes, NULL);
+  THCTensor_resize(state, out, sizes, NULL);
   THLongStorage_free(sizes);
 
   // It is possible that the tensor dimensions are able to be collapsed,

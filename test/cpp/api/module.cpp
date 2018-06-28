@@ -1,27 +1,31 @@
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/nn/module.h>
+#include <torch/nn/modules/linear.h>
+#include <torch/nn/modules/rnn.h>
+#include <torch/tensor.h>
+#include <torch/utils.h>
 
-using namespace torch;
 using namespace torch::nn;
 
 using Catch::StartsWith;
 
-struct AGIUnit : nn::Module {};
+struct AGIUnit : torch::nn::Module {};
 
 namespace test {
-struct AGIUnit : nn::Module {};
-struct AGIUnit2 : nn::Module {
-  AGIUnit2() : nn::Module("Foo") {}
+struct AGIUnit : torch::nn::Module {};
+struct AGIUnit2 : torch::nn::Module {
+  AGIUnit2() : torch::nn::Module("Foo") {}
 };
 } // namespace test
 
-bool pointer_equal(at::Tensor first, at::Tensor second) {
-  return first.data<float>() == second.data<float>();
+bool pointer_equal(torch::Tensor first, torch::Tensor second) {
+  return first.data().data<float>() == second.data().data<float>();
 }
 
 TEST_CASE("module/training-mode") {
-  auto module = Linear(3, 4).build();
+  torch::manual_seed(0);
+  Linear module(3, 4);
   REQUIRE(module->is_training());
   SECTION("Enable eval mode") {
     module->eval();
@@ -34,18 +38,19 @@ TEST_CASE("module/training-mode") {
 }
 
 TEST_CASE("module/zero-grad") {
-  auto module = Linear(3, 4).build();
-  auto weight = torch::ones({8, 3}, at::requires_grad());
-  auto loss = module->forward({weight}).front().sum();
+  torch::manual_seed(0);
+  Linear module(3, 4);
+  auto weight = torch::ones({8, 3}, torch::requires_grad());
+  auto loss = module->forward(weight).sum();
   loss.backward();
   for (auto& parameter : module->parameters()) {
-    Variable grad = parameter->grad();
+    auto grad = parameter->grad();
     REQUIRE(grad.defined());
     REQUIRE(grad.sum().toCFloat() != 0);
   }
   module->zero_grad();
   for (auto& parameter : module->parameters()) {
-    Variable grad = parameter->grad();
+    auto grad = parameter->grad();
     REQUIRE(grad.defined());
     REQUIRE(grad.sum().toCFloat() == 0);
   }
@@ -65,47 +70,58 @@ TEST_CASE("module/name") {
 }
 
 TEST_CASE("module/conversions", "[cuda]") {
-  auto module = LSTM(128, 64).layers(3).dropout(0.2).build();
+  torch::manual_seed(0);
+  Linear module(128, 64);
   SECTION("starts as float on CPU") {
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().backend() == at::kCPU);
-      REQUIRE(parameter->type().scalarType() == at::kFloat);
+      REQUIRE(parameter->device() == torch::Device(torch::kCPU));
+      REQUIRE(parameter->dtype() == torch::kFloat32);
     }
   }
   SECTION("to(CUDA)") {
-    module->cuda();
+    module->to({torch::kCUDA, 0});
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().backend() == at::kCUDA);
+      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
+      REQUIRE(parameter->device().index() == 0);
+    }
+    module->cuda(1);
+    for (auto& parameter : module->parameters()) {
+      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
+      REQUIRE(parameter->device().index() == 1);
     }
   }
   SECTION("to(CPU)") {
-    module->to(at::kCPU);
+    module->to(torch::Device(torch::kCPU));
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().backend() == at::kCPU);
+      REQUIRE(parameter->device().type() == torch::Device::Type::CPU);
     }
   }
-  SECTION("to(Int)") {
-    module->to(at::kInt);
+  SECTION("to(Int32)") {
+    module->to(torch::kInt32);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().scalarType() == at::kInt);
+      REQUIRE(parameter->dtype() == torch::kInt32);
     }
   }
-  SECTION("to(Double)") {
-    module->to(at::kDouble);
+  SECTION("to(Float64)") {
+    module->to(torch::kFloat64);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().scalarType() == at::kDouble);
+      REQUIRE(parameter->dtype() == torch::kFloat64);
     }
   }
-  SECTION("to(CUDA(Float))") {
-    module->to(at::CUDA(at::kFloat));
+  SECTION("to(CUDA, Byte)") {
+    module->to(torch::Device(torch::kCUDA, 1), torch::kUInt8);
     for (auto& parameter : module->parameters()) {
-      REQUIRE(parameter->type().backend() == at::kCUDA);
-      REQUIRE(parameter->type().scalarType() == at::kFloat);
+      REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
+      REQUIRE(parameter->device().index() == 1);
+    }
+    for (auto& parameter : module->parameters()) {
+      REQUIRE(parameter->dtype() == torch::kUInt8);
     }
   }
 }
 
 TEST_CASE("module/clone") {
+  torch::manual_seed(0);
   SECTION(
       "a module that does not override clone() throws when clone() is called") {
     struct UnCloneable : Module {};
@@ -126,37 +142,54 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning creates distinct parameters") {
-    struct TestModule : public CloneableModule<TestModule> {
+    struct TestModule : public Cloneable<TestModule> {
       void reset() override {
-        l1 = register_module("l1", Linear(10, 3).build());
-        l2 = register_module("l2", Linear(3, 5).build());
-        l3 = register_module("l3", Linear(5, 100).build());
+        l1 = register_module("l1", Linear(10, 3));
+        l2 = register_module("l2", Linear(3, 5));
+        l3 = register_module("l3", Linear(5, 100));
+        buffer = register_buffer("buf", torch::ones({2, 2}));
       }
 
-      std::shared_ptr<Linear> l1, l2, l3;
+      Linear l1, l2, l3;
+      torch::Tensor buffer;
     };
 
     auto module = TestModule().build();
 
     auto module2 = module->clone();
-    auto m1param = module->parameters();
-    auto m2param = module2->parameters();
-    for (auto& param : m1param) {
-      REQUIRE(!pointer_equal(param.value, m2param[param.key]));
-      REQUIRE(param->allclose(m2param[param.key]));
+    auto params1 = module->parameters();
+    auto params2 = module2->parameters();
+    REQUIRE(params1.size() == 6);
+    REQUIRE(params2.size() == 6);
+    for (auto& param : params1) {
+      REQUIRE(!pointer_equal(param.value, params2[param.key]));
+      REQUIRE(param->allclose(params2[param.key]));
       param->data().mul_(2);
     }
-    for (auto& param : m1param) {
-      REQUIRE(!param->allclose(m2param[param.key]));
+    for (auto& param : params1) {
+      REQUIRE(!param->allclose(params2[param.key]));
+    }
+
+    auto buffers1 = module->buffers();
+    auto buffers2 = module2->buffers();
+    REQUIRE(buffers1.size() == 1);
+    REQUIRE(buffers2.size() == 1);
+    for (auto& buffer : buffers1) {
+      REQUIRE(!pointer_equal(buffer.value, buffers2[buffer.key]));
+      REQUIRE(buffer->allclose(buffers2[buffer.key]));
+      buffer->data().mul_(2);
+    }
+    for (auto& buffer : buffers1) {
+      REQUIRE(!buffer->allclose(buffers2[buffer.key]));
     }
   }
 
   SECTION("Cloning preserves external references") {
-    struct TestModule : public CloneableModule<TestModule> {
+    struct TestModule : public Cloneable<TestModule> {
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
-      Variable weight;
+      torch::Tensor weight;
     };
     auto module = TestModule().build();
     module->weight.data() += 1;
@@ -173,15 +206,15 @@ TEST_CASE("module/clone") {
   }
 
   SECTION("Cloning copies the values of variables of submodules") {
-    struct TestModule : public CloneableModule<TestModule> {
+    struct TestModule : public Cloneable<TestModule> {
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
 
-      Variable weight;
+      torch::Tensor weight;
       int value = 0;
     };
-    struct NestedModule : public CloneableModule<NestedModule> {
+    struct NestedModule : public Cloneable<NestedModule> {
       void reset() override {
         module = register_module("module", TestModule().build());
       }
@@ -204,6 +237,7 @@ TEST_CASE("module/clone") {
 }
 
 TEST_CASE("module/parameters") {
+  torch::manual_seed(0);
   struct TestModule : Module {
     TestModule() {
       a = register_parameter("a", torch::zeros({2, 2}));
@@ -211,7 +245,7 @@ TEST_CASE("module/parameters") {
       c = register_parameter("c", torch::ones({2, 2}) * 2);
     }
 
-    Variable a, b, c;
+    torch::Tensor a, b, c;
   };
 
   TestModule module;
@@ -225,5 +259,31 @@ TEST_CASE("module/parameters") {
     REQUIRE(parameters.contains("a"));
     REQUIRE(parameters.contains("b"));
     REQUIRE(parameters.contains("c"));
+  }
+}
+
+TEST_CASE("module/buffers") {
+  torch::manual_seed(0);
+  struct TestModule : Module {
+    TestModule() {
+      a = register_buffer("a", torch::zeros({2, 2}));
+      b = register_buffer("b", torch::ones({2, 2}));
+      c = register_buffer("c", torch::ones({2, 2}) * 2);
+    }
+
+    torch::Tensor a, b, c;
+  };
+
+  TestModule module;
+
+  SECTION("has correct number of buffers") {
+    REQUIRE(module.buffers().size() == 3);
+  }
+
+  SECTION("contains buffers with the correct name") {
+    auto buffers = module.buffers();
+    REQUIRE(buffers.contains("a"));
+    REQUIRE(buffers.contains("b"));
+    REQUIRE(buffers.contains("c"));
   }
 }

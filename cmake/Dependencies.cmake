@@ -318,7 +318,19 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  set(Python_ADDITIONAL_VERSIONS 3.6 3.5 2.8 2.7 2.6)
+  # Put the currently-activated python version at the front of
+  # Python_ADDITIONAL_VERSIONS so that it is found first. Otherwise there may
+  # be mismatches between Python executables and libraries used at different
+  # stages of build time and at runtime
+  execute_process(
+    COMMAND "python" -c "import sys; sys.stdout.write('%s.%s' % (sys.version_info.major, sys.version_info.minor))"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _py_version)
+  set(Python_ADDITIONAL_VERSIONS)
+  if(${_exitcode} EQUAL 0)
+    list(APPEND Python_ADDITIONAL_VERSIONS "${_py_version}")
+  endif()
+  list(APPEND Python_ADDITIONAL_VERSIONS 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
@@ -740,8 +752,6 @@ endif()
 if (BUILD_ATEN)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  add_definitions(-DTH_INDEX_BASE=0)
 
   # RPATH stuff
   # see https://cmake.org/Wiki/CMake_RPATH_handling

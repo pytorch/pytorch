@@ -99,7 +99,7 @@ template <typename scalar_t, typename Op>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
-    scalar_t* input_data,
+    const scalar_t* input_data,
     int64_t size) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;

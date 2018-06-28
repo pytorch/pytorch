@@ -36,7 +36,7 @@ void EliminateDeadCode(Block *block, bool recurse, bool_memo_type& memo) {
   }
 }
 
-void EliminateDeadCode(std::shared_ptr<Graph>& graph) {
+void EliminateDeadCode(const std::shared_ptr<Graph>& graph) {
   bool_memo_type side_effect_memo;
   EliminateDeadCode(graph->block(), true, side_effect_memo);
 }

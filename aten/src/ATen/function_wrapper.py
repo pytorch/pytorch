@@ -906,6 +906,9 @@ def create_generic(top_env, declarations):
             if isinstance(t_raw, string_type):
                 t = t_raw
                 name = None
+            elif t_raw is None:
+                t = 'void'
+                name = None
             else:
                 t = t_raw['type']
                 name = t_raw['name']
@@ -967,14 +970,14 @@ def create_generic(top_env, declarations):
         option['const_mark'] = '' if option['inplace'] else ' const'
 
         is_method = 'method' in option['variants']
-        is_function = 'function' in option['variants']
+        is_namespace_function = 'function' in option['variants']
         is_factory_method = find_formal('TensorOptions', formals)
-        is_deprecated_factory_method = \
-            formals[0]['dynamic_type'] == 'Type' and option['return_type'] == 'Tensor' and option['deprecated']
+        is_deprecated_factory_method = len(formals) > 0 and \
+            formals[0]['dynamic_type'] == 'Type' and \
+            option['return_type'] == 'Tensor' and option['deprecated']
         needs_native_definition = not is_deprecated_factory_method
 
         has_dispatch = dispatch_tensor or dispatch_type
-        is_namespace_function = is_function and (has_dispatch or is_factory_method)
 
         option['method_prefix_derived'] = ''
         option['device_guard_declaration'] = device_guard(option, formals, is_factory_method)
@@ -1045,6 +1048,9 @@ def create_generic(top_env, declarations):
                 option['inferred_type'] = dispatch_type['name']
             elif dispatch_tensor:
                 option['inferred_type'] = 'infer_type({})'.format(dispatch_tensor)
+            else:
+                # doesn't depend on a specific type, use undefined float
+                option['inferred_type'] = 'at::getType(at::Backend::Undefined, at::ScalarType::Float)'
             declaration = DEPRECATED_FUNCTION_DECLARATION if option['deprecated'] else FUNCTION_DECLARATION
             top_env['function_declarations'].append(declaration.substitute(env))
             if is_factory_method:

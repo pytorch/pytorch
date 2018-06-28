@@ -141,6 +141,9 @@ public:
   Vec256<float> sqrt() const {
     return _mm256_sqrt_ps(values);
   }
+  Vec256<float> rsqrt() const {
+    return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));
+  }
 };
 
 template <>

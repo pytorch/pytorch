@@ -3,6 +3,7 @@
 #include <cmath>
 #include "ATen/Dispatch.h"
 #include "ATen/cpu/vml.h"
+#include "ATen/CPUApplyUtils.h"
 #include "ATen/native/cpu/CapabilityDispatch.h"
 
 namespace at { namespace native {
@@ -10,76 +11,67 @@ namespace {
 
 using namespace vec256;
 
-static void abs_kernel(Tensor& result, const Tensor& self) {
-  AT_DISPATCH_ALL_TYPES(self.type(), "abs", [&] {
-    scalar_t* out = result.data<scalar_t>();
-    scalar_t* in = self.data<scalar_t>();
-    int64_t size = self.numel();
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
-      map([](const Vec256<scalar_t>& x) { return x.abs(); },
-          out + begin,
-          in + begin,
-          end - begin);
-    });
-  });
-}
-
-static void rsqrt_kernel(Tensor& result, const Tensor& self) {
-  AT_DISPATCH_FLOATING_TYPES(self.type(), "rsqrt", [&] {
-    scalar_t* out = result.data<scalar_t>();
-    scalar_t* in = self.data<scalar_t>();
-    int64_t size = self.numel();
-    parallel_for(0, size, 2048, [out, in](int64_t begin, int64_t end) {
-      map(
-          [](const Vec256<scalar_t>& x) {
-            return Vec256<scalar_t>((scalar_t)(1)) / x.sqrt();
-          },
-          out + begin,
-          in + begin,
-          end - begin);
-    });
-  });
-}
-
-#define IMPLEMENT_FLOAT_KERNEL(op)                                        \
-  static void op##_kernel(Tensor& result, const Tensor& self) {           \
-    AT_DISPATCH_FLOATING_TYPES(self.type(), #op, [&] {                    \
-      scalar_t* out = result.data<scalar_t>();                            \
-      scalar_t* in = self.data<scalar_t>();                               \
-      int64_t size = self.numel();                                        \
-      vml::v##op(out, in, size); \
-    });                                                                   \
-  }                                                                       \
+#define IMPLEMENT_FLOAT_KERNEL(dispatchtypes, op)                          \
+  static void op##_kernel(Tensor& result, const Tensor& self) {            \
+    AT_DISPATCH_##dispatchtypes##_TYPES(self.type(), #op, [&] {                \
+      if (self.is_contiguous() && result.is_contiguous()) {                \
+        vml::v##op(                                                        \
+            result.data<scalar_t>(), self.data<scalar_t>(), self.numel()); \
+                                                                           \
+      } else {                                                             \
+        static constexpr int64_t WIDTH = 131072 / sizeof(scalar_t);        \
+        CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(             \
+            result,                                                        \
+            self,                                                          \
+            [](int64_t size,                                               \
+               scalar_t* x,                                                \
+               scalar_t* y,                                                \
+               int64_t stridex,                                            \
+               int64_t stridey) {                                          \
+              if (stridex == 1 && stridey == 1) {                          \
+                vml::v##op(x, y, size);                                    \
+              } else {                                                     \
+                for (int64_t i = 0; i < size; i += WIDTH) {                \
+                  scalar_t buffer[WIDTH];                                  \
+                  int64_t width = WIDTH;                                   \
+                  width = std::min(width, size - i);                       \
+                  for (int64_t j = 0; j < width; j++)                      \
+                    buffer[j] = y[stridey * (i + j)];                      \
+                  vml::v##op(buffer, buffer, width);                       \
+                  for (int64_t j = 0; j < width; j++)                      \
+                    x[stridex * (i + j)] = buffer[j];                      \
+                }                                                          \
+              }                                                            \
+            });                                                            \
+      }                                                                    \
+    });                                                                    \
+  }                                                                        \
   REGISTER_DISPATCH(op##Impl, &op##_kernel)
 
 } // anonymous namespace
 
-
-REGISTER_DISPATCH(absImpl, &abs_kernel);
-REGISTER_DISPATCH(rsqrtImpl, &rsqrt_kernel);
-
-// IMPLEMENT_FLOAT_KERNEL(abs)
-IMPLEMENT_FLOAT_KERNEL(acos)
-IMPLEMENT_FLOAT_KERNEL(asin)
-IMPLEMENT_FLOAT_KERNEL(atan)
-IMPLEMENT_FLOAT_KERNEL(ceil)
-IMPLEMENT_FLOAT_KERNEL(cos)
-IMPLEMENT_FLOAT_KERNEL(cosh)
-IMPLEMENT_FLOAT_KERNEL(erf)
-IMPLEMENT_FLOAT_KERNEL(exp)
-IMPLEMENT_FLOAT_KERNEL(expm1)
-IMPLEMENT_FLOAT_KERNEL(floor)
-IMPLEMENT_FLOAT_KERNEL(log)
-IMPLEMENT_FLOAT_KERNEL(log10)
-IMPLEMENT_FLOAT_KERNEL(log1p)
-IMPLEMENT_FLOAT_KERNEL(log2)
-IMPLEMENT_FLOAT_KERNEL(round)
-// IMPLEMENT_FLOAT_KERNEL(rsqrt)
-IMPLEMENT_FLOAT_KERNEL(sin)
-IMPLEMENT_FLOAT_KERNEL(sinh)
-IMPLEMENT_FLOAT_KERNEL(sqrt)
-IMPLEMENT_FLOAT_KERNEL(tan)
-IMPLEMENT_FLOAT_KERNEL(tanh)
-IMPLEMENT_FLOAT_KERNEL(trunc)
+// IMPLEMENT_FLOAT_KERNEL(ALL, abs)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, acos)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, asin)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, atan)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, ceil)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, cos)
+// IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, exp)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, log)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, log10)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, log1p)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, log2)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, round)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, rsqrt)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, sin)
+// IMPLEMENT_FLOAT_KERNEL(FLOATING, sinh)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, sqrt)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, tan)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, tanh)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, trunc)
 
 }} // namespace at::native

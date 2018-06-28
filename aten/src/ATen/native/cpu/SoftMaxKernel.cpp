@@ -14,7 +14,7 @@
 // compiled with AVX/AVX2 This is because of SSE-AVX transitions and a bug in
 // Glibc2.23 See https://bugs.launchpad.net/ubuntu/+source/glibc/+bug/1663280
 //
-// On grainsize: The grainsize is chosen to roughly get TBB_GRAIN_SIZE number of
+// On grainsize: The grainsize is chosen to roughly get GRAIN_SIZE number of
 // computations per task. Each task works across dim_size elements. 16 should be
 // a very rough approximation of the number of computations per dim_size element
 // by counting simple computations (*, +, -) as 1 and exp or log as 4.
@@ -30,7 +30,7 @@ inline void _vec_log_softmax_lastdim(
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
   static constexpr int64_t CHUNK_SIZE = (128 / sizeof(scalar_t)) * Vec::size;
-  int64_t grain_size = internal::TBB_GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size * CHUNK_SIZE);
   if (grain_size < CHUNK_SIZE)
     grain_size = CHUNK_SIZE;
 
@@ -93,7 +93,7 @@ inline void _vec_softmax_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  int64_t grain_size = internal::TBB_GRAIN_SIZE / (16 * dim_size);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
 
@@ -134,7 +134,7 @@ inline void _vec_host_softmax_backward_lastdim(
     int64_t outer_size,
     int64_t dim_size) {
   using Vec = vec256::Vec256<scalar_t>;
-  int64_t grain_size = internal::TBB_GRAIN_SIZE / (16 * dim_size);
+  int64_t grain_size = internal::GRAIN_SIZE / (16 * dim_size);
   if (grain_size < 1)
     grain_size = 1;
 

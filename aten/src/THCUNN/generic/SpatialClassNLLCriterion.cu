@@ -8,13 +8,12 @@ void THNN_(SpatialClassNLLCriterion_shapeCheck)(
            THCIndexTensor *target,
            THCTensor *weights)
 {
-  THArgCheck(THCIndexTensor_(nDimension)(state, target) == 3, 1,
-             "only batches of spatial targets supported (3D tensors)" \
-             " but got targets of dimension: %d",
-             THCIndexTensor_(nDimension)(state, target));
-  THArgCheck(THCTensor_(nDimension)(state, input) == 4, 2,
-             "only batches of spatial inputs supported (4D tensors), "      \
-             "but got input of dimension: %d", THCTensor_(nDimension)(state, input));
+  AT_CHECK(!target->is_empty() && THCIndexTensor_(nDimension)(state, target) == 3, 1,
+           "only batches of spatial targets supported (non-empty 3D tensors)" \
+           " but got targets of size: : ", target->sizes());
+  AT_CHECK(!input->is_empty() && THCTensor_(nDimension)(state, input) == 4, 2,
+           "only batches of spatial inputs supported (non-empty 4D tensors), "      \
+           "but got input of size: ", input->sizes());
   if (THCTensor_(size)(state, input, 0) != THCIndexTensor_(size)(state, target, 0) ||
       THCTensor_(size)(state, input, 2) != THCIndexTensor_(size)(state, target, 1) ||
       THCTensor_(size)(state, input, 3) != THCIndexTensor_(size)(state, target, 2)) {
@@ -34,9 +33,8 @@ static void THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
            THCTensor *gradOutput,
            THCIndexTensor *target)
 {
-  THArgCheck(THCTensor_(nDimension)(state, gradOutput) == 3, 2,
-             "Expected dimension 3 but got gradOutput of dimension: %d",
-             THCTensor_(nDimension)(state, gradOutput));
+  AT_CHECK(!gradOutput->is_empty() && THCTensor_(nDimension)(state, gradOutput) == 3, 2,
+           "Expected non-empty dimension 3 but got gradOutput of size: ", gradOutput->sizes());
   if (THCTensor_(size)(state, gradOutput, 0) != THCIndexTensor_(size)(state, target, 0) ||
       THCTensor_(size)(state, gradOutput, 1) != THCIndexTensor_(size)(state, target, 1) ||
       THCTensor_(size)(state, gradOutput, 2) != THCIndexTensor_(size)(state, target, 2)) {

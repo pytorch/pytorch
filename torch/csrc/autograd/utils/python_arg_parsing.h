@@ -23,7 +23,7 @@ parse_to_conversion(PyObject *args, PyObject *kwargs) {
   } else {
     auto tensor = r.tensor(0);
     return std::make_tuple(
-      torch::tensor::getDevice(tensor),
+      torch::tensors::getDevice(tensor),
       tensor.type().scalarType(),
       r.toBool(1)
     );

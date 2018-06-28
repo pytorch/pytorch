@@ -18,8 +18,8 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
   int64_t numBatch = 1;
 
   int64_t numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 4 || numInputDims == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 4 || numInputDims == 5), 2, input,
+                  "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 5) {
     numBatch = THCTensor_(size)(state, input, 0);
