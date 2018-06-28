@@ -27,16 +27,20 @@ void ComputeDivGradient(
       std::accumulate(B_dims, B_dims + ndim, 1, std::multiplies<int>());
   const int C_size =
       std::accumulate(C_dims, C_dims + ndim, 1, std::multiplies<int>());
-  math::Set<TGrad, CPUContext>(A_size, TGrad(0), dA, context);
+  if (dA != nullptr) {
+    math::Set<TGrad, CPUContext>(A_size, TGrad(0), dA, context);
+  }
   math::Set<TGrad, CPUContext>(B_size, TGrad(0), dB, context);
   std::vector<int> index(ndim, 0);
   for (int C_index = 0; C_index < C_size; ++C_index) {
-    const int A_index =
-        math::utils::GetIndexFromDims(ndim, A_dims, index.data());
     const int B_index =
         math::utils::GetIndexFromDims(ndim, B_dims, index.data());
-    dA[A_index] += dC[C_index] / B[B_index];
     dB[B_index] += -dC[C_index] * C[C_index] / B[B_index];
+    if (dA != nullptr) {
+      const int A_index =
+          math::utils::GetIndexFromDims(ndim, A_dims, index.data());
+      dA[A_index] += dC[C_index] / B[B_index];
+    }
     math::utils::IncreaseIndexInDims(ndim, C_dims, index.data());
   }
 }
@@ -58,11 +62,11 @@ bool DivFunctor<CPUContext>::Backward(
   if (A_dims == B_dims) {
     const int size = std::accumulate(
         A_dims.cbegin(), A_dims.cend(), 1, std::multiplies<int>());
-    math::Div(size, dC, B, dA, context);
     EigenVectorMap<TGrad>(dB, size) =
         -ConstEigenVectorArrayMap<TGrad>(dC, size) *
         ConstEigenVectorArrayMap<TOut>(C, size) /
         ConstEigenVectorArrayMap<TIn>(B, size);
+    math::Div(size, dC, B, dA, context);
     return true;
   }
   const int ndim = std::max(A_dims.size(), B_dims.size());
@@ -77,17 +81,40 @@ bool DivFunctor<CPUContext>::Backward(
       A_broadcast_dims.data(),
       B_broadcast_dims.data(),
       C_broadcast_dims.data());
-  ComputeDivGradient<TGrad, TIn, TOut>(
-      ndim,
-      A_broadcast_dims.data(),
-      B_broadcast_dims.data(),
-      C_broadcast_dims.data(),
-      dC,
-      B,
-      C,
-      dA,
-      dB,
-      context);
+  if (dA == dC) {
+    ComputeDivGradient<TGrad, TIn, TOut>(
+        ndim,
+        A_broadcast_dims.data(),
+        B_broadcast_dims.data(),
+        C_broadcast_dims.data(),
+        dC,
+        B,
+        C,
+        nullptr,
+        dB,
+        context);
+    math::Div(
+        A_dims.size(),
+        A_dims.data(),
+        B_dims.size(),
+        B_dims.data(),
+        dC,
+        B,
+        dA,
+        context);
+  } else {
+    ComputeDivGradient<TGrad, TIn, TOut>(
+        ndim,
+        A_broadcast_dims.data(),
+        B_broadcast_dims.data(),
+        C_broadcast_dims.data(),
+        dC,
+        B,
+        C,
+        dA,
+        dB,
+        context);
+  }
   return true;
 }
 

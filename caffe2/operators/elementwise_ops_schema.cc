@@ -278,7 +278,7 @@ OPERATOR_SCHEMA(Add)
 OPERATOR_SCHEMA(AddGradient)
     .NumInputs(3)
     .NumOutputs(2)
-    .AllowInplace({{0, 0}, {1, 0}});
+    .AllowInplace({{0, 0}, {0, 1}});
 
 OPERATOR_SCHEMA(Sub)
     .NumInputs(2)
@@ -291,7 +291,7 @@ OPERATOR_SCHEMA(Sub)
 OPERATOR_SCHEMA(SubGradient)
     .NumInputs(3)
     .NumOutputs(2)
-    .AllowInplace({{0, 0}, {1, 0}});
+    .AllowInplace({{0, 0}, {0, 1}});
 
 OPERATOR_SCHEMA(Mul)
     .NumInputs(2)
@@ -304,7 +304,7 @@ OPERATOR_SCHEMA(Mul)
 OPERATOR_SCHEMA(MulGradient)
     .NumInputs(3)
     .NumOutputs(2)
-    .AllowInplace({{0, 0}, {1, 0}});
+    .AllowInplace({{0, 0}, {0, 1}});
 
 OPERATOR_SCHEMA(Div)
     .NumInputs(2)
