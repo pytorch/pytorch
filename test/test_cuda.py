@@ -1911,6 +1911,7 @@ def generate_tests():
 
                 setattr(TestCuda, test_name, test_fn)
 
+
 TestTorch.__bases__ = (object, )
 
 if __name__ == '__main__':
