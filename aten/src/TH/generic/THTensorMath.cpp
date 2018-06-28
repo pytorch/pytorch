@@ -288,7 +288,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
-  THLongTensor_resize2d(subscript, numel, tensor->dim());
+  THLongTensor_resize2d(subscript, numel, tensor->_dim());
 
   /* Second pass populates subscripts */
   subscript_data = THLongTensor_data(subscript);
@@ -296,12 +296,12 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                   if IS_NONZERO(*tensor_data) {
                     div = 1;
 
-                    for (dim = tensor->dim() - 1; dim >= 0; dim--) {
+                    for (dim = tensor->_dim() - 1; dim >= 0; dim--) {
                       *(subscript_data + dim) = (i/div) % tensor->size[dim];
                       div *= tensor->size[dim];
                     }
 
-                    subscript_data += tensor->dim();
+                    subscript_data += tensor->_dim();
                   }
                   ++i;);
 }

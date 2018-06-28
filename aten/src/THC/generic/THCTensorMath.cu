@@ -271,7 +271,7 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
   self = THCTensor_(newContiguous)(state, self);
   thrust::device_ptr<real> self_data(THCTensor_(data)(state, self));
 
-  int num_dim = THCTensor_(nDimension)(state, self);
+  int num_dim = THCTensor_(_nDimension)(state, self);
   int64_t N = THCTensor_(nElement)(state, self);
 
   THCudaLongTensor_resize2d(state, tensor, N, num_dim);
