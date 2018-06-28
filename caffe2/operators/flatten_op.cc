@@ -31,7 +31,7 @@ OPERATOR_SCHEMA(Flatten)
     .SetDoc(R"DOC(
 Flattens the input tensor into a 2D matrix. If input tensor has shape
 $(d_0, d_1, ..., d_n)$ then the output will have shape
-$\bigl((d_0 * d_1 * ... * d_{(axis-1)}), (d_{axis} * d_{(axis+1)} * ... * d_n)\bigr)$.
+$\\bigl((d_0 * d_1 * ... * d_{(axis-1)}), (d_{axis} * d_{(axis+1)} * ... * d_n)\\bigr)$.
 
 Github Links:
 

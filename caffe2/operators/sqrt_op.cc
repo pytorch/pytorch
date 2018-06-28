@@ -19,7 +19,7 @@ OPERATOR_SCHEMA(Sqrt)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Performs element-wise square-root ($\sqrt{x}$) of input tensor $X$.
+Performs element-wise square-root ($\\sqrt{x}$) of input tensor $X$.
 
 Github Link:
 - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sqrt_op.cc

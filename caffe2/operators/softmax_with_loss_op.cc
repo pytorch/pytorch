@@ -39,11 +39,11 @@ Combined Softmax and Cross-Entropy loss operator. The operator first computes th
 
 Softmax cross-entropy loss function:
 
-$$loss(x, class) = -\log{\biggl(\frac{\exp(x[class])}{\sum_{j} \exp(x[j])}\biggr)} = -x[class] + \log{\biggl(\sum_{j} \exp(x[j])\biggr)}$$
+$$loss(x, class) = -\\log{\\biggl(\\frac{\\exp(x[class])}{\\sum_{j} \\exp(x[j])}\\biggr)} = -x[class] + \\log{\\biggl(\\sum_{j} \\exp(x[j])\\biggr)}$$
 
 or if the `weight_tensor` has been passed:
 
-$$loss(x, class) = weight[class]\biggl(-x[class] + \log{\biggl(\sum_{j} \exp(x[j])\biggr)}\biggr)$$
+$$loss(x, class) = weight[class]\\biggl(-x[class] + \\log{\\biggl(\\sum_{j} \\exp(x[j])\\biggr)}\\biggr)$$
 
 The `logits` input does not need to explicitly be a 2D vector; rather, it will be coerced into one. For an arbitrary n-dimensional tensor `X` in $[a_0, a_1, ..., a_{k-1}, a_k, ..., a_{n-1}]$, where k is the `axis` provided, then `X` will be coerced into a 2-dimensional tensor with dimensions $[(a_0 * ... * a_{k-1}), (a_k * ... * a_{n-1})]$. For the default case where `axis`=1, the `X` tensor will be coerced into a 2D tensor of dimensions $[a_0, (a_1 * ... * a_{n-1})]$, where $a_0$ is often the batch size. In this situation, we must have $a_0 = N$ and $a_1 * ... * a_{n-1} = D$. Each of these dimensions must be matched correctly, or else the operator will throw errors.
 

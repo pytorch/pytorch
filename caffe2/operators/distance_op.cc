@@ -399,7 +399,7 @@ OPERATOR_SCHEMA(L1Distance)
     .SetDoc(R"DOC(
 Computes the row-wise L1 Distance between the two input tensors $X$ and $Y$, which is defined as
 
-$$L1Distance(\mathbf{x},\mathbf{y}) = \sum_{i}\mid x_i - y_i\mid$$
+$$L1Distance(\\mathbf{x},\\mathbf{y}) = \\sum_{i}\mid x_i - y_i\\mid$$
 
 Note, both inputs must either be 1-dimensional or 2-dimensional and both must have the same shape. The output $Z$ will be 1-dimensional regardless and its length will equal the number of rows in the inputs.
 
@@ -425,11 +425,11 @@ op = core.CreateOperator(
 
 # Create X
 X = 5*np.ones((1, 4))
-print("X:\n",X)
+print("X:\\n",X)
 
 # Create Y
 Y = np.ones((1, 4))
-print("Y:\n",Y)
+print("Y:\\n",Y)
 
 # Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
@@ -439,7 +439,7 @@ workspace.FeedBlob("Y", Y.astype(np.float32))
 workspace.RunOperatorOnce(op)
 
 # Collect Output
-print("Z:\n", workspace.FetchBlob("Z"))
+print("Z:\\n", workspace.FetchBlob("Z"))
 
 ```
 
@@ -502,15 +502,15 @@ Given two vectors $X = [x_0, x_1, x_2]$ and $Y = [y_0, y_1, y_2]$; $Z = [x_0 * y
 
 For 2D inputs:
 Given two matrices:
-$$X = [[x_0^0, x_1^0, x_2^0], \\ [x_0^1, x_1^1, x_2^1], \\ [x_0^2, x_1^2, x_2^2], \\ ..., \\ [x_0^n, x_1^n, x_2^n]]$$
+$$X = [[x_0^0, x_1^0, x_2^0], \\\\ [x_0^1, x_1^1, x_2^1], \\\\ [x_0^2, x_1^2, x_2^2], \\\\ ..., \\\\ [x_0^n, x_1^n, x_2^n]]$$
 
 and
 
-$$Y = [[y_0^0, y_1^0, y_2^0], \\ [y_0^1, y_1^1, y_2^1], \\ [y_0^2, y_1^2, y_2^2], \\ ..., \\ [y_0^n, y_1^n, y_2^n]]$$
+$$Y = [[y_0^0, y_1^0, y_2^0], \\\\ [y_0^1, y_1^1, y_2^1], \\\\ [y_0^2, y_1^2, y_2^2], \\\\ ..., \\\\ [y_0^n, y_1^n, y_2^n]]$$
 
 then
 
-$$Z =  \biggl[\Big((x_0^0 * y_0^0) + (x_1^0 * y_1^0) + (x_2^0 * y_2^0)\Big), \\ \Big((x_0^1 * y_0^1) + (x_1^1 * y_1^1) + (x_2^1 * y_2^1)\Big), \\ \Big((x_0^2 * y_0^2) + (x_1^2 * y_1^2) + (x_2^2 * y_2^2)\Big), \\ ..., \\ \Big((x_0^n * y_0^n) + (x_1^n * y_1^n) + (x_2^n * y_2^n)\Big)\biggr]$$
+$$Z =  \\biggl[\\Big((x_0^0 * y_0^0) + (x_1^0 * y_1^0) + (x_2^0 * y_2^0)\\Big), \\\\ \\Big((x_0^1 * y_0^1) + (x_1^1 * y_1^1) + (x_2^1 * y_2^1)\\Big), \\\\ \\Big((x_0^2 * y_0^2) + (x_1^2 * y_1^2) + (x_2^2 * y_2^2)\\Big), \\\\ ..., \\\\ \\Big((x_0^n * y_0^n) + (x_1^n * y_1^n) + (x_2^n * y_2^n)\\Big)\\biggr]$$
 
 Github Link:
 - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.cc
@@ -533,19 +533,19 @@ op = core.CreateOperator(
 
 workspace.FeedBlob("X", np.random.randint(20, size=(5)).astype(np.float32))
 workspace.FeedBlob("Y", np.random.randint(20, size=(5)).astype(np.float32))
-print("X:\n", workspace.FetchBlob("X"))
-print("Y:\n", workspace.FetchBlob("Y"))
+print("X:\\n", workspace.FetchBlob("X"))
+print("Y:\\n", workspace.FetchBlob("Y"))
 workspace.RunOperatorOnce(op)
-print("Z:\n", workspace.FetchBlob("X"))
+print("Z:\\n", workspace.FetchBlob("X"))
 
 
 workspace.ResetWorkspace()
 workspace.FeedBlob("X", np.random.randint(10, size=(3,3)).astype(np.float32))
 workspace.FeedBlob("Y", np.random.randint(10, size=(3,3)).astype(np.float32))
-print("X:\n", workspace.FetchBlob("X"))
-print("Y:\n", workspace.FetchBlob("Y"))
+print("X:\\n", workspace.FetchBlob("X"))
+print("Y:\\n", workspace.FetchBlob("Y"))
 workspace.RunOperatorOnce(op)
-print("Z:\n", workspace.FetchBlob("Z"))
+print("Z:\\n", workspace.FetchBlob("Z"))
 
 ```
 
@@ -609,7 +609,7 @@ OPERATOR_SCHEMA(CosineSimilarity)
     .SetDoc(R"DOC(
 This op takes two input float tensors of the same size, $X$ and $Y$, and produces one output float tensor , $Z$, calculated as the cosine similarity between $X$ and $Y$. Recall, the cosine similarity between two tensors $X$ and $Y$ is defined as:
 
-$$\mathbf{Z}=CosineSimilarity(\mathbf{X},\mathbf{Y}) = \frac{\mathbf{X}\cdot\mathbf{Y}}{\|\mathbf{X}\|\|\mathbf{Y}\|} = \frac{\sum_n^{i=1}X_iY_i}{\sqrt{\sum_n^{i=1}X_i^2}\sqrt{\sum_n^{i=1}Y_i^2}}$$
+$$\\mathbf{Z}=CosineSimilarity(\\mathbf{X},\\mathbf{Y}) = \\frac{\\mathbf{X}\\cdot\\mathbf{Y}}{\\|\\mathbf{X}\\|\\|\\mathbf{Y}\\|} = \\frac{\\sum_n^{i=1}X_iY_i}{\\sqrt{\\sum_n^{i=1}X_i^2}\\sqrt{\\sum_n^{i=1}Y_i^2}}$$
 
 Github Links:
 - https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.h
@@ -633,11 +633,11 @@ op = core.CreateOperator(
 
 # Create X
 X = np.random.randn(3, 3)
-print("X:\n",X)
+print("X:\\n",X)
 
 # Create Y
 Y = np.random.randn(3, 3)
-print("Y:\n",Y)
+print("Y:\\n",Y)
 
 # Feed X & Y into workspace
 workspace.FeedBlob("X", X.astype(np.float32))
@@ -647,7 +647,7 @@ workspace.FeedBlob("Y", Y.astype(np.float32))
 workspace.RunOperatorOnce(op)
 
 # Collect Output
-print("Z:\n", workspace.FetchBlob("Z"))
+print("Z:\\n", workspace.FetchBlob("Z"))
 
 ```
 
