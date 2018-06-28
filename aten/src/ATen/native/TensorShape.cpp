@@ -123,15 +123,11 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
-  if (start < 0) {
+  if (start < 0 || start >= cur_size) {
     AT_ERROR("start out of range");
   }
-#ifndef USE_TH_SIZE_ZERO_DIM
   if (length <= 0 || start > cur_size - length) {
-#else
-  if (length < 0 || start > cur_size - length) {
-#endif
-    AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
+    AT_ERROR("length out of range");
   }
   return at::slice(self, dim, start, start + length, 1);
 }
@@ -326,12 +322,10 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
   }
   auto storage_offset = self.storage_offset() + start * strides[dim];
   auto len = end - start;
-#ifndef USE_TH_SIZE_ZERO_DIM
   if (len == 0) {
     // TODO: currently we don't have support for 0-sized dims, return size 0 tensor for now
     return self.type().tensor();
   }
-#endif
   sizes[dim] = (len + step - 1) / step;  // round-up
   strides[dim] *= step;
   return self.as_strided(sizes, strides, storage_offset);

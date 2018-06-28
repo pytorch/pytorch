@@ -40,7 +40,7 @@ THLongStorage *THCTensor_(newSizeOf)(THCState *state, THCTensor *self)
 
 THLongStorage *THCTensor_(newStrideOf)(THCState *state, THCTensor *self)
 {
-  THLongStorage *stride = THLongStorage_newWithSize(self->dim());
+  THLongStorage *stride = THLongStorage_newWithSize(self->_dim());
   THLongStorage_rawCopy(stride, self->stride);
   return stride;
 }
@@ -313,6 +313,11 @@ void THCTensor_(resize)(THCState *state, THCTensor *self, THLongStorage *size, T
   THCTensor_resize(state, self, size, stride);
 }
 
+void THCTensor_(resizeLegacy)(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride)
+{
+  THCTensor_resizeLegacy(state, self, size, stride);
+}
+
 void THCTensor_(resizeAs)(THCState *state, THCTensor *self, THCTensor *src)
 {
   THCTensor_resizeAs(state, self, src);
@@ -422,14 +427,9 @@ void THCTensor_(narrow)(THCState *state, THCTensor *self, THCTensor *src, int di
   if(!src)
     src = self;
 
-  THArgCheck( (dimension >= 0) && (dimension < src->dim()), 3, "out of range");
-  THArgCheck( firstIndex >= 0, 4, "out of range");
-#ifdef USE_TH_SIZE_ZERO_DIM
-  THArgCheck( size >= 0, 5, "out of range");
-#else
-  THArgCheck( size > 0, 5, "out of range");
-#endif
-  THArgCheck(firstIndex+size <= src->size[dimension], 5, "out of range");
+  THArgCheck( (dimension >= 0) && (dimension < src->_dim()), 3, "out of range");
+  THArgCheck( (firstIndex >= 0) && (firstIndex < src->size[dimension]), 4, "out of range");
+  THArgCheck( (size > 0) && (firstIndex+size <= src->size[dimension]), 5, "out of range");
 
   THCTensor_(set)(state, self, src);
 
@@ -613,9 +613,9 @@ int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor 
 int THCTensor_(isSameSizeAs)(THCState *state, const THCTensor *self, const THCTensor* src)
 {
   int d;
-  if (self->dim() != src->dim())
+  if (self->_dim() != src->_dim())
     return 0;
-  for(d = 0; d < self->dim(); ++d)
+  for(d = 0; d < self->_dim(); ++d)
   {
     if(self->size[d] != src->size[d])
       return 0;
@@ -669,6 +669,11 @@ void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *stor
 void THCTensor_(resizeNd)(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
 {
   THCTensor_resizeNd(state, self, nDimension, size, stride);
+}
+
+void THCTensor_(resizeNdLegacy)(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
+{
+  THCTensor_resizeNdLegacy(state, self, nDimension, size, stride);
 }
 
 void THCTensor_(set1d)(THCState *state, THCTensor *tensor, int64_t x0, real value)

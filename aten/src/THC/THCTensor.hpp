@@ -66,6 +66,8 @@ THC_API THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type);
 THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
 THC_API void THCTensor_resizeNd(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
 THC_API void THCTensor_resizeAs(THCState *state, THCTensor *tensor, THCTensor *src);
+THC_API void THCTensor_resizeLegacy(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
+THC_API void THCTensor_resizeNdLegacy(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
 
 THC_API void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride);
