@@ -2053,13 +2053,42 @@ class TestAutograd(TestCase):
             self.assertTrue(hasattr(x, key))
 
     def test_as_strided(self):
-        x = Variable(torch.arange(0., 25).view(5, 5), requires_grad=True)
 
-        def as_strided(x):
-            return x.as_strided([3, 3], [6, 2], 2)
+        def test(x, repro_fn, *args):
+            def closure(x):
+                if repro_fn is not None:
+                    x = repro_fn(x)
+                return x.as_strided(*args)
 
-        gradcheck(as_strided, [x], raise_exception=True)
-        gradgradcheck(as_strided, [x], [torch.randn(3, 3)])
+            x = x.to(torch.double).detach().requires_grad_()
+            gradcheck(closure, [x])
+            gradgradcheck(closure, [x])
+
+        # test
+        test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
+
+        # test crazy stride at dim with size 1 case
+        test(torch.randn(10), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
+
+        # test expand case
+        test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
+        test(torch.randn(5), None, [3, 3, 3], [0, 0, 0], 4)
+        test(torch.randn(5), lambda x: x.expand(5, 5), [5, 5], [0, 1], 0)
+
+        # test non-expand overlapping case
+        test(torch.randn(35), None, [6, 6], [5, 1], 2)
+        test(torch.randn(15), None, [3, 2], [3, 6], 2)
+
+        # test transpose case
+        test(torch.randn(3, 4), None, [4, 3], [1, 4])
+
+        # test "getting things outside the input" case
+        x = torch.randn(6, 2)
+        test(x[3:], None, [3, 2], [2, 1], 0)  # should be all zeros
+        self.assertEqual(x[3:].as_strided([3, 2], [2, 1], 0), x[:3])
+
+        # test select on expanded input case
+        test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
 
     def _test_where_functional(self, t):
         x = Variable(t(torch.randn(5, 5)), requires_grad=True)
@@ -2334,13 +2363,13 @@ class TestAutograd(TestCase):
 
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, True)
-        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
             with detect_anomaly():
                 out.backward()
 
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, False)
-        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
             with detect_anomaly():
                 out.backward()
 

@@ -16,6 +16,7 @@
 
 #if AT_MKL_ENABLED() && !defined(__APPLE__)
 #include <mkl.h>
+#include <mkl_vml.h>
 #endif
 
 namespace at {
@@ -55,11 +56,11 @@ inline void vrsqrt(scalar_t* out, scalar_t* in, int64_t size) {
   inline void v##op(scalar_t* out, scalar_t* in, int64_t size);               \
   template <>                                                                 \
   inline void v##op(float* out, float* in, int64_t size) {                    \
-    vms##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_DEFAULT); \
+    vms##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE); \
   }                                                                           \
   template <>                                                                 \
   inline void v##op(double* out, double* in, int64_t size) {                  \
-    vmd##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_DEFAULT); \
+    vmd##mklop(size, in, out, VML_HA | VML_FTZDAZ_OFF | VML_ERRMODE_IGNORE); \
   }
 
 // NB: abs, cosh and sinh were temporarily disabled due to issues with Apple clang

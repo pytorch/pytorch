@@ -24,25 +24,25 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d",
              dT, dH, dW);
 
-  if (THCTensor_(_nDimension)(state, input) == 4)
+  if (THCTensor_(nDimension)(state, input) == 4)
   {
     inputSlices = THCTensor_(size)(state, input, 0);
   }
-  else if (THCTensor_(_nDimension)(state, input) == 5)
+  else if (THCTensor_(nDimension)(state, input) == 5)
   {
     inputSlices = THCTensor_(size)(state, input, 1);
   }
   else
   {
-    THArgCheck(false, 2, "4D or 5D tensor expected, got %d",
-               THCTensor_(_nDimension)(state, input));
+    AT_ERROR("non-empty 4D or 5D tensor expected, got size: ",
+             input->sizes());
   }
 
   int dimw = 3;
   int dimh = 2;
   int dimt = 1;
   int dimn = 0;
-  if (input->_dim() == 5)
+  if (input->dim() == 5)
   {
     dimt++;
     dimw++;
@@ -58,7 +58,7 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
         oT, oH, oW, gradOutput->size[dimt], gradOutput->size[dimh], gradOutput->size[dimw]);
     }
 
-    THCUNN_check_dim_size(state, gradOutput, input->_dim(), dimn, inputSlices);
+    THCUNN_check_dim_size(state, gradOutput, input->dim(), dimn, inputSlices);
   }
 }
 
@@ -83,8 +83,8 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 3, input, indices, output);
 
-  int fiveDimensionalInput = THCTensor_(_nDimension)(state, input) == 5;
-  if (THCTensor_(_nDimension)(state, input) == 4)
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  if (THCTensor_(nDimension)(state, input) == 4)
   {
     /* sizes */
     batchSize   = 1;
@@ -192,7 +192,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
-  int fiveDimensionalInput = THCTensor_(_nDimension)(state, input) == 5;
+  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;

@@ -2,7 +2,6 @@
 
 #include <torch/detail/ordered_dict.h>
 #include <torch/expanding_array.h>
-#include <torch/functions.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/tensor.h>
 #include <torch/utils.h>
@@ -11,21 +10,20 @@
 
 #include <ATen/optional.h>
 
-using namespace torch;
 using namespace torch::nn;
 
 template <typename T>
-using OrderedDict = detail::OrderedDict<std::string, T>;
+using OrderedDict = torch::detail::OrderedDict<std::string, T>;
 
 using Catch::StartsWith;
 
 TEST_CASE("misc") {
   SECTION("no_grad") {
-    NoGradGuard guard;
+    torch::NoGradGuard guard;
     Linear model(5, 2);
-    auto x = torch::randn({10, 5}, at::requires_grad());
-    auto y = model->forward({x})[0];
-    Variable s = y.sum();
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto y = model->forward(x);
+    torch::Tensor s = y.sum();
 
     s.backward();
     REQUIRE(!model->parameters()["weight"].grad().defined());
@@ -47,9 +45,9 @@ TEST_CASE("misc_cuda", "[cuda]") {
   SECTION("CUDA random seed") {
     int size = 100;
     torch::manual_seed(7);
-    auto x1 = torch::randn({size}, at::kCUDA);
+    auto x1 = torch::randn({size}, torch::kCUDA);
     torch::manual_seed(7);
-    auto x2 = torch::randn({size}, at::kCUDA);
+    auto x2 = torch::randn({size}, torch::kCUDA);
 
     auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
     REQUIRE(l_inf < 1e-10);
@@ -57,7 +55,7 @@ TEST_CASE("misc_cuda", "[cuda]") {
 }
 
 TEST_CASE("autograd") {
-  auto x = torch::randn({3, 3}, at::requires_grad());
+  auto x = torch::randn({3, 3}, torch::requires_grad());
   auto y = torch::randn({3, 3});
   auto z = x * y;
   SECTION("derivatives of zero-dim tensors") {
@@ -78,7 +76,7 @@ TEST_CASE("autograd") {
 TEST_CASE("expanding-array") {
   SECTION("successful construction") {
     SECTION("initializer_list") {
-      ExpandingArray<5> e({1, 2, 3, 4, 5});
+      torch::ExpandingArray<5> e({1, 2, 3, 4, 5});
       REQUIRE(e.size() == 5);
       for (size_t i = 0; i < e.size(); ++i) {
         REQUIRE((*e)[i] == i + 1);
@@ -86,7 +84,7 @@ TEST_CASE("expanding-array") {
     }
 
     SECTION("vector") {
-      ExpandingArray<5> e(std::vector<int64_t>{1, 2, 3, 4, 5});
+      torch::ExpandingArray<5> e(std::vector<int64_t>{1, 2, 3, 4, 5});
       REQUIRE(e.size() == 5);
       for (size_t i = 0; i < e.size(); ++i) {
         REQUIRE((*e)[i] == i + 1);
@@ -94,7 +92,7 @@ TEST_CASE("expanding-array") {
     }
 
     SECTION("array") {
-      ExpandingArray<5> e(std::array<int64_t, 5>({1, 2, 3, 4, 5}));
+      torch::ExpandingArray<5> e(std::array<int64_t, 5>({1, 2, 3, 4, 5}));
       REQUIRE(e.size() == 5);
       for (size_t i = 0; i < e.size(); ++i) {
         REQUIRE((*e)[i] == i + 1);
@@ -102,7 +100,7 @@ TEST_CASE("expanding-array") {
     }
 
     SECTION("single value") {
-      ExpandingArray<5> e(5);
+      torch::ExpandingArray<5> e(5);
       REQUIRE(e.size() == 5);
       for (size_t i = 0; i < e.size(); ++i) {
         REQUIRE((*e)[i] == 5);
@@ -112,12 +110,12 @@ TEST_CASE("expanding-array") {
   SECTION("throws for incorrect size on construction") {
     SECTION("initializer_list") {
       REQUIRE_THROWS_WITH(
-          ExpandingArray<5>({1, 2, 3, 4, 5, 6, 7}),
+          torch::ExpandingArray<5>({1, 2, 3, 4, 5, 6, 7}),
           StartsWith("Expected 5 values, but instead got 7"));
     }
     SECTION("vector") {
       REQUIRE_THROWS_WITH(
-          ExpandingArray<5>(std::vector<int64_t>({1, 2, 3, 4, 5, 6, 7})),
+          torch::ExpandingArray<5>(std::vector<int64_t>({1, 2, 3, 4, 5, 6, 7})),
           StartsWith("Expected 5 values, but instead got 7"));
     }
   }

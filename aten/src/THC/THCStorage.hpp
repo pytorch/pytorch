@@ -7,8 +7,14 @@
 
 #include "ATen/ScalarType.h"
 #include "ATen/ScalarTypeUtils.h"
-#include "ATen/cuda/CUDATypeConversion.cuh"
 #include <atomic>
+
+namespace at {
+
+template <>
+struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
+
+}
 
 typedef struct THCStorage
 {
@@ -24,7 +30,7 @@ typedef struct THCStorage
 
     template <typename T>
     inline T * data() const {
-      auto scalar_type_T = at::CTypeToScalarType<at::cuda::from_type<T>>::to();
+      auto scalar_type_T = at::CTypeToScalarType<T>::to();
       if (scalar_type != scalar_type_T) {
         AT_ERROR("Attempt to access Storage having data type ", at::toString(scalar_type),
                  " as data type ", at::toString(scalar_type_T));

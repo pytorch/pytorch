@@ -1,9 +1,10 @@
 #include "catch.hpp"
 
-#include <torch/functions.h>
+#include <torch/tensor.h>
 
 #include <ATen/Context.h>
 #include <ATen/Functions.h>
+#include <ATen/OptionsGuard.h>
 #include <ATen/TensorOptions.h>
 
 #include <vector>
@@ -17,6 +18,12 @@ using namespace at;
   REQUIRE(options.device().index() == Device((device_), (index_)).index()); \
   REQUIRE(options.dtype() == (type_));                                      \
   REQUIRE(options.layout() == (layout_))
+
+#define REQUIRE_TENSOR_OPTIONS(device_, index_, type_, layout_)            \
+  REQUIRE(tensor.device().type() == Device((device_), (index_)).type());   \
+  REQUIRE(tensor.device().index() == Device((device_), (index_)).index()); \
+  REQUIRE(tensor.type().scalarType() == (type_));                          \
+  REQUIRE(tensor.type().layout() == (layout_))
 
 TEST_CASE("TensorOptions/DefaultsToTheRightValues") {
   TensorOptions options;
@@ -46,7 +53,7 @@ TEST_CASE("TensorOptions/UtilityFunctionsReturnTheRightTensorOptions") {
 }
 
 TEST_CASE("TensorOptions/ConstructsWellFromCPUTypes") {
-  auto options = TensorOptions();
+  TensorOptions options;
   REQUIRE_OPTIONS(kCPU, -1, kFloat, kStrided);
 
   options = TensorOptions({kCPU, 0});
@@ -98,4 +105,32 @@ TEST_CASE("Device/ParsesCorrectlyFromString") {
   for (const auto& badness : badnesses) {
     REQUIRE_THROWS(Device(badness));
   }
+}
+
+TEST_CASE("OptionsGuard") {
+  Tensor tensor;
+  {
+    OptionsGuard guard(TensorOptions{});
+    tensor = at::empty({10});
+  }
+  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
+
+  {
+    OptionsGuard guard(TensorOptions().dtype(kInt));
+    tensor = at::empty({10});
+  }
+  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kInt, kStrided);
+
+  {
+    OptionsGuard guard(TensorOptions().dtype(kInt).layout(kSparse));
+    tensor = at::empty({10});
+  }
+  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kInt, kSparse);
+
+  {
+    OptionsGuard guard(requires_grad(true));
+    tensor = torch::empty({10});
+  }
+  REQUIRE_TENSOR_OPTIONS(kCPU, -1, kFloat, kStrided);
+  REQUIRE(tensor.requires_grad());
 }

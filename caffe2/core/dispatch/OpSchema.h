@@ -77,6 +77,15 @@ struct has_parameter_names_defined<T, guts::void_t<
 
 // TODO Test has_parameter_names_defined
 
+template<class T, typename = void>
+struct has_name_defined : std::false_type {};
+template<class T>
+struct has_name_defined<T, guts::void_t<
+        decltype(T::name)
+>> : std::true_type {};
+
+// TODO Test has_name_defined
+
 /**
  * Wrapper class around a user-provided schema definition some useful information about the schema.
  *
@@ -150,6 +159,9 @@ template<class OpSchemaDef>
 class OpDispatchKeySchema<OpSchemaDef, guts::enable_if_t<!has_function_dispatch_key_defined<OpSchemaDef>::value>> final {
   using signature = OpSignatureSchema<OpSchemaDef>;
 
+  // TODO Static assert that dispatch_key_type has operator<<(ostream, _) defined for debug output.
+  // TODO Use an ADL-based debugString(DispatchKey) function instead of operator<< for debug printing.
+
 public:
   using dispatch_key_type = DispatchKey<signature::num_tensor_args>;
 
@@ -203,6 +215,18 @@ public:
   }
 };
 
+template<class OpSchemaDef>
+class OpMetadataSchema final {
+private:
+    static_assert(has_name_defined<OpSchemaDef>::value, "The operator schema has to define a 'static constexpr const char* name = ...' member to specify the operator name.");
+    static_assert(std::is_same<const char* const, decltype(OpSchemaDef::name)>::value, "The 'name' member of the operator schema must have type 'static constexpr const char*'");
+
+public:
+    static constexpr const char* name() {
+        return OpSchemaDef::name;
+    }
+};
+
 }  // namespace details
 
 /**
@@ -219,6 +243,7 @@ public:
 template<class OpSchemaDef> class OpSchema final {
   // TODO static_assert OpSchemaDef isn't an instanciation of OpSchema. If yes, the caller probably passed an OpSchema somewhere where an OpSchemaDef was expected and wants a good error message.
 public:
+  using metadata = details::OpMetadataSchema<OpSchemaDef>;
   /**
    * Information about the signature
    */

@@ -8,6 +8,7 @@
 #include "THCStorage.hpp"
 
 #include <atomic>
+#include <ATen/ATen.h>
 
 typedef struct THCTensor
 {
@@ -50,6 +51,10 @@ typedef struct THCTensor
         }
       }
       return false;
+    }
+
+    inline at::IntList sizes() {
+      return at::IntList(size, dim_);
     }
 } THCTensor;
 

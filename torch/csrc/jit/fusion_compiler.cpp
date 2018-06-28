@@ -70,6 +70,7 @@ typedef unsigned char uint8_t;
 typedef signed char int8_t;
 typedef short int  int16_t;
 typedef long long int int64_t;
+${HalfHeader}
 #endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
@@ -98,8 +99,8 @@ void ${kernelName}(IndexType totalElements, ${formals}) {
 
 auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstddef>
+#include <cstdint>
 #include <math.h>
-#include <iostream>
 ${type_declarations}
 
 #define OMP_THRESHOLD 100000
@@ -120,6 +121,44 @@ void ${kernelName}(IndexType totalElements, void ** args) {
   ${kernelName}_kernel(totalElements ${,argument_loads});
 }
 )");
+
+// This snippet enables half support in the jit. Following the pattern for
+// reductions, fp16 input data is immediately upconverted to float
+// with __half2float(). All mathematical operations are done on float
+// values, and if needed the intermediate float representation is 
+// converted to half with __float2half() when writing to a half tensor.
+constexpr auto half_support_literal  = R"(    
+#define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
+#define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
+#if defined(__cplusplus)
+  struct __align__(2) __half {
+    __host__ __device__ __half() { }
+
+  protected:
+    unsigned short __x;
+  };
+
+  /* All intrinsic functions are only available to nvcc compilers */
+  #if defined(__CUDACC__)
+    /* Definitions of intrinsics */
+    __device__ __half __float2half(const float f) {
+      __half val;
+      asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(__HALF_TO_US(val)) : "f"(f));
+      return val;
+    }
+
+    __device__ float __half2float(const __half h) {
+      float val;
+      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(h)));
+      return val;
+    }
+  #endif /* defined(__CUDACC__) */
+#endif /* defined(__cplusplus) */
+#undef __HALF_TO_US
+#undef __HALF_TO_CUS
+
+typedef __half half;
+)";
 
 // curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
 // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
@@ -159,10 +198,14 @@ std::string valueName(Value * n) {
 }
 
 const char * scalarTypeName(at::ScalarType type) {
+  if (type == at::ScalarType::Half) {
+    return "half";
+  }
+
   switch(type) {
     #define DEFINE_CASE(ctype,name,_) \
       case at::ScalarType::name: return #ctype;
-    AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(DEFINE_CASE)
     #undef DEFINE_CASE
     default:
       throw std::runtime_error("unknown scalar type");
@@ -317,14 +360,28 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
       }
     }
   }
+
+  bool has_half_tensor = false;
   size_t formal_count = 0;
   for(auto p : subgraph.inputs()) {
     env.s("node",valueName(p));
     env.d("formal",formal_count++);
-    env.s("access",format("t${formal}.data[t${formal}_offset]",env));
+
+    // Acquires and converts (if needed) inputs
+    auto pt = p->type()->cast<TensorType>();
+    if (use_cuda && pt && pt->scalarType() == at::ScalarType::Half) {
+      env.s(
+        "access"
+      , format("__half2float(t${formal}.data[t${formal}_offset])", env));
+      has_half_tensor = true;
+    } else {
+      env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+    }
+    
     //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }
+
   for(auto n : subgraph.nodes()) {
     if(n->kind() == aten::cat)
       continue; // Concat nodes by narrowing the output Tensors before the kernel runs
@@ -332,12 +389,29 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
   }
+
   for(auto o : flat_output_nodes) {
     env.d("formal",formal_count++);
     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
     env.s("node",valueName(o));
-    body << format("${access} = ${node};\n",env);
+
+    // Acquires and converts (if needed) outputs
+    auto ot = o->type()->cast<TensorType>();
+    if (use_cuda && ot && ot->scalarType() == at::ScalarType::Half) {
+      body << format("${access} = __float2half(${node});\n",env);
+      has_half_tensor = true;
+    } else {
+      body << format("${access} = ${node};\n",env);
+    }
   }
+
+  // Includes half support if any half tensors are involved
+  if (has_half_tensor) {
+    env.s("HalfHeader", half_support_literal);
+  } else {
+    env.s("HalfHeader", "");
+  }
+
   env.s("tensorOffsets",tensorOffsets.str());
   env.s("kernelBody",body.str());
   env.v("formals",formals);
@@ -348,6 +422,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   } else {
     out << cpu_compilation_unit_template.format(env);
   }
+
   return concat_desc;
 }
 
@@ -673,7 +748,7 @@ static const std::string compile_string =
 #ifndef __PPC64__
   "-march=native "
 #endif
-  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\"";
+  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
 static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_file, const std::string & so_file) {
   TemplateEnv env;

@@ -54,14 +54,14 @@ operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
 template <>
 template <typename T>
 bool SoftsignGradientFunctor<CUDAContext>::Forward(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& /* X_dims */,
-    const T* dY,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& /* dY_dims */,
     const T* X,
+    const T* dY,
     T* dX,
     CUDAContext* context) const {
   const int size = std::accumulate(
-      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+      X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   SoftsignGradientCUDAKernel<T>
       <<<CAFFE_GET_BLOCKS(size),
          CAFFE_CUDA_NUM_THREADS,
