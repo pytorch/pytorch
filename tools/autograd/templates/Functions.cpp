@@ -108,6 +108,23 @@ Tensor norm_backward(Tensor grad, const Tensor & self, const Scalar & p_, Tensor
   return norm_backward(grad, self, p_, norm);
 }
 
+Tensor pow_backward(Tensor grad, const Tensor & self, const Scalar & exponent_) {
+  double exponent = exponent_.toDouble();
+  if (exponent == 0.0) {
+    return zeros_like(self);
+  } else {
+    return grad * exponent * self.pow(exponent - 1);
+  }
+}
+
+Tensor pow_backward_self(Tensor grad, const Tensor & self, const Tensor & exponent) {
+  return at::where(exponent == 0.0, at::zeros({}, grad.type()), grad * exponent * self.pow(exponent - 1));
+}
+
+Tensor pow_backward_exponent(Tensor grad, const Tensor & self, const Tensor & exponent) {
+  return grad * self.pow(exponent) * self.log();
+}
+
 Tensor reduce_to(const Tensor & grad, IntList sizes) {
   if (sizes.size() == 0) {
     return grad.sum();
