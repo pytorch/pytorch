@@ -288,6 +288,7 @@ BLAS and LAPACK Operations
 .. autofunction:: mv
 .. autofunction:: orgqr
 .. autofunction:: ormqr
+.. autofunction:: pinv
 .. autofunction:: potrf
 .. autofunction:: potri
 .. autofunction:: potrs

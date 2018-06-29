@@ -5264,6 +5264,39 @@ Example::
     (tensor(-1.), tensor(1.5731))
 """)
 
+add_docstr(torch.pinv,
+           r"""
+pinv(input) -> Tensor
+
+Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
+Please look at `Moore-Penrose inverse`_ for more details
+
+.. note::
+    This method is implemented using the Singular Value Decomposition.
+
+Arguments:
+    input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
+
+Returns:
+    The pseudo-inverse of :attr:`input` of dimensions :math:`n \times m`
+
+Example::
+
+    >>> input = torch.randn(3, 5)
+    >>> input
+    tensor([[ 0.5495,  0.0979, -1.4092, -0.1128,  0.4132],
+            [-1.1143, -0.3662,  0.3042,  1.6374, -0.9294],
+            [-0.3269, -0.5745, -0.0382, -0.5922, -0.6759]])
+    >>> torch.pinv(input)
+    tensor([[ 0.0600, -0.1933, -0.2090],
+            [-0.0903, -0.0817, -0.4752],
+            [-0.7124, -0.1631, -0.2272],
+            [ 0.1356,  0.3933, -0.5023],
+            [-0.0308, -0.1725, -0.5216]])
+
+.. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
+""")
+
 add_docstr(torch.fft,
            r"""
 fft(input, signal_ndim, normalized=False) -> Tensor

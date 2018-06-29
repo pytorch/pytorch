@@ -4039,6 +4039,25 @@ class TestTorch(TestCase):
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
 
     @staticmethod
+    def _test_pinverse(self, conv_fn):
+        def run_test(M, conv_fn):
+            MPI = torch.pinverse(M)
+            E = conv_fn(torch.eye(5))
+            self.assertEqual(E, torch.mm(M, MPI), 1e-7, 'pseudo-inverse value')
+            self.assertEqual(E, torch.mm(MPI, M), 1e-7, 'pseudo-inverse value')
+
+        # Square matrix
+        M = conv_fn(torch.randn(5, 5))
+        run_test(M, conv_fn)
+        # Rectangular matrix
+        M = conv_fn(torch.randn(3, 4))
+        run_test(M, conv_fn)
+
+    @skipIfNoLapack
+    def test_pinverse(self):
+        self._test_pinverse(conv_fn=lambda x: x)
+
+    @staticmethod
     def _test_det_logdet_slogdet(self, conv_fn):
         def reference_det(M):
             # naive row reduction

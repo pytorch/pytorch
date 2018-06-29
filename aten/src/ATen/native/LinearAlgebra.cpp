@@ -96,6 +96,20 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
+Tensor pinv(const Tensor& self) {
+  if (!at::isFloatingType(self.type().scalarType()) ||
+       self.dim() != 2) {
+    std::ostringstream ss;
+    ss << "pinverse(" << self.type() << "{" << self.sizes() << "}): expected a "
+       << "2D tensor of floating types";
+    throw std::runtime_error(ss.str());
+  }
+  Tensor U, S, V;
+  std::tie(U, S, V) = self.svd();
+  Tensor S_pseudoinv = at::where(S != 0.0, S.reciprocal(), at::zeros({}, self.type()));
+  return V.mm(S_pseudoinv.diag().mm(U.t()));
+}
+
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
   if (t.dim() != 1) {
    AT_ERROR(fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
