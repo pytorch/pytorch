@@ -454,6 +454,9 @@ Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
 //              (after reduction)
 //                buffer:        [ {output of 3rd it}, {output of 2nd it}]
 //            Return {output of 3rd it}.
+//
+// TODO: If two or more reduced dimensions are contiguous, reduce as if they are
+//       a large dimension.
 template <Tensor (reduce_1)(const Tensor &, int64_t, bool),
     Tensor& (reduce_1_out)(Tensor& result, const Tensor &, int64_t, bool)>
 inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool keepdim) {
