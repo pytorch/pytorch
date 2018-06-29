@@ -52,7 +52,11 @@ void cuda_stream_create_with_priority(
   cudaStream_t* pStream
 , int32_t flags
 , int32_t priority) {
+#ifndef __HIP_PLATFORM_HCC__
   check_status(cudaStreamCreateWithPriority(pStream, flags, priority));
+#else
+  check_status(cudaStreamCreateWithFlags(pStream, flags));
+#endif
 }
 
 void cuda_stream_destroy(cudaStream_t stream) {
