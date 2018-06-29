@@ -250,7 +250,7 @@ struct AT_CUDA_API DropoutDescriptor
   // Initialize a dropout descriptor's RNG state.
   // WARNING: This function is very expensive, avoid calling this function!
   // NB: it takes a Type so that we can generate a Variable if necessary.
-  void initialize_rng(Type& type, cudnnHandle_t handle, float dropout, long long int seed) {
+  void initialize_rng(const Type& type, cudnnHandle_t handle, float dropout, long long int seed) {
     AT_ASSERTM(dropout > 0, "dropout must be nonzero; otherwise call set_no_dropout");
     size_t state_size;
     AT_CUDNN_CHECK(cudnnDropoutGetStatesSize(handle, &state_size));
