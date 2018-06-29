@@ -178,6 +178,11 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
 
   auto args = std::vector<int64_t>();
+  // for case IntList x={}, return an empty vector
+  if (s.size() == 2) {
+    return args;
+  }
+
   int64_t x = 0, sign = 1;
   for (size_t i = 1; i < n - 1; i++) {
     if (s[i] == '-') {

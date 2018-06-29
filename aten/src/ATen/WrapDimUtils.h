@@ -90,6 +90,7 @@ static inline int64_t legacy_cat_wrap_dim(int64_t dim, TensorList tensors) {
 static inline void wrap_dims(std::vector<int64_t>& to_transform_dims, int64_t tensor_total_dims) {
   for (size_t i = 0; i < to_transform_dims.size(); i++) {
     if (to_transform_dims[i] < 0) {
+      AT_CHECK(to_transform_dims[i] >= -tensor_total_dims, "to_transform_dims = ", to_transform_dims[i], " less than lower bound ", -tensor_total_dims);
       to_transform_dims[i] = (tensor_total_dims + (to_transform_dims[i] % tensor_total_dims)) % tensor_total_dims;
     }
   }
