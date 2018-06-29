@@ -892,6 +892,8 @@ void testControlFlow() {
 }
 
 void testProto() {
+  ::google::protobuf::internal::GetEmptyString();
+
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
   proto.set_producer_version("3");
