@@ -4,7 +4,6 @@
 #include <ATen/Error.h>
 #include <ATen/MatrixRef.h>
 #include <ATen/NativeFunctions.h>
-#include <ATen/TensorOptions.h>
 #include <ATen/cuda/CUDAConfig.h>
 
 #if !AT_CUDNN_ENABLED()
@@ -48,7 +47,7 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
   throw std::runtime_error("_cudnn_rnn_backward: ATen not compiled with cuDNN support");
 }
 
-Tensor _cudnn_init_dropout_state(double dropout, bool train, int64_t dropout_seed, const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
   throw std::runtime_error("_cudnn_init_dropout_state: ATen not compiled with cuDNN support");
 }
 
@@ -999,17 +998,14 @@ std::tuple<Tensor, Tensor, Tensor, std::vector<Tensor>> _cudnn_rnn_backward(
 
 // TODO: I am not sure if we actually need the 'dropout' and 'train' parameters
 // to initialize just the state tensor
-Tensor _cudnn_init_dropout_state(
-    double dropout,
-    bool train,
-    int64_t dropout_seed,
-    const TensorOptions& options) {
+Tensor _cudnn_init_dropout_state(const Type& ty, double dropout, bool train, int64_t dropout_seed) {
   auto handle = getCudnnHandle();
   DropoutDescriptor dropout_desc;
   auto dropout_p = train ? dropout : 0;
-  dropout_desc.initialize_rng(handle, dropout_p, dropout_seed, options);
+  dropout_desc.initialize_rng(ty, handle, dropout_p, dropout_seed);
   return dropout_desc.state;
 }
+
 }} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED()

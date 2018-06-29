@@ -129,13 +129,14 @@ Tensor RNNImplBase<Derived>::create_dropout_state(Tensor input) const {
   static const int64_t dropout_seed =
       torch::ones({}, torch::kInt64).random_().toCLong();
   if (options_.dropout_ > 0) {
+    torch::DeviceGuard guard(input.device());
     return torch::_cudnn_init_dropout_state(
+        input.type().toScalarType(torch::kUInt8),
         options_.dropout_,
         this->is_training(),
-        dropout_seed,
-        input.options().dtype(torch::kUInt8));
+        dropout_seed);
   }
-  return torch::empty({}, input.type());
+  return torch::empty({}, input.options());
 }
 
 template <typename Derived>
