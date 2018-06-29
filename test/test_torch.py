@@ -4055,7 +4055,7 @@ class TestTorch(TestCase):
 
     @skipIfNoLapack
     def test_pinverse(self):
-        self._test_pinverse(conv_fn=lambda x: x)
+        self._test_pinverse(self, conv_fn=lambda x: x)
 
     @staticmethod
     def _test_det_logdet_slogdet(self, conv_fn):
