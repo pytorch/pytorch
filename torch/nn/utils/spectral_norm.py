@@ -52,7 +52,8 @@ class SpectralNorm(object):
             setattr(module, self.name, weight)
             setattr(module, self.name + '_u', u)
         else:
-            getattr(module, self.name).detach_()
+            r_g = getattr(module, self.name + '_orig').requires_grad
+            getattr(module, self.name).detach_().requires_grad_(r_g)
 
     @staticmethod
     def apply(module, name, n_power_iterations, dim, eps):
