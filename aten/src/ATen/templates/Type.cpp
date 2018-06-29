@@ -83,10 +83,10 @@ Tensor Type::tensorFromBlob(void * data, IntList sizes, IntList strides, const s
   auto storage = storageFromBlob(data, computeStorageSize(sizes, strides), deleter);
   return tensor(*storage, 0, sizes, strides);
 }
-Tensor Type::tensorWithAllocator(IntList sizes, std::unique_ptr<Allocator> allocator) const {
+Tensor Type::tensorWithAllocator(IntList sizes, Allocator* allocator) const {
   return tensorWithAllocator(sizes, defaultStrides(sizes), std::move(allocator));
 }
-Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, std::unique_ptr<Allocator> allocator) const {
+Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const {
   auto storage = storageWithAllocator(computeStorageSize(sizes, strides), std::move(allocator));
   return tensor(*storage, 0, sizes, strides);
 }

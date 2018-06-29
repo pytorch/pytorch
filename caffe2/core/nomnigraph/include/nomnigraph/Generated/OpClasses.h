@@ -555,13 +555,32 @@ class GivenTensorFill : public NeuralNetOperator {
 
 class Concat : public NeuralNetOperator {
  public:
-  Concat() : NeuralNetOperator(NNKind::Concat) {}
+  Concat(int axis = -1, bool addAxis = false)
+      : NeuralNetOperator(NNKind::Concat), Axis(axis), AddAxis(addAxis) {}
 
   ~Concat() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Concat);
 
+  int getAxis() const {
+    return Axis;
+  }
+
+  bool getAddAxis() const {
+    return AddAxis;
+  }
+
+  void setAxis(int axis) {
+    Axis = axis;
+  }
+
+  void setAddAxis(bool addAxis) {
+    AddAxis = addAxis;
+  }
+
  private:
+  int Axis;
+  bool AddAxis;
 };
 
 class Softmax : public NeuralNetOperator {
@@ -905,6 +924,71 @@ class Int8MaxPoolRelu : public NeuralNetOperator {
   ~Int8MaxPoolRelu() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Int8MaxPoolRelu);
+
+ private:
+};
+
+class BatchMatMul : public NeuralNetOperator {
+ public:
+  BatchMatMul(bool transA = false, bool transB = true, bool broadcast = false)
+      : NeuralNetOperator(NNKind::BatchMatMul),
+        TransA(transA),
+        TransB(transB),
+        Broadcast(broadcast) {}
+
+  ~BatchMatMul() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(BatchMatMul);
+
+  bool getTransA() const {
+    return TransA;
+  }
+
+  bool getTransB() const {
+    return TransB;
+  }
+
+  bool getBroadcast() const {
+    return Broadcast;
+  }
+
+  void setTransA(bool transA) {
+    TransA = transA;
+  }
+
+  void setTransB(bool transB) {
+    TransB = transB;
+  }
+
+  void setBroadcast(bool broadcast) {
+    Broadcast = broadcast;
+  }
+
+ private:
+  bool TransA;
+  bool TransB;
+  bool Broadcast;
+};
+
+class BatchGather : public NeuralNetOperator {
+ public:
+  BatchGather() : NeuralNetOperator(NNKind::BatchGather) {}
+
+  ~BatchGather() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(BatchGather);
+
+ private:
+};
+
+class ConcatBatchMatMulBatchGatherOp : public NeuralNetOperator {
+ public:
+  ConcatBatchMatMulBatchGatherOp()
+      : NeuralNetOperator(NNKind::ConcatBatchMatMulBatchGatherOp) {}
+
+  ~ConcatBatchMatMulBatchGatherOp() {}
+
+  NOMNIGRAPH_DEFINE_NN_RTTI(ConcatBatchMatMulBatchGatherOp);
 
  private:
 };

@@ -33,7 +33,8 @@ inline void parallel_for(
     int64_t tid = omp_get_thread_num();
     int64_t chunk_size = divup((end - begin), num_threads);
     int64_t begin_tid = begin + tid * chunk_size;
-    f(begin_tid, std::min(end, chunk_size + begin_tid));
+    if (begin_tid < end)
+      f(begin_tid, std::min(end, chunk_size + begin_tid));
   }
 #else
   f(begin, end);
