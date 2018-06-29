@@ -188,7 +188,7 @@ bool test_mnist(
   auto telabel = readLabels("test/cpp/api/mnist/t10k-labels-idx1-ubyte");
 
   if (useGPU) {
-    model->cuda();
+    model->to(torch::kCUDA);
   }
 
   std::random_device device;

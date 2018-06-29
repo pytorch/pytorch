@@ -69,16 +69,6 @@ class Module {
   /// True if the module is in training mode.
   virtual bool is_training() const noexcept;
 
-  /// Recursively moves all parameters to CPU memory (in place).
-  virtual void cpu();
-
-  /// Recursively moves all parameters to CUDA memory (in place).
-  /// If `non_blocking` is true and the source is in pinned memory and
-  /// destination is on the GPU or vice versa, the copy is performed
-  /// asynchronously with respect to the host. Otherwise, the argument has no
-  /// effect.
-  virtual void cuda(int32_t device_index = -1, bool non_blocking = false);
-
   /// Recursively casts all parameters to the given dtype and device.
   /// If `non_blocking` is true and the source is in pinned memory and
   /// destination is on the GPU or vice versa, the copy is performed
@@ -183,14 +173,18 @@ class Module {
 
   virtual void clone_(Module& other);
 
+  /// The implementation of the various `to()`.
   template <typename... Ts>
   void to_impl(Ts&&... ts) {
+    // First call `to()` on every child module.
     for (auto& child : children_) {
       child.value->to(ts...);
     }
+    // Then move every parameter to the new dtype/device.
     for (auto& parameter : parameters_) {
       at::detail::set_data(*parameter, parameter->data().to(ts...));
     }
+    // Then move every buffer to the new dtype/device.
     for (auto& buffer : buffers_) {
       at::detail::set_data(*buffer, buffer->data().to(ts...));
     }
