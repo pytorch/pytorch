@@ -30,7 +30,6 @@ namespace script {
   _(TK_NEWLINE, "newline", "")                   \
   _(TK_INDENT, "indent", "")                     \
   _(TK_DEDENT, "dedent", "")                     \
-  _(TK_WHERE, "where", "where")                  \
   _(TK_FLOAT, "float", "float")                  \
   _(TK_DOUBLE, "double", "double")               \
   _(TK_LONG, "long", "long")                     \

@@ -156,14 +156,13 @@ REGISTER_CPU_OPERATOR(Concat, ConcatOp<CPUContext>);
 OPERATOR_SCHEMA(Concat)
     .NumInputs(1, INT_MAX)
     .NumOutputs(2)
-    .Arg("axis", "Which axis to concat on")
+    .Arg("axis", "*(type: int; default: -1)* Axis to concatenate on.")
     .Arg(
         "order",
-        "Either NHWC or NCHW, will concat on C axis, defaults to NCHW")
+        "*(type: string; default='NCHW')* Order of blob dimensions. Concats on the C dimension.")
     .Arg(
         "add_axis",
-        "Pass 1 to add the axis specified in arg 'axis' to all "
-        "input tensors")
+        "*(type: int)* Pass non-zero integer to add the axis specified in `axis` to all input tensors.")
     .TensorInferenceFunction(OpSchema::NeedsAllInputShapes(
       [](const OperatorDef& def,
          const vector<TensorShape>& in) {
@@ -238,9 +237,128 @@ OPERATOR_SCHEMA(Concat)
     }))
     .CostInferenceFunction(CostInferenceForConcat)
     .DeviceInferenceFunction(concatOpDevInfer)
-    .SetDoc("Concatenate a list of tensors into a single tensor")
-    .Output(0, "concat_result", "Concatenated tensor")
-    .Output(1, "split_info", "The dimensions of the inputs.")
+    .SetDoc(R"DOC(
+Concatenate a list of tensors into a single tensor. Similar functionality to
+Numpy's [concatenate](https://docs.scipy.org/doc/numpy/reference/generated/numpy.concatenate.html)
+function. The `axis` argument specifies what axis along which the arrays will be concatenated.
+When set to non-zero (default=0), the `add_axis` argument adds the axis specified in `axis` to
+all input tensors.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/concat_split_op.cc
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/concat_split_op.h
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Concat",
+    ["X1",  "X2"],
+    ["Y", "split_info"],
+    axis=0
+)
+
+workspace.FeedBlob("X1", np.array([[1,2],[3,4]]))
+workspace.FeedBlob("X2", np.array([[5,6]]))
+print("X1:", workspace.FetchBlob("X1"))
+print("X2:", workspace.FetchBlob("X2"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+print("split_info:", workspace.FetchBlob("split_info"))
+
+```
+
+**Result**
+
+```
+
+X1: [[1 2]
+ [3 4]]
+X2: [[5 6]]
+Y: [[1 2]
+ [3 4]
+ [5 6]]
+split_info: [2 1]
+
+```
+
+</details>
+
+<details>
+
+<summary> <b>Example 2</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Concat",
+    ["X1",  "X2"],
+    ["Y", "split_info"],
+    add_axis=1,
+    axis=3
+)
+
+workspace.FeedBlob("X1", np.random.randint(10, size=(1, 1, 5, 5))) # NCHW
+workspace.FeedBlob("X2", np.random.randint(10, size=(1, 1, 5, 5))) # NCHW
+print("X1:", workspace.FetchBlob("X1"))
+print("X2:", workspace.FetchBlob("X2"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+print("split_info:", workspace.FetchBlob("split_info"))
+
+```
+
+**Result**
+
+```
+
+X1: [[[[1 8 3 9 0]
+   [6 4 6 5 6]
+   [3 9 1 9 9]
+   [5 1 0 7 7]
+   [9 4 0 0 9]]]]
+X2: [[[[7 0 2 6 1]
+   [3 9 4 0 3]
+   [5 3 8 9 4]
+   [3 4 2 1 0]
+   [0 8 8 8 1]]]]
+Y: [[[[[1 8 3 9 0]
+    [7 0 2 6 1]]
+
+   [[6 4 6 5 6]
+    [3 9 4 0 3]]
+
+   [[3 9 1 9 9]
+    [5 3 8 9 4]]
+
+   [[5 1 0 7 7]
+    [3 4 2 1 0]]
+
+   [[9 4 0 0 9]
+    [0 8 8 8 1]]]]]
+split_info: [1 1]
+
+```
+
+</details>
+
+    )DOC")
+    .Input(0, "X1, X2, ...", "*(type: Tensor`<float>`)* List of input tensors.")
+    .Output(0, "concat_result", "*(type: Tensor`<float>`)* Concatenated tensor.")
+    .Output(1, "split_info", "*(type: Tensor`<int>`)* The dimensions of the inputs.")
     .InheritOnnxSchema("Concat");
 
 // Backward compatibility names.

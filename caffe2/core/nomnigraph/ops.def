@@ -55,11 +55,16 @@ BatchNormalization
 FC
 GivenTensorFill
 Concat
+- Axis : int : -1
+- AddAxis : bool : false
 Softmax
 ChannelShuffle
 Add
 Reshape
 Flatten
+
+NCHW2NHWC
+NHWC2NCHW
 
 Int8Quantize
 Int8Dequantize
@@ -81,3 +86,10 @@ Int8ConvRelu : ConvRelu
 Int8SumRelu : SumRelu
 Int8AveragePoolRelu : AveragePoolRelu
 Int8MaxPoolRelu : MaxPoolRelu
+
+BatchMatMul
+- TransA : bool : false
+- TransB : bool : true
+- Broadcast: bool : false
+BatchGather
+ConcatBatchMatMulBatchGatherOp

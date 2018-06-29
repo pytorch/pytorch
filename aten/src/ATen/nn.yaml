@@ -72,11 +72,6 @@
   scalar_check:
     output: 'false'
 
-- name: hardshrink(Tensor self, Scalar lambd=0.5)
-  cname: HardShrink
-  scalar_check:
-    output: self_->isScalar()
-
 - name: hardtanh(Tensor self, Scalar min_val=-1, Scalar max_val=1)
   cname: HardTanh
   has_inplace: True
@@ -139,12 +134,12 @@
 - name: adaptive_max_pool3d(Tensor self, IntList[3] output_size)
   cname: VolumetricAdaptiveMaxPooling
 
-- name: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=false)
+- name: avg_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: SpatialAveragePooling
   default_init:
     stride: kernel_size
 
-- name: avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=false)
+- name: avg_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, bool ceil_mode=false, bool count_include_pad=true)
   cname: VolumetricAveragePooling
   default_init:
     stride: kernel_size
@@ -154,12 +149,12 @@
   scalar_check:
     output: 'false'
 
-- name: max_pool2d(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
+- name: max_pool2d_with_indices(Tensor self, IntList[2] kernel_size, IntList[2] stride={}, IntList[2] padding=0, IntList[2] dilation=1, bool ceil_mode=false)
   cname: SpatialDilatedMaxPooling
   default_init:
     stride: kernel_size
 
-- name: max_pool3d(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false)
+- name: max_pool3d_with_indices(Tensor self, IntList[3] kernel_size, IntList[3] stride={}, IntList[3] padding=0, IntList[3] dilation=1, bool ceil_mode=false)
   cname: VolumetricDilatedMaxPooling
   default_init:
     stride: kernel_size

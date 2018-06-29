@@ -59,7 +59,7 @@ THAllocator THStorageWeakRefAllocator = {
   free_wrapper<StorageWeakRefAllocator>,
 };
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 cudaError_t CudaStorageWeakRefAllocator::malloc(void** ptr, size_t size, cudaStream_t stream) {
   THError("CudaStorageWeakRefAllocator: malloc not supported");
   return cudaSuccess;

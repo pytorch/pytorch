@@ -39,7 +39,7 @@ TEST_CASE("static") {
     REQUIRE(torch::any_of<true, true, false>::value == true);
   }
   SECTION("enable_if_module_t") {
-    REQUIRE(f(torch::nn::Linear(1, 2)) == true);
+    REQUIRE(f(torch::nn::LinearImpl({1, 2})) == true);
     REQUIRE(f(5) == false);
   }
   SECTION("check_not_lvalue_references") {

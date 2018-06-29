@@ -16,17 +16,27 @@ with extension_loader.DlopenGuard():
         else:
             has_gpu_support = False
     except ImportError as e:
-        logging.warning(
-            'This caffe2 python run does not have GPU support. '
-            'Will run in CPU only mode.')
-        logging.warning('Debug message: {0}'.format(str(e)))
         has_gpu_support = False
         try:
-            from caffe2.python.caffe2_pybind11_state import *  # noqa
+            from caffe2.python.caffe2_pybind11_state_hip import *  # noqa
+            if num_hip_devices():
+                has_hip_support = True
+                logging.info('This caffe2 python run has AMD GPU support!')
+            else:
+                has_hip_support = False
         except ImportError as e:
-            logging.critical(
-                'Cannot load caffe2.python. Error: {0}'.format(str(e)))
-            sys.exit(1)
+            logging.info('Failed to import AMD hip module: {}'.format(e))
+
+            logging.warning(
+                'This caffe2 python run does not have GPU support. '
+                'Will run in CPU only mode.')
+            logging.warning('Debug message: {0}'.format(str(e)))
+            try:
+                from caffe2.python.caffe2_pybind11_state import *  # noqa
+            except ImportError as e:
+                logging.critical(
+                    'Cannot load caffe2.python. Error: {0}'.format(str(e)))
+                sys.exit(1)
 
 # libcaffe2_python contains a global Workspace that we need to properly delete
 # when exiting. Otherwise, cudart will cause segfaults sometimes.

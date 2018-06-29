@@ -100,8 +100,9 @@ inline at::Tensor as_tensor(bool v) {
 }
 
 inline at::Tensor as_tensor(at::IntList l) {
-  return at::CPU(at::kLong).tensorFromBlob(const_cast<void*>(reinterpret_cast<const void*>(l.data())),
-                                           {static_cast<int64_t>(l.size())}).clone();
+  void* data = const_cast<void*>(reinterpret_cast<const void*>(l.data()));
+  auto sizes = {static_cast<int64_t>(l.size())};
+  return at::from_blob(data, sizes, at::kLong).clone();
 }
 
 inline at::Tensor as_tensor(const at::Scalar& s) {
@@ -110,7 +111,7 @@ inline at::Tensor as_tensor(const at::Scalar& s) {
 
 template<size_t N>
 inline at::Tensor as_tensor(std::array<bool, N>&& bools) {
-  auto r = at::CPU(at::kByte).tensor({N});
+  auto r = at::empty({N}, at::kByte);
   auto accessor = r.accessor<uint8_t, 1>();
   for(size_t i = 0; i < N; ++i) {
     accessor[i] = bools[i];

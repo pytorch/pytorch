@@ -134,19 +134,6 @@ TH_API void THNN_(GatedLinear_updateGradInput)(
           THTensor *gradInput,         // [OUT] gradient w.r.t input
           int dim);                    // dimension for halving operation
 
-// HardShink outputs 0 on interval of (-lambda; lambda) or original value otherwise.
-TH_API void THNN_(HardShrink_updateOutput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *output,            // [OUT] output tensor
-          accreal lambda);             // HardShrink parameter
-TH_API void THNN_(HardShrink_updateGradInput)(
-          THNNState *state,            // library's state
-          THTensor *input,             // input tensor
-          THTensor *gradOutput,        // gradient w.r.t. module's output
-          THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          accreal lambda);             // HardShrink parameter
-
 // HardTanh clamps the values to the interval [min_val; max_val].
 TH_API void THNN_(HardTanh_updateOutput)(
           THNNState *state,            // library's state

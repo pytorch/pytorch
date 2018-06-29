@@ -9,7 +9,7 @@
 #include "torch/csrc/PythonTypes.h"
 #include "torch/csrc/autograd/python_variable.h"
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "torch/csrc/cuda/Stream.h"
 #endif
 
@@ -23,7 +23,7 @@ static std::unordered_map<std::string, THDChannelType> name2channel_type = {
 
 static bool THDPModule_loadClasses(PyObject *self)
 {
-#ifdef WITH_DISTRIBUTED_MW
+#ifdef USE_DISTRIBUTED_MW
 #define ASSERT_NOT_NULL(ptr) if (!(ptr)) { THPUtils_setError("couldn't load classes"); return false; }
   PyObject *torch_module = PyImport_ImportModule("torch.distributed");
   if (!torch_module) {
@@ -56,7 +56,7 @@ static bool THDPModule_loadClasses(PyObject *self)
 
 static bool THDPModule_assignStateless(PyObject *self)
 {
-#ifdef WITH_DISTRIBUTED_MW
+#ifdef USE_DISTRIBUTED_MW
 #define INIT_STATELESS(type)                                                   \
   stateless = PyObject_CallFunctionObjArgs((PyObject*)&TH_CONCAT_3(THDP, type, TensorStatelessType), NULL); \
   if (!stateless) {                                                            \
@@ -82,7 +82,7 @@ static bool THDPModule_assignStateless(PyObject *self)
 static std::unordered_map<PyObject*, THDReduceOp> obj2reduceop;
 static std::unordered_map<PyObject*, THDGroup> obj2group;
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 extern THCState* state;
 #endif
 
@@ -109,7 +109,7 @@ PyObject* THDPModule_initProcessGroup(PyObject *_unused, PyObject *args)
     AutoNoGIL nogil;
     THDProcessGroupInit(channel_type, init_method, world_size, group_name, rank);
   }
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   THDSetCudaStatePtr(&state);
 #endif
   Py_RETURN_NONE;
@@ -126,7 +126,7 @@ PyObject* THDPModule_destroyProcessGroup(PyObject *_unused) {
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef WITH_DISTRIBUTED_MW
+#ifdef USE_DISTRIBUTED_MW
 PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
@@ -150,7 +150,7 @@ PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
     AutoNoGIL nogil;
     THDMasterWorkerInit(channel_type, init_method, world_size, group_name, rank);
   }
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   THDSetCudaStatePtr(&state);
 #endif
   Py_RETURN_NONE;
@@ -158,7 +158,7 @@ PyObject* THDPModule_initMasterWorker(PyObject *_unused, PyObject *args)
 }
 #endif
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 PyObject* THDPModule_registerStream(PyObject *_unused, PyObject *_stream)
 {
   HANDLE_TH_ERRORS
@@ -185,7 +185,7 @@ PyObject* THDPModule_getNumProcesses(PyObject *_unused)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 extern PyObject* THCPDoubleTensorClass;
 extern PyObject* THCPFloatTensorClass;
 extern PyObject* THCPHalfTensorClass;
@@ -982,10 +982,10 @@ static struct PyMethodDef _THDPModule_methods[] = {
   {"_dist_init_process_group", (PyCFunction)THDPModule_initProcessGroup, METH_VARARGS, NULL},
   {"_dist_destroy_process_group", (PyCFunction)THDPModule_destroyProcessGroup, METH_NOARGS, NULL},
   {"_dist_clear_group_cache", (PyCFunction)THDPModule_clearGroupCache, METH_VARARGS, NULL},
-#ifdef WITH_DISTRIBUTED_MW
+#ifdef USE_DISTRIBUTED_MW
   {"_dist_init_master_worker", (PyCFunction)THDPModule_initMasterWorker, METH_VARARGS, NULL},
 #endif
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   {"_dist_register_stream", (PyCFunction)THDPModule_registerStream, METH_O, NULL},
 #endif
   {"_dist_get_rank", (PyCFunction)THDPModule_getRank, METH_NOARGS, NULL},

@@ -2,6 +2,7 @@
 
 #include "detail/IndexUtils.cuh"
 #include "ATen/TensorUtils.h"
+#include "THC/THCAtomics.cuh"
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -148,8 +149,7 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
     const IndexType bOffset =
       detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
 
-    bool earlyExit = false;
-    op(a.data[aOffset], b.data[bOffset], earlyExit);
+    op(a.data[aOffset], b.data[bOffset]);
   }
 }
 
@@ -291,7 +291,7 @@ bool CUDA_tensor_apply2(at::Tensor a,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   Tensor oldA;
@@ -473,7 +473,7 @@ bool CUDA_tensor_apply3(at::Tensor a,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   Tensor oldA;
@@ -694,7 +694,7 @@ bool CUDA_tensor_apply4(at::Tensor a,
 
   /*
   Expands readable/writable tensors whose indices may be "overlapped."
-  This ensures that each element of the tensor is operated on once and only 
+  This ensures that each element of the tensor is operated on once and only
   once.
   */
   Tensor oldA;

@@ -36,7 +36,7 @@ set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS}
         )
 
 set(Caffe2_HIP_SRCS ${Caffe2_HIP_SRCS}
-        utils/math_hip.cc
+        utils/hip/math_hip.cc
         )
 
 set(Caffe2_CPU_TEST_SRCS ${Caffe2_CPU_TEST_SRCS}
@@ -55,8 +55,8 @@ set(Caffe2_GPU_TEST_SRCS ${Caffe2_GPU_TEST_SRCS}
         )
 
 set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
-        utils/math_hip_test.cc
-        utils/math_blas_hip_test.cc
+        utils/hip/math_hip_test.cc
+        utils/hip/math_blas_hip_test.cc
         )
 
 # TODO Remove the CMake_xxx variables above and add them to the variables for the local library target below instead
@@ -64,6 +64,8 @@ set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
 set(LIB_SOURCES_CPU
         Array.cpp
         C++17.cpp
+        IdWrapper.cpp
+        Optional.cpp
         Metaprogramming.cpp
         TypeList.cpp
         TypeTraits.cpp

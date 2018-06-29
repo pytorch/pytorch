@@ -21,7 +21,7 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
   const Tensor& input = self.contiguous();
   const scalar_t* input_data = input.data<scalar_t>();
   std::unordered_set<scalar_t> set(input_data, input_data + input.numel());
-  Tensor output = input.type().tensor({static_cast<int64_t>(set.size())});
+  Tensor output = at::empty({static_cast<int64_t>(set.size())}, input.type());
   scalar_t* output_data = output.data<scalar_t>();
 
   if (sorted) {
@@ -32,7 +32,7 @@ std::tuple<Tensor, Tensor> _unique_cpu_template(
     std::copy(set.begin(), set.end(), output_data);
   }
 
-  Tensor inverse_indices = self.type().toScalarType(kLong).tensor({0});
+  Tensor inverse_indices = at::empty({0}, self.type().toScalarType(kLong));
   if (return_inverse) {
     inverse_indices.resize_(input.sizes());
     int64_t* inverse_indices_data = inverse_indices.data<int64_t>();

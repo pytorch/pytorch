@@ -100,7 +100,7 @@ std::function<bool(int64_t)> getContinuationTest(
 
 // if the blob doesn't exist or is not initiaized, return false
 inline bool getShouldStop(const Blob* b) {
-  if (!b || !b->meta().id()) { // not exist or uninitialized
+  if (!b || b->meta().id() == CaffeTypeId::uninitialized()) { // not exist or uninitialized
     return false;
   }
 
@@ -124,7 +124,7 @@ struct WorkspaceIdInjector {
   void InjectWorkspaceId(Workspace* workspace) {
     if (workspace->HasBlob(NODE_ID)) {
       Blob* node_id_blob = workspace->GetBlob(NODE_ID);
-      TensorCPU node_id_tensor = node_id_blob->template Get<TensorCPU>();
+      const TensorCPU& node_id_tensor = node_id_blob->template Get<TensorCPU>();
       int node_id = node_id_tensor.template data<int32_t>()[0];
       CAFFE_ENFORCE(
           seq_ < (1 << 16),

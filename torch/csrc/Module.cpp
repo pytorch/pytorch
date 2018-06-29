@@ -38,11 +38,11 @@
 #include "torch/csrc/jit/python_ir.h"
 #include "torch/csrc/onnx/init.h"
 
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
 #include "cudnn.h"
 #endif
 
-#ifdef WITH_C10D
+#ifdef USE_C10D
 #include "torch/csrc/distributed/c10d/c10d.h"
 #endif
 
@@ -93,7 +93,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   }
   torch::utils::initializeLayouts();
   torch::utils::initializeDtypes();
-  torch::tensor::initialize_python_bindings();
+  torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
 
@@ -149,7 +149,7 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   HANDLE_TH_ERRORS
-  torch::tensor::py_set_default_tensor_type(type);
+  torch::tensors::py_set_default_tensor_type(type);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -157,7 +157,7 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 PyObject * THPModule_setDefaultDtype(PyObject *_unused, PyObject *dtype)
 {
   HANDLE_TH_ERRORS
-  torch::tensor::py_set_default_dtype(dtype);
+  torch::tensors::py_set_default_dtype(dtype);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -267,7 +267,7 @@ static PyObject *THPModule_getBackcompatKeepdimWarn(PyObject *module)
 
 PyObject *THPModule_hasDistributed(PyObject *_unused)
 {
-#ifdef WITH_DISTRIBUTED
+#ifdef USE_DISTRIBUTED
   Py_RETURN_TRUE;
 #else
   Py_RETURN_FALSE;
@@ -364,7 +364,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  auto& type = torch::tensor::get_default_tensor_type();
+  auto& type = torch::tensors::get_default_tensor_type();
   auto dtype = (PyObject*)torch::getDtype(type.scalarType());
   Py_INCREF(dtype);
   return dtype;
@@ -373,10 +373,20 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (torch::tensor::get_default_tensor_type().is_cuda()) {
+  if (torch::tensors::get_default_tensor_type().is_cuda()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
+  END_HANDLE_TH_ERRORS
+}
+
+PyObject *THPModule_useZeroSizeDim(PyObject *_unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+#ifdef USE_TH_SIZE_ZERO_DIM
+  Py_RETURN_TRUE;
+#else
+  Py_RETURN_FALSE;
+#endif
   END_HANDLE_TH_ERRORS
 }
 
@@ -409,6 +419,7 @@ static PyMethodDef TorchMethods[] = {
   {"set_flush_denormal", (PyCFunction)THPModule_setFlushDenormal, METH_O,     NULL},
   {"get_default_dtype", (PyCFunction)THPModule_getDefaultDtype, METH_NOARGS,  NULL},
   {"_is_default_type_cuda", (PyCFunction)THPModule_isDefaultTypeCuda, METH_NOARGS,  NULL},
+  {"_use_zero_size_dim", (PyCFunction)THPModule_useZeroSizeDim, METH_NOARGS,  NULL},
   {NULL, NULL, 0, NULL}
 };
 
@@ -423,7 +434,7 @@ bool THCPByteStorage_init(PyObject *module);
 
 bool THCPStream_init(PyObject *module);
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 PyMethodDef* THCPModule_methods();
 namespace torch { namespace cuda {
 
@@ -435,7 +446,7 @@ void initModule(PyObject *module);
 namespace torch { namespace nn {
 
 void init__THNN(PyObject*);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 void init__THCUNN(PyObject*);
 #endif
 
@@ -452,12 +463,12 @@ bool THDPByteStorage_init(PyObject *module);
 
 static std::vector<PyMethodDef> methods;
 
-#ifdef WITH_DISTRIBUTED
+#ifdef USE_DISTRIBUTED
 PyMethodDef* THDPModule_methods();
 #endif
 
 // TODO: Refactor this in some less manual way
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
 static PyObject * THCUDNN_cudnn_version(PyObject *self, PyObject *args)
 {
   return PyLong_FromLong(CUDNN_VERSION);
@@ -473,6 +484,14 @@ PyMethodDef* THCUDNN_methods() {
 }
 #endif
 
+// ATen warning handler for Python
+static void warning_handler(const at::SourceLocation& source_location, const char* msg) {
+  AutoGIL gil;
+  if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
+    throw python_error();
+  }
+}
+
 static PyObject* initModule() {
   HANDLE_TH_ERRORS
   THInferNumThreads();
@@ -482,16 +501,16 @@ static PyObject* initModule() {
   THPUtils_addPyMethodDefs(methods, TorchMethods);
   THPUtils_addPyMethodDefs(methods, DataLoaderMethods);
   THPUtils_addPyMethodDefs(methods, torch::autograd::python_functions());
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   THPUtils_addPyMethodDefs(methods, THCPModule_methods());
 #endif
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
   THPUtils_addPyMethodDefs(methods, THCUDNN_methods());
 #endif
-#ifdef WITH_DISTRIBUTED
+#ifdef USE_DISTRIBUTED
   THPUtils_addPyMethodDefs(methods, THDPModule_methods());
 #endif
-#ifdef WITH_C10D
+#ifdef USE_C10D
   THPUtils_addPyMethodDefs(methods, torch::distributed::c10d::python_functions());
 #endif
 
@@ -524,7 +543,7 @@ static PyObject* initModule() {
   torch::jit::initJITBindings(module);
   torch::autograd::initNNFunctions(module);
   torch::autograd::init_legacy_variable(module);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   torch::cuda::initModule(module);
 #endif
   ASSERT_TRUE(THPDoubleStorage_init(module));
@@ -536,7 +555,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THPCharStorage_init(module));
   ASSERT_TRUE(THPByteStorage_init(module));
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   // This will only initialise base classes and attach them to library namespace
   // They won't be ready for real usage until importing cuda module, that will
   // complete the process (but it defines Python classes before calling back into
@@ -553,7 +572,7 @@ static PyObject* initModule() {
   ASSERT_TRUE(THCPStream_init(module));
 #endif
 
-#ifdef WITH_CUDNN
+#ifdef USE_CUDNN
   PyObject *has_cudnn = Py_True;
 #else
   PyObject *has_cudnn = Py_False;
@@ -561,7 +580,7 @@ static PyObject* initModule() {
   Py_INCREF(has_cudnn);
   ASSERT_TRUE(PyModule_AddObject(module, "has_cudnn", has_cudnn) == 0);
 
-#ifdef WITH_DISTRIBUTED_MW
+#ifdef USE_DISTRIBUTED_MW
   // See comment on CUDA objects
   ASSERT_TRUE(THDPDoubleStorage_init(module));
   ASSERT_TRUE(THDPFloatStorage_init(module));
@@ -577,6 +596,9 @@ static PyObject* initModule() {
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
 
+  // Set ATen warnings to issue Python warnings
+  at::Warning::set_warning_handler(&warning_handler);
+
   ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
 
   auto& defaultGenerator = at::globalContext().defaultGenerator(at::kCPU);
@@ -584,12 +606,12 @@ static PyObject* initModule() {
     defaultGenerator);
   ASSERT_TRUE(PyModule_AddObject(module, "default_generator", (PyObject*)THPDefaultGenerator) == 0);
 
-#ifdef WITH_NUMPY
+#ifdef USE_NUMPY
   if (_import_array() < 0) return NULL;
 #endif
 
   torch::nn::init__THNN(module);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   torch::nn::init__THCUNN(module);
 #endif
 

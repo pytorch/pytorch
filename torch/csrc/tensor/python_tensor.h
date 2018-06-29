@@ -1,10 +1,14 @@
 #pragma once
 
 #include "torch/csrc/python_headers.h"
-#include "torch/csrc/utils/device.h"
-#include <ATen/ATen.h>
 
-namespace torch { namespace tensor {
+namespace at {
+struct Type;
+struct Device;
+struct Tensor;
+} // namespace at
+
+namespace torch { namespace tensors {
 
 // Initializes the Python tensor type objects: torch.FloatTensor,
 // torch.DoubleTensor, etc. and binds them in their containing modules.
@@ -25,6 +29,6 @@ void py_set_default_dtype(PyObject* dtype_obj);
 at::Type& get_default_tensor_type();
 
 // Gets the torch::Device object of a given at::Tensor
-Device getDevice(const at::Tensor& tensor);
+at::Device getDevice(const at::Tensor& tensor);
 
-}} // namespace torch::tensor
+}} // namespace torch::tensors

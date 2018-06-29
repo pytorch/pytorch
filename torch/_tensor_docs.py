@@ -516,6 +516,11 @@ clone() -> Tensor
 
 Returns a copy of the :attr:`self` tensor. The copy has the same size and data
 type as :attr:`self`.
+
+.. note::
+
+    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
+    propagating to the cloned tensor will propagate to the original tensor.
 """)
 
 add_docstr_all('contiguous',
@@ -803,6 +808,13 @@ add_docstr_all('frac_',
 frac_() -> Tensor
 
 In-place version of :meth:`~Tensor.frac`
+""")
+
+add_docstr_all('flatten',
+               r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+see :func:`torch.flatten`
 """)
 
 add_docstr_all('gather',

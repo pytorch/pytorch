@@ -1,14 +1,25 @@
 #include "torch/csrc/jit/aten_dispatch.h"
+
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/variable_tensor_functions.h"
-#include "torch/csrc/utils/device.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
-#include <unordered_map>
+#include <ATen/ATen.h>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstring>
+#include <sstream>
+#include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 // ${generated_comment}
 
@@ -20,6 +31,8 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 using at::TensorList;
+using at::TensorOptions;
+using at::DeviceGuard;
 
 namespace {
 
@@ -33,6 +46,10 @@ void pack(Stack & stack, T&& v) {
 }
 template<>
 void pack(Stack & stack, Tensor&& v) {
+  stack.push_back(std::move(v));
+}
+template<>
+void pack(Stack & stack, autograd::Variable&& v) {
   stack.push_back(std::move(v));
 }
 template<>
@@ -89,26 +106,6 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   JIT_ASSERT(vec.size() == N);
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
-}
-
-static at::Backend resolveBackend(int64_t device_type, int64_t is_strided) {
-  switch(static_cast<torch::DeviceType>(device_type)) {
-    case torch::DeviceType::CPU:
-      if(is_strided)
-        return at::kCPU;
-      else
-        return at::kSparseCPU;
-    case torch::DeviceType::CUDA:
-      if(is_strided)
-        return at::kCUDA;
-      else
-        return at::kSparseCUDA;
-  }
-  throw std::runtime_error("unknown backend");
-}
-
-static at::Type& resolveType(int64_t device_type, int64_t is_strided, at::ScalarType type) {
-  return torch::getType(resolveBackend(device_type, is_strided), type);
 }
 
 using operator_constructor = std::function<TensorOp(jit::Node*)>;

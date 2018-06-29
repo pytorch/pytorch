@@ -12,8 +12,12 @@
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_conversion_dispatch.h"
 
+#include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
+#include <ATen/TensorOptions.h>
+
 #include <vector>
+#include <tuple>
 
 using namespace at;
 using namespace torch::autograd::utils;
@@ -141,6 +145,12 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
       result = applySelect(result, dim, THPUtils_unpackLong(obj));
     } else if (PySlice_Check(obj)) {
       result = applySlice(result, dim, obj);
+      if (result.numel() == 0) {
+        // TODO: currently we don't have support for 0-sized dims, so slicing a dim
+        // to size 0 will return a size 0 tensor. for now, just shortcircuit slicing
+        // and return that size 0 tensor.
+        return result;
+      }
       dim++;
     } else if (obj == Py_Ellipsis) {
       dim += self.dim() - specified_dims;
@@ -171,7 +181,7 @@ static Variable applySlicing(const Variable& self, PyObject* index, variable_lis
 
 static std::vector<Tensor> typeConvertIndices(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_inds(indices.size());
-  int64_t device = self.is_cuda() ? self.get_device() : -1;
+  int32_t device = self.is_cuda() ? self.get_device() : -1;
   for (size_t i = 0; i < indices.size(); ++i) {
     const auto &ind = indices[i];
     if (ind.defined()) {
@@ -187,14 +197,14 @@ static std::vector<Tensor> typeConvertIndices(const Variable& self, const variab
 static Variable dispatch_index(const Variable& self, const variable_list& indices) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
+  DeviceGuard device_guard(self);
   return self.index(converted_indices);
 }
 
 static Variable dispatch_index_put_(Variable& self, const variable_list& indices, const Variable& value) {
   std::vector<Tensor> converted_indices = typeConvertIndices(self, indices);
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(self);
+  DeviceGuard device_guard(self);
   return self.index_put_(converted_indices, value);
 }
 
@@ -257,14 +267,14 @@ static PyObject* applyBoolGetitem(const Variable& self, bool index) {
   if (index) {
     return wrap(self.type().copy(self.unsqueeze(0)));
   } else {
-    return wrap(self.type().tensor({0}));
+    return wrap(at::empty({0}, self.options()));
   }
 }
 
 PyObject* THPVariable_getitem(PyObject* self, PyObject* index) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
 
   // handle simple types: integers, slices, ellipsis
   if (index == Py_None) {
@@ -323,7 +333,7 @@ static void copy_to(Variable dst, const Variable& src) {
 int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   HANDLE_TH_ERRORS
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
-  AutoGPU auto_gpu(self_);
+  DeviceGuard device_guard(self_);
   auto value = valueToTensor(self_.type(), py_value);
 
   // handle simple types: integers, slices, ellipsis, bool

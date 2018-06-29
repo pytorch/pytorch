@@ -40,19 +40,19 @@ real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
-  return THCStorage_new(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to());
+  return THCStorage_new(state, at::CTypeToScalarType<real>::to());
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
-  return THCStorage_newWithSize(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to(), size);
+  return THCStorage_newWithSize(state, at::CTypeToScalarType<real>::to(), size);
 }
 
 THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           THCDeviceAllocator* allocator,
                                           void* allocatorContext)
 {
-  return THCStorage_newWithAllocator(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to(),
+  return THCStorage_newWithAllocator(state, at::CTypeToScalarType<real>::to(),
                                      size, allocator, allocatorContext);
 }
 
@@ -108,7 +108,7 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
   THCDeviceAllocator *allocator, void *allocatorContext) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
-  storage->scalar_type = at::CTypeToScalarType<at::cuda::from_type<real>>::to();
+  storage->scalar_type = at::CTypeToScalarType<real>::to();
   storage->data_ptr = data;
   storage->size = size;
   storage->refcount = 1;

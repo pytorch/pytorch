@@ -14,13 +14,13 @@ void RecordFunction::pushFunctionRange(Function* fn) {
   pushRange(fn->name());
 }
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 static void onEachDevice(std::function<void(int)> op) {
-  AutoGPU gpu_guard;
+  at::DeviceGuard device_guard;
   int count;
   TORCH_CUDA_CHECK(cudaGetDeviceCount(&count));
   for(int i = 0; i < count; i++) {
-    gpu_guard.setDevice(i);
+    device_guard.set_index(i);
     op(i);
   }
 }
@@ -28,7 +28,7 @@ static void onEachDevice(std::function<void(int)> op) {
 
 void enableProfiler(ProfilerState new_state) {
   TORCH_ASSERT(new_state != ProfilerState::Disabled);
-#ifndef WITH_CUDA
+#ifndef USE_CUDA
   if (new_state == ProfilerState::NVTX)
     throw std::runtime_error("Can't use NVTX profiler - PyTorch was compiled without CUDA");
 #endif
@@ -37,7 +37,7 @@ void enableProfiler(ProfilerState new_state) {
   }
   state = new_state;
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   if(state == ProfilerState::CUDA) {
     // event recording appears to have some startup overhead, so we need to
     // to generate some dummy events first before recording syncrhonization events

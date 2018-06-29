@@ -11,10 +11,13 @@
 #include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/Utils.h"
+#include "ATen/Device.h"
+#include "ATen/Layout.h"
 
 namespace at {
 struct Type;
 struct Tensor;
+struct TensorOptions;
 namespace detail {
 void set_data(Tensor& tensor, Tensor new_data);
 } // namespace detail
@@ -83,15 +86,39 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
-  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`,
-  /// or has undefined type. Defined in Type.h because of include order issues.
-  bool is_variable_or_undefined() const noexcept;
+  /// New-style `to()` methods.
+  /// NB: These methods are defined in TensorOptions.h.
+  Tensor to(Device device, ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(Device device, bool non_blocking = false) const;
+
+  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
+  /// Defined in Type.h because of include order issues.
+  bool is_variable() const noexcept;
+
+  /// Returns a `Tensor`'s layout. Defined in Type.h
+  Layout layout() const noexcept;
+
+  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
+  ScalarType dtype() const noexcept;
+
+  /// Returns a `Tensor`'s device.
+  Device device() const;
+
+  /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
+  /// TensorOptions.h.
+  TensorOptions options() const;
 
   template<typename T>
   T * data() const;
 
   void * unsafeGetTH(bool retain) const {
     return pImpl->unsafeGetTH(retain);
+  }
+
+  // non-retaining
+  TensorImpl * unsafeGetTensorImpl() const {
+    return pImpl;
   }
 
   // Purposely not defined here to avoid inlining
@@ -109,7 +136,7 @@ struct Tensor : public detail::TensorBase {
   #undef TO_C_TYPE
 
   template<typename T, size_t N>
-  TensorAccessor<T,N> accessor() {
+  TensorAccessor<T,N> accessor() const {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
     AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
@@ -130,8 +157,9 @@ struct Tensor : public detail::TensorBase {
 
   // ~~~~~ Autograd API ~~~~~
 
-  void set_requires_grad(bool requires_grad) {
+  Tensor& set_requires_grad(bool requires_grad) {
     pImpl->set_requires_grad(requires_grad);
+    return *this;
   }
   bool requires_grad() const {
     return pImpl->requires_grad();

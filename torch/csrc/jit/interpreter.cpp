@@ -5,14 +5,25 @@
 #include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/aten_dispatch.h"
+#include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <stdexcept>
 #include <typeinfo>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -102,7 +113,7 @@ void desugarTripCounts(Block * b) {
         WithInsertPoint guard(n);
         // int i = 0
         Value* initial_trip_count =
-            g->insertNode(g->createConstant(at::zeros(at::CPU(at::kLong), {1})))
+            g->insertNode(g->createConstant(at::zeros({1}, at::kLong)))
                 ->output();
         // Set up initial iteration number value for loop-carried dependency
         n->removeInput(0);
@@ -122,7 +133,7 @@ void desugarTripCounts(Block * b) {
         // conjunctive stopping condition as above.
 
         Value* const_one =
-            g->insertNode(g->createConstant(at::ones(at::CPU(at::kLong), {1})))
+            g->insertNode(g->createConstant(at::ones({1}, at::kLong)))
                 ->output();
 
         Value* inc_trip_count =
@@ -671,20 +682,47 @@ struct CodeImpl {
         stack.push_back(t);
         return 0;
       };
-    IR_ELSEIF(Undefined)
+    IR_ELSEIF(TensorToNum)
+      // no-op
       return [](Stack & stack) {
-        stack.push_back(at::Tensor());
         return 0;
       };
-    IR_ELSEIF(ReplaceIfUndef)
+    IR_ELSEIF(NumToTensor)
+      // no-op
       return [](Stack & stack) {
-        auto alternate = pop(stack);
-        auto result = pop(stack);
-        if(result.defined()) {
-          stack.push_back(std::move(result));
-        } else {
-          stack.push_back(std::move(alternate));
+        return 0;
+      };
+    IR_ELSEIF(Undefined)
+    return [](Stack & stack) {
+      stack.push_back(at::Tensor());
+      return 0;
+    };
+    IR_ELSEIF(AnyDefined)
+      size_t num_inputs = value->inputs().size();
+      auto true_ = at::full({}, 1, at::kLong);
+      auto false_ = at::full({}, 0, at::kLong);
+      return [=](Stack & stack) {
+        bool result = false;
+        for(const at::Tensor& t : last(stack, num_inputs)) {
+          if(t.defined()) {
+            result = true;
+            break;
+          }
         }
+        drop(stack, num_inputs);
+        stack.push_back(result ? true_ : false_);
+        return 0;
+      };
+    IR_ELSEIF(AutogradAdd)
+      return [=](Stack & stack) {
+        auto a = pop(stack);
+        auto b = pop(stack);
+        if(!a.defined())
+          stack.push_back(b);
+        else if(!b.defined())
+          stack.push_back(a);
+        else
+          stack.push_back(a + b);
         return 0;
       };
     IR_ELSEIF(Print)
@@ -761,7 +799,7 @@ struct CodeImpl {
           return [=](Stack& stack) {
             auto t = pop(stack);
             at::IntList sizes = t.sizes();
-            auto sizes_tensor = torch::CPU(at::kLong).tensor(sizes.size());
+            auto sizes_tensor = torch::empty({static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
             auto accessor = sizes_tensor.accessor<int64_t, 1>();
             for (size_t i=0; i<sizes.size(); ++i) {
               accessor[i] = sizes[i];

@@ -190,7 +190,7 @@ void checkNumChainsAndRun(const char* spec, const int expected_num_chains) {
   }
 }
 
-TEST(NetTest, ChainingForLinearModel) {
+TEST(NetTest, DISABLED_ChainingForLinearModel) {
   const auto spec = R"DOC(
         name: "example"
         type: "dag"
@@ -209,7 +209,7 @@ TEST(NetTest, ChainingForLinearModel) {
   checkChainingAndRun(spec, {{0, {0, 1}}});
 }
 
-TEST(NetTest, ChainingForFork) {
+TEST(NetTest, DISABLED_ChainingForFork) {
   const auto spec = R"DOC(
         name: "example"
         type: "dag"
@@ -262,7 +262,7 @@ TEST(NetTest, ChainingForFork) {
 //   checkChainingAndRun(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
 // }
 
-TEST(NetTest, ChainingForForkJoin) {
+TEST(NetTest, DISABLED_ChainingForForkJoin) {
   const auto spec = R"DOC(
         name: "example"
         type: "dag"
@@ -292,7 +292,7 @@ TEST(NetTest, ChainingForForkJoin) {
   checkChainingAndRun(spec, {{0, {0}}, {1, {1}}, {2, {2, 3}}});
 }
 
-TEST(NetTest, ChainingForwardBackward) {
+TEST(NetTest, DISABLED_ChainingForwardBackward) {
   const auto spec = R"DOC(
   name: "gpu_0"
   type: "dag"
@@ -503,7 +503,7 @@ TEST(NetTest, ChainingForwardBackward) {
   checkNumChainsAndRun(spec, 1);
 }
 
-TEST(NetTest, ChainingForHogwildModel) {
+TEST(NetTest, DISABLED_ChainingForHogwildModel) {
   const auto spec = R"DOC(
         name: "example"
         type: "dag"
@@ -542,7 +542,7 @@ TEST(NetTest, ChainingForHogwildModel) {
   checkNumChainsAndRun(spec, 2);
 }
 
-TEST(NetTest, FailingOperator) {
+TEST(NetTest, DISABLED_FailingOperator) {
   const auto spec = R"DOC(
         name: "example"
         type: "dag"
@@ -635,7 +635,7 @@ TEST(NetTest, OperatorWithExecutorHelper) {
   ASSERT_TRUE(net->Run());
 }
 
-TEST(NetTest, OperatorWithDisabledEvent) {
+TEST(NetTest, DISABLED_OperatorWithDisabledEvent) {
   const auto spec = R"DOC(
         name: "example"
         type: "async_scheduling"
@@ -718,26 +718,30 @@ TEST(NetTest, AsyncEmptyNet) {
   }
 }
 
-TEST(NetTest, RunAsyncFailure) {
+TEST(NetTest, DISABLED_RunAsyncFailure) {
   const auto spec = R"DOC(
         name: "example"
         type: "async_scheduling"
         op {
-          type: "ExecutorHelperDummy"
+          input: "in"
+          output: "out"
+          type: "NetTestDummy"
+          arg {
+            name: "fail"
+            i: 1
+          }
         }
   )DOC";
 
   Workspace ws;
+  ws.CreateBlob("in");
+
   NetDef net_def;
   CAFFE_ENFORCE(
       ::google::protobuf::TextFormat::ParseFromString(spec, &net_def));
 
   {
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-    // set incorrect device option and trigger net run failure
-    DeviceOption& dev = const_cast<DeviceOption&>(
-        net->GetOperators()[0]->event().GetDeviceOption());
-    dev.set_device_type(ONLY_FOR_TEST);
 
     bool caught_exception = false;
     try {
@@ -745,7 +749,7 @@ TEST(NetTest, RunAsyncFailure) {
     } catch (const std::exception& e) {
       caught_exception = true;
     }
-    ASSERT_FALSE(caught_exception);
+    ASSERT_TRUE(caught_exception);
   }
 }
 

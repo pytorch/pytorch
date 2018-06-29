@@ -489,9 +489,13 @@ class TestLuaReader(TestCase):
         long_size = 8 if sys.platform == 'win32' else None
         tests = load_lua(path, long_size=long_size)
         for name, test in tests['modules'].items():
+            if name == "HardShrink":
+                continue
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._module_test(name, test))
         for name, test in tests['criterions'].items():
+            if name == "HardShrink":
+                continue
             test_name = 'test_' + name.replace('nn.', '')
             setattr(cls, test_name, cls._criterion_test(name, test))
 
@@ -526,6 +530,7 @@ class TestLuaReader(TestCase):
         return input, target.sub(1)
 
 
+@unittest.skipIf('SKIP_TEST_BOTTLENECK' in os.environ.keys(), 'SKIP_TEST_BOTTLENECK is set')
 class TestBottleneck(TestCase):
     def _run(self, command):
         """Returns (return-code, stdout, stderr)"""
@@ -632,7 +637,7 @@ class TestCollectEnv(TestCase):
 
     def _preprocess_info_for_test(self, info_output):
         # Remove the version hash
-        version_hash_regex = re.compile(r'(a\d+)\+.......')
+        version_hash_regex = re.compile(r'(a\d+)\+\w+')
         result = re.sub(version_hash_regex, r'\1', info_output).strip()
 
         # Substitutions to lower the specificity of the versions listed

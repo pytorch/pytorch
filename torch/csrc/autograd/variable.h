@@ -9,6 +9,7 @@
 #include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <ATen/ATen.h>
+#include <ATen/Error.h>
 
 #include <list>
 #include <memory>
@@ -122,25 +123,18 @@ struct Variable : public at::Tensor {
   // know are Variables.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
     TORCH_ASSERTM(
-        is_variable_or_undefined(),
+        is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
   /*implicit*/ Variable(at::Tensor&& rhs) noexcept
       : at::Tensor(std::move(rhs)) {
     TORCH_ASSERTM(
-        is_variable_or_undefined(),
+        is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
   // NOTE: Assignment operators to Tensor come for free from the constructors.
-
-  /// Returns true if the `tensor`'s dynamic type is `Variable`, else false.
-  /// NOTE: Has to be a friend function because runtime type information is
-  /// available only for `TensorImpl`/`Impl` and not the `Tensor`/`Variable`
-  /// classes, as the latter are not polymorphic classes (`Tensor` has no
-  /// virtual methods).
-  friend bool is_variable(const at::Tensor& tensor) noexcept;
 
   const at::Tensor& data() const noexcept;
   at::Tensor& data() noexcept;
@@ -315,6 +309,9 @@ struct Variable::Impl : public at::TensorImpl {
   /// leaf variables that want to accumulate gradients, and false for all other
   /// variables.
   void set_requires_grad(bool requires_grad) override {
+    AT_CHECK(
+        !requires_grad || at::isFloatingType(type().scalarType()),
+        "Only Tensors of floating point dtype can require gradients");
     requires_grad_ = requires_grad;
   }
 
@@ -436,6 +433,9 @@ inline Variable make_variable_view(
 }
 
 inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
     auto impl = new Variable::Impl(data, requires_grad);
     return Variable(impl, /*retain=*/false);
@@ -444,6 +444,9 @@ inline Variable make_variable(at::Tensor data, bool requires_grad = false) {
 }
 
 inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
+  AT_CHECK(
+      !data.is_variable(),
+      "Must not create a new variable from a variable, use its .data()");
   if (data.defined()) {
     auto impl = new Variable::Impl(data, false, std::move(gradient_edge));
     return Variable(impl, /*retain=*/false);
@@ -454,30 +457,22 @@ inline Variable make_variable(at::Tensor data, Edge gradient_edge) {
 // Tensor Conversion
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-inline bool is_variable(const at::Tensor& tensor) noexcept {
-  // dynamic_cast will return a nullptr if the `TensorImpl`'s dynamic type is
-  // not `Variable::Impl`.
-  return dynamic_cast<const Variable::Impl*>(tensor.get()) != nullptr;
-}
-
 /// Downcasts the `Tensor` reference to a `Variable` reference. If compiling
 /// in DEBUG mode and the tensor's dynamic type is not in fact `Variable`,
 /// throws a `std::invalid_argument` exception.
 inline Variable& as_variable_ref(at::Tensor& tensor) {
-  if (!is_variable(tensor)) {
-    AT_ERROR(
-        "Attempted to cast a Tensor to a Variable, but "
-        "the dynamic type of the value is not Variable.");
-  }
+  AT_CHECK(
+      tensor.is_variable(),
+      "Attempted to cast a Tensor to a Variable, but "
+      "the dynamic type of the value is not Variable.");
   return static_cast<Variable&>(tensor);
 }
 
 inline const Variable& as_variable_ref(const at::Tensor& tensor) {
-  if (!is_variable(tensor)) {
-    AT_ERROR(
-        "Attempted to cast a Tensor to a Variable, but "
-        "the dynamic type of the value is not Variable.");
-  }
+  AT_CHECK(
+      tensor.is_variable(),
+      "Attempted to cast a Tensor to a Variable, but "
+      "the dynamic type of the value is not Variable.");
   return static_cast<const Variable&>(tensor);
 }
 

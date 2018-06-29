@@ -39,7 +39,7 @@ class OnnxAttributes {
     return onnx_attrs_.count(key);
   }
 
-  AttributeProto* AddRewrittenAttibute(const std::string& key) {
+  AttributeProto* AddRewrittenAttribute(const std::string& key) {
     auto tmp = rewritten_onnx_attrs_.emplace(key, AttributeProto());
     auto& attr = tmp.first->second;
     attr.set_name(key);
@@ -189,6 +189,8 @@ class Caffe2Backend {
   Caffe2Ops CreateMatMul(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateUpsample(OnnxNode* onnx_node, int opset_version);
+
+  Caffe2Ops CreateDropout(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateLRN(OnnxNode* onnx_node, int opset_version);
 

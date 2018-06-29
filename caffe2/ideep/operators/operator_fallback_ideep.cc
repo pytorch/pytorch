@@ -15,8 +15,11 @@
 #include <caffe2/operators/given_tensor_fill_op.h>
 #include <caffe2/operators/load_save_op.h>
 #include <caffe2/operators/loss_op.h>
+#include <caffe2/operators/pad_op.h>
+#include <caffe2/operators/prelu_op.h>
 #include <caffe2/operators/reshape_op.h>
 #include <caffe2/operators/roi_align_op.h>
+#include <caffe2/operators/roi_align_rotated_op.h>
 #include <caffe2/operators/softmax_op.h>
 #include <caffe2/operators/transpose_op.h>
 #include <caffe2/operators/utility_ops.h>
@@ -84,6 +87,9 @@ REGISTER_IDEEP_OPERATOR(
     RoIAlign,
     IDEEPFallbackOp<RoIAlignOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
+    RoIAlignRotated,
+    IDEEPFallbackOp<RoIAlignRotatedOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
     GenerateProposals,
     IDEEPFallbackOp<GenerateProposalsOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
@@ -94,9 +100,16 @@ REGISTER_IDEEP_OPERATOR(
     IDEEPFallbackOp<CollectAndDistributeFpnRpnProposalsOp<CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     BoxWithNMSLimit,
-    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>>);
+    IDEEPFallbackOp<BoxWithNMSLimitOp<CPUContext>, SkipIndices<0,1,2>>);
 REGISTER_IDEEP_OPERATOR(
     BBoxTransform,
     IDEEPFallbackOp<BBoxTransformOp<float, CPUContext>>);
+
+REGISTER_IDEEP_OPERATOR(
+    PadImage,
+    IDEEPFallbackOp<PadImageOp<float, CPUContext>>);
+REGISTER_IDEEP_OPERATOR(
+    PRelu,
+    IDEEPFallbackOp<PReluOp<float, CPUContext>>);
 
 } // namespace caffe2

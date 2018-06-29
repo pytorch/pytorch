@@ -1,4 +1,4 @@
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
@@ -29,7 +29,7 @@ static PyObject * THPStorage_(copy_)(PyObject *self, PyObject *args, PyObject *k
 static PyObject * THPStorage_(isPinned)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-#if defined(WITH_CUDA)
+#if defined(USE_CUDA)
   cudaPointerAttributes attr;
   cudaError_t err = cudaPointerGetAttributes(&attr, THWStorage_(data)(LIBRARY_STATE self->cdata));
   if (err != cudaSuccess) {

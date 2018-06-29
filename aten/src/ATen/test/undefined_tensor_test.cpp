@@ -13,7 +13,7 @@ TEST_CASE( "undefined tensor test", "[]" ) {
 
   // mainly test ops on undefined tensors don't segfault and give a reasonable errror message.
   Tensor und;
-  Tensor ft = ones(CPU(kFloat), {1});
+  Tensor ft = ones({1}, CPU(kFloat));
 
   std::stringstream ss;
   ss << und << std::endl;
@@ -46,9 +46,8 @@ TEST_CASE( "undefined tensor test", "[]" ) {
   REQUIRE_THROWS_WITH(und.toBackend(Backend::CPU), Catch::Contains("toBackend"));
   REQUIRE_THROWS_WITH(ft.toBackend(Backend::Undefined), Catch::Contains("UndefinedType"));
 
-  Tensor to_move = ones(CPU(kFloat), {1});
+  Tensor to_move = ones({1}, CPU(kFloat));
   Tensor m(std::move(to_move));
   REQUIRE(!to_move.defined());
   REQUIRE(to_move.get() == UndefinedTensor::singleton());
 }
-

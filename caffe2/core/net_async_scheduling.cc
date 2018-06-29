@@ -26,7 +26,6 @@ AsyncSchedulingNet::AsyncSchedulingNet(
 void AsyncSchedulingNet::reset() {
   AsyncNetBase::reset();
   processed_tasks_num_ = 0;
-  success_ = true;
 }
 
 void AsyncSchedulingNet::Wait() {
@@ -46,9 +45,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
       if (streams_per_gpu_ > 1) {
         stream_id = stream(task_id);
       }
-      try {
-        run(task_id, stream_id);
-      } catch (const std::exception& e) {
+      if (!run(task_id, stream_id)) {
         success_ = false;
       }
     }
