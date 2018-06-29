@@ -372,7 +372,8 @@ ConvertedResult OnnxExporter::CreateArgMaxMinOpNodes(
   if (!explicit_axis) {
     const auto& x = def.input(0);
     const auto& x_shape = shapes.at(x);
-    node.add_attribute()->CopyFrom(MakeAttribute("axis", x_shape.dims().size() - 1));
+    node.add_attribute()->CopyFrom(
+        MakeAttribute("axis", x_shape.dims().size() - 1));
   }
 
   return result;
