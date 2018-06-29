@@ -17,7 +17,7 @@
 #include <cmath>
 #include "hip/hip_runtime.h"
 #include "caffe2/core/hip/context_hip.h"
-#include "caffe2/operators/elementwise_op.h"
+#include "caffe2/operators/elementwise_ops.h"
 
 namespace caffe2 {
 
