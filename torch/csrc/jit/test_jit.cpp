@@ -893,30 +893,30 @@ void testControlFlow() {
 
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
-  proto.set_ir_version(3);
-  proto.set_model_version(4);
+  proto.set_producer_name("foo");
+  proto.set_producer_version("3");
   std::cout << proto.DebugString() << std::endl;
 }
 
 std::string runJITCPPTests() {
-  testProto();
   std::stringstream out;
-  testControlFlow();
-  testGraphExecutor();
-  testBlocks(out);
-  testCreateAutodiffSubgraphs(out);
-  testDifferentiate(out);
-  testDifferentiateWithRequiresGrad(out);
-  testADFormulas();
-  interpTest();
-  interpStageTest();
-  codeTemplateTest();
-  fusionTests();
-  attributesTest();
-  internedStringsTests();
-  fromQualStringTests();
-  argumentSpecTest();
-  shapeAnalysisTest();
+  // testControlFlow();
+  // testGraphExecutor();
+  // testBlocks(out);
+  // testCreateAutodiffSubgraphs(out);
+  // testDifferentiate(out);
+  // testDifferentiateWithRequiresGrad(out);
+  // testADFormulas();
+  // interpTest();
+  // interpStageTest();
+  // codeTemplateTest();
+  // fusionTests();
+  // attributesTest();
+  // internedStringsTests();
+  // fromQualStringTests();
+  // argumentSpecTest();
+  // shapeAnalysisTest();
+  testProto();
   return out.str();
 }
 
