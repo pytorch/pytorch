@@ -376,6 +376,84 @@ Tensor logsumexp(const Tensor &self, int64_t dim_, bool keepdim) {
 
 // MULTI DIM REDUCE ###########################################################
 
+// NB: this applies two optimizations:
+//   1. Reducing the dimensions in the order of decreasing size, so that the
+//      larger dimensions are dealt earlier and we can work with less elements
+//      overall.
+//      E.g., reducing tensor of shape [1, 10, 200] over dimemsions {0, 1, 2}.
+//            If we reduce in the order of [0, 1, 2], the input and output
+//            shapes of iterations are:
+//                it 0:  [1, 10, 200] (2000 elem) => [10, 200] (2000 elem)
+//                it 1:     [10, 200] (2000 elem) =>     [200] ( 200 elem)
+//                it 2:         [200] ( 200 elem) =>     [  1] (   1 elem)
+//              Since we need to iterate through all input elements at each
+//              iteration, total number of elements traversed is 4200.
+//            If we reduce in the order of [2, 1, 0], i.e., with decreasing
+//            size, the input and output shapes of iterations are:
+//                it 0:  [1, 10, 200] (2000 elem) => [1, 10] (10 elem)
+//                it 1:      [1,  10] (  10 elem) =>    [ 1] ( 1 elem)
+//                it 2:           [1] (   1 elem) =>    [ 1] ( 1 elem)
+//              Total number of elements traversed is 2011, much less than 4200.
+//   2. Preallocated buffer.
+//      Utilizing the `_out` variant, instead of allocating new output tensors
+//      at each iteration, we can use a preallocated buffer. Since output numel
+//      in each iteration is decreasing, we can reuse the buffer throughout the
+//      loop.
+//      Note that we need two buffers, one containing the input, i.e., output
+//      from the previous iteration, and one containing the output for this
+//      iteration.
+//      The largest output size is the output size of the first iteration. After
+//      that the largest size we need is the output size  of the second
+//      iteration.
+//      So we allocate
+//        1. a region of size `input.numel() / input.size(reduced_dims[0])`, and
+//        2. a region of size `input.numel() / (input.size(reduced_dims[0]) * input.size(reduced_dims[1]))`.
+//      These two regions are allocated together as a contiguous flattened
+//      buffer tensor, with a variable `offset` indicating the starting position
+//      of the output region for the current iteration.
+//      E.g., reducing tensor of shape [4, 3, 2] over dimemsions {0, 1, 2}.
+//            Say we reduce in the order of [0, 1, 2].
+//            The first buffer with has size `4 * 3 * 2 / 4 = 6`.
+//            The second buffer with has size `4 * 3 * 2 / (4 * 3) = 2`.
+//            So we allocate a tensor of size `6 + 2 = 8`:
+//              buffer: [ _, _, _, _, _, _, _, _]
+//      buffer region 1-->^^^^^^^^^^^^^^^^  ^^^^<--buffer region 2
+//            1st iteration:
+//              (before reduction)
+//                input:         self (or input)
+//                input shape:   [ 4, 3, 2]
+//                output shape:  [ 3, 2]
+//                buffer:        [ _, _, _, _, _, _, _, _]
+//                offset:          ^--beginning of 1st buffer region, i.e., the
+//                                    starting output location of 1st iteration.
+//              (after reduction)
+//                buffer:        [ {output of 1st it}, _, _]
+//
+//            2nd iteration:
+//              (before reduction)
+//                input:         output of 1st it
+//                input shape:   [ 3, 2]
+//                output shape:  [ 2]
+//                buffer:        [ {output of 1st it}, _, _]
+//                offset:                              ^--beginning of 2nd
+//                                                      buffer region. We can't
+//                                                      overwrite the 1st buffer
+//                                                      as it contains input to
+//                                                      reduction of this it.
+//              (after reduction)
+//                buffer:        [ {output of 1st it}, {output of 2nd it}]
+//
+//            3rd iteration:
+//              (before reduction)
+//                input:         output of 2nd it
+//                input shape:   [ 2]
+//                output shape:  [ 1]
+//                buffer:        [ {output of 1st it}, {output of 2nd it}]
+//                offset:          ^--beginning of 1st buffer region. We can
+//                                  safely overwrite now.
+//              (after reduction)
+//                buffer:        [ {output of 3rd it}, {output of 2nd it}]
+//            Return {output of 3rd it}.
 template <Tensor (reduce_1)(const Tensor &, int64_t, bool),
     Tensor& (reduce_1_out)(Tensor& result, const Tensor &, int64_t, bool)>
 inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool keepdim) {
@@ -386,13 +464,16 @@ inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool k
     return self;
   }
   int64_t ndims = self.dim();
+  // `reduced_numel` and `reduced_size` will be updated in the loop.
+  // Before that, they are just size and numel.
+  int64_t reduced_numel = self.numel();
   auto reduced_size = self.sizes().vec();
   auto dims = dims_.vec();
   maybe_wrap_dims(dims, ndims);
-  // Sort the reduced dimensions so that we reduce the largest dimension first.
+  // Sort the reduced dimensions so that we reduce the larger dimensions first.
   std::sort(dims.begin(), dims.end(),
         [&](int64_t i, int64_t j){ return reduced_size[i] > reduced_size[j]; });
-  int64_t reduced_numel = self.numel();
+  // Calculate 1st buffer region size
   int64_t max_reduced_numel = reduced_numel / reduced_size[dims[0]];
   int64_t buffer_size = max_reduced_numel + max_reduced_numel / reduced_size[dims[1]];
   // We separate `buffer` into two regions, one starting at 0, and another
@@ -400,7 +481,7 @@ inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool k
   // the output of a `reduce_1` along a particular dimension. `offset` will
   // indicate which region we should use next.
   // Have keepdim=true when reducing. We will squeeze later.
-  auto buffer = at::empty({buffer_size}, self.type());
+  auto buffer = at::empty({buffer_size}, self.options());
   int64_t offset = 0;
   Tensor t = self;
   for (auto& dim : dims) {
@@ -408,6 +489,8 @@ inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool k
     reduced_size[dim] = 1;
     auto res = buffer.narrow(0, offset, reduced_numel).view(reduced_size);
     t = reduce_1_out(res, t, dim, true);
+    // switch to other buffer region
+    // this alternatively changes `offset` between 0 and max_reduced_numel
     offset = max_reduced_numel - offset;
   }
   // squeeze if needed
@@ -425,6 +508,7 @@ inline Tensor reduce_multi_associative(const Tensor &self, IntList dims_, bool k
   return t;
 }
 
+// See comments above reduce_multi_associative for details.
 template <Tensor (reduce_1)(const Tensor &, int64_t, bool),
     Tensor& (reduce_1_out)(Tensor& result, const Tensor &, int64_t, bool)>
 inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, IntList dims_, bool keepdim) {
@@ -432,16 +516,20 @@ inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, 
     return reduce_1_out(result, self, dims_[0], keepdim);
   }
   if (dims_.size() == 0) {
-    return result;
+    // reduce_out should be clone_out with empty dims_
+    return result.resize_as_(self).copy_(self);
   }
   int64_t ndims = self.dim();
+  // `reduced_numel` and `reduced_size` will be updated in the loop.
+  // Before that, they are just size and numel.
+  int64_t reduced_numel = self.numel();
   auto reduced_size = self.sizes().vec();
   auto dims = dims_.vec();
   maybe_wrap_dims(dims, ndims);
   // Sort the reduced dimensions so that we reduce the largest dimension first.
   std::sort(dims.begin(), dims.end(),
         [&](int64_t i, int64_t j){ return reduced_size[i] > reduced_size[j]; });
-  int64_t reduced_numel = self.numel();
+  // Calculate 1st buffer region size
   int64_t max_reduced_numel = reduced_numel / reduced_size[dims[0]];
   int64_t buffer_size = max_reduced_numel + max_reduced_numel / reduced_size[dims[1]];
   // We separate `buffer` into two regions, one starting at 0, and another
@@ -449,7 +537,7 @@ inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, 
   // the output of a `reduce_1` along a particular dimension. `offset` will
   // indicate which region we should use next.
   // Have keepdim=true when reducing. We will squeeze later.
-  auto buffer = at::empty({buffer_size}, self.type());
+  auto buffer = at::empty({buffer_size}, self.options());
   int64_t offset = 0;
   Tensor t = self;
   int64_t last_reduction = dims.size() - 1;
@@ -463,6 +551,8 @@ inline Tensor& reduce_multi_associative_out(Tensor &result, const Tensor &self, 
     } else {
       reduce_1_out(result, t, dim, true);
     }
+    // switch to other buffer region
+    // this alternatively changes `offset` between 0 and max_reduced_numel
     offset = max_reduced_numel - offset;
     num_reduction++;
   }

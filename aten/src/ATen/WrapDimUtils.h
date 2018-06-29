@@ -46,11 +46,18 @@ static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<
 }
 
 // wrap negative dims in to_transform_dims
-static inline void maybe_wrap_dims(std::vector<int64_t>& to_transform_dims, int64_t tensor_total_dims) {
-  for (size_t i = 0; i < to_transform_dims.size(); i++) {
-    if (to_transform_dims[i] < 0) {
-      to_transform_dims[i] = (tensor_total_dims + (to_transform_dims[i] % tensor_total_dims)) % tensor_total_dims;
-    }
+static inline void maybe_wrap_dims(std::vector<int64_t>& dims, int64_t dim_post_expr) {
+  if (dim_post_expr <= 0) {
+    dim_post_expr = 1; // this will make range [-1, 0]
+  }
+  int64_t min = -dim_post_expr;
+  int64_t max = dim_post_expr - 1;
+  for (auto& dim : dims) {
+    AT_CHECK(
+        dim >= min && dim <= max,
+        "Dimension out of range (expected to be in range of [",
+        min, ", ", max, "], but got ", dim, ")");
+    if (dim < 0) dim += dim_post_expr;
   }
 }
 
