@@ -1878,6 +1878,17 @@ std::tuple<Tensor, Tensor, Tensor> _trilinear_backward(const Tensor& grad_out, c
   return std::tuple<Tensor, Tensor, Tensor>(grad_i1, grad_i2, grad_i3);
 }
 
+Tensor log1p_backward(const Tensor& grad, const Tensor& self) {
+  if (self.is_sparse()) {
+    AT_ERROR(
+      "log1p of a sparse tensor is made to be non-differentiable since ",
+      "local gradient of zero is 1 / (0 + 1) = 1 and it makes the tensor dense. ",
+      "Use a different mathematical operation which preserves sparsity of gradients, ",
+      "or report a bug if you think this is an error.");
+  }
+  return grad / (self + 1);
+}
+
 } // anonymous namespace
 
 ${autograd_function_definitions}

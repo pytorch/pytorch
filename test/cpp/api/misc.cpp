@@ -17,45 +17,21 @@ using OrderedDict = torch::detail::OrderedDict<std::string, T>;
 
 using Catch::StartsWith;
 
-TEST_CASE("misc") {
-  SECTION("no_grad") {
-    torch::NoGradGuard guard;
-    Linear model(5, 2);
-    auto x = torch::randn({10, 5}, at::requires_grad());
-    auto y = model->forward(x);
-    torch::Tensor s = y.sum();
+TEST_CASE("NoGrad") {
+  torch::manual_seed(0);
+  torch::NoGradGuard guard;
+  Linear model(5, 2);
+  auto x = torch::randn({10, 5}, torch::requires_grad());
+  auto y = model->forward(x);
+  torch::Tensor s = y.sum();
 
-    s.backward();
-    REQUIRE(!model->parameters()["weight"].grad().defined());
-  }
-
-  SECTION("CPU random seed") {
-    int size = 100;
-    torch::manual_seed(7);
-    auto x1 = torch::randn({size});
-    torch::manual_seed(7);
-    auto x2 = torch::randn({size});
-
-    auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
-    REQUIRE(l_inf < 1e-10);
-  }
-}
-
-TEST_CASE("misc_cuda", "[cuda]") {
-  SECTION("CUDA random seed") {
-    int size = 100;
-    torch::manual_seed(7);
-    auto x1 = torch::randn({size}, at::kCUDA);
-    torch::manual_seed(7);
-    auto x2 = torch::randn({size}, at::kCUDA);
-
-    auto l_inf = (x1.data() - x2.data()).abs().max().toCFloat();
-    REQUIRE(l_inf < 1e-10);
-  }
+  s.backward();
+  REQUIRE(!model->parameters()["weight"].grad().defined());
 }
 
 TEST_CASE("autograd") {
-  auto x = torch::randn({3, 3}, at::requires_grad());
+  torch::manual_seed(0);
+  auto x = torch::randn({3, 3}, torch::requires_grad());
   auto y = torch::randn({3, 3});
   auto z = x * y;
   SECTION("derivatives of zero-dim tensors") {
@@ -74,6 +50,7 @@ TEST_CASE("autograd") {
 }
 
 TEST_CASE("expanding-array") {
+  torch::manual_seed(0);
   SECTION("successful construction") {
     SECTION("initializer_list") {
       torch::ExpandingArray<5> e({1, 2, 3, 4, 5});

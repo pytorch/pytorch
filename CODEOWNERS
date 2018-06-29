@@ -20,5 +20,4 @@
 /torch/csrc/distributed/ @apaszke @pietern @teng-li
 /torch/distributed/ @apaszke @pietern @teng-li
 /test/test_c10d.py @apaszke @pietern @teng-li
-/third_party/ @orionr
 /torch/utils/cpp_extension.py @goldsborough @fmassa @apaszke @soumith @ezyang

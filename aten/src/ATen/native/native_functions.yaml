@@ -754,12 +754,16 @@
   dispatch:
     CPU: _log1p__cpu
     CUDA: _log1p__cuda
+    SparseCPU: log1p_sparse_
+    SparseCUDA: log1p_sparse_
 
 - func: log1p_out(Tensor result, Tensor self) -> Tensor
   variants: function
   dispatch:
     CPU: _log1p_out_cpu
     CUDA: _log1p_out_cuda
+    SparseCPU: log1p_out_sparse
+    SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
 
@@ -817,7 +821,16 @@
 
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
-- func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+- func: max_pool1d_with_indices(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+  variants: function
+
+- func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
+  variants: function
+
+- func: max_pool2d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
+  variants: function
+
+- func: max_pool3d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
   variants: function
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
@@ -1420,8 +1433,6 @@
     SparseCUDA: zero_sparse_
 
 - func: zero_(Tensor self) -> Tensor
-
-
 
 - func: s_native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function

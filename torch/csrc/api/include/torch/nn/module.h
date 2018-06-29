@@ -85,8 +85,8 @@ class Module {
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
   virtual void to(
-      at::Device device,
-      at::ScalarType dtype,
+      torch::Device device,
+      torch::Dtype dtype,
       bool non_blocking = false);
 
   /// Recursively casts all parameters to the given dtype.
@@ -94,14 +94,14 @@ class Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  virtual void to(at::ScalarType dtype, bool non_blocking = false);
+  virtual void to(torch::Dtype dtype, bool non_blocking = false);
 
   /// Recursively moves all parameters to the given device.
   /// If `non_blocking` is true and the source is in pinned memory and
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  virtual void to(at::Device device, bool non_blocking = false);
+  virtual void to(torch::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();
@@ -126,6 +126,25 @@ class Module {
       ar(name);
       ar(params[name]);
     }
+  }
+
+  /// Returns true if the dynamic type of this module is of the given
+  /// `ModuleType`. Performs a `dynamic_cast` to check this.
+  template <
+      typename ModuleType,
+      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
+  bool is() const noexcept {
+    return dynamic_cast<const ModuleType*>(this) != nullptr;
+  }
+
+  /// Returns true if the dynamic type of this module is of the given
+  /// `ModuleType`. Performs a `dynamic_cast` to check this.
+  template <typename ModuleType>
+  torch::enable_if_t<torch::detail::is_module_holder<ModuleType>::value, bool>
+  is() const noexcept {
+    // Use the contained type of the `ModuleHolder`, e.g. `LinearImpl` for
+    // `Linear`, since `LinearImpl` inherits `nn::Module`.
+    return is<typename ModuleType::ContainedType>();
   }
 
  protected:
