@@ -76,21 +76,21 @@ void SinCos(const int N, const T* x, T* ys, T* yc, Context* context);
 template <typename T, class Context>
 void Abs(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Sqr(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void Sqrt(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
-void InvSqrt(const int N, const T* x, T* y, Context* context);
+void Rsqrt(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
-void Sqr(const int N, const T* x, T* y, Context* context);
-
+void Cube(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Cbrt(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Neg(const int N, const T* x, T* y, Context* context);
-
 template <typename T, class Context>
 void Sign(const int N, const T* x, T* y, Context* context);
-
 template <typename T, class Context>
 void Not(const int N, const T* x, T* y, Context* context);
-
 template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
 

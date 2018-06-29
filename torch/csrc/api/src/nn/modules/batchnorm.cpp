@@ -48,7 +48,7 @@ Tensor BatchNormImpl::pure_forward(Tensor input, Tensor mean, Tensor variance) {
         "BatchNorm expected more than 1 value per channel when training!");
   }
 
-  return at::batch_norm(
+  return torch::batch_norm(
       input,
       weight_,
       bias_,
