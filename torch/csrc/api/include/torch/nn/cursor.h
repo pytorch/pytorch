@@ -162,9 +162,16 @@ class CursorBase {
   T& at(const std::string& key);
   const T& at(const std::string& key) const;
 
+  /// Attempts to return the item at the given index. If the index is in range,
+  /// returns a reference to the item. If not, throws an exception.
+  Item& at(size_t index);
+
   /// Equivalent to `at(key)`.
   T& operator[](const std::string& key);
   const T& operator[](const std::string& key) const;
+
+  /// Equivalent to `at(index)`.
+  Item& operator[](size_t index);
 
   /// Returns true if an item with the given `key` exists.
   bool contains(const std::string& key) const noexcept;

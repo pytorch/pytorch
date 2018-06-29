@@ -91,6 +91,6 @@ X:
         "element-wise")
     .InheritOnnxSchema("Tanh");
 
-OPERATOR_SCHEMA(TanhGradient).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(TanhGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
 
 } // namespace caffe2

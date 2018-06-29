@@ -44,8 +44,6 @@ class AsyncNetBase : public NetBase {
     return operators_;
   }
 
-  void handleRunError() override;
-
   bool RunAsync() override;
 
   const dag_utils::ExecutionChains& TEST_execution_chains() const {
@@ -73,7 +71,7 @@ class AsyncNetBase : public NetBase {
       int task_id,
       int stream_id,
       const std::vector<int>& wait_task_ids) const;
-  void run(int task_id, int stream_id);
+  bool run(int task_id, int stream_id);
   int stream(int task_id);
   TaskThreadPool* pool(const DeviceOption& device_option);
 
@@ -83,6 +81,8 @@ class AsyncNetBase : public NetBase {
   bool isStreamFree(int task_id, int stream_id) const;
 
   virtual void reset();
+
+  bool handleRunError() override;
 
   // Operator/task graph
   std::vector<OperatorBase*> operators_;
@@ -103,11 +103,15 @@ class AsyncNetBase : public NetBase {
   static thread_local std::vector<int> stream_counters_;
   int num_workers_;
 
+  // Exception/error handling
+  void setTaskErrorMessage(int task_id, const std::string& err_msg);
+  std::atomic<bool> success_;
 #ifdef CAFFE2_USE_EXCEPTION_PTR
   // Mutex that protects caught_exception_
   std::mutex exception_mutex_;
   std::exception_ptr caught_exception_;
 #endif // CAFFE2_USE_EXCEPTION_PTR
+
   // Tracing
   std::shared_ptr<tracing::Tracer> tracer_;
 

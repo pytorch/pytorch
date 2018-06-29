@@ -7,6 +7,12 @@
 #include <unordered_set>
 
 namespace c10 {
+class TensorTypeId;
+}
+
+std::ostream& operator<<(std::ostream&, c10::TensorTypeId);
+
+namespace c10 {
 
 namespace details {
   using _tensorTypeId_underlyingType = uint8_t;
@@ -24,7 +30,7 @@ private:
   constexpr explicit TensorTypeId(details::_tensorTypeId_underlyingType id) noexcept: IdWrapper(id) {}
 
   friend class TensorTypeIdCreator;
-  friend std::ostream& operator<<(std::ostream&, TensorTypeId);
+  friend std::ostream& ::operator<<(std::ostream&, TensorTypeId);
 };
 
 }  // namespace c10

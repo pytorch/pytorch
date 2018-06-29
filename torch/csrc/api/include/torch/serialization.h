@@ -3,6 +3,7 @@
 #include <fstream>
 
 #include <torch/tensor.h>
+#include <torch/optim.h>
 
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
@@ -51,34 +52,34 @@ namespace detail {
 // wrt changes in ATen; see e.g. https://git.io/vxd6R
 // The mapping is consistent with the ScalarType enum as of pytorch version
 // v0.1.11-7675-ge94c67e.
-inline int32_t scalarTypeId(at::ScalarType type) {
+inline int32_t scalarTypeId(torch::Dtype type) {
   switch (type) {
-    case at::ScalarType::Byte: return 0;
-    case at::ScalarType::Char: return 1;
-    case at::ScalarType::Short: return 2;
-    case at::ScalarType::Int: return 3;
-    case at::ScalarType::Long: return 4;
-    case at::ScalarType::Half: return 5;
-    case at::ScalarType::Float: return 6;
-    case at::ScalarType::Double: return 7;
-    case at::ScalarType::Undefined: return 8;
+    case torch::Dtype::Byte: return 0;
+    case torch::Dtype::Char: return 1;
+    case torch::Dtype::Short: return 2;
+    case torch::Dtype::Int: return 3;
+    case torch::Dtype::Long: return 4;
+    case torch::Dtype::Half: return 5;
+    case torch::Dtype::Float: return 6;
+    case torch::Dtype::Double: return 7;
+    case torch::Dtype::Undefined: return 8;
     default:
       throw std::runtime_error(
           "Unknown scalar type: " + std::to_string(static_cast<int>(type)));
   }
 }
 
-inline at::ScalarType scalarTypeFromId(int32_t id) {
+inline torch::Dtype scalarTypeFromId(int32_t id) {
   switch (id) {
-    case 0: return at::ScalarType::Byte;
-    case 1: return at::ScalarType::Char;
-    case 2: return at::ScalarType::Short;
-    case 3: return at::ScalarType::Int;
-    case 4: return at::ScalarType::Long;
-    case 5: return at::ScalarType::Half;
-    case 6: return at::ScalarType::Float;
-    case 7: return at::ScalarType::Double;
-    case 8: return at::ScalarType::Undefined;
+    case 0: return torch::Dtype::Byte;
+    case 1: return torch::Dtype::Char;
+    case 2: return torch::Dtype::Short;
+    case 3: return torch::Dtype::Int;
+    case 4: return torch::Dtype::Long;
+    case 5: return torch::Dtype::Half;
+    case 6: return torch::Dtype::Float;
+    case 7: return torch::Dtype::Double;
+    case 8: return torch::Dtype::Undefined;
     default:
       throw std::runtime_error("Unknown scalar type id: " + std::to_string(id));
   }
@@ -113,18 +114,22 @@ inline at::Backend backendFromId(int32_t id) {
 } // namespace torch
 
 // This is super ugly and I don't know how to simplify it
-CEREAL_REGISTER_TYPE(torch::SGD);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::SGD);
-CEREAL_REGISTER_TYPE(torch::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::SGD);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::Adagrad);
-CEREAL_REGISTER_TYPE(torch::RMSprop);
+    torch::optim::Optimizer,
+    torch::optim::SGD);
+CEREAL_REGISTER_TYPE(torch::optim::Adagrad);
 CEREAL_REGISTER_POLYMORPHIC_RELATION(
-    torch::OptimizerImpl,
-    torch::RMSprop);
-CEREAL_REGISTER_TYPE(torch::Adam);
-CEREAL_REGISTER_POLYMORPHIC_RELATION(torch::OptimizerImpl, torch::Adam);
+    torch::optim::Optimizer,
+    torch::optim::Adagrad);
+CEREAL_REGISTER_TYPE(torch::optim::RMSprop);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::RMSprop);
+CEREAL_REGISTER_TYPE(torch::optim::Adam);
+CEREAL_REGISTER_POLYMORPHIC_RELATION(
+    torch::optim::Optimizer,
+    torch::optim::Adam);
 
 namespace cereal {
 
@@ -164,7 +169,7 @@ loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
 template <class Archive>
 void save(Archive& archive, torch::Tensor const& tensor) {
   if (!tensor.defined()) {
-    int32_t typeId = ::torch::detail::scalarTypeId(at::ScalarType::Undefined);
+    int32_t typeId = ::torch::detail::scalarTypeId(torch::Dtype::Undefined);
     archive(CEREAL_NVP(typeId));
     return;
   } else {
@@ -176,7 +181,7 @@ void save(Archive& archive, torch::Tensor const& tensor) {
   for (auto s : tensor.sizes()) {
     sizes.push_back(s);
   }
-  auto contig = tensor.toBackend(at::kCPU).contiguous();
+  auto contig = tensor.toBackend(torch::kCPU).contiguous();
   int32_t backend = ::torch::detail::backendId(tensor.data().type().backend());
 
   archive(CEREAL_NVP(backend), CEREAL_NVP(sizes));
@@ -194,11 +199,11 @@ void save(Archive& archive, torch::Tensor const& tensor) {
  **/
 template <class Archive>
 void load(Archive& archive, torch::Tensor& tensor) {
-  at::ScalarType type;
+  torch::Dtype type;
   int32_t typeId;
   archive(CEREAL_NVP(typeId));
   type = ::torch::detail::scalarTypeFromId(typeId);
-  if (type == at::ScalarType::Undefined) {
+  if (type == torch::Dtype::Undefined) {
     tensor = torch::Tensor();
     return;
   }
@@ -210,13 +215,13 @@ void load(Archive& archive, torch::Tensor& tensor) {
 
   at::Backend backend = ::torch::detail::backendFromId(backendId);
   if (!tensor.defined() || tensor.data().type().scalarType() != type) {
-    tensor = torch::empty({}, at::getType(backend, type));
+    tensor = torch::empty({}, torch::getType(backend, type));
   }
   tensor.data().resize_(sizes);
 
   if (tensor.type().is_cuda()) {
     // should actually use cudamemcpy probably
-    auto cputensor = at::empty(sizes, tensor.data().type().scalarType());
+    auto cputensor = torch::empty(sizes, tensor.data().type().scalarType());
     agimpl::loadBinary(
         archive,
         cputensor.data_ptr(),

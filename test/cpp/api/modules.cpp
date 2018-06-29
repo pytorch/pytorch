@@ -8,6 +8,7 @@
 #include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
 
@@ -21,10 +22,6 @@ class TestModel : public torch::nn::Module {
     l3 = register_module("l3", Linear(5, 100));
   }
 
-  std::vector<torch::Tensor> forward(std::vector<torch::Tensor> input) {
-    return input;
-  }
-
   Linear l1, l2, l3;
 };
 
@@ -36,21 +33,18 @@ class NestedModel : public torch::nn::Module {
     param_ = register_parameter("param", torch::empty({3, 2, 21}));
   }
 
-  std::vector<torch::Tensor> forward(std::vector<torch::Tensor> input) {
-    return input;
-  };
-
   torch::Tensor param_;
   Linear l1;
   std::shared_ptr<TestModel> t;
 };
 
 TEST_CASE("modules") {
+  torch::manual_seed(0);
   SECTION("conv") {
     SECTION("1d") {
       Conv1d model(Conv1dOptions(3, 2, 3).stride(2));
-      auto x = torch::randn({2, 3, 5}, at::requires_grad());
-      auto y = model->forward({x})[0];
+      auto x = torch::randn({2, 3, 5}, torch::requires_grad());
+      auto y = model->forward(x);
       torch::Tensor s = y.sum();
 
       s.backward();
@@ -65,8 +59,8 @@ TEST_CASE("modules") {
     SECTION("2d") {
       SECTION("even") {
         Conv2d model(Conv2dOptions(3, 2, 3).stride(2));
-        auto x = torch::randn({2, 3, 5, 5}, at::requires_grad());
-        auto y = model->forward({x})[0];
+        auto x = torch::randn({2, 3, 5, 5}, torch::requires_grad());
+        auto y = model->forward(x);
         torch::Tensor s = y.sum();
 
         s.backward();
@@ -81,8 +75,8 @@ TEST_CASE("modules") {
 
       SECTION("uneven") {
         Conv2d model(Conv2dOptions(3, 2, {3, 2}).stride({2, 2}));
-        auto x = torch::randn({2, 3, 5, 4}, at::requires_grad());
-        auto y = model->forward({x})[0];
+        auto x = torch::randn({2, 3, 5, 4}, torch::requires_grad());
+        auto y = model->forward(x);
         torch::Tensor s = y.sum();
 
         s.backward();
@@ -97,8 +91,8 @@ TEST_CASE("modules") {
     }
     SECTION("3d") {
       Conv3d model(Conv3dOptions(3, 2, 3).stride(2));
-      auto x = torch::randn({2, 3, 5, 5, 5}, at::requires_grad());
-      auto y = model->forward({x})[0];
+      auto x = torch::randn({2, 3, 5, 5, 5}, torch::requires_grad());
+      auto y = model->forward(x);
       torch::Tensor s = y.sum();
 
       s.backward();
@@ -115,8 +109,8 @@ TEST_CASE("modules") {
   SECTION("linear") {
     SECTION("basic1") {
       Linear model(5, 2);
-      auto x = torch::randn({10, 5}, at::requires_grad());
-      auto y = model->forward({x})[0];
+      auto x = torch::randn({10, 5}, torch::requires_grad());
+      auto y = model->forward(x);
       torch::Tensor s = y.sum();
 
       s.backward();
@@ -135,10 +129,10 @@ TEST_CASE("modules") {
     auto l2 = model->add(Linear(3, 5), "l2");
     auto l3 = model->add(Linear(5, 100), "l3");
 
-    auto x = torch::randn({1000, 10}, at::requires_grad());
-    x = l1->forward({x})[0].clamp_min(0);
-    x = l2->forward({x})[0].clamp_min(0);
-    x = l3->forward({x})[0].clamp_min(0);
+    auto x = torch::randn({1000, 10}, torch::requires_grad());
+    x = l1->forward(x).clamp_min(0);
+    x = l2->forward(x).clamp_min(0);
+    x = l3->forward(x).clamp_min(0);
 
     x.backward();
     REQUIRE(x.ndimension() == 2);
@@ -154,7 +148,7 @@ TEST_CASE("modules") {
       // Cannot get gradients to change indices (input) - only for embedding
       // params
       auto x = torch::full({10}, dict_size - 1, torch::kInt64);
-      auto y = model->forward({x})[0];
+      auto y = model->forward(x);
       torch::Tensor s = y.sum();
 
       s.backward();
@@ -169,7 +163,7 @@ TEST_CASE("modules") {
     SECTION("list") {
       Embedding model(6, 4);
       auto x = torch::full({2, 3}, 5, torch::kInt64);
-      auto y = model->forward({x})[0];
+      auto y = model->forward(x);
       torch::Tensor s = y.sum();
 
       s.backward();
@@ -182,19 +176,17 @@ TEST_CASE("modules") {
 
   SECTION("dropout") {
     Dropout dropout(0.5);
-    torch::Tensor x = torch::ones(100, at::requires_grad());
-    torch::Tensor y = dropout->forward({x})[0];
+    torch::Tensor x = torch::ones(100, torch::requires_grad());
+    torch::Tensor y = dropout->forward(x);
 
     y.backward();
     REQUIRE(y.ndimension() == 1);
     REQUIRE(y.size(0) == 100);
-    // TODO: These two tests are flaky
-    // https://github.com/pytorch/pytorch/issues/7286
-    // REQUIRE(y.sum().toCFloat() < 130); // Probably
-    // REQUIRE(y.sum().toCFloat() > 70); // Probably
+    REQUIRE(y.sum().toCFloat() < 130); // Probably
+    REQUIRE(y.sum().toCFloat() > 70); // Probably
 
     dropout->eval();
-    y = dropout->forward({x})[0];
+    y = dropout->forward(x);
     REQUIRE(y.data().sum().toCFloat() == 100);
   }
 
@@ -219,26 +211,42 @@ TEST_CASE("modules") {
   }
 
   SECTION("functional") {
-    bool was_called = false;
-    // clang-format off
-    auto functional = Functional([&was_called](std::vector<torch::Tensor> input) {
-      was_called = true;
-      return input;
-    });
-    // clang-format on
-    auto output = functional->forward({torch::ones(5, at::requires_grad())});
-    REQUIRE(was_called);
-    REQUIRE(output.size() == 1);
-    REQUIRE(output.front().equal(torch::ones(5, at::requires_grad())));
+    {
+      bool was_called = false;
+      auto functional = Functional([&was_called](torch::Tensor input) {
+        was_called = true;
+        return input;
+      });
+      auto output = functional->forward(torch::ones(5, torch::requires_grad()));
+      REQUIRE(was_called);
+      REQUIRE(output.equal(torch::ones(5, torch::requires_grad())));
+
+      was_called = false;
+      output = functional(torch::ones(5, torch::requires_grad()));
+      REQUIRE(was_called);
+      REQUIRE(output.equal(torch::ones(5, torch::requires_grad())));
+    }
+    {
+      auto functional = Functional(torch::relu);
+      REQUIRE(functional(torch::ones({})).data().toCFloat() == 1);
+      REQUIRE(functional(torch::ones({})).toCFloat() == 1);
+      REQUIRE(functional(torch::ones({}) * -1).toCFloat() == 0);
+    }
+    {
+      auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0);
+      REQUIRE(functional(torch::ones({})).toCFloat() == 0);
+    }
   }
 }
 
 TEST_CASE("modules_cuda", "[cuda]") {
+  torch::manual_seed(0);
   SECTION("1") {
     Linear model(5, 2);
     model->cuda();
-    auto x = torch::randn({10, 5}, at::device(at::kCUDA).requires_grad(true));
-    auto y = model->forward({x})[0];
+    auto x =
+        torch::randn({10, 5}, torch::device(torch::kCUDA).requires_grad(true));
+    auto y = model->forward(x);
     torch::Tensor s = y.sum();
 
     s.backward();
@@ -254,8 +262,8 @@ TEST_CASE("modules_cuda", "[cuda]") {
     Linear model(5, 2);
     model->cuda();
     model->cpu();
-    auto x = torch::randn({10, 5}, at::requires_grad());
-    auto y = model->forward({x})[0];
+    auto x = torch::randn({10, 5}, torch::requires_grad());
+    auto y = model->forward(x);
     torch::Tensor s = y.sum();
 
     s.backward();

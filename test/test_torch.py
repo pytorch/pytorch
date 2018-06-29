@@ -21,6 +21,7 @@ from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
     run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
+from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
     import numpy as np
@@ -4552,6 +4553,18 @@ class TestTorch(TestCase):
         forked_value = torch.rand(1000, generator=gen)
         self.assertEqual(target_value, forked_value, 0, "RNG has not forked correctly.")
 
+    def test_RNG_after_pickle(self):
+        torch.random.manual_seed(100)
+        before = torch.rand(10)
+
+        torch.random.manual_seed(100)
+        buf = io.BytesIO()
+        tensor = torch.Tensor([1, 2, 3])
+        ForkingPickler(buf, pickle.HIGHEST_PROTOCOL).dump(tensor)
+        after = torch.rand(10)
+
+        self.assertEqual(before, after, 0)
+
     def test_boxMullerState(self):
         torch.manual_seed(123)
         odd_number = 101
@@ -5526,7 +5539,7 @@ class TestTorch(TestCase):
         self.assertEqual(flat, src)
 
         # out of bounds index
-        with self.assertRaisesRegex(RuntimeError, 'dimension out of range'):
+        with self.assertRaisesRegex(RuntimeError, 'Dimension out of range'):
             src.flatten(5, 10)
 
         # invalid start and end
@@ -6668,10 +6681,7 @@ class TestTorch(TestCase):
             return module
 
         with filecontext_lambda() as checkpoint:
-            try:
-                fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.py')
-            except IOError:
-                fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.pyc')
+            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network1.py')
             module = import_module(tmpmodule_name, fname)
             torch.save(module.Net(), checkpoint)
 
@@ -6684,10 +6694,7 @@ class TestTorch(TestCase):
                     self.assertEquals(len(w), 0)
 
             # Replace the module with different source
-            try:
-                fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network2.py')
-            except IOError:
-                fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network2.pyc')
+            fname = get_file_path_2(os.path.dirname(__file__), 'data', 'network2.py')
             module = import_module(tmpmodule_name, fname)
             checkpoint.seek(0)
             with warnings.catch_warnings(record=True) as w:

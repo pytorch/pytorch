@@ -51,7 +51,7 @@ std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
 std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
   AT_ERROR("storage not supported on sparse");
 }
-std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const {
   AT_ERROR("storage not supported on sparse");
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {

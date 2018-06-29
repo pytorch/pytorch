@@ -1,0 +1,9 @@
+graph(%x : Dynamic) {
+  %1 : Dynamic = aten::zeros[size=[4, 3], dtype=6, device=[0, -1], layout=0]()
+  %2 : Dynamic = aten::mm(%x, %1)
+  %3 : int = prim::Constant[value={1}]()
+  %4 : Dynamic = prim::NumToTensor(%3)
+  %5 : Dynamic = aten::type_as(%4, %2)
+  %7 : Dynamic = aten::add[alpha={1}](%2, %5)
+  return (%7);
+}
