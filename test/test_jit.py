@@ -1080,26 +1080,18 @@ class TestJit(JitTestCase):
 
 
 class TestBatched(TestCase):
-    def assertEqual(self, xs, ybs, prec=None, message='', allow_inf=False):
-        if isinstance(ybs, torch.BatchTensor):
-            self.assertEqual(xs, ybs.examples(), prec, message, allow_inf)
-        elif isinstance(ybs, (list, tuple)):
-            for x, yb in zip(xs, ybs):
-                super(TestBatched, self).assertEqual(x, yb, prec, message, allow_inf)
-        else:
-            super(TestBatched, self).assertEqual(x, y, prec, message, allow_inf)
-
-    def mb_rand(self, *dims):
+    # generate random examples and create an batchtensor with them
+    def rand_batch(self, *dims):
         dims = [dim for dim in dims if dim != ()]
         xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
         xb = torch.BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
         return xs, xb
 
-    def test_create_from_list(self):
-        xs, batch = self.mb_rand(4, (True, 3), (False, 2), (True, 5))
-        self.assertEqual(xs, batch)
+    def test_create_batchtensor(self):
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2), (True, 5))
+        self.assertEqual(xs, batch.examples())
         batch2 = torch.BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
-        self.assertEqual(xs, batch2)
+        self.assertEqual(xs, batch2.examples())
 
 
 class TestScript(JitTestCase):
@@ -3943,7 +3935,6 @@ def func(t):
 
         self.assertExpected(str(script_fn.graph))
 
-    @unittest.skip('TODO: Python value resolution broken')
     def test_call_python_fn_from_script_module(self):
         def python_fn(x):
             return torch.neg(x)
@@ -3958,14 +3949,7 @@ def func(t):
                 return python_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # TODO: At the time of writing this test fails with:
-        # RuntimeError
-        # undefined value python_fn:
-        # @torch.jit.script_method
-        # def forward(self, x):
-        #     return python_fn(torch.mm(x, self.param))
-        #            ~~~~~~~~~ <--- HERE
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(str(sm.__getattr__('forward').graph))
 
     def test_call_python_mod_from_script_module(self):
         class PythonMod(torch.nn.Module):
@@ -3991,7 +3975,6 @@ def func(t):
         # are NOT inlined
         self.assertExpected(str(sm.graph))
 
-    @unittest.skip('TODO: Python value resolution broken')
     def test_call_tracing_fn_from_script_module(self):
         @torch.jit.trace(torch.rand(3, 3))
         def traced_fn(x):
@@ -4007,14 +3990,7 @@ def func(t):
                 return traced_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # FIXME: at the time of writing we fail with the following:
-        # RuntimeError:
-        # undefined value traced_fn:
-        # @torch.jit.script_method
-        # def forward(self, x):
-        #     return traced_fn(torch.mm(x, self.param))
-        #            ~~~~~~~~~ <--- HERE
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(str(sm.__getattr__('forward').graph))
 
     def test_call_tracing_mod_from_script_module(self):
         class TracedMod(torch.nn.Module):
@@ -4041,7 +4017,6 @@ def func(t):
         # inlined
         self.assertExpected(str(sm.graph))
 
-    @unittest.skip('TODO: Python value resolution broken')
     def test_call_script_fn_from_script_module(self):
         @torch.jit.script
         def script_fn(x):
@@ -4057,14 +4032,7 @@ def func(t):
                 return script_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # FIXME: at the time of writing, this failes with
-        # RuntimeError:
-        # undefined value traced_fn:
-        # @torch.jit.script_method
-        # def forward(self, x):
-        #     return traced_fn(torch.mm(x, self.param))
-        #            ~~~~~~~~~ <--- HERE
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(str(sm.__getattr__('forward').graph))
 
     def test_call_script_mod_from_script_module(self):
         class ScriptMod1(torch.jit.ScriptModule):
@@ -4481,7 +4449,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(3, 4),), verbose=True)
+        self.checkTrace(Sequence(), (torch.rand(3, 4),))
 
     def test_vae(self):
         class VAE(nn.Module):
@@ -4576,18 +4544,6 @@ class TestPytorchExportModes(JitTestCase):
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
-    'test___getitem___adv_index',
-    'test___getitem___adv_index_beg',
-    'test___getitem___adv_index_comb',
-    'test___getitem___adv_index_dup',
-    'test___getitem___adv_index_end',
-    'test___getitem___adv_index_mid',
-    'test___getitem___adv_index_sub',
-    'test___getitem___adv_index_sub_2',
-    'test___getitem___adv_index_sub_3',
-    'test___getitem___adv_index_var',
-    'test_unsqueeze_last_neg0',
-    'test_unsqueeze_middle_neg0',
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
@@ -4627,8 +4583,6 @@ EXCLUDE_SCRIPT = {
     'test_split_size_list',
     'test_split_size_list_dim',
     'test_split_size_list_dim_neg0',
-    'test_unsqueeze_last_neg0',
-    'test_unsqueeze_middle_neg0',
     'test_expand',
     'test_expand_1_element',
     'test_expand_new_dim',
