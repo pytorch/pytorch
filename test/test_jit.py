@@ -3920,7 +3920,6 @@ def func(t):
 
         self.assertExpected(str(script_fn.graph))
 
-    @unittest.skip('TODO: Python value resolution broken')
     def test_call_python_fn_from_script_module(self):
         def python_fn(x):
             return torch.neg(x)
@@ -3935,14 +3934,7 @@ def func(t):
                 return python_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # TODO: At the time of writing this test fails with:
-        # RuntimeError
-        # undefined value python_fn:
-        # @torch.jit.script_method
-        # def forward(self, x):
-        #     return python_fn(torch.mm(x, self.param))
-        #            ~~~~~~~~~ <--- HERE
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(str(sm.__getattr__('forward').graph))
 
     def test_call_python_mod_from_script_module(self):
         class PythonMod(torch.nn.Module):
@@ -3968,7 +3960,6 @@ def func(t):
         # are NOT inlined
         self.assertExpected(str(sm.graph))
 
-    @unittest.skip('TODO: Python value resolution broken')
     def test_call_tracing_fn_from_script_module(self):
         @torch.jit.trace(torch.rand(3, 3))
         def traced_fn(x):
@@ -3984,14 +3975,7 @@ def func(t):
                 return traced_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # FIXME: at the time of writing we fail with the following:
-        # RuntimeError:
-        # undefined value traced_fn:
-        # @torch.jit.script_method
-        # def forward(self, x):
-        #     return traced_fn(torch.mm(x, self.param))
-        #            ~~~~~~~~~ <--- HERE
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(str(sm.__getattr__('forward').graph))
 
     def test_call_tracing_mod_from_script_module(self):
         class TracedMod(torch.nn.Module):
@@ -4018,7 +4002,6 @@ def func(t):
         # inlined
         self.assertExpected(str(sm.graph))
 
-    @unittest.skip('TODO: Python value resolution broken')
     def test_call_script_fn_from_script_module(self):
         @torch.jit.script
         def script_fn(x):
@@ -4034,14 +4017,7 @@ def func(t):
                 return script_fn(torch.mm(x, self.param))
 
         sm = ScriptMod()
-        # FIXME: at the time of writing, this failes with
-        # RuntimeError:
-        # undefined value traced_fn:
-        # @torch.jit.script_method
-        # def forward(self, x):
-        #     return traced_fn(torch.mm(x, self.param))
-        #            ~~~~~~~~~ <--- HERE
-        self.assertExpected(str(sm.graph))
+        self.assertExpected(str(sm.__getattr__('forward').graph))
 
     def test_call_script_mod_from_script_module(self):
         class ScriptMod1(torch.jit.ScriptModule):
