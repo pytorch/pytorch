@@ -1,3 +1,4 @@
+# UBSAN triggers when compiling protobuf, so we need to disable it.
 set(UBSAN_FLAG "-fsanitize=undefined")
 
 macro(disable_ubsan)
