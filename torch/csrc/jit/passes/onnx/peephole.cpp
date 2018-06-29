@@ -259,6 +259,16 @@ void pushPackingPastRnn(Block *b) {
     newPackPadded->addInput(next->outputs()[0]);
     newPackPadded->addInput(n->inputs()[1]);
 
+    TensorType* oldType = rnn->inputs()[0]->type()->cast<TensorType>();
+    std::vector<int64_t> new_sizes;
+    new_sizes.push_back(oldType->sizes()[0]);
+    new_sizes.push_back(oldType->sizes()[1]);
+    new_sizes.push_back(rnn->i(attr::hidden_size));
+    TensorTypePtr newType = std::make_shared<TensorType>(oldType->scalarType(),
+                                                         oldType->device(),
+                                                         new_sizes);
+    next->outputs()[0]->setType(newType);
+
     it.destroyCurrent();
   }
 }
