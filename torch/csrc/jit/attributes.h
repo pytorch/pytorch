@@ -5,15 +5,10 @@
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
+#include "ATen/Utils.h"
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/assertions.h"
-
-#if defined(__clang__)
-#define __ubsan_ignore_vptr__ __attribute__((no_sanitize("vptr")))
-#else
-#define __ubsan_ignore_vptr__
-#endif
 
 namespace torch { namespace jit {
 

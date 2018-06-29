@@ -4,18 +4,14 @@
 #include <functional>
 #include <cmath>
 
+#include "ATen/Utils.h"
+
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
 #define __at_align32__ __declspec(align(32))
 #else
 #define __at_align32__
-#endif
-
-#if defined(__clang__)
-#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-#else
-#define __ubsan_ignore_float_divide_by_zero__
 #endif
 
 namespace at {

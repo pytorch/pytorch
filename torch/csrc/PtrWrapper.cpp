@@ -1,11 +1,6 @@
 #include "torch/csrc/python_headers.h"
+#include "ATen/Utils.h"
 #include <functional>
-
-#if defined(__clang__)
-#define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
-#else
-#define __ubsan_ignore_function__
-#endif
 
 static PyObject* THPWrapperClass = NULL;
 

@@ -6,12 +6,7 @@
 #endif
 
 #include "AVX.h"
-
-#if defined(__clang__)
-#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-#else
-#define __ubsan_ignore_float_divide_by_zero__
-#endif
+#include "ATen/Utils.h"
 
 void THDoubleVector_copy_AVX(double *y, const double *x, const ptrdiff_t n) {
   ptrdiff_t i;
