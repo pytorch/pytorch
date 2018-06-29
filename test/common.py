@@ -55,6 +55,7 @@ PY34 = sys.version_info >= (3, 4)
 
 IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
+IN_SANDCASTLE = 'IN_SANDCASTLE' in os.environ
 
 TEST_NUMPY = True
 try:
