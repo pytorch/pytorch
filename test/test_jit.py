@@ -4434,7 +4434,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(3, 4),), verbose=True)
+        self.checkTrace(Sequence(), (torch.rand(3, 4),))
 
     def test_vae(self):
         class VAE(nn.Module):
