@@ -96,6 +96,8 @@ if(NOT CUDNN_FOUND)
   message(WARNING
     "Caffe2: Cannot find cuDNN library. Turning the option off")
   set(CAFFE2_USE_CUDNN OFF)
+else()
+  set(CAFFE2_USE_CUDNN ON)
 endif()
 
 # Optionally, find TensorRT
@@ -298,16 +300,21 @@ else()
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=onnx_c2")
 endif()
 
-# CUDA 9.x requires GCC version <= 6
+# CUDA 9.0 & 9.1 require GCC version <= 5
+# Although they support GCC 6, but a bug that wasn't fixed until 9.2 prevents
+# them from compiling the std::tuple header of GCC 6.
+# See Sec. 2.2.1 of
+# https://developer.download.nvidia.com/compute/cuda/9.2/Prod/docs/sidebar/CUDA_Toolkit_Release_Notes.pdf
 if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
     (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
   if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 7.0 AND
+      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
       CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
     message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with GCC version >= 7. "
-      "Use the following option to use another version (for example): \n"
-      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-6\n")
+      "CUDA ${CUDA_VERSION} is not compatible with std::tuple from GCC version "
+      ">= 6. Please upgrade to CUDA 9.2 or use the following option to use "
+      "another version (for example): \n"
+      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
   endif()
 elseif (CUDA_VERSION VERSION_EQUAL 8.0)
   # CUDA 8.0 requires GCC version <= 5

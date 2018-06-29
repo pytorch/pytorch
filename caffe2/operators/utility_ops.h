@@ -1407,6 +1407,68 @@ class RangeOp : public Operator<Context> {
   TensorCPU local_;
 };
 
+class ThrowExceptionOp : public Operator<CPUContext> {
+ public:
+  ThrowExceptionOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Exception from ThrowExceptionOp")) {}
+
+  bool RunOnDevice() override {
+    CAFFE_THROW(message_);
+  }
+
+ private:
+  const std::string message_;
+};
+
+class ThrowChildThreadExceptionOp : public Operator<CPUContext> {
+ public:
+  ThrowChildThreadExceptionOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Exception from ThrowChildThreadExceptionOp")) {}
+
+  bool RunOnDevice() override {
+    std::thread t([this]() { CAFFE_THROW(this->message_); });
+
+    t.join();
+    return true;
+  }
+
+ private:
+  const std::string message_;
+};
+
+class LogFatalOp : public Operator<CPUContext> {
+ public:
+  LogFatalOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Logging from LogFatalOp")) {}
+
+  bool RunOnDevice() override {
+    LOG(FATAL) << message_;
+    return true;
+  }
+
+ private:
+  const std::string message_;
+};
+
+class FailOp : public Operator<CPUContext> {
+ public:
+  FailOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    return false;
+  }
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_UTILITY_OPS_H_

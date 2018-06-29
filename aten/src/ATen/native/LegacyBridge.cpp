@@ -6,12 +6,8 @@
 namespace at { namespace native {
 
 namespace {
-  // NB: Even though some of the functions we have ported are CUDA
-  // friendly, flipping the switch between native and non-native is
-  // an all or nothing affair, because the internal representation
-  // is different
   static bool _type_has_native(const Type& dtype) {
-    return dtype.is_sparse() && !dtype.is_cuda();
+    return dtype.is_sparse();
   }
 
   static bool _has_native(const Tensor& self) {
@@ -74,18 +70,6 @@ Tensor& zero_(Tensor& self) {
   }
 }
 
-// Note [CPU sparse is globally native]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// The current state of affairs is as follows:
-//
-//  - CPU sparse functionality is implemented natively
-//  - CUDA sparse functionality, and all other functionality, are implemented
-//    in TH.
-//
-// Thus, we need these trampoline functions, to help us decide whether or
-// not we can go to native implementations or not.  We expect the trampolines
-// to go away when things get ported to native for real.
-
 // Note [Multiple dispatch to sparse]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // In an ideal world, we would use direct support for multiple dispatch to
@@ -99,14 +83,14 @@ Tensor& zero_(Tensor& self) {
 // We are in neither of those worlds.  Instead, we have a th_add function
 // which has legacy implementations in the single dispatch world, BUT our
 // actual add function needs to call s_native_add if the function *would have*
-// utilized a kernel implemented in THS (CPU sparse tensors).
+// utilized a sparse kernel that is natively implemented.
 //
 // th_add is "good old single dispatch" which internally handles the is_sparse()
 // test and also handles broadcasting.  s_native_add works asymmetrically:
 // it doesn't handle broadcasting at all, and it ASSUMES that the relevant
-// argument is a CPU sparse tensor.  Why the asymmetry?  It turns out it is not
+// argument is a sparse tensor.  Why the asymmetry?  It turns out it is not
 // so easy to figure out if a kernel is implemented in THS; it's not as simple
-// as testing if the first argument is CPU and sparse, because, e.g.,
+// as testing if the first argument is sparse, because, e.g.,
 // in add(Dense, Sparse), the sparse kernel is in the second argument.  So,
 // the trampoline function is going to know about the overloads *anyway*; it
 // might as well also handle is_sparse() and broadcasting while it's at it.
@@ -116,23 +100,19 @@ Tensor& zero_(Tensor& self) {
 // done it.
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
-  if (!self.is_cuda()) {
-    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
-    auto self_sparse = self.is_sparse();
-    auto other_sparse = other.is_sparse();
-    if (self_sparse && other_sparse) {
-      Tensor b_self, b_other;
-      std::tie(b_self, b_other) = expand_outplace(self, other, "add_out");
-      return s_native_add_out(result, b_self, b_other, alpha);
-    } else if (!self_sparse && other_sparse) {
-      // TODO: Perhaps doing overload selection with SparseTensorRef is
-      // confusing, and we should have given these overloads different names.
-      // For now, we do it this way for consistency with the TH bindings
-      // (not that it is terribly consistent anyway).
-      return native_add_out(result, self, SparseTensorRef(other), alpha);
-    } else {
-      return th_add_out(result, self, other, alpha);
-    }
+  // See Note [Multiple dispatch to sparse]
+  auto self_sparse = self.is_sparse();
+  auto other_sparse = other.is_sparse();
+  if (self_sparse && other_sparse) {
+    Tensor b_self, b_other;
+    std::tie(b_self, b_other) = expand_outplace(self, other, "add_out");
+    return s_native_add_out(result, b_self, b_other, alpha);
+  } else if (!self_sparse && other_sparse) {
+    // TODO: Perhaps doing overload selection with SparseTensorRef is
+    // confusing, and we should have given these overloads different names.
+    // For now, we do it this way for consistency with the TH bindings
+    // (not that it is terribly consistent anyway).
+    return native_add_out(result, self, SparseTensorRef(other), alpha);
   } else {
     return th_add_out(result, self, other, alpha);
   }
@@ -147,38 +127,30 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
 // alone for now.
 
 Tensor add(const Tensor& self, const Tensor& other, Scalar alpha) {
-  if (!self.is_cuda()) {
-    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
-    auto self_sparse = self.is_sparse();
-    auto other_sparse = other.is_sparse();
-    if (self_sparse && other_sparse) {
-      Tensor b_self, b_other;
-      std::tie(b_self, b_other) = expand_outplace(self, other, "add");
-      return s_native_add(b_self, b_other, alpha);
-    } else if (!self_sparse && other_sparse) {
-      return native_add(self, SparseTensorRef(other), alpha);
-    } else {
-      return th_add(self, other, alpha);
-    }
+  // See Note [Multiple dispatch to sparse]
+  auto self_sparse = self.is_sparse();
+  auto other_sparse = other.is_sparse();
+  if (self_sparse && other_sparse) {
+    Tensor b_self, b_other;
+    std::tie(b_self, b_other) = expand_outplace(self, other, "add");
+    return s_native_add(b_self, b_other, alpha);
+  } else if (!self_sparse && other_sparse) {
+    return native_add(self, SparseTensorRef(other), alpha);
   } else {
     return th_add(self, other, alpha);
   }
 }
 
 Tensor& add_(Tensor& self, const Tensor& other, Scalar alpha) {
-  if (!self.is_cuda()) {
-    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
-    auto self_sparse = self.is_sparse();
-    auto other_sparse = other.is_sparse();
-    if (self_sparse && other_sparse) {
-      Tensor b_other;
-      std::tie(b_other) = expand_inplace(self, other, "add_");
-      return s_native_add_(self, b_other, alpha);
-    } else if (!self_sparse && other_sparse) {
-      return native_add_(self, SparseTensorRef(other), alpha);
-    } else {
-      return th_add_(self, other, alpha);
-    }
+  // See Note [Multiple dispatch to sparse]
+  auto self_sparse = self.is_sparse();
+  auto other_sparse = other.is_sparse();
+  if (self_sparse && other_sparse) {
+    Tensor b_other;
+    std::tie(b_other) = expand_inplace(self, other, "add_");
+    return s_native_add_(self, b_other, alpha);
+  } else if (!self_sparse && other_sparse) {
+    return native_add_(self, SparseTensorRef(other), alpha);
   } else {
     return th_add_(self, other, alpha);
   }
@@ -296,47 +268,35 @@ Tensor& div_(Tensor& self, Scalar other) {
 }
 
 Tensor& addmm_out(Tensor& result, const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  if (!self.is_cuda()) {
-    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
-    auto mat1_sparse = mat1.is_sparse();
-    if (mat1_sparse) {
-      Tensor b_self;
-      std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
-      return s_native_addmm_out(result, b_self, mat1, mat2, beta, alpha);
-    } else {
-      return th_addmm_out(result, self, mat1, mat2, beta, alpha);
-    }
+  // See Note [Multiple dispatch to sparse]
+  auto mat1_sparse = mat1.is_sparse();
+  if (mat1_sparse) {
+    Tensor b_self;
+    std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm_out");
+    return s_native_addmm_out(result, b_self, mat1, mat2, beta, alpha);
   } else {
     return th_addmm_out(result, self, mat1, mat2, beta, alpha);
   }
 }
 
 Tensor addmm(const Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  if (!self.is_cuda()) {
-    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
-    auto mat1_sparse = mat1.is_sparse();
-    if (mat1_sparse) {
-      Tensor b_self;
-      std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
-      return s_native_addmm(b_self, mat1, mat2, beta, alpha);
-    } else {
-      return th_addmm(self, mat1, mat2, beta, alpha);
-    }
+  // See Note [Multiple dispatch to sparse]
+  auto mat1_sparse = mat1.is_sparse();
+  if (mat1_sparse) {
+    Tensor b_self;
+    std::tie(b_self) = expand_size(self, {mat1.size(0), mat2.size(1)}, "addmm");
+    return s_native_addmm(b_self, mat1, mat2, beta, alpha);
   } else {
     return th_addmm(self, mat1, mat2, beta, alpha);
   }
 }
 
 Tensor& addmm_(Tensor& self, const Tensor& mat1, const Tensor& mat2, Scalar beta, Scalar alpha) {
-  if (!self.is_cuda()) {
-    // See Note [CPU sparse is globally native] and Note [Multiple dispatch to sparse]
-    auto mat1_sparse = mat1.is_sparse();
-    if (mat1_sparse) {
-      // inplace is not broadcasting
-      return s_native_addmm_(self, mat1, mat2, beta, alpha);
-    } else {
-      return th_addmm_(self, mat1, mat2, beta, alpha);
-    }
+  // See Note [Multiple dispatch to sparse]
+  auto mat1_sparse = mat1.is_sparse();
+  if (mat1_sparse) {
+    // inplace is not broadcasting
+    return s_native_addmm_(self, mat1, mat2, beta, alpha);
   } else {
     return th_addmm_(self, mat1, mat2, beta, alpha);
   }
@@ -360,128 +320,23 @@ Tensor tensor(const Type& dtype, ArrayRef<int64_t> size) {
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values) {
-  if (!indices.is_cuda()) {
-    return values.type().toSparse().native_sparse_coo_tensor(indices, values);
-  } else {
-    return values.type().toSparse().th_sparse_coo_tensor(indices, values);
-  }
+  return values.type().toSparse().native_sparse_coo_tensor(indices, values);
 }
 
 Tensor sparse_coo_tensor(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
-  if (!indices.is_cuda()) {
-    return values.type().toSparse().native_sparse_coo_tensor(indices, values, size);
-  } else {
-    return values.type().toSparse().th_sparse_coo_tensor(indices, values, size);
-  }
+  return values.type().toSparse().native_sparse_coo_tensor(indices, values, size);
 }
 
 Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values, ArrayRef<int64_t> size) {
-  if (!indices.is_cuda()) {
-    return values.type().toSparse()._native_sparse_coo_tensor_unsafe(indices, values, size);
-  } else {
-    return values.type().toSparse()._th_sparse_coo_tensor_unsafe(indices, values, size);
-  }
+  return values.type().toSparse()._native_sparse_coo_tensor_unsafe(indices, values, size);
 }
 
-
-Tensor& sparse_raw_resize_(Tensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
+int64_t get_device(const Tensor& self) {
   if (_has_native(self)) {
-    return native_sparse_raw_resize_(self, size, sparseDims, denseDims);
+    return native_get_device(self);
   } else {
-    return th_sparse_raw_resize_(self, size, sparseDims, denseDims);
+    return _th_get_device(self);
   }
 }
-
-
-Tensor _sparse_mask(const Tensor& self, SparseTensorRef mask) {
-  if (!self.is_cuda()) {
-    return _native_sparse_mask(self, mask);
-  } else {
-    return self._th_sparse_mask(mask);
-  }
-}
-
-Tensor to_dense(const Tensor& self) {
-  if (_has_native(self)) {
-    return native_to_dense(self);
-  } else {
-    return th_to_dense(self);
-  }
-}
-
-int64_t _sparseDims(const Tensor& self) {
-  if (_has_native(self)) {
-    return _native_sparseDims(self);
-  } else {
-    return _th_sparseDims(self);
-  }
-}
-
-int64_t _denseDims(const Tensor& self) {
-  if (_has_native(self)) {
-    return _native_denseDims(self);
-  } else {
-    return _th_denseDims(self);
-  }
-}
-
-int64_t _nnz(const Tensor& self) {
-  if (_has_native(self)) {
-    return _native_nnz(self);
-  } else {
-    return _th_nnz(self);
-  }
-}
-
-Tensor coalesce(const Tensor& self) {
-  if (_has_native(self)) {
-    return native_coalesce(self);
-  } else {
-    return th_coalesce(self);
-  }
-}
-
-bool is_coalesced(const Tensor& self) {
-  if (_has_native(self)) {
-    return native_is_coalesced(self);
-  } else {
-    return th_is_coalesced(self);
-  }
-}
-
-Tensor _indices(const Tensor& self) {
-  if (_has_native(self)) {
-    return _native_indices(self);
-  } else {
-    return _th_indices(self);
-  }
-}
-
-Tensor _values(const Tensor& self) {
-  if (_has_native(self)) {
-    return _native_values(self);
-  } else {
-    return _th_values(self);
-  }
-}
-
-
-Tensor& hspmm_out(Tensor& result, const Tensor& mat1, const Tensor& mat2) {
-  if (_has_native(mat1)) {
-    return native_hspmm_out(result, mat1, mat2);
-  } else {
-    return th_hspmm_out(result, mat1, mat2);
-  }
-}
-
-Tensor hspmm(const Tensor& mat1, const Tensor& mat2) {
-  if (_has_native(mat1)) {
-    return native_hspmm(mat1, mat2);
-  } else {
-    return th_hspmm(mat1, mat2);
-  }
-}
-
-
 
 }} // namespace at::native

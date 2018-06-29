@@ -60,6 +60,9 @@ _(prim, TupleConstruct) \
 _(prim, TupleUnpack) \
 _(prim, NumToTensor) \
 _(prim, TensorToNum) \
+_(prim, AutogradAdd) \
+_(prim, GradOf) \
+_(prim, AnyDefined)
 /* end */
 
 // Workaround for some not-yet-defined ATen symbols, see
@@ -129,6 +132,7 @@ _(attr, sizes) \
 _(attr, starts) \
 _(attr, transA) \
 _(attr, transB) \
+_(attr, name)
 /* end */
 
 #define FORALL_ATTR_SYMBOLS(_) \

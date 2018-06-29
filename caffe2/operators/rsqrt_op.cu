@@ -4,24 +4,21 @@
 #include <functional>
 
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/math_utils.h"
 
 namespace caffe2 {
 
 namespace {
 
 template <typename T>
-inline __host__ __device__ T CubeCUDA(const T x) {
-  return x * x * x;
-}
-
-template <typename T>
 __global__ void
-RSqrtGradientCUDAKernel(const int size, const T* dY, const T* Y, T* dX) {
+RsqrtGradientCUDAKernel(const int size, const T* dY, const T* Y, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, size) {
 #if __CUDA_ARCH__ >= 350
-    dX[i] = __ldg(dY + i) * CubeCUDA(__ldg(Y + i)) * static_cast<T>(-0.5);
+    dX[i] = __ldg(dY + i) * math::utils::Cube<T>(__ldg(Y + i)) *
+        static_cast<T>(-0.5);
 #else
-    dX[i] = dY[i] * CubeCUDA(Y[i]) * static_cast<T>(-0.5);
+    dX[i] = dY[i] * math::utils::Cube<T>(Y[i]) * static_cast<T>(-0.5);
 #endif
   }
 }
@@ -30,7 +27,7 @@ RSqrtGradientCUDAKernel(const int size, const T* dY, const T* Y, T* dX) {
 
 template <>
 template <typename T>
-bool RSqrtGradientFunctor<CUDAContext>::Forward(
+bool RsqrtGradientFunctor<CUDAContext>::Forward(
     const std::vector<int>& dY_dims,
     const std::vector<int>& /* Y_dims */,
     const T* dY,
@@ -39,7 +36,7 @@ bool RSqrtGradientFunctor<CUDAContext>::Forward(
     CUDAContext* context) const {
   const int size = std::accumulate(
       dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
-  RSqrtGradientCUDAKernel<T>
+  RsqrtGradientCUDAKernel<T>
       <<<CAFFE_GET_BLOCKS(size),
          CAFFE_CUDA_NUM_THREADS,
          0,
@@ -48,16 +45,16 @@ bool RSqrtGradientFunctor<CUDAContext>::Forward(
 }
 
 REGISTER_CUDA_OPERATOR(
-    RSqrt,
+    Rsqrt,
     UnaryElementwiseOp<
         TensorTypes<float>,
         CUDAContext,
-        RSqrtFunctor<CUDAContext>>);
+        RsqrtFunctor<CUDAContext>>);
 REGISTER_CUDA_OPERATOR(
-    RSqrtGradient,
+    RsqrtGradient,
     BinaryElementwiseOp<
         TensorTypes<float>,
         CUDAContext,
-        RSqrtGradientFunctor<CUDAContext>>);
+        RsqrtGradientFunctor<CUDAContext>>);
 
 } // namespace caffe2
