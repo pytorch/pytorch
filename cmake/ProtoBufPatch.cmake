@@ -29,7 +29,7 @@ foreach(ns ${NAMESPACES})
   string(
     REPLACE
     "namespace ${ns} {"
-    "namespace ${ns} { ExplicitlyConstructed< ::std::string>& fixed_address_empty_string(); const ::std::string& GetEmptyStringAlreadyInited(); const ::std::string& GetEmptyString()"
+    "namespace ${ns} { ExplicitlyConstructed< ::std::string>& fixed_address_empty_string(); const ::std::string& GetEmptyStringAlreadyInited(); const ::std::string& GetEmptyString();"
     content
     "${content}")
 endforeach()
