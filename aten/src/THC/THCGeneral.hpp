@@ -20,6 +20,7 @@ struct THCState {
   THAllocator* cudaHostAllocator;
   THAllocator* cudaUVAAllocator;
   THCDeviceAllocator* cudaDeviceAllocator;
+  void* cudaDeviceAllocatorState;
 
   /* Index of the current selected BLAS handle. The actual BLAS handle used
      depends on the current device. */

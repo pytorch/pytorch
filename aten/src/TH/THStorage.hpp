@@ -44,7 +44,7 @@ typedef struct THStorage
     std::atomic<int> refcount;
     std::atomic<int> weakcount;
     char flag;
-    void *allocatorVoidPtr; // Either THDeviceAllocator or THCDeviceAllocator
+    at::Allocator *allocator;
     void *allocatorContext;
     std::unique_ptr<THFinalizer> finalizer;
     struct THStorage *view;

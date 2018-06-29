@@ -18,6 +18,6 @@ EXPORT_API void libshm_init(const char *manager_exec_path);
 EXPORT_API libshm_context * libshm_context_new(const char *manager_handle, const char *filename, int flags);
 EXPORT_API void libshm_context_free(libshm_context *context);
 
-extern THAllocator THManagedSharedAllocator;
+EXPORT_API THAllocator * getTHManagedSharedAllocator();
 
 #endif

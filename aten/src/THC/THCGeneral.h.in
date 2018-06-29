@@ -49,14 +49,7 @@ typedef struct THCStream THCStream;
 typedef struct THCState THCState;
 struct THCState;
 
-typedef struct _THCDeviceAllocator {
-   cudaError_t (*malloc)( void*, void**, size_t,         cudaStream_t);
-   cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
-   cudaError_t (*free)(void*, void*);
-   cudaError_t (*emptyCache)(void*);
-   cudaError_t  (*cacheInfo)(void*, int, size_t*, size_t*);
-   void* state;
-} THCDeviceAllocator;
+typedef THAllocator THCDeviceAllocator;
 
 typedef struct _THCCudaResourcesPerDevice {
   /* Number of materialized cuBLAS handles */
@@ -99,7 +92,7 @@ THC_API struct THCRNGState* THCState_getRngState(THCState* state);
 THC_API THAllocator* THCState_getCudaHostAllocator(THCState* state);
 THC_API THAllocator* THCState_getCudaUVAAllocator(THCState* state);
 THC_API THCDeviceAllocator* THCState_getDeviceAllocator(THCState* state);
-THC_API void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator);
+THC_API void THCState_setDeviceAllocator(THCState* state, THCDeviceAllocator* allocator, void* allocator_ctx);
 THC_API int THCState_isCachingAllocatorEnabled(THCState* state);
 
 THC_API void THCMagma_init(THCState *state);
@@ -144,8 +137,8 @@ THC_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line
 THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
 
-THC_API cudaError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
-THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
+THC_API void* THCudaMalloc(THCState *state, size_t size);
+THC_API void THCudaFree(THCState *state, void *ptr);
 THC_API void* THCudaHostAlloc(THCState *state, size_t size);
 THC_API void THCudaHostFree(THCState *state, void *ptr);
 THC_API void THCudaHostRecord(THCState *state, void *ptr);

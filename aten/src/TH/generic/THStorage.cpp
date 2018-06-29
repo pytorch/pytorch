@@ -30,7 +30,7 @@ THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 }
 
 THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
-                                        THAllocator *allocator,
+                                        at::Allocator *allocator,
                                         void *allocatorContext)
 {
   return THStorage_newWithAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), size, allocator, allocatorContext);
@@ -111,7 +111,7 @@ THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
 }
 
 THStorage* THStorage_(newWithDataAndAllocator)(real* data, ptrdiff_t size,
-                                               THAllocator* allocator,
+                                               at::Allocator* allocator,
                                                void* allocatorContext) {
   return THStorage_newWithDataAndAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), data, size, allocator, allocatorContext);
 }

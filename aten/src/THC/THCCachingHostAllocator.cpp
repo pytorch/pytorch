@@ -274,8 +274,16 @@ void THCCachingHostAllocator_emptyCache()
   allocator.emptyCache();
 }
 
-THAllocator THCCachingHostAllocator = {
-  &THCCachingHostAllocator_malloc,
-  NULL,
-  &THCCachingHostAllocator_free,
+struct THCCachingHostAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    return THCCachingHostAllocator_malloc(ctx, size);
+  }
+  void deallocate(void* ctx, void* ptr) const override {
+    return THCCachingHostAllocator_free(ctx, ptr);
+  }
 };
+
+static THCCachingHostAllocator thc_caching_host_allocator;
+at::Allocator* getTHCCachingHostAllocator() {
+  return &thc_caching_host_allocator;
+}

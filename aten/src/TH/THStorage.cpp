@@ -29,7 +29,7 @@ void THStorage_free(THStorage *storage) {
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
       if (storage->flag & TH_STORAGE_FREEMEM) {
-        static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
+        storage->allocator->deallocate(storage->allocatorContext, storage->data_ptr);
       }
       if (storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);
@@ -105,23 +105,23 @@ THStorage* THStorage_new(at::ScalarType scalar_type)
 
 THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
 {
-  return THStorage_newWithAllocator(scalar_type, size, &THDefaultAllocator, nullptr);
+  return THStorage_newWithAllocator(scalar_type, size, getTHDefaultAllocator(), nullptr);
 }
 
 THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
-                                      THAllocator *allocator,
+                                      at::Allocator *allocator,
                                       void *allocatorContext)
 {
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->backend = at::kCPU;
   storage->scalar_type = scalar_type;
-  storage->data_ptr = allocator->malloc(allocatorContext, at::elementSize(scalar_type)*size);
+  storage->data_ptr = allocator->allocate(allocatorContext, at::elementSize(scalar_type)*size);
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
   new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocatorVoidPtr = allocator;
+  storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
   storage->device = INT_MIN;  // device is not meaningful on CPU
   return storage;
@@ -142,7 +142,7 @@ THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *file
   THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
 
   THStorage *storage = THStorage_newWithAllocator(scalar_type, size,
-                                                  &THMapAllocator,
+                                                  getTHMapAllocator(),
                                                   ctx);
 
   if (size <= 0) {
@@ -187,7 +187,7 @@ int THStorage_retainIfLive(THStorage *storage)
 THStorage* THStorage_newWithData(at::ScalarType scalar_type, void *data, ptrdiff_t size)
 {
   return THStorage_newWithDataAndAllocator(scalar_type, data, size,
-                                           &THDefaultAllocator, NULL);
+                                           getTHDefaultAllocator(), NULL);
 }
 
 THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
@@ -203,7 +203,7 @@ THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
   new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
   new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocatorVoidPtr = allocator;
+  storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
   storage->device = 0;
   return storage;
@@ -213,38 +213,28 @@ void THStorage_resize(THStorage *storage, ptrdiff_t size)
 {
   AT_ASSERT(storage->backend == at::kCPU);
 
-  auto* th_allocator = static_cast<THAllocator*>(storage->allocatorVoidPtr);
-
   if (storage->flag & TH_STORAGE_RESIZABLE)
   {
-    if (th_allocator->realloc == nullptr) {
-      /* case when the allocator does not have a realloc defined */
-      void *old_data = storage->data_ptr;
-      ptrdiff_t old_size = storage->size;
-      if (size == 0) {
-        storage->data_ptr = nullptr;
-      } else {
-        storage->data_ptr = th_allocator->malloc(
-            storage->allocatorContext,
-            at::elementSize(storage->scalar_type)*size);
-      }
-      storage->size = size;
-      if (old_data != nullptr) {
-        ptrdiff_t copy_size = old_size;
-        if (storage->size < copy_size) {
-          copy_size = storage->size;
-        }
-        if (copy_size > 0) {
-          memcpy(storage->data_ptr, old_data, at::elementSize(storage->scalar_type)*copy_size);
-        }
-        th_allocator->free(storage->allocatorContext, old_data);
-      }
+    /* case when the allocator does not have a realloc defined */
+    void *old_data = storage->data_ptr;
+    ptrdiff_t old_size = storage->size;
+    if (size == 0) {
+      storage->data_ptr = nullptr;
     } else {
-      storage->data_ptr = th_allocator->realloc(
-              storage->allocatorContext,
-              storage->data_ptr,
-              at::elementSize(storage->scalar_type)*size);
-      storage->size = size;
+      storage->data_ptr = storage->allocator->allocate(
+          storage->allocatorContext,
+          at::elementSize(storage->scalar_type)*size);
+    }
+    storage->size = size;
+    if (old_data != nullptr) {
+      ptrdiff_t copy_size = old_size;
+      if (storage->size < copy_size) {
+        copy_size = storage->size;
+      }
+      if (copy_size > 0) {
+        memcpy(storage->data_ptr, old_data, at::elementSize(storage->scalar_type)*copy_size);
+      }
+      storage->allocator->deallocate(storage->allocatorContext, old_data);
     }
   } else {
     THError("Trying to resize storage that is not resizable");
@@ -258,7 +248,7 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
     SWAP(size);
     SWAP(flag);
     // don't swap refcount!
-    SWAP(allocatorVoidPtr);
+    SWAP(allocator);
     SWAP(allocatorContext);
     SWAP(view);
     SWAP(device);
