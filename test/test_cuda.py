@@ -14,7 +14,8 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3, IS_WINDOWS
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3, \
+    IS_WINDOWS, IN_SANDCASTLE
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -1468,6 +1469,7 @@ class TestCuda(TestCase):
         except RuntimeError as e:
             return e
 
+    @unittest.skipIf(IN_SANDCASTLE, "timed out in Sandcastle")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \

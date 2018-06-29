@@ -20,7 +20,8 @@ from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
-    run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3
+    run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, PY3, \
+    IN_SANDCASTLE
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
@@ -2389,6 +2390,7 @@ class TestTorch(TestCase):
         except RuntimeError as e:
             return 'invalid multinomial distribution' in str(e)
 
+    @unittest.skipIf(IN_SANDCASTLE, "timed out in Sandcastle")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
