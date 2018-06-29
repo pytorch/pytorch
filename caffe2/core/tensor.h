@@ -10,10 +10,10 @@
 #include <vector>
 
 #include "caffe2/core/common.h"
-#include "caffe2/core/flags.h"
 #include "caffe2/core/context.h"
-#include "caffe2/core/typeid.h"
+#include "caffe2/core/flags.h"
 #include "caffe2/core/logging.h"
+#include "caffe2/core/typeid.h"
 
 // A global boolean variable to control whether we free memory when a Tensor
 // is shrinked to a smaller size. As a result, a Tensor is always going to
@@ -81,21 +81,21 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
 }
 
 /**
- * @brief Tensor is the basic class in Caffe2 that stores a contiguous memory
- * with its shape information.
+ * @brief TensorImpl is the implementation of a tensor and the basic class
+ * in Caffe2 that stores a contiguous memory with its shape information.
  *
- * The Tensor class is essentially a wrapper around a device-specific memory
+ * The TensorImpl class is essentially a wrapper around a device-specific memory
  * (the device is specified by the Context template argument), and deals with
  * the allocation and de-allocation of such memory. We make a simplified
  * assumption that the memory is always contiguous.
  */
 template <class Context>
-class Tensor {
+class TensorImpl {
  public:
   /**
    * Initializes an empty tensor.
    */
-  Tensor() {}
+  TensorImpl() {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -103,8 +103,12 @@ class Tensor {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
-  explicit Tensor(const vector<TIndex>& dims) { Resize(dims); }
-  explicit Tensor(const vector<int>& dims) { Resize(dims); }
+  explicit TensorImpl(const vector<TIndex>& dims) {
+    Resize(dims);
+  }
+  explicit TensorImpl(const vector<int>& dims) {
+    Resize(dims);
+  }
 
   /**
    * @brief Creates a tensor from a source tensor, copying over the content.
@@ -117,7 +121,7 @@ class Tensor {
    * be noted that this will cause a potential performance hit.
    */
   template <class SrcContext, class ContextForCopy>
-  Tensor(const Tensor<SrcContext>& src, ContextForCopy* context) {
+  TensorImpl(const TensorImpl<SrcContext>& src, ContextForCopy* context) {
     CopyFrom(src, context);
   }
 
@@ -133,7 +137,7 @@ class Tensor {
    * constructor and it should be definitely explicit.
    */
   template <class SrcContext>
-  explicit Tensor(const Tensor<SrcContext>& src) {
+  explicit TensorImpl(const TensorImpl<SrcContext>& src) {
     CopyFrom(src);
   }
 
@@ -141,21 +145,27 @@ class Tensor {
    * @brief Creates a tensor, and fills its contents with the given values.
    */
   template <typename T>
-  Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
+  TensorImpl(
+      const vector<TIndex>& dims,
+      const vector<T>& values,
+      Context* context)
       : meta_(TypeMeta::Make<T>()) {
     Resize(dims);
     CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size_);
-    context->template Copy<T, CPUContext, Context>(size_, values.data(), mutable_data<T>());
+    context->template Copy<T, CPUContext, Context>(
+        size_, values.data(), mutable_data<T>());
   }
 
   /**
    * @brief Creates a scalar tensor, and fills its content with the given value.
    */
-  template <typename T,
-            typename = typename std::enable_if<std::is_scalar<T>::value>::type>
-  Tensor(const T& value, Context* context) {
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_scalar<T>::value>::type>
+  TensorImpl(const T& value, Context* context) {
     Resize(vector<TIndex>{});
-    context->template Copy<T, CPUContext, Context>(size_, &value, mutable_data<T>());
+    context->template Copy<T, CPUContext, Context>(
+        size_, &value, mutable_data<T>());
   }
 
   /**
@@ -163,7 +173,7 @@ class Tensor {
    * carry out the underlying memcpy operation.
    */
   template <class SrcContext, class ContextForCopy>
-  void CopyFrom(const Tensor<SrcContext>& src, ContextForCopy* context) {
+  void CopyFrom(const TensorImpl<SrcContext>& src, ContextForCopy* context) {
     if ((void*)&src == (void*)this) {
       return;
     }
@@ -196,12 +206,12 @@ class Tensor {
    * providing a context for copy if you can.
    */
   template <class SrcContext>
-  inline void CopyFrom(const Tensor<SrcContext>& src) {
+  inline void CopyFrom(const TensorImpl<SrcContext>& src) {
     SrcContext tmp_context;
     CopyFrom(src, &tmp_context);
   }
 
-  virtual ~Tensor() noexcept {}
+  virtual ~TensorImpl() noexcept {}
 
   /**
    * @brief Extends the outer-most dimension of this tensor by num elements,
@@ -321,7 +331,7 @@ class Tensor {
    * sugar wrapper that essentially calls Resize(src_tensor.dims()).
    */
   template <class OtherContext>
-  inline void ResizeLike(const Tensor<OtherContext>& src_tensor) {
+  inline void ResizeLike(const TensorImpl<OtherContext>& src_tensor) {
     // Note: need casting for different context types.
     if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
       Resize(src_tensor.dims());
@@ -350,10 +360,6 @@ class Tensor {
     dims_ = dims;
   }
 
-  inline void Reshape(const vector<int>& dims) {
-    Reshape(ToVectorTIndex(dims));
-  }
-
   /**
    * Release whatever memory the tensor was holding but keep size and type
    * information. Subsequent call to mutable_data will trigger new memory
@@ -375,8 +381,8 @@ class Tensor {
    */
   string DebugString() const {
     std::stringstream ss;
-    ss << "A Tensor of item size " << itemsize() << " and type "
-       << meta_.name() << " and dimension (";
+    ss << "A Tensor of item size " << itemsize() << " and type " << meta_.name()
+       << " and dimension (";
     for (int d : dims_) {
       ss << d << ",";
     }
@@ -384,7 +390,7 @@ class Tensor {
     return ss.str();
   }
 
-  void swap(Tensor<Context>& other) {
+  void swap(TensorImpl<Context>& other) noexcept {
     std::swap(dims_, other.dims_);
     std::swap(size_, other.size_);
     std::swap(meta_, other.meta_);
@@ -406,7 +412,7 @@ class Tensor {
    *
    * The source tensor should already have its data allocated.
    */
-  void ShareData(const Tensor& src) {
+  void ShareData(const TensorImpl& src) {
     meta_ = src.meta();
     CAFFE_ENFORCE_EQ_WITH_CALLER(
         src.size_,
@@ -583,38 +589,45 @@ class Tensor {
    * For fundamental types, we reuse possible existing storage if there
    * is sufficient capacity.
    */
-   template <typename T>
-    inline T* mutable_data() {
-      if ((size_ == 0 || data_.get()) && IsType<T>()) {
-        return static_cast<T*>(data_.get());
-      }
-      // Check it here statically - otherwise TypeMeta would throw the runtime
-      // error in attempt to invoke TypeMeta::ctor()
-      static_assert(
-          std::is_default_constructible<T>::value,
-          "Tensor can't hold non-default-constructible types");
-      return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
+  template <typename T>
+  inline T* mutable_data() {
+    if ((size_ == 0 || data_.get()) && IsType<T>()) {
+      return static_cast<T*>(data_.get());
     }
-
+    // Check it here statically - otherwise TypeMeta would throw the runtime
+    // error in attempt to invoke TypeMeta::ctor()
+    static_assert(
+        std::is_default_constructible<T>::value,
+        "Tensor can't hold non-default-constructible types");
+    return static_cast<T*>(raw_mutable_data(TypeMeta::Make<T>()));
+  }
 
   /**
    * Returns the number of dimensions of the data.
    */
-  inline int ndim() const { return dims_.size(); }
+  inline int ndim() const {
+    return dims_.size();
+  }
   /**
    * Returns the size (i.e. the number of items) of the tensor.
    */
-  inline TIndex size() const { return size_; }
+  inline TIndex size() const {
+    return size_;
+  }
   /**
    * Return the number of bytes each item takes in the tensor.
    */
-  inline size_t itemsize() const { return meta_.itemsize(); }
+  inline size_t itemsize() const {
+    return meta_.itemsize();
+  }
   /**
    * Returns the total number of bytes of the storage.
    *
    * This is equivalent to calling size() * itemsize().
    */
-  inline size_t nbytes() const { return size_ * meta_.itemsize(); }
+  inline size_t nbytes() const {
+    return size_ * meta_.itemsize();
+  }
 
   inline size_t capacity_nbytes() const {
     return capacity_;
@@ -622,7 +635,9 @@ class Tensor {
   /**
    * Returns the dimensions of the tensor as a vector.
    */
-  inline const vector<TIndex>& dims() const { return dims_; }
+  inline const vector<TIndex>& dims() const {
+    return dims_;
+  }
 
   inline TIndex size_from_dim(int k) const {
     return size_from_dim_(k, dims_);
@@ -637,16 +652,16 @@ class Tensor {
   }
 
   /**
-  * Returns the 'canonical' version of a (usually)  user-specified axis,
-  * allowing for negative indexing (e.g., -1 for the last axis).
-  *
-  * @param axis_index the axis index.
-  *        If 0 <= index < ndim(), return index.
-  *        If -ndim <= index <= -1, return (ndim() - (-index)),
-  *        e.g., the last axis index (ndim() - 1) if index == -1,
-  *        the second to last if index == -2, etc.
-  *        Dies on out of range index.
-  */
+   * Returns the 'canonical' version of a (usually)  user-specified axis,
+   * allowing for negative indexing (e.g., -1 for the last axis).
+   *
+   * @param axis_index the axis index.
+   *        If 0 <= index < ndim(), return index.
+   *        If -ndim <= index <= -1, return (ndim() - (-index)),
+   *        e.g., the last axis index (ndim() - 1) if index == -1,
+   *        the second to last if index == -2, etc.
+   *        Dies on out of range index.
+   */
   inline int canonical_axis_index(int axis_index) const {
     return canonical_axis_index_(axis_index, ndim());
   }
@@ -655,11 +670,15 @@ class Tensor {
    * Checks if the tensor content is of the given data type.
    */
   template <typename T>
-  inline bool IsType() const { return meta_.Match<T>(); }
+  inline bool IsType() const {
+    return meta_.Match<T>();
+  }
   /**
    * Returns the TypeMeta object associated with the current data type.
    */
-  inline const TypeMeta& meta() const { return meta_; }
+  inline const TypeMeta& meta() const {
+    return meta_;
+  }
 
   /**
    * Returns the i-th dimension of the tensor in int.
@@ -669,10 +688,10 @@ class Tensor {
    * call dim() instead.
    */
   inline int dim32(const int i) const {
-    #ifndef NDEBUG
+#ifndef NDEBUG
     CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
-    #endif
+#endif
     CAFFE_ENFORCE_LT_WITH_CALLER(dims_[i], std::numeric_limits<int>::max());
     return static_cast<int>(dims_[i]);
   }
@@ -683,10 +702,10 @@ class Tensor {
    * this function will produce a fatal message.
    */
   inline TIndex dim(const int i) const {
-    #ifndef NDEBUG
+#ifndef NDEBUG
     CAFFE_ENFORCE_LT_WITH_CALLER(i, dims_.size(), "Exceeding ndim limit");
     CAFFE_ENFORCE_GE_WITH_CALLER(i, 0, "Cannot have negative dimension index");
-    #endif
+#endif
     return dims_[i];
   }
 
@@ -782,7 +801,226 @@ class Tensor {
 
   // Note(jiayq): possibly a rule-of-three violation, but we explicitly
   // discourage the use of = for Tensors.
+  TensorImpl& operator=(const TensorImpl& src) = delete;
+};
+
+/**
+ * @brief Tensor class holds a shared pointer to the implementation TensorImpl,
+ * redirects API calls to TensorImpl;
+ * Copying of Tensor results in sharing the same underlying implementation
+ * object
+ */
+template <class Context>
+class Tensor final {
+ protected:
+  std::shared_ptr<TensorImpl<Context>> impl_;
+
+ public:
+  Tensor() : impl_(std::make_shared<TensorImpl<Context>>()) {}
+
+  explicit Tensor(const vector<TIndex>& dims)
+      : impl_(std::make_shared<TensorImpl<Context>>(dims)) {}
+
+  explicit Tensor(const vector<int>& dims)
+      : impl_(std::make_shared<TensorImpl<Context>>(dims)) {}
+
+  template <class SrcContext, class ContextForCopy>
+  Tensor(const Tensor<SrcContext>& src, ContextForCopy* context)
+      : impl_(std::make_shared<TensorImpl<Context>>()) {
+    impl_->template CopyFrom<SrcContext, ContextForCopy>(*src.impl_, context);
+  }
+
+  template <class SrcContext>
+  explicit Tensor(const Tensor<SrcContext>& src)
+      : impl_(std::make_shared<TensorImpl<Context>>()) {
+    impl_->template CopyFrom<SrcContext>(*src.impl_);
+  }
+
+  template <typename T>
+  Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
+      : impl_(std::make_shared<TensorImpl<Context>>(dims, values, context)) {}
+
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_scalar<T>::value>::type>
+  Tensor(const T& value, Context* context)
+      : impl_(std::make_shared<TensorImpl<Context>>(value, context)) {}
+
+  Tensor Clone() const {
+    Tensor x;
+    x.CopyFrom(*this);
+    return x;
+  }
+
+  Tensor(Tensor<Context>&& src) noexcept {
+    swap(src);
+  }
+
+  // TODO(iliacher): reenable with new semantics
   Tensor& operator=(const Tensor& src) = delete;
+  Tensor(const Tensor<Context>& src) = delete;
+
+  template <class SrcContext, class ContextForCopy>
+  void CopyFrom(const Tensor<SrcContext>& src, ContextForCopy* context) {
+    impl_->template CopyFrom<SrcContext, ContextForCopy>(*src.impl_, context);
+  }
+
+  template <class SrcContext>
+  inline void CopyFrom(const Tensor<SrcContext>& src) {
+    impl_->template CopyFrom<SrcContext>(*src.impl_);
+  }
+
+  ~Tensor() noexcept {}
+
+  template <class ContextForCopy>
+  void Extend(TIndex num, float growthPct, ContextForCopy* context) {
+    impl_->template Extend<ContextForCopy>(num, growthPct, context);
+  }
+
+  template <class T, class ContextForCopy>
+  void Reserve(const std::vector<T>& newCapacity, ContextForCopy* context) {
+    impl_->template Reserve<T, ContextForCopy>(newCapacity, context);
+  }
+
+  void Shrink(TIndex outer_dim) {
+    impl_->Shrink(outer_dim);
+  }
+
+  template <typename... Ts>
+  void Resize(Ts... dim_source) {
+    return impl_->template Resize<Ts...>(dim_source...);
+  }
+
+  template <class OtherContext>
+  inline void ResizeLike(const Tensor<OtherContext>& src_tensor) {
+    CAFFE_ENFORCE(src_tensor.impl_);
+    impl_->template ResizeLike<OtherContext>(*src_tensor.impl_);
+  }
+
+  inline void Reshape(const vector<TIndex>& dims) {
+    impl_->Reshape(dims);
+  }
+
+  inline void Reshape(const vector<int>& dims) {
+    Reshape(ToVectorTIndex(dims));
+  }
+
+  inline void FreeMemory() {
+    impl_->FreeMemory();
+  }
+
+  string DebugString() const {
+    return impl_->DebugString();
+  }
+
+  void swap(Tensor<Context>& other) noexcept {
+    std::swap(impl_, other.impl_);
+  }
+
+  void ShareData(const Tensor& src) {
+    impl_->ShareData(*src.impl_);
+  }
+
+  template <typename T, typename Deleter = MemoryDeleter>
+  void ShareExternalPointer(T* src, size_t capacity = 0, Deleter d = nullptr) {
+    impl_->template ShareExternalPointer<T, Deleter>(src, capacity, d);
+  }
+
+  template <typename Deleter = MemoryDeleter>
+  void ShareExternalPointer(
+      void* src,
+      const TypeMeta& meta,
+      size_t capacity = 0,
+      Deleter d = nullptr) {
+    impl_->template ShareExternalPointer<Deleter>(src, meta, capacity, d);
+  }
+
+  bool shares_data() const {
+    return impl_->shares_data();
+  }
+
+  inline const void* raw_data() const {
+    return impl_->raw_data();
+  }
+
+  template <typename T>
+  inline const T* data() const {
+    return impl_->template data<T>();
+  }
+
+  inline void* raw_mutable_data(const TypeMeta& meta) {
+    return impl_->raw_mutable_data(meta);
+  }
+
+  inline void* raw_mutable_data() {
+    return impl_->raw_mutable_data();
+  }
+
+  template <typename T>
+  inline T* mutable_data() {
+    return impl_->template mutable_data<T>();
+  }
+
+  inline int ndim() const {
+    return impl_->ndim();
+  }
+
+  inline TIndex size() const {
+    return impl_->size();
+  }
+
+  inline size_t itemsize() const {
+    return impl_->itemsize();
+  }
+
+  inline size_t nbytes() const {
+    return impl_->nbytes();
+  }
+
+  inline size_t capacity_nbytes() const {
+    return impl_->capacity_nbytes();
+  }
+
+  inline const vector<TIndex>& dims() const {
+    return impl_->dims();
+  }
+
+  inline TIndex size_from_dim(int k) const {
+    return impl_->size_from_dim(k);
+  }
+
+  inline TIndex size_to_dim(int k) const {
+    return impl_->size_to_dim(k);
+  }
+
+  inline TIndex size_between_dim(int k, int l) const {
+    return impl_->size_between_dim(k, l);
+  }
+
+  inline int canonical_axis_index(int axis_index) const {
+    return impl_->canonical_axis_index(axis_index);
+  }
+
+  template <typename T>
+  inline bool IsType() const {
+    return impl_->template IsType<T>();
+  }
+
+  inline const TypeMeta& meta() const {
+    return impl_->meta();
+  }
+
+  inline int dim32(const int i) const {
+    return impl_->dim32(i);
+  }
+
+  inline TIndex dim(const int i) const {
+    return impl_->dim(i);
+  }
+
+  // accessing impl_ of another tensor
+  template <typename>
+  friend class Tensor;
 };
 
 // For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
