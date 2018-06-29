@@ -575,11 +575,9 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   size_t matrices_size = num_batches * sizeof(real*);
 
 //   Copy pointers to device.
-  const real **d_matrices1, **d_matrices2;
-  real **d_result_matrices;
-  THCudaCheck(THCudaMalloc(state, (void**)&d_matrices1, matrices_size));
-  THCudaCheck(THCudaMalloc(state, (void**)&d_matrices2, matrices_size));
-  THCudaCheck(THCudaMalloc(state, (void**)&d_result_matrices, matrices_size));
+  auto d_matrices1 = static_cast<const real**>(THCudaMalloc(state, matrices_size));
+  auto d_matrices2 = static_cast<const real**>(THCudaMalloc(state, matrices_size));
+  auto d_result_matrices = static_cast<real**>(THCudaMalloc(state, matrices_size));
 
   const int64_t block = 512;
   const int64_t grid = (num_batches + block - 1) / block;
@@ -786,9 +784,8 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
   int *info_gpu = THCudaIntTensor_data(state, rinfo_);
 
   // Copy pointers to device.
-  real **d_result;
   size_t matrices_size = num_batches * sizeof(real*);
-  THCudaCheck(THCudaMalloc(state, (void**)&d_result, matrices_size));
+  auto d_result = static_cast<real**>(THCudaMalloc(state, matrices_size));
 
   const int64_t block = 512;
   const int64_t grid = (num_batches + block - 1) / block;
@@ -899,10 +896,8 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
   size_t matrices_size = num_batches * sizeof(real*);
 
   // Copy pointers to device.
-  real **d_result;
-  const real **d_atf;
-  THCudaCheck(THCudaMalloc(state, (void**)&d_result, matrices_size));
-  THCudaCheck(THCudaMalloc(state, (void**)&d_atf, matrices_size));
+  auto d_result = static_cast<real**>(THCudaMalloc(state, matrices_size));
+  auto d_atf = static_cast<const real**>(THCudaMalloc(state, matrices_size));
 
   const int64_t block = 512;
   const int64_t grid = (num_batches + block - 1) / block;
