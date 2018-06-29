@@ -5,7 +5,6 @@
 #include <sys/socket.h>
 #endif
 
-#include <limits.h>
 #include <stdbool.h>
 #include <unordered_map>
 #include <cstdlib>
