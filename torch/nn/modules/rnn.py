@@ -304,6 +304,10 @@ class RNN(RNNBase):
         bias_hh_l[k]: the learnable hidden-hidden bias of the k-th layer,
             of shape `(hidden_size)`
 
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.RNN(10, 20, 2)
@@ -412,6 +416,10 @@ class LSTM(RNNBase):
         bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer
             `(b_hi|b_hf|b_hg|b_ho)`, of shape `(4*hidden_size)`
 
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.LSTM(10, 20, 2)
@@ -497,6 +505,11 @@ class GRU(RNNBase):
             (b_ir|b_iz|b_in), of shape `(3*hidden_size)`
         bias_hh_l[k] : the learnable hidden-hidden bias of the :math:`\text{k}^{th}` layer
             (b_hr|b_hz|b_hn), of shape `(3*hidden_size)`
+
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.GRU(10, 20, 2)
@@ -570,6 +583,10 @@ class RNNCell(RNNCellBase):
             `(hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(hidden_size)`
+
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
 
     Examples::
 
@@ -668,6 +685,10 @@ class LSTMCell(RNNCellBase):
         bias_ih: the learnable input-hidden bias, of shape `(4*hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(4*hidden_size)`
 
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
+
     Examples::
 
         >>> rnn = nn.LSTMCell(10, 20)
@@ -751,6 +772,10 @@ class GRUCell(RNNCellBase):
             `(3*hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(3*hidden_size)`
         bias_hh: the learnable hidden-hidden bias, of shape `(3*hidden_size)`
+
+    .. note::
+        All the weights and biases are initialized from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})`
+        where :math:`k = \frac{1}{\text{hidden_size}}`
 
     Examples::
 

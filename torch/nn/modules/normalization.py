@@ -100,7 +100,8 @@ class LayerNorm(Module):
             normalize over the last dimension which is expected to be of that specific size.
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         elementwise_affine: a boolean value that when set to ``True``, this module
-            has learnable per-element affine parameters. Default: ``True``
+            has learnable per-element affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, *)`
@@ -172,7 +173,8 @@ class GroupNorm(Module):
         num_channels (int): number of channels expected in input
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         affine: a boolean value that when set to ``True``, this module
-            has learnable per-channel affine parameters. Default: ``True``
+            has learnable per-channel affine parameters initialized to ones (for weights)
+            and zeros (for biases). Default: ``True``.
 
     Shape:
         - Input: :math:`(N, num\_channels, *)`

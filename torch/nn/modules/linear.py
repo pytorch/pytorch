@@ -23,8 +23,13 @@ class Linear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            `(out_features x in_features)`
-        bias:   the learnable bias of the module of shape `(out_features)`
+            `(out_features x in_features)`. The values are initialized from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{1}{\text{in_features}}`
+        bias:   the learnable bias of the module of shape `(out_features)`.
+                If :attr:`bias` is ``True``, the values are initialized from
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`k = \frac{1}{\text{in_features}}`
 
     Examples::
 
@@ -80,8 +85,13 @@ class Bilinear(Module):
 
     Attributes:
         weight: the learnable weights of the module of shape
-            `(out_features x in1_features x in2_features)`
+            `(out_features x in1_features x in2_features)`. The values are initialized from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{1}{\text{in1_features}}`
         bias:   the learnable bias of the module of shape `(out_features)`
+                If :attr:`bias` is ``True``, the values are initialized from
+                :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                :math:`k = \frac{1}{\text{in1_features}}`
 
     Examples::
 
