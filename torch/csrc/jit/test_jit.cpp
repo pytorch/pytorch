@@ -892,7 +892,9 @@ void testControlFlow() {
 }
 
 void testProto() {
+  std::cout << "Before GetEmptyString in testProto" << std::endl;
   ::google::protobuf::internal::GetEmptyString();
+  std::cout << "After GetEmptyString in testProto" << std::endl;
 
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
