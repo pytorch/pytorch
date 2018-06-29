@@ -2030,6 +2030,16 @@ class TestAutograd(TestCase):
         run_test((10,), 1)
         run_test((10,), 1.5)
 
+    def test_pow_zero_tensor_gradient(self):
+        def run_test(input_size, exponent):
+            input = torch.zeros(*input_size, requires_grad=True)
+            input.pow(exponent).sum().backward()
+            self.assertEqual(input.grad.data.abs().sum(), 0)
+
+        run_test((10,), torch.zeros(10))
+        run_test((10, 10), torch.zeros(10, 10))
+        run_test((10,), 0)
+
     def test_profiler(self):
         x = torch.randn(10, 10)
 
