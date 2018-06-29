@@ -36,8 +36,16 @@ void libshm_free(void *_ctx, void *data) {
   libshm_context_free(ctx);
 }
 
-THAllocator THManagedSharedAllocator = {
-  libshm_alloc,
-  libshm_realloc,
-  libshm_free,
+struct THManagedSharedAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    return libshm_alloc(ctx, size);
+  }
+  void deallocate(void* ctx, void* data) const override {
+    return libshm_free(ctx, data);
+  }
 };
+
+static THManagedSharedAllocator th_managed_shared_allocator;
+at::Allocator* getTHManagedSharedAllocator() {
+  return &th_managed_shared_allocator;
+}
