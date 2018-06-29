@@ -3,7 +3,7 @@
 import warnings
 import math
 from operator import mul
-from functools import reduce, wraps
+from functools import reduce
 
 import torch
 from torch._C import _infer_size, _add_docstr
@@ -615,14 +615,28 @@ def feature_dropout(input, p=0.5, training=False, inplace=False):
     else:
         return input.dropout(p, True, training)
 
+
 def _make_deprecated_dropoutNd(N):
-    @wraps(feature_dropout)
-    def wrapper(*args, **kwargs):
+    def deprecated_dropoutNd(*args, **kwargs):
         warnings.warn(
             "dropout{}d is deprecated. Please use nn.FeatureDropout (module) "
             "or nn.functional.feature_dropout (functional) instead.".format(N))
         return feature_dropout(*args, **kwargs)
-    return wrapper
+
+    deprecated_dropoutNd.__doc__ = r"""
+dropout{}d(input, p=0.5, training=False, inplace=False) -> Tensor
+
+.. warning::
+    This method is now deprecated in favor of :func:`torch.nn.functional.feature_dropout`.
+
+Args:
+    p (float, optional): the drop probability. Default: 0.5
+    training (bool, optional): switch between training and evaluation mode. Default: ``False``
+    inplace (bool, optional): whether to apply dropout inplace. Default: ``False``
+
+See :func:`~torch.nn.functional.feature_dropout` for details.""".format(N)
+    deprecated_dropoutNd.__name__ = "dropout{}d".format(N)
+    return deprecated_dropoutNd
 
 dropout1d = _make_deprecated_dropoutNd(1)
 dropout2d = _make_deprecated_dropoutNd(2)

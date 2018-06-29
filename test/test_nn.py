@@ -3405,8 +3405,8 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: nn.Dropout2d(1.1))
         self.assertRaises(ValueError, lambda: nn.Dropout3d(-0.1))
         self.assertRaises(ValueError, lambda: nn.Dropout3d(1.1))
-        self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
-        self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
+        self.assertRaises(RuntimeError, lambda: F.dropout(v, -0.1))
+        self.assertRaises(RuntimeError, lambda: F.dropout(v, 1.1))
 
     def test_pad_sequence(self):
         def pad(tensor, length):

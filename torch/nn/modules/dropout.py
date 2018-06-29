@@ -66,7 +66,7 @@ class FeatureDropout(_DropoutNd):
     will not regularize the activations and will otherwise just result
     in an effective learning rate decrease.
 
-    In this case, :func:`nn.Dropout2d` will help promote independence between
+    In this case, :func:`nn.FeatureDropout` will help promote independence between
     feature maps and should be used instead.
 
     Args:
@@ -108,6 +108,9 @@ class Dropout2d(_DropoutNd):
     In this case, :func:`nn.Dropout2d` will help promote independence between
     feature maps and should be used instead.
 
+    .. warning::
+        This module is deprecated in favor of :class:`torch.nn.FeatureDropout`.
+
     Args:
         p (float, optional): probability of an element to be zero-ed.
         inplace (bool, optional): If set to ``True``, will do this operation
@@ -146,6 +149,9 @@ class Dropout3d(_DropoutNd):
 
     In this case, :func:`nn.Dropout3d` will help promote independence between
     feature maps and should be used instead.
+
+    .. warning::
+        This module is deprecated in favor of :class:`torch.nn.FeatureDropout`.
 
     Args:
         p (float, optional): probability of an element to be zeroed.
