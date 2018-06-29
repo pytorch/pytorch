@@ -335,6 +335,8 @@ Caffe2Backend::get_special_operators() const {
   const static std::
       unordered_map<std::string, Caffe2Backend::SpecialOpConverter>
           kSpecialOperators = {
+              {"ArgMax", &Caffe2Backend::CreateArgMaxMin},
+              {"ArgMin", &Caffe2Backend::CreateArgMaxMin},
               {"Cast", &Caffe2Backend::CreateCast},
               {"Constant", &Caffe2Backend::CreateConstant},
               {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
@@ -362,6 +364,17 @@ Caffe2Backend::get_special_operators() const {
 //============================
 // Special Operator Converters
 //============================
+
+Caffe2Ops Caffe2Backend::CreateArgMaxMin(OnnxNode* onnx_node, int opset_version) {
+  const auto& node = onnx_node->node;
+  auto& attributes = onnx_node->attributes;
+  if (!attributes.HasAttribute("axis")) {
+    auto* attr = attributes.AddRewrittenAttribute("axis");
+    attr->set_i(0);
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+
+}
 
 Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
