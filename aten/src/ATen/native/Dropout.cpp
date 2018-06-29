@@ -10,7 +10,7 @@ namespace native {
 
 Tensor dropout(const Tensor& self, double p, bool featurewise, bool train, Generator *gen) {
   AT_CHECK(0 <= p && p <= 1, "dropout() expects 0 <= p <= 1, but got p = ", p);
-  if (train) {
+  if (train && p > 0) {
     if (p == 1) {
       return at::zeros_like(self);
     } else {
@@ -38,7 +38,7 @@ Tensor dropout(const Tensor& self, double p, bool featurewise, bool train, Gener
 
 Tensor& dropout_(Tensor& self, double p, bool featurewise, bool train, Generator *gen) {
   AT_CHECK(0 <= p && p <= 1, "dropout() expects 0 <= p <= 1, but got p = ", p);
-  if (train) {
+  if (train && p > 0) {
     if (p == 1) {
       return self.zero_();
     } else {
