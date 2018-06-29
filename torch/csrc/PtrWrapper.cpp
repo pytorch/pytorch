@@ -1,6 +1,12 @@
 #include "torch/csrc/python_headers.h"
 #include <functional>
 
+#if defined(__clang__)
+#define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
+#else
+#define __ubsan_ignore_function__
+#endif
+
 static PyObject* THPWrapperClass = NULL;
 
 struct THPWrapper {
@@ -44,11 +50,6 @@ static PyObject * THPWrapper_pynew(PyTypeObject *type, PyObject *args, PyObject 
   return self;
 }
 
-#if defined(__clang__)
-#define __ubsan_ignore_function__ __attribute__((no_sanitize("function")))
-#else
-#define __ubsan_ignore_function__
-#endif
 static void __ubsan_ignore_function__ THPWrapper_dealloc(THPWrapper* self)
 {
   self->destructor(self->data);

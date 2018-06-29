@@ -12,6 +12,12 @@
 #define __at_align32__
 #endif
 
+#if defined(__clang__)
+#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+#else
+#define __ubsan_ignore_float_divide_by_zero__
+#endif
+
 namespace at {
 namespace vec256 {
 namespace {
@@ -173,11 +179,6 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-#if defined(__clang__)
-#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-#else
-#define __ubsan_ignore_float_divide_by_zero__
-#endif
 template <class T> Vec256<T> __ubsan_ignore_float_divide_by_zero__ operator/(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {

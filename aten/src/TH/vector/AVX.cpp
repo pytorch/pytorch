@@ -7,6 +7,12 @@
 
 #include "AVX.h"
 
+#if defined(__clang__)
+#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+#else
+#define __ubsan_ignore_float_divide_by_zero__
+#endif
+
 void THDoubleVector_copy_AVX(double *y, const double *x, const ptrdiff_t n) {
   ptrdiff_t i;
   ptrdiff_t off;
@@ -35,12 +41,6 @@ void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n) {
     x[off+i] = c;
   }
 }
-
-#if defined(__clang__)
-#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
-#else
-#define __ubsan_ignore_float_divide_by_zero__
-#endif
 
 void __ubsan_ignore_float_divide_by_zero__ THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) {
   ptrdiff_t i;
