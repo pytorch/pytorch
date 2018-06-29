@@ -24,8 +24,10 @@ BatchTensor::BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims
     }
     mask_sizes[i] = *dims[i - 1].toByteData() ? sizes[i] : 1;
   }
-  data = datalist[0].type().zeros(sizes);
-  mask = datalist[0].type().toScalarType(at::kByte).zeros(mask_sizes);
+  data = datalist[0].type().tensor(sizes);
+  data.fill_(0);
+  mask = datalist[0].type().toScalarType(at::kByte).tensor(mask_sizes);
+  mask.fill_(0);
   for(std::size_t i = 0; i < datalist.size(); i++){
     auto data_item = data.narrow(0, i, 1);
     auto mask_item = mask.narrow(0, i, 1);
