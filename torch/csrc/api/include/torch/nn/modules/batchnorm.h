@@ -22,7 +22,10 @@ class BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   explicit BatchNormImpl(BatchNormOptions options);
 
   void reset() override;
-  std::vector<Tensor> forward(std::vector<Tensor>);
+
+  Tensor forward(Tensor input);
+  Tensor pure_forward(Tensor input, Tensor mean, Tensor variance);
+
   const BatchNormOptions& options() const noexcept;
 
  private:

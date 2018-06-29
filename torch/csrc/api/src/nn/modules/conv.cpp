@@ -70,88 +70,87 @@ const ConvOptions<D>& ConvImpl<D, Derived>::options() const noexcept {
   return options_;
 }
 
-std::vector<Tensor> Conv1dImpl::forward(std::vector<Tensor> input) {
-  AT_ASSERT(input.front().ndimension() == 3);
+Tensor Conv1dImpl::forward(Tensor input) {
+  AT_ASSERT(input.ndimension() == 3);
 
   if (options_.transposed_) {
-    return {at::conv_transpose1d(
-        input.front(),
+    return torch::conv_transpose1d(
+        input,
         weight_,
         bias_,
         options_.stride_,
         options_.padding_,
         options_.output_padding_,
         options_.groups_,
-        options_.dilation_)};
+        options_.dilation_);
   }
-  return {at::conv1d(
-      input.front(),
+  return torch::conv1d(
+      input,
       weight_,
       bias_,
       options_.stride_,
       options_.padding_,
       options_.dilation_,
-      options_.groups_)};
+      options_.groups_);
 }
 
-std::vector<Tensor> Conv2dImpl::forward(std::vector<Tensor> input) {
-  AT_ASSERT(input.front().ndimension() == 4);
+Tensor Conv2dImpl::forward(Tensor input) {
+  AT_ASSERT(input.ndimension() == 4);
 
   if (options_.transposed_) {
-    return {at::conv_transpose2d(
-        input.front(),
+    return torch::conv_transpose2d(
+        input,
         weight_,
         bias_,
         options_.stride_,
         options_.padding_,
         options_.output_padding_,
         options_.groups_,
-        options_.dilation_)};
+        options_.dilation_);
   }
-  return {at::conv2d(
-      input.front(),
+  return torch::conv2d(
+      input,
       weight_,
       bias_,
       options_.stride_,
       options_.padding_,
       options_.dilation_,
-      options_.groups_)};
+      options_.groups_);
 }
 
-std::vector<Tensor> Conv3dImpl::forward(std::vector<Tensor> input) {
-  AT_ASSERT(input.front().ndimension() == 5);
+Tensor Conv3dImpl::forward(Tensor input) {
+  AT_ASSERT(input.ndimension() == 5);
 
   if (options_.transposed_) {
-    return {at::conv_transpose3d(
-        input.front(),
+    return torch::conv_transpose3d(
+        input,
         weight_,
         bias_,
         options_.stride_,
         options_.padding_,
         options_.output_padding_,
         options_.groups_,
-        options_.dilation_)};
+        options_.dilation_);
   } else {
-    return {at::conv3d(
-        input.front(),
+    return torch::conv3d(
+        input,
         weight_,
         bias_,
         options_.stride_,
         options_.padding_,
         options_.dilation_,
-        options_.groups_)};
+        options_.groups_);
   }
 }
 
-#define CONV_D(D)                 \
-  template struct ConvOptions<D>; \
-  template class ConvImpl<D, Conv##D##dImpl>
+template struct ConvOptions<1>;
+template class ConvImpl<1, Conv1dImpl>;
 
-CONV_D(1);
-CONV_D(2);
-CONV_D(3);
+template struct ConvOptions<2>;
+template class ConvImpl<2, Conv2dImpl>;
 
-#undef CONV_D
+template struct ConvOptions<3>;
+template class ConvImpl<3, Conv3dImpl>;
 
 } // namespace nn
 } // namespace torch

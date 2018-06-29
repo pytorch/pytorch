@@ -24,11 +24,11 @@ public:
   void setOperatorDef(caffe2::OperatorDef* opDef) {
     OpDef = opDef;
   }
-  const caffe2::OperatorDef* getOperatorDef() const { 
+  const caffe2::OperatorDef* getOperatorDef() const {
     assert(OpDef && "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
     return OpDef;
   }
-  caffe2::OperatorDef* getMutableOperatorDef() { 
+  caffe2::OperatorDef* getMutableOperatorDef() {
     assert(OpDef && "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
     return OpDef;
   }
@@ -51,9 +51,9 @@ caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 // are not reflected in changes to external_input or external_output.
 caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
 
-std::unique_ptr<nom::repr::NeuralNetOperator> convertToOperatorDef(caffe2::OperatorDef op);
+std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(caffe2::OperatorDef* op);
 
-} // namespace caffe2 
+} // namespace caffe2
 
 
 #endif // CAFFE2_OPT_CONVERTER_H
