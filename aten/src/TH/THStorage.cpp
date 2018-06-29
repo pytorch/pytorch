@@ -23,7 +23,7 @@ void THStorage_free(THStorage *storage) {
     if(--storage->refcount == 0)
     {
       if(storage->flag & TH_STORAGE_FREEMEM) {
-        static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
+        storage->allocator->deallocate(storage->allocatorContext, storage->data_ptr);
       }
       if(storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);
@@ -75,7 +75,7 @@ THStorage* THStorage_new(at::ScalarType scalar_type)
 
 THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
 {
-  return THStorage_newWithAllocator(scalar_type, size, &THDefaultAllocator, NULL);
+  return THStorage_newWithAllocator(scalar_type, size, getTHDefaultAllocator(), NULL);
 }
 
 THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
@@ -85,7 +85,7 @@ THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->backend = at::kCPU;
   storage->scalar_type = scalar_type;
-  storage->data_ptr = allocator->malloc(allocatorContext, at::elementSize(scalar_type)*size);
+  storage->data_ptr = allocator->allocate(allocatorContext, at::elementSize(scalar_type)*size);
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;

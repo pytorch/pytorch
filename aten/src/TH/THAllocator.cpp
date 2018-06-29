@@ -25,13 +25,13 @@ struct THDefaultAllocator : public at::Allocator {
   void* allocate(void* ctx, size_t size) const override {
     return THAlloc(size);
   }
-  void deallocate(void* ctx, void* ptr) {
+  void deallocate(void* ctx, void* ptr) const override {
     THFree(ptr);
   }
 };
 
 static THDefaultAllocator th_default_allocator;
-Allocator* getTHDefaultAllocator() {
+at::Allocator* getTHDefaultAllocator() {
   return &th_default_allocator;
 }
 
@@ -616,19 +616,29 @@ int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 // TODO: realloc nerfed
 struct THMapAllocator : public at::Allocator {
   void* allocate(void* ctx, size_t size) const override {
-    THMapAllocator_alloc(ctx, size);
+    return THMapAllocator_alloc(ctx, size);
   }
   void deallocate(void* ctx, void* data) const override {
     THMapAllocator_free(ctx, data);
   }
 };
 
+static THMapAllocator th_map_allocator;
+at::Allocator* getTHMapAllocator() {
+  return &th_map_allocator;
+}
+
 // TODO: realloc nerfed
 struct THRefcountedMapAllocator : public at::Allocator {
   void* allocate(void* ctx, size_t size) const override {
-    THRefcountedMapAllocator_alloc(ctx, size);
+    return THRefcountedMapAllocator_alloc(ctx, size);
   }
   void deallocate(void* ctx, void* data) const override {
     THRefcountedMapAllocator_free(ctx, data);
   }
 };
+
+static THRefcountedMapAllocator th_refcounted_map_allocator;
+at::Allocator* getTHRefcountedMapAllocator() {
+  return &th_refcounted_map_allocator;
+}

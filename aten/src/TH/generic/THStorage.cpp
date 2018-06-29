@@ -42,7 +42,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
   THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
 
   THStorage *storage = THStorage_(newWithAllocator)(size,
-                                                    &THMapAllocator,
+                                                    getTHMapAllocator(),
                                                     ctx);
 
   if(size <= 0)
