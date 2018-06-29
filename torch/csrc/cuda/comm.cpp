@@ -1,14 +1,21 @@
-#include "comm.h"
+#include <torch/csrc/cuda/comm.h>
 
-#include "torch/csrc/utils/tensor_flatten.h"
-#include "torch/csrc/cuda/device_set.h"
+#include <torch/csrc/cuda/device_set.h>
+#include <torch/csrc/utils/tensor_flatten.h>
+
 #ifdef USE_NCCL
-#include "torch/csrc/cuda/nccl.h"
+#include <torch/csrc/cuda/nccl.h>
 #endif
 
+#include <torch/csrc/utils/auto_stream.h>
+
+#include <THC/THC.h>
+
 #include <ATen/ATen.h>
+#include <ATen/optional.h>
 
 #include <cstddef>
+#include <vector>
 
 namespace torch { namespace cuda {
 
@@ -111,4 +118,89 @@ tensor_list2d broadcast_coalesced(TensorList tensors, IntList devices, size_t bu
   return outputs;
 }
 
-}}
+std::vector<at::Tensor> scatter(
+    const at::Tensor& tensor,
+    at::IntList devices,
+    const at::optional<std::vector<int64_t>>& chunk_sizes,
+    int64_t dim,
+    const at::optional<std::vector<THCStream*>>& streams) {
+  std::vector<at::Tensor> chunks;
+  if (!chunk_sizes) {
+    chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
+  } else {
+    const int64_t chunk_size_sum =
+        std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
+    // clang-format off
+    AT_CHECK(
+      chunk_size_sum == tensor.size(dim),
+      "given chunk sizes don't sum up to the tensor's size ",
+      "(sum(chunk_sizes) == ", chunk_size_sum,
+      ", but expected ", tensor.size(dim), ")");
+    // clang-format on
+    chunks.reserve(chunk_sizes->size());
+    int64_t chunk_start = 0;
+    for (size_t chunk = 0; chunk < chunk_sizes->size(); ++chunk) {
+      const int64_t chunk_size = (*chunk_sizes)[chunk];
+      AT_CHECK(chunk_size > 0, "Chunk size must be positive");
+      chunks.push_back(tensor.narrow(dim, chunk_start, chunk_size));
+      chunk_start += chunk_size;
+    }
+    AT_ASSERT(chunks.size() == chunk_sizes->size());
+  }
+  auto* thc_state = at::globalContext().lazyInitCUDA();
+  for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
+    const int32_t device_index = devices[chunk];
+    // We must set the current device before setting the current stream.
+    const at::DeviceGuard device_guard({at::kCUDA, device_index});
+    const AutoStream stream_guard(
+        streams ? (*streams)[chunk] : THCState_getStream(thc_state));
+    // Copy the chunk from its current device to its destination device, which
+    // we set as the default device above, thus specified as -1.
+    chunks[chunk] =
+        chunks[chunk].contiguous().to({at::kCUDA, -1}, /*non_blocking=*/true);
+  }
+  return chunks;
+}
+
+at::Tensor gather(
+    at::TensorList tensors,
+    int64_t dim,
+    at::optional<int32_t> destination_index) {
+  AT_ASSERT(!tensors.empty());
+  at::Tensor result;
+  int64_t total_size = 0;
+  auto& first = tensors.front();
+  const auto first_size = first.sizes();
+  std::vector<int64_t> expected_size(first_size.begin(), first_size.end());
+  for (const auto& tensor : tensors) {
+    AT_CHECK(
+        tensor.type().is_cuda(), "Gather expects all inputs to have CUDA type");
+    AT_CHECK(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    expected_size[dim] = tensor.size(dim);
+    for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
+      // clang-format off
+      AT_CHECK(
+          expected_size[dimension] == tensor.size(dimension),
+          "Gather got an input of invalid size: got ",
+          tensor.sizes(), ", but expected ", at::IntList(expected_size));
+      // clang-format on
+    }
+    total_size += tensor.size(dim);
+  }
+  expected_size[dim] = total_size;
+  at::Device device(at::kCPU);
+  if (!destination_index || *destination_index != -1) {
+    device = at::Device(at::kCUDA, destination_index ? *destination_index : -1);
+  }
+  result = at::empty(expected_size, first.options().device(device));
+
+  int64_t chunk_start = 0;
+  for (const auto& tensor : tensors) {
+    result.narrow(dim, chunk_start, tensor.size(dim))
+        .copy_(tensor, /*non_blocking=*/true);
+    chunk_start += tensor.size(dim);
+  }
+  return result;
+}
+} // namespace cuda
+} // namespace torch
