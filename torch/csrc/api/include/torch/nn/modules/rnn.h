@@ -50,13 +50,15 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
 
   void reset() override;
 
-  void to(torch::Device device, torch::Dtype dtype, bool non_blocking) override;
+  /// Recursively casts all parameters to the given device and dtype.
+  void to(torch::Device device, torch::Dtype dtype, bool non_blocking = false)
+      override;
 
   /// Recursively casts all parameters to the given dtype.
-  void to(torch::Dtype dtype, bool non_blocking) override;
+  void to(torch::Dtype dtype, bool non_blocking = false) override;
 
   /// Recursively moves all parameters to the given device.
-  void to(torch::Device device, bool non_blocking) override;
+  void to(torch::Device device, bool non_blocking = false) override;
 
   void flatten_parameters_for_cudnn();
 

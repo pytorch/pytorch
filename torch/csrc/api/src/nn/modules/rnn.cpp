@@ -130,7 +130,10 @@ Tensor RNNImplBase<Derived>::create_dropout_state(Tensor input) const {
       torch::ones({}, torch::kInt64).random_().toCLong();
   if (options_.dropout_ > 0) {
     return torch::_cudnn_init_dropout_state(
-        input.type(), options_.dropout_, this->is_training(), dropout_seed);
+        options_.dropout_,
+        this->is_training(),
+        dropout_seed,
+        input.options().dtype(torch::kUInt8));
   }
   return torch::empty({}, input.type());
 }
@@ -174,6 +177,7 @@ RNNOutput RNNImplBase<Derived>::autograd_forward(Tensor input, Tensor state) {
 template <typename Derived>
 void RNNImplBase<Derived>::flatten_parameters_for_cudnn() {
   data_ptrs_.clear();
+  const auto any_parameter = ihw_.at(0);
   if (!use_cudnn(/*sample=*/ihw_.at(0))) {
     return;
   }
