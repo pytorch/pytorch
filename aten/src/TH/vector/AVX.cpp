@@ -42,7 +42,7 @@ void THDoubleVector_fill_AVX(double *x, const double c, const ptrdiff_t n) {
   }
 }
 
-void __ubsan_ignore_float_divide_by_zero__ THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) {
+void THDoubleVector_cdiv_AVX(double *z, const double *x, const double *y, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
   ptrdiff_t i;
   __m256d YMM0, YMM1, YMM2, YMM3;
   for (i=0; i<=((n)-8); i+=8) {
@@ -60,7 +60,7 @@ void __ubsan_ignore_float_divide_by_zero__ THDoubleVector_cdiv_AVX(double *z, co
   }
 }
 
-void __ubsan_ignore_float_divide_by_zero__ THDoubleVector_divs_AVX(double *y, const double *x, const double c, const ptrdiff_t n) {
+void THDoubleVector_divs_AVX(double *y, const double *x, const double c, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
   ptrdiff_t i;
   __m256d YMM15 = _mm256_set_pd(c, c, c, c);
   __m256d YMM0, YMM1;
@@ -174,7 +174,7 @@ void THFloatVector_fill_AVX(float *x, const float c, const ptrdiff_t n) {
   }
 }
 
-void __ubsan_ignore_float_divide_by_zero__ THFloatVector_cdiv_AVX(float *z, const float *x, const float *y, const ptrdiff_t n) {
+void THFloatVector_cdiv_AVX(float *z, const float *x, const float *y, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
   ptrdiff_t i;
   __m256 YMM0, YMM1, YMM2, YMM3;
   for (i=0; i<=((n)-16); i+=16) {
@@ -192,7 +192,7 @@ void __ubsan_ignore_float_divide_by_zero__ THFloatVector_cdiv_AVX(float *z, cons
   }
 }
 
-void __ubsan_ignore_float_divide_by_zero__ THFloatVector_divs_AVX(float *y, const float *x, const float c, const ptrdiff_t n) {
+void THFloatVector_divs_AVX(float *y, const float *x, const float c, const ptrdiff_t n) __ubsan_ignore_float_divide_by_zero__ {
   ptrdiff_t i;
   __m256 YMM15 = _mm256_set_ps(c, c, c, c, c, c, c, c);
   __m256 YMM0, YMM1;

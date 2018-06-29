@@ -179,7 +179,7 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <class T> Vec256<T> __ubsan_ignore_float_divide_by_zero__ operator/(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.values[i] = a.values[i] / b.values[i];
