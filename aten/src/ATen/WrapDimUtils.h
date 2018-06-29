@@ -45,7 +45,7 @@ static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<
   return maybe_wrap_dim(dim, tensor_sizes[0].size());
 }
 
-// wrap negative dims in to_transform_dims
+// wrap each of dims basing on dim_post_expr
 static inline void maybe_wrap_dims(std::vector<int64_t>& dims, int64_t dim_post_expr) {
   if (dim_post_expr <= 0) {
     dim_post_expr = 1; // this will make range [-1, 0]
