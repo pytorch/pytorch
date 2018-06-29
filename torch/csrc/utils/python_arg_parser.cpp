@@ -174,7 +174,7 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   }
 
   size_t n = s.size();
-  AT_CHECK(s[0] == '{', "Default value of IntList is missing left brace '{', found ", s[0]);
+  // since already checked left brace '{' above, here only checks right brace '}'
   AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
 
   auto args = std::vector<int64_t>();
