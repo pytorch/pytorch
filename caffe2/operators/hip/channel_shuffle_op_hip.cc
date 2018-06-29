@@ -15,7 +15,7 @@
  */
 
 #include "hip/hip_runtime.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/channel_shuffle_op.h"
 
 namespace caffe2 {

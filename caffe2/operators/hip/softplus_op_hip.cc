@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/softplus_op.h"
 
 namespace caffe2 {

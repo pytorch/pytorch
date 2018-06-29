@@ -15,7 +15,7 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/operators/resize_op.h"
 

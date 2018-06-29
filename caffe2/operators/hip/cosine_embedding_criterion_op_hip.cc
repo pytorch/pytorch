@@ -14,7 +14,7 @@
  * limitations under the License.
  */
 
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 #include "caffe2/operators/cosine_embedding_criterion_op.h"
 #include "hip/hip_runtime.h"
 
