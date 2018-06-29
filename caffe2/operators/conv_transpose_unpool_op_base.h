@@ -83,8 +83,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 	//if pad exists, legacy padding or output_shape should not exist.
 	//if legacy padding exists, pad should not exist, output_shape is optional.
 	//if output_shape exists, pad should not exist, legacy padding is optional.
-	//CAFFE_ENFORCE(!has_pad && !has_legacy && !has_output_shape,
-	//  "Padding information missing, you should specify at least one item in [pad, legacy_pad, output_shape]");
 
 	CAFFE_ENFORCE((has_pad != has_legacy) || (!has_pad && !has_legacy),
 	  "If you use legacy padding VALID or SAME, you should not specify "
