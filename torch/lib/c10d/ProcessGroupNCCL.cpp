@@ -365,6 +365,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::allreduce(
 
   CUDADevice gpuGuard;
 
+  std::unique_lock<std::mutex> cudaFreeMutexLock(
+      *(THCCachingAllocator_getCudaFreeMutex()));
+
   C10D_NCCL_CHECK(ncclGroupStart());
 
   for (size_t i = 0; i < tensors.size(); ++i) {
@@ -411,6 +414,9 @@ std::shared_ptr<ProcessGroup::Work> ProcessGroupNCCL::broadcast(
   auto work = std::make_shared<ProcessGroupNCCL::WorkNCCL>(devices);
 
   CUDADevice gpuGuard;
+
+  std::unique_lock<std::mutex> cudaFreeMutexLock(
+      *(THCCachingAllocator_getCudaFreeMutex()));
 
   C10D_NCCL_CHECK(ncclGroupStart());
 

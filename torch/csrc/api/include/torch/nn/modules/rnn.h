@@ -5,6 +5,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
+#include <ATen/ATen.h>
 #include <ATen/Error.h>
 #include <ATen/optional.h>
 
@@ -15,6 +16,12 @@
 
 namespace torch {
 namespace nn {
+
+struct RNNOutput {
+  Tensor output;
+  Tensor state;
+};
+
 namespace detail {
 struct RNNOptionsBase {
   RNNOptionsBase(int64_t input_size, int64_t hidden_size);
@@ -39,31 +46,34 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
       int64_t number_of_gates = 1,
       bool has_cell_state = false);
 
-  std::vector<Variable> forward(std::vector<Variable>);
+  RNNOutput forward(Tensor input, Tensor state = {});
 
   void reset() override;
 
-  void to(at::Type& type) override;
-  void to(at::ScalarType scalar_type) override;
-  void to(at::Backend backend) override;
+  void to(torch::Device device, torch::Dtype dtype, bool non_blocking) override;
 
- protected:
-  virtual std::vector<Variable> cell_forward(
-      std::vector<Variable>,
-      int64_t layer) = 0;
+  /// Recursively casts all parameters to the given dtype.
+  void to(torch::Dtype dtype, bool non_blocking) override;
 
-  std::vector<Variable> CUDNN_forward(std::vector<Variable>);
-  std::vector<Variable> autograd_forward(std::vector<Variable>);
+  /// Recursively moves all parameters to the given device.
+  void to(torch::Device device, bool non_blocking) override;
 
   void flatten_parameters_for_cudnn();
-  std::vector<at::Tensor> flat_weights() const;
+
+ protected:
+  virtual Tensor cell_forward(Tensor input, Tensor state, int64_t layer) = 0;
+
+  RNNOutput CUDNN_forward(Tensor input, Tensor state);
+  RNNOutput autograd_forward(Tensor input, Tensor state);
+
+  std::vector<Tensor> flat_weights() const;
 
   RNNOptionsBase options_;
 
-  std::vector<Variable> ihw_;
-  std::vector<Variable> ihb_;
-  std::vector<Variable> hhw_;
-  std::vector<Variable> hhb_;
+  std::vector<Tensor> ihw_;
+  std::vector<Tensor> ihb_;
+  std::vector<Tensor> hhw_;
+  std::vector<Tensor> hhb_;
 
   int64_t number_of_gates_;
   bool has_cell_state_;
@@ -77,7 +87,7 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   // TODO Actually since we are in C++ we can probably just actually check if
   // the parameters are flat, instead of relying on data pointers and stuff.
   std::vector<void*> data_ptrs_;
-  Variable flat_weights_;
+  Tensor flat_weights_;
 };
 } // namespace detail
 
@@ -108,11 +118,10 @@ class RNNImpl : public detail::RNNImplBase<RNNImpl> {
   const RNNOptions& options() const noexcept;
 
  private:
-  std::vector<Variable> cell_forward(std::vector<Variable>, int64_t layer)
-      override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 
   RNNOptions options_;
-  std::function<Variable(Variable)> activation_function_;
+  std::function<Tensor(Tensor)> activation_function_;
 };
 
 TORCH_MODULE(RNN);
@@ -128,8 +137,7 @@ class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
   const LSTMOptions& options() const noexcept;
 
  private:
-  std::vector<Variable> cell_forward(std::vector<Variable>, int64_t layer)
-      override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 };
 
 TORCH_MODULE(LSTM);
@@ -145,8 +153,7 @@ class GRUImpl : public detail::RNNImplBase<GRUImpl> {
   const GRUOptions& options() const noexcept;
 
  private:
-  std::vector<Variable> cell_forward(std::vector<Variable>, int64_t layer)
-      override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 };
 
 TORCH_MODULE(GRU);

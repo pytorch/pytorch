@@ -4,8 +4,6 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
-
 #include <cstdint>
 
 namespace torch {
@@ -24,15 +22,18 @@ class BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   explicit BatchNormImpl(BatchNormOptions options);
 
   void reset() override;
-  std::vector<Variable> forward(std::vector<Variable>);
+
+  Tensor forward(Tensor input);
+  Tensor pure_forward(Tensor input, Tensor mean, Tensor variance);
+
   const BatchNormOptions& options() const noexcept;
 
  private:
   BatchNormOptions options_;
-  Variable weight_;
-  Variable bias_;
-  Variable running_mean_;
-  Variable running_variance_;
+  Tensor weight_;
+  Tensor bias_;
+  Tensor running_mean_;
+  Tensor running_variance_;
 };
 
 TORCH_MODULE(BatchNorm);

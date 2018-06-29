@@ -126,7 +126,7 @@ static void THPVariable_dealloc(THPVariable* self)
 static PyObject *THPVariable_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   HANDLE_TH_ERRORS
-  auto& default_type = torch::tensor::get_default_tensor_type();
+  auto& default_type = torch::tensors::get_default_tensor_type();
   auto tensor = torch::utils::legacy_tensor_ctor(default_type, args, kwargs);
   return THPVariable_NewWithVar(type, std::move(tensor));
   END_HANDLE_TH_ERRORS
@@ -383,7 +383,7 @@ static PyObject * THPVariable_layout(THPVariable* self) {
 
 static PyObject * THPVariable_device(THPVariable* self) {
   HANDLE_TH_ERRORS
-  return THPDevice_New(torch::tensor::getDevice(self->cdata));
+  return THPDevice_New(torch::tensors::getDevice(self->cdata));
   END_HANDLE_TH_ERRORS
 }
 

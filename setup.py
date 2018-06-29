@@ -379,8 +379,8 @@ class build_deps(PytorchCommand):
 
         # Use copies instead of symbolic files.
         # Windows has very poor support for them.
-        sym_files = ['tools/shared/cwrap_common.py']
-        orig_files = ['aten/src/ATen/common_with_cwrap.py']
+        sym_files = ['tools/shared/cwrap_common.py', 'tools/shared/_utils_internal.py']
+        orig_files = ['aten/src/ATen/common_with_cwrap.py', 'torch/_utils_internal.py']
         for sym_file, orig_file in zip(sym_files, orig_files):
             if os.path.exists(sym_file):
                 os.remove(sym_file)
@@ -768,12 +768,15 @@ main_sources = [
     "torch/csrc/jit/passes/dead_code_elimination.cpp",
     "torch/csrc/jit/passes/remove_expands.cpp",
     "torch/csrc/jit/passes/lower_tuples.cpp",
+    "torch/csrc/jit/passes/lower_grad_of.cpp",
     "torch/csrc/jit/passes/common_subexpression_elimination.cpp",
     "torch/csrc/jit/passes/peephole.cpp",
     "torch/csrc/jit/passes/inplace_check.cpp",
     "torch/csrc/jit/passes/canonicalize.cpp",
     "torch/csrc/jit/passes/batch_mm.cpp",
     "torch/csrc/jit/passes/decompose_addmm.cpp",
+    "torch/csrc/jit/passes/specialize_undef.cpp",
+    "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
@@ -816,7 +819,7 @@ main_sources = [
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN.cpp",
     "torch/csrc/tensor/python_tensor.cpp",
-    "torch/csrc/onnx/onnx.pb.cpp",
+    "torch/csrc/onnx/onnx.npb.cpp",
     "torch/csrc/onnx/onnx.cpp",
     "torch/csrc/onnx/init.cpp",
 ]

@@ -4,22 +4,23 @@
 
 #include <functional>
 #include <utility>
-#include <vector>
 
 namespace torch {
 namespace nn {
-FunctionalImpl::FunctionalImpl(Function function)
+FunctionalImpl::FunctionalImpl(std::function<Tensor(Tensor)> function)
     : function_(std::move(function)) {}
 
-FunctionalImpl::FunctionalImpl(std::function<Variable(Variable)> function)
-    : function_([function](std::vector<Variable> input) {
-        return std::vector<Variable>({function(input.front())});
-      }) {}
+FunctionalImpl::FunctionalImpl(BoundFunction bound_function)
+    : function_(std::move(bound_function.function_)) {}
 
 void FunctionalImpl::reset() {}
 
-std::vector<Variable> FunctionalImpl::forward(std::vector<Variable> input) {
+Tensor FunctionalImpl::forward(Tensor input) {
   return function_(input);
+}
+
+Tensor FunctionalImpl::operator()(Tensor input) {
+  return forward(input);
 }
 } // namespace nn
 } // namespace torch

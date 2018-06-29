@@ -12,7 +12,7 @@ from functools import wraps, reduce
 from operator import mul
 from collections import OrderedDict
 import hashlib
-import sys
+import os
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -30,7 +30,7 @@ from torch.nn import Parameter
 from torch.nn.parallel._functions import Broadcast
 from common import freeze_rng_state, run_tests, TestCase, skipIfNoLapack, \
     TEST_SCIPY, IS_WINDOWS, download_file, PY3, PY34, to_gpu, \
-    get_function_arglist, skipCUDAMemoryLeakCheckIf, parser
+    get_function_arglist, skipCUDAMemoryLeakCheckIf
 from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
@@ -896,6 +896,14 @@ class TestNN(NNTestCase):
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
 
+    def test_register_buffer_raises_error_if_name_is_not_string(self):
+        m = nn.Module()
+        expected_error = 'buffer name should be a string. Got '
+        with self.assertRaisesRegex(TypeError, expected_error + 'int'):
+            m.register_buffer(1, torch.rand(5))
+        with self.assertRaisesRegex(TypeError, expected_error + 'NoneType'):
+            m.register_buffer(None, torch.rand(5))
+
     def test_register_buffer_raises_error_if_attr_exists(self):
         m = nn.Module()
         m.attribute_name = 5
@@ -928,6 +936,14 @@ class TestNN(NNTestCase):
         self.assertEqual(m.buffer_name, buffer2)
         m.register_buffer('buffer_name', buffer3)
         self.assertEqual(m.buffer_name, buffer3)
+
+    def test_register_parameter_raises_error_if_name_is_not_string(self):
+        m = nn.Module()
+        expected_error = 'parameter name should be a string. Got '
+        with self.assertRaisesRegex(TypeError, expected_error + 'int'):
+            m.register_parameter(1, nn.Parameter())
+        with self.assertRaisesRegex(TypeError, expected_error + 'NoneType'):
+            m.register_parameter(None, nn.Parameter())
 
     def test_register_parameter_raises_error_if_attr_exists(self):
         m = nn.Module()
@@ -1175,6 +1191,10 @@ class TestNN(NNTestCase):
         net.add_module('l', l3)
         self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
+                               lambda: net.add_module(1, l))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
+                               lambda: net.add_module(None, l))
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
@@ -1438,9 +1458,9 @@ class TestNN(NNTestCase):
         # weight_u should be just a reused buffer
         self.assertTrue(hasattr(m, 'weight_u'))
         self.assertTrue('weight_u' in m._buffers)
+        self.assertTrue('weight' in m._buffers)
         # weight should be a plain attribute, not counted as a buffer or a param
-        self.assertTrue(hasattr(m, 'weight'))
-        self.assertFalse('weight' in m._buffers or 'weight' in m._parameters)
+        self.assertFalse('weight' in m._parameters)
         # it should also be sharing storage as `weight_orig`
         self.assertEqual(m.weight_orig.storage(), m.weight.storage())
         self.assertEqual(m.weight_orig.size(), m.weight.size())
@@ -1452,6 +1472,42 @@ class TestNN(NNTestCase):
         # weight should be converted back as a parameter
         self.assertTrue(hasattr(m, 'weight'))
         self.assertTrue('weight' in m._parameters)
+
+    def test_spectral_norm_eval_remove(self):
+        inp = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        m = torch.nn.utils.spectral_norm(m)
+        x0 = m(inp)
+        m.eval()
+        # test that eval mode and removing / adding+removing doesn't change weight and output
+        x1 = m(inp)
+        x2 = m(inp)
+        self.assertEqual(x0, x1)
+        self.assertEqual(x0, x2)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x3 = m(inp)
+        self.assertEqual(x0, x3)
+        m = torch.nn.utils.spectral_norm(m)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x4 = m(inp)
+        self.assertEqual(x0, x4)
+        # check that removing after train doesn't change output
+        m.train()
+        m = torch.nn.utils.spectral_norm(m)
+        for i in range(5):
+            x0 = m(inp)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x1 = m(inp)
+        self.assertEqual(x0, x1)
+
+    def test_spectral_norm_dim(self):
+        inp = torch.randn(2, 3, 10, 12)
+        m = nn.ConvTranspose2d(3, 4, (5, 6))
+        m = torch.nn.utils.spectral_norm(m)
+        # this should not run into incompatible shapes
+        x = m(inp)
+        # check that u refers to the same dimension
+        self.assertEqual(m.weight_u.shape, m.weight_orig[0, :, 0, 0].shape)
 
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
@@ -2209,6 +2265,29 @@ class TestNN(NNTestCase):
         # Make sure backward after changing indices will result in an error
         indices.add_(1)
         self.assertRaises(RuntimeError, lambda: output.backward(grad_output))
+
+    def test_adaptive_pooling_input_size(self):
+        for numel in (2, 3):
+            for pool_type in ('Max', 'Avg'):
+                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                module_cls = getattr(nn, cls_name)
+                output_size = (2,) * numel
+                module = module_cls(output_size)
+
+                input = torch.randn(output_size)
+                self.assertRaises(ValueError, lambda: module(input))
+
+    def test_adaptive_pooling_size_none(self):
+        for numel in (2, 3):
+            for pool_type in ('Max', 'Avg'):
+                cls_name = 'Adaptive{}Pool{}d'.format(pool_type, numel)
+                module_cls = getattr(nn, cls_name)
+                output_size = (2,) * (numel - 1) + (None,)
+                module = module_cls(output_size)
+
+                input = torch.randn((4,) * (numel + 1))
+                output = module(input)
+                self.assertEqual(output.size(), (4,) + (2,) * (numel - 1) + (4,))
 
     def test_Conv2d_naive_groups(self):
         self._test_Conv2d_naive_groups()
@@ -4202,6 +4281,39 @@ class TestNN(NNTestCase):
 
         self.assertEqual(out1, out2)
 
+    def test_bce_with_logits_ones_in_pos_weights_are_the_same_as_none(self):
+        target = torch.rand(64, 4)
+        output = torch.rand(64, 4) - 0.5
+        pos_weight = torch.ones(64, 4)
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target),
+                         nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target))
+
+    def test_bce_with_logits_broadcasts_pos_weights(self):
+        target = torch.rand(64, 4)
+        output = torch.rand(64, 4) - 0.5
+        pos_weight = torch.rand(4)
+        out1 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
+
+        pos_weight1 = pos_weight.expand(1, 4)
+        out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight1)(output, target)
+
+        pos_weight2 = pos_weight.expand(64, 4)
+        out3 = nn.BCEWithLogitsLoss(pos_weight=pos_weight2)(output, target)
+
+        self.assertEqual(out1, out2)
+        self.assertEqual(out1, out3)
+
+    def test_bce_with_logits_with_pos_weight_has_correct_grad_at_zero(self):
+        output = torch.zeros(3, 1, requires_grad=True)
+        target = torch.zeros(3, 1)
+        pos_weight = torch.ones(3, 1)
+        nn.BCEWithLogitsLoss(pos_weight=pos_weight, size_average=False)(output, target).backward()
+        expected_grad = torch.empty(3, 1).fill_(0.5)
+        grad = output.grad
+        print(grad)
+        self.assertEqual(grad, expected_grad)
+
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
         target = torch.rand(16, 4)
@@ -4514,6 +4626,10 @@ class TestNN(NNTestCase):
         input1 = torch.randn(input_size, requires_grad=True)
         input2 = torch.randn(input_size, requires_grad=True)
         self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
+
+    def test_grid_sample_unsupported_mode(self):
+        with self.assertRaisesRegex(NotImplementedError, "nn.functional.grid_sample got unsupported mode: 'garbage'"):
+            F.grid_sample(torch.tensor([]), torch.tensor([]), mode='garbage')
 
     def test_grid_sample(self):
         def test_cpu_against_cuda(N, C, H, W, padding_mode):
@@ -7222,6 +7338,12 @@ new_module_tests = [
         desc='tuple',
     ),
     dict(
+        module_name='AdaptiveMaxPool2d',
+        constructor_args=((3, None),),
+        input_fn=lambda: _rand_tensor_non_equal(1, 3, 5, 6),
+        desc='tuple_none',
+    ),
+    dict(
         module_name='AdaptiveMaxPool3d',
         constructor_args=(3,),
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
@@ -7232,6 +7354,12 @@ new_module_tests = [
         constructor_args=((3, 4, 5),),
         input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
         desc='tuple',
+    ),
+    dict(
+        module_name='AdaptiveMaxPool3d',
+        constructor_args=((3, None, 5),),
+        input_fn=lambda: _rand_tensor_non_equal(2, 3, 5, 6, 7),
+        desc='tuple_none',
     ),
     dict(
         module_name='AdaptiveMaxPool3d',
@@ -7263,6 +7391,12 @@ new_module_tests = [
         desc='tuple',
     ),
     dict(
+        module_name='AdaptiveAvgPool2d',
+        constructor_args=((3, None),),
+        input_fn=lambda: torch.rand(1, 3, 5, 6),
+        desc='tuple_none',
+    ),
+    dict(
         module_name='AdaptiveAvgPool3d',
         constructor_args=(3,),
         input_fn=lambda: torch.rand(2, 3, 5, 2, 7),
@@ -7273,6 +7407,12 @@ new_module_tests = [
         constructor_args=((3, 4, 5),),
         input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
         desc='tuple',
+    ),
+    dict(
+        module_name='AdaptiveAvgPool3d',
+        constructor_args=((None, 4, 5),),
+        input_fn=lambda: torch.rand(2, 3, 5, 3, 7),
+        desc='tuple_none',
     ),
     dict(
         module_name='SELU',
@@ -7610,28 +7750,21 @@ add_test(NewModuleTest(
     fullname='AdaptiveLogSoftmax'))
 
 
+num_shards = os.environ.get('TEST_NN_NUM_SHARDS', None)
+shard = os.environ.get('TEST_NN_SHARD', None)
+if num_shards is not None and shard is not None:
+    num_shards = int(num_shards)
+    shard = int(shard)
+
+    def load_tests(loader, tests, pattern):
+        test_suite = unittest.TestSuite()
+        for test_group in tests:
+            for test in test_group:
+                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
+                if hash_id % num_shards == shard:
+                    test_suite.addTest(test)
+        return test_suite
+
+
 if __name__ == '__main__':
-    parser.add_argument(
-        '--num-shards',
-        type=int,
-        required=False,
-        help='number of shards')
-    parser.add_argument(
-        '--shard',
-        type=int,
-        required=False,
-        help='which shard to run')
-
-    args, remaining = parser.parse_known_args()
-    unittest_args = [sys.argv[0]] + remaining
-
-    if args.num_shards is not None and args.shard is not None:
-        def load_tests(loader, tests, pattern):
-            test_suite = unittest.TestSuite()
-            for test_group in tests:
-                for test in test_group:
-                    if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % args.num_shards == args.shard:
-                        test_suite.addTest(test)
-            return test_suite
-
-    run_tests(unittest_args)
+    run_tests()

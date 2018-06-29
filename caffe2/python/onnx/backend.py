@@ -996,3 +996,5 @@ run_node = Caffe2Backend.run_node
 run_model = Caffe2Backend.run_model
 
 supports_device = Caffe2Backend.supports_device  # noqa
+
+is_compatible = Caffe2Backend.is_compatible

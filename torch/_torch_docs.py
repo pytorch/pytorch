@@ -5294,8 +5294,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.ifft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5383,8 +5394,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.fft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5461,8 +5483,19 @@ of :attr:`input`, but instead the last dimension will be halfed as of size
 
 The inverse of this function is :func:`~torch.irfft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5531,8 +5564,19 @@ The inverse of this function is :func:`~torch.rfft`.
     Jacobian with point perturbations, :func:`~torch.irfft` will almost
     certainly fail the check.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:

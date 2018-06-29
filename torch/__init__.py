@@ -8,9 +8,11 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+import os
 import sys
 import platform
 from ._utils import _import_dotted_name
+from ._utils_internal import get_file_path, prepare_multiprocessing_environment
 from .version import __version__
 from ._six import string_classes as _string_classes
 
@@ -233,8 +235,8 @@ _tensor_classes = set()
 def manager_path():
     if platform.system() == 'Windows':
         return b""
-    import os
-    path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
+    path = get_file_path('torch', 'lib', 'torch_shm_manager')
+    prepare_multiprocessing_environment(get_file_path('torch'))
     if not os.path.exists(path):
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
@@ -283,6 +285,7 @@ import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
+import torch.backends.cuda
 import torch.backends.mkl
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
 

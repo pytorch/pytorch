@@ -234,6 +234,18 @@ class ArgumentHelper {
     return ArgumentHelper(def).GetRepeatedMessageArgument<MessageType>(name);
   }
 
+  template <typename Def>
+  static bool RemoveArgument(Def& def, int index) {
+    if (index >= def.arg_size()) {
+      return false;
+    }
+    if (index < def.arg_size() - 1) {
+      def.mutable_arg()->SwapElements(index, def.arg_size() - 1);
+    }
+    def.mutable_arg()->RemoveLast();
+    return true;
+  }
+
   explicit ArgumentHelper(const OperatorDef& def);
   explicit ArgumentHelper(const NetDef& netdef);
   bool HasArgument(const string& name) const;
@@ -277,11 +289,24 @@ class ArgumentHelper {
   CaffeMap<string, Argument> arg_map_;
 };
 
+// **** Arguments Utils *****
+
+// Helper methods to get an argument from OperatorDef or NetDef given argument
+// name. Throws if argument does not exist.
 const Argument& GetArgument(const OperatorDef& def, const string& name);
+const Argument& GetArgument(const NetDef& def, const string& name);
+
+// Helper methods to query a boolean argument flag from OperatorDef or NetDef
+// given argument name. If argument does not exist, return default value.
+// Throws if argument exists but the type is not boolean.
 bool GetFlagArgument(
     const OperatorDef& def,
     const string& name,
-    bool def_value = false);
+    bool default_value = false);
+bool GetFlagArgument(
+    const NetDef& def,
+    const string& name,
+    bool default_value = false);
 
 Argument* GetMutableArgument(
     const string& name,
@@ -295,6 +320,7 @@ template <typename T>
 inline void AddArgument(const string& name, const T& value, OperatorDef* def) {
   GetMutableArgument(name, true, def)->CopyFrom(MakeArgument(name, value));
 }
+// **** End Arguments Utils *****
 
 bool inline operator==(const DeviceOption& dl, const DeviceOption& dr) {
   return IsSameDevice(dl, dr);

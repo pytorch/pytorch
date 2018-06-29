@@ -8,7 +8,7 @@ struct Device;
 struct Tensor;
 } // namespace at
 
-namespace torch { namespace tensor {
+namespace torch { namespace tensors {
 
 // Initializes the Python tensor type objects: torch.FloatTensor,
 // torch.DoubleTensor, etc. and binds them in their containing modules.
@@ -31,4 +31,4 @@ at::Type& get_default_tensor_type();
 // Gets the torch::Device object of a given at::Tensor
 at::Device getDevice(const at::Tensor& tensor);
 
-}} // namespace torch::tensor
+}} // namespace torch::tensors

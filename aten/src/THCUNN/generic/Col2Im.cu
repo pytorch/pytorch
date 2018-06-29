@@ -17,9 +17,9 @@ static inline void THNN_(Col2Im_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = THCTensor_(_nDimension)(state, input);
-  THCUNN_argCheck(state, ndim == 2 || ndim == 3, 2, input,
-                  "2D or 3D input tensor expected but got %s");
+  int ndim = THCTensor_(nDimension)(state, input);
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 2 || ndim == 3), 2, input,
+                  "non-empty 2D or 3D input tensor expected but got %s");
 
   int batch_dim = (ndim == 4) ? 0 : -1;
   long nInputPlane  = input->size[batch_dim + 1];
@@ -50,7 +50,7 @@ void THNN_(Col2Im_updateOutput)(
                            kH, kW, dH, dW, padH, padW, sH, sW);
 
   bool batched_input = true;
-  if (input->_dim() == 2) {
+  if (input->dim() == 2) {
       // Force batch
       batched_input = false;
       THCTensor_(resize3d)(state, input, 1, input->size[0], input->size[1]);

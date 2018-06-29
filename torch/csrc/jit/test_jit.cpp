@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/assertions.h"
@@ -604,7 +605,7 @@ void testADFormulas() {
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
     auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
-
+    LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
     auto tensor_grads_in           = fmap(var_grads_in, unwrap);
@@ -848,7 +849,9 @@ void testBlocks(std::ostream & out) {
 
 const static auto cf_examples = R"JIT(
   def if_test(a, b):
-      c = 0
+      # FIXME: use 0 instead of a.
+      # c = 0
+      c = a
       if a < b:
         c = b
       else:

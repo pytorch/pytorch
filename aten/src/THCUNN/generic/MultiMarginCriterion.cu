@@ -19,7 +19,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
-  if (input->_dim() == 1)
+  if (input->dim() == 1)
   {
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -50,10 +50,10 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     }
     THCudaCheck(cudaGetLastError());
   }
-  else if (input->_dim() == 2)
+  else if (input->dim() == 2)
   {
     int nframe = input->size[0];
-    THArgCheck((target->_dim() == 1) && (target->size[0] == nframe), 3,
+    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe), 3,
                "inconsistent target size");
     dim3 blocks(input->size[0]);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -123,7 +123,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   }
   else
   {
-    THError("vector or matrix expected");
+    AT_ERROR("non-empty vector or matrix expected, got sizes: ", input->sizes());
   }
 
   THCTensor_(free)(state, input);
@@ -151,7 +151,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   if(weights)
     weights = THCTensor_(newContiguous)(state, weights);
 
-  if (input->_dim() == 1)
+  if (input->dim() == 1)
   {
     dim3 blocks(1);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -186,10 +186,10 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   }
-  else if (input->_dim() == 2)
+  else if (input->dim() == 2)
   {
     int nframe = gradInput->size[0];
-    THArgCheck((target->_dim() == 1) && (target->size[0] == nframe), 3,
+    THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe), 3,
                "inconsistent target size");
     dim3 blocks(gradInput->size[0]);
     dim3 threads(MULTIMARGIN_THREADS);
@@ -226,7 +226,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   }
   else
   {
-    THError("vector or matrix expected");
+    AT_ERROR("non-empty vector or matrix expected, got ", input->sizes());
   }
 
   THCTensor_(free)(state, input);

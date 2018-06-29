@@ -18,9 +18,9 @@ static inline void THNN_(Im2Col_shapeCheck)(
   THArgCheck(sW > 0 && sH > 0, 10,
              "stride should be greater than zero, but got sH: %d sW: %d", sH, sW);
 
-  int ndim = THCTensor_(_nDimension)(state, input);
-  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
-                  "3D or 4D input tensor expected but got: %s");
+  int ndim = THCTensor_(nDimension)(state, input);
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+                  "non-empty 3D or 4D input tensor expected but got: %s");
 
   int dim_batch = 0;
   if (ndim == 3) {
@@ -56,7 +56,7 @@ void THNN_(Im2Col_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   bool batched_input = true;
-  if (input->_dim() == 3) {
+  if (input->dim() == 3) {
     batched_input = false;
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
   }

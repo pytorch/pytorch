@@ -29,7 +29,6 @@ enum class SymbolNamespace : unsigned char {
 //
 // TODO: Consider moving the synthetic onnx operators to their own
 // namespace.
-
 #define FORALL_PRIM_SYMBOLS(_) \
 _(prim, Assign) \
 _(prim, Constant) \
@@ -58,7 +57,12 @@ _(prim, Store) \
 _(prim, Undefined) \
 _(prim, Starred) \
 _(prim, TupleConstruct) \
-_(prim, TupleUnpack)
+_(prim, TupleUnpack) \
+_(prim, NumToTensor) \
+_(prim, TensorToNum) \
+_(prim, AutogradAdd) \
+_(prim, GradOf) \
+_(prim, AnyDefined)
 /* end */
 
 // Workaround for some not-yet-defined ATen symbols, see
@@ -128,6 +132,7 @@ _(attr, sizes) \
 _(attr, starts) \
 _(attr, transA) \
 _(attr, transB) \
+_(attr, name)
 /* end */
 
 #define FORALL_ATTR_SYMBOLS(_) \
