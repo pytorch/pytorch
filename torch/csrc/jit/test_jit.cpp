@@ -894,7 +894,8 @@ void testControlFlow() {
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
-  proto.DebugString();
+  proto.set_producer_version("0.3");
+  std::cout << proto.DebugString() << std::endl;
 }
 
 std::string runJITCPPTests() {
