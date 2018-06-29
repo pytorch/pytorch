@@ -17,12 +17,12 @@ struct LinearOptions {
   TORCH_ARG(bool, with_bias) = true;
 };
 
-class LinearImpl : public torch::nn::Cloneable<LinearImpl> {
+class LinearImpl : public Cloneable<LinearImpl> {
  public:
   explicit LinearImpl(LinearOptions options);
 
   void reset() override;
-  std::vector<Tensor> forward(std::vector<Tensor>);
+  Tensor forward(Tensor);
   const LinearOptions& options() const noexcept;
 
  private:

@@ -43,7 +43,7 @@ class TestCaffe2Basic(TestCase):
 
         b2 = C.Caffe2Backend()
 
-        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], broadcast = 0)
+        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"])
         output = b2.convert_node(node_def.SerializeToString(), 6)
 
         bad_node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], foo = 42, bar = 56)
@@ -166,8 +166,7 @@ class TestCaffe2Basic(TestCase):
             ['A', 'B', 'C'],
             ["Y"],
             alpha=alpha,
-            beta=beta,
-            broadcast=1)
+            beta=beta)
         output = c2.run_node(node_def, [A, B, C])
         np.testing.assert_almost_equal(
             output["Y"],

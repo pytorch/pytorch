@@ -168,6 +168,15 @@ class Tensor {
       return;
     }
     meta_ = src.meta();
+    if (src.size() == -1) {
+      dims_.clear();
+      size_ = -1;
+      data_.reset();
+      shares_data_ = false;
+      capacity_ = 0;
+      reserved_ = false;
+      return;
+    }
     Resize(src.dims());
     if (size() > 0) {
       if (meta_.copy()) {
@@ -680,6 +689,21 @@ class Tensor {
     #endif
     return dims_[i];
   }
+
+  Tensor Clone() const {
+    Tensor x;
+    x.CopyFrom(*this);
+    return x;
+  }
+
+  Tensor(Tensor<Context>&& src) noexcept {
+    swap(src);
+  }
+
+  /**
+   * @brief Delete the copy constructor and use Clone explicitly
+   */
+  Tensor(const Tensor<Context>& src) = delete;
 
  protected:
   vector<TIndex> dims_;

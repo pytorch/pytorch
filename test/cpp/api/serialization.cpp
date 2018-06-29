@@ -1,11 +1,13 @@
 #include <catch.hpp>
 
+#include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/optim/optimizer.h>
 #include <torch/optim/sgd.h>
 #include <torch/serialization.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
 
@@ -21,11 +23,15 @@ using namespace torch::nn;
 namespace {
 std::shared_ptr<Sequential> xor_model() {
   return std::make_shared<Sequential>(
-      torch::SigmoidLinear(2, 8), torch::SigmoidLinear(8, 1));
+      Linear(2, 8),
+      Functional(at::sigmoid),
+      Linear(8, 1),
+      Functional(at::sigmoid));
 }
 } // namespace
 
 TEST_CASE("serialization") {
+  torch::manual_seed(0);
   SECTION("undefined") {
     auto x = torch::Tensor();
 
@@ -41,19 +47,19 @@ TEST_CASE("serialization") {
   }
 
   SECTION("cputypes") {
-    for (int i = 0; i < static_cast<int>(at::ScalarType::NumOptions); i++) {
-      if (i == static_cast<int>(at::ScalarType::Half)) {
+    for (int i = 0; i < static_cast<int>(torch::Dtype::NumOptions); i++) {
+      if (i == static_cast<int>(torch::Dtype::Half)) {
         // XXX can't serialize half tensors at the moment since contiguous() is
         // not implemented for this type;
         continue;
-      } else if (i == static_cast<int>(at::ScalarType::Undefined)) {
+      } else if (i == static_cast<int>(torch::Dtype::Undefined)) {
         // We can't construct a tensor for this type. This is tested in
         // serialization/undefined anyway.
         continue;
       }
 
       auto x = torch::ones(
-          {5, 5}, at::getType(at::kCPU, static_cast<at::ScalarType>(i)));
+          {5, 5}, torch::getType(torch::kCPU, static_cast<torch::Dtype>(i)));
       auto y = torch::empty({});
 
       std::stringstream ss;
@@ -62,7 +68,7 @@ TEST_CASE("serialization") {
 
       REQUIRE(y.defined());
       REQUIRE(x.sizes().vec() == y.sizes().vec());
-      if (at::isIntegralType(static_cast<at::ScalarType>(i))) {
+      if (torch::isIntegralType(static_cast<torch::Dtype>(i))) {
         REQUIRE(x.equal(y));
       } else {
         REQUIRE(x.allclose(y));
@@ -168,21 +174,15 @@ TEST_CASE("serialization") {
 
   SECTION("xor") {
     // We better be able to save and load a XOR model!
-    auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
-      auto inp = torch::empty({bs, 2});
-      auto lab = torch::empty({bs});
-      for (auto i = 0U; i < bs; i++) {
-        auto a = std::rand() % 2;
-        auto b = std::rand() % 2;
-        auto c = a ^ b;
-        inp[i][0] = a;
-        inp[i][1] = b;
-        lab[i] = c;
+    auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t batch_size) {
+      auto inputs = torch::empty({batch_size, 2});
+      auto labels = torch::empty({batch_size});
+      for (size_t i = 0; i < batch_size; i++) {
+        inputs[i] = torch::randint(2, {2}, torch::kInt64);
+        labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
       }
-
-      // forward
-      auto x = model->forward<torch::Tensor>(inp);
-      return at::binary_cross_entropy(x, lab);
+      auto x = model->forward<torch::Tensor>(inputs);
+      return torch::binary_cross_entropy(x, labels);
     };
 
     auto model = xor_model();
@@ -240,11 +240,11 @@ TEST_CASE("serialization") {
     auto optim3_2 = torch::optim::SGD(
         model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
 
-    auto x = torch::ones({10, 5}, at::requires_grad());
+    auto x = torch::ones({10, 5}, torch::requires_grad());
 
     auto step = [&](torch::optim::Optimizer& optimizer, Linear model) {
       optimizer.zero_grad();
-      auto y = model->forward({x})[0].sum();
+      auto y = model->forward(x).sum();
       y.backward();
       optimizer.step();
     };
@@ -277,22 +277,17 @@ TEST_CASE("serialization") {
 }
 
 TEST_CASE("serialization_cuda", "[cuda]") {
+  torch::manual_seed(0);
   // We better be able to save and load a XOR model!
-  auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
-    auto inp = torch::empty({bs, 2});
-    auto lab = torch::empty({bs});
-    for (auto i = 0U; i < bs; i++) {
-      auto a = std::rand() % 2;
-      auto b = std::rand() % 2;
-      auto c = a ^ b;
-      inp[i][0] = a;
-      inp[i][1] = b;
-      lab[i] = c;
+  auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t batch_size) {
+    auto inputs = torch::empty({batch_size, 2});
+    auto labels = torch::empty({batch_size});
+    for (size_t i = 0; i < batch_size; i++) {
+      inputs[i] = torch::randint(2, {2}, torch::kInt64);
+      labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
     }
-
-    // forward
-    auto x = model->forward<torch::Tensor>(inp);
-    return at::binary_cross_entropy(x, lab);
+    auto x = model->forward<torch::Tensor>(inputs);
+    return torch::binary_cross_entropy(x, labels);
   };
 
   auto model = xor_model();

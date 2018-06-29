@@ -286,7 +286,8 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
 #endif
   };
   if (b) {
-    state->bias = caffe2::make_unique<TensorCPU>(*b);
+    CPUContext context;
+    state->bias = caffe2::make_unique<TensorCPU>(*b, &context);
   }
   return state;
 }

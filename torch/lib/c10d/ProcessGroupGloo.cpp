@@ -214,7 +214,7 @@ ProcessGroupGloo::ProcessGroupGloo(
       cacheNumAlgorithmEntries_(options.cacheNumAlgorithmEntries) {
   auto& devices = options.devices;
   if (devices.empty()) {
-    devices.push_back(::gloo::transport::tcp::CreateDevice("localhost"));
+    throw std::runtime_error("No device(s) specified");
   }
 
   for (auto& device : options.devices) {

@@ -180,19 +180,20 @@ bool PackSegmentsOp<CUDAContext>::DoRunWithType2() {
   if (return_presence_mask_) {
     CAFFE_THROW("CUDA version of PackSegments does not support presence mask.");
   }
-  CAFFE_ENFORCE(data.ndim() >= 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
 
   // Find the length of the longest sequence.
   dev_max_length_.Resize(1);
   host_max_length_.Resize(1);
-  const T max_length = array_max<T>(
-      lengths_ptr,
-      num_seq,
-      dev_buffer_,
-      dev_max_length_,
-      host_max_length_,
-      context_);
+  const T max_length = num_seq > 0 ? array_max<T>(
+                                         lengths_ptr,
+                                         num_seq,
+                                         dev_buffer_,
+                                         dev_max_length_,
+                                         host_max_length_,
+                                         context_)
+                                   : 0;
 
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
@@ -245,8 +246,8 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
   const T* lengths_ptr = lengths.data<T>();
   auto* out = Output(0);
 
-  CAFFE_ENFORCE(data.ndim() >= 1, "DATA should be at least 1-D");
-  CAFFE_ENFORCE(lengths.ndim() == 1, "LENGTH should be 1-D");
+  CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
+  CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
 
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
@@ -255,13 +256,14 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
   // compute max of the lengths
   dev_max_length_.Resize(1);
   host_max_length_.Resize(1);
-  const T max_length = array_max<T>(
-      lengths_ptr,
-      num_seq,
-      dev_buffer_,
-      dev_max_length_,
-      host_max_length_,
-      context_);
+  const T max_length = num_seq > 0 ? array_max<T>(
+                                         lengths_ptr,
+                                         num_seq,
+                                         dev_buffer_,
+                                         dev_max_length_,
+                                         host_max_length_,
+                                         context_)
+                                   : 0;
 
   // compute num of cells: sum of the lengths
   dev_num_cell_.Resize(1);
@@ -276,8 +278,8 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
 
   // create output tensor
   auto shape = data.dims();
-  CAFFE_ENFORCE(
-      shape[0] == lengths.dim(0), "LENGTH should match DATA in dimension 0");
+  CAFFE_ENFORCE_EQ(
+      shape[0], lengths.dim(0), "LENGTH should match DATA in dimension 0");
   shape.erase(shape.begin());
   shape[0] = num_cell;
   out->Resize(shape);

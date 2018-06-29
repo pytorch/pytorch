@@ -14,6 +14,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/math_utils.h"
 
 namespace caffe2 {
 
@@ -21,11 +22,6 @@ namespace {
 
 template <typename T>
 using BlockReduce = cub::BlockReduce<T, CAFFE_CUDA_NUM_THREADS>;
-
-template <typename T>
-inline __host__ __device__ T CubeCUDA(const T x) {
-  return x * x * x;
-}
 
 __global__ void InvStdCUDAKernel(
     const int size,
@@ -144,13 +140,14 @@ __global__ void GroupNormBackwardCUDAKernel(
     const int i_gamma = kOrder == StorageOrder::NCHW ? (i / HxW) % C : i % C;
 #if __CUDA_ARCH__ >= 350
     const T u = (__ldg(db + i_mu) * __ldg(mu + i_mu) - __ldg(ds + i_mu)) *
-        (__ldg(X + i) - __ldg(mu + i_mu)) * CubeCUDA(__ldg(rsig + i_mu));
+        (__ldg(X + i) - __ldg(mu + i_mu)) *
+        math::utils::Cube<T>(__ldg(rsig + i_mu));
     const T v = __ldg(db + i_mu) * __ldg(rsig + i_mu);
     dX[i] = __ldg(gamma + i_gamma) * __ldg(dY + i) * __ldg(rsig + i_mu) +
         (u - v) * denom;
 #else
     const T u = (db[i_mu] * mu[i_mu] - ds[i_mu]) * (X[i] - mu[i_mu]) *
-        CubeCUDA(rsig[i_mu]);
+        math::utils::Cube<T>(rsig[i_mu]);
     const T v = db[i_mu] * rsig[i_mu];
     dX[i] = gamma[i_gamma] * dY[i] * rsig[i_mu] + (u - v) * denom;
 #endif
