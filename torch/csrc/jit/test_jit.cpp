@@ -892,14 +892,10 @@ void testControlFlow() {
 }
 
 void testProto() {
-  std::cout << "Before GetEmptyString in testProto" << std::endl;
-  ::google::protobuf::internal::GetEmptyString();
-  std::cout << "After GetEmptyString in testProto" << std::endl;
-
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
   proto.set_producer_version("3");
-  std::cout << proto.DebugString() << std::endl;
+  std::cerr << proto.DebugString() << std::endl;
 }
 
 std::string runJITCPPTests() {
