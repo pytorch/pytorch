@@ -20,24 +20,17 @@ void libshm_context_free(libshm_context *ctx) {
   delete ctx;
 }
 
-void * libshm_alloc(void *_ctx, ptrdiff_t size) {
+THManagedSharedDeleter THManagedSharedDeleter::singleton_;
+
+
+at::SupervisedPtr libshm_alloc(void *_ctx, ptrdiff_t size) {
   auto *ctx = (libshm_context*)_ctx;
-  return THRefcountedMapAllocator.malloc(ctx->th_context, size);
+  return THRefcountedMapAllocator_alloc(ctx->th_context, size);
 }
 
-void * libshm_realloc(void *_ctx, void *data, ptrdiff_t size) {
-  THError("cannot realloc shared memory");
-  return NULL;
-}
 
-void libshm_free(void *_ctx, void *data) {
+void THManagedSharedDeleter::deallocate(void* _ctx, void* data) const {
   auto *ctx = (libshm_context*)_ctx;
-  THRefcountedMapAllocator.free(ctx->th_context, data);
-  libshm_context_free(ctx);
+  ctx->th_deleter(data);
+  return libshm_context_free(ctx);
 }
-
-THAllocator THManagedSharedAllocator = {
-  libshm_alloc,
-  libshm_realloc,
-  libshm_free,
-};
