@@ -893,8 +893,8 @@ void testControlFlow() {
 
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
-  proto.set_producer_name("foo");
-  proto.set_producer_version("0.3");
+  proto.set_ir_version(3);
+  proto.set_model_version(4);
   std::cout << proto.DebugString() << std::endl;
 }
 
