@@ -40,7 +40,7 @@ if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     (cd test && python -c "import torch")
     echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
-    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(3)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
     (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
