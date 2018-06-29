@@ -79,7 +79,7 @@ THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
 }
 
 THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
-                                      THAllocator *allocator,
+                                      at::Allocator *allocator,
                                       void *allocatorContext)
 {
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
@@ -89,7 +89,7 @@ THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocatorVoidPtr = allocator;
+  storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
   storage->device = 0;  // device is not meaningful on CPU
   return storage;

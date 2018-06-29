@@ -51,35 +51,13 @@ static THCDeviceAllocator wrapped_allocator = {
   nullptr,
 };
 #else
-static void call_deleter(void * ctx, void * data) {
-  auto fnptr = (std::function<void(void*)>*) ctx;
-  (*fnptr)(data);
-  delete fnptr;
-}
-static THAllocator storage_deleter = {
-  nullptr,
-  nullptr,
-  call_deleter,
-};
-static void* wrapped_alloc(void * ctx, ptrdiff_t size) {
-  auto ac = static_cast<Allocator*>(ctx);
-  return ac->allocate(size);
-}
-static void wrapped_free(void * ctx, void * data) {
-  auto ac = static_cast<Allocator*>(ctx);
-  ac->deallocate(data);
-}
-static THAllocator wrapped_allocator = {
-  wrapped_alloc,
-  nullptr,
-  wrapped_free,
-};
+
 #endif
 
 ${Storage}::${Storage}(Context* context, size_t size, Allocator* allocator)
   : storage(nullptr),
     context(context) {
-  storage = ${THStorage}_newWithAllocator(${state,} size, &wrapped_allocator, allocator);
+  storage = ${THStorage}_newWithAllocator(${state,} size, allocator, nullptr);
   ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
 }
 
@@ -87,7 +65,9 @@ ${Storage}::${Storage}(Context* context,
   void * data, size_t size, const std::function<void(void*)> & deleter)
   : storage(${THStorage}_newWithDataAndAllocator(${state,}
      static_cast<${THScalarType}*>(data), size,
-     &storage_deleter,
+     getStorageDeleterAllocator(),
+     // NB: The memory safety of this critically relies on us not "reallocating"
+     // (which we have disabled below).
      new std::function<void(void*)>(deleter)
     )),
     context(context) {

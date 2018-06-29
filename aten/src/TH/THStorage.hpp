@@ -18,7 +18,7 @@ typedef struct THStorage
     ptrdiff_t size;
     std::atomic<int> refcount;
     char flag;
-    void *allocatorVoidPtr; // Either THDeviceAllocator or THCDeviceAllocator
+    at::Allocator *allocator;
     void *allocatorContext;
     struct THStorage *view;
     int device;

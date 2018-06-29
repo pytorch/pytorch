@@ -19,23 +19,21 @@
 #endif
 /* end of stuff for mapped files */
 
-static void *THDefaultAllocator_alloc(void* ctx, ptrdiff_t size) {
-  return THAlloc(size);
-}
-
-static void *THDefaultAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  return THRealloc(ptr, size);
-}
-
-static void THDefaultAllocator_free(void* ctx, void* ptr) {
-  THFree(ptr);
-}
-
-THAllocator THDefaultAllocator = {
-  &THDefaultAllocator_alloc,
-  &THDefaultAllocator_realloc,
-  &THDefaultAllocator_free
+// TODO: realloc support was dropped
+// THRealloc(ptr, size);
+struct THDefaultAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    return THAlloc(size);
+  }
+  void deallocate(void* ctx, void* ptr) {
+    THFree(ptr);
+  }
 };
+
+static THDefaultAllocator th_default_allocator;
+Allocator* getTHDefaultAllocator() {
+  return &th_default_allocator;
+}
 
 #if defined(_WIN32) || defined(HAVE_MMAP)
 
@@ -615,14 +613,22 @@ int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 
 #endif
 
-THAllocator THMapAllocator = {
-  &THMapAllocator_alloc,
-  &THMapAllocator_realloc,
-  &THMapAllocator_free
+// TODO: realloc nerfed
+struct THMapAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    THMapAllocator_alloc(ctx, size);
+  }
+  void deallocate(void* ctx, void* data) const override {
+    THMapAllocator_free(ctx, data);
+  }
 };
 
-THAllocator THRefcountedMapAllocator = {
-  &THRefcountedMapAllocator_alloc,
-  &THRefcountedMapAllocator_realloc,
-  &THRefcountedMapAllocator_free
+// TODO: realloc nerfed
+struct THRefcountedMapAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    THRefcountedMapAllocator_alloc(ctx, size);
+  }
+  void deallocate(void* ctx, void* data) const override {
+    THRefcountedMapAllocator_free(ctx, data);
+  }
 };
