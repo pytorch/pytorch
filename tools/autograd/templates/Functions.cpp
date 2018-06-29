@@ -521,8 +521,14 @@ Tensor index_select_backward(Tensor grad, int64_t dim, Tensor indices, IntList s
 }
 
 Tensor slice_backward(Tensor grad, IntList input_sizes, int64_t dim, int64_t start, int64_t end, int64_t step) {
-  auto grad_input = at::zeros(input_sizes, grad.type());
+  auto grad_input = at::zeros(input_sizes, grad.options());
   grad_input.slice(dim, start, end, step).copy_(grad);
+  return grad_input;
+}
+
+Tensor select_backward(Tensor grad, IntList input_sizes, int64_t dim, int64_t index) {
+  auto grad_input = at::zeros(input_sizes, grad.options());
+  grad_input.select(dim, index).copy_(grad);
   return grad_input;
 }
 
