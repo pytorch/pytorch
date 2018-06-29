@@ -22,7 +22,7 @@ void libshm_context_free(libshm_context *ctx) {
 
 void * libshm_alloc(void *_ctx, ptrdiff_t size) {
   auto *ctx = (libshm_context*)_ctx;
-  return THRefcountedMapAllocator.malloc(ctx->th_context, size);
+  return getTHRefcountedMapAllocator()->allocate(ctx->th_context, size);
 }
 
 void * libshm_realloc(void *_ctx, void *data, ptrdiff_t size) {
@@ -32,12 +32,20 @@ void * libshm_realloc(void *_ctx, void *data, ptrdiff_t size) {
 
 void libshm_free(void *_ctx, void *data) {
   auto *ctx = (libshm_context*)_ctx;
-  THRefcountedMapAllocator.free(ctx->th_context, data);
+  getTHRefcountedMapAllocator()->deallocate(ctx->th_context, data);
   libshm_context_free(ctx);
 }
 
-THAllocator THManagedSharedAllocator = {
-  libshm_alloc,
-  libshm_realloc,
-  libshm_free,
+struct THManagedSharedAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    return libshm_alloc(ctx, size);
+  }
+  void deallocate(void* ctx, void* data) const override {
+    return libshm_free(ctx, data);
+  }
 };
+
+static THManagedSharedAllocator th_managed_shared_allocator;
+at::Allocator* getTHManagedSharedAllocator() {
+  return &th_managed_shared_allocator;
+}

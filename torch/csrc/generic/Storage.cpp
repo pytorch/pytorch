@@ -23,13 +23,13 @@ static void THPStorage_(dealloc)(THPStorage* self)
   Py_TYPE(self)->tp_free((PyObject*)self);
 }
 
-static THWStorage* THPStorage_(newWithAllocator)(int64_t size, THAllocator* allocator)
+static THWStorage* THPStorage_(newWithAllocator)(int64_t size, at::Allocator* allocator)
 {
 #if defined(THC_GENERIC_FILE) || defined(THD_GENERIC_FILE)
   THPUtils_setError(THPStorageStr " does not support custom allocators");
   return NULL;
 #else
-  return THWStorage_(newWithAllocator)(LIBRARY_STATE size, allocator, NULL);
+  return THWStorage_(newWithAllocator)(LIBRARY_STATE size, allocator);
 #endif
 }
 
@@ -118,7 +118,8 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
         size, numel - offset, offset);
 
     real *data_ptr = THWStorage_(data)(LIBRARY_STATE storage_arg->cdata) + offset;
-    THWStoragePtr storage(THWStorage_(newWithData)(LIBRARY_STATE data_ptr, size));
+    // TODO: Hmmmm
+    THWStoragePtr storage(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {data_ptr, {}}, size, nullptr));
     storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     storage->view = storage_arg->cdata;
     THWStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
@@ -213,7 +214,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     }
 
     real *data = THWStorage_(data)(LIBRARY_STATE self->cdata);
-    THWStoragePtr new_storage(THWStorage_(newWithData)(LIBRARY_STATE data + start, slicelength));
+    THWStoragePtr new_storage(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {static_cast<void*>(data + start), {}}, slicelength, nullptr));
     new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     new_storage->view = self->cdata;
     THWStorage_(retain)(LIBRARY_STATE self->cdata);

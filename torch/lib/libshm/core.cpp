@@ -104,7 +104,20 @@ AllocInfo get_alloc_info(libshm_context *ctx) {
   return info;
 }
 
-void * libshm_alloc(void *_ctx, ptrdiff_t size) {
+void libshm_free(void *_ctx, void *data) {
+  auto *ctx = (libshm_context*)_ctx;
+  AllocInfo info = get_alloc_info(ctx);
+  info.free = true;
+  ClientSocket &socket = get_manager_socket(ctx->manager_handle);
+  ctx->th_deleter(data);
+  // NB: No need to clear th_context; it was stolen by th_deleter
+  libshm_context_free(ctx);
+  socket.register_deallocation(info);
+}
+
+THManagedSharedDeleter THManagedSharedDeleter::singleton_;
+
+std::unique_ptr<void, at::BoundDeleter> libshm_alloc(void *_ctx, ptrdiff_t size) {
   // TODO: unlock GIL when contacting the manager
   auto *ctx = (libshm_context*)_ctx;
   try {
@@ -124,26 +137,10 @@ void * libshm_alloc(void *_ctx, ptrdiff_t size) {
   } catch(std::exception &e) {
     THError(e.what());
   }
-  return THRefcountedMapAllocator.malloc(ctx->th_context, size);
+  auto ptr = THRefcountedMapAllocator_alloc(ctx->th_context, size);
+  return {ptr.release(), THManagedSharedDeleter::make(ctx, ptr.get_deleter())};
 }
 
-void * libshm_realloc(void *_ctx, void *data, ptrdiff_t size) {
-  THError("cannot realloc shared memory");
-  return NULL;
+void THManagedSharedDeleter::deallocate(void* ctx, void* data) const {
+  return libshm_free(ctx, data);
 }
-
-void libshm_free(void *_ctx, void *data) {
-  auto *ctx = (libshm_context*)_ctx;
-  AllocInfo info = get_alloc_info(ctx);
-  info.free = true;
-  ClientSocket &socket = get_manager_socket(ctx->manager_handle);
-  THRefcountedMapAllocator.free(ctx->th_context, data);
-  libshm_context_free(ctx);
-  socket.register_deallocation(info);
-}
-
-THAllocator THManagedSharedAllocator = {
-  libshm_alloc,
-  libshm_realloc,
-  libshm_free,
-};

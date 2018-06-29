@@ -58,17 +58,15 @@ public:
       // make storage of size 0 actually a 1-length storage with 1 element
       // so that our 0-dim tensors get allocated as 1-dim inside TH
       one = 1;
-      storage.data_ptr = &one;
+      storage.data_ptr = {&one, BoundDeleter{}};
       storage.size = 1;
     } else {
-      storage.data_ptr = (void*)(ref.data());
+      storage.data_ptr = {const_cast<void*>(static_cast<const void*>(ref.data())), BoundDeleter{}};
       storage.size = ref.size();
     }
     storage.scalar_type = at::CTypeToScalarType<th::from_type<int64_t>>::to();
     storage.refcount = 0;
     storage.flag = 0;
-    storage.allocatorVoidPtr = nullptr;
-    storage.allocatorContext = nullptr;
   }
 private:
   int64_t one;

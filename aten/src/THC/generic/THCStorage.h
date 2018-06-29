@@ -4,7 +4,6 @@
 
 #define TH_STORAGE_REFCOUNTED 1
 #define TH_STORAGE_RESIZABLE  2
-#define TH_STORAGE_FREEMEM    4
 
 #define THCStorage THStorage
 
@@ -37,17 +36,14 @@ THC_API THCStorage* THCStorage_(newWithSize3)(THCState *state, real, real, real)
 THC_API THCStorage* THCStorage_(newWithSize4)(THCState *state, real, real, real, real);
 THC_API THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *filename, ptrdiff_t size, int shared);
 
-/* takes ownership of data */
-THC_API THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size);
-
+#ifdef __cplusplus
 THC_API THCStorage* THCStorage_(newWithAllocator)(
   THCState *state, ptrdiff_t size,
-  THCDeviceAllocator* allocator,
-  void *allocatorContext);
+  at::Allocator* allocator);
 THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, real* data, ptrdiff_t size,
-  THCDeviceAllocator* allocator,
-  void *allocatorContext);
+  THCState *state, std::unique_ptr<void, at::BoundDeleter>&& data, ptrdiff_t size,
+  at::Allocator* allocator);
+#endif
 
 THC_API void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag);

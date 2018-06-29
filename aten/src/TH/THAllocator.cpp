@@ -19,23 +19,21 @@
 #endif
 /* end of stuff for mapped files */
 
-static void *THDefaultAllocator_alloc(void* ctx, ptrdiff_t size) {
-  return THAlloc(size);
-}
-
-static void *THDefaultAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  return THRealloc(ptr, size);
-}
-
-static void THDefaultAllocator_free(void* ctx, void* ptr) {
-  THFree(ptr);
-}
-
-THAllocator THDefaultAllocator = {
-  &THDefaultAllocator_alloc,
-  &THDefaultAllocator_realloc,
-  &THDefaultAllocator_free
+struct THDefaultAllocator final : public at::Allocator {
+  std::unique_ptr<void, at::BoundDeleter> allocate(size_t size) const override {
+    return {THAlloc(size), THDefaultDeleter::make()};
+  }
+  at::BoundDeleter maybeGlobalBoundDeleter() const override {
+    return THDefaultDeleter::make();
+  }
 };
+
+THDefaultDeleter THDefaultDeleter::singleton_;
+
+static THDefaultAllocator th_default_allocator;
+at::Allocator* getTHDefaultAllocator() {
+  return &th_default_allocator;
+}
 
 #if defined(_WIN32) || defined(HAVE_MMAP)
 
@@ -165,12 +163,16 @@ static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFire
 }
 #endif
 
-static void *_map_alloc(void* ctx_, ptrdiff_t size)
+std::unique_ptr<void, at::BoundDeleter> THMapAllocatorContext_alloc(THMapAllocatorContext* ctx, ptrdiff_t size)
 {
-  if (size == 0)
-    return NULL;
+  if (size == 0) {
+    // NB: We are still obligated to attach the deleter, because otherwise
+    // (1) we will leak ctx and (2) some code will still expect there to
+    // be a deleter so that they can look at the context.
+    // TestMultiprocessing.test_empty_shared checks this case.
+    return {nullptr, THMapDeleter::make(ctx)};
+  }
 
-  THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext*>(ctx_);
   void *data = NULL;
 
 #ifdef _WIN32
@@ -427,16 +429,7 @@ static void *_map_alloc(void* ctx_, ptrdiff_t size)
   }
 #endif
 
-  return data;
-}
-
-static void * THMapAllocator_alloc(void *ctx, ptrdiff_t size) {
-  return _map_alloc(ctx, size);
-}
-
-static void *THMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("cannot realloc mapped data");
-  return NULL;
+  return {data, THMapDeleter::make(ctx)};
 }
 
 static void THMapAllocator_free(void* ctx_, void* data) {
@@ -487,16 +480,6 @@ void THMapAllocatorContext_free(THMapAllocatorContext *ctx) {
   THError("file mapping not supported on your system");
 }
 
-static void *THMapAllocator_alloc(void* ctx_, ptrdiff_t size) {
-  THError("file mapping not supported on your system");
-  return NULL;
-}
-
-static void *THMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("file mapping not supported on your system");
-  return NULL;
-}
-
 static void THMapAllocator_free(void* ctx, void* data) {
   THError("file mapping not supported on your system");
 }
@@ -505,7 +488,7 @@ static void THMapAllocator_free(void* ctx, void* data) {
 
 #if (defined(_WIN32) || defined(HAVE_MMAP)) && defined(TH_ATOMIC_IPC_REFCOUNT)
 
-static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
+std::unique_ptr<void, at::BoundDeleter> THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
   THMapAllocatorContext *ctx = static_cast<THMapAllocatorContext *>(_ctx);
 
   if (ctx->flags & TH_ALLOCATOR_MAPPED_FROMFD)
@@ -518,7 +501,7 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
     THError("THRefcountedMapAllocator requires TH_ALLOCATOR_MAPPED_SHAREDMEM flag");
 
   size = size + TH_ALLOC_ALIGNMENT;
-  void *ptr = _map_alloc(ctx, size);
+  void* ptr = THMapAllocatorContext_alloc(ctx, size).release();
   char *data = ((char*)ptr) + TH_ALLOC_ALIGNMENT;
   THMapInfo *map_info = (THMapInfo*)ptr;
 
@@ -538,12 +521,7 @@ static void * THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size) {
   else
     map_info->refcount++;
 
-  return (void*)data;
-}
-
-static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("cannot realloc mapped data");
-  return NULL;
+  return {(void*)data, THRefcountedMapDeleter::make(ctx)};
 }
 
 static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
@@ -588,16 +566,6 @@ int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 
 #else
 
-static void * THRefcountedMapAllocator_alloc(void *ctx, ptrdiff_t size) {
-  THError("refcounted file mapping not supported on your system");
-  return NULL;
-}
-
-static void *THRefcountedMapAllocator_realloc(void* ctx, void* ptr, ptrdiff_t size) {
-  THError("refcounted file mapping not supported on your system");
-  return NULL;
-}
-
 static void THRefcountedMapAllocator_free(void* ctx_, void* data) {
   THError("refcounted file mapping not supported on your system");
 }
@@ -615,14 +583,14 @@ int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data)
 
 #endif
 
-THAllocator THMapAllocator = {
-  &THMapAllocator_alloc,
-  &THMapAllocator_realloc,
-  &THMapAllocator_free
-};
+void THMapDeleter::deallocate(void* ctx, void* ptr) const {
+  THMapAllocator_free(ctx, ptr);
+}
 
-THAllocator THRefcountedMapAllocator = {
-  &THRefcountedMapAllocator_alloc,
-  &THRefcountedMapAllocator_realloc,
-  &THRefcountedMapAllocator_free
-};
+THMapDeleter THMapDeleter::singleton_;
+
+void THRefcountedMapDeleter::deallocate(void* ctx, void* ptr) const {
+  THRefcountedMapAllocator_free(ctx, ptr);
+}
+
+THRefcountedMapDeleter THRefcountedMapDeleter::singleton_;

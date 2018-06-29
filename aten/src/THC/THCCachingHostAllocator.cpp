@@ -250,19 +250,6 @@ struct HostAllocator
 
 static HostAllocator allocator;
 
-static void* THCCachingHostAllocator_malloc(void* ctx, ptrdiff_t size)
-{
-  THAssert(size >= 0);
-  void *ptr;
-  THCudaCheck(allocator.malloc(&ptr, size));
-  return ptr;
-}
-
-static void THCCachingHostAllocator_free(void* ctx, void* ptr)
-{
-  allocator.free(ptr);
-}
-
 cudaError_t THCCachingHostAllocator_recordEvent(void *ptr, THCStream *stream)
 {
   return allocator.recordEvent(ptr, stream);
@@ -273,8 +260,31 @@ void THCCachingHostAllocator_emptyCache()
   allocator.emptyCache();
 }
 
-THAllocator THCCachingHostAllocator = {
-  &THCCachingHostAllocator_malloc,
-  NULL,
-  &THCCachingHostAllocator_free,
+struct THCCachingHostDeleter : public at::Deleter {
+  void deallocate(void* ctx, void* ptr) const override {
+    allocator.free(ptr);
+  }
+  static at::BoundDeleter make() {
+    return {&singleton_, nullptr};
+  }
+private:
+  static THCCachingHostDeleter singleton_;
 };
+THCCachingHostDeleter THCCachingHostDeleter::singleton_;
+
+struct THCCachingHostAllocator final : public at::Allocator {
+  std::unique_ptr<void, at::BoundDeleter> allocate(size_t size) const override {
+    THAssert(size >= 0);
+    void *ptr;
+    THCudaCheck(allocator.malloc(&ptr, size));
+    return {ptr, THCCachingHostDeleter::make()};
+  }
+  at::BoundDeleter maybeGlobalBoundDeleter() {
+    return THCCachingHostDeleter::make();
+  }
+};
+
+static THCCachingHostAllocator thc_caching_host_allocator;
+at::Allocator* getTHCCachingHostAllocator() {
+  return &thc_caching_host_allocator;
+}
