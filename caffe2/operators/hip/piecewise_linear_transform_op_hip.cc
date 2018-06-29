@@ -250,7 +250,6 @@ bool PiecewiseLinearTransformOp<float, HIPContext>::TransformBinary() {
         Y->mutable_data<float>());
   } else {
     hipLaunchKernelGGL((PieceWiseLinearTransformBinaryKernel2), dim3(CAFFE_GET_BLOCKS(X.size()/2)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
-    PieceWiseLinearTransformBinaryKernel2<<<
         // don't want N*M threads, only N*M/2
         N,
         M,
