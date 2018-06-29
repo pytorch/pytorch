@@ -54,8 +54,7 @@ option(BUILD_CAFFE2 "Build Caffe2" ON)
 option(BUILD_ATEN "Build ATen" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
-cmake_dependent_option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON
-  "NOT MSVC" OFF)
+option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
 option(BUILD_PYTHON "Build Python binaries" ON)
 option(BUILD_SHARED_LIBS "Build libcaffe2.so" ON)
 cmake_dependent_option(

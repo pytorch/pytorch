@@ -86,7 +86,7 @@ if "%REBUILD%"=="" (
   .\Miniconda3-latest-Windows-x86_64.exe /InstallationType=JustMe /RegisterPython=0 /S /AddToPath=0 /D=C:\\Jenkins\\Miniconda3
 )
 call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3
-if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 protobuf)
+if "%REBUILD%"=="" ( call conda install -y -q numpy cffi pyyaml boto3 )
 
 :: Install ninja
 if "%REBUILD%"=="" ( pip install ninja )

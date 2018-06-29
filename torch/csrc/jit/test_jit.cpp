@@ -898,8 +898,8 @@ void testProto() {
 }
 
 std::string runJITCPPTests() {
+  testProto();
   std::stringstream out;
-  /*
   testControlFlow();
   testGraphExecutor();
   testBlocks(out);
@@ -916,8 +916,6 @@ std::string runJITCPPTests() {
   fromQualStringTests();
   argumentSpecTest();
   shapeAnalysisTest();
-  */
-  testProto();
   return out.str();
 }
 
