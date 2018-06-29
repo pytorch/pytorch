@@ -1576,6 +1576,7 @@ class TestScript(JitTestCase):
 
     def test_python_frontend(self):
         def fn(x, y, z):
+            q = None
             q = x + y - z.sigmoid()
             print(q)
             w = -z
