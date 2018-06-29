@@ -603,7 +603,7 @@
   src: grad.gather(dim, index)
 
 - name: select(Tensor self, int64_t dim, int64_t index)
-  self: slice_backward(grad.unsqueeze(dim), self.sizes(), dim, index, index + 1, 1)
+  self: select_backward(grad, self.sizes(), dim, index)
 
 - name: sigmoid(Tensor self)
   self: _sigmoid_backward(grad, result)
