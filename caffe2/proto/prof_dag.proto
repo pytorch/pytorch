@@ -52,4 +52,5 @@ message ProfDAGProto {
 // indices within each 'op'.
 message ProfDAGProtos {
   repeated ProfDAGProto stats = 1;
+  optional string net_name = 2;
 }
