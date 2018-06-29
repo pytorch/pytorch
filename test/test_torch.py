@@ -4041,7 +4041,7 @@ class TestTorch(TestCase):
     @staticmethod
     def _test_pinverse(self, conv_fn):
         def run_test(M, conv_fn):
-            MPI = torch.pinverse(M)
+            MPI = torch.pinv(M)
             E = conv_fn(torch.eye(5))
             self.assertEqual(E, torch.mm(M, MPI), 1e-7, 'pseudo-inverse value')
             self.assertEqual(E, torch.mm(MPI, M), 1e-7, 'pseudo-inverse value')
