@@ -878,6 +878,21 @@ gesv(A) -> Tensor, Tensor
 See :func:`torch.gesv`
 """)
 
+add_docstr_all('get_device',
+               r"""
+get_device(A) -> Device ordinal (Integer)
+
+For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
+For CPU tensors, an error is thrown.
+
+Example::
+
+    >>> x = torch.randn(3, 4, 5, device='cuda:0')
+    >>> x.get_device()
+    0
+    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+""")
+
 add_docstr_all('gt',
                r"""
 gt(other) -> Tensor
