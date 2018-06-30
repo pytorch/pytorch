@@ -104,6 +104,12 @@ class GenerateProposalsOp final : public Operator<Context> {
 
  protected:
   utils::GenerateProposalsArguments args_;
+
+ private:
+  Tensor transformedBBoxes_{Context::GetDeviceType()};
+  Tensor transposedScores_{Context::GetDeviceType()};
+  Tensor indicies_{Context::GetDeviceType()};
+  Tensor offsets_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2
