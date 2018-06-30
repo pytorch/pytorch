@@ -110,17 +110,28 @@ ERMatXf ComputeAllAnchors(
 
 } // namespace utils
 
-template <>
-void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
+namespace {
+
+// Generate bounding box proposals for a given image
+// im_info: [height, width, im_scale]
+// all_anchors: (H * W * A, 4)
+// bbox_deltas_tensor: (4 * A, H, W)
+// scores_tensor: (A, H, W)
+// out_boxes: (n, 5)
+// out_probs: n
+
+void ProposalsForOneImage(
     const Eigen::Array3f& im_info,
     const Eigen::Map<const ERMatXf>& all_anchors,
     const utils::ConstTensorView<float>& bbox_deltas_tensor,
     const utils::ConstTensorView<float>& scores_tensor,
+    const utils::GenerateProposalsArguments& args,
     ERArrXXf* out_boxes,
-    EArrXf* out_probs) const {
-  const auto& post_nms_topN = rpn_post_nms_topN_;
-  const auto& nms_thresh = rpn_nms_thresh_;
-  const auto& min_size = rpn_min_size_;
+    EArrXf* out_probs) {
+  const auto& pre_nms_topN = args.rpn_pre_nms_topN_;
+  const auto& post_nms_topN = args.rpn_post_nms_topN_;
+  const auto& nms_thresh = args.rpn_nms_thresh_;
+  const auto& min_size = args.rpn_min_size_;
   const int box_dim = static_cast<int>(all_anchors.cols());
   CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
@@ -157,7 +168,7 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
 
   std::vector<int> order(scores.size());
   std::iota(order.begin(), order.end(), 0);
-  if (rpn_pre_nms_topN_ <= 0 || rpn_pre_nms_topN_ >= scores.size()) {
+  if (pre_nms_topN <= 0 || pre_nms_topN >= scores.size()) {
     // 4. sort all (proposal, score) pairs by score from highest to lowest
     // 5. take top pre_nms_topN (e.g. 6000)
     std::sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
@@ -168,10 +179,10 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
     // unsorted and then sort just those (~20x faster for 200k scores)
     std::partial_sort(
         order.begin(),
-        order.begin() + rpn_pre_nms_topN_,
+        order.begin() + pre_nms_topN,
         order.end(),
         [&scores](int lhs, int rhs) { return scores[lhs] > scores[rhs]; });
-    order.resize(rpn_pre_nms_topN_);
+    order.resize(pre_nms_topN);
   }
 
   ERArrXXf bbox_deltas_sorted;
@@ -190,15 +201,15 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
       bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
-      correct_transform_coords_,
-      angle_bound_on_,
-      angle_bound_lo_,
-      angle_bound_hi_);
+      args.correct_transform_coords_,
+      args.angle_bound_on_,
+      args.angle_bound_lo_,
+      args.angle_bound_hi_);
 
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
-  proposals =
-      utils::clip_boxes(proposals, im_info[0], im_info[1], clip_angle_thresh_);
+  proposals = utils::clip_boxes(
+      proposals, im_info[0], im_info[1], args.clip_angle_thresh_);
 
   // 3. remove predicted boxes with either height or width < min_size
   auto keep = utils::filter_boxes(proposals, min_size, im_info);
@@ -218,6 +229,8 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   utils::GetSubArrayRows(proposals, utils::AsEArrXt(keep), out_boxes);
   utils::GetSubArray(scores_sorted, utils::AsEArrXt(keep), out_probs);
 }
+
+} // namespace
 
 template <>
 bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
@@ -254,7 +267,7 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
 
   // Broadcast the anchors to all pixels
   auto all_anchors_vec =
-      utils::ComputeAllAnchors(anchors, height, width, feat_stride_);
+      utils::ComputeAllAnchors(anchors, height, width, args_.feat_stride_);
   Eigen::Map<const ERMatXf> all_anchors(all_anchors_vec.data(), K * A, box_dim);
 
   Eigen::Map<const ERArrXXf> im_info(
@@ -280,6 +293,7 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
         all_anchors,
         cur_bbox_deltas,
         cur_scores,
+        args_,
         &im_i_boxes,
         &im_i_probs);
   }
