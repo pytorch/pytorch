@@ -148,4 +148,8 @@ if not "%USE_CUDA%"=="0" (
 
 EOL
 
-ci_scripts/build_pytorch.bat && echo "BUILD PASSED"
+ci_scripts/build_pytorch.bat 
+if [ ! -f $IMAGE_COMMIT_TAG.7z ]; then
+    exit 1
+fi
+echo "BUILD PASSED"
