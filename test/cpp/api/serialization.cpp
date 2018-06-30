@@ -318,7 +318,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   auto loss = getLoss(model2, 100);
   REQUIRE(loss.toCFloat() < 0.1);
 
-  model2->cuda();
+  model2->to(torch::kCUDA);
   ss.clear();
   torch::save(ss, model2);
   torch::load(ss, model3);
