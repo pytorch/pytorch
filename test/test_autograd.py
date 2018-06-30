@@ -2486,6 +2486,11 @@ def random_fullrank_matrix_distinct_singular_value(l):
     s = torch.arange(1., l + 1).mul_(1.0 / (l + 1))
     return u.mm(torch.diag(s)).mm(v.t())
 
+def random_matrix_large_singular_value(m, n):
+    U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+    V = torch.randn(n, m).qr()[0]  # Orthogonal with dimensions n x m
+    S = torch.cat([torch.empty(m).uniform_(10., 20.), torch.zeros(n - m)], 0)
+    return U.mm(torch.diag(S)).mm(V)
 
 def uniform_scalar(offset=0, requires_grad=False):
     v = torch.rand(()) + offset
@@ -2948,6 +2953,10 @@ method_tests = [
     ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
     ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('pinverse', lambda: random_matrix_large_singular_value(S, M), NO_ARGS,
+     'rectangular', NO_ARGS, [skipIfNoLapack]),
+    ('pinverse', lambda: random_matrix_large_singular_value(M, M), NO_ARGS,
+     'square', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (1, 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),
