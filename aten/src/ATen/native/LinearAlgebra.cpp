@@ -83,13 +83,14 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
-Tensor pinverse(const Tensor& self) {
+Tensor pinverse(const Tensor& self, double rcond) {
   AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
            "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
            "of floating types");
   Tensor U, S, V;
   std::tie(U, S, V) = self.svd();
-  Tensor S_pseudoinv = at::where(S != 0.0, S.reciprocal(), at::zeros({}, self.options()));
+  double max_val = S[0].toCDouble();
+  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
   return V.mm(S_pseudoinv.diag().mm(U.t()));
 }
 

@@ -5266,7 +5266,7 @@ Example::
 
 add_docstr(torch.pinverse,
            r"""
-pinverse(input) -> Tensor
+pinverse(input, rcond=1e-15) -> Tensor
 
 Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
 Please look at `Moore-Penrose inverse`_ for more details
@@ -5276,6 +5276,8 @@ Please look at `Moore-Penrose inverse`_ for more details
 
 Arguments:
     input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
+    rcond (float): A floating point value to determine the cutoff for small singular values.
+                   Default: 1e-15
 
 Returns:
     The pseudo-inverse of :attr:`input` of dimensions :math:`n \times m`
