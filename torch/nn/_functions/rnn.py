@@ -272,8 +272,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
 
         handle = cudnn.get_handle()
         with torch.cuda.device(input.get_device()):
-            dropout_ts = cudnn.rnn.init_dropout_state(torch.uint8, torch.device('cuda'), dropout,
-                                                      train, dropout_seed, dropout_state)
+            dropout_ts = cudnn.rnn.init_dropout_state(dropout, train, dropout_seed, dropout_state)
 
         weight_arr = list(itertools.chain.from_iterable(weight))
         weight_stride0 = len(weight[0])
