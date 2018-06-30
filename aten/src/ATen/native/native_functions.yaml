@@ -903,7 +903,7 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
-- func: pinv(Tensor self) -> Tensor
+- func: pinverse(Tensor self) -> Tensor
 
 - func: rand(IntList size, *, TensorOptions options={}) -> Tensor
   variants: function

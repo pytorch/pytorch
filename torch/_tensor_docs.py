@@ -2521,9 +2521,9 @@ slogdet() -> (Tensor, Tensor)
 See :func:`torch.slogdet`
 """)
 
-add_docstr_all('pinv',
+add_docstr_all('pinverse',
                r"""
-pinv() -> Tensor
+pinverse() -> Tensor
 
-See :func:`torch.pinv`
+See :func:`torch.pinverse`
 """)

@@ -4041,12 +4041,12 @@ class TestTorch(TestCase):
     @staticmethod
     def _test_pinverse(self, conv_fn):
         def run_test(M):
-            # Testing against identities for pseudo-inverses
-            MPI = torch.pinv(M)
-            self.assertEqual(MPI, MPI.mm(MPI.t()).mm(M.t()), 1e-8, 'pseudo-inverse identity 1')
-            self.assertEqual(MPI, M.t().mm(MPI.t()).mm(MPI), 1e-8, 'pseudo-inverse identity 2')
-            self.assertEqual(M, MPI.t().mm(M.t()).mm(M), 1e-8, 'pseudo-inverse identity 3')
-            self.assertEqual(M, M.mm(M.t()).mm(MPI.t()), 1e-8, 'pseudo-inverse idenity 4')
+            # Testing against definition for pseudo-inverses
+            MPI = torch.pinverse(M)
+            self.assertEqual(M, M.mm(MPI).mm(M), 1e-8, 'pseudo-inverse condition 1')
+            self.assertEqual(MPI, MPI.mm(M).mm(MPI), 1e-8, 'pseudo-inverse condition 2')
+            self.assertEqual(M.mm(MPI), (M.mm(MPI)).t(), 1e-8, 'pseudo-inverse condition 3')
+            self.assertEqual(MPI.mm(M), (MPI.mm(M)).t(), 1e-8, 'pseudo-inverse condition 4')
 
         # Square matrix
         M = conv_fn(torch.randn(5, 5))
@@ -4059,7 +4059,7 @@ class TestTorch(TestCase):
         # Test inverse and pseudo-inverse for invertible matrix
         M = torch.randn(5, 5)
         M = conv_fn(M.mm(M.t()))
-        self.assertEqual(conv_fn(torch.eye(5)), M.pinv().mm(M), 1e-7, 'pseudo-inverse for invertible matrix')
+        self.assertEqual(conv_fn(torch.eye(5)), M.pinverse().mm(M), 1e-7, 'pseudo-inverse for invertible matrix')
 
     @skipIfNoLapack
     def test_pinverse(self):

@@ -96,7 +96,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
-Tensor pinv(const Tensor& self) {
+Tensor pinverse(const Tensor& self) {
   if (!at::isFloatingType(self.type().scalarType()) ||
        self.dim() != 2) {
     std::ostringstream ss;
