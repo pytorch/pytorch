@@ -536,7 +536,7 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
-inline Value* Value::setUniqueName(const std::string & name) {
+Value* Value::setUniqueName(const std::string & name) {
   if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
   }
