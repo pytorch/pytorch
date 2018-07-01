@@ -13,6 +13,7 @@ class _LRScheduler(object):
             raise TypeError('{} is not an Optimizer'.format(
                 type(optimizer).__name__))
         self.optimizer = optimizer
+        self.min_lr = min_lr
         if last_epoch == -1:
             for group in optimizer.param_groups:
                 group.setdefault('initial_lr', group['lr'])
@@ -24,7 +25,6 @@ class _LRScheduler(object):
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
         self.step(last_epoch + 1)
         self.last_epoch = last_epoch
-        self.min_lr = min_lr
 
     def state_dict(self):
         """Returns the state of the scheduler as a :class:`dict`.
