@@ -1066,6 +1066,7 @@ if __name__ == '__main__':
                 'lib/include/THC/*.cuh',
                 'lib/include/THC/generic/*.h',
                 'lib/include/THCUNN/*.cuh',
+                'lib/include/THNN/*.h',
                 'lib/include/torch/csrc/*.h',
                 'lib/include/torch/csrc/autograd/*.h',
                 'lib/include/torch/csrc/jit/*.h',

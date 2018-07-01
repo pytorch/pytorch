@@ -11,6 +11,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/DeviceGuard.h"
 #include "ATen/TensorOptions.h"
+#include "THNN/Reduction.h"
 
 namespace at {
 
