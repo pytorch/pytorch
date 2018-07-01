@@ -7,15 +7,14 @@ void THNN_(BCECriterion_updateOutput)(
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           bool sizeAverage,
-           THCTensor *weights,
-           bool reduce)
+           int64_t reduction,
+           THCTensor *weights)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_nElement(state, input, weights);
   THCUNN_assertSameGPU(state, 3, input, target, weights);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
     THC_pointwiseApply3<real, real, real>(state, input, target, output,
         bce_updateOutput_no_reduce_functor<real, accreal>());
@@ -58,7 +57,7 @@ void THNN_(BCECriterion_updateOutput)(
     );
   }
 
-  if (sizeAverage)
+  if (reduction == Reduction::ElementwiseMean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -73,9 +72,8 @@ void THNN_(BCECriterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
-           THCTensor *weights,
-           bool reduce)
+           int64_t reduction,
+           THCTensor *weights)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_nElement(state, input, weights);
@@ -83,7 +81,7 @@ void THNN_(BCECriterion_updateGradInput)(
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCUNN_check_nElement(state, gradOutput, input);
     THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
         bce_updateGradInput_no_reduce_functor<real, accreal>());
@@ -97,7 +95,7 @@ void THNN_(BCECriterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  real norm = ScalarConvert<accreal, real>::to((sizeAverage ? accreal(1)/size : accreal(1)) * THCTensor_(get1d)(state, gradOutput, 0));
+  real norm = ScalarConvert<accreal, real>::to((reduction == Reduction::ElementwiseMean ? accreal(1)/size : accreal(1)) * THCTensor_(get1d)(state, gradOutput, 0));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

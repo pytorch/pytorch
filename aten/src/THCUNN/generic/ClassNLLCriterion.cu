@@ -7,11 +7,10 @@ void THNN_(ClassNLLCriterion_updateOutput)(
            THCTensor *input,
            THCIndexTensor *target,
            THCTensor *output,
-           bool sizeAverage,
+           int64_t reduction,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index,
-           bool reduce) {
+           int64_t ignore_index) {
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
@@ -44,7 +43,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
             " but got weight tensor of shape: %s", n_classes, s1.str);
   }
 
-  if (!reduce && n_dims == 2) {
+  if (reduction == Reduction::None && n_dims == 2) {
     THCTensor_(resize1d)(state, output, batch_size);
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
@@ -68,10 +67,6 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     return;
   }
 
-  if (!reduce && n_dims <= 1) {
-    sizeAverage = false;
-  }
-
   THCTensor_(resize1d)(state, output, 1);
   THCTensor_(resize1d)(state, total_weight, 1);
 
@@ -93,7 +88,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         n_classes,
         ignore_index
     );
@@ -106,7 +101,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
         input_data,
         target_data,
         weights_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,
@@ -128,11 +123,10 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
            THCIndexTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
+           int64_t reduction,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index,
-           bool reduce) {
+           int64_t ignore_index) {
   if (THCIndexTensor_(nDimension)(state, target) > 1) {
     THError("multi-target not supported");
   }
@@ -167,7 +161,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THError("weight tensor should be defined either for all or no classes");
   }
 
-  if (!reduce && n_dims == 2) {
+  if (reduction == Reduction::None && n_dims == 2) {
     THCUNN_check_dim_size(state, gradOutput, 1, 0, batch_size);
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
@@ -191,10 +185,6 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     return;
   }
 
-  if (!reduce && n_dims <= 1) {
-    sizeAverage = false;
-  }
-
   ignore_index -= TH_INDEX_BASE;
 
   weights = weights ? THCTensor_(newContiguous)(state, weights) : NULL;
@@ -215,7 +205,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         weights_data,
         target_data,
         total_weight_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         n_classes,
         ignore_index
     );
@@ -227,7 +217,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
         target_data,
         weights_data,
         total_weight_data,
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         THCTensor_(size)(state, input, 0),
         THCTensor_(size)(state, input, 1),
         n_classes,

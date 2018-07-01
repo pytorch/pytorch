@@ -2,6 +2,7 @@
 #include "catch.hpp"
 
 #include "ATen/ATen.h"
+#include "THNN/Reduction.h"
 
 // for TH compat test only...
 struct THFloatTensor;
@@ -266,7 +267,7 @@ static void test(Type & type) {
   SECTION("dispatch") {
     Tensor tensor = randn({20, 20});
     Tensor other = randn({20, 20});
-    auto result = tensor.m(relu).m(mse_loss, other, true, true);
+    auto result = tensor.m(relu).m(mse_loss, other, Reduction::ElementwiseMean);
     REQUIRE(result.allclose(mse_loss(relu(tensor), other)));
   }
 }

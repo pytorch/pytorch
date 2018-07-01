@@ -2,6 +2,7 @@
 #include <ATen/Utils.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
+#include <THNN/Reduction.h>
 
 // define constants like M_PI and C keywords for MSVC
 #ifdef _MSC_VER
@@ -685,11 +686,11 @@ Tensor glu_double_backward_grad_output(const Tensor & grad, const Tensor & input
   return tmp.narrow(dim, 0, sizes[dim]) + tmp.narrow(dim, sizes[dim], sizes[dim]);
 }
 
-Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
-  auto result = kl_div_backward(grad, input, target, size_average, false);
-  if (reduce && size_average) {
+Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
+  auto result = kl_div_backward(grad, input, target, Reduction::None);
+  if (reduction == Reduction::ElementwiseMean) {
     return result.mean();
-  } else if (reduce) {
+  } else if (reduction == Reduction::Sum) {
     return result.sum();
   }
   return result;
@@ -697,11 +698,11 @@ Tensor kl_div_double_backward_grad_output(const Tensor & grad, const Tensor & in
 
 // Compute derivatives for targets.
 // Assume targets are given as probabilities (i.e. without taking the logarithm).
-Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, bool size_average, bool reduce) {
-  if (!reduce) {
+Tensor kl_div_target_backward(Tensor grad_output, Tensor self, Tensor target, int64_t reduction) {
+  if (reduction == Reduction::None) {
     return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
   }
-  if (size_average) {
+  if (reduction == Reduction::ElementwiseMean) {
     return grad_output.mul(target.log().add_(1).sub_(self)).div_(target.numel()).masked_fill_(target == 0, 0.);
   }
   return grad_output.mul(target.log().add_(1).sub_(self)).masked_fill_(target == 0, 0.);
@@ -734,30 +735,30 @@ Tensor log_softmax_double_backward(const Tensor & grad, const Tensor & grad_outp
   return z * grad_output.sum(dim, true) * ((grad * z).sum(dim, true) - grad);
 }
 
-Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
-  auto output = l1_loss_backward(grad, input, target, size_average, false);
-  if (reduce and size_average) {
+Tensor l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
+  auto output = l1_loss_backward(grad, input, target, Reduction::None);
+  if (reduction == Reduction::ElementwiseMean) {
     return output.mean();
-  } else if (reduce) {
+  } else if (reduction == Reduction::Sum) {
     return output.sum();
   }
   return output;
 }
 
-Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
+Tensor smooth_l1_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto d = (input - target).abs();
   auto grad_input = grad * (d < 1).toType(grad.type());
-  if (size_average && reduce) {
+  if (reduction == Reduction::ElementwiseMean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
-Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
-  if (!reduce) {
-    return smooth_l1_loss_backward(grad, input, target, size_average, reduce);
+Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+  if (reduction == Reduction::None) {
+    return smooth_l1_loss_backward(grad, input, target, reduction);
   }
-  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, size_average, true);
+  auto r = smooth_l1_loss_backward(ones_like(grad_output), input, target, reduction);
   return (r * grad).sum();
 }
 
@@ -783,37 +784,37 @@ Tensor diagonal_backward(const Tensor & grad, IntList input_sizes, int64_t offse
   return grad_input;
 }
 
-Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, bool size_average, bool reduce) {
+Tensor mse_loss_double_backward(const Tensor & grad, const Tensor & input, int64_t reduction) {
   auto grad_input = 2 * grad;
-  if (size_average && reduce) {
+  if (reduction == Reduction::ElementwiseMean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
-Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
-  if (!reduce) {
-    return mse_loss_backward(grad, input, target, size_average, reduce);
+Tensor mse_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+  if (reduction == Reduction::None) {
+    return mse_loss_backward(grad, input, target, reduction);
   }
-  auto r = mse_loss_backward(ones_like(grad_output), input, target, size_average, true);
+  auto r = mse_loss_backward(ones_like(grad_output), input, target, reduction);
   return (r * grad).sum();
 }
 
-Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
+Tensor soft_margin_loss_double_backward(const Tensor & grad, const Tensor & input, const Tensor & target, int64_t reduction) {
   auto z = (input * -target).exp();
   auto zplus1 = z + 1;
   auto grad_input = grad * (target * target) * z / (zplus1 * zplus1);
-  if (size_average && reduce) {
+  if (reduction == Reduction::ElementwiseMean) {
     grad_input /= input.numel();
   }
   return grad_input;
 }
 
-Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, bool size_average, bool reduce) {
-  if (!reduce) {
-    return soft_margin_loss_backward(grad, input, target, size_average, reduce);
+Tensor soft_margin_loss_double_backward_grad_output(const Tensor & grad, const Tensor & grad_output, const Tensor & input, const Tensor & target, int64_t reduction) {
+  if (reduction == Reduction::None) {
+    return soft_margin_loss_backward(grad, input, target, reduction);
   }
-  auto r = soft_margin_loss_backward(ones_like(grad_output), input, target, size_average, true);
+  auto r = soft_margin_loss_backward(ones_like(grad_output), input, target, reduction);
   return (r * grad).sum();
 }
 
