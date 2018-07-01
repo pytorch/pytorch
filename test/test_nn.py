@@ -735,6 +735,20 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
+    def _test_alpha_dropout(self, cls, input):
+        mean = input.mean()
+        std = input.std()
+
+        for p in [0.2, 0.5, 0.8]:
+            module = cls(p)
+            input_var = torch.tensor(input, requires_grad=True)
+            output = module(input_var)
+            # output mean should be close to input mean
+            self.assertLess(abs(output.data.mean() - mean), 0.1)
+            # output std should be close to input std
+            self.assertLess(abs(output.data.std() - std), 0.1)
+            output.backward(input)
+
     def test_parameters(self):
         def num_params(module):
             return len(list(module.parameters()))
@@ -1915,19 +1929,24 @@ class TestNN(NNTestCase):
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
         input = torch.randn(5000)
+        self._test_alpha_dropout(nn.AlphaDropout, input)
 
-        mean = input.mean()
-        std = input.std()
+    def test_AlphaDropout2d(self):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        num_features = 1000
+        input = torch.randn(num_features, b, w, h)
+        self._test_alpha_dropout(nn.AlphaDropout2d, input)
 
-        for p in [0.2, 0.5, 0.8]:
-            module = nn.AlphaDropout(p)
-            input_var = torch.tensor(input, requires_grad=True)
-            output = module(input_var)
-            # output mean should be close to input mean
-            self.assertLess(abs(output.data.mean() - mean), 0.1)
-            # output std should be close to input std
-            self.assertLess(abs(output.data.std() - std), 0.1)
-            output.backward(input)
+    def test_AlphaDropout3d(self):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        d = random.randint(1, 2)
+        num_features = 1000
+        input = torch.Tensor(num_features, b, d, w, h)
+        self._test_alpha_dropout(nn.AlphaDropout3d, input)
 
     def _test_InstanceNorm_general(self, cls, input, device="cpu", dtype=torch.float):
         # default case track_running_stats=False
