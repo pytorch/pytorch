@@ -554,35 +554,12 @@ def dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.Dropout.apply(input, p, training, inplace)
 
 
-def alpha_dropout(input, p=0.5, training=False):
+def alpha_dropout(input, p=0.5, training=False, inplace=False):
     r"""Applies alpha dropout to the input.
 
     See :class:`~torch.nn.AlphaDropout` for details.
-
-    Args:
-        p (float, optional): the drop probability. Default: 0.5
-        training (bool, optional): switch between training and evaluation mode. Default: ``False``
     """
-    if p < 0 or p > 1:
-        raise ValueError("dropout probability has to be between 0 and 1, "
-                         "but got {}".format(p))
-
-    if p == 0 or not training:
-        return input
-
-    alpha = -1.7580993408473766
-    keep_prob = 1 - p
-    # TODO avoid casting to byte after resize
-    noise = input.data.new().resize_(input.size())
-    noise.bernoulli_(p)
-    noise = noise.byte()
-
-    output = input.masked_fill(noise, alpha)
-
-    a = (keep_prob + alpha ** 2 * keep_prob * (1 - keep_prob)) ** (-0.5)
-    b = -a * alpha * (1 - keep_prob)
-
-    return output.mul_(a).add_(b)
+    return _functions.dropout.AlphaDropout.apply(input, p, training, inplace)
 
 
 def dropout2d(input, p=0.5, training=False, inplace=False):
@@ -591,6 +568,14 @@ def dropout2d(input, p=0.5, training=False, inplace=False):
 
 def dropout3d(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+
+
+def alpha_dropout2d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureAlphaDropout.apply(input, p, training, inplace)
+
+
+def alpha_dropout3d(input, p=0.5, training=False, inplace=False):
+    return _functions.dropout.FeatureAlphaDropout.apply(input, p, training, inplace)
 
 
 def threshold(input, threshold, value, inplace=False):
