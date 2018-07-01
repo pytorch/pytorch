@@ -46,6 +46,9 @@ void IncreaseIndexInDims(const int n, const int* dims, int* index);
 // Get index value from dims and index digits.
 int GetIndexFromDims(const int n, const int* dims, const int* index);
 
+// Checks if the input permutation is an identity permutation;
+bool IsIdentityPermutation(const int n, const int* perm);
+
 // Computest the broadcast binary operation dims.
 void ComputeBroadcastBinaryOpDims(
     const int A_ndim,

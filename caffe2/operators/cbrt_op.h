@@ -31,4 +31,4 @@ struct CbrtGradientFunctor {
 
 } // namespace caffe2
 
-#endif
+#endif // CAFFE2_OPERATORS_CBRT_OP_H_
