@@ -2951,8 +2951,12 @@ class TestNN(NNTestCase):
         del state_dict['num_batches_tracked']
         state_dict._metadata['']['version'] = 1  # version 1
         bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtpye, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
         del state_dict._metadata['']['version']  # no version
         bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtpye, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
