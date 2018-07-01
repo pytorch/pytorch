@@ -5274,6 +5274,13 @@ Please look at `Moore-Penrose inverse`_ for more details
 .. note::
     This method is implemented using the Singular Value Decomposition.
 
+.. note::
+    The pseudo-inverse is not necessarily a continuous function in the elements of the matrix `[1]`_.
+    Therefore, derivatives are not always existent, and exist for a constant rank only `[2]`_.
+    However, this method is backprop-able due to the implementation by using SVD results, and
+    could be unstable. Double-backward will also be unstable due to the usage of SVD internally.
+    See :meth:`~torch.svd` for more details.
+
 Arguments:
     input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
     rcond (float): A floating point value to determine the cutoff for small singular values.
@@ -5297,6 +5304,10 @@ Example::
             [-0.0308, -0.1725, -0.5216]])
 
 .. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
+
+.. _[1]: https://epubs.siam.org/doi/10.1137/0117004
+
+.. _[2]: https://www.jstor.org/stable/2156365
 """)
 
 add_docstr(torch.fft,
