@@ -2044,6 +2044,7 @@ class TestAutograd(TestCase):
         m, n = 5, 10
         U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
         V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+
         def func(x):
             S = torch.cat([x, torch.zeros(n - m)], 0)
             M = U.mm(torch.diag(S)).mm(V.t())
