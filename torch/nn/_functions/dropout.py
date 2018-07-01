@@ -79,7 +79,6 @@ class AlphaDropout(Dropout):
             return _unimplemented("AlphaDropout", "training mode")
         return input
 
-
     @classmethod
     def forward(cls, ctx, input, p=0.5, train=False, inplace=False):
         if p < 0 or p > 1:
