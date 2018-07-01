@@ -306,7 +306,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   THCudaCheck(cudaIpcOpenMemHandle(&devPtr, handle, cudaIpcMemLazyEnablePeerAccess));
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
-      LIBRARY_STATE (real*)devPtr, storage_size, &THCIpcAllocator, (void*)device));
+      LIBRARY_STATE (real*)devPtr, storage_size, getTHCIpcAllocator(), (void*)device));
   base->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_FREEMEM;
 
   if (offset != 0 || view_size != storage_size) {

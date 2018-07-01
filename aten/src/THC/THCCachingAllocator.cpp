@@ -1,6 +1,9 @@
 #include "THCCachingAllocator.h"
 #include "THCStream.hpp"
 
+#include <ATen/Context.h>
+#include <ATen/cudnn/Exceptions.h>
+
 #include <cuda_runtime_api.h>
 #include <algorithm>
 #include <deque>
@@ -491,44 +494,37 @@ struct THCCachingAllocator
   }
 };
 
-static cudaError_t THCCachingAllocator_malloc(void* ctx, void** ptr, size_t size, cudaStream_t stream)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  return a->malloc(ptr, size, stream);
-}
+THCCachingAllocator caching_allocator;
 
-static cudaError_t THCCachingAllocator_free(void* ctx, void* ptr)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  return a->free(ptr);
-}
-
-static cudaError_t THCCachingAllocator_emptyCache(void* ctx)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  return a->emptyCache();
-}
-
-static cudaError_t THCCachingAllocator_cacheInfo(void* ctx, int dev_id, size_t* cachedAndFree, size_t* largestBlock)
-{
-  THCCachingAllocator* a = (THCCachingAllocator*) ctx;
-  a->cacheInfo(dev_id, cachedAndFree, largestBlock);
-  return cudaSuccess;
-}
-
-static THCCachingAllocator caching_allocator;
-static THCDeviceAllocator device_allocator = {
-  &THCCachingAllocator_malloc,
-  NULL,
-  &THCCachingAllocator_free,
-  &THCCachingAllocator_emptyCache,
-  &THCCachingAllocator_cacheInfo,
-  &caching_allocator
+// NB: I decided not to fold this into THCCachingAllocator, because the latter
+// has a lot more methods and it wasn't altogether clear that they should
+// actually be publically exposed
+struct CudaCachingAllocator : at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    int device;
+    THCudaCheck(cudaGetDevice(&device));
+    void* r;
+    AT_CUDA_CHECK(caching_allocator.malloc(&r, size, at::globalContext().getCurrentCUDAStreamOnDevice(device)));
+    return r;
+  }
+  void deallocate(void* ctx, void* ptr) const override {
+    AT_CUDA_CHECK(caching_allocator.free(ptr));
+  }
 };
 
-THC_API THCDeviceAllocator* THCCachingAllocator_get(void)
+CudaCachingAllocator device_allocator;
+
+THC_API at::Allocator* THCCachingAllocator_get(void)
 {
   return &device_allocator;
+}
+
+THC_API void THCCachingAllocator_emptyCache(void) {
+  AT_CUDA_CHECK(caching_allocator.emptyCache());
+}
+
+THC_API void THCCachingAllocator_cacheInfo(int dev_id, size_t* cachedAndFree, size_t* largestBlock) {
+  caching_allocator.cacheInfo(dev_id, cachedAndFree, largestBlock);
 }
 
 THC_API void* THCCachingAllocator_getBaseAllocation(void *ptr, size_t *size)

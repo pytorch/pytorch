@@ -51,7 +51,7 @@ at::Allocator* getTHObjectPtrAllocator() {
   return &th_object_ptr_allocator;
 }
 
-struct THStorageWeakRefAllocator : at::Allocator {
+struct THStorageWeakRefAllocator : public at::Allocator {
   void* allocate(void* ctx, size_t size) const override {
     return malloc_wrapper<StorageWeakRefAllocator>(ctx, size);
   }
@@ -66,34 +66,32 @@ at::Allocator* getTHStorageWeakRefAllocator() {
 }
 
 #ifdef USE_CUDA
-cudaError_t CudaStorageWeakRefAllocator::malloc(void** ptr, size_t size, cudaStream_t stream) {
+void* CudaStorageWeakRefAllocator::malloc(size_t size) {
   THError("CudaStorageWeakRefAllocator: malloc not supported");
-  return cudaSuccess;
 }
 
-cudaError_t CudaStorageWeakRefAllocator::free(void* ptr) {
+void CudaStorageWeakRefAllocator::free(void* ptr) {
   {
     AutoGIL gil;
     PyObject_SetAttrString(object.get(), "cdata", Py_None);
     object = nullptr;
   }
-  cudaError_t err = allocator->free(allocatorContext, ptr);
+  allocator->deallocate(allocatorContext, ptr);
   delete this;
-  return err;
 }
 
-static cudaError_t cuda_malloc_wrapper(void *ctx, void** ptr, size_t size, cudaStream_t stream) {
-  return ((CudaStorageWeakRefAllocator*)ctx)->malloc(ptr, size, stream);
-}
-
-static cudaError_t cuda_free_wrapper(void *ctx, void *ptr) {
-  return ((CudaStorageWeakRefAllocator*)ctx)->free(ptr);
-}
-
-THCDeviceAllocator THCStorageWeakRefAllocator = {
-  cuda_malloc_wrapper,
-  NULL,
-  cuda_free_wrapper,
-  NULL,
+struct THCStorageWeakRefAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    return static_cast<CudaStorageWeakRefAllocator*>(ctx)->malloc(size);
+  }
+  void deallocate(void* ctx, void* ptr) const override {
+    static_cast<CudaStorageWeakRefAllocator*>(ctx)->free(ptr);
+  }
 };
+
+static THCStorageWeakRefAllocator thc_storage_weak_ref_allocator;
+at::Allocator* getTHCStorageWeakRefAllocator() {
+  return &thc_storage_weak_ref_allocator;
+}
+
 #endif

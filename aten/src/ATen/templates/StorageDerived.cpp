@@ -19,41 +19,6 @@ ${Storage}::${Storage}(Context* context, THStorage* storage):
 ${Storage}::${Storage}(Context* context, size_t storage_size)
   : storage(${THStorage}_newWithSize(${state,} storage_size)), context(context) {}
 
-#if ${isCUDA}
-static cudaError_t call_deleter(void * ctx, void * data) {
-  auto fnptr = (std::function<void(void*)>*) ctx;
-  (*fnptr)(data);
-  delete fnptr;
-  return cudaSuccess;
-}
-static THCDeviceAllocator storage_deleter = {
-  nullptr,
-  nullptr,
-  call_deleter,
-  nullptr,
-  nullptr,
-};
-static cudaError_t wrapped_alloc(void * ctx, void** result, size_t size, cudaStream_t stream) {
-  auto ac = static_cast<Allocator*>(ctx);
-  *result = ac->allocate(size);
-  return cudaSuccess;
-}
-static cudaError_t wrapped_free(void * ctx, void * data) {
-  auto ac = static_cast<Allocator*>(ctx);
-  ac->deallocate(data);
-  return cudaSuccess;
-}
-static THCDeviceAllocator wrapped_allocator = {
-  wrapped_alloc,
-  nullptr,
-  wrapped_free,
-  nullptr,
-  nullptr,
-};
-#else
-
-#endif
-
 ${Storage}::${Storage}(Context* context, size_t size, Allocator* allocator)
   : storage(nullptr),
     context(context) {
