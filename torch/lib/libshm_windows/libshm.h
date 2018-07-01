@@ -24,6 +24,6 @@ SHM_API void libshm_init(const char *manager_exec_path);
 SHM_API libshm_context * libshm_context_new(const char *manager_handle, const char *filename, int flags);
 SHM_API void libshm_context_free(libshm_context *context);
 
-SHM_API THAllocator THManagedSharedAllocator;
+SHM_API at::Allocator* getTHManagedSharedAllocator();
 
 #endif
