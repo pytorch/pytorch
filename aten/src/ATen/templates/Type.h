@@ -13,6 +13,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/Deprecated.h"
 #include "ATen/Layout.h"
+#include "THNN/Reduction.h"
 
 #include <array>
 #include <cstddef>
