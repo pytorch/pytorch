@@ -59,7 +59,7 @@ static PyObject * THPStorage_(newTHView)(THWStorage *base, ptrdiff_t offset, siz
 #ifndef THC_GENERIC_FILE
 // TODO: move this somewhere - we only need one version
 static std::string THPStorage_(__newHandle)() {
-  std::random_device rd;
+  static std::random_device rd;
   std::string handle = "/torch_";
 #ifdef _MSC_VER
   handle += std::to_string(GetCurrentProcessId());
