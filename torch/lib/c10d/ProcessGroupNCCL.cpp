@@ -2,6 +2,7 @@
 #include "private/CUDAUtils.hpp"
 
 #include <THC.h>
+#include <THC/THCGeneral.hpp>
 
 #include <map>
 #include <unordered_set>
