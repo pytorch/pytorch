@@ -602,13 +602,14 @@ class Module(object):
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
+    def _load_from_state_dict(self, state_dict, prefix, metadata, strict, missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
-        module in input :attr:`state_dict` is at ``state_dict._metadata[prefix]``.
+        module in input :attr:`state_dict` is provided as :attr`metadata`.
+        For state dicts without meta data, :attr`metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
-        the version number at ``state_dict._metadata[prefix]["version"]``.
+        the version number at `metadata.get("version", None)`.
 
         .. note::
             :attr:`state_dict` is not the same object as the input
@@ -620,6 +621,8 @@ class Module(object):
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
                 module
+            metadata (dict): a dict containing the metadata for this moodule.
+                See
             strict (bool): whether to strictly enforce that the keys in
                 :attr:`state_dict` with :attr:`prefix` match the names of
                 parameters and buffers in this module
@@ -691,8 +694,9 @@ class Module(object):
             state_dict._metadata = metadata
 
         def load(module, prefix=''):
+            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             module._load_from_state_dict(
-                state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs)
+                state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')
