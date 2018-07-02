@@ -21,11 +21,11 @@ class DropoutImplBase : public torch::nn::Cloneable<Derived> {
   explicit DropoutImplBase(DropoutOptions options);
 
   void reset() override;
-  std::vector<Variable> forward(std::vector<Variable> input);
+  Tensor forward(Tensor input);
   const DropoutOptions& options() const noexcept;
 
  protected:
-  virtual Variable noise_mask(Variable input) const = 0;
+  virtual Tensor noise_mask(Tensor input) const = 0;
 
   DropoutOptions options_;
 };
@@ -34,13 +34,13 @@ class DropoutImplBase : public torch::nn::Cloneable<Derived> {
 class DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
  public:
   using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
-  Variable noise_mask(Variable input) const override;
+  Tensor noise_mask(Tensor input) const override;
 };
 
 class Dropout2dImpl : public detail::DropoutImplBase<Dropout2dImpl> {
  public:
   using detail::DropoutImplBase<Dropout2dImpl>::DropoutImplBase;
-  Variable noise_mask(Variable input) const override;
+  Tensor noise_mask(Tensor input) const override;
 };
 
 TORCH_MODULE(Dropout);

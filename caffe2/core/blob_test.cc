@@ -521,7 +521,7 @@ TEST(TensorTest, TensorNonFundamentalType) {
   }
 }
 
-TEST(TensorTest, TensorNonFundamentalTypeCopy) {
+TEST(TensorTest, TensorNonFundamentalTypeClone) {
   TensorCPU tensor(vector<int>{2, 3, 4});
   std::string* ptr = tensor.mutable_data<std::string>();
   EXPECT_TRUE(ptr != nullptr);
@@ -529,8 +529,17 @@ TEST(TensorTest, TensorNonFundamentalTypeCopy) {
     EXPECT_TRUE(ptr[i] == "");
     ptr[i] = "filled";
   }
-  TensorCPU dst_tensor(tensor);
+  TensorCPU dst_tensor = tensor.Clone();
   const std::string* dst_ptr = dst_tensor.data<std::string>();
+  for (int i = 0; i < dst_tensor.size(); ++i) {
+    EXPECT_TRUE(dst_ptr[i] == "filled");
+  }
+  // Change the original tensor
+  for (int i = 0; i < tensor.size(); ++i) {
+    EXPECT_TRUE(ptr[i] == "filled");
+    ptr[i] = "changed";
+  }
+  // Confirm that the cloned tensor is not affect
   for (int i = 0; i < dst_tensor.size(); ++i) {
     EXPECT_TRUE(dst_ptr[i] == "filled");
   }
@@ -1058,6 +1067,48 @@ TEST(BlobTest, CastingMessage) {
     EXPECT_NE(msg.find("BlobTestFoo"), std::string::npos) << msg;
     EXPECT_NE(msg.find("BlobTestBar"), std::string::npos) << msg;
   }
+}
+
+TEST(TensorConstruction, UnitializedCopyTest) {
+  CPUContext context;
+  TensorCPU x;
+  TensorCPU y(x, &context);
+  TensorCPU z = x.Clone();
+  // should be uninitialized
+  EXPECT_EQ(x.size(), -1);
+  EXPECT_EQ(y.size(), -1);
+  LOG(INFO) << "z.size()" << z.size();
+  EXPECT_EQ(z.size(), -1);
+}
+
+TEST(TensorConstruction, CopyConstructorTest) {
+  CPUContext context;
+
+  TensorCPU x;
+  x.Resize(5);
+  x.mutable_data<float>()[0] = 1;
+  TensorCPU y = x.Clone();
+  TensorCPU z(x, &context);
+  TensorCPU w;
+
+  EXPECT_EQ(*x.data<float>(), 1);
+  EXPECT_EQ(*y.data<float>(), 1);
+  EXPECT_EQ(*z.data<float>(), 1);
+  x.mutable_data<float>()[0] = 5;
+  EXPECT_EQ(*x.data<float>(), 5);
+  EXPECT_EQ(*y.data<float>(), 1);
+  EXPECT_EQ(*z.data<float>(), 1);
+}
+
+TEST(TensorConstruction, MoveConstructorTest) {
+  CPUContext context;
+
+  TensorCPU x;
+  x.Resize(5);
+  x.mutable_data<float>()[0] = 1;
+  TensorCPU y = std::move(x);
+
+  EXPECT_EQ(*y.data<float>(), 1);
 }
 
 } // namespace

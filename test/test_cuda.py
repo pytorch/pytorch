@@ -6,6 +6,7 @@ import unittest
 import sys
 from itertools import repeat
 import os
+from contextlib import contextmanager
 
 import torch
 import torch.cuda
@@ -13,7 +14,8 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3, IS_WINDOWS
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -859,6 +861,8 @@ class TestCuda(TestCase):
         for i, t in enumerate(result):
             self.assertEqual(t.get_device(), i)
             self.assertEqual(t, input)
+            if input.is_cuda and input.get_device() == i:
+                self.assertEqual(t.data_ptr(), input.data_ptr())
 
     def test_broadcast_cpu(self):
         self._test_broadcast(torch.randn(5, 5))
@@ -1388,6 +1392,31 @@ class TestCuda(TestCase):
     def test_fft_ifft_rfft_irfft(self):
         TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
 
+        @contextmanager
+        def plan_cache_max_size(n):
+            original = torch.backends.cuda.cufft_plan_cache.max_size
+            torch.backends.cuda.cufft_plan_cache.max_size = n
+            yield
+            torch.backends.cuda.cufft_plan_cache.max_size = original
+
+        with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with plan_cache_max_size(0):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        torch.backends.cuda.cufft_plan_cache.clear()
+
+        # check that stll works after clearing cache
+        with plan_cache_max_size(10):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
+            torch.backends.cuda.cufft_plan_cache.max_size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"read-only property"):
+            torch.backends.cuda.cufft_plan_cache.size = -1
+
     def test_stft(self):
         TestTorch._test_stft(self, device=torch.device('cuda'))
 
@@ -1440,6 +1469,8 @@ class TestCuda(TestCase):
         except RuntimeError as e:
             return e
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
@@ -1677,6 +1708,16 @@ class TestCuda(TestCase):
             b = torch.__dict__[t]()
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
+
+    def test_linspace(self):
+        a = torch.linspace(0, 10, 10, device='cuda')
+        b = torch.linspace(0, 10, 10)
+        self.assertEqual(a, b.cuda())
+
+    def test_logspace(self):
+        a = torch.logspace(1, 10, 10, device='cuda')
+        b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.cuda())
 
     def test_diagonal(self):
         TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')

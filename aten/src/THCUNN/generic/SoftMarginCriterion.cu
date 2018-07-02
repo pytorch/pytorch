@@ -7,13 +7,12 @@ void THNN_(SoftMarginCriterion_updateOutput)(
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
     THC_pointwiseApply3<real, real, real>(state, input, target, output,
         softmargin_no_reduce_functor<real, accreal>());
@@ -31,7 +30,7 @@ void THNN_(SoftMarginCriterion_updateOutput)(
   thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
   sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal) 0, thrust::plus<accreal>(), softmargin_functor<real, accreal>());
 
-  if(sizeAverage)
+  if (reduction == Reduction::ElementwiseMean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -46,15 +45,14 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, gradOutput);
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCUNN_check_shape(state, gradOutput, input);
     THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
         softmargin_updateGradInput_no_reduce_functor<real, accreal>());
@@ -63,7 +61,7 @@ void THNN_(SoftMarginCriterion_updateGradInput)(
   }
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  accreal norm = (sizeAverage ? 1./size : 1.);
+  accreal norm = (reduction == Reduction::ElementwiseMean ? 1./size : 1.);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

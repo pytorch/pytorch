@@ -90,47 +90,16 @@ void Module::eval() {
   is_training_ = false;
 }
 
-void Module::cuda() {
-  to(at::kCUDA);
+void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {
+  to_impl(device, dtype, non_blocking);
 }
 
-void Module::cpu() {
-  to(at::kCPU);
+void Module::to(torch::Dtype dtype, bool non_blocking) {
+  to_impl(dtype, non_blocking);
 }
 
-void Module::to(at::Type& type) {
-  for (auto& child : children_) {
-    child.value->to(type);
-  }
-  for (auto& parameter : parameters_) {
-    at::detail::set_data(*parameter, parameter->data().toType(type));
-    AT_ASSERT(parameter->data().type() == type);
-    AT_ASSERT(&parameter->type() == autograd::VariableType::getType(type));
-  }
-}
-
-void Module::to(at::ScalarType scalar_type) {
-  for (auto& child : children_) {
-    child.value->to(scalar_type);
-  }
-  for (auto& parameter : parameters_) {
-    auto& new_type = parameter->data().type().toScalarType(scalar_type);
-    at::detail::set_data(*parameter, parameter->data().toType(new_type));
-    AT_ASSERT(parameter->data().type().scalarType() == scalar_type);
-    AT_ASSERT(parameter->type().scalarType() == scalar_type);
-  }
-}
-
-void Module::to(at::Backend backend) {
-  for (auto& child : children_) {
-    child.value->to(backend);
-  }
-  for (auto& parameter : parameters_) {
-    auto& new_type = parameter->data().type().toBackend(backend);
-    at::detail::set_data(*parameter, parameter->data().toType(new_type));
-    AT_ASSERT(parameter->data().type().backend() == backend);
-    AT_ASSERT(parameter->type().backend() == backend);
-  }
+void Module::to(torch::Device device, bool non_blocking) {
+  to_impl(device, non_blocking);
 }
 
 bool Module::is_training() const noexcept {
@@ -142,20 +111,24 @@ void Module::zero_grad() {
     child.value->zero_grad();
   }
   for (auto& parameter : parameters_) {
-    parameter->grad().zero_();
+    auto& grad = parameter->grad();
+    if (grad.defined()) {
+      grad = grad.detach();
+      grad.zero_();
+    }
   }
 }
 
-autograd::Variable& Module::register_parameter(
+Tensor& Module::register_parameter(
     std::string name,
-    Variable tensor,
+    Tensor tensor,
     bool requires_grad) {
   tensor.set_requires_grad(requires_grad);
   return parameters_.insert(std::move(name), std::move(tensor));
 }
 
-autograd::Variable& Module::register_buffer(std::string name, Variable tensor) {
-  return parameters_.insert(std::move(name), std::move(tensor));
+Tensor& Module::register_buffer(std::string name, Tensor tensor) {
+  return buffers_.insert(std::move(name), std::move(tensor));
 }
 
 void Module::clone_(Module& other) {}

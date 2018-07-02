@@ -67,6 +67,10 @@ class Tags(object):
     Proto. Typically to provide info for distributed training.
     """
     EXTRA_INFO = 'extra_info:'
+    """
+    An empty tag, used to make conditional statement on with(Tags) block more concise
+    """
+    EMPTY_TAG = 'empty_tag'
 
     DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT)
 

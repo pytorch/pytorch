@@ -51,18 +51,17 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THTensor *input,
           THIndexTensor *target,
           THTensor *output,
-          bool sizeAverage,
+          int64_t reduction,
           THTensor *weights,
           THTensor *total_weight,
-          int64_t ignore_index,
-          bool reduce)
+          int64_t ignore_index)
 {
   INITIAL_CHECK;
   THTensor_(resize1d)(output, 1);
   THTensor_(resize1d)(total_weight, 1);
   ignore_index -= TH_INDEX_BASE;
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     int64_t batch_size = THTensor_(size)(input, 0);
     int64_t H = THTensor_(size)(input, 2);
     int64_t W = THTensor_(size)(input, 3);
@@ -118,7 +117,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   *total_weight_data = total_weight_acc;
   *output_data = output_acc;
 
-  if (sizeAverage && *total_weight_data)
+  if (reduction == Reduction::ElementwiseMean && *total_weight_data)
     *output_data /= *total_weight_data;
 
   THTensor_(free)(input);
@@ -133,11 +132,10 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THIndexTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
+          int64_t reduction,
           THTensor *weights,
           THTensor *total_weight,
-          int64_t ignore_index,
-          bool reduce)
+          int64_t ignore_index)
 {
   INITIAL_CHECK;
   THTensor_(resizeAs)(gradInput, input);
@@ -147,7 +145,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THNN_CHECK_SHAPE(input, gradInput);
   ignore_index -= TH_INDEX_BASE;
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     GRADOUTPUT_SHAPE_CHECK;
 
     int64_t batch_size = THTensor_(size)(input, 0);
@@ -190,7 +188,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   int64_t map_size = THTensor_(size)(input, 2) * THTensor_(size)(input, 3);
   int64_t sample_size = map_size * n_classes;
 
-  real normalize = (sizeAverage) ? *total_weight_data : 1.0f;
+  real normalize = (reduction == Reduction::ElementwiseMean) ? *total_weight_data : 1.0f;
 
   int b;
   #pragma omp parallel for

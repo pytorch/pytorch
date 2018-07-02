@@ -1,6 +1,5 @@
 #include "TH/THMath.h"
 #ifdef __CUDA_ARCH__
-#include <THCUNN/THCHalfAutoNumerics.cuh>
 #include <nvfunctional>
 #endif
 

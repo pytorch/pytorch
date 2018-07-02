@@ -149,8 +149,7 @@ kernelPointwiseApply2(detail::TensorInfo<scalar1, IndexType> a,
     const IndexType bOffset =
       detail::IndexToOffset<scalar2, IndexType, BDims>::get(linearIndex, b);
 
-    bool earlyExit = false;
-    op(a.data[aOffset], b.data[bOffset], earlyExit);
+    op(a.data[aOffset], b.data[bOffset]);
   }
 }
 

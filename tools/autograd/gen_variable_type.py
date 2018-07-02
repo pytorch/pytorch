@@ -233,6 +233,7 @@ def emit_body(declaration):
     inplace = declaration['inplace']
     is_out_fn = name.endswith('_out')
     modifies_arguments = inplace or is_out_fn
+    returns_void = len(returns) == 1 and returns[0]['type'] == 'void'
 
     base_name = name[:-1] if inplace else name[:-4] if is_out_fn else name
     is_view = base_name in VIEW_FUNCTIONS
@@ -466,7 +467,7 @@ def emit_body(declaration):
                 call = wrap_output(call)
         else:
             call = CALL_VIA_TYPE.substitute(declaration)
-        if not modifies_arguments:
+        if not modifies_arguments and not returns_void:
             call = '{} = {}'.format(tie_return_values(), call)
         return call + ';'
 
@@ -548,7 +549,8 @@ def emit_body(declaration):
     body.append(post_record_trace)
     if requires_derivative:
         body.append(emit_save_outputs())
-    body.append('return {};'.format(get_return_value()))
+    if not returns_void:
+        body.append('return {};'.format(get_return_value()))
     return body
 
 

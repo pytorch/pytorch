@@ -17,12 +17,10 @@ static inline int64_t maybe_wrap_dim(int64_t dim, int64_t dim_post_expr, bool wr
 
   int64_t min = -dim_post_expr;
   int64_t max = dim_post_expr - 1;
-  if (dim < min || dim > max) {
-    std::ostringstream oss;
-    oss << "dimension out of range (expected to be in range of [" << min
-        << ", " << max << "], but got " << dim << ")",
-    throw std::runtime_error(oss.str());
-  }
+  AT_CHECK(
+      dim >= min && dim <= max,
+      "Dimension out of range (expected to be in range of [",
+      min, ", ", max, "], but got ", dim, ")");
   if (dim < 0) dim += dim_post_expr;
   return dim;
 }
@@ -45,6 +43,22 @@ static inline int64_t maybe_wrap_dim(int64_t dim, const std::vector<std::vector<
     return dim;
   }
   return maybe_wrap_dim(dim, tensor_sizes[0].size());
+}
+
+// wrap each of dims basing on dim_post_expr
+static inline void maybe_wrap_dims(std::vector<int64_t>& dims, int64_t dim_post_expr) {
+  if (dim_post_expr <= 0) {
+    dim_post_expr = 1; // this will make range [-1, 0]
+  }
+  int64_t min = -dim_post_expr;
+  int64_t max = dim_post_expr - 1;
+  for (auto& dim : dims) {
+    AT_CHECK(
+        dim >= min && dim <= max,
+        "Dimension out of range (expected to be in range of [",
+        min, ", ", max, "], but got ", dim, ")");
+    if (dim < 0) dim += dim_post_expr;
+  }
 }
 
 // previously, size [0] tensors were the only possible empty tensors; thus, it wasn't possible

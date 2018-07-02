@@ -5,6 +5,8 @@
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
 
+namespace at { struct Half; }
+
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
 
@@ -116,6 +118,9 @@ static inline  __device__ void atomicAdd(half *address, half val) {
     old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
+}
+static inline __device__ void atomicAdd(at::Half *address, half val) {
+  return atomicAdd(reinterpret_cast<half*>(address), val);
 }
 #endif
 

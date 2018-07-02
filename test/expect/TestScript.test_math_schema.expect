@@ -1,0 +1,5 @@
+graph(%x : Dynamic
+      %y : Dynamic) {
+  %2 : Dynamic = aten::add[alpha={1}](%x, %y)
+  return (%2);
+}

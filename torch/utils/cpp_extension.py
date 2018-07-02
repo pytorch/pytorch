@@ -843,7 +843,7 @@ def _write_ninja_file(path,
             '  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(
                 cl_path))
     else:
-        link_rule.append('  command = $cxx $ldflags $in -o $out')
+        link_rule.append('  command = $cxx $in $ldflags -o $out')
 
     # Emit one build rule per source to enable incremental build.
     object_files = []

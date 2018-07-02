@@ -732,6 +732,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -752,8 +753,6 @@ endif()
 if (BUILD_ATEN)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  add_definitions(-DTH_INDEX_BASE=0)
 
   # RPATH stuff
   # see https://cmake.org/Wiki/CMake_RPATH_handling
