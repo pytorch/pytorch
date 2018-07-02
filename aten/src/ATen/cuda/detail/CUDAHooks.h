@@ -15,16 +15,23 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDA() const override;
   bool hasCuDNN() const override;
   cudaStream_t getCurrentCUDAStream(THCState*) const override;
+#ifndef __HIP_PLATFORM_HCC__
+  cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const override;
+#endif
   cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device) const override;
   struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const override;
   struct cudaDeviceProp* getDeviceProperties(THCState*, int device) const override;
   int64_t current_device() const override;
-  std::unique_ptr<Allocator> newPinnedMemoryAllocator() const override;
+  Allocator* getPinnedMemoryAllocator() const override;
   void registerCUDATypes(Context*) const override;
   bool compiledWithCuDNN() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
   long versionCuDNN() const override;
   double batchnormMinEpsilonCuDNN() const override;
+  int64_t cuFFTGetPlanCacheMaxSize() const override;
+  void cuFFTSetPlanCacheMaxSize(int64_t max_size) const override;
+  int64_t cuFFTGetPlanCacheSize() const override;
+  void cuFFTClearPlanCache() const override;
   int getNumGPUs() const override;
 };
 

@@ -17,7 +17,8 @@ protoc --plugin=protoc-gen-nanopb=$PWD/torch/lib/nanopb/generator/protoc-gen-nan
        --nanopb_out=-T:.
 # NB: -T suppresses timestamp. See https://github.com/nanopb/nanopb/issues/274
 # nanopb generated C files are valid CPP! Yay!
-cp $TEMP_DIR/onnx.pb.c torch/csrc/onnx/onnx.pb.cpp
-cp $TEMP_DIR/onnx.pb.h torch/csrc/onnx/onnx.pb.h
+cp $TEMP_DIR/onnx.pb.c torch/csrc/onnx/onnx.npb.cpp
+sed -i s'/\(#include.*onnx\).pb.h/\1.npb.h/' torch/csrc/onnx/onnx.npb.cpp
+cp $TEMP_DIR/onnx.pb.h torch/csrc/onnx/onnx.npb.h
 
 rm -r $TEMP_DIR

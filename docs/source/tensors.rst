@@ -237,11 +237,11 @@ view of a storage and defines numeric operations on it.
    .. automethod:: geqrf
    .. automethod:: ger
    .. automethod:: gesv
+   .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
    .. automethod:: half
    .. automethod:: histc
-   .. automethod:: index
    .. automethod:: index_add_
    .. automethod:: index_copy_
    .. automethod:: index_fill_

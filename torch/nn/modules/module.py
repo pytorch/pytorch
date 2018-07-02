@@ -101,12 +101,15 @@ class Module(object):
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
-        if hasattr(self, name) and name not in self._buffers:
-            raise KeyError("attribute '{}' already exists".format(name))
+        if not isinstance(name, torch._six.string_classes):
+            raise TypeError("buffer name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("buffer name can't contain \".\"")
         elif name == '':
             raise KeyError("buffer name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._buffers:
+            raise KeyError("attribute '{}' already exists".format(name))
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
@@ -128,12 +131,15 @@ class Module(object):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        elif hasattr(self, name) and name not in self._parameters:
-            raise KeyError("attribute '{}' already exists".format(name))
+        elif not isinstance(name, torch._six.string_classes):
+            raise TypeError("parameter name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("parameter name can't contain \".\"")
         elif name == '':
             raise KeyError("parameter name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._parameters:
+            raise KeyError("attribute '{}' already exists".format(name))
 
         if param is None:
             self._parameters[name] = None
@@ -163,6 +169,9 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
+        elif not isinstance(name, torch._six.string_classes):
+            raise TypeError("module name should be a string. Got {}".format(
+                torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
@@ -629,6 +638,14 @@ class Module(object):
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+
+                if input_param.shape != param.shape:
+                    # local shape should match the one in checkpoint
+                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
+                                      'where the shape is {} in current model.'
+                                      .format(key, param.shape, input_param.shape))
+                    continue
+
                 if isinstance(input_param, Parameter):
                     # backwards compatibility for serialized parameters
                     input_param = input_param.data

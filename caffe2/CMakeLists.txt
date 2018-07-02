@@ -255,7 +255,7 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen files. 
+  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
   IF(BUILD_ATEN)
      HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
   ENDIF()
@@ -263,21 +263,21 @@ if(USE_ROCM)
      set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   ENDIF()
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
-  
+
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
   set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
-  
-  # Since PyTorch files contain HIP headers, this is also needed to capture the includes. 
+
+  # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
   target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
- 
+  target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
+
   IF(BUILD_ATEN)
     aten_set_target_props(caffe2_hip)
   ENDIF()
 
-  # https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
-  # To avoid having to do above, keep this commented.
+  # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
 
   caffe2_interface_library(caffe2_hip caffe2_hip_library)
@@ -429,9 +429,8 @@ if(BUILD_CAFFE2)
     endif()
 
     if(USE_ROCM)
-      set_source_files_properties(${Caffe2_HIP_PYTHON_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-      hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-      set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+      add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "${HIP_HIPCC_FLAGS} -fvisibility=hidden")
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
       if (APPLE)

@@ -223,10 +223,25 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+vector<TensorShape> TensorInferenceForDotProduct(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_GT(in.size(), 0);
+
+  vector<TIndex> dims(1);
+  dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
+  return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
+}
+
 OpSchema::Cost CostInferenceForDotProduct(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
-  struct OpSchema::Cost c = PointwiseCostInference<1>(def, in);
+  std::vector<TensorShape> out = TensorInferenceForDotProduct(def, in);
+  CAFFE_ENFORCE_GT(out.size(), 0);
+  CAFFE_ENFORCE_EQ(out[0].dims().size(), 1);
+
+  struct OpSchema::Cost c = PointwiseCostInference<2>(def, in);
+  c.bytes_written = out[0].dims(0) * sizeof(out[0].data_type());
   c.params_bytes = 0;
   return c;
 }
@@ -474,12 +489,96 @@ OPERATOR_SCHEMA(DotProduct)
     .NumOutputs(1)
     .IdenticalTypeAndShapeOfInputDim(0, 0)
     .SetDoc(R"DOC(
-Given two input float tensors X, Y, and produces one output float tensor
-of the dot product between X and Y.
+Computes and outputs the dot product of the two input float tensors `X` and `Y`.
+Note that `X` and `Y` must be either 1D or 2D, and they must be the same shape.
+The output tensor is 1D, which represents either the product of each element in
+a respective dimension if the inputs are 1D, or the sum of the products in a
+given dimension if the inputs are 2D matrices. Note that the actual dot product
+is a scalar value, which is effectively the sum of the elements in the 1D
+output tensor.
+
+For 1D inputs:
+Given two vectors $X = [x_0, x_1, x_2]$ and $Y = [y_0, y_1, y_2]$; $Z = [x_0 * y_0, x_1 * y_1, x_2 * y_2]$
+
+For 2D inputs:
+Given two matrices:
+$$X = [[x_0^0, x_1^0, x_2^0], \\ [x_0^1, x_1^1, x_2^1], \\ [x_0^2, x_1^2, x_2^2], \\ ..., \\ [x_0^n, x_1^n, x_2^n]]$$
+
+and
+
+$$Y = [[y_0^0, y_1^0, y_2^0], \\ [y_0^1, y_1^1, y_2^1], \\ [y_0^2, y_1^2, y_2^2], \\ ..., \\ [y_0^n, y_1^n, y_2^n]]$$
+
+then
+
+$$Z =  \biggl[\Big((x_0^0 * y_0^0) + (x_1^0 * y_1^0) + (x_2^0 * y_2^0)\Big), \\ \Big((x_0^1 * y_0^1) + (x_1^1 * y_1^1) + (x_2^1 * y_2^1)\Big), \\ \Big((x_0^2 * y_0^2) + (x_1^2 * y_1^2) + (x_2^2 * y_2^2)\Big), \\ ..., \\ \Big((x_0^n * y_0^n) + (x_1^n * y_1^n) + (x_2^n * y_2^n)\Big)\biggr]$$
+
+Github Link:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/distance_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "DotProduct",
+    ["X",  "Y"],
+    ["Z"]
+)
+
+workspace.FeedBlob("X", np.random.randint(20, size=(5)).astype(np.float32))
+workspace.FeedBlob("Y", np.random.randint(20, size=(5)).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"))
+print("Y:\n", workspace.FetchBlob("Y"))
+workspace.RunOperatorOnce(op)
+print("Z:\n", workspace.FetchBlob("X"))
+
+
+workspace.ResetWorkspace()
+workspace.FeedBlob("X", np.random.randint(10, size=(3,3)).astype(np.float32))
+workspace.FeedBlob("Y", np.random.randint(10, size=(3,3)).astype(np.float32))
+print("X:\n", workspace.FetchBlob("X"))
+print("Y:\n", workspace.FetchBlob("Y"))
+workspace.RunOperatorOnce(op)
+print("Z:\n", workspace.FetchBlob("Z"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [ 2. 15.  2.  7. 12.]
+Y:
+ [ 3. 12.  9.  3. 18.]
+Z:
+ [ 2. 15.  2.  7. 12.]
+X:
+ [[2. 0. 4.]
+ [7. 7. 4.]
+ [7. 9. 9.]]
+Y:
+ [[2. 0. 8.]
+ [9. 6. 1.]
+ [7. 8. 0.]]
+Z:
+ [ 36. 109. 121.]
+
+```
+
+</details>
+
 )DOC")
-    .Input(0, "X", "1D or 2D input tensor")
-    .Input(1, "Y", "1D or 2D input tensor (must have the same shape as X)")
-    .Output(0, "Z", "1D output tensor")
+    .Input(0, "X", "*(type: Tensor`<float>`)* 1D or 2D input tensor.")
+    .Input(1, "Y", "*(type: Tensor`<float>`)* 1D or 2D input tensor (must have the same shape as X).")
+    .Output(0, "Z", "*(type: Tensor`<float>`)* 1D output tensor.")
+    .TensorInferenceFunction(TensorInferenceForDotProduct)
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct));
 

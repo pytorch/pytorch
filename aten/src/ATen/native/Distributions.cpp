@@ -145,12 +145,8 @@ Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-  if (!self.is_cuda()) {
-    self._cpu_bernoulli_(p, gen);
+    self._bernoulli_(p, gen);
     return self;
-  }
-  Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
-  return native::bernoulli_(self, probs, gen);
 }
 
 Tensor& bernoulli_(Tensor& self) {
@@ -174,7 +170,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
  */
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
-  Tensor ret = at::zeros(lambda.type(), lambda.sizes());
+  Tensor ret = at::zeros(lambda.sizes(), lambda.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
@@ -188,7 +184,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
 }
 
 Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
-  Tensor ret = alpha.type().zeros(alpha.sizes());
+  Tensor ret = at::zeros(alpha.sizes(), alpha.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);

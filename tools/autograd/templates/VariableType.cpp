@@ -15,10 +15,16 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/variadic.h"
 
-#include <initializer_list>
-#include <iostream>
-#include <functional>
+#include <array>
 #include <cstddef>
+#include <functional>
+#include <initializer_list>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 #ifdef _MSC_VER
 #ifdef Type
@@ -92,7 +98,8 @@ static void setposattr(jit::Node* n, size_t idx, const char *name, std::array<bo
 
 VariableType::VariableType(Context* context, Type* baseType)
   : Type(context, /*is_variable=*/true, /*is_undefined=*/false)
-  , baseType(baseType) {
+  , baseType(baseType)
+  , id_(context->freshTypeID()) {
   str = std::string("Variable[") + baseType->toString() + "]";
 }
 
@@ -118,8 +125,8 @@ std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size
 std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
 }
-std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
-  return baseType->storageWithAllocator(size, std::move(allocator));
+std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
+  return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
@@ -141,36 +148,37 @@ Type & VariableType::toScalarType(ScalarType s) const {
   return *getType(baseType->toScalarType(s));
 }
 TypeID VariableType::ID() const {
-  throw std::runtime_error("VariableType::ID() not implemented");
+  return static_cast<TypeID>(id_);
 }
 
 const char * VariableType::typeString() {
   return "VariableType";
 }
 
-// Pre-condition: backend/scalar_type is a valid type in the type_registry
-void register_variable_type_for(at::Context* context, at::Backend backend, at::ScalarType scalar_type) {
-  auto* baseType = context->type_registry[static_cast<int>(at::IsVariable::NotVariable)][static_cast<int>(backend)][static_cast<int>(scalar_type)].get();
-  AT_ASSERT(baseType);
-  context->type_registry[static_cast<int>(at::IsVariable::Variable)][static_cast<int>(backend)][static_cast<int>(scalar_type)].reset(new VariableType(context, baseType));
+std::vector<std::unique_ptr<Type>> type_to_variable_type;
+
+// XXX - this is not threadsafe with uses of Variables
+void register_variable_type_for(Type* baseType) {
+  TORCH_ASSERT(baseType);
+  size_t base_id = static_cast<size_t>(baseType->ID());
+  if(type_to_variable_type.size() <= base_id) {
+    type_to_variable_type.resize(base_id + 1);
+  }
+  type_to_variable_type[base_id].reset(new VariableType(&at::globalContext(), baseType));
 }
 
 struct VariableTypeRegistry {
-  static constexpr int MaxTypes = static_cast<int>(at::TypeID::NumOptions);
-
   VariableTypeRegistry() {
     auto& context = at::globalContext();
     for (int p = 0; p < static_cast<int>(Backend::NumOptions); ++p) {
-      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-        auto baseType = context.type_registry[static_cast<int>(at::IsVariable::NotVariable)][p][s].get();
+      for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); ++s) {
+        auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
         if (baseType && baseType->backend() != Backend::Undefined) {
-          register_variable_type_for(&context, static_cast<Backend>(p), static_cast<ScalarType>(s));
+          register_variable_type_for(baseType);
         }
       }
     }
   }
-
-  std::once_flag init_flag;
 };
 
 static VariableTypeRegistry registry;
@@ -180,9 +188,10 @@ bool VariableType::isVariableType(const at::Type& type) {
 }
 
 at::Type* VariableType::getType(const at::Type& baseType) {
-  return globalContext().type_registry[static_cast<int>(at::IsVariable::Variable)]
-                                      [static_cast<int>(baseType.backend())]
-                                      [static_cast<int>(baseType.scalarType())].get();
+  auto id = static_cast<size_t>(baseType.ID());
+  if(id >= type_to_variable_type.size())
+    return nullptr;
+  return type_to_variable_type[id].get();
 }
 
 at::Type* VariableType::getType(const at::Tensor& tensor) {
@@ -192,33 +201,30 @@ at::Type* VariableType::getType(const at::Tensor& tensor) {
   return getType(tensor.type());
 }
 
-std::vector<at::Type*> VariableType::allCPUTypes() {
+namespace {
+std::vector<at::Type*> allTypesForBackends(at::ArrayRef<at::Backend> backends) {
   auto& context = at::globalContext();
   std::vector<Type*> res;
-  // CPU and Sparse CPU
-  res.reserve(2 * static_cast<int>(ScalarType::NumOptions));
-  for (auto p : { Backend::CPU, Backend::SparseCPU }) {
+  res.reserve(backends.size() * static_cast<int>(ScalarType::NumOptions));
+  for (auto p : backends) {
     for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto* r = context.type_registry[static_cast<int>(at::IsVariable::Variable)][static_cast<int>(p)][s].get();
-      if (r) res.emplace_back(r);
+      auto baseType = context.getTypeRaw(static_cast<Backend>(p), static_cast<ScalarType>(s));
+      if (baseType) {
+        res.emplace_back(VariableType::getType(*baseType));
+      }
     }
   }
   return res;
 }
+}
+
+std::vector<at::Type*> VariableType::allCPUTypes() {
+  return allTypesForBackends({ Backend::CPU, Backend::SparseCPU });
+}
 
 std::vector<at::Type*> VariableType::allCUDATypes() {
-  auto& context = at::globalContext();
-  context.lazyInitCUDA();
-  std::vector<Type*> res;
-  // CUDA and Sparse CUDA
-  res.reserve(2 * static_cast<int>(ScalarType::NumOptions));
-  for (auto p : { Backend::CUDA, Backend::SparseCUDA }) {
-    for (int s = 0; s < static_cast<int>(ScalarType::NumOptions); s++) {
-      auto* r = context.type_registry[static_cast<int>(at::IsVariable::Variable)][static_cast<int>(p)][s].get();
-      if (r) res.emplace_back(r);
-    }
-  }
-  return res;
+  at::globalContext().lazyInitCUDA();
+  return allTypesForBackends({ Backend::CUDA, Backend::SparseCUDA });
 }
 
 Variable & VariableType::checked_cast_variable(const Tensor & t, const char * name, int pos) {
@@ -400,7 +406,7 @@ struct Flatten : IterArgs<Flatten> {
   }
 };
 
-template<typename... Args> inline variable_list flatten(Args&&... args) {
+template<typename... Args> inline variable_list flatten_tensor_args(Args&&... args) {
   variable_list out;
   out.reserve(count_tensors(std::forward<Args>(args)...));
   Flatten(out).apply(std::forward<Args>(args)...);
@@ -428,7 +434,9 @@ Tensor & VariableType::s_copy_(Tensor & self, const Tensor & src, bool non_block
     grad_fn = std::make_shared<CopyBackwards>();
     grad_fn->set_next_edges(collect_next_edges(self, src));
     grad_fn->src_type = &src.type();
-    grad_fn->src_device = src.is_cuda() ? src.get_device() : -1;
+    if (src.is_cuda()) {
+      grad_fn->src_device = src.get_device();
+    }
   }
   baseType->s_copy_(self_, src_, non_blocking);
   increment_version(self);

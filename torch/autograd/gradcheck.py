@@ -3,6 +3,7 @@ from collections import Iterable
 import torch.testing
 import sys
 from itertools import product
+import warnings
 
 
 def zero_gradients(x):
@@ -126,7 +127,8 @@ def _differentiable_outputs(x):
 
 def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True):
     r"""Check gradients computed via small finite differences against analytical
-    gradients
+    gradients w.r.t. tensors in :attr:`inputs` that are of floating point type
+    and with ``requires_grad=True``.
 
     The check between numerical and analytical gradients has the same behaviour as
     `numpy.allclose <https://docs.scipy.org/doc/numpy/reference/generated/numpy.allclose.html>`_,
@@ -141,8 +143,15 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 
     .. note::
         The default values are designed for :attr:`input` of double precision.
-        This check will likely fail if :attr:`input` is of single precision,
-        i.e., ``FloatTensor``.
+        This check will likely fail if :attr:`input` is of less precision, e.g.,
+        ``FloatTensor``.
+
+    .. warning::
+       If any checked tensor in :attr:`input` has overlapping memory, i.e.,
+       different indices pointing to the same memory address (e.g., from
+       :func:`torch.expand`), this check will likely fail because the numerical
+       gradients computed by point perturbation at such indices will change
+       values at all other indices that share the same memory address.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns
@@ -163,6 +172,12 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
     # Make sure that gradients are saved for all inputs
     for inp in tupled_inputs:
         if isinstance(inp, torch.Tensor):
+            if inp.requires_grad and inp.dtype != torch.float64:
+                warnings.warn(
+                    'At least one of the inputs that requires gradient \
+                     is not of double precision floating point. '
+                    'This check will likely fail if all the inputs are not of \
+                     double precision floating point. ')
             inp.retain_grad()
 
     output = _differentiable_outputs(func(*inputs))
@@ -220,7 +235,9 @@ def gradcheck(func, inputs, eps=1e-6, atol=1e-5, rtol=1e-3, raise_exception=True
 def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-3,
                   gen_non_contig_grad_outputs=False, raise_exception=True):
     r"""Check gradients of gradients computed via small finite differences
-    against analytical gradients
+    against analytical gradients w.r.t. tensors in :attr:`inputs` and
+    :attr:`grad_outputs` that are of floating point type and with
+    ``requires_grad=True``.
 
     This function checks that backpropagating through the gradients computed
     to the given :attr:`grad_outputs` are correct.
@@ -237,9 +254,17 @@ def gradgradcheck(func, inputs, grad_outputs=None, eps=1e-6, atol=1e-5, rtol=1e-
     gradient :math:`n`.
 
     .. note::
-        The default values are designed for :attr:`input` of double precision.
-        This check will likely fail if :attr:`input` is of single precision,
-        i.e., ``FloatTensor``.
+        The default values are designed for :attr:`input` and
+        :attr:`grad_outputs` of double precision. This check will likely fail if
+        they are of less precision, e.g., ``FloatTensor``.
+
+    .. warning::
+       If any checked tensor in :attr:`input` and :attr:`grad_outputs` has
+       overlapping memory, i.e., different indices pointing to the same memory
+       address (e.g., from :func:`torch.expand`), this check will likely fail
+       because the numerical gradients computed by point perturbation at such
+       indices will change values at all other indices that share the same
+       memory address.
 
     Args:
         func (function): a Python function that takes Tensor inputs and returns

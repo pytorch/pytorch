@@ -5,7 +5,8 @@
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/auto_gpu.h"
+
+#include <ATen/DeviceGuard.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -23,7 +24,7 @@
 #include <queue>
 #include <TH/TH.h>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
 #endif
@@ -204,7 +205,7 @@ Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  AutoGPU guard(device);
+  at::DeviceGuard guard(device);
   worker_device = device;
   thread_main(nullptr);
 }
@@ -382,7 +383,7 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
     AutoGradMode grad_mode(false);
     for (int i = 0; i < num_outputs; ++i) {
       auto& output = outputs[i];
-      AutoGPU guard(output);
+      at::DeviceGuard guard(output);
       if (output.defined() && output.ne(output).any().toCByte()) {
         std::stringstream ss;
         ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
@@ -575,7 +576,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 
 auto Engine::start_threads() -> void {
   int num_devices = 0;
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   // check for case of compiled with CUDA but no available devices
   if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
     cudaGetLastError();

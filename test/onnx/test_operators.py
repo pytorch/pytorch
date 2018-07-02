@@ -189,11 +189,6 @@ class TestOperators(TestCase):
         y = nn.Parameter(torch.Tensor([[1, 2], [3, 4]]), requires_grad=True)
         self.assertONNX(lambda x, y: -torch.sigmoid(torch.tanh(x * (x + y))), x, params=(y, ))
 
-    def test_non_float_params(self):
-        x = Variable(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
-        y = nn.Parameter(torch.LongTensor([[1, 2], [3, 4]]), requires_grad=True)
-        self.assertONNX(lambda x, y: x * (x + y), x, params=(y, ))
-
     def test_symbolic_mismatch(self):
         class MyFun(Function):
             @staticmethod
@@ -313,28 +308,28 @@ class TestOperators(TestCase):
         self.assertONNX(lambda x: torch.sqrt(x), x)
 
     def test_equal(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x == y, (x, y))
 
     def test_lt(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x < y, (x, y))
 
     def test_gt(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x > y, (x, y))
 
     def test_le(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x <= y, (x, y))
 
     def test_ge(self):
-        x = Variable(torch.randn(3, 4).int(), requires_grad=True)
-        y = Variable(torch.randn(3, 4).int(), requires_grad=True)
+        x = Variable(torch.randn(3, 4).int(), requires_grad=False)
+        y = Variable(torch.randn(3, 4).int(), requires_grad=False)
         self.assertONNX(lambda x, y: x >= y, (x, y))
 
     def test_exp(self):

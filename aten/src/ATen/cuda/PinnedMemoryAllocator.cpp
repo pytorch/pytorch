@@ -18,4 +18,10 @@ void PinnedMemoryAllocator::deallocate(void* ptr) const {
   return state->cudaHostAllocator->free(nullptr, ptr);
 }
 
+// No risk of static initialization order fiasco
+static PinnedMemoryAllocator r;
+PinnedMemoryAllocator* getPinnedMemoryAllocator() {
+  return &r;
+}
+
 }} // namespace at::cuda

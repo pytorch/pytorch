@@ -1,8 +1,9 @@
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <cuda_runtime.h>
 #endif
 
+#include <random>
 
 static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
 {
@@ -58,6 +59,7 @@ static PyObject * THPStorage_(newTHView)(THWStorage *base, ptrdiff_t offset, siz
 #ifndef THC_GENERIC_FILE
 // TODO: move this somewhere - we only need one version
 static std::string THPStorage_(__newHandle)() {
+  std::random_device rd;
   std::string handle = "/torch_";
 #ifdef _MSC_VER
   handle += std::to_string(GetCurrentProcessId());
@@ -65,7 +67,7 @@ static std::string THPStorage_(__newHandle)() {
   handle += std::to_string(getpid());
 #endif
   handle += "_";
-  handle += std::to_string(THRandom_random(THPGenerator_TH_CData(THPDefaultGenerator)));
+  handle += std::to_string(rd());
   return handle;
 }
 
@@ -101,7 +103,7 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
     ctx = (libshm_context*)allocator_obj->allocatorContext;
   } else {
     // TODO: retry on collision
-    AutoNoGIL no_gil;
+    // TODO: free GIL - but remember to reacquire it when an exception is thrown
     THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
@@ -182,7 +184,6 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
     auto allocator_obj = ((StorageWeakRefAllocator*)storage->allocatorContext);
     ctx = (THMapAllocatorContext*)allocator_obj->allocatorContext;
   } else {
-    AutoNoGIL no_gil;
     THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
@@ -237,7 +238,7 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
-  AutoGPU gpu_guard(storage->device);
+  at::DeviceGuard device_guard(storage->device);
   THPObjectPtr tuple(PyTuple_New(5));
   THPObjectPtr device(PyLong_FromLong(storage->device));
   THPObjectPtr _handle(Py_None);
@@ -291,7 +292,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   size_t view_size =  (size_t)THPUtils_unpackLong(_view_size);
 
   int64_t device = THPUtils_unpackLong(_device);
-  AutoGPU __autogpu(device);
+  at::DeviceGuard device_guard(device);
 
   char *buffer;
   Py_ssize_t handle_size;

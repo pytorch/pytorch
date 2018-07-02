@@ -9,4 +9,6 @@ struct PinnedMemoryAllocator final : public Allocator {
   void deallocate(void* ptr) const override;
 };
 
+PinnedMemoryAllocator* getPinnedMemoryAllocator();
+
 }} // namespace at::cuda

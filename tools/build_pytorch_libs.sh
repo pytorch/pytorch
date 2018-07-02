@@ -11,32 +11,32 @@
 set -ex
 
 # Options for building only a subset of the libraries
-WITH_CUDA=0
-WITH_ROCM=0
-WITH_NNPACK=0
-WITH_MKLDNN=0
-WITH_GLOO_IBVERBS=0
-WITH_DISTRIBUTED_MW=0
+USE_CUDA=0
+USE_ROCM=0
+USE_NNPACK=0
+USE_MKLDNN=0
+USE_GLOO_IBVERBS=0
+USE_DISTRIBUTED_MW=0
 FULL_CAFFE2=0
 while [[ $# -gt 0 ]]; do
     case "$1" in
-      --with-cuda)
-          WITH_CUDA=1
+      --use-cuda)
+          USE_CUDA=1
           ;;
-      --with-rocm)
-          WITH_ROCM=1
+      --use-rocm)
+          USE_ROCM=1
           ;;
-      --with-nnpack)
-          WITH_NNPACK=1
+      --use-nnpack)
+          USE_NNPACK=1
           ;;
-      --with-mkldnn)
-          WITH_MKLDNN=1
+      --use-mkldnn)
+          USE_MKLDNN=1
           ;;
-      --with-gloo-ibverbs)
-          WITH_GLOO_IBVERBS=1
+      --use-gloo-ibverbs)
+          USE_GLOO_IBVERBS=1
           ;;
-      --with-distributed-mw)
-          WITH_DISTRIBUTED_MW=1
+      --use-distributed-mw)
+          USE_DISTRIBUTED_MW=1
           ;;
       --full-caffe2)
           FULL_CAFFE2=1
@@ -76,7 +76,7 @@ INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
-C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
+C_FLAGS=" -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
   -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
   -I\"$INSTALL_DIR/include/THNN\" -I\"$INSTALL_DIR/include/THCUNN\""
@@ -96,16 +96,16 @@ CPP_FLAGS=" -std=c++11 "
 GLOO_FLAGS=""
 THD_FLAGS=""
 NCCL_ROOT_DIR=${NCCL_ROOT_DIR:-$INSTALL_DIR}
-if [[ $WITH_CUDA -eq 1 ]]; then
+if [[ $USE_CUDA -eq 1 ]]; then
     GLOO_FLAGS="-DUSE_CUDA=1 -DNCCL_ROOT_DIR=$NCCL_ROOT_DIR"
 fi
 # Gloo infiniband support
-if [[ $WITH_GLOO_IBVERBS -eq 1 ]]; then
+if [[ $USE_GLOO_IBVERBS -eq 1 ]]; then
     GLOO_FLAGS+=" -DUSE_IBVERBS=1 -DBUILD_SHARED_LIBS=1"
-    THD_FLAGS="-DWITH_GLOO_IBVERBS=1"
+    THD_FLAGS="-DUSE_GLOO_IBVERBS=1"
 fi
-if [[ $WITH_DISTRIBUTED_MW -eq 1 ]]; then
-    THD_FLAGS+="-DWITH_DISTRIBUTED_MW=1"
+if [[ $USE_DISTRIBUTED_MW -eq 1 ]]; then
+    THD_FLAGS+="-DUSE_DISTRIBUTED_MW=1"
 fi
 CWRAP_FILES="\
 $BASE_DIR/torch/lib/ATen/Declarations.cwrap;\
@@ -144,7 +144,7 @@ function build() {
   # TODO: The *_LIBRARIES cmake variables should eventually be
   # deprecated because we are using .cmake files to handle finding
   # installed libraries instead
-  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -171,8 +171,8 @@ function build() {
               -DTHNN_SO_VERSION=1 \
               -DTHCUNN_SO_VERSION=1 \
               -DTHD_SO_VERSION=1 \
-              -DUSE_CUDA=$WITH_CUDA \
-              -DNO_NNPACK=$((1-$WITH_NNPACK)) \
+              -DUSE_CUDA=$USE_CUDA \
+              -DNO_NNPACK=$((1-$USE_NNPACK)) \
               -DNCCL_EXTERNAL=1 \
               -Dnanopb_BUILD_GENERATOR=0 \
               -DCMAKE_DEBUG_POSTFIX="" \
@@ -194,17 +194,26 @@ function build() {
   fi
 }
 
+function path_remove {
+  # Delete path by parts so we can never accidentally remove sub paths
+  PATH=${PATH//":$1:"/":"} # delete any instances in the middle
+  PATH=${PATH/#"$1:"/} # delete any instance at the beginning
+  PATH=${PATH/%":$1"/} # delete any instance in the at the end
+}
+
 function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
-  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
-              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
-  ${CMAKE_INSTALL}
+              -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
+              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
+              -DNUM_JOBS="$NUM_JOBS"
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
@@ -233,13 +242,13 @@ function build_caffe2() {
       -DBUILD_BINARY=OFF \
       -DBUILD_SHARED_LIBS=ON \
       -DONNX_NAMESPACE=$ONNX_NAMESPACE \
-      -DUSE_CUDA=$WITH_CUDA \
-      -DUSE_ROCM=$WITH_ROCM \
-      -DUSE_NNPACK=$WITH_NNPACK \
+      -DUSE_CUDA=$USE_CUDA \
+      -DUSE_ROCM=$USE_ROCM \
+      -DUSE_NNPACK=$USE_NNPACK \
       -DCUDNN_INCLUDE_DIR=$CUDNN_INCLUDE_DIR \
       -DCUDNN_LIB_DIR=$CUDNN_LIB_DIR \
       -DCUDNN_LIBRARY=$CUDNN_LIBRARY \
-      -DUSE_MKLDNN=$WITH_MKLDNN \
+      -DUSE_MKLDNN=$USE_MKLDNN \
       -DMKLDNN_INCLUDE_DIR=$MKLDNN_INCLUDE_DIR \
       -DMKLDNN_LIB_DIR=$MKLDNN_LIB_DIR \
       -DMKLDNN_LIBRARY=$MKLDNN_LIBRARY \

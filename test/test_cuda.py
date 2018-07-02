@@ -5,6 +5,8 @@ import re
 import unittest
 import sys
 from itertools import repeat
+import os
+from contextlib import contextmanager
 
 import torch
 import torch.cuda
@@ -12,7 +14,8 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3, IS_WINDOWS
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -409,6 +412,10 @@ tests = [
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
+    ('flip', small_3d, lambda t: [0], 'd0', types, True),
+    ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
+    ('flip', small_3d, lambda t: [0, 2], 'd02', types, True),
+    ('flip', small_3d, lambda t: [2, 0], 'd20', types, True),
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
@@ -771,7 +778,6 @@ class TestCuda(TestCase):
             w = torch.randn(5, 5).cuda()
             self.assertEqual(w.get_device(), 1)
             self.assertEqual(y.cuda().get_device(), 1)
-            self.assertEqual(y.cuda(-1).get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
 
@@ -855,6 +861,8 @@ class TestCuda(TestCase):
         for i, t in enumerate(result):
             self.assertEqual(t.get_device(), i)
             self.assertEqual(t, input)
+            if input.is_cuda and input.get_device() == i:
+                self.assertEqual(t.data_ptr(), input.data_ptr())
 
     def test_broadcast_cpu(self):
         self._test_broadcast(torch.randn(5, 5))
@@ -1105,6 +1113,9 @@ class TestCuda(TestCase):
         y = torch.randn(1, SIZE, SIZE).cuda()
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
+
+    def test_cat_empty_legacy(self):
+        TestTorch._test_cat_empty_legacy(self, use_cuda=True)
 
     def test_cat_empty(self):
         TestTorch._test_cat_empty(self, use_cuda=True)
@@ -1372,11 +1383,39 @@ class TestCuda(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
+    def test_flip(self):
+        TestTorch._test_flip(self, use_cuda=True)
+
     def test_signal_window_functions(self):
         TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))
 
     def test_fft_ifft_rfft_irfft(self):
         TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        @contextmanager
+        def plan_cache_max_size(n):
+            original = torch.backends.cuda.cufft_plan_cache.max_size
+            torch.backends.cuda.cufft_plan_cache.max_size = n
+            yield
+            torch.backends.cuda.cufft_plan_cache.max_size = original
+
+        with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with plan_cache_max_size(0):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        torch.backends.cuda.cufft_plan_cache.clear()
+
+        # check that stll works after clearing cache
+        with plan_cache_max_size(10):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
+            torch.backends.cuda.cufft_plan_cache.max_size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"read-only property"):
+            torch.backends.cuda.cufft_plan_cache.size = -1
 
     def test_stft(self):
         TestTorch._test_stft(self, device=torch.device('cuda'))
@@ -1405,13 +1444,20 @@ class TestCuda(TestCase):
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
 
+    @staticmethod
+    def mute():
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+
     def _spawn_method(self, method, arg):
         try:
             mp.set_start_method('spawn')
         except RuntimeError:
             pass
-        with mp.Pool(1) as pool:
-            self.assertTrue(pool.map(method, [arg]))
+        with mp.Pool(1, initializer=self.mute) as pool:
+            errors = pool.map(method, [arg])
+            for e in errors:
+                if 'device-side assert triggered' not in str(e):
+                    self.fail(e)
 
     @staticmethod
     def _test_multinomial_invalid_probs_cuda(probs):
@@ -1421,8 +1467,10 @@ class TestCuda(TestCase):
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
-            return 'device-side assert triggered' in str(e)
+            return e
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
@@ -1660,6 +1708,16 @@ class TestCuda(TestCase):
             b = torch.__dict__[t]()
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
+
+    def test_linspace(self):
+        a = torch.linspace(0, 10, 10, device='cuda')
+        b = torch.linspace(0, 10, 10)
+        self.assertEqual(a, b.cuda())
+
+    def test_logspace(self):
+        a = torch.logspace(1, 10, 10, device='cuda')
+        b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.cuda())
 
     def test_diagonal(self):
         TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')

@@ -22,8 +22,8 @@ void THNN_(LookupTable_accGradParameters)(
     THError("Tensors must be contiguous");
   }
 
-  int nDim = THCIndexTensor_(nDimension)(state, input);
-  if (THCIndexTensor_(nDimension)(state, input) != 1 && THCIndexTensor_(nDimension)(state, input) != 2) {
+  int nDim = THCIndexTensor_(_nDimension)(state, input);
+  if (THCIndexTensor_(_nDimension)(state, input) != 1 && THCIndexTensor_(_nDimension)(state, input) != 2) {
     THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, input);
     THError("input must be a vector or matrix, but is of shape: %s", s1.str);
   }
@@ -57,8 +57,8 @@ void THNN_(LookupTable_accGradParameters)(
   }
 
   THLongStorage *inputSize = THCIndexTensor_(newSizeOf)(state, input);
-  THCIndexTensor_(resizeLegacy)(state, sortedIndices, inputSize, NULL);
-  THCIndexTensor_(resizeLegacy)(state, origIndices, inputSize, NULL);
+  THCIndexTensor_(resize)(state, sortedIndices, inputSize, NULL);
+  THCIndexTensor_(resize)(state, origIndices, inputSize, NULL);
   THLongStorage_free(inputSize);
 
   // Sort the inputs into sorted with the corresponding indices; we
@@ -170,7 +170,7 @@ void THNN_(LookupTable_renorm)(
     THError("Tensors must be contiguous");
   }
 
-  if (THCIndexTensor_(nDimension)(state, idx) != 1) {
+  if (THCIndexTensor_(_nDimension)(state, idx) != 1) {
     THError("idx must be a vector");
   }
 

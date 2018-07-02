@@ -318,7 +318,19 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  set(Python_ADDITIONAL_VERSIONS 3.6 3.5 2.8 2.7 2.6)
+  # Put the currently-activated python version at the front of
+  # Python_ADDITIONAL_VERSIONS so that it is found first. Otherwise there may
+  # be mismatches between Python executables and libraries used at different
+  # stages of build time and at runtime
+  execute_process(
+    COMMAND "python" -c "import sys; sys.stdout.write('%s.%s' % (sys.version_info.major, sys.version_info.minor))"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _py_version)
+  set(Python_ADDITIONAL_VERSIONS)
+  if(${_exitcode} EQUAL 0)
+    list(APPEND Python_ADDITIONAL_VERSIONS "${_py_version}")
+  endif()
+  list(APPEND Python_ADDITIONAL_VERSIONS 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
@@ -462,8 +474,8 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
 
     set(Caffe2_HIP_INCLUDES
       ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
-    
-    # This is needed for library added by hip_add_library (same for hip_add_executable)	
+
+    # This is needed for library added by hip_add_library (same for hip_add_executable)
     hip_include_directories(${Caffe2_HIP_INCLUDES})
 
     set(Caffe2_HIP_DEPENDENCY_LIBS
@@ -720,6 +732,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -740,8 +753,6 @@ endif()
 if (BUILD_ATEN)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  add_definitions(-DTH_INDEX_BASE=0)
 
   # RPATH stuff
   # see https://cmake.org/Wiki/CMake_RPATH_handling

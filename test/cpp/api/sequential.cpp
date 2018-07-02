@@ -1,34 +1,88 @@
 #include <catch.hpp>
 
+#include <torch/nn/modules.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
+#include <memory>
 #include <vector>
 
-using namespace torch;
 using namespace torch::nn;
 
 using Catch::StartsWith;
 
 TEST_CASE("sequential") {
-  SECTION("construction") {
+  SECTION("construction from shared pointer") {
+    struct M : torch::nn::Module {
+      explicit M(int value_) : value(value_) {}
+      int value;
+      int forward() {
+        return value;
+      }
+    };
     Sequential sequential(
-        Linear(2, 3).build(), Linear(2, 3), Linear(2, 3).build());
+        std::make_shared<M>(1), std::make_shared<M>(2), std::make_shared<M>(3));
+    REQUIRE(sequential.size() == 3);
+  }
+  SECTION("construction from concrete type") {
+    struct M : torch::nn::Module {
+      explicit M(int value_) : value(value_) {}
+      int value;
+      int forward() {
+        return value;
+      }
+    };
+
+    Sequential sequential(M(1), M(2), M(3));
+    REQUIRE(sequential.size() == 3);
+  }
+  SECTION("construction from module holders") {
+    struct MImpl : torch::nn::Module {
+      explicit MImpl(int value_) : value(value_) {}
+      int forward() {
+        return value;
+      }
+      int value;
+    };
+
+    struct M : torch::nn::ModuleHolder<MImpl> {
+      using torch::nn::ModuleHolder<MImpl>::ModuleHolder;
+      using torch::nn::ModuleHolder<MImpl>::get;
+    };
+
+    Sequential sequential(M(1), M(2), M(3));
     REQUIRE(sequential.size() == 3);
   }
   SECTION("push_back") {
+    struct M : torch::nn::Module {
+      explicit M(int value_) : value(value_) {}
+      int forward() {
+        return value;
+      }
+      int value;
+    };
     Sequential sequential;
     REQUIRE(sequential.size() == 0);
     REQUIRE(sequential.is_empty());
-    sequential.push_back(Linear(3, 4).build());
+    sequential.push_back(Linear(3, 4));
     REQUIRE(sequential.size() == 1);
-    sequential.push_back(Linear(4, 5).build());
+    sequential.push_back(std::make_shared<M>(1));
     REQUIRE(sequential.size() == 2);
+    sequential.push_back(M(2));
+    REQUIRE(sequential.size() == 3);
   }
   SECTION("access") {
-    std::vector<std::shared_ptr<Linear>> modules = {
-        Linear(2, 3).build(), Linear(3, 4).build(), Linear(4, 5).build()};
+    struct M : torch::nn::Module {
+      explicit M(int value_) : value(value_) {}
+      int forward() {
+        return value;
+      }
+      int value;
+    };
+    std::vector<std::shared_ptr<M>> modules = {
+        std::make_shared<M>(1), std::make_shared<M>(2), std::make_shared<M>(3)};
 
     Sequential sequential;
     for (auto& module : modules) {
@@ -39,15 +93,15 @@ TEST_CASE("sequential") {
     SECTION("at()") {
       SECTION("returns the correct module for a given index") {
         for (size_t i = 0; i < modules.size(); ++i) {
-          REQUIRE(&sequential.at<Linear>(i) == modules[i].get());
+          REQUIRE(&sequential.at<M>(i) == modules[i].get());
         }
       }
       SECTION("throws for a bad index") {
         REQUIRE_THROWS_WITH(
-            sequential.at<Linear>(modules.size() + 1),
+            sequential.at<M>(modules.size() + 1),
             StartsWith("Index out of range"));
         REQUIRE_THROWS_WITH(
-            sequential.at<Linear>(modules.size() + 1000000),
+            sequential.at<M>(modules.size() + 1000000),
             StartsWith("Index out of range"));
       }
     }
@@ -57,7 +111,7 @@ TEST_CASE("sequential") {
         for (size_t i = 0; i < modules.size(); ++i) {
           REQUIRE(sequential.ptr(i).get() == modules[i].get());
           REQUIRE(sequential[i].get() == modules[i].get());
-          REQUIRE(sequential.ptr<Linear>(i).get() == modules[i].get());
+          REQUIRE(sequential.ptr<M>(i).get() == modules[i].get());
         }
       }
       SECTION("throws for a bad index") {
@@ -79,7 +133,7 @@ TEST_CASE("sequential") {
     }
 
     SECTION("calling forward() on a non-empty sequential chains correctly") {
-      struct MockModule : nn::Module {
+      struct MockModule : torch::nn::Module {
         explicit MockModule(int value) : expected(value) {}
         int expected;
         int forward(int value) {
@@ -94,7 +148,7 @@ TEST_CASE("sequential") {
     }
 
     SECTION("calling forward() with the wrong return type throws") {
-      struct M : public nn::Module {
+      struct M : public torch::nn::Module {
         int forward() {
           return 5;
         }
@@ -108,28 +162,55 @@ TEST_CASE("sequential") {
                      "is int, but you asked for type float"));
     }
 
-    SECTION("The return type of forward() defaults to Variable") {
-      struct M : public nn::Module {
-        autograd::Variable forward(autograd::Variable v) {
+    SECTION("The return type of forward() defaults to Tensor") {
+      struct M : public torch::nn::Module {
+        torch::Tensor forward(torch::Tensor v) {
           return v;
         }
       };
 
       Sequential sequential(M{});
-      auto variable =
-          autograd::make_variable(at::CPU(at::kFloat).ones({3, 3}), true);
+      auto variable = torch::ones({3, 3}, torch::requires_grad());
       REQUIRE(sequential.forward(variable).equal(variable));
     }
   }
 
   SECTION("returns the last value") {
-    Sequential sequential(
-        Linear(10, 3).build(), Linear(3, 5).build(), Linear(5, 100).build());
+    torch::manual_seed(0);
+    Sequential sequential(Linear(10, 3), Linear(3, 5), Linear(5, 100));
 
-    auto x = Var(at::CPU(at::kFloat).randn({1000, 10}));
-    auto y = sequential.forward<std::vector<Variable>>(std::vector<Variable>{x}).front();
+    auto x = torch::randn({1000, 10}, torch::requires_grad());
+    auto y = sequential.forward(x);
     REQUIRE(y.ndimension() == 2);
     REQUIRE(y.size(0) == 1000);
     REQUIRE(y.size(1) == 100);
+  }
+
+  SECTION("can hold other important modules") {
+    Sequential sequential(
+        Linear(10, 3),
+        Conv2d(1, 2, 3),
+        Dropout(0.5),
+        BatchNorm(5),
+        Embedding(4, 10),
+        LSTM(4, 5));
+  }
+
+  SECTION("converts at::Tensor to torch::Tensor correctly") {
+    struct M : torch::nn::Module {
+      torch::Tensor forward(torch::Tensor input) {
+        return input;
+      }
+    };
+
+    Sequential sequential(M{});
+    torch::Tensor variable = torch::ones(5);
+    REQUIRE(sequential.forward(variable).sum().toCFloat() == 5);
+
+    at::Tensor tensor_that_is_actually_a_variable = variable * 2;
+    REQUIRE(
+        sequential.forward(tensor_that_is_actually_a_variable)
+            .sum()
+            .toCFloat() == 10);
   }
 }

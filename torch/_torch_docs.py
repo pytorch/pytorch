@@ -1368,7 +1368,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor. Must be a `ByteTensor` or the same type as `input`.
+    out (Tensor, optional): the output tensor. Must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1591,6 +1591,30 @@ Example::
     array([-1,  2,  3])
 """)
 
+add_docstr(torch.flatten,
+           r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+Flattens a contiguous range of dims in a tensor.
+
+Args:
+    input (Tensor): the input tensor
+    start_dim (int): the first dim to flatten
+    end_dim (int): the last dim to flatten
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+                           [3, 4]],
+                          [[5, 6],
+                           [7, 8]]])
+    >>> torch.flatten(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+    >>> torch.flatten(t, start_dim=1)
+    tensor([[1, 2, 3, 4],
+            [5, 6, 7, 8]])
+""")
+
 add_docstr(torch.gather,
            r"""
 gather(input, dim, index, out=None) -> Tensor
@@ -1635,7 +1659,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1861,7 +1885,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -2022,7 +2046,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -2267,7 +2291,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A `torch.ByteTensor` containing a 1 at each location where comparison is true
@@ -2832,7 +2856,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as `input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
@@ -4430,6 +4454,33 @@ Example::
             [-0.5872,  0.6932]])
 """)
 
+add_docstr(torch.flip,
+           r"""
+flip(input, dims) -> Tensor
+
+Reverse the order of a n-D tensor along given axis in dims.
+
+Args:
+    input (Tensor): the input tensor
+    dims (a list or tuple): axis to flip on
+
+Example::
+
+    >>> x = torch.arange(8).view(2, 2, 2)
+    >>> x
+    tensor([[[ 0,  1],
+             [ 2,  3]],
+
+            [[ 4,  5],
+             [ 6,  7]]])
+    >>> torch.flip(x, [0, 1])
+    tensor([[[ 6,  7],
+             [ 4,  5]],
+
+            [[ 2,  3],
+             [ 0,  1]]])
+""")
+
 add_docstr(torch.take,
            r"""
 take(input, indices) -> Tensor
@@ -5243,8 +5294,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.ifft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5332,8 +5394,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.fft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5410,8 +5483,19 @@ of :attr:`input`, but instead the last dimension will be halfed as of size
 
 The inverse of this function is :func:`~torch.irfft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5480,8 +5564,19 @@ The inverse of this function is :func:`~torch.rfft`.
     Jacobian with point perturbations, :func:`~torch.irfft` will almost
     certainly fail the check.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:

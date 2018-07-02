@@ -30,7 +30,7 @@ struct TypeAndSize {
     : sizes(t.sizes())
     , type(&t.type()) {}
 
-  Tensor zeros() { return at::zeros(*type, sizes); }
+  Tensor zeros() { return at::zeros(sizes, *type); }
 
 private:
   std::vector<int64_t> sizes;
