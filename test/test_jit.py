@@ -4732,6 +4732,8 @@ class TestJitGenerated(TestCase):
     pass
 
 
+# UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
+# and we have to disable the failing tests here instead.
 UBSAN_BLACKLISTED_TESTS = [
     "test___rdiv___constant",
     "test___rdiv___scalar_constant",
