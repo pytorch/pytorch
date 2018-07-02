@@ -11,11 +11,9 @@ class _InstanceNorm(_BatchNorm):
     def _check_input_dim(self, input):
         raise NotImplementedError
 
-    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
-        try:
-            version = state_dict._metadata[prefix[:-1]]["version"]
-        except (AttributeError, KeyError):
-            version = None
+    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
+                              missing_keys, unexpected_keys, error_msgs):
+        version = metadata.get('version', None)
         # at version 1: removed running_mean and running_var when
         # track_running_stats=False (default)
         if version is None and not self.track_running_stats:
@@ -40,7 +38,8 @@ class _InstanceNorm(_BatchNorm):
                     state_dict.pop(key)
 
         super(_InstanceNorm, self)._load_from_state_dict(
-            state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs)
+            state_dict, prefix, metadata, strict,
+            missing_keys, unexpected_keys, error_msgs)
 
     def forward(self, input):
         self._check_input_dim(input)
@@ -85,7 +84,7 @@ class InstanceNorm1d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
-            learnable affine parameters. Default: ``True``
+            learnable affine parameters. Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -149,7 +148,7 @@ class InstanceNorm2d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
-            learnable affine parameters. Default: ``True``
+            learnable affine parameters. Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -213,7 +212,7 @@ class InstanceNorm3d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
-            learnable affine parameters. Default: ``True``
+            learnable affine parameters. Default: ``False``
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch

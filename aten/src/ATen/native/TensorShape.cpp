@@ -4,6 +4,7 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/optional.h"
+#include <TH/THTensor.hpp>
 
 #include <algorithm>
 
@@ -112,6 +113,14 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
+Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
+  return self.as_strided(size, stride, self.storage_offset());
+}
+
+Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
+  return self.as_strided_(size, stride, self.storage_offset());
+}
+
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
@@ -125,7 +134,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 #endif
     AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   }
-  return at::native::slice(self, dim, start, start + length, 1);
+  return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor permute(const Tensor& self, IntList dims) {
@@ -216,53 +225,12 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
   throw std::runtime_error(ss.str());
 }
 
-static at::optional<std::vector<int64_t>>
-compute_stride(const Tensor& self, IntList newshape) {
-  auto oldstride = self.strides();
-  auto oldshape = self.sizes();
-  if (oldshape.empty()) {
-    return std::vector<int64_t>(newshape.size(), 1);
-  }
-
-  std::vector<int64_t> newstride(newshape.size());
-  int64_t view_d = newshape.size() - 1;
-  // stride for each subspace in the chunk
-  int64_t chunk_base_stride = oldstride.back();
-  // numel in current chunk
-  int64_t tensor_numel = 1;
-  int64_t view_numel = 1;
-  for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
-    tensor_numel *= oldshape[tensor_d];
-    // if end of tensor size chunk, check view
-    if ((tensor_d == 0) ||
-        (oldshape[tensor_d - 1] != 1 && oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
-      while (view_d >= 0 && (view_numel < tensor_numel || newshape[view_d] == 1)) {
-        newstride[view_d] = view_numel * chunk_base_stride;
-        view_numel *= newshape[view_d];
-        view_d--;
-      }
-      if (view_numel != tensor_numel) {
-        return {};
-      }
-      if (tensor_d > 0) {
-        chunk_base_stride = oldstride[tensor_d - 1];
-        tensor_numel = 1;
-        view_numel = 1;
-      }
-    }
-  }
-  if (view_d != -1) {
-    return {};
-  }
-  return newstride;
-}
-
 Tensor reshape(const Tensor& self, IntList proposed_shape) {
   if (self.type().is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
   auto shape = infer_size(proposed_shape, self.numel());
-  if (auto stride = compute_stride(self, shape)) {
+  if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }
   return at::_unsafe_view(self.clone(), shape);

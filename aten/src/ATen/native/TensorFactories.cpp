@@ -595,6 +595,8 @@ Tensor hann_window(
       window_length, periodic, /*alpha=*/0.5, /*beta=*/0.5, options);
 }
 
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ tensor ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
 template <typename T>
 Tensor tensor_cpu(ArrayRef<T> values, const TensorOptions& options) {
   auto result = at::empty(values.size(), options);

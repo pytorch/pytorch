@@ -438,7 +438,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
     size_t total_inputs = attributes.size() + inputs.size();
     if(total_inputs > schema.arguments.size()) {
       err() << "expected at most " << schema.arguments.size() << " arguments "
-      << " but found " << total_inputs << "\n" << loc << "\n";
+      << "but found " << total_inputs << "\n" << loc << "\n";
       return at::nullopt;
     }
     // fill in positional arguments

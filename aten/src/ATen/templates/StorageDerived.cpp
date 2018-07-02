@@ -34,15 +34,13 @@ static THCDeviceAllocator storage_deleter = {
   nullptr,
 };
 static cudaError_t wrapped_alloc(void * ctx, void** result, size_t size, cudaStream_t stream) {
-  auto ac = static_cast<detail::AllocatorRetainable*>(ctx);
-  ac->retain();
+  auto ac = static_cast<Allocator*>(ctx);
   *result = ac->allocate(size);
   return cudaSuccess;
 }
 static cudaError_t wrapped_free(void * ctx, void * data) {
-  auto ac = static_cast<detail::AllocatorRetainable*>(ctx);
+  auto ac = static_cast<Allocator*>(ctx);
   ac->deallocate(data);
-  ac->release();
   return cudaSuccess;
 }
 static THCDeviceAllocator wrapped_allocator = {
@@ -64,14 +62,12 @@ static THAllocator storage_deleter = {
   call_deleter,
 };
 static void* wrapped_alloc(void * ctx, ptrdiff_t size) {
-  auto ac = static_cast<detail::AllocatorRetainable*>(ctx);
-  ac->retain();
+  auto ac = static_cast<Allocator*>(ctx);
   return ac->allocate(size);
 }
 static void wrapped_free(void * ctx, void * data) {
-  auto ac = static_cast<detail::AllocatorRetainable*>(ctx);
+  auto ac = static_cast<Allocator*>(ctx);
   ac->deallocate(data);
-  ac->release();
 }
 static THAllocator wrapped_allocator = {
   wrapped_alloc,
@@ -80,12 +76,10 @@ static THAllocator wrapped_allocator = {
 };
 #endif
 
-${Storage}::${Storage}(Context* context, size_t size, std::unique_ptr<Allocator> allocator)
+${Storage}::${Storage}(Context* context, size_t size, Allocator* allocator)
   : storage(nullptr),
     context(context) {
-  auto ctx = new detail::AllocatorRetainable(std::move(allocator));
-  storage = ${THStorage}_newWithAllocator(${state,} size, &wrapped_allocator, ctx);
-  ctx->release();
+  storage = ${THStorage}_newWithAllocator(${state,} size, &wrapped_allocator, allocator);
   ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
 }
 

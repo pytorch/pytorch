@@ -7,12 +7,11 @@ void THNN_(SmoothL1Criterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          bool sizeAverage,
-          bool reduce)
+          int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY3(real, input, real, target, real, output,
       real z = fabs(*input_data - *target_data);
@@ -29,7 +28,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     sum += z < 1 ? 0.5*z*z : z - 0.5;
   );
 
-  if (sizeAverage)
+  if (reduction == Reduction::ElementwiseMean)
     sum /= THTensor_(nElement)(input);
 
   THTensor_(set1d)(output, 0, sum);
@@ -41,13 +40,12 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
-          bool reduce)
+          int64_t reduction)
 {
   THNN_CHECK_SHAPE(input, target);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THNN_CHECK_SHAPE(gradOutput, input);
     TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
       real x = *input_data - *target_data;
@@ -66,7 +64,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   }
 
   THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, 1);
-  real norm = (sizeAverage ? 1./((real)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGet1d)(gradOutput, 0);
+  real norm = (reduction == Reduction::ElementwiseMean ? 1./((real)THTensor_(nElement)(input)) : 1.) * THTensor_(fastGet1d)(gradOutput, 0);
 
   TH_TENSOR_APPLY3(real, gradInput, real, input, real, target,
     real x = *input_data - *target_data;

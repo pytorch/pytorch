@@ -25,7 +25,10 @@ def parse_default(s):
     try:
         return int(s)
     except Exception:
-        return float(s)
+        try:
+            return float(s)
+        except Exception:
+            return s
 
 
 def sanitize_types(typ):

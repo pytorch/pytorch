@@ -17,17 +17,17 @@ graph(%0 : Double(1, 3, 224, 224)
       %16 : Double(1000)) {
   %17 : Double(1, 64, 55, 55) = aten::_convolution[stride=[4, 4], padding=[2, 2], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%0, %1, %2), scope: AlexNet/Sequential[features]/Conv2d[0]
   %18 : Double(1, 64, 55, 55) = aten::threshold[threshold={0}, value={0}](%17), scope: AlexNet/Sequential[features]/ReLU[1]
-  %19 : Double(1, 64, 27, 27), %20 : Long(1, 64, 27, 27) = aten::max_pool2d[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
+  %19 : Double(1, 64, 27, 27), %20 : Long(1, 64, 27, 27) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%18), scope: AlexNet/Sequential[features]/MaxPool2d[2]
   %21 : Double(1, 192, 27, 27) = aten::_convolution[stride=[1, 1], padding=[2, 2], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%19, %3, %4), scope: AlexNet/Sequential[features]/Conv2d[3]
   %22 : Double(1, 192, 27, 27) = aten::threshold[threshold={0}, value={0}](%21), scope: AlexNet/Sequential[features]/ReLU[4]
-  %23 : Double(1, 192, 13, 13), %24 : Long(1, 192, 13, 13) = aten::max_pool2d[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%22), scope: AlexNet/Sequential[features]/MaxPool2d[5]
+  %23 : Double(1, 192, 13, 13), %24 : Long(1, 192, 13, 13) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%22), scope: AlexNet/Sequential[features]/MaxPool2d[5]
   %25 : Double(1, 384, 13, 13) = aten::_convolution[stride=[1, 1], padding=[1, 1], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%23, %5, %6), scope: AlexNet/Sequential[features]/Conv2d[6]
   %26 : Double(1, 384, 13, 13) = aten::threshold[threshold={0}, value={0}](%25), scope: AlexNet/Sequential[features]/ReLU[7]
   %27 : Double(1, 256, 13, 13) = aten::_convolution[stride=[1, 1], padding=[1, 1], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%26, %7, %8), scope: AlexNet/Sequential[features]/Conv2d[8]
   %28 : Double(1, 256, 13, 13) = aten::threshold[threshold={0}, value={0}](%27), scope: AlexNet/Sequential[features]/ReLU[9]
   %29 : Double(1, 256, 13, 13) = aten::_convolution[stride=[1, 1], padding=[1, 1], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%28, %9, %10), scope: AlexNet/Sequential[features]/Conv2d[10]
   %30 : Double(1, 256, 13, 13) = aten::threshold[threshold={0}, value={0}](%29), scope: AlexNet/Sequential[features]/ReLU[11]
-  %31 : Double(1, 256, 6, 6), %32 : Long(1, 256, 6, 6) = aten::max_pool2d[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%30), scope: AlexNet/Sequential[features]/MaxPool2d[12]
+  %31 : Double(1, 256, 6, 6), %32 : Long(1, 256, 6, 6) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%30), scope: AlexNet/Sequential[features]/MaxPool2d[12]
   %33 : Long() = aten::size[dim=0](%31), scope: AlexNet
   %34 : Long() = prim::Constant[value={9216}](), scope: AlexNet
   %35 : Dynamic = aten::stack[dim=0](%33, %34), scope: AlexNet

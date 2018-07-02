@@ -104,6 +104,11 @@ cudaStream_t CUDAHooks::getCurrentCUDAStreamOnDevice(
     int64_t device) const {
   return THCState_getCurrentStreamOnDevice(thc_state, device);
 }
+#ifndef __HIP_PLATFORM_HCC__
+cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) const {
+  return THCState_getCurrentSparseHandle(thc_state);
+}
+#endif
 struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
     THCState* thc_state) const {
   return THCState_getCurrentDeviceProperties(thc_state);
@@ -123,8 +128,8 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-std::unique_ptr<Allocator> CUDAHooks::newPinnedMemoryAllocator() const {
-  return std::unique_ptr<Allocator>(new PinnedMemoryAllocator());
+Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
+  return at::cuda::getPinnedMemoryAllocator();
 }
 
 void CUDAHooks::registerCUDATypes(Context* context) const {

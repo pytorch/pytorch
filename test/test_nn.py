@@ -896,6 +896,14 @@ class TestNN(NNTestCase):
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
 
+    def test_register_buffer_raises_error_if_name_is_not_string(self):
+        m = nn.Module()
+        expected_error = 'buffer name should be a string. Got '
+        with self.assertRaisesRegex(TypeError, expected_error + 'int'):
+            m.register_buffer(1, torch.rand(5))
+        with self.assertRaisesRegex(TypeError, expected_error + 'NoneType'):
+            m.register_buffer(None, torch.rand(5))
+
     def test_register_buffer_raises_error_if_attr_exists(self):
         m = nn.Module()
         m.attribute_name = 5
@@ -928,6 +936,14 @@ class TestNN(NNTestCase):
         self.assertEqual(m.buffer_name, buffer2)
         m.register_buffer('buffer_name', buffer3)
         self.assertEqual(m.buffer_name, buffer3)
+
+    def test_register_parameter_raises_error_if_name_is_not_string(self):
+        m = nn.Module()
+        expected_error = 'parameter name should be a string. Got '
+        with self.assertRaisesRegex(TypeError, expected_error + 'int'):
+            m.register_parameter(1, nn.Parameter())
+        with self.assertRaisesRegex(TypeError, expected_error + 'NoneType'):
+            m.register_parameter(None, nn.Parameter())
 
     def test_register_parameter_raises_error_if_attr_exists(self):
         m = nn.Module()
@@ -1175,6 +1191,10 @@ class TestNN(NNTestCase):
         net.add_module('l', l3)
         self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
+                               lambda: net.add_module(1, l))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
+                               lambda: net.add_module(None, l))
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
@@ -1438,9 +1458,9 @@ class TestNN(NNTestCase):
         # weight_u should be just a reused buffer
         self.assertTrue(hasattr(m, 'weight_u'))
         self.assertTrue('weight_u' in m._buffers)
+        self.assertTrue('weight' in m._buffers)
         # weight should be a plain attribute, not counted as a buffer or a param
-        self.assertTrue(hasattr(m, 'weight'))
-        self.assertFalse('weight' in m._buffers or 'weight' in m._parameters)
+        self.assertFalse('weight' in m._parameters)
         # it should also be sharing storage as `weight_orig`
         self.assertEqual(m.weight_orig.storage(), m.weight.storage())
         self.assertEqual(m.weight_orig.size(), m.weight.size())
@@ -1452,6 +1472,48 @@ class TestNN(NNTestCase):
         # weight should be converted back as a parameter
         self.assertTrue(hasattr(m, 'weight'))
         self.assertTrue('weight' in m._parameters)
+
+    def test_spectral_norm_eval_remove(self):
+        inp = torch.randn(3, 5)
+        m = nn.Linear(5, 7)
+        m = torch.nn.utils.spectral_norm(m)
+        x0 = m(inp)
+        m.eval()
+        # test that eval mode and removing / adding+removing doesn't change weight and output
+        x1 = m(inp)
+        x2 = m(inp)
+        self.assertEqual(x0, x1)
+        self.assertEqual(x0, x2)
+        # test that we can backward several times without running into problems
+        x1 = m(inp)
+        x1.sum().backward()
+        x1 = m(inp)
+        x1.sum().backward()
+        # test removing
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x3 = m(inp)
+        self.assertEqual(x0, x3)
+        m = torch.nn.utils.spectral_norm(m)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x4 = m(inp)
+        self.assertEqual(x0, x4)
+        # check that removing after train doesn't change output
+        m.train()
+        m = torch.nn.utils.spectral_norm(m)
+        for i in range(5):
+            x0 = m(inp)
+        m = torch.nn.utils.remove_spectral_norm(m)
+        x1 = m(inp)
+        self.assertEqual(x0, x1)
+
+    def test_spectral_norm_dim(self):
+        inp = torch.randn(2, 3, 10, 12)
+        m = nn.ConvTranspose2d(3, 4, (5, 6))
+        m = torch.nn.utils.spectral_norm(m)
+        # this should not run into incompatible shapes
+        x = m(inp)
+        # check that u refers to the same dimension
+        self.assertEqual(m.weight_u.shape, m.weight_orig[0, :, 0, 0].shape)
 
     def test_spectral_norm_forward(self):
         input = torch.randn(3, 5)
@@ -2886,6 +2948,22 @@ class TestNN(NNTestCase):
         for k, v, in old_state_dict.items():
             self.assertTrue(v.equal(new_state_dict[k]))
 
+    def test_load_state_dict_BC(self):
+        # BatchNormNd
+        # Added num_batches_tracked buffer at version 2. For state dict with
+        # earlier versions or no versions, it should provide default value of 0.
+        bn = nn.BatchNorm2d(3)
+        state_dict = bn.state_dict()
+        del state_dict['num_batches_tracked']
+        state_dict._metadata['']['version'] = 1  # version 1
+        bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
+        del state_dict._metadata['']['version']  # no version
+        bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
+
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
@@ -4225,6 +4303,39 @@ class TestNN(NNTestCase):
 
         self.assertEqual(out1, out2)
 
+    def test_bce_with_logits_ones_in_pos_weights_are_the_same_as_none(self):
+        target = torch.rand(64, 4)
+        output = torch.rand(64, 4) - 0.5
+        pos_weight = torch.ones(64, 4)
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target),
+                         nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target))
+
+    def test_bce_with_logits_broadcasts_pos_weights(self):
+        target = torch.rand(64, 4)
+        output = torch.rand(64, 4) - 0.5
+        pos_weight = torch.rand(4)
+        out1 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
+
+        pos_weight1 = pos_weight.expand(1, 4)
+        out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight1)(output, target)
+
+        pos_weight2 = pos_weight.expand(64, 4)
+        out3 = nn.BCEWithLogitsLoss(pos_weight=pos_weight2)(output, target)
+
+        self.assertEqual(out1, out2)
+        self.assertEqual(out1, out3)
+
+    def test_bce_with_logits_with_pos_weight_has_correct_grad_at_zero(self):
+        output = torch.zeros(3, 1, requires_grad=True)
+        target = torch.zeros(3, 1)
+        pos_weight = torch.ones(3, 1)
+        nn.BCEWithLogitsLoss(pos_weight=pos_weight, size_average=False)(output, target).backward()
+        expected_grad = torch.empty(3, 1).fill_(0.5)
+        grad = output.grad
+        print(grad)
+        self.assertEqual(grad, expected_grad)
+
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
         target = torch.rand(16, 4)
@@ -4516,6 +4627,27 @@ class TestNN(NNTestCase):
         self.assertEqual(F.triplet_margin_loss(input1, input2, input3, swap=True, reduce=False),
                          loss_reference_fns['TripletMarginLoss'](input1, input2, input3, swap=True, reduce=False))
 
+    def test_loss_reduction_arg(self):
+        # NB: This is a sanity test to check that the new reduction arg works the same as size_average and reduce
+        # Remove this when size_average and reduce are deprecated and tests are ported to the new arg
+        input1 = torch.randn(5, 10, requires_grad=True)
+        input2 = torch.randn(5, 10, requires_grad=True)
+        input3 = torch.randn(5, 10, requires_grad=True)
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduction='elementwise_mean'), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduction='elementwise_mean'),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3))
+
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduction='sum'), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduction='sum'),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, size_average=False))
+
+        self.assertTrue(gradcheck(lambda x1, x2, x3: F.triplet_margin_loss(
+            x1, x2, x3, reduction='none'), (input1, input2, input3)))
+        self.assertEqual(F.triplet_margin_loss(input1, input2, input3, reduction='none'),
+                         loss_reference_fns['TripletMarginLoss'](input1, input2, input3, reduce=False))
+
     def test_cosine_similarity(self):
         input1 = torch.randn(4, 4, requires_grad=True)
         input2 = torch.randn(4, 4, requires_grad=True)
@@ -4537,6 +4669,10 @@ class TestNN(NNTestCase):
         input1 = torch.randn(input_size, requires_grad=True)
         input2 = torch.randn(input_size, requires_grad=True)
         self.assertEqual(F.cosine_similarity(input1, input2, dim=1).size(), expected_size)
+
+    def test_grid_sample_unsupported_mode(self):
+        with self.assertRaisesRegex(NotImplementedError, "nn.functional.grid_sample got unsupported mode: 'garbage'"):
+            F.grid_sample(torch.tensor([]), torch.tensor([]), mode='garbage')
 
     def test_grid_sample(self):
         def test_cpu_against_cuda(N, C, H, W, padding_mode):
@@ -7667,7 +7803,8 @@ if num_shards is not None and shard is not None:
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:
-                if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % num_shards == shard:
+                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
+                if hash_id % num_shards == shard:
                     test_suite.addTest(test)
         return test_suite
 

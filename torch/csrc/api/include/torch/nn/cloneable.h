@@ -40,10 +40,14 @@ class Cloneable : public Module {
     const auto& self = static_cast<const Derived&>(*this);
     auto copy = std::make_shared<Derived>(self);
     copy->parameters_.clear();
+    copy->buffers_.clear();
     copy->children_.clear();
     copy->reset();
     for (const auto& parameter : parameters_) {
       copy->parameters_[parameter.key].data().copy_(parameter->data());
+    }
+    for (const auto& buffer : buffers_) {
+      copy->buffers_[buffer.key].data().copy_(buffer->data());
     }
     for (const auto& child : children_) {
       copy->children_[child.key]->clone_(*child.value);

@@ -6,9 +6,6 @@
 #include "ATen/native/SpectralOpsUtils.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
 #include "ATen/native/cuda/CuFFTPlanCache.h"
-
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCTensorMathReduce.cuh>
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
 
