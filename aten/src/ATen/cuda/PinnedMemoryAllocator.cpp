@@ -3,6 +3,7 @@
 #include <ATen/Config.h>
 
 #include <THC/THC.h>
+#include <THC/THCGeneral.hpp>
 
 #include <stdexcept>
 
