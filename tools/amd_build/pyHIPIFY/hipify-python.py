@@ -85,7 +85,8 @@ def filename_ends_with_extension(filename, extensions):
 
 def inside_included_directories(dirpath, rootpath, include_dirs):
     """Helper method to see if filename within included directories"""
-    return reduce(lambda result, included_directory: re.match(r'(%s)\b' % os.path.join(rootpath, included_directory), dirpath) or result, include_dirs, None)
+    return reduce(lambda result, included_directory: re.match(r'(%s)\b' % os.path.join(rootpath, included_directory),
+        dirpath) or result, include_dirs, None)
 
 
 def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=None):
@@ -258,8 +259,8 @@ def processKernelLaunches(string, stats):
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
 
         # Transform cuda kernel to hip kernel
-        hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel[0:-1].replace(">>>",
-                                                                       ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(">>>", ", ")
+        hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel[0:-1].replace(">>>", ", 0" * (4 - num_klp) + ">>>").replace(
+            "<<<", ", ").replace(">>>", ", ")
 
         # Replace cuda kernel with hip kernel
         output_string = output_string.replace(cuda_kernel, hip_kernel)
@@ -726,7 +727,8 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                                     arg = kernel_params[arg_idx].strip()
                                     the_type = argument_types[arg_idx]
                                     the_arg = arg.replace("\n", "").strip()
-                                    if the_type in ["int", "const int", "int64_t", "THCIndex_t *", "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]:
+                                    if the_type in ["int", "const int", "int64_t", "THCIndex_t *", "const int *",
+                                        "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]:
                                         static_argument = "static_cast<%s>(%s)" % (the_type, the_arg)
                                         static_argument = arg.replace(the_arg, static_argument)
 
@@ -825,8 +827,8 @@ def main():
 
     # If no output directory, provide a default one.
     if args.output_directory is "":
-        args.project_directory = args.project_directory[0:-
-                                                        1] if args.project_directory.endswith("/") else args.project_directory
+        args.project_directory = (args.project_directory[0:- 1] if args.project_directory.endswith("/") else args.
+            project_directory)
         args.output_directory = args.project_directory + "_amd"
 
     # Copy from project directory to output directory if not done already.
@@ -838,7 +840,8 @@ def main():
         KernelTemplateParams = {}
         for (dirpath, _dirnames, filenames) in os.walk(args.output_directory):
             for filename in filenames:
-                if filename_ends_with_extension(filename, args.extensions) and inside_included_directories(dirpath, args.output_directory, args.include_dirs):
+                if filename_ends_with_extension(filename, args.extensions) and inside_included_directories(dirpath,
+                    args.output_directory, args.include_dirs):
                     the_file = os.sep.join([dirpath, filename])
 
                     # Store param information inside KernelTemplateParams
