@@ -21,7 +21,7 @@ class EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
   explicit EmbeddingImpl(EmbeddingOptions options);
 
   void reset() override;
-  std::vector<Tensor> forward(std::vector<Tensor>);
+  Tensor forward(Tensor);
   const EmbeddingOptions& options() const noexcept;
 
  private:

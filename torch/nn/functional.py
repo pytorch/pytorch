@@ -341,7 +341,7 @@ def max_pool1d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool1d` for details.
     """
-    ret = torch.max_pool1d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch.max_pool1d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -352,7 +352,7 @@ def max_pool2d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool2d` for details.
     """
-    ret = torch._C._nn.max_pool2d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch._C._nn.max_pool2d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -363,7 +363,7 @@ def max_pool3d(input, kernel_size, stride=None, padding=0, dilation=1,
 
     See :class:`~torch.nn.MaxPool3d` for details.
     """
-    ret = torch._C._nn.max_pool3d(input, kernel_size, stride, padding, dilation, ceil_mode)
+    ret = torch._C._nn.max_pool3d_with_indices(input, kernel_size, stride, padding, dilation, ceil_mode)
     return ret if return_indices else ret[0]
 
 
@@ -1518,7 +1518,7 @@ def binary_cross_entropy(input, target, weight=None, size_average=True, reduce=T
     return torch._C._nn.binary_cross_entropy(input, target, weight, size_average, reduce)
 
 
-def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True):
+def binary_cross_entropy_with_logits(input, target, weight=None, size_average=True, reduce=True, pos_weight=None):
     r"""Function that measures Binary Cross Entropy between target and output
     logits.
 
@@ -1537,6 +1537,8 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
                 observations for each minibatch depending on :attr:`size_average`. When :attr:`reduce`
                 is ``False``, returns a loss per input/target element instead and ignores
                 :attr:`size_average`. Default: ``True``
+        pos_weight (Tensor, optional): a weight of positive examples.
+                Must be a vector with length equal to the number of classes.
 
     Examples::
 
@@ -1549,7 +1551,12 @@ def binary_cross_entropy_with_logits(input, target, weight=None, size_average=Tr
         raise ValueError("Target size ({}) must be the same as input size ({})".format(target.size(), input.size()))
 
     max_val = (-input).clamp(min=0)
-    loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
+
+    if pos_weight is None:
+        loss = input - input * target + max_val + ((-max_val).exp() + (-input - max_val).exp()).log()
+    else:
+        log_weight = 1 + (pos_weight - 1) * target
+        loss = input - input * target + log_weight * (max_val + ((-max_val).exp() + (-input - max_val).exp()).log())
 
     if weight is not None:
         loss = loss * weight

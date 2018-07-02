@@ -128,8 +128,8 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-std::unique_ptr<Allocator> CUDAHooks::newPinnedMemoryAllocator() const {
-  return std::unique_ptr<Allocator>(new PinnedMemoryAllocator());
+Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
+  return at::cuda::getPinnedMemoryAllocator();
 }
 
 void CUDAHooks::registerCUDATypes(Context* context) const {

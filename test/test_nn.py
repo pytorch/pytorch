@@ -896,6 +896,14 @@ class TestNN(NNTestCase):
                                                    ('0.block', block), ('0.block.linear1', l1),
                                                    ('0.block.linear2', l2)])
 
+    def test_register_buffer_raises_error_if_name_is_not_string(self):
+        m = nn.Module()
+        expected_error = 'buffer name should be a string. Got '
+        with self.assertRaisesRegex(TypeError, expected_error + 'int'):
+            m.register_buffer(1, torch.rand(5))
+        with self.assertRaisesRegex(TypeError, expected_error + 'NoneType'):
+            m.register_buffer(None, torch.rand(5))
+
     def test_register_buffer_raises_error_if_attr_exists(self):
         m = nn.Module()
         m.attribute_name = 5
@@ -928,6 +936,14 @@ class TestNN(NNTestCase):
         self.assertEqual(m.buffer_name, buffer2)
         m.register_buffer('buffer_name', buffer3)
         self.assertEqual(m.buffer_name, buffer3)
+
+    def test_register_parameter_raises_error_if_name_is_not_string(self):
+        m = nn.Module()
+        expected_error = 'parameter name should be a string. Got '
+        with self.assertRaisesRegex(TypeError, expected_error + 'int'):
+            m.register_parameter(1, nn.Parameter())
+        with self.assertRaisesRegex(TypeError, expected_error + 'NoneType'):
+            m.register_parameter(None, nn.Parameter())
 
     def test_register_parameter_raises_error_if_attr_exists(self):
         m = nn.Module()
@@ -1175,6 +1191,10 @@ class TestNN(NNTestCase):
         net.add_module('l', l3)
         self.assertEqual(net.l, l3)
         self.assertRaises(TypeError, lambda: net.add_module('x', 'non-module'))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got int',
+                               lambda: net.add_module(1, l))
+        self.assertRaisesRegex(TypeError, 'module name should be a string. Got NoneType',
+                               lambda: net.add_module(None, l))
 
     def test_module_to_argparse(self):
         net = nn.Sequential(nn.Linear(3, 3))
@@ -4260,6 +4280,39 @@ class TestNN(NNTestCase):
         out2 = nn.BCEWithLogitsLoss(weight)(output, target)
 
         self.assertEqual(out1, out2)
+
+    def test_bce_with_logits_ones_in_pos_weights_are_the_same_as_none(self):
+        target = torch.rand(64, 4)
+        output = torch.rand(64, 4) - 0.5
+        pos_weight = torch.ones(64, 4)
+
+        self.assertEqual(nn.BCEWithLogitsLoss()(output, target),
+                         nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target))
+
+    def test_bce_with_logits_broadcasts_pos_weights(self):
+        target = torch.rand(64, 4)
+        output = torch.rand(64, 4) - 0.5
+        pos_weight = torch.rand(4)
+        out1 = nn.BCEWithLogitsLoss(pos_weight=pos_weight)(output, target)
+
+        pos_weight1 = pos_weight.expand(1, 4)
+        out2 = nn.BCEWithLogitsLoss(pos_weight=pos_weight1)(output, target)
+
+        pos_weight2 = pos_weight.expand(64, 4)
+        out3 = nn.BCEWithLogitsLoss(pos_weight=pos_weight2)(output, target)
+
+        self.assertEqual(out1, out2)
+        self.assertEqual(out1, out3)
+
+    def test_bce_with_logits_with_pos_weight_has_correct_grad_at_zero(self):
+        output = torch.zeros(3, 1, requires_grad=True)
+        target = torch.zeros(3, 1)
+        pos_weight = torch.ones(3, 1)
+        nn.BCEWithLogitsLoss(pos_weight=pos_weight, size_average=False)(output, target).backward()
+        expected_grad = torch.empty(3, 1).fill_(0.5)
+        grad = output.grad
+        print(grad)
+        self.assertEqual(grad, expected_grad)
 
     def test_bce_loss_broadcasts_weights(self):
         sigmoid = nn.Sigmoid()
@@ -7707,7 +7760,8 @@ if num_shards is not None and shard is not None:
         test_suite = unittest.TestSuite()
         for test_group in tests:
             for test in test_group:
-                if int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16) % num_shards == shard:
+                hash_id = int(hashlib.sha256(str(test).encode('utf-8')).hexdigest(), 16)
+                if hash_id % num_shards == shard:
                     test_suite.addTest(test)
         return test_suite
 

@@ -5,4 +5,5 @@ Relu, Conv, ConvRelu, ConvTranspose, AveragePool, AveragePoolRelu, MaxPool,
     Int8Conv, Int8ConvTranspose, Int8FC, Int8MaxPool, Int8Relu,
     Int8GivenTensorFill, Int8Concat, Int8Softmax, Int8ChannelShuffle, Int8Sum,
     Int8Add, Int8Reshape, Int8Flatten, Int8ConvRelu, Int8SumRelu,
-    Int8AveragePoolRelu, Int8MaxPoolRelu
+    Int8AveragePoolRelu, Int8MaxPoolRelu, BatchMatMul, BatchGather,
+    ConcatBatchMatMulBatchGatherOp

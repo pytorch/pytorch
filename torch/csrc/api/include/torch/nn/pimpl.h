@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/utils/variadic.h>
+#include <torch/tensor.h>
 
 #include <memory>
 #include <type_traits>
@@ -13,6 +14,9 @@ namespace detail {
 /// `ModuleHolder` over some unknown type `ModuleType`. With this, you can do
 /// enable_if_t<is_base_of<ModuleHolderIndicator, T>::value>::type.
 struct ModuleHolderIndicator {};
+
+template <typename T>
+using is_module_holder = std::is_base_of<ModuleHolderIndicator, decay_t<T>>;
 
 template <typename T>
 using disable_if_module_holder_t =
@@ -69,6 +73,12 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   const Contained* operator->() const {
     AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
     return impl_.get();
+  }
+
+  /// Forwards to the call operator of the contained module.
+  template <typename... Args>
+  Tensor operator()(Args&&... args) {
+    return (*impl_)(std::forward<Args>(args)...);
   }
 
   /// Returns the underlying module.

@@ -84,6 +84,26 @@ public:
   }
 };
 
+class AT_API Warning {
+  using handler_t = void(*)(const SourceLocation& source_location, const char* msg);
+
+public:
+  /// Issue a warning with a given message. Dispatched to the current
+  /// warning handler.
+  static void warn(SourceLocation source_location, std::string msg);
+
+  /// Sets the global warning handler. This is not thread-safe, so it should
+  /// generally be called once during initialization.
+  static void set_warning_handler(handler_t handler);
+
+  /// The default warning handler. Prints the message to stderr.
+  static void print_warning(const SourceLocation& source_location, const char* msg);
+
+private:
+  static handler_t warning_handler_;
+};
+
+
 } // namespace at
 
 // TODO: variants that print the expression tested and thus don't require strings
@@ -91,6 +111,9 @@ public:
 
 #define AT_ERROR(...) \
   throw at::Error({__func__, __FILE__, __LINE__}, at::str(__VA_ARGS__))
+
+#define AT_WARN(...) \
+  at::Warning::warn({__func__, __FILE__, __LINE__}, at::str(__VA_ARGS__))
 
 #define AT_ASSERT(cond) \
   if (!(cond)) {             \

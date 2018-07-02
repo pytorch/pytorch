@@ -91,22 +91,22 @@ void Module::eval() {
 }
 
 void Module::cpu() {
-  to_impl(at::Device(at::Device::Type::CPU));
+  to_impl(torch::Device(torch::Device::Type::CPU));
 }
 
 void Module::cuda(int32_t device_index, bool non_blocking) {
-  to_impl(at::Device(at::Device::Type::CUDA, device_index), non_blocking);
+  to_impl(torch::Device(torch::Device::Type::CUDA, device_index), non_blocking);
 }
 
-void Module::to(at::Device device, at::ScalarType dtype, bool non_blocking) {
+void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
 }
 
-void Module::to(at::ScalarType dtype, bool non_blocking) {
+void Module::to(torch::Dtype dtype, bool non_blocking) {
   to_impl(dtype, non_blocking);
 }
 
-void Module::to(at::Device device, bool non_blocking) {
+void Module::to(torch::Device device, bool non_blocking) {
   to_impl(device, non_blocking);
 }
 
@@ -119,7 +119,11 @@ void Module::zero_grad() {
     child.value->zero_grad();
   }
   for (auto& parameter : parameters_) {
-    parameter->grad().zero_();
+    auto& grad = parameter->grad();
+    if (grad.defined()) {
+      grad = grad.detach();
+      grad.zero_();
+    }
   }
 }
 

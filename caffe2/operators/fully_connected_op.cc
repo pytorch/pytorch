@@ -61,17 +61,17 @@ OpSchema::Cost CostInferenceForFC(
 
   auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
   const auto canonical_axis = canonical_axis_index_(axis, in[0].dims().size());
-  const int M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
-  const int K = size_from_dim_(canonical_axis, GetDimsVector(in[0]));
+  const uint64_t M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
+  const uint64_t K = size_from_dim_(canonical_axis, GetDimsVector(in[0]));
   auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
   const int canonical_axis_w =
       canonical_axis_index_(axis_w, in[1].dims().size());
-  const int N = pretransposed_weight
+  const uint64_t N = pretransposed_weight
       ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
 
   const auto& X = in[0];
-  c.flops = 2 * K * M * N + M * N;
+  c.flops = M * N * (2 * K + 1);
   c.bytes_read = (K * (M + N) + N) * sizeof(X.data_type());
   c.bytes_written = M * N * sizeof(X.data_type());
   c.params_bytes = (K * N + N) * sizeof(X.data_type());
@@ -117,37 +117,27 @@ OpSchema::Cost CostInferenceForFCGradient(
 
   auto axis = helper.GetSingleArgument<int32_t>("axis", 1);
   const auto canonical_axis = canonical_axis_index_(axis, in[0].dims().size());
-  const int M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
-  const int K = size_from_dim_(canonical_axis, GetDimsVector(in[0]));
+  const uint64_t M = size_to_dim_(canonical_axis, GetDimsVector(in[0]));
+  const uint64_t K = size_from_dim_(canonical_axis, GetDimsVector(in[0]));
   auto axis_w = helper.GetSingleArgument<int32_t>("axis_w", 1);
   const int canonical_axis_w =
       canonical_axis_index_(axis_w, in[1].dims().size());
-  const int N = pretransposed_weight
+  const uint64_t N = pretransposed_weight
       ? size_from_dim_(canonical_axis_w, GetDimsVector(in[1]))
       : size_to_dim_(canonical_axis_w, GetDimsVector(in[1]));
 
-  uint64_t size_dW = 1;
-  for (int i = 0; i < dW.dims().size(); i++) {
-    size_dW *= dW.dims(i);
-  }
+  uint64_t size_dW = nElemFromDim(dW);
+  uint64_t size_db = nElemFromDim(db);
 
-  uint64_t size_db = 1;
-  for (int i = 0; i < db.dims().size(); i++) {
-    size_db *= db.dims(i);
-  }
-
-  c.flops = 2 * (M * N * K + M * N);
+  c.flops = M * N * (2 * K + 1);
   c.bytes_written = (size_dW + size_db) * sizeof(float);
   c.params_bytes = (K * N + N) * sizeof(float);
 
   if (out.size() == 3) {
     const TensorShape dX = out[2];
-    uint64_t size_dX = 1;
-    for (int i = 0; i < dX.dims().size(); i++) {
-      size_dX *= dX.dims(i);
-    }
+    uint64_t size_dX = nElemFromDim(dX);
 
-    c.flops += M * N * K;
+    c.flops += 2 * M * N * K;
     c.bytes_written += size_dX * sizeof(float);
   }
   return c;

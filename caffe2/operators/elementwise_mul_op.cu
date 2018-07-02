@@ -126,20 +126,22 @@ void ComputeMulGradientCUDA(
   for (int i = pivot; i < ndim; ++i) {
     inner_size *= Y_dims[X_transpose_axes[i]];
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      ndim,
-      ComputeMulGradientCUDAImpl,
-      TGrad,
-      TIn,
-      outer_size,
-      inner_size,
-      Y_dims.data(),
-      W_dims.data(),
-      X_transpose_axes.data(),
-      dY,
-      W,
-      dX,
-      context);
+  if (outer_size > 0) {
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+        ndim,
+        ComputeMulGradientCUDAImpl,
+        TGrad,
+        TIn,
+        outer_size,
+        inner_size,
+        Y_dims.data(),
+        W_dims.data(),
+        X_transpose_axes.data(),
+        dY,
+        W,
+        dX,
+        context);
+  }
 }
 
 } // namespace

@@ -13,6 +13,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/conversions.h"
+#include "caffe2/utils/math_utils.h"
 
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
@@ -22,25 +23,6 @@ namespace caffe2 {
 namespace math {
 
 namespace {
-
-inline __host__ __device__ bool Not(const bool x) {
-  return !x;
-}
-
-template <typename T>
-inline __host__ __device__ T Negate(const T& x) {
-  return -x;
-}
-
-template <typename T>
-inline __host__ __device__ T Square(const T& x) {
-  return x * x;
-}
-
-template <typename T>
-inline __host__ __device__ T Sign(const T& x) {
-  return x > 0 ? T(1) : (x < 0 ? T(-1) : T(0));
-}
 
 #define DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Func, expr)        \
   template <typename T>                                               \
@@ -342,21 +324,45 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, utils::Square<float>)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, InvSqrt, rsqrtf)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, Square<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Rsqrt, rsqrtf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cbrt, cbrtf)
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, Not)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cube, utils::Cube<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Cube, utils::Cube<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int32_t,
+    Cube,
+    utils::Cube<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int64_t,
+    Cube,
+    utils::Cube<std::int64_t>)
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Neg, Negate<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Neg, Negate<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int32_t, Neg, Negate<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int64_t, Neg, Negate<std::int64_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(bool, Not, utils::Not)
 
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sign, Sign<float>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sign, Sign<double>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int32_t, Sign, Sign<std::int32_t>)
-DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(std::int64_t, Sign, Sign<std::int64_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Neg, utils::Negate<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Neg, utils::Negate<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int32_t,
+    Neg,
+    utils::Negate<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int64_t,
+    Neg,
+    utils::Negate<std::int64_t>)
+
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sign, utils::Sign<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Sign, utils::Sign<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int32_t,
+    Sign,
+    utils::Sign<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int64_t,
+    Sign,
+    utils::Sign<std::int64_t>)
 
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
@@ -2789,6 +2795,9 @@ void ReduceTensorCUDA(
     T* Y,
     CUDAContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
+  if (X == Y) {
+    return;
+  }
   std::vector<int> transpose_axes(num_dims);
   utils::ComputeTransposeAxesForReduceOp(
       num_dims, num_axes, axes, transpose_axes.data());
@@ -2801,29 +2810,31 @@ void ReduceTensorCUDA(
   for (int i = pivot; i < num_dims; ++i) {
     inner_size *= dims[transpose_axes[i]];
   }
-  if (transpose_axes[pivot] == pivot) {
-    RowwiseReduceKernel<T>
-        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(
-            outer_size, inner_size, reducer, init, X, Y);
-    return;
+  if (outer_size > 0) {
+    if (transpose_axes[pivot] == pivot) {
+      RowwiseReduceKernel<T>
+          <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(
+              outer_size, inner_size, reducer, init, X, Y);
+      return;
+    }
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+        num_dims,
+        ReduceTensorCUDAImpl,
+        T,
+        Reducer,
+        outer_size,
+        inner_size,
+        dims,
+        transpose_axes.data(),
+        reducer,
+        init,
+        X,
+        Y,
+        context);
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      num_dims,
-      ReduceTensorCUDAImpl,
-      T,
-      Reducer,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      reducer,
-      init,
-      X,
-      Y,
-      context);
 }
 
 template <typename T>
@@ -3136,26 +3147,29 @@ void MomentsCUDA(
   for (int i = pivot; i < num_dims; ++i) {
     inner_size *= dims[transpose_axes[i]];
   }
-  if (transpose_axes[pivot] == pivot) {
-    RowwiseMomentsCUDAKernel<T>
-        <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
-           CAFFE_CUDA_NUM_THREADS,
-           0,
-           context->cuda_stream()>>>(outer_size, inner_size, X, mean, variance);
-    return;
+  if (outer_size > 0) {
+    if (transpose_axes[pivot] == pivot) {
+      RowwiseMomentsCUDAKernel<T>
+          <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
+             CAFFE_CUDA_NUM_THREADS,
+             0,
+             context->cuda_stream()>>>(
+              outer_size, inner_size, X, mean, variance);
+      return;
+    }
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+        num_dims,
+        MomentsCUDAImpl,
+        T,
+        outer_size,
+        inner_size,
+        dims,
+        transpose_axes.data(),
+        X,
+        mean,
+        variance,
+        context);
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
-      num_dims,
-      MomentsCUDAImpl,
-      T,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      X,
-      mean,
-      variance,
-      context);
 }
 
 } // namespace

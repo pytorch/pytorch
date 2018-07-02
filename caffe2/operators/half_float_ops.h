@@ -28,8 +28,7 @@ class Float16ConstantFillOp : public Operator<CPUContext> {
  public:
   Float16ConstantFillOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<CPUContext>(operator_def, ws),
-        shape_(
-            ToVectorTIndex(OperatorBase::GetRepeatedArgument<int>("shape"))) {}
+        shape_(OperatorBase::GetRepeatedArgument<int64_t>("shape")) {}
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
   virtual ~Float16ConstantFillOp() {}
