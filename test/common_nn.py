@@ -977,11 +977,7 @@ class ModuleTest(TestBase):
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():
-                try:
-                    out = test_case._forward(module, i)
-                except Exception:
-                    # Some modules will fail because of non contiguous inputs and we're ok with that
-                    continue
+                out = test_case._forward(module, i)
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)

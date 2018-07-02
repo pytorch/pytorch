@@ -308,7 +308,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
           });
     }
   } else {
-    LongTensor indices1D = _newFlattenedIndices(sparse, 0);
+    LongTensor indices1D = _newFlattenedIndices(sparse, 0).contiguous();
     indices1D.resize_({nnz});
 
     // FIXME: at some point we can wrap the scale into indexAdd

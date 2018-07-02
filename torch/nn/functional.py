@@ -1111,7 +1111,6 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
                  [ 0.0000,  0.0000,  0.0000],
                  [ 0.6262,  0.2438,  0.7471]]])
     """
-    input = input.contiguous()
     if padding_idx is not None:
         if padding_idx > 0:
             assert padding_idx < weight.size(0), 'Padding_idx must be within num_embeddings'
@@ -1121,6 +1120,10 @@ def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
     elif padding_idx is None:
             padding_idx = -1
     if max_norm is not None:
+        # `embedding_renorm_` will call .contiguous() on input anyways, so we
+        # call it here and take advantage of the improved locality in the
+        # `embedding` call below too.
+        input = input.contiguous()
         with torch.no_grad():
             torch.embedding_renorm_(weight, input, max_norm, norm_type)
     return torch.embedding(weight, input, padding_idx, scale_grad_by_freq, sparse)

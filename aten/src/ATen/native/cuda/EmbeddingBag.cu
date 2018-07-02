@@ -299,15 +299,13 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor>
-embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
+_embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
                    const Tensor &offsets, const bool scale_grad_by_freq,
                    const int64_t mode, bool sparse) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding_bag_cuda", indices_arg, kLong);
-  checkContiguous("embedding_bag_cuda", indices_arg);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
   checkScalarType("embedding_bag_cuda", offsets_arg, kLong);
-  checkContiguous("embedding_bag_cuda", offsets_arg);
   auto weight_arg = TensorArg(weight, "weight", 1);
   checkContiguous("embedding_bag_cuda", weight_arg);
   checkSameGPU("embedding_bag_cuda", weight_arg, indices_arg);
@@ -348,22 +346,21 @@ embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
 }
 
-Tensor embedding_bag_backward_cuda(const Tensor &grad_, const Tensor &indices,
+Tensor _embedding_bag_dense_backward_cuda(const Tensor &grad_, const Tensor &indices,
                                    const Tensor &offsets,
                                    const Tensor &offset2bag,
                                    const Tensor &bag_size_,
                                    const Tensor &max_indices,
                                    int64_t num_weights,
                                    bool scale_grad_by_freq, int64_t mode) {
+  // indices, offsets and offset2bag are assumed having correct dtypes and
+  // contiguous here due to the checks in _embedding_bag_backward in
+  // EmbeddingBag.cpp.
+
   Tensor grad = grad_.contiguous();
   auto indices_arg = TensorArg(indices, "indices", 1);
-  checkScalarType("embedding_bag_cuda", indices_arg, kLong);
-  checkContiguous("embedding_bag_cuda", indices_arg);
   auto offsets_arg = TensorArg(offsets, "offsets", 1);
-  checkScalarType("embedding_bag_cuda", offsets_arg, kLong);
-  checkContiguous("embedding_bag_cuda", offsets_arg);
   auto grad_arg = TensorArg(grad, "grad", 1);
-  checkContiguous("embedding_bag_cuda", grad_arg);
   checkSameGPU("embedding_bag_cuda", grad_arg, offsets_arg);
   checkSameGPU("embedding_bag_cuda", grad_arg, indices_arg);
 
