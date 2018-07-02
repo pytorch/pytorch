@@ -754,7 +754,10 @@ class NNTestCase(TestCase):
             jacobian_param = torch.zeros(num_param, output_size)
 
         for i in range(output_size):
-            _, d_param = self._get_parameters(module)
+            param, d_param = self._get_parameters(module)
+            # make non grad zeros
+            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+
             d_out = torch.zeros_like(output)
             flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
