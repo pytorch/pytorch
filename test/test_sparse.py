@@ -2,6 +2,7 @@ import torch
 from torch import sparse
 
 import itertools
+import functools
 import random
 import unittest
 from common import TestCase, run_tests
@@ -11,6 +12,7 @@ from numbers import Number
 
 
 def cpu_only(inner):
+    @functools.wraps(inner)
     def outer(self, *args, **kwargs):
         if self.is_cuda:
             raise unittest.SkipTest("Test is CPU-only")
@@ -19,6 +21,7 @@ def cpu_only(inner):
 
 
 def cuda_only(inner):
+    @functools.wraps(inner)
     def outer(self, *args, **kwargs):
         if not self.is_cuda:
             raise unittest.SkipTest("Test is GPU-only")
@@ -517,6 +520,26 @@ class TestSparse(TestCase):
         res = torch.add(y, r, x)
         expected = y + r * self.safeToDense(x)
 
+        self.assertEqual(res, expected)
+
+        x, i, v = self._gen_sparse(len(shape_i), 10, shape)
+
+        # Non contiguous sparse indices tensor
+        x_ = self.SparseTensor(i[:, ::2], v[:5], x.shape)
+        res = torch.add(y, r, x_)
+        expected = y + r * self.safeToDense(x_)
+        self.assertEqual(res, expected)
+
+        # Non contiguous sparse values tensor
+        x_ = self.SparseTensor(i[:, :5], v[::2], x.shape)
+        res = torch.add(y, r, x_)
+        expected = y + r * self.safeToDense(x_)
+        self.assertEqual(res, expected)
+
+        # Non contiguous sparse indices and values tensors
+        x_ = self.SparseTensor(i[:, 1::2], v[1::2], x.shape)
+        res = torch.add(y, r, x_)
+        expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
     def test_spadd(self):
