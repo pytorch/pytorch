@@ -575,8 +575,8 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   size_t matrices_size = num_batches * sizeof(real*);
 
 //   Copy pointers to device.
-  auto d_matrices1 = static_cast<real**>(THCudaMalloc(state, matrices_size));
-  auto d_matrices2 = static_cast<real**>(THCudaMalloc(state, matrices_size));
+  auto d_matrices1 = static_cast<const real**>(THCudaMalloc(state, matrices_size));
+  auto d_matrices2 = static_cast<const real**>(THCudaMalloc(state, matrices_size));
   auto d_result_matrices = static_cast<real**>(THCudaMalloc(state, matrices_size));
 
   const int64_t block = 512;
