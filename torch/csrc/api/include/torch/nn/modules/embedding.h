@@ -22,11 +22,9 @@ class EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
 
   void reset() override;
   Tensor forward(Tensor);
-  const EmbeddingOptions& options() const noexcept;
 
- private:
-  EmbeddingOptions options_;
-  Tensor table_;
+  EmbeddingOptions options;
+  Tensor table;
 };
 
 TORCH_MODULE(Embedding);
