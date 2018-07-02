@@ -1,6 +1,19 @@
 #include "caffe2/operators/arg_max_op.h"
 
+#include "caffe2/core/operator.h"
+#include "caffe2/core/types.h"
+
 namespace caffe2 {
+
+vector<TensorShape> TensorInferenceForRowWiseArgMax(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  std::vector<TIndex> output_dims(2);
+  output_dims[0] = in[0].dims(0); // N
+  output_dims[1] = 1; // 1
+  return vector<TensorShape>{
+      CreateTensorShape(vector<TIndex>{output_dims}, TensorProto::INT64)};
+}
 
 template <>
 bool RowWiseArgMaxOp<CPUContext>::RunOnDevice() {
@@ -32,6 +45,7 @@ REGISTER_CPU_OPERATOR(RowWiseArgMax, RowWiseArgMaxOp<CPUContext>);
 OPERATOR_SCHEMA(RowWiseArgMax)
     .NumInputs(1)
     .NumOutputs(1)
+    .TensorInferenceFunction(TensorInferenceForRowWiseArgMax)
     .SetDoc(R"DOC(
     Given a 2D (N X D) input tensor, this operator returns a 2D (N X 1) output
     tensor with with the index of the maximum value in each row. If there are

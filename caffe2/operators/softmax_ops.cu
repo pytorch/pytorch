@@ -683,6 +683,10 @@ bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
   const int N = X.size_to_dim(canonical_axis);
   const int D = X.size_from_dim(canonical_axis);
   P->ResizeLike(X);
+  auto* P_data = P->mutable_data<float>();
+  if (N == 0) {
+    return true;
+  }
   if (sum_multiplier_.size() != D) {
     sum_multiplier_.Resize(D);
     math::Set<float, CUDAContext>(
@@ -701,7 +705,7 @@ bool SoftmaxOp<float, CUDAContext>::RunOnDevice() {
       sum_multiplier_.data<float>(),
       scale_.mutable_data<float>(),
       rowmax_.mutable_data<float>(),
-      P->mutable_data<float>(),
+      P_data,
       false,
       &context_);
   return true;
@@ -754,12 +758,15 @@ bool SoftmaxGradientOp<float, CUDAContext>::RunOnDevice() {
   const int N = Y.size_to_dim(canonical_axis);
   const int D = Y.size_from_dim(canonical_axis);
   dX->ResizeLike(Y);
+  auto* dX_data = dX->mutable_data<float>();
+  if (N == 0) {
+    return true;
+  }
   softmax_gradient_kernel<<<
       N,
       SOFTMAX_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(
-      D, Y.data<float>(), dY.data<float>(), dX->mutable_data<float>());
+      context_.cuda_stream()>>>(D, Y.data<float>(), dY.data<float>(), dX_data);
   return true;
 }
 

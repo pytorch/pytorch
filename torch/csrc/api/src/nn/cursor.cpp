@@ -1,7 +1,7 @@
 #include <torch/nn/cursor.h>
-#include <torch/nn/module.h>
 
-#include <torch/csrc/autograd/variable.h>
+#include <torch/nn/module.h>
+#include <torch/tensor.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -24,7 +24,17 @@ T& CursorBase<T>::Item::operator*() {
 }
 
 template <typename T>
+const T& CursorBase<T>::Item::operator*() const {
+  return value;
+}
+
+template <typename T>
 T* CursorBase<T>::Item::operator->() {
+  return &value;
+}
+
+template <typename T>
+const T* CursorBase<T>::Item::operator->() const {
   return &value;
 }
 
@@ -40,13 +50,33 @@ template <typename T>
 }
 
 template <typename T>
+typename CursorBase<T>::ConstIterator CursorBase<T>::begin() const& noexcept {
+  return items_.begin();
+}
+
+template <typename T>
     typename CursorBase<T>::Iterator CursorBase<T>::end() & noexcept {
   return items_.end();
 }
 
 template <typename T>
+typename CursorBase<T>::ConstIterator CursorBase<T>::end() const& noexcept {
+  return items_.end();
+}
+
+template <typename T>
 T* CursorBase<T>::find(const std::string& key) noexcept {
-  for (auto item : *this) {
+  for (auto& item : items_) {
+    if (item.key == key) {
+      return &item.value;
+    }
+  }
+  return nullptr;
+}
+
+template <typename T>
+const T* CursorBase<T>::find(const std::string& key) const noexcept {
+  for (auto& item : items_) {
     if (item.key == key) {
       return &item.value;
     }
@@ -63,12 +93,41 @@ T& CursorBase<T>::at(const std::string& key) {
 }
 
 template <typename T>
+const T& CursorBase<T>::at(const std::string& key) const {
+  if (auto* value = find(key)) {
+    return *value;
+  }
+  AT_ERROR("No such key: '", key, "'");
+}
+
+template <typename T>
+typename CursorBase<T>::Item& CursorBase<T>::at(size_t index) {
+  AT_CHECK(
+      index < size(),
+      "Index ",
+      index,
+      " is out of range for cursor of size ",
+      size());
+  return items_[index];
+}
+
+template <typename T>
 T& CursorBase<T>::operator[](const std::string& key) {
   return at(key);
 }
 
 template <typename T>
-bool CursorBase<T>::contains(const std::string& key) noexcept {
+const T& CursorBase<T>::operator[](const std::string& key) const {
+  return at(key);
+}
+
+template <typename T>
+typename CursorBase<T>::Item& CursorBase<T>::operator[](size_t index) {
+  return at(index);
+}
+
+template <typename T>
+bool CursorBase<T>::contains(const std::string& key) const noexcept {
   return find(key) != nullptr;
 }
 
@@ -151,11 +210,27 @@ struct CursorBase<T>::Collector {
 // Explicitly instantiate the CursorBase template for all types we need.
 template class CursorBase<nn::Module>;
 template class CursorBase<const nn::Module>;
-template class CursorBase<autograd::Variable>;
-template class CursorBase<const autograd::Variable>;
+template class CursorBase<Tensor>;
+template class CursorBase<const Tensor>;
 } // namespace detail
 
 namespace nn {
+namespace {
+template <typename Item, typename Cursor>
+std::vector<Item> copy_cursor_items(const Cursor& cursor) {
+  std::vector<Item> result;
+  result.reserve(cursor.size());
+  cursor.apply_items(
+      [&result](
+          const std::string& key, const typename Cursor::ValueType& value) {
+        result.emplace_back(key, value);
+      });
+  return result;
+}
+} // namespace
+
+// Module cursors
+
 ModuleCursor::ModuleCursor(Module& module, size_t maximum_depth)
     : detail::CursorBase<Module>(
           Collector().collect_children(module, maximum_depth)) {}
@@ -164,20 +239,32 @@ ConstModuleCursor::ConstModuleCursor(const Module& module, size_t maximum_depth)
     : detail::CursorBase<const Module>(
           Collector().collect_children(module, maximum_depth)) {}
 
+ConstModuleCursor::ConstModuleCursor(const ModuleCursor& cursor)
+    : detail::CursorBase<const Module>(copy_cursor_items<Item>(cursor)) {}
+
+// Parameter cursors
+
 ParameterCursor::ParameterCursor(Module& module)
-    : detail::CursorBase<autograd::Variable>(
-          Collector().collect_parameters(module)) {}
+    : detail::CursorBase<Tensor>(Collector().collect_parameters(module)) {}
 
 ConstParameterCursor::ConstParameterCursor(const Module& module)
+    : detail::CursorBase<const Tensor>(Collector().collect_parameters(module)) {
+}
+
+ConstParameterCursor::ConstParameterCursor(const ParameterCursor& cursor)
     : detail::CursorBase<const autograd::Variable>(
-          Collector().collect_parameters(module)) {}
+          copy_cursor_items<Item>(cursor)) {}
+
+// Buffer cursors
 
 BufferCursor::BufferCursor(Module& module)
-    : detail::CursorBase<autograd::Variable>(
-          Collector().collect_buffers(module)) {}
+    : detail::CursorBase<Tensor>(Collector().collect_buffers(module)) {}
 
 ConstBufferCursor::ConstBufferCursor(const Module& module)
+    : detail::CursorBase<const Tensor>(Collector().collect_buffers(module)) {}
+
+ConstBufferCursor::ConstBufferCursor(const BufferCursor& cursor)
     : detail::CursorBase<const autograd::Variable>(
-          Collector().collect_buffers(module)) {}
+          copy_cursor_items<Item>(cursor)) {}
 } // namespace nn
 } // namespace torch

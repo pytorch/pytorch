@@ -50,11 +50,10 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
            THCTensor *input,
            THCIndexTensor *target,
            THCTensor *output,
-           bool sizeAverage,
+           int64_t reduction,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index,
-           bool reduce)
+           int64_t ignore_index)
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THCTensor_(resize1d)(state, output, 1);
@@ -66,7 +65,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   else
     THCUNN_assertSameGPU(state, 4, input, target, output, total_weight);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     int64_t batch_size = THCTensor_(size)(state, input, 0);
     int64_t H = THCTensor_(size)(state, input, 2);
     int64_t W = THCTensor_(size)(state, input, 3);
@@ -119,7 +118,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       input_data,
       target_data,
       weights_data,
-      sizeAverage,
+      reduction == Reduction::ElementwiseMean,
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) * THCTensor_(size)(state, input, 3),
@@ -127,7 +126,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       ignore_index
   );
   THCudaCheck(cudaGetLastError());
-  if (sizeAverage) {
+  if (reduction == Reduction::ElementwiseMean) {
     cunn_SpatialClassNLLCriterion_sizeAverage_kernel<<<1, 1, 0, THCState_getCurrentStream(state)>>>(
       output_data, total_weight_data
     );
@@ -146,11 +145,10 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
            THCIndexTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
+           int64_t reduction,
            THCTensor *weights,
            THCTensor *total_weight,
-           int64_t ignore_index,
-           bool reduce)
+           int64_t ignore_index)
 {
   THNN_(SpatialClassNLLCriterion_shapeCheck)(state, input, target, weights);
   THCTensor_(resizeAs)(state, gradInput, input);
@@ -164,7 +162,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   else
     THCUNN_assertSameGPU(state, 4, input, target, gradInput, total_weight);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
         state,
         gradOutput,
@@ -217,7 +215,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
       target_data,
       weights_data,
       total_weight_data,
-      sizeAverage,
+      reduction == Reduction::ElementwiseMean,
       THCTensor_(size)(state, input, 0),
       THCTensor_(size)(state, input, 1),
       THCTensor_(size)(state, input, 2) *THCTensor_(size)(state, input, 3),

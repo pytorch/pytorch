@@ -296,13 +296,14 @@ bool SumElementsGradientOp<T, Context>::RunOnDevice()
 #endif
 {
   auto& X = Input(0);
-  TensorCPU sum_grad = TensorCPU(Input(1));
+  const auto& sum_grad = Input(1);
   auto* dX = Output(0);
   dX->ResizeLike(X);
   DCHECK_EQ(sum_grad.size(), 1);
   math::Set<T, Context>(
       dX->size(),
-      static_cast<T>(sum_grad.data<T>()[0] * (average_ ? 1.0 / X.size() : 1)),
+      static_cast<T>(
+          sum_grad.template data<T>()[0] * (average_ ? 1.0 / X.size() : 1)),
       dX->template mutable_data<T>(),
       &context_);
   return true;

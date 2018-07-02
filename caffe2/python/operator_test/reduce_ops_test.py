@@ -76,9 +76,11 @@ class TestReduceOps(hu.HypothesisTestCase):
         self.run_reduce_op_test(
             "ReduceMax", X, keepdims, num_axes, np.max, gc, dc)
 
-    @given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
-           num_axes=st.integers(1, 4), **hu.gcs)
-    def test_reduce_sum(self, X, keepdims, num_axes, gc, dc):
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), keepdims=st.booleans(),
+           num_axes=st.integers(1, 3), **hu.gcs)
+    def test_reduce_sum(self, n, m, k, t, keepdims, num_axes, gc, dc):
+        X = np.random.randn(n, m, k, t).astype(np.float32)
         self.run_reduce_op_test(
             "ReduceSum", X, keepdims, num_axes, np.sum, gc, dc)
 
@@ -208,7 +210,8 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             workspace.FeedBlob('X', not_empty_X)
             workspace.RunNet(workspace.GetNetName(net))
             output = workspace.FetchBlob('output')
-            np.testing.assert_allclose(output, ref_sum(not_empty_X)[0], atol=1e-3)
+            np.testing.assert_allclose(
+                output, ref_sum(not_empty_X)[0], atol=1e-3)
 
             workspace.FeedBlob('X', X)
             workspace.RunNet(workspace.GetNetName(net))

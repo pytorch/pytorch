@@ -8,11 +8,10 @@ void THNN_(MultiMarginCriterion_updateOutput)(
            THCTensor *input,
            THCIndexTensor *target,
            THCTensor *output,
-           bool sizeAverage,
+           int64_t reduction,
            int p,
            THCTensor *weights,
-           accreal margin_,
-           bool reduce)
+           accreal margin_)
 {
   real margin = ScalarConvert<accreal, real>::to(margin_);
   THCUNN_assertSameGPU(state, 2, input, target);
@@ -32,7 +31,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, input->size[0],
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         margin
       );
     }
@@ -44,7 +43,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, input->size[0],
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         margin
       );
     }
@@ -58,7 +57,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     dim3 blocks(input->size[0]);
     dim3 threads(MULTIMARGIN_THREADS);
 
-    if (!reduce)
+    if (reduction == Reduction::None)
     {
       THCTensor_(resize1d)(state, output, input->size[0]);
       if (p == 1)
@@ -99,7 +98,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
           nframe, input->size[1],
-          sizeAverage,
+          reduction == Reduction::ElementwiseMean,
           margin
         );
       }
@@ -111,7 +110,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THCIndexTensor_(data)(state, target),
           weights ? THCTensor_(data)(state, weights) : NULL,
           input->size[0], input->size[1],
-          sizeAverage,
+          reduction == Reduction::ElementwiseMean,
           margin
         );
       }
@@ -137,11 +136,10 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
            THCIndexTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
+           int64_t reduction,
            int p,
            THCTensor *weights,
-           accreal margin_,
-           bool reduce)
+           accreal margin_)
 {
   real margin = ScalarConvert<accreal, real>::to(margin_);
   THCUNN_assertSameGPU(state, 3, input, gradInput, target);
@@ -165,9 +163,9 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, gradInput->size[0],
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     else if (p == 2)
@@ -179,9 +177,9 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         1, gradInput->size[0],
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     THCudaCheck(cudaGetLastError());
@@ -203,9 +201,9 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         nframe, gradInput->size[1],
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     else if (p == 2)
@@ -217,9 +215,9 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         weights ? THCTensor_(data)(state, weights) : NULL,
         nframe, gradInput->size[1],
-        sizeAverage,
+        reduction == Reduction::ElementwiseMean,
         margin,
-        reduce
+        reduction != Reduction::None
       );
     }
     THCudaCheck(cudaGetLastError());

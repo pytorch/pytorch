@@ -18,7 +18,7 @@ public:
   explicit ${Storage}(Context* context);
   ${Storage}(Context* context, ${THStorage} *wrapped);
   ${Storage}(Context* context, size_t size);
-  ${Storage}(Context* context, size_t size, std::unique_ptr<Allocator> allocator);
+  ${Storage}(Context* context, size_t size, Allocator* allocator);
   ${Storage}(Context* context,
     void * data, size_t size, const std::function<void(void*)> & deleter);
   virtual ~${Storage}();
