@@ -24,7 +24,7 @@ import warnings
 from test_autograd import method_tests, create_input, unpack_variables, \
     exclude_tensor_method, EXCLUDE_GRADCHECK, EXCLUDE_FUNCTIONAL
 from copy import deepcopy
-
+import random
 
 from torch.jit.frontend import NotSupportedError
 
@@ -1077,6 +1077,21 @@ class TestJit(JitTestCase):
 
         ten = torch.rand(3, 3)
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
+
+
+class TestBatched(TestCase):
+    # generate random examples and create an batchtensor with them
+    def rand_batch(self, *dims):
+        dims = [dim for dim in dims if dim != ()]
+        xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
+        xb = torch.BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
+        return xs, xb
+
+    def test_create_batchtensor(self):
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2), (True, 5))
+        self.assertEqual(xs, batch.examples())
+        batch2 = torch.BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
+        self.assertEqual(xs, batch2.examples())
 
 
 class TestScript(JitTestCase):
@@ -4434,7 +4449,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(3, 4),), verbose=True)
+        self.checkTrace(Sequence(), (torch.rand(3, 4),))
 
     def test_vae(self):
         class VAE(nn.Module):
@@ -4529,18 +4544,6 @@ class TestPytorchExportModes(JitTestCase):
 
 # known to be failing in tracer
 EXCLUDE_TRACED = {
-    'test___getitem___adv_index',
-    'test___getitem___adv_index_beg',
-    'test___getitem___adv_index_comb',
-    'test___getitem___adv_index_dup',
-    'test___getitem___adv_index_end',
-    'test___getitem___adv_index_mid',
-    'test___getitem___adv_index_sub',
-    'test___getitem___adv_index_sub_2',
-    'test___getitem___adv_index_sub_3',
-    'test___getitem___adv_index_var',
-    'test_unsqueeze_last_neg0',
-    'test_unsqueeze_middle_neg0',
     'test_split_dim',
     'test_split_dim_neg0',
     'test_gesv',
@@ -4580,8 +4583,6 @@ EXCLUDE_SCRIPT = {
     'test_split_size_list',
     'test_split_size_list_dim',
     'test_split_size_list_dim_neg0',
-    'test_unsqueeze_last_neg0',
-    'test_unsqueeze_middle_neg0',
     'test_expand',
     'test_expand_1_element',
     'test_expand_new_dim',

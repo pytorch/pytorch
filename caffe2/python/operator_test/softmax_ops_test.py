@@ -13,7 +13,7 @@ import unittest
 
 class TestSoftmaxOps(hu.HypothesisTestCase):
 
-    @given(n=st.sampled_from([2, 4, 71, 103]),
+    @given(n=st.sampled_from([0, 2, 4, 71, 103]),
            D=st.sampled_from([4, 8, 64, 79, 256, 333]),
            engine=st.sampled_from([None, 'CUDNN']),
            **hu.gcs)
@@ -51,7 +51,7 @@ class TestSoftmaxOps(hu.HypothesisTestCase):
             reference=label_softmax,
         )
 
-    @given(n=st.sampled_from([2, 4, 71, 103, 555, 751, 1201]),
+    @given(n=st.sampled_from([0, 2, 4, 71, 103, 555, 751, 1201]),
            D=st.sampled_from([4, 8, 64, 79, 256, 333, 1000]),
            engine=st.sampled_from([None, 'CUDNN']),
            **hu.gcs)

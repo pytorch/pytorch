@@ -125,7 +125,7 @@ TEST_CASE("module/conversions", "[cuda]") {
       REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
       REQUIRE(parameter->device().index() == 0);
     }
-    module->cuda(1);
+    module->to({at::kCUDA, 1});
     for (auto& parameter : module->parameters()) {
       REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
       REQUIRE(parameter->device().index() == 1);

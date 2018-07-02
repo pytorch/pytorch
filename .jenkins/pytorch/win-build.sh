@@ -139,7 +139,7 @@ if not "%USE_CUDA%"=="0" (
 
   python setup.py install && sccache --show-stats && (
     if "%BUILD_ENVIRONMENT%"=="" (
-      echo "NOTE: To run `import torch`, please make sure to activate the conda environment by running `call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3` in Command Prompt before running Git Bash."
+      echo "NOTE: To run \`import torch\`, please make sure to activate the conda environment by running \`call C:\\Jenkins\\Miniconda3\\Scripts\\activate.bat C:\\Jenkins\\Miniconda3\` in Command Prompt before running Git Bash."
     ) else (
       7z a %IMAGE_COMMIT_TAG%.7z C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch && python ci_scripts\\upload_image.py %IMAGE_COMMIT_TAG%.7z
     )
@@ -148,4 +148,8 @@ if not "%USE_CUDA%"=="0" (
 
 EOL
 
-ci_scripts/build_pytorch.bat && echo "BUILD PASSED"
+ci_scripts/build_pytorch.bat
+if [ ! -f $IMAGE_COMMIT_TAG.7z ] && [ ! ${BUILD_ENVIRONMENT} == "" ]; then
+    exit 1
+fi
+echo "BUILD PASSED"

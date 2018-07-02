@@ -90,14 +90,6 @@ void Module::eval() {
   is_training_ = false;
 }
 
-void Module::cpu() {
-  to_impl(torch::Device(torch::Device::Type::CPU));
-}
-
-void Module::cuda(int32_t device_index, bool non_blocking) {
-  to_impl(torch::Device(torch::Device::Type::CUDA, device_index), non_blocking);
-}
-
 void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {
   to_impl(device, dtype, non_blocking);
 }
