@@ -170,8 +170,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Kernel Parameter
     size_t tensorMetadataSize = sizeof(CatArrInputTensor<real, unsigned int>) * CAT_ARRAY_BATCH_SIZE;
-    CatArrInputTensor<real, unsigned int> *d_inputs;
-    THCudaCheck(THCudaMalloc(state, (void**) &d_inputs, tensorMetadataSize));
+    auto d_inputs = static_cast<CatArrInputTensor<real, unsigned int> *>(THCudaMalloc(state, tensorMetadataSize));
 
     OutputTensorSizeStride<unsigned int, CAT_ARRAY_MAX_INPUT_DIMS> param;
 
@@ -242,7 +241,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
       }
       THCudaCheck(cudaGetLastError());
     }
-    THCudaCheck(THCudaFree(state, d_inputs));
+    THCudaFree(state, d_inputs);
 #undef HANDLE_CASE
   } else {
     offset = 0;

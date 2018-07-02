@@ -15,7 +15,7 @@
 class ObjectPtrAllocator {
 public:
   ObjectPtrAllocator(PyObject *wrapped_object):
-      ObjectPtrAllocator(wrapped_object, &THDefaultAllocator, nullptr) {}
+      ObjectPtrAllocator(wrapped_object, getTHDefaultAllocator(), nullptr) {}
 
   ObjectPtrAllocator(PyObject *wrapped_object, THAllocator *alloc, void *ctx) {
     Py_XINCREF(wrapped_object);
@@ -25,7 +25,6 @@ public:
   }
 
   void* malloc(ptrdiff_t size);
-  void* realloc(void* ptr, ptrdiff_t size);
   void free(void* ptr);
 
   THPObjectPtr object;
@@ -51,9 +50,8 @@ public:
     allocatorContext = ctx;
   }
 
-  cudaError_t malloc(void** ptr, size_t size, cudaStream_t stream);
-  cudaError_t realloc(void** ptr, size_t old_size, size_t size, cudaStream_t stream);
-  cudaError_t free(void* ptr);
+  void* malloc(size_t size);
+  void free(void* ptr);
 
   THPObjectPtr object;
   THCDeviceAllocator *allocator;
@@ -61,8 +59,8 @@ public:
 };
 #endif
 
-extern THAllocator THObjectPtrAllocator;
-extern THAllocator THStorageWeakRefAllocator;
+at::Allocator* getTHObjectPtrAllocator();
+at::Allocator* getTHStorageWeakRefAllocator();
 #ifdef USE_CUDA
-extern THCDeviceAllocator THCStorageWeakRefAllocator;
+at::Allocator* getTHCStorageWeakRefAllocator();
 #endif

@@ -3,8 +3,8 @@
 
 #include "THCGeneral.h"
 
-extern THAllocator THCudaHostAllocator;
-extern THAllocator THCUVAAllocator;
-THC_API THCDeviceAllocator THCIpcAllocator;
+THC_API THAllocator* getTHCudaHostAllocator();
+THC_API THAllocator* getTHCUVAAllocator();
+THC_API THCDeviceAllocator* getTHCIpcAllocator();
 
 #endif

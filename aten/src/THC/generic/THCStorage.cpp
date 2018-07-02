@@ -100,14 +100,15 @@ THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size
 {
   return THCStorage_(newWithDataAndAllocator)(state, data, size,
                                               state->cudaDeviceAllocator,
-                                              state->cudaDeviceAllocator->state);
+                                              state->cudaDeviceAllocatorState);
 }
 
 THCStorage* THCStorage_(newWithDataAndAllocator)(
   THCState *state, real *data, ptrdiff_t size,
-  THCDeviceAllocator *allocator, void *allocatorContext) {
+  at::Allocator *allocator, void *allocatorContext) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
+  storage->backend = at::kCUDA;
   storage->scalar_type = at::CTypeToScalarType<real>::to();
   storage->data_ptr = data;
   storage->size = size;
