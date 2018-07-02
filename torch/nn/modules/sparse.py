@@ -104,7 +104,7 @@ class Embedding(Module):
     def reset_parameters(self):
         init.normal_(self.weight)
         if self.padding_idx is not None:
-            with torch.no_grad:
+            with torch.no_grad():
                 self.weight[self.padding_idx].fill_(0)
 
     def forward(self, input):
