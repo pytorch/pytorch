@@ -248,11 +248,11 @@ def processKernelLaunches(string, stats):
         # Get kernel components
         params = grab_method_and_template(kernel)
 
-        # Find paranthesis after kernel launch
-        paranthesis = string.find("(", kernel["end"])
+        # Find parenthesis after kernel launch
+        parenthesis = string.find("(", kernel["end"])
 
         # Extract cuda kernel
-        cuda_kernel = string[params[0]["start"]:paranthesis + 1]
+        cuda_kernel = string[params[0]["start"]:parenthesis + 1]
 
         # Keep number of kernel launch params consistent (grid dims, group dims, stream, dynamic shared size)
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
@@ -270,24 +270,24 @@ def processKernelLaunches(string, stats):
     return output_string
 
 
-def find_paranthesis_end(input_string, start):
-    inside_paranthesis = False
-    parans = 0
+def find_parenthesis_end(input_string, start):
+    inside_parenthesis = False
+    parens = 0
     pos = start
     p_start, p_end = -1, -1
 
     while pos < len(input_string):
         if input_string[pos] == "(":
-            if inside_paranthesis is False:
-                inside_paranthesis = True
-                parans = 1
+            if inside_parenthesis is False:
+                inside_parenthesis = True
+                parens = 1
                 p_start = pos
             else:
-                parans += 1
-        elif input_string[pos] == ")" and inside_paranthesis:
-            parans -= 1
+                parens += 1
+        elif input_string[pos] == ")" and inside_parenthesis:
+            parens -= 1
 
-            if parans == 0:
+            if parens == 0:
                 p_end = pos
                 return p_start, p_end
 
@@ -302,7 +302,7 @@ def disable_asserts(input_string):
     output_string = input_string
     asserts = list(re.finditer(r"\bassert[ ]*\(", input_string))
     for assert_item in asserts:
-        p_start, p_end = find_paranthesis_end(input_string, assert_item.end() - 1)
+        p_start, p_end = find_parenthesis_end(input_string, assert_item.end() - 1)
         start = assert_item.start()
         output_string = output_string.replace(input_string[start:p_end + 1], "")
     return output_string
