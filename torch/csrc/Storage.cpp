@@ -25,8 +25,24 @@
 #include "generic/Storage.cpp"
 #include <TH/THGenerateHalfType.h>
 
+#ifdef USE_CUDA
+#include <THC/THC.h>
+#endif
+
+// NB: If you ever divest libtorch of USE_CUDA, you'll have to virtualize
+// the CUDA call.
 template<>
 void THPPointer<THStorage>::free() {
-  if (ptr)
-    THStorage_free(ptr);
+  if (ptr) {
+    if (ptr->backend == at::kCPU) {
+      THStorage_free(ptr);
+    } else {
+      AT_ASSERT(ptr->backend == at::kCUDA);
+#ifdef USE_CUDA
+      THCStorage_free(LIBRARY_STATE ptr);
+#else
+      AT_ERROR("Cannot free THCStorage when not built with CUDA");
+#endif
+    }
+  }
 }
