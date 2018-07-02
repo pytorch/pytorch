@@ -29,6 +29,9 @@ using value_list = std::vector<Value*>;
 //   df_input_captures = {I0, O2, O0} // Order matches the prefix of inputs to df
 //                        x   t   y
 //   df_output_vjps = {0}     // i.e. connect next_edge[0] of grad_fn to x's (grad_fn, output_nr).
+//
+// Terminology: vjp = vector-jacobian product
+
 struct Gradient {
   operator bool() const {
     return df != nullptr;
