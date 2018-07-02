@@ -45,6 +45,7 @@ static PyObject * THPWrapper_pynew(PyTypeObject *type, PyObject *args, PyObject 
   return self;
 }
 
+// UBSAN error: https://github.com/pytorch/pytorch/issues/9054
 static void THPWrapper_dealloc(THPWrapper* self) __ubsan_ignore_function__
 {
   self->destructor(self->data);
