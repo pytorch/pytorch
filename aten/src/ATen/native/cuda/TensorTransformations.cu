@@ -81,7 +81,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   }
 
   auto flip_dims = std::vector<int64_t>(dims);
-  wrap_dims(flip_dims, total_dims);
+  wrap_all_dims(flip_dims, total_dims);
 
   // use kernel_pointwise_flip_apply2 only when to-flip dim is the 1st or last dim, where collapseDims can reduce the amount of work
   if (flip_dims_size == 1 && in_tensor.is_contiguous() && (flip_dims[0] == 0 || flip_dims[0] == total_dims - 1)) {

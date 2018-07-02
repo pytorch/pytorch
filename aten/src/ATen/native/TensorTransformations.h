@@ -26,7 +26,7 @@ static inline void flip_check_errors(int64_t total_dims, int64_t flip_dims_size,
     "The max flip dims out of range, got max flip dims=", *min_max_d.second);
 
   // check duplicates in dims
-  wrap_dims(flip_dims_v, total_dims);
+  wrap_all_dims(flip_dims_v, total_dims);
   flip_dims_v.erase(std::unique(flip_dims_v.begin(), flip_dims_v.end()), flip_dims_v.end());
   AT_CHECK((int64_t)flip_dims_v.size() == flip_dims_size,
     "dims has duplicates, original flip dims size=", flip_dims_size,

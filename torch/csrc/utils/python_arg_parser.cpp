@@ -168,30 +168,68 @@ There are two kinds of default values:
 1. IntList[2] x=1 (where size=2, value={1,1}
 2. IntList x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', ' to split args)
 */
+// static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
+//   printf("s = %s\n", s.c_str());
+//   if (s[0] != '{') {
+//     return std::vector<int64_t>(size, std::stol(s));
+//   }
+//
+//   size_t n = s.size();
+//   // since already checked left brace '{' above, here only checks right brace '}'
+//   AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
+//
+//   auto args = std::vector<int64_t>();
+//   // for case IntList x={}, return an empty vector
+//   if (s.size() == 2) {
+//     return args;
+//   }
+//
+//   int64_t x = 0, sign = 1;
+//   for (size_t i = 1; i < n - 1; i++) {
+//     if (s[i] == '-') {
+//       sign *= -1;
+//     }
+//     else if ('0' <= s[i] && s[i] <= '9') {
+//       x = x * 10 + (s[i] - '0');
+//     }
+//     else if (s[i] == ',') {
+//       args.emplace_back(sign * x);
+//       sign = 1;
+//       x = 0;
+//     }
+//     else {
+//       AT_ERROR("Illegal char in IntList default value: ", s[i]);
+//     }
+//   }
+//   args.emplace_back(sign * x);
+//   return args;
+// }
+
 static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
-  if (s[0] != '{') {
-    return std::vector<int64_t>(size, std::stoi(s));
-  }
-
+  printf("s = %s\n", s.c_str());
+  char *str_end;
+  int64_t x = 0;
   size_t n = s.size();
-  // since already checked left brace '{' above, here only checks right brace '}'
-  AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
-
   auto args = std::vector<int64_t>();
-  // for case IntList x={}, return an empty vector
-  if (s.size() == 2) {
+
+  if (s.empty()) return args;
+
+  if (s[0] != '{') {
+    x = strtol(s.c_str(), &str_end, 10);
+    if (*str_end == 0) {
+      args = std::vector<int64_t>(size, x);
+    }
     return args;
   }
 
-  int64_t x = 0, sign = 1;
+  // since already checked left brace '{' above, here only checks right brace '}'
+  AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
+
+  int64_t s = 1, e = 1;
   for (size_t i = 1; i < n - 1; i++) {
-    if (s[i] == '-') {
-      sign *= -1;
-    }
-    else if ('0' <= s[i] && s[i] <= '9') {
-      x = x * 10 + (s[i] - '0');
-    }
     else if (s[i] == ',') {
+      e = i;
+      auto x = std::atol(s.substr(s, e - s));
       args.emplace_back(sign * x);
       sign = 1;
       x = 0;

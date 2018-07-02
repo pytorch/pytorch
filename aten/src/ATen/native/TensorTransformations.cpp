@@ -14,7 +14,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
   flip_check_errors(total_dims, flip_dims_size, dims);
 
   auto flip_dims_v = std::vector<int64_t>(dims);
-  wrap_dims(flip_dims_v, total_dims);
+  wrap_all_dims(flip_dims_v, total_dims);
   std::sort(flip_dims_v.begin(), flip_dims_v.end());
   auto final_indices = std::vector<at::Tensor>(total_dims);
 
@@ -58,7 +58,12 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 }
 
 Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
-  const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
+  const int64_t total_dims = self.dim();
+  int64_t total_rot_dims = dims.size();
+  if (total_rot_dims == 0) {
+    dims = IntList({0,1});
+    total_rot_dims = 2;
+  }
 
   AT_CHECK(total_rot_dims == 2,
     "expected total rotation dims == 2, but got dims = ", total_rot_dims);
