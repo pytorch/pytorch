@@ -26,6 +26,11 @@ class NormalizeOp final : public Operator<Context> {
     const int m = x.dim32(canonical_axis);
     const int n = x.size() / m;
     const int sf = x.size_from_dim(canonical_axis + 1);
+
+    if (n == 0) {
+      return true;
+    }
+
     DoNormalize(xData, yData, m, n, sf);
     return true;
   }
