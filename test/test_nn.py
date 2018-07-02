@@ -2942,6 +2942,22 @@ class TestNN(NNTestCase):
         for k, v, in old_state_dict.items():
             self.assertTrue(v.equal(new_state_dict[k]))
 
+    def test_load_state_dict_BC(self):
+        # BatchNormNd
+        # Added num_batches_tracked buffer at version 2. For state dict with
+        # earlier versions or no versions, it should provide default value of 0.
+        bn = nn.BatchNorm2d(3)
+        state_dict = bn.state_dict()
+        del state_dict['num_batches_tracked']
+        state_dict._metadata['']['version'] = 1  # version 1
+        bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
+        del state_dict._metadata['']['version']  # no version
+        bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
+
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
 
