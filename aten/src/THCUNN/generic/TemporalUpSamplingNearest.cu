@@ -65,9 +65,9 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            int nbatch,
-	   int nchannels,
-	   int inputWidth,
-	   int outputWidth)
+           int nchannels,
+           int inputWidth,
+           int outputWidth)
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(TemporalUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels, inputWidth, outputWidth);

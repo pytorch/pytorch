@@ -1032,18 +1032,18 @@ THC_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
                   int nbatch,
-		  int nchannels,
-		  int inputHeight,
-		  int inputWidth,
-		  int outputHeight,
-		  int outputWidth);
+                  int nchannels,
+                  int inputHeight,
+                  int inputWidth,
+                  int outputHeight,
+                  int outputWidth);
 
 THC_API void THNN_(SpatialUpSamplingNearest_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
                   int outputHeight,
-		  int outputWidth);
+                  int outputWidth);
 
 THC_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
                   THCState *state,
@@ -1314,9 +1314,9 @@ THC_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
                   THCState *state,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-		  int nbatch,
-		  int nchannels,
-		  int inputWidth,
+                  int nbatch,
+                  int nchannels,
+                  int inputWidth,
                   int outputWidth);
 
 THC_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
@@ -1651,22 +1651,22 @@ THC_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
                   THCState *state,
                   THCTensor *gradOutput,
                   THCTensor *gradInput,
-		  int nbatch,
-		  int nchannels,
-		  int inputDepth,
-		  int inputHeight,
-		  int inputWidth,
-		  int outputDepth,
-		  int outputHeight,
-		  int outputWidth);
+                  int nbatch,
+                  int nchannels,
+                  int inputDepth,
+                  int inputHeight,
+                  int inputWidth,
+                  int outputDepth,
+                  int outputHeight,
+                  int outputWidth);
 
 THC_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
                   THCState *state,
                   THCTensor *input,
                   THCTensor *output,
-		  int outputDepth,
-		  int outputHeight,
-		  int outputWidth);
+                  int outputDepth,
+                  int outputHeight,
+                  int outputWidth);
 
 THC_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
                   THCState *state,

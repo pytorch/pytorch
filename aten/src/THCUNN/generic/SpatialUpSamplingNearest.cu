@@ -91,8 +91,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   THCDeviceTensor<real, 4> data2 = toDeviceTensor<real, 4>(state, gradOutput);
 
   const int num_kernels = outputHeight * outputWidth;
-  const int num_threads = 
-	  THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   nearest_neighbor_4d_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),

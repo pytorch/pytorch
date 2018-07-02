@@ -4860,8 +4860,8 @@ class TestNN(NNTestCase):
             for scale_factor in [0.5, 1.5, 2]:
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2)
-                out_size = math.floor(in_t.shape[-1] * scale_factor)
-                out_t = m(Variable(in_t))
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, requires_grad=True)
@@ -4896,8 +4896,8 @@ class TestNN(NNTestCase):
             for scale_factor in [0.5, 1.5, 2]:
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2)
-                out_size = math.floor(in_t.shape[-1] * scale_factor)
-                out_t = m(Variable(in_t))
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
@@ -4928,8 +4928,8 @@ class TestNN(NNTestCase):
             for scale_factor in [0.5, 1.5, 2]:
                 m = nn.Upsample(scale_factor=scale_factor, **kwargs)
                 in_t = torch.ones(1, 1, 2, 2, 2)
-                out_size = math.floor(in_t.shape[-1] * scale_factor)
-                out_t = m(Variable(in_t))
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
                 self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
 
                 input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)

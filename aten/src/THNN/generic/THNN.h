@@ -738,9 +738,9 @@ TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           int isizeB,
-	  int isizeC,
-	  int isizeW,
-	  int osizeW);
+          int isizeC,
+          int isizeW,
+          int osizeW);
 
 TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
           THNNState *state,
@@ -1194,18 +1194,19 @@ TH_API void THNN_(SpatialUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-	  int osizeH,
-	  int osizeW);
+          int osizeH,
+          int osizeW);
+
 TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
           THTensor *gradInput,
-	  int isizeB,
-	  int isizeC,
-	  int isizeH,
-	  int isizeW,
-	  int osizeH,
-	  int osizeW);
+          int isizeB,
+          int isizeC,
+          int isizeH,
+          int isizeW,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THNNState *state,
@@ -1651,9 +1652,9 @@ TH_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-	  int osizeT,
-	  int osizeH,
-	  int osizeW);
+          int osizeT,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
           THNNState *state,
