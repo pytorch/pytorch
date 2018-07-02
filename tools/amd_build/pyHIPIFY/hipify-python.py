@@ -501,8 +501,6 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
         f.seek(0)
         f.write(contents)
         f.truncate()
-        f.flush()
-        os.fsync(f)
 
 
 def file_add_header(filepath, header):
@@ -514,8 +512,6 @@ def file_add_header(filepath, header):
         f.seek(0)
         f.write(contents)
         f.truncate()
-        f.flush()
-        os.fsync(f)
 
 
 def fix_static_global_kernels(in_txt):
