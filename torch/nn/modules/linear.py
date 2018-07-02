@@ -3,6 +3,7 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 from .module import Module
 
 
@@ -52,9 +53,9 @@ class Linear(Module):
 
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        init.uniform_(self.weight, -stdv, stdv)
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            init.uniform_(self.bias, -stdv, stdv)
 
     def forward(self, input):
         return F.linear(input, self.weight, self.bias)
@@ -117,9 +118,9 @@ class Bilinear(Module):
 
     def reset_parameters(self):
         stdv = 1. / math.sqrt(self.weight.size(1))
-        self.weight.data.uniform_(-stdv, stdv)
+        init.uniform_(self.weight, -stdv, stdv)
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            init.uniform_(self.bias, -stdv, stdv)
 
     def forward(self, input1, input2):
         return F.bilinear(input1, input2, self.weight, self.bias)

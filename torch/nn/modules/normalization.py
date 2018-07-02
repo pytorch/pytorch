@@ -4,6 +4,7 @@ from torch.nn.parameter import Parameter
 from .module import Module
 from .batchnorm import _BatchNorm
 from .. import functional as F
+from .. import init
 
 
 class LocalResponseNorm(Module):
@@ -140,8 +141,8 @@ class LayerNorm(Module):
 
     def reset_parameters(self):
         if self.elementwise_affine:
-            self.weight.data.fill_(1)
-            self.bias.data.zero_()
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
 
     def forward(self, input):
         return F.layer_norm(
@@ -210,8 +211,8 @@ class GroupNorm(Module):
 
     def reset_parameters(self):
         if self.affine:
-            self.weight.data.fill_(1)
-            self.bias.data.zero_()
+            init.ones_(self.weight)
+            init.zeros_(self.bias)
 
     def forward(self, input):
         return F.group_norm(

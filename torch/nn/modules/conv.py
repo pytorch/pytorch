@@ -3,6 +3,7 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple
 
@@ -42,9 +43,9 @@ class _ConvNd(Module):
         for k in self.kernel_size:
             n *= k
         stdv = 1. / math.sqrt(n)
-        self.weight.data.uniform_(-stdv, stdv)
+        init.uniform_(self.weight, -stdv, stdv)
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            init.uniform_(self.bias, -stdv, stdv)
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'

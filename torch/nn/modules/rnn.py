@@ -7,6 +7,7 @@ import numbers
 from .module import Module
 from ..parameter import Parameter
 from ..utils.rnn import PackedSequence
+from .. import init
 
 
 class RNNBase(Module):
@@ -115,7 +116,7 @@ class RNNBase(Module):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def check_forward_args(self, input, hidden, batch_sizes):
         is_input_packed = batch_sizes is not None
@@ -618,7 +619,7 @@ class RNNCell(RNNCellBase):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -719,7 +720,7 @@ class LSTMCell(RNNCellBase):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
@@ -806,7 +807,7 @@ class GRUCell(RNNCellBase):
     def reset_parameters(self):
         stdv = 1.0 / math.sqrt(self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            init.uniform_(weight, -stdv, stdv)
 
     def forward(self, input, hx=None):
         self.check_forward_input(input)
