@@ -72,10 +72,10 @@ def update_progress_bar(total, progress):
         status)
 
     # Send the progress to stdout.
-    sys.stdout.write(text)
+    sys.stderr.write(text)
 
     # Send the buffered text to stdout!
-    sys.stdout.flush()
+    sys.stderr.flush()
 
 
 def filename_ends_with_extension(filename, extensions):
