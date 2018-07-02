@@ -1484,6 +1484,12 @@ class TestNN(NNTestCase):
         x2 = m(inp)
         self.assertEqual(x0, x1)
         self.assertEqual(x0, x2)
+        # test that we can backward several times without running into problems
+        x1 = m(inp)
+        x1.sum().backward()
+        x1 = m(inp)
+        x1.sum().backward()
+        # test removing
         m = torch.nn.utils.remove_spectral_norm(m)
         x3 = m(inp)
         self.assertEqual(x0, x3)
