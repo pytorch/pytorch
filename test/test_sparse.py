@@ -523,15 +523,16 @@ class TestSparse(TestCase):
         self.assertEqual(res, expected)
 
         x, i, v = self._gen_sparse(len(shape_i), 10, shape)
+        nnz = i.size(1)
 
         # Non contiguous sparse indices tensor
-        x_ = self.SparseTensor(i[:, ::2], v[:5], x.shape)
+        x_ = self.SparseTensor(i[:, ::2], v[:int(nnz / 2)], x.shape)
         res = torch.add(y, r, x_)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
 
         # Non contiguous sparse values tensor
-        x_ = self.SparseTensor(i[:, :5], v[::2], x.shape)
+        x_ = self.SparseTensor(i[:, :int(nnz / 2)], v[::2], x.shape)
         res = torch.add(y, r, x_)
         expected = y + r * self.safeToDense(x_)
         self.assertEqual(res, expected)
