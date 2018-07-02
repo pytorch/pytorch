@@ -71,27 +71,32 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       adj_.push_back(OperatorBase::GetSingleArgument<int>("adj_w", 0));
     }
 
-	const bool has_pad = OperatorBase::HasArgument("pad") || (
-		OperatorBase::HasArgument("pad_t") &&
-        OperatorBase::HasArgument("pad_l") &&
-        OperatorBase::HasArgument("pad_b") &&
-        OperatorBase::HasArgument("pad_r"));
-	const bool has_legacy = (legacy_pad_ == LegacyPadding::VALID || legacy_pad_ == LegacyPadding::SAME);
-	const bool has_output_shape = OperatorBase::HasArgument("output_shape") || (
-		OperatorBase::HasArgument("output_shape_h") &&
-		OperatorBase::HasArgument("output_shape_w"));
-	//if pad exists, legacy padding or output_shape should not exist.
-	//if legacy padding exists, pad should not exist, output_shape is optional.
-	//if output_shape exists, pad should not exist, legacy padding is optional.
+    const bool has_pad = OperatorBase::HasArgument("pad") ||
+        (OperatorBase::HasArgument("pad_t") &&
+         OperatorBase::HasArgument("pad_l") &&
+         OperatorBase::HasArgument("pad_b") &&
+         OperatorBase::HasArgument("pad_r")) ||
+        OperatorBase::HasArgument("pads");
+    const bool has_legacy =
+        (legacy_pad_ == LegacyPadding::VALID ||
+         legacy_pad_ == LegacyPadding::SAME);
+    const bool has_output_shape = OperatorBase::HasArgument("output_shape") ||
+        (OperatorBase::HasArgument("output_shape_h") &&
+         OperatorBase::HasArgument("output_shape_w"));
+    // if pad exists, legacy padding or output_shape should not exist.
+    // if legacy padding exists, pad should not exist, output_shape is optional.
+    // if output_shape exists, pad should not exist, legacy padding is optional.
 
-	CAFFE_ENFORCE((has_pad != has_legacy) || (!has_pad && !has_legacy),
-	  "If you use legacy padding VALID or SAME, you should not specify "
-	  "any specific padding values.");
-	CAFFE_ENFORCE((has_pad != has_output_shape) || (!has_pad && !has_legacy),
-	  "If output_shape is given, you should not specify "
-	  "any specific padding values.");
+    CAFFE_ENFORCE(
+        (has_pad != has_legacy) || (!has_pad && !has_legacy),
+        "If you use legacy padding VALID or SAME, you should not specify "
+        "any specific padding values.");
+    CAFFE_ENFORCE(
+        (has_pad != has_output_shape) || (!has_pad && !has_legacy),
+        "If output_shape is given, you should not specify "
+        "any specific padding values.");
 
-	if (has_pad){
+    if (has_pad) {
       if (OperatorBase::HasArgument("pad")) {
         pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
       } else {
@@ -118,7 +123,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
         // Fill default values.
         if (kernel_.size() == 0) {
           kernel_.assign({0, 0});
-    }
+        }
 
     if (stride_.size() == 0) {
       stride_.resize(default_size, 1);
