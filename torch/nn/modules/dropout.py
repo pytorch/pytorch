@@ -173,13 +173,7 @@ class AlphaDropout(_DropoutNd):
         return F.alpha_dropout(input, self.p, self.training)
 
 
-class AlphaDropout2d(_DropoutNd):
+class FeatureAlphaDropout(_DropoutNd):
 
     def forward(self, input):
-        return F.alpha_dropout2d(input, self.p, self.training)
-
-
-class AlphaDropout3d(_DropoutNd):
-
-    def forward(self, input):
-        return F.alpha_dropout3d(input, self.p, self.training)
+        return F.feature_alpha_dropout(input, self.p, self.training)

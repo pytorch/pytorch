@@ -570,11 +570,7 @@ def dropout3d(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
 
 
-def alpha_dropout2d(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureAlphaDropout.apply(input, p, training, inplace)
-
-
-def alpha_dropout3d(input, p=0.5, training=False, inplace=False):
+def feature_alpha_dropout(input, p=0.5, training=False, inplace=False):
     return _functions.dropout.FeatureAlphaDropout.apply(input, p, training, inplace)
 
 

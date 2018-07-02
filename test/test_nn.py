@@ -1931,22 +1931,14 @@ class TestNN(NNTestCase):
         input = torch.randn(5000)
         self._test_alpha_dropout(nn.AlphaDropout, input)
 
-    def test_AlphaDropout2d(self):
-        b = random.randint(1, 5)
-        w = random.randint(1, 5)
-        h = random.randint(1, 5)
-        num_features = 1000
-        input = torch.randn(num_features, b, w, h)
-        self._test_alpha_dropout(nn.AlphaDropout2d, input)
-
-    def test_AlphaDropout3d(self):
+    def test_FeatureAlphaDropout(self):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
         h = random.randint(1, 5)
         d = random.randint(1, 2)
         num_features = 1000
-        input = torch.Tensor(num_features, b, d, w, h)
-        self._test_alpha_dropout(nn.AlphaDropout3d, input)
+        input = torch.randn(num_features, b, d, w, h)
+        self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
     def _test_InstanceNorm_general(self, cls, input, device="cpu", dtype=torch.float):
         # default case track_running_stats=False
