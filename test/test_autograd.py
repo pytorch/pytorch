@@ -2052,6 +2052,8 @@ class TestAutograd(TestCase):
 
         gradcheck(func, [torch.rand(m) + 1])
         gradcheck(func, [torch.rand(m) + 10])
+        gradgradcheck(func, [torch.rand(m) + 1])
+        gradgradcheck(func, [torch.rand(m) + 10])
 
     def test_profiler(self):
         x = torch.randn(10, 10)
