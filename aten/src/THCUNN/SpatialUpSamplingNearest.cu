@@ -56,7 +56,7 @@ __global__ void nearest_neighbor_4d_kernel(
 // Backward operation
 template <typename Dtype, typename Acctype>
 __global__ void nearest_neighbor_4d_kernel_backward(
-		const int n, 
+		const int n,
 		THCDeviceTensor<Dtype, 4> data1,
 		const THCDeviceTensor<Dtype, 4> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;
@@ -87,7 +87,7 @@ __global__ void nearest_neighbor_4d_kernel_backward(
     //
     const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, height1);
     const int w1 = nearest_neighbor_compute_source_index(width_scale, w2, width1);
- 
+
     for (int n = 0; n < batchsize; n++) {
       for (int c = 0; c < channels; ++c) {
         const Dtype d2val = data2[n][c][h2][w2];

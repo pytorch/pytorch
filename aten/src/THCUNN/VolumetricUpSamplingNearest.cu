@@ -62,7 +62,7 @@ __global__ void nearest_neighbor_5d_kernel(
 // Backward operation
 template <typename Dtype, typename Acctype>
 __global__ void nearest_neighbor_5d_kernel_backward(
-		const int n, 
+		const int n,
 		THCDeviceTensor<Dtype, 5> data1,
 		const THCDeviceTensor<Dtype, 5> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;

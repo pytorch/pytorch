@@ -45,7 +45,7 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
         nbatch, channels,
         inputHeight, inputWidth,
         outputHeight, outputWidth);
-  input = THCTensor_(newContiguous)(state, input);
+
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resize4d)(state, output,
                        THCTensor_(size)(state, input, 0),
@@ -64,7 +64,6 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
    0 , stream>>>(num_kernels, rheight, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, input);
 }
 
 

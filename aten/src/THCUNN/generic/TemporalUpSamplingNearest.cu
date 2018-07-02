@@ -46,7 +46,6 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
                        outputWidth);
   THCTensor_(zero)(state, output);
 
-  input = THCTensor_(newContiguous)(state, input);
   THCDeviceTensor<real, 3> idata = toDeviceTensor<real, 3>(state, input);
   THCDeviceTensor<real, 3> odata = toDeviceTensor<real, 3>(state, output);
 
@@ -56,7 +55,6 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   nearest_neighbor_3d_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
 	 0, stream>>>(num_kernels, idata, odata);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, input);
 }
 
 
@@ -79,8 +77,7 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THCDeviceTensor<real, 3> data2 = toDeviceTensor<real, 3>(state, gradOutput);
 
   const int num_kernels = outputWidth;
-  const int num_threads = 
-	  THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   nearest_neighbor_3d_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),

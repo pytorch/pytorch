@@ -46,11 +46,11 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
 		  inputHeight, inputWidth, outputHeight, outputWidth);
 
   THTensor_(resize4d)(output,
-      		THTensor_(size)(input, 0),
-      	        THTensor_(size)(input, 1),
-      	        outputHeight,
-      	        outputWidth);
-  channels = channels * nbatch; 
+                      THTensor_(size)(input, 0),
+                      THTensor_(size)(input, 1),
+                      outputHeight,
+                      outputWidth);
+  channels = channels * nbatch;
 
   THAssert(inputWidth > 0 && outputWidth > 0);
 
@@ -77,7 +77,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     THTensor_(free)(input);
     return;
   }
-  
+
   for (int h2 = 0; h2 < outputHeight; ++h2) {
     const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
     for (int w2 = 0; w2 < outputWidth; ++w2) {
@@ -133,7 +133,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     THTensor_(free)(gradOutput);
     return;
   }
-  
+
   for (int h2 = 0; h2 < outputHeight; ++h2) {
     const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
     for (int w2 = 0; w2 < outputWidth; ++w2) {
@@ -150,6 +150,5 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
 
   THTensor_(free)(gradOutput);
 }
- 
 
 #endif

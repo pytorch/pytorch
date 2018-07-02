@@ -48,7 +48,7 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
         nbatch, channels,
         inputDepth, inputHeight, inputWidth,
         outputDepth, outputHeight, outputWidth);
-  input = THCTensor_(newContiguous)(state, input);
+
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resize5d)(state, output,
                        THCTensor_(size)(state, input, 0),
@@ -68,7 +68,6 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
    0 , stream>>>(num_kernels, rdepth, rheight, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, input);
 }
 
 

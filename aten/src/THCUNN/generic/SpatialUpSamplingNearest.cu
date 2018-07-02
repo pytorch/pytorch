@@ -54,7 +54,6 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
                        outputWidth);
   THCTensor_(zero)(state, output);
 
-  input = THCTensor_(newContiguous)(state, input);
   THCDeviceTensor<real, 4> idata = toDeviceTensor<real, 4>(state, input);
   THCDeviceTensor<real, 4> odata = toDeviceTensor<real, 4>(state, output);
 
@@ -64,7 +63,6 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   nearest_neighbor_4d_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
 	 0, stream>>>(num_kernels, idata, odata);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, input);
 }
 
 

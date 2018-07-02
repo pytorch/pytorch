@@ -42,9 +42,9 @@ static inline T linear_upsampling_compute_source_index(
 
 static inline int nearest_neighbor_compute_source_index(
 		const float scale, int dst_index, int inputSize) {
-  const int src_index = MIN(floorf(dst_index * scale), inputSize - 1);	
+  const int src_index = MIN(floorf(dst_index * scale), inputSize - 1);
   return src_index;
-}	
+}
 
 
 #endif

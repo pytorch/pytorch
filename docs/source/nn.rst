@@ -1244,7 +1244,7 @@ Vision functions
 :hidden:`interpolate`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: interpolate 
+.. autofunction:: interpolate
 
 :hidden:`upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~

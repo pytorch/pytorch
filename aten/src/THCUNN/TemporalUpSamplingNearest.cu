@@ -50,7 +50,7 @@ __global__ void nearest_neighbor_3d_kernel(
 // Backward operation
 template <typename Dtype, typename Acctype>
 __global__ void nearest_neighbor_3d_kernel_backward(
-		const int n, 
+		const int n,
 		THCDeviceTensor<Dtype, 3> data1,
 		const THCDeviceTensor<Dtype, 3> data2) {
   int index = threadIdx.x + blockIdx.x * blockDim.x;

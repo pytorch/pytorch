@@ -42,19 +42,19 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   int inputDepth = THTensor_(size)(input, 2);
   int inputHeight = THTensor_(size)(input, 3);
   int inputWidth = THTensor_(size)(input, 4);
-  const float depth_scale = (float) inputDepth / (float) outputDepth; 
+  const float depth_scale = (float) inputDepth / (float) outputDepth;
   const float height_scale = (float) inputHeight / (float)outputHeight;
   const float width_scale = (float) inputWidth / (float)outputWidth;
 
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(input, NULL, nbatch, channels, inputDepth, inputHeight, inputWidth, outputDepth, outputHeight, outputWidth);
 
   THTensor_(resize5d)(output,
-      		      THTensor_(size)(input, 0),
+                      THTensor_(size)(input, 0),
                       THTensor_(size)(input, 1),
                       outputDepth,
                       outputHeight,
                       outputWidth);
-  channels = channels * nbatch; 
+  channels = channels * nbatch;
 
   THAssert(inputDepth > 0 && inputHeight > 0 && inputWidth > 0 && outputDepth > 0 && outputHeight > 0 && outputWidth > 0);
 
@@ -84,7 +84,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
     THTensor_(free)(input);
     return;
   }
-  
+
   for (int d2 = 0; d2 < outputDepth; ++d2) {
     const int d1 = nearest_neighbor_compute_source_index(depth_scale, d2, inputDepth);
     for (int h2 = 0; h2 < outputHeight; ++h2) {
@@ -149,7 +149,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
     THTensor_(free)(gradOutput);
     return;
   }
-  
+
   for (int d2 = 0; d2 < outputDepth; ++d2) {
     const int d1 = nearest_neighbor_compute_source_index(depth_scale, d2, inputDepth);
     for (int h2 = 0; h2 < outputHeight; ++h2) {
@@ -169,6 +169,5 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
 
   THTensor_(free)(gradOutput);
 }
- 
 
 #endif

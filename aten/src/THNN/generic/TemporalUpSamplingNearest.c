@@ -41,7 +41,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
 			THTensor_(size)(input, 0),
       THTensor_(size)(input, 1),
       outputWidth);
-    channels = channels * nbatch; 
+    channels = channels * nbatch;
 
   THAssert(inputWidth > 0 && outputWidth > 0);
 
@@ -126,6 +126,5 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   }
   THTensor_(free)(gradOutput);
 }
- 
 
 #endif
