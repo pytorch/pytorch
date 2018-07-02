@@ -23,12 +23,10 @@ class LinearImpl : public Cloneable<LinearImpl> {
 
   void reset() override;
   Tensor forward(Tensor);
-  const LinearOptions& options() const noexcept;
 
- private:
-  Tensor weight_;
-  Tensor bias_;
-  LinearOptions options_;
+  LinearOptions options;
+  Tensor weight;
+  Tensor bias;
 };
 
 TORCH_MODULE(Linear);
