@@ -1115,7 +1115,7 @@ class TestNN(NNTestCase):
     def test_ModuleDict(self):
         modules = OrderedDict([
             ('act', nn.ReLU()),
-            ('conv', nn.Conv2d(10, 10, 3)),
+            ('conv', nn.Conv2d(10, 10, 5)),
             ('fc', nn.Linear(5, 5)),
         ])
 
