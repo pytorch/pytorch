@@ -99,13 +99,17 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     if (has_pad) {
       if (OperatorBase::HasArgument("pad")) {
         pads_.resize(4, OperatorBase::GetSingleArgument<int>("pad", 0));
-      } else {
+      } else if (
+          OperatorBase::HasArgument("pad_t") &&
+          OperatorBase::HasArgument("pad_l") &&
+          OperatorBase::HasArgument("pad_b") &&
+          OperatorBase::HasArgument("pad_r")) {
         pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_t", 0));
         pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_l", 0));
         pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_b", 0));
         pads_.push_back(OperatorBase::GetSingleArgument<int>("pad_r", 0));
-	  }
-	} else
+      }
+        } else
 	if (has_output_shape){
 	  if (!has_legacy){
 		use_pad_ = false;
