@@ -25,8 +25,14 @@
 #include "generic/Storage.cpp"
 #include <TH/THGenerateHalfType.h>
 
+#ifndef USE_CUDA
+// NB: When USE_CUDA, the *full* implementation of
+// this lives in torch/csrc/cuda/Storage.cpp.
 template<>
 void THPPointer<THStorage>::free() {
-  if (ptr)
+  if (ptr) {
+    AT_ASSERT(ptr->backend == at::kCPU);
     THStorage_free(ptr);
+  }
 }
+#endif
