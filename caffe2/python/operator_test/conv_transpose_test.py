@@ -348,9 +348,9 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
     # Testing when using output_shape instead of pad
-    @given(stride=st.integers(1, 2),
-           pads=st.integers(0, 3),
-           kernel=st.integers(1, 5),
+    @given(stride=st.integers(1, 3),
+           pads=st.integers(0, 2),
+           kernel=st.integers(3, 6),
            adj=st.integers(0, 2),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
@@ -418,8 +418,8 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             rtol=1e-4)
 
     @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 3),
-           kernel=st.integers(1, 5),
+           pad=st.integers(0, 2),
+           kernel=st.integers(3, 6),
            adj=st.integers(0, 2),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
