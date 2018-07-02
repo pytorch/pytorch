@@ -5,7 +5,7 @@
 #define _USE_MATH_DEFINES
 #endif
 #include <math.h>
-
+#include <string>
 #ifndef M_PIf
 #define M_PIf 3.1415926535f
 #endif  // M_PIf
@@ -691,58 +691,54 @@ static inline float TH_i1f(float x){
  *
  */
 
-#define MACHEP 1.11022302462515654042E-16
 #define MAXITER 2000
 
+static const double MACHEP = 1.11022302462515654042E-16;
 static double iv_asymptotic(double v, double x);
 static void ikv_asymptotic_uniform(double v, double x, double *Iv, double *Kv);
 static void ikv_temme(double v, double x, double *Iv, double *Kv);
 
-static inline float TH_ivf(float v, float x)
-{
-  return x * v;
-}
 
 static inline double TH_iv(double v, double x)
 {
-    int sign;
-    double t, ax, res;
+  int sign;
+  double t, ax, res;
 
     /* If v is a negative integer, invoke symmetry */
-    t = floor(v);
-    if (v < 0.0) {
+  t = floor(v);
+  if (v < 0.0) {
     if (t == v) {
         v = -v;     /* symmetry */
-        t = -t;
+      t = -t;
     }
-    }
+  }
     /* If x is negative, require v to be an integer */
-    sign = 1;
-    if (x < 0.0) {
+  sign = 1;
+  if (x < 0.0) {
     if (t != v) {
-        THError("iv DOMAIN");
-        return (NAN);
+      THError("If x is negative, v needs to be an integer");
+      return (NAN);
     }
     if (v != 2.0 * floor(v / 2.0)) {
-        sign = -1;
+      sign = -1;
     }
-    }
+  }
 
     /* Avoid logarithm singularity */
-    if (x == 0.0) {
+  if (x == 0.0) {
     if (v == 0.0) {
-        return 1.0;
+      return 1.0;
     }
     if (v < 0.0) {
-        THError("iv OVERFLOW");
-        return INFINITY;
+      THError("x can't be 0 unless v>=0");
+      return INFINITY;
     }
     else
-        return 0.0;
-    }
+      return 0.0;
+  }
 
-    ax = fabs(x);
-    if (fabs(v) > 50) {
+  ax = fabs(x);
+  if (fabs(v) > 50) {
     /*
      * Uniform asymptotic expansion for large orders.
      *
@@ -750,15 +746,73 @@ static inline double TH_iv(double v, double x)
      * implementation of Temme's method.
      */
     ikv_asymptotic_uniform(v, ax, &res, NULL);
-    }
-    else {
+  }
+  else {
     /* Otherwise: Temme's method */
     ikv_temme(v, ax, &res, NULL);
-    }
-    res *= sign;
-    return res;
+  }
+  res *= sign;
+  return res;
 }
 
+static inline float TH_ivf(float vf, float xf)
+{
+  int sign;
+  double t, ax, res, x, v ;
+  float resf;
+  x = (double) xf;
+  v = (double) vf;
+    /* If v is a negative integer, invoke symmetry */
+  t = floor(v);
+  if (v < 0.0) {
+    if (t == v) {
+        v = -v;     /* symmetry */
+      t = -t;
+    }
+  }
+    /* If x is negative, require v to be an integer */
+  sign = 1;
+  if (x < 0.0) {
+    if (t != v) {
+      THError("If x is negative, v needs to be an integer");
+      return (NAN);
+    }
+    if (v != 2.0 * floor(v / 2.0)) {
+      sign = -1;
+    }
+  }
+
+    /* Avoid logarithm singularity */
+  if (x == 0.0) {
+    if (v == 0.0) {
+      return 1.0;
+    }
+    if (v < 0.0) {
+      THError("x can't be 0 unless v>=0");
+      return INFINITY;
+    }
+    else
+      return 0.0;
+  }
+
+  ax = fabs(x);
+  if (fabs(v) > 50) {
+    /*
+     * Uniform asymptotic expansion for large orders.
+     *
+     * This appears to overflow slightly later than the Boost
+     * implementation of Temme's method.
+     */
+    ikv_asymptotic_uniform(v, ax, &res, NULL);
+  }
+  else {
+    /* Otherwise: Temme's method */
+    ikv_temme(v, ax, &res, NULL);
+  }
+  res *= sign;
+  resf = (float)res;
+  return resf;
+}
 
 /*
  * Compute Iv from (AMS5 9.7.1), asymptotic expansion for large |z|
@@ -766,33 +820,35 @@ static inline double TH_iv(double v, double x)
  */
 static double iv_asymptotic(double v, double x)
 {
-    double mu;
-    double sum, term, prefactor, factor;
-    int k;
+  double mu;
+  double sum, term, prefactor, factor;
+  int k;
 
-    prefactor = exp(x) / sqrt(2 * M_PI * x);
+  prefactor = exp(x) / sqrt(2 * M_PI * x);
 
-    if (prefactor == INFINITY) {
+  if (prefactor == INFINITY) {
     return prefactor;
-    }
+  }
 
-    mu = 4 * v * v;
-    sum = 1.0;
-    term = 1.0;
-    k = 1;
+  mu = 4 * v * v;
+  sum = 1.0;
+  term = 1.0;
+  k = 1;
 
-    do {
+  do {
     factor = (mu - (2 * k - 1) * (2 * k - 1)) / (8 * x) / k;
     if (k > 100) {
-        /* didn't converge */
-        THError("iv(iv_asymptotic) TLOSS");
-        break;
+      /* didn't converge */
+      #ifdef DEBUG
+        THError("iv_asymptotic didn't converge in 100 iterations");
+      #endif //DEBUG
+      break;
     }
     term *= -factor;
     sum += term;
     ++k;
-    } while (fabs(term) > MACHEP * fabs(sum));
-    return sum * prefactor;
+  } while (fabs(term) > MACHEP * fabs(sum));
+  return sum * prefactor;
 }
 
 
@@ -868,49 +924,47 @@ static const double asymptotic_ufactors[N_UFACTORS][N_UFACTOR_TERMS] = {
 /*
  * Compute Iv, Kv from (AMS5 9.7.7 + 9.7.8), asymptotic expansion for large v
  */
-static void ikv_asymptotic_uniform(double v, double x,
-                double *i_value, double *k_value)
+static void ikv_asymptotic_uniform(double v, double x, double *i_value, double *k_value)
 {
-    double i_prefactor, k_prefactor;
-    double t, t2, eta, z;
-    double i_sum, k_sum, term, divisor;
-    int k, n;
-    int sign = 1;
+  double i_prefactor, k_prefactor;
+  double t, t2, eta, z;
+  double i_sum, k_sum, term, divisor;
+  int k, n;
+  int sign = 1;
 
-    if (v < 0) {
+  if (v < 0) {
     /* Negative v; compute I_{-v} and K_{-v} and use (AMS 9.6.2) */
     sign = -1;
     v = -v;
-    }
+  }
 
-    z = x / v;
-    t = 1 / sqrt(1 + z * z);
-    t2 = t * t;
-    eta = sqrt(1 + z * z) + log(z / (1 + 1 / t));
+  z = x / v;
+  t = 1 / sqrt(1 + z * z);
+  t2 = t * t;
+  eta = sqrt(1 + z * z) + log(z / (1 + 1 / t));
 
-    i_prefactor = sqrt(t / (2 * M_PI * v)) * exp(v * eta);
-    i_sum = 1.0;
+  i_prefactor = sqrt(t / (2 * M_PI * v)) * exp(v * eta);
+  i_sum = 1.0;
 
-    k_prefactor = sqrt(M_PI * t / (2 * v)) * exp(-v * eta);
-    k_sum = 1.0;
+  k_prefactor = sqrt(M_PI * t / (2 * v)) * exp(-v * eta);
+  k_sum = 1.0;
 
-    divisor = v;
-    for (n = 1; n < N_UFACTORS; ++n) {
+  divisor = v;
+  for (n = 1; n < N_UFACTORS; ++n) {
     /*
      * Evaluate u_k(t) with Horner's scheme;
      * (using the knowledge about which coefficients are zero)
      */
     term = 0;
-    for (k = N_UFACTOR_TERMS - 1 - 3 * n;
-         k < N_UFACTOR_TERMS - n; k += 2) {
-        term *= t2;
-        term += asymptotic_ufactors[n][k];
+    for (k = N_UFACTOR_TERMS - 1 - 3 * n; k < N_UFACTOR_TERMS - n; k += 2) {
+      term *= t2;
+      term += asymptotic_ufactors[n][k];
     }
     for (k = 1; k < n; k += 2) {
-        term *= t2;
+      term *= t2;
     }
     if (n % 2 == 1) {
-        term *= t;
+      term *= t;
     }
 
     /* Sum terms */
@@ -920,36 +974,35 @@ static void ikv_asymptotic_uniform(double v, double x,
 
     /* Check convergence */
     if (fabs(term) < MACHEP) {
-        break;
+      break;
     }
 
     divisor *= v;
-    }
-
+  }
+  #ifdef DEBUG
     if (fabs(term) > 1e-3 * fabs(i_sum)) {
-    /* Didn't converge */
-    THError("ikv_asymptotic_uniform TLOSS");
+        /* Didn't converge */
+      THError("ikv_asymptotic_uniform didn't converge");
     }
     if (fabs(term) > MACHEP * fabs(i_sum)) {
-    /* Some precision lost */
-    THError("ikv_asymptotic_uniform PLOSS");
+        /* Some precision lost */
+        THError("ikv_asymptotic_uniform didn't converge fully");
     }
-
-    if (k_value != NULL) {
-    /* symmetric in v */
+  #endif //DEBUG
+  if (k_value != NULL) {
+      /* symmetric in v */
     *k_value = k_prefactor * k_sum;
-    }
+  }
 
-    if (i_value != NULL) {
+  if (i_value != NULL) {
     if (sign == 1) {
-        *i_value = i_prefactor * i_sum;
+      *i_value = i_prefactor * i_sum;
     }
     else {
-        /* (AMS 9.6.2) */
-        *i_value = (i_prefactor * i_sum
-            + (2 / M_PI) * sin(M_PI * v) * k_prefactor * k_sum);
+          /* (AMS 9.6.2) */
+      *i_value = (i_prefactor * i_sum + (2 / M_PI) * sin(M_PI * v) * k_prefactor * k_sum);
     }
-    }
+  }
 }
 
 
@@ -967,11 +1020,11 @@ static void ikv_asymptotic_uniform(double v, double x,
  */
 static int temme_ik_series(double v, double x, double *K, double *K1)
 {
-    double f, h, p, q, coef, sum, sum1, tolerance;
-    double a, b, c, d, sigma, gamma1, gamma2;
-    unsigned long k;
-    double gp;
-    double gm;
+  double f, h, p, q, coef, sum, sum1, tolerance;
+  double a, b, c, d, sigma, gamma1, gamma2;
+  unsigned long k;
+  double gp;
+  double gm;
 
 
     /*
@@ -979,30 +1032,30 @@ static int temme_ik_series(double v, double x, double *K, double *K1)
      * |x| > 2, the larger the |x|, the slower the convergence
      */
 
-    gp = gamma(v + 1) - 1;
-    gm = gamma(-v + 1) - 1;
+  gp = tgamma(v + 1) - 1;
+  gm = tgamma(-v + 1) - 1;
 
-    a = log(x / 2);
-    b = exp(v * a);
-    sigma = -a * v;
-    c = fabs(v) < MACHEP ? 1 : sin(M_PI * v) / (v * M_PI);
-    d = fabs(sigma) < MACHEP ? 1 : sinh(sigma) / sigma;
-    double EULER = 0.577215664901532860606512090082402431; // Euler-Mascheroni constant
-    gamma1 = fabs(v) < MACHEP ? - EULER : (0.5f / v) * (gp - gm) * c;
-    gamma2 = (2 + gp + gm) * c / 2;
+  a = log(x / 2);
+  b = exp(v * a);
+  sigma = -a * v;
+  c = fabs(v) < MACHEP ? 1 : sin(M_PI * v) / (v * M_PI);
+  d = fabs(sigma) < MACHEP ? 1 : sinh(sigma) / sigma;
+  double EULER = 0.577215664901532860606512090082402431; // Euler-Mascheroni constant
+  gamma1 = fabs(v) < MACHEP ? - EULER : (0.5f / v) * (gp - gm) * c;
+  gamma2 = (2 + gp + gm) * c / 2;
 
-    /* initial values */
-    p = (gp + 1) / (2 * b);
-    q = (1 + gm) * b / 2;
-    f = (cosh(sigma) * gamma1 + d * (-a) * gamma2) / c;
-    h = p;
-    coef = 1;
-    sum = coef * f;
-    sum1 = coef * h;
+  /* initial values */
+  p = (gp + 1) / (2 * b);
+  q = (1 + gm) * b / 2;
+  f = (cosh(sigma) * gamma1 + d * (-a) * gamma2) / c;
+  h = p;
+  coef = 1;
+  sum = coef * f;
+  sum1 = coef * h;
 
-    /* series summation */
-    tolerance = MACHEP;
-    for (k = 1; k < MAXITER; k++) {
+  /* series summation */
+  tolerance = MACHEP;
+  for (k = 1; k < MAXITER; k++) {
     f = (k * f + p + q) / (k * k - v * v);
     p /= k - v;
     q /= k + v;
@@ -1011,25 +1064,27 @@ static int temme_ik_series(double v, double x, double *K, double *K1)
     sum += coef * f;
     sum1 += coef * h;
     if (fabs(coef * f) < fabs(sum) * tolerance) {
-        break;
+      break;
     }
-    }
+  }
+  #ifdef DEBUG
     if (k == MAXITER) {
     THError("ikv_temme(temme_ik_series) TLOSS");
     }
+  #endif //DEBUG
 
-    *K = sum;
-    *K1 = 2 * sum1 / x;
+  *K = sum;
+  *K1 = 2 * sum1 / x;
 
-    return 0;
+  return 0;
 }
 
 /* Evaluate continued fraction fv = I_(v+1) / I_v, derived from
  * Abramowitz and Stegun, Handbook of Mathematical Functions, 1972, 9.1.73 */
 static int CF1_ik(double v, double x, double *fv)
 {
-    double C, D, f, a, b, delta, tiny, tolerance;
-    unsigned long k;
+  double C, D, f, a, b, delta, tiny, tolerance;
+  unsigned long k;
 
 
     /*
@@ -1041,35 +1096,37 @@ static int CF1_ik(double v, double x, double *fv)
      * modified Lentz's method, see
      * Lentz, Applied Optics, vol 15, 668 (1976)
      */
-    tolerance = 2 * MACHEP;
-    tiny = 1 / sqrt(DBL_MAX);
-    C = f = tiny;       /* b0 = 0, replace with tiny */
-    D = 0;
-    for (k = 1; k < MAXITER; k++) {
+  tolerance = 2 * MACHEP;
+  tiny = 1 / sqrt(DBL_MAX);
+  C = f = tiny;       /* b0 = 0, replace with tiny */
+  D = 0;
+  for (k = 1; k < MAXITER; k++) {
     a = 1;
     b = 2 * (v + k) / x;
     C = b + a / C;
     D = b + a * D;
     if (C == 0) {
-        C = tiny;
+      C = tiny;
     }
     if (D == 0) {
-        D = tiny;
+      D = tiny;
     }
     D = 1 / D;
     delta = C * D;
     f *= delta;
     if (fabs(delta - 1) <= tolerance) {
-        break;
+      break;
     }
-    }
+  }
+  #ifdef DEBUG
     if (k == MAXITER) {
-    THError("ikv_temme(CF1_ik) TLOSS");
+      THError("ikv_temme(CF1_ik) TLOSS");
     }
+  #endif //DEBUG
 
-    *fv = f;
+  *fv = f;
 
-    return 0;
+  return 0;
 }
 
 /*
@@ -1080,8 +1137,8 @@ static int CF1_ik(double v, double x, double *fv)
 static int CF2_ik(double v, double x, double *Kv, double *Kv1)
 {
 
-    double S, C, Q, D, f, a, b, q, delta, tolerance, current, prev;
-    unsigned long k;
+  double S, C, Q, D, f, a, b, q, delta, tolerance, current, prev;
+  unsigned long k;
 
     /*
      * |x| >= |v|, CF2_ik converges rapidly
@@ -1092,16 +1149,16 @@ static int CF2_ik(double v, double x, double *Kv, double *Kv1)
      * Steed's algorithm, see Thompson and Barnett,
      * Journal of Computational Physics, vol 64, 490 (1986)
      */
-    tolerance = MACHEP;
-    a = v * v - 0.25f;
-    b = 2 * (x + 1);        /* b1 */
-    D = 1 / b;          /* D1 = 1 / b1 */
-    f = delta = D;      /* f1 = delta1 = D1, coincidence */
-    prev = 0;           /* q0 */
-    current = 1;        /* q1 */
-    Q = C = -a;         /* Q1 = C1 because q1 = 1 */
-    S = 1 + Q * delta;      /* S1 */
-    for (k = 2; k < MAXITER; k++) { /* starting from 2 */
+  tolerance = MACHEP;
+  a = v * v - 0.25f;
+  b = 2 * (x + 1);        /* b1 */
+  D = 1 / b;          /* D1 = 1 / b1 */
+  f = delta = D;      /* f1 = delta1 = D1, coincidence */
+  prev = 0;           /* q0 */
+  current = 1;        /* q1 */
+  Q = C = -a;         /* Q1 = C1 because q1 = 1 */
+  S = 1 + Q * delta;      /* S1 */
+  for (k = 2; k < MAXITER; k++) { /* starting from 2 */
     /* continued fraction f = z1 / z0 */
     a -= 2 * (k - 1);
     b += 2;
@@ -1109,27 +1166,29 @@ static int CF2_ik(double v, double x, double *Kv, double *Kv1)
     delta *= b * D - 1;
     f += delta;
 
-    /* series summation S = 1 + \sum_{n=1}^{\infty} C_n * z_n / z_0 */
+      /* series summation S = 1 + \sum_{n=1}^{\infty} C_n * z_n / z_0 */
     q = (prev - (b - 2) * current) / a;
     prev = current;
-    current = q;        /* forward recurrence for q */
+      current = q;        /* forward recurrence for q */
     C *= -a / k;
     Q += C * q;
     S += Q * delta;
 
-    /* S converges slower than f */
+      /* S converges slower than f */
     if (fabs(Q * delta) < fabs(S) * tolerance) {
-        break;
+      break;
     }
-    }
+  }
+  #ifdef DEBUG
     if (k == MAXITER) {
-    THError("ikv_temme(CF2_ik) TLOSS");
+      THError("ikv_temme(CF2_ik) TLOSS");
     }
+  #endif //DEBUG
 
-    *Kv = sqrt(M_PI / (2 * x)) * exp(-x) / S;
-    *Kv1 = *Kv * (0.5f + v + x + (v * v - 0.25f) * f) / x;
+  *Kv = sqrt(M_PI / (2 * x)) * exp(-x) / S;
+  *Kv1 = *Kv * (0.5f + v + x + (v * v - 0.25f) * f) / x;
 
-    return 0;
+  return 0;
 }
 
 /* Flags for what to compute */
@@ -1146,124 +1205,129 @@ static void ikv_temme(double v, double x, double *Iv_p, double *Kv_p)
 {
     /* Kv1 = K_(v+1), fv = I_(v+1) / I_v */
     /* Ku1 = K_(u+1), fu = I_(u+1) / I_u */
-    double u, Iv, Kv, Kv1, Ku, Ku1, fv;
-    double W, current, prev, next;
-    int reflect = 0;
-    unsigned n, k;
-    int kind;
+  double u, Iv, Kv, Kv1, Ku, Ku1, fv;
+  double W, current, prev, next;
+  int reflect = 0;
+  unsigned n, k;
+  int kind;
 
-    kind = 0;
-    if (Iv_p != NULL) {
+  kind = 0;
+  if (Iv_p != NULL) {
     kind |= need_i;
-    }
-    if (Kv_p != NULL) {
+  }
+  if (Kv_p != NULL) {
     kind |= need_k;
-    }
+  }
 
-    if (v < 0) {
+  if (v < 0) {
     reflect = 1;
     v = -v;         /* v is non-negative from here */
     kind |= need_k;
-    }
-    n = round(v);
-    u = v - n;          /* -1/2 <= u < 1/2 */
+  }
+  n = round(v);
+  u = v - n;          /* -1/2 <= u < 1/2 */
 
-    if (x < 0) {
+  if (x < 0) {
     if (Iv_p != NULL)
-        *Iv_p = NAN;
+      *Iv_p = NAN;
     if (Kv_p != NULL)
-        *Kv_p = NAN;
-    THError("ikv_temme DOMAIN");
+      *Kv_p = NAN;
+    #ifdef DEBUG
+        THError("ikv_temme DOMAIN");
+    #endif //DEBUG
     return;
-    }
-    if (x == 0) {
+  }
+  if (x == 0) {
     Iv = (v == 0) ? 1 : 0;
     if (kind & need_k) {
+      #ifdef DEBUG
         THError("ikv_temme OVERFLOW");
-        Kv = INFINITY;
+      #endif //DEBUG
+      Kv = INFINITY;
     }
     else {
-        Kv = NAN;   /* any value will do */
+      Kv = NAN;   /* any value will do */
     }
 
     if (reflect && (kind & need_i)) {
-        double z = (u + n % 2);
-
-        Iv = sin(M_PI * z) == 0 ? Iv : INFINITY;
+      double z = (u + n % 2);
+      Iv = sin(M_PI * z) == 0 ? Iv : INFINITY;
+      #ifdef DEBUG
         if (Iv == INFINITY || Iv == -INFINITY) {
-        THError("ikv_temme OVERFLOW");
+          THError("ikv_temme OVERFLOW");
         }
+      #endif //DEBUG
     }
 
     if (Iv_p != NULL) {
-        *Iv_p = Iv;
+      *Iv_p = Iv;
     }
     if (Kv_p != NULL) {
-        *Kv_p = Kv;
+      *Kv_p = Kv;
     }
     return;
-    }
-    /* x is positive until reflection */
-    W = 1 / x;          /* Wronskian */
-    if (x <= 2) {       /* x in (0, 2] */
+  }
+  /* x is positive until reflection */
+  W = 1 / x;          /* Wronskian */
+  if (x <= 2) {       /* x in (0, 2] */
     temme_ik_series(u, x, &Ku, &Ku1);   /* Temme series */
-    }
-    else {          /* x in (2, \infty) */
+  }
+  else {          /* x in (2, \infty) */
     CF2_ik(u, x, &Ku, &Ku1);    /* continued fraction CF2_ik */
-    }
-    prev = Ku;
-    current = Ku1;
-    for (k = 1; k <= n; k++) {  /* forward recurrence for K */
+  }
+  prev = Ku;
+  current = Ku1;
+  for (k = 1; k <= n; k++) {  /* forward recurrence for K */
     next = 2 * (u + k) * current / x + prev;
     prev = current;
     current = next;
-    }
-    Kv = prev;
-    Kv1 = current;
-    if (kind & need_i) {
+  }
+  Kv = prev;
+  Kv1 = current;
+  if (kind & need_i) {
     double lim = (4 * v * v + 10) / (8 * x);
 
     lim *= lim;
     lim *= lim;
     lim /= 24;
     if ((lim < MACHEP * 10) && (x > 100)) {
-        /*
-         * x is huge compared to v, CF1 may be very slow
-         * to converge so use asymptotic expansion for large
-         * x case instead.  Note that the asymptotic expansion
-         * isn't very accurate - so it's deliberately very hard
-         * to get here - probably we're going to overflow:
-         */
-        Iv = iv_asymptotic(v, x);
+          /*
+           * x is huge compared to v, CF1 may be very slow
+           * to converge so use asymptotic expansion for large
+           * x case instead.  Note that the asymptotic expansion
+           * isn't very accurate - so it's deliberately very hard
+           * to get here - probably we're going to overflow:
+           */
+      Iv = iv_asymptotic(v, x);
     }
     else {
-        CF1_ik(v, x, &fv);  /* continued fraction CF1_ik */
-        Iv = W / (Kv * fv + Kv1);   /* Wronskian relation */
+          CF1_ik(v, x, &fv);  /* continued fraction CF1_ik */
+          Iv = W / (Kv * fv + Kv1);   /* Wronskian relation */
     }
-    }
-    else {
-    Iv = NAN;       /* any value will do */
-    }
+  }
+  else {
+      Iv = NAN;       /* any value will do */
+  }
 
-    if (reflect) {
+  if (reflect) {
     double z = (u + n % 2);
 
     if (Iv_p != NULL) {
-        *Iv_p = Iv + (2 / M_PI) * sin(M_PI * z) * Kv;   /* reflection formula */
+          *Iv_p = Iv + (2 / M_PI) * sin(M_PI * z) * Kv;   /* reflection formula */
     }
     if (Kv_p != NULL) {
-        *Kv_p = Kv;
+      *Kv_p = Kv;
     }
-    }
-    else {
+  }
+  else {
     if (Iv_p != NULL) {
-        *Iv_p = Iv;
+      *Iv_p = Iv;
     }
     if (Kv_p != NULL) {
-        *Kv_p = Kv;
+      *Kv_p = Kv;
     }
-    }
-    return;
+  }
+  return;
 }
 
 #endif // _THMATH_H

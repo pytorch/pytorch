@@ -5,7 +5,7 @@
 
 #ifdef USE_CUDA
   #include "cuda.h" // for CUDA_VERSION
-#endif 
+#endif
 
 namespace torch { namespace jit {
 
@@ -40,7 +40,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::expm1,
   aten::i0,
   aten::i1,
-  //aten::iv,
+  aten::iv,
   aten::floor,
   aten::fmod,
   aten::frac,
@@ -139,13 +139,13 @@ struct GraphFuser {
       #ifdef USE_CUDA
         // Checks for half tensor on GPU
         // const auto device = tt->device();
-        if (tt->device() != kCPUDevice 
+        if (tt->device() != kCPUDevice
           && CUDA_VERSION >= 9
           && tt->scalarType() == at::ScalarType::Half) {
           return true;
         }
-      #endif 
-    } 
+      #endif
+    }
 
     return false;
   }

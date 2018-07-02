@@ -422,9 +422,11 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
     def test_iv(self):
         from scipy.special import iv
-        for v in range(2, 15):
-            self._test_math(lambda x: torch.iv(torch.tensor(v, dtype=torch.double), x),
+        for v in range(0, 50, 5):
+            self._test_math(lambda x: torch.iv(torch.tensor(v, dtype=x.dtype), x),
                             lambda x: iv(v, x).item())
+            self._test_math(lambda x: torch.iv(torch.tensor(v + 0.5, dtype=x.dtype), x.abs()),
+                            lambda x: iv(v + 0.5, np.abs(x)).item())
 
     def test_asin(self):
         self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
@@ -2751,8 +2753,8 @@ class TestTorch(TestCase):
                 small2 = cast(torch.randn(*dims_small2).float())
                 small2_expanded = small2.expand(*dims_full)
 
-            if small.is_cuda and fn in ['map', 'map2']:
-                # map and map2 are not implementd on CUDA tensors
+            if small.is_cuda and fn in ['map', 'map2', 'iv']:
+                # map, map2, and iv are not implementd on CUDA tensors
                 continue
 
             # TODO: fix masked_scatter and masked_fill broadcasting
@@ -2766,6 +2768,8 @@ class TestTorch(TestCase):
                         return myfn(t1, 0.5)
                     elif fn == "masked_select":
                         return myfn(t1 < 0)
+                    elif fn == "iv":
+                        return myfn((t1 * 5 + 2).floor().abs())
                     elif fn in fns_3_args:
                         return myfn(1, t1, t2)
                     else:
@@ -2780,6 +2784,10 @@ class TestTorch(TestCase):
                     method = getattr(first, fn)
                     r1 = tensorfn(method_expanded, expanded[second], expanded[third])
                     r2 = tensorfn(method, second, third)
+                    if not (r1 == r2).any():
+                        print(method_expanded, expanded[first], expanded[second])
+                        print(method, first, second)
+                        print(r1, r2)
                     self.assertEqual(r1, r2)
 
             # now for torch. versions of functions
@@ -2796,6 +2804,8 @@ class TestTorch(TestCase):
                         return fntorch(t1, t2 < 0.5, cast(torch.arange(1, t1.nelement() + 1).float()))
                     elif fn == "masked_fill":
                         return fntorch(t1, t2 < 0.5, 1.0)
+                    elif fn == "iv":
+                        return fntorch(t1.floor().abs(), t2)
                     elif fn in fns_3_args:
                         return fntorch(t1, 1.0, t2, t3)
                     else:
@@ -2827,6 +2837,8 @@ class TestTorch(TestCase):
                     return t0_fn(t1 < 0.5, cast(torch.arange(1, t0.nelement() + 1).float()))
                 elif fn == "masked_fill":
                     return t0_fn(t1 < 0.5, 1.0)
+                elif fn == "iv":
+                        return t0_fn(t1.floor().abs())
                 elif fn == "map":
                     return t0_fn(t1, lambda x, y: x + y)
                 elif fn == "map2":

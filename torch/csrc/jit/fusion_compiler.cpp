@@ -125,9 +125,9 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 // This snippet enables half support in the jit. Following the pattern for
 // reductions, fp16 input data is immediately upconverted to float
 // with __half2float(). All mathematical operations are done on float
-// values, and if needed the intermediate float representation is 
+// values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
-constexpr auto half_support_literal  = R"(    
+constexpr auto half_support_literal  = R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
 #if defined(__cplusplus)
@@ -246,7 +246,7 @@ std::string encodeRHS(Node * n) {
     {aten::reciprocal, "reciprocalf(${0})"},
     {aten::neg, "-${0}"},
     //simple binary
-    //{aten::iv, "ivf(${0},${1})"},
+    {aten::iv, "ivf(${0},${1})"},
     {aten::atan2, "atan2(${0}, ${1})"},
     {aten::min, "fminf(${0}, ${1})"},
     {aten::max, "fmaxf(${0}, ${1})"},
@@ -380,7 +380,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
-    
+
     //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }

@@ -1351,12 +1351,14 @@
   variants:
     - method
     - function
+  cname: iv
   return: argument 0
   arguments:
     - arg: THTensor* result
       output: True
     - THTensor* v
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: v fallback
 ]]
 [[
   name: iv_
@@ -1365,11 +1367,12 @@
   backends:
     - CPU
   cname: iv
-  return: self
+  return: argument 0
   arguments:
     - THTensor* self
     - THTensor* v
-    - THTensor* self
+    - arg: THTensor* self
+      broadcast: v inplace fallback
 ]]
 [[
   name: _exp

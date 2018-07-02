@@ -283,7 +283,7 @@ VECTOR_IMPLEMENT_FUNCTION(trunc,TH_MATH_NAME(trunc))
 VECTOR_IMPLEMENT_FUNCTION(frac,TH_MATH_NAME(TH_frac))
 VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
-/*void THVector_(iv)(real *r, const real *v, const real *t, const ptrdiff_t n)
+void THVector_(iv)(real *r, const real *v, const real *t, const ptrdiff_t n)
 {
   ptrdiff_t i = 0;
 
@@ -297,7 +297,7 @@ VECTOR_IMPLEMENT_FUNCTION(cinv, TH_MATH_NAME(1.0) / )
 
   for(; i < n; i++)
     r[i] = TH_MATH_NAME(TH_iv)(v[i],t[i]);
-}*/
+}
 
 #undef TH_MATH_NAME
 #endif /* floating point only part */

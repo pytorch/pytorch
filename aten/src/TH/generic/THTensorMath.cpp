@@ -4098,42 +4098,10 @@ LAB_IMPLEMENT_BASIC_FUNCTION(rsqrt,TH_MATH_NAME(TH_rsqrt),HYPER_TH_OMP_OVERHEAD_
 
 LAB_IMPLEMENT_VECTORIZED_FUNCTION(sigmoid,TH_MATH_NAME(TH_sigmoid),HYPER_TH_OMP_OVERHEAD_THRESHOLD)
 
-/*void THTensor_(iv)(THTensor *r_, THTensor *v, THTensor *t)
-{
-  THTensor_(resizeAs)(r_, t);
-  TH_TENSOR_APPLY3(real, r_, real, v, real, t, *r__data = TH_MATH_NAME(TH_iv)(*v_data, *t_data););
-}*/
-
 void THTensor_(iv)(THTensor *r_, THTensor *v, THTensor *t)
 {
   THTensor_(resizeAs)(r_, t);
-  int64_t r_Size = THTensor_(nElement)(r_);
-  int64_t vSize = THTensor_(nElement)(v);
-  int r_Contig = THTensor_(isContiguous)(r_);
-  int vContig = THTensor_(isContiguous)(v);
-  int tContig = THTensor_(isContiguous)(t);
-  int serial_path = 0;
-  if (vSize == r_Size){
-    if (r_Contig && vContig && tContig) {
-      TH_TENSOR_APPLY3_CONTIG(real, r_, real, v, real, t, TH_MATH_NAME(TH_iv)(*v_data, *t_data););
-    } else {
-#if _OPENMP
-      int inOMP = omp_in_parallel();
-      if (inOMP) {
-        serial_path = 1;
-      } else {
-        TH_TENSOR_APPLY3_OMP(r_Size, r_Contig, tContig, tContig, real, r_, real, v, real, t, *r__data = TH_MATH_NAME(TH_iv)(*v_data, *t_data);, UNCERTAIN_TH_OMP_OVERHEAD_THRESHOLD);
-      }
-#else
-      serial_path = 1;
-#endif
-    }
-  } else {
-    serial_path = 1;
-  }
-  if (serial_path) {
-    TH_TENSOR_APPLY3(real, r_, real, v, real, t, *r__data = TH_MATH_NAME(TH_iv)(*v_data, *t_data););
-  }
+  TH_TENSOR_APPLY3(real, r_, real, v, real, t, *r__data = TH_MATH_NAME(TH_iv)(*v_data, *t_data););
 }
 
 void THTensor_(atan2)(THTensor *r_, THTensor *tx, THTensor *ty)
