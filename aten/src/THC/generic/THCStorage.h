@@ -6,7 +6,7 @@
 #define TH_STORAGE_RESIZABLE  2
 #define TH_STORAGE_FREEMEM    4
 
-typedef struct THCStorage THCStorage;
+#define THCStorage THStorage
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THCStorage type.

@@ -108,12 +108,13 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
   THCDeviceAllocator *allocator, void *allocatorContext) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
+  storage->backend = at::kCUDA;
   storage->scalar_type = at::CTypeToScalarType<real>::to();
   storage->data_ptr = data;
   storage->size = size;
   storage->refcount = 1;
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocator = allocator;
+  storage->allocatorVoidPtr = allocator;
   storage->allocatorContext = allocatorContext;
   int device;
   if (data) {

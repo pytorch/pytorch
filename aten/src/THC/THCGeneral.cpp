@@ -6,6 +6,7 @@
 #include "THCStream.h"
 #include "THCThreadLocal.h"
 #include "THCTensorRandom.h"
+#include "THCGeneral.hpp"
 #include <stdlib.h>
 #include <stdint.h>
 
