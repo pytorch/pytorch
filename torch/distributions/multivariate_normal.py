@@ -35,7 +35,7 @@ def _batch_potrf_lower(bmat):
     r"""
     Applies a Cholesky decomposition to all matrices in a batch of arbitrary shape.
     """
-    n = bmat.shape[-1]
+    n = bmat.size(-1)
     cholesky = torch.stack([m.potrf(upper=False) for m in bmat.reshape(-1, n, n)])
     return cholesky.reshape(bmat.shape)
 
@@ -51,7 +51,7 @@ def _batch_inverse(bmat):
     r"""
     Returns the inverses of a batch of square matrices.
     """
-    n = bmat.shape[-1]
+    n = bmat.size(-1)
     flat_bmat_inv = torch.stack([m.inverse() for m in bmat.reshape(-1, n, n)])
     return flat_bmat_inv.reshape(bmat.shape)
 
@@ -75,10 +75,10 @@ def _batch_mahalanobis(bL, bx):
     Accepts batches for both bL and bx. They are not necessarily assumed to have the same batch
     shape, but `bL` one should be able to broadcasted to `bx` one.
     """
-    n = bx.shape[-1]
+    n = bx.size(-1)
     bL = bL.expand(bx.shape[bx.dim() - bL.dim() + 1:] + (n,))
     flat_L = bL.reshape(-1, n, n)  # shape = b x n x n
-    flat_x = bx.reshape(-1, flat_L.shape[0], n)  # shape = c x b x n
+    flat_x = bx.reshape(-1, flat_L.size(0), n)  # shape = c x b x n
     flat_x_swap = flat_x.permute(1, 2, 0)  # shape = b x n x c
     M_swap = _batch_trtrs_lower(flat_x_swap, flat_L).pow(2).sum(-2)  # shape = b x c
     return M_swap.t().reshape(bx.shape[:-1])

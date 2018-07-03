@@ -13,7 +13,7 @@ def _batch_vector_diag(bvec):
     """
     Returns the diagonal matrices of a batch of vectors.
     """
-    n = bvec.shape[-1]
+    n = bvec.size(-1)
     flat_bvec = bvec.reshape(-1, n)
     flat_bmat = torch.stack([v.diag() for v in flat_bvec])
     return flat_bmat.reshape(bvec.shape + (n,))
@@ -24,10 +24,10 @@ def _batch_capacitance_tril(W, D):
     Computes Cholesky of :math:`I + W.T @ inv(D) @ W` for a batch of matrices :math:`W`
     and a batch of vectors :math:`D`.
     """
-    m = W.shape[-1]
-    identity = torch.eye(m, out=W.new(m, m))
+    m = W.size(-1)
     Wt_Dinv = W.transpose(-1, -2) / D.unsqueeze(-2)
-    K = identity + torch.matmul(Wt_Dinv, W)
+    K = torch.matmul(Wt_Dinv, W)
+    K.view(-1)[::m+1] += 1  # add identity matrix to K
     return _batch_potrf_lower(K)
 
 
@@ -135,10 +135,10 @@ class LowRankMultivariateNormal(Distribution):
         # The matrix "I + D-1/2 @ W @ W.T @ D-1/2" has eigenvalues bounded from below by 1,
         # hence it is well-conditioned and safe to take Cholesky decomposition.
         n = self._event_shape[0]
-        identity = torch.eye(n, out=self.scale_factor.new(n, n))
         scale_diag_sqrt_unsqueeze = self.scale_diag.sqrt().unsqueeze(-1)
         Dinvsqrt_W = self.scale_factor / scale_diag_sqrt_unsqueeze
-        K = identity + torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2))
+        K = torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2))
+        K.view(-1)[::n+1] += 1  # add identity matrix to K
         return scale_diag_sqrt_unsqueeze * _batch_potrf_lower(K)
 
     @lazy_property
