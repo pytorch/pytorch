@@ -1,3 +1,5 @@
+#include <climits>
+
 #include "THStorage.hpp"
 
 #include "generic/THStorage.cpp"
@@ -13,6 +15,8 @@
 #include "THGenerateHalfType.h"
 
 void THStorage_free(THStorage *storage) {
+  AT_ASSERT(storage->backend == at::kCPU);
+
   if(!storage)
     return;
 
@@ -21,7 +25,7 @@ void THStorage_free(THStorage *storage) {
     if(--storage->refcount == 0)
     {
       if(storage->flag & TH_STORAGE_FREEMEM) {
-        storage->allocator->free(storage->allocatorContext, storage->data_ptr);
+        static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
       }
       if(storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);
@@ -64,4 +68,31 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
     THLongStorage_data(copy)[dim_infer] = nElement / total_size;
   }
   return copy;
+}
+
+THStorage* THStorage_new(at::ScalarType scalar_type)
+{
+  return THStorage_newWithSize(scalar_type, 0);
+}
+
+THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
+{
+  return THStorage_newWithAllocator(scalar_type, size, &THDefaultAllocator, nullptr);
+}
+
+THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
+                                      THAllocator *allocator,
+                                      void *allocatorContext)
+{
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
+  storage->backend = at::kCPU;
+  storage->scalar_type = scalar_type;
+  storage->data_ptr = allocator->malloc(allocatorContext, at::elementSize(scalar_type)*size);
+  storage->size = size;
+  new (&storage->refcount) std::atomic<int>(1);
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  storage->allocatorVoidPtr = allocator;
+  storage->allocatorContext = allocatorContext;
+  storage->device = INT_MIN;  // device is not meaningful on CPU
+  return storage;
 }
