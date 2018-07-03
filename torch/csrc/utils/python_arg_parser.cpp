@@ -169,18 +169,16 @@ There are two kinds of default values:
 2. IntList x={1,2,3} (where size=3, value={1,2,3}, note that there cannot be space after comma since native_parse.py uses ', ' to split args)
 */
 static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int64_t size) {
-  printf("s = %s\n", s.c_str());
   size_t n = s.size();
 
-  // case 1. s = ""
   if (s.empty()) return std::vector<int64_t>();
 
-  // case 2. s is an int (e.g., s = "12")
+  // case 1. s is an int (e.g., s=2)
   if (s[0] != '{') {
     return std::vector<int64_t>(size, std::stol(s));
   }
 
-  // case 3. s is a list of dims (e.g., s = {1,2})
+  // case 2. s is a list of dims (e.g., s={1,2})
 
   // since already checked left brace '{' above, here only checks right brace '}'
   AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
