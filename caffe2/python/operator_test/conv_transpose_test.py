@@ -437,9 +437,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                                              order, engine, use_bias,
                                              compute_dX, gc, dc):
         np.random.seed(0)
-        #output_size = (size - 1) * stride + kernel + adj - 2 * pad
         stride = 1
-        pad = 0
         kernel = 3
         size = 7
         output_size = (size - 1) * stride + kernel + adj - 2 * pad
