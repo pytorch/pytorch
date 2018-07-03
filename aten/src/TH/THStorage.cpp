@@ -14,6 +14,7 @@
 #include "generic/THStorageCopy.cpp"
 #include "THGenerateHalfType.h"
 
+// Free a non-weak pointer to THStorage
 void THStorage_free(THStorage *storage) {
   AT_ASSERT(storage->backend == at::kCPU);
 
@@ -23,16 +24,44 @@ void THStorage_free(THStorage *storage) {
 
   if ((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0)) {
     if (--storage->refcount == 0) {
+      if (storage->finalizer) {
+        (*storage->finalizer)();
+      }
+      storage->finalizer.~unique_ptr<THFinalizer>();
       if (storage->flag & TH_STORAGE_FREEMEM) {
         static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
       }
       if (storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);
       }
-      storage->refcount.~atomic<int>();
-      THFree(storage);
+      THStorage_weakFree(storage);
     }
   }
+}
+
+// Manually retains a weak reference
+void THStorage_weakRetain(THStorage *weak_storage) {
+  weak_storage->weakcount++;
+}
+
+// Releases a weak reference
+void THStorage_weakFree(THStorage *weak_storage) {
+  if (--weak_storage->weakcount == 0) {
+    weak_storage->refcount.~atomic<int>();
+    weak_storage->weakcount.~atomic<int>();
+    THFree(weak_storage);
+  }
+}
+
+// Given a weak reference, returns a strong reference to a storage (which must
+// be freed when done) or null if the storage is already dead.
+THStorage* THStorage_weakLock(THStorage *weak_storage) {
+  for (;;) {
+    int refcount = weak_storage->refcount.load();
+    if (refcount == 0) return nullptr;
+    if (weak_storage->refcount.compare_exchange_strong(refcount, refcount + 1)) break;
+  }
+  return weak_storage;
 }
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
@@ -89,6 +118,8 @@ THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size
   storage->data_ptr = allocator->malloc(allocatorContext, at::elementSize(scalar_type)*size);
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocatorVoidPtr = allocator;
   storage->allocatorContext = allocatorContext;
@@ -168,7 +199,9 @@ THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
   storage->scalar_type = scalar_type;
   storage->data_ptr = data;
   storage->size = size;
-  storage->refcount = 1;
+  new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocatorVoidPtr = allocator;
   storage->allocatorContext = allocatorContext;
