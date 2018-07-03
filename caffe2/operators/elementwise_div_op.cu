@@ -8,6 +8,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/elementwise_ops_utils.h"
+#include "caffe2/utils/fixed_divisor.h"
 
 namespace caffe2 {
 
@@ -20,10 +21,10 @@ template <typename TGrad, typename TIn, int D>
 __global__ void ComputeDivAGradientCUDAKernel(
     const int outer_size,
     const int inner_size,
-    const SimpleArray<int, D> C_dims,
+    const SimpleArray<FixedDivisor<int>, D> C_dims,
     const SimpleArray<int, D> C_strides,
     const SimpleArray<int, D> B_strides,
-    const SimpleArray<int, D> A_dims,
+    const SimpleArray<FixedDivisor<int>, D> A_dims,
     const TGrad* dC,
     const TIn* B,
     TGrad* dA) {
@@ -36,17 +37,17 @@ __global__ void ComputeDivAGradientCUDAKernel(
       int A_index_val = A_index;
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
-        C_index += (A_index_val % A_dims.data[d]) * C_strides.data[d];
-        A_index_val /= A_dims.data[d];
+        int r;
+        A_dims.data[d].DivMod(A_index_val, &A_index_val, &r);
+        C_index += r * C_strides.data[d];
       }
       int B_index = 0;
       int C_index_val = C_index;
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
-        B_index += B_strides.data[d] == 0
-            ? 0
-            : (C_index_val % C_dims.data[d]) * B_strides.data[d];
-        C_index_val /= C_dims.data[d];
+        int r;
+        C_dims.data[d].DivMod(C_index_val, &C_index_val, &r);
+        B_index += r * B_strides.data[d];
       }
 #if __CUDA_ARCH__ >= 350
       sum += __ldg(dC + C_index) / __ldg(B + B_index);
@@ -83,7 +84,7 @@ __global__ void ComputeDivBGradientCUDAKernel(
     const int outer_size,
     const int inner_size,
     const SimpleArray<int, D> C_strides,
-    const SimpleArray<int, D> B_dims,
+    const SimpleArray<FixedDivisor<int>, D> B_dims,
     const TGrad* dC,
     const TIn* B,
     const TOut* C,
@@ -96,8 +97,9 @@ __global__ void ComputeDivBGradientCUDAKernel(
       int B_index = i * inner_size + j;
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
-        C_index += (B_index % B_dims.data[d]) * C_strides.data[d];
-        B_index /= B_dims.data[d];
+        int r;
+        B_dims.data[d].DivMod(B_index, &B_index, &r);
+        C_index += r * C_strides.data[d];
       }
 #if __CUDA_ARCH__ >= 350
       sum += -__ldg(dC + C_index) * __ldg(C + C_index) / __ldg(B + i);
@@ -124,19 +126,19 @@ void ComputeDivAGradientCUDAImpl(
     const TIn* B,
     TGrad* dA,
     CUDAContext* context) {
-  SimpleArray<int, D> C_dims_arr;
+  SimpleArray<FixedDivisor<int>, D> C_dims_arr;
   SimpleArray<int, D> C_strides_arr;
   SimpleArray<int, D> B_strides_arr;
-  SimpleArray<int, D> A_dims_arr;
-  std::copy_n(C_dims, D, C_dims_arr.data);
+  SimpleArray<FixedDivisor<int>, D> A_dims_arr;
+  for (int i = 0; i < D; ++i) {
+    C_dims_arr.data[i] = FixedDivisor<int>(C_dims[i]);
+    A_dims_arr.data[i] = FixedDivisor<int>(C_dims[A_axes[i]]);
+  }
   math::utils::ComputeTransposedStrides(D, C_dims, A_axes, C_strides_arr.data);
   int cur_stride = 1;
   for (int i = D - 1; i >= 0; --i) {
     B_strides_arr.data[i] = B_dims[i] == 1 ? 0 : cur_stride;
     cur_stride *= B_dims[i];
-  }
-  for (int i = 0; i < D; ++i) {
-    A_dims_arr.data[i] = C_dims[A_axes[i]];
   }
   ComputeDivAGradientCUDAKernel<TGrad, TIn, D>
       <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -166,10 +168,10 @@ void ComputeDivBGradientCUDAImpl(
     TGrad* dB,
     CUDAContext* context) {
   SimpleArray<int, D> C_strides_arr;
-  SimpleArray<int, D> B_dims_arr;
+  SimpleArray<FixedDivisor<int>, D> B_dims_arr;
   math::utils::ComputeTransposedStrides(D, C_dims, B_axes, C_strides_arr.data);
   for (int i = 0; i < D; ++i) {
-    B_dims_arr.data[i] = C_dims[B_axes[i]];
+    B_dims_arr.data[i] = FixedDivisor<int>(C_dims[B_axes[i]]);
   }
   ComputeDivBGradientCUDAKernel<TGrad, TIn, TOut, D>
       <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -202,20 +204,24 @@ void ComputeDivAGradientCUDA(
   for (int i = pivot; i < ndim; ++i) {
     inner_size *= C_dims[A_transpose_axes[i]];
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      ndim,
-      ComputeDivAGradientCUDAImpl,
-      TGrad,
-      TIn,
-      outer_size,
-      inner_size,
-      C_dims.data(),
-      B_dims.data(),
-      A_transpose_axes.data(),
-      dC,
-      B,
-      dA,
-      context);
+  if (outer_size > 0 && inner_size > 0) {
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+        ndim,
+        ComputeDivAGradientCUDAImpl,
+        TGrad,
+        TIn,
+        outer_size,
+        inner_size,
+        C_dims.data(),
+        B_dims.data(),
+        A_transpose_axes.data(),
+        dC,
+        B,
+        dA,
+        context);
+  } else if (outer_size > 0) {
+    math::Set<TGrad, CUDAContext>(outer_size, TGrad(0), dA, context);
+  }
 }
 
 template <typename TGrad, typename TIn, typename TOut>
@@ -240,21 +246,25 @@ void ComputeDivBGradientCUDA(
   for (int i = pivot; i < ndim; ++i) {
     inner_size *= C_dims[B_transpose_axes[i]];
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(
-      ndim,
-      ComputeDivBGradientCUDAImpl,
-      TGrad,
-      TIn,
-      TOut,
-      outer_size,
-      inner_size,
-      C_dims.data(),
-      B_transpose_axes.data(),
-      dC,
-      B,
-      C,
-      dB,
-      context);
+  if (outer_size > 0 && inner_size > 0) {
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(
+        ndim,
+        ComputeDivBGradientCUDAImpl,
+        TGrad,
+        TIn,
+        TOut,
+        outer_size,
+        inner_size,
+        C_dims.data(),
+        B_transpose_axes.data(),
+        dC,
+        B,
+        C,
+        dB,
+        context);
+  } else if (outer_size > 0) {
+    math::Set<TGrad, CUDAContext>(outer_size, TGrad(0), dB, context);
+  }
 }
 
 } // namespace
@@ -274,12 +284,12 @@ bool DivFunctor<CUDAContext>::Backward(
   if (A_dims == B_dims) {
     const int size = std::accumulate(
         A_dims.cbegin(), A_dims.cend(), 1, std::multiplies<int>());
-    math::Div(size, dC, B, dA, context);
     ComputeSimpleDivBGradientCUDAKernel<TGrad, TIn, TOut>
         <<<CAFFE_GET_BLOCKS(size),
            CAFFE_CUDA_NUM_THREADS,
            0,
            context->cuda_stream()>>>(size, dC, B, C, dB);
+    math::Div(size, dC, B, dA, context);
     return true;
   }
   const int ndim = std::max(A_dims.size(), B_dims.size());
@@ -298,12 +308,156 @@ bool DivFunctor<CUDAContext>::Backward(
   std::vector<int> B_axes;
   elementwise_ops_utils::ComputeBinaryBroadcastBackwardAxes(
       A_dims, B_dims, &A_axes, &B_axes);
-  ComputeDivAGradientCUDA<TGrad, TIn>(
-      C_broadcast_dims, B_broadcast_dims, A_axes, dC, B, dA, context);
   ComputeDivBGradientCUDA<TGrad, TIn, TOut>(
       C_broadcast_dims, B_axes, dC, B, C, dB, context);
+  ComputeDivAGradientCUDA<TGrad, TIn>(
+      C_broadcast_dims, B_broadcast_dims, A_axes, dC, B, dA, context);
   return true;
 }
+
+template <>
+class BinaryElementwiseWithArgsGradientOp<
+    NumericTypes,
+    CUDAContext,
+    BinaryFunctorWithDefaultCtor<DivFunctor<CUDAContext>>,
+    SameTypeAsInput,
+    SameTypeAsInput>
+    final : public Operator<CUDAContext> {
+ public:
+  USE_OPERATOR_FUNCTIONS(CUDAContext);
+
+  BinaryElementwiseWithArgsGradientOp(
+      const OperatorDef& operator_def,
+      Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws),
+        OP_SINGLE_ARG(bool, "broadcast", legacy_broadcast_, false),
+        OP_SINGLE_ARG(int, "axis", axis_, -1),
+        OP_SINGLE_ARG(string, "axis_str", axis_str_, ""),
+        OP_SINGLE_ARG(string, "order", order_, "NCHW"),
+        functor_(*this) {
+    if (legacy_broadcast_) {
+      if (axis_ != -1) {
+        // Get axis from an explicit axis argument.
+        CAFFE_ENFORCE_EQ(
+            axis_str_.size(),
+            0,
+            "Args axis and axis_str cannot be used simultaneously.");
+      } else if (axis_str_.size()) {
+        // Get the axis index semantically.
+        CAFFE_ENFORCE_EQ(
+            axis_str_.size(), 1, "Unsupported axis string", axis_str_);
+        const size_t semantic_axis_ = order_.find(axis_str_);
+        CAFFE_ENFORCE_NE(
+            semantic_axis_,
+            string::npos,
+            "Unrecognizable axis string ",
+            axis_str_,
+            " from order string ",
+            order_);
+        axis_ = semantic_axis_;
+      } else {
+        CAFFE_ENFORCE(
+            axis_ == -1 && axis_str_.empty(),
+            "Do not specify axis or axis_str if broadcast is not enabled.");
+      }
+    }
+  }
+
+  bool RunOnDevice() override {
+    return DispatchHelper<NumericTypes>::call(this, Input(1));
+  }
+
+  template <typename T>
+  bool DoRunWithType() {
+    auto* dA = Output(0);
+    auto* dB = Output(1);
+    const T* dC_data = nullptr;
+    const T* A_data = nullptr;
+    const T* B_data = nullptr;
+    const T* C_data = nullptr;
+    std::vector<int> A_dims;
+    std::vector<int> B_dims;
+    if (InputSize() == 3) {
+      const auto& B = Input(0);
+      const auto& C = Input(1);
+      const auto& dC = Input(2);
+      if (legacy_broadcast_) {
+        if (B.size() == 1) {
+          A_dims = {static_cast<int>(C.size())};
+          B_dims = {1};
+        } else {
+          size_t pre, n, post;
+          std::tie(pre, n, post) =
+              elementwise_ops_utils::ComputeLegacyBroadcastSizes(C, B, axis_);
+          A_dims = {static_cast<int>(pre),
+                    static_cast<int>(n),
+                    static_cast<int>(post)};
+          B_dims = {static_cast<int>(n), 1};
+        }
+      } else {
+        std::copy(
+            C.dims().cbegin(), C.dims().cend(), std::back_inserter(A_dims));
+        std::copy(
+            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      }
+      B_data = B.template data<T>();
+      C_data = C.template data<T>();
+      dC_data = dC.template data<T>();
+      dA->ResizeLike(C);
+      dB->ResizeLike(B);
+    } else {
+      const auto& dC = Input(0);
+      const auto& A = Input(1);
+      const auto& B = Input(2);
+      const auto& C = Input(3);
+      if (legacy_broadcast_) {
+        if (B.size() == 1) {
+          A_dims = {static_cast<int>(A.size())};
+          B_dims = {1};
+        } else {
+          size_t pre, n, post;
+          std::tie(pre, n, post) =
+              elementwise_ops_utils::ComputeLegacyBroadcastSizes(A, B, axis_);
+          A_dims = {static_cast<int>(pre),
+                    static_cast<int>(n),
+                    static_cast<int>(post)};
+          B_dims = {static_cast<int>(n), 1};
+        }
+      } else {
+        std::copy(
+            A.dims().cbegin(), A.dims().cend(), std::back_inserter(A_dims));
+        std::copy(
+            B.dims().cbegin(), B.dims().cend(), std::back_inserter(B_dims));
+      }
+      dC_data = dC.template data<T>();
+      A_data = A.template data<T>();
+      B_data = B.template data<T>();
+      C_data = C.template data<T>();
+      dA->ResizeLike(A);
+      dB->ResizeLike(B);
+    }
+    auto* dA_data = dA->template mutable_data<T>();
+    auto* dB_data = dB->template mutable_data<T>();
+    return functor_.Backward(
+        A_dims,
+        B_dims,
+        dC_data,
+        A_data,
+        B_data,
+        C_data,
+        dA_data,
+        dB_data,
+        &context_);
+  }
+
+ private:
+  const bool legacy_broadcast_;
+  int axis_;
+  const std::string axis_str_;
+  const std::string order_;
+
+  BinaryFunctorWithDefaultCtor<DivFunctor<CUDAContext>> functor_;
+};
 
 REGISTER_CUDA_OPERATOR(
     Div,

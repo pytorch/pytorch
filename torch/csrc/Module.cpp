@@ -93,7 +93,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   }
   torch::utils::initializeLayouts();
   torch::utils::initializeDtypes();
-  torch::tensor::initialize_python_bindings();
+  torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
 
@@ -149,7 +149,7 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   HANDLE_TH_ERRORS
-  torch::tensor::py_set_default_tensor_type(type);
+  torch::tensors::py_set_default_tensor_type(type);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -157,7 +157,7 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 PyObject * THPModule_setDefaultDtype(PyObject *_unused, PyObject *dtype)
 {
   HANDLE_TH_ERRORS
-  torch::tensor::py_set_default_dtype(dtype);
+  torch::tensors::py_set_default_dtype(dtype);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -364,7 +364,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  auto& type = torch::tensor::get_default_tensor_type();
+  auto& type = torch::tensors::get_default_tensor_type();
   auto dtype = (PyObject*)torch::getDtype(type.scalarType());
   Py_INCREF(dtype);
   return dtype;
@@ -373,7 +373,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (torch::tensor::get_default_tensor_type().is_cuda()) {
+  if (torch::tensors::get_default_tensor_type().is_cuda()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -484,6 +484,14 @@ PyMethodDef* THCUDNN_methods() {
 }
 #endif
 
+// ATen warning handler for Python
+static void warning_handler(const at::SourceLocation& source_location, const char* msg) {
+  AutoGIL gil;
+  if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
+    throw python_error();
+  }
+}
+
 static PyObject* initModule() {
   HANDLE_TH_ERRORS
   THInferNumThreads();
@@ -587,6 +595,9 @@ static PyObject* initModule() {
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
+
+  // Set ATen warnings to issue Python warnings
+  at::Warning::set_warning_handler(&warning_handler);
 
   ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
 

@@ -206,7 +206,7 @@ ImageInputOp<Context>::ImageInputOp(
           {-1, -1})),
       max_decode_error_ratio_(OperatorBase::template GetSingleArgument<float>(
           "max_decode_error_ratio",
-          0.0)) {
+          1.0)) {
   if ((random_scale_[0] == -1) || (random_scale_[1] == -1)) {
     random_scaling_ = false;
   } else {

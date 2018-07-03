@@ -26,7 +26,7 @@
 #include <type_traits>
 #include <vector>
 
-namespace torch { namespace tensor {
+namespace torch { namespace tensors {
 
 using namespace at;
 using namespace torch::autograd;
@@ -394,4 +394,4 @@ Device getDevice(const at::Tensor& tensor) {
   }
   return at::Device(at::kCPU);
 }
-}} // namespace torch::tensor
+}} // namespace torch::tensors

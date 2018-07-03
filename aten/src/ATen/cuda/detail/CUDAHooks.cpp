@@ -10,6 +10,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include "THC/THC.h"
+#include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
 #include "ATen/cudnn/cudnn-wrapper.h"
@@ -128,8 +129,8 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-std::unique_ptr<Allocator> CUDAHooks::newPinnedMemoryAllocator() const {
-  return std::unique_ptr<Allocator>(new PinnedMemoryAllocator());
+Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
+  return at::cuda::getPinnedMemoryAllocator();
 }
 
 void CUDAHooks::registerCUDATypes(Context* context) const {

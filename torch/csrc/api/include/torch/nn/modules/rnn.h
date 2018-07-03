@@ -5,6 +5,7 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
+#include <ATen/ATen.h>
 #include <ATen/Error.h>
 #include <ATen/optional.h>
 
@@ -15,6 +16,12 @@
 
 namespace torch {
 namespace nn {
+
+struct RNNOutput {
+  Tensor output;
+  Tensor state;
+};
+
 namespace detail {
 struct RNNOptionsBase {
   RNNOptionsBase(int64_t input_size, int64_t hidden_size);
@@ -34,42 +41,52 @@ class RNNImplBase : public torch::nn::Cloneable<Derived> {
   enum class CuDNNMode { RNN_RELU = 0, RNN_TANH = 1, LSTM = 2, GRU = 3 };
 
   RNNImplBase(
-      RNNOptionsBase options,
+      RNNOptionsBase options_,
       at::optional<CuDNNMode> cudnn_mode = at::nullopt,
       int64_t number_of_gates = 1,
       bool has_cell_state = false);
 
-  std::vector<Tensor> forward(std::vector<Tensor>);
+  RNNOutput forward(Tensor input, Tensor state = {});
 
   void reset() override;
 
-  void to(at::Type& type) override;
-  void to(at::ScalarType scalar_type) override;
-  void to(at::Backend backend) override;
+  /// Recursively casts all parameters to the given device and dtype.
+  void to(torch::Device device, torch::Dtype dtype, bool non_blocking = false)
+      override;
 
+  /// Recursively casts all parameters to the given dtype.
+  void to(torch::Dtype dtype, bool non_blocking = false) override;
+
+  /// Recursively moves all parameters to the given device.
+  void to(torch::Device device, bool non_blocking = false) override;
+
+  /// Fills the internal flattened parameter buffers passed to cuDNN. Call this
+  /// method if you mess around with the variable storages and want to use
+  /// cuDNN.
   void flatten_parameters_for_cudnn();
 
- protected:
-  virtual std::vector<Tensor> cell_forward(
-      std::vector<Tensor>,
-      int64_t layer) = 0;
+  RNNOptionsBase options;
 
-  std::vector<Tensor> CUDNN_forward(std::vector<Tensor>);
-  std::vector<Tensor> autograd_forward(std::vector<Tensor>);
+  std::vector<Tensor> w_ih;
+  std::vector<Tensor> w_hh;
+  std::vector<Tensor> b_ih;
+  std::vector<Tensor> b_hh;
+
+  Dropout dropout;
+
+ protected:
+  virtual Tensor cell_forward(Tensor input, Tensor state, int64_t layer) = 0;
+
+  RNNOutput CUDNN_forward(Tensor input, Tensor state);
+  RNNOutput autograd_forward(Tensor input, Tensor state);
 
   std::vector<Tensor> flat_weights() const;
-
-  RNNOptionsBase options_;
-
-  std::vector<Tensor> ihw_;
-  std::vector<Tensor> ihb_;
-  std::vector<Tensor> hhw_;
-  std::vector<Tensor> hhb_;
+  bool use_cudnn(Tensor sample) const;
+  Tensor create_dropout_state(Tensor input) const;
 
   int64_t number_of_gates_;
   bool has_cell_state_;
   at::optional<CuDNNMode> cudnn_mode_;
-  Dropout dropout_module_;
 
   // This is copied from pytorch, to determine whether weights are flat for the
   // fast CUDNN route. Otherwise, we have to use non flattened weights, which
@@ -106,12 +123,10 @@ class RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
   explicit RNNImpl(RNNOptions options);
 
-  const RNNOptions& options() const noexcept;
+  RNNOptions options;
 
  private:
-  std::vector<Tensor> cell_forward(std::vector<Tensor>, int64_t layer) override;
-
-  RNNOptions options_;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
   std::function<Tensor(Tensor)> activation_function_;
 };
 
@@ -125,10 +140,8 @@ class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
   explicit LSTMImpl(LSTMOptions options);
 
-  const LSTMOptions& options() const noexcept;
-
  private:
-  std::vector<Tensor> cell_forward(std::vector<Tensor>, int64_t layer) override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 };
 
 TORCH_MODULE(LSTM);
@@ -141,10 +154,8 @@ class GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
   explicit GRUImpl(GRUOptions options);
 
-  const GRUOptions& options() const noexcept;
-
  private:
-  std::vector<Tensor> cell_forward(std::vector<Tensor>, int64_t layer) override;
+  Tensor cell_forward(Tensor input, Tensor state, int64_t layer) override;
 };
 
 TORCH_MODULE(GRU);

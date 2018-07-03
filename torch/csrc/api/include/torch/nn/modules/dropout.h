@@ -18,16 +18,13 @@ namespace detail {
 template <typename Derived>
 class DropoutImplBase : public torch::nn::Cloneable<Derived> {
  public:
-  explicit DropoutImplBase(DropoutOptions options);
+  explicit DropoutImplBase(DropoutOptions options_);
 
   void reset() override;
-  std::vector<Tensor> forward(std::vector<Tensor> input);
-  const DropoutOptions& options() const noexcept;
-
- protected:
+  Tensor forward(Tensor input);
   virtual Tensor noise_mask(Tensor input) const = 0;
 
-  DropoutOptions options_;
+  DropoutOptions options;
 };
 } // namespace detail
 

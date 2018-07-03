@@ -6,8 +6,6 @@
 #include <torch/nn/pimpl.h>
 #include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
-
 #include <ATen/Error.h>
 
 #include <cstdint>
@@ -25,6 +23,7 @@ namespace nn {
 class Sequential : public Cloneable<Sequential> {
  public:
   using Iterator = std::vector<std::shared_ptr<AnyModule>>::iterator;
+  using ConstIterator = std::vector<std::shared_ptr<AnyModule>>::const_iterator;
 
   /// Constructs the `Sequential` from a pack of modules. Each module can either
   /// be a plain value (e.g. `Linear`) or a boxed value (e.g.
@@ -82,9 +81,7 @@ class Sequential : public Cloneable<Sequential> {
     static_assert(
         torch::detail::has_forward<ModuleType>::value,
         "Can only add modules with a forward() method to Sequential");
-    modules_.push_back(std::make_shared<AnyModule>(std::move(module_ptr)));
-    const auto index = modules_.size() - 1;
-    register_module(std::to_string(index), modules_[index]->ptr());
+    push_back(std::make_shared<AnyModule>(std::move(module_ptr)));
   }
 
   /// Adds a new `Module` to the `Sequential` container, moving or copying it
@@ -107,13 +104,35 @@ class Sequential : public Cloneable<Sequential> {
     push_back(module_holder.get());
   }
 
+  /// Adds a type-erased `AnyModule` to the `Sequential`.
+  void push_back(std::shared_ptr<AnyModule> any_module) {
+    modules_.push_back(std::move(any_module));
+    const auto index = modules_.size() - 1;
+    register_module(std::to_string(index), modules_[index]->ptr());
+  }
+
+  /// Iterates over the container and calls `push_back()` on each iterated
+  /// value.
+  template <typename Container>
+  void extend(const Container& container) {
+    for (const auto& module : container) {
+      push_back(module);
+    }
+  }
+
   /// Returns an iterator to the start of the `Sequential`.
   Iterator begin() {
+    return modules_.begin();
+  }
+  ConstIterator begin() const {
     return modules_.begin();
   }
 
   /// Returns an iterator to the end of the `Sequential`.
   Iterator end() {
+    return modules_.end();
+  }
+  ConstIterator end() const {
     return modules_.end();
   }
 

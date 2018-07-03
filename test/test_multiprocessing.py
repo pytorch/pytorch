@@ -11,7 +11,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests, IS_WINDOWS
+from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN
 
 
 TEST_REPEATS = 30
@@ -300,11 +300,15 @@ class TestMultiprocessing(TestCase):
         p.join(1)
         self.assertEqual(t, torch.ones(5, 5) * 3, 0)
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     def test_cuda(self):
         torch.cuda.FloatTensor([1])  # initialize CUDA outside of leak checker
         self._test_sharing(mp.get_context('spawn'), torch.cuda.FloatTensor)
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     @unittest.skipIf(not TEST_CUDA_IPC, 'CUDA IPC not available')
     @unittest.skipIf(not TEST_MULTIGPU, 'found only 1 GPU')
     def test_cuda_small_tensors(self):

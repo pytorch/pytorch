@@ -1,10 +1,13 @@
 #include <catch.hpp>
 
+#include <torch/nn/modules/functional.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/nn/modules/sequential.h>
-#include <torch/optimizers.h>
+#include <torch/optim/optimizer.h>
+#include <torch/optim/sgd.h>
 #include <torch/serialization.h>
 #include <torch/tensor.h>
+#include <torch/utils.h>
 
 #include <test/cpp/api/util.h>
 
@@ -20,11 +23,15 @@ using namespace torch::nn;
 namespace {
 std::shared_ptr<Sequential> xor_model() {
   return std::make_shared<Sequential>(
-      torch::SigmoidLinear(2, 8), torch::SigmoidLinear(8, 1));
+      Linear(2, 8),
+      Functional(at::sigmoid),
+      Linear(8, 1),
+      Functional(at::sigmoid));
 }
 } // namespace
 
 TEST_CASE("serialization") {
+  torch::manual_seed(0);
   SECTION("undefined") {
     auto x = torch::Tensor();
 
@@ -40,19 +47,19 @@ TEST_CASE("serialization") {
   }
 
   SECTION("cputypes") {
-    for (int i = 0; i < static_cast<int>(at::ScalarType::NumOptions); i++) {
-      if (i == static_cast<int>(at::ScalarType::Half)) {
+    for (int i = 0; i < static_cast<int>(torch::Dtype::NumOptions); i++) {
+      if (i == static_cast<int>(torch::Dtype::Half)) {
         // XXX can't serialize half tensors at the moment since contiguous() is
         // not implemented for this type;
         continue;
-      } else if (i == static_cast<int>(at::ScalarType::Undefined)) {
+      } else if (i == static_cast<int>(torch::Dtype::Undefined)) {
         // We can't construct a tensor for this type. This is tested in
         // serialization/undefined anyway.
         continue;
       }
 
       auto x = torch::ones(
-          {5, 5}, at::getType(at::kCPU, static_cast<at::ScalarType>(i)));
+          {5, 5}, torch::getType(torch::kCPU, static_cast<torch::Dtype>(i)));
       auto y = torch::empty({});
 
       std::stringstream ss;
@@ -61,7 +68,7 @@ TEST_CASE("serialization") {
 
       REQUIRE(y.defined());
       REQUIRE(x.sizes().vec() == y.sizes().vec());
-      if (at::isIntegralType(static_cast<at::ScalarType>(i))) {
+      if (torch::isIntegralType(static_cast<torch::Dtype>(i))) {
         REQUIRE(x.equal(y));
       } else {
         REQUIRE(x.allclose(y));
@@ -167,39 +174,34 @@ TEST_CASE("serialization") {
 
   SECTION("xor") {
     // We better be able to save and load a XOR model!
-    auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
-      auto inp = torch::empty({bs, 2});
-      auto lab = torch::empty({bs});
-      for (auto i = 0U; i < bs; i++) {
-        auto a = std::rand() % 2;
-        auto b = std::rand() % 2;
-        auto c = a ^ b;
-        inp[i][0] = a;
-        inp[i][1] = b;
-        lab[i] = c;
+    auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t batch_size) {
+      auto inputs = torch::empty({batch_size, 2});
+      auto labels = torch::empty({batch_size});
+      for (size_t i = 0; i < batch_size; i++) {
+        inputs[i] = torch::randint(2, {2}, torch::kInt64);
+        labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
       }
-
-      // forward
-      auto x = model->forward<torch::Tensor>(inp);
-      return at::binary_cross_entropy(x, lab);
+      auto x = model->forward<torch::Tensor>(inputs);
+      return torch::binary_cross_entropy(x, labels);
     };
 
     auto model = xor_model();
     auto model2 = xor_model();
     auto model3 = xor_model();
-    auto optim = torch::SGD(model, 1e-1)
-                     .momentum(0.9)
-                     .nesterov()
-                     .weight_decay(1e-6)
-                     .make();
+    auto optimizer = torch::optim::SGD(
+        model->parameters(),
+        torch::optim::SGDOptions(1e-1)
+            .momentum(0.9)
+            .nesterov(true)
+            .weight_decay(1e-6));
 
     float running_loss = 1;
     int epoch = 0;
     while (running_loss > 0.1) {
       torch::Tensor loss = getLoss(model, 4);
-      optim->zero_grad();
+      optimizer.zero_grad();
       loss.backward();
-      optim->step();
+      optimizer.step();
 
       running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
       REQUIRE(epoch < 3000);
@@ -227,19 +229,24 @@ TEST_CASE("serialization") {
     torch::load(ss, model3.get());
 
     // Make some optimizers with momentum (and thus state)
-    auto optim1 = torch::SGD(model1, 1e-1).momentum(0.9).make();
-    auto optim2 = torch::SGD(model2, 1e-1).momentum(0.9).make();
-    auto optim2_2 = torch::SGD(model2, 1e-1).momentum(0.9).make();
-    auto optim3 = torch::SGD(model3, 1e-1).momentum(0.9).make();
-    auto optim3_2 = torch::SGD(model3, 1e-1).momentum(0.9).make();
+    auto optim1 = torch::optim::SGD(
+        model1->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim2 = torch::optim::SGD(
+        model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim2_2 = torch::optim::SGD(
+        model2->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim3 = torch::optim::SGD(
+        model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
+    auto optim3_2 = torch::optim::SGD(
+        model3->parameters(), torch::optim::SGDOptions(1e-1).momentum(0.9));
 
-    auto x = torch::ones({10, 5}, at::requires_grad());
+    auto x = torch::ones({10, 5}, torch::requires_grad());
 
-    auto step = [&](torch::Optimizer optim, Linear model) {
-      optim->zero_grad();
-      auto y = model->forward({x})[0].sum();
+    auto step = [&](torch::optim::Optimizer& optimizer, Linear model) {
+      optimizer.zero_grad();
+      auto y = model->forward(x).sum();
       y.backward();
-      optim->step();
+      optimizer.step();
     };
 
     // Do 2 steps of model1
@@ -253,8 +260,8 @@ TEST_CASE("serialization") {
     // Do 2 steps of model 3 while saving the optimizer
     step(optim3, model3);
     ss.clear();
-    torch::save(ss, optim3);
-    torch::load(ss, optim3_2);
+    torch::save(ss, &optim3);
+    torch::load(ss, &optim3_2);
     step(optim3_2, model3);
 
     auto param1 = model1->parameters();
@@ -270,40 +277,34 @@ TEST_CASE("serialization") {
 }
 
 TEST_CASE("serialization_cuda", "[cuda]") {
+  torch::manual_seed(0);
   // We better be able to save and load a XOR model!
-  auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t bs) {
-    auto inp = torch::empty({bs, 2});
-    auto lab = torch::empty({bs});
-    for (auto i = 0U; i < bs; i++) {
-      auto a = std::rand() % 2;
-      auto b = std::rand() % 2;
-      auto c = a ^ b;
-      inp[i][0] = a;
-      inp[i][1] = b;
-      lab[i] = c;
+  auto getLoss = [](std::shared_ptr<Sequential> model, uint32_t batch_size) {
+    auto inputs = torch::empty({batch_size, 2});
+    auto labels = torch::empty({batch_size});
+    for (size_t i = 0; i < batch_size; i++) {
+      inputs[i] = torch::randint(2, {2}, torch::kInt64);
+      labels[i] = inputs[i][0].toCLong() ^ inputs[i][1].toCLong();
     }
-
-    // forward
-    auto x = model->forward<torch::Tensor>(inp);
-    return at::binary_cross_entropy(x, lab);
+    auto x = model->forward<torch::Tensor>(inputs);
+    return torch::binary_cross_entropy(x, labels);
   };
 
   auto model = xor_model();
   auto model2 = xor_model();
   auto model3 = xor_model();
-  auto optim = torch::SGD(model, 1e-1)
-                   .momentum(0.9)
-                   .nesterov()
-                   .weight_decay(1e-6)
-                   .make();
+  auto optimizer = torch::optim::SGD(
+      model->parameters(),
+      torch::optim::SGDOptions(1e-1).momentum(0.9).nesterov(true).weight_decay(
+          1e-6));
 
   float running_loss = 1;
   int epoch = 0;
   while (running_loss > 0.1) {
     torch::Tensor loss = getLoss(model, 4);
-    optim->zero_grad();
+    optimizer.zero_grad();
     loss.backward();
-    optim->step();
+    optimizer.step();
 
     running_loss = running_loss * 0.99 + loss.data().sum().toCFloat() * 0.01;
     REQUIRE(epoch < 3000);
@@ -317,7 +318,7 @@ TEST_CASE("serialization_cuda", "[cuda]") {
   auto loss = getLoss(model2, 100);
   REQUIRE(loss.toCFloat() < 0.1);
 
-  model2->cuda();
+  model2->to(torch::kCUDA);
   ss.clear();
   torch::save(ss, model2);
   torch::load(ss, model3);

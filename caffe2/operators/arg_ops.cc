@@ -10,18 +10,18 @@ namespace {
 
 template <typename T, class Compare, class Context>
 void ComputeArgImpl(
-    const TIndex prev_size,
-    const TIndex next_size,
-    const TIndex n,
+    const int prev_size,
+    const int next_size,
+    const int n,
     const Compare& comp,
     const T* X,
     TIndex* Y,
     Context* context) {
   math::Set<TIndex, Context>(prev_size * next_size, TIndex(0), Y, context);
-  for (TIndex i = 0; i < prev_size; ++i) {
+  for (int i = 0; i < prev_size; ++i) {
     const T* cur_X = X + i * n * next_size + next_size;
-    for (TIndex k = 1; k < n; ++k) {
-      for (TIndex j = 0; j < next_size; ++j) {
+    for (int k = 1; k < n; ++k) {
+      for (int j = 0; j < next_size; ++j) {
         TIndex* cur_Y = Y + i * next_size + j;
         if (comp(*cur_X, X[i * n * next_size + *cur_Y * next_size + j])) {
           *cur_Y = k;
@@ -37,9 +37,9 @@ void ComputeArgImpl(
 template <>
 template <typename T>
 bool ArgMaxReducer<CPUContext>::operator()(
-    const TIndex prev_size,
-    const TIndex next_size,
-    const TIndex n,
+    const int prev_size,
+    const int next_size,
+    const int n,
     const T* X,
     TIndex* Y,
     CPUContext* context) const {
@@ -50,9 +50,9 @@ bool ArgMaxReducer<CPUContext>::operator()(
 template <>
 template <typename T>
 bool ArgMinReducer<CPUContext>::operator()(
-    const TIndex prev_size,
-    const TIndex next_size,
-    const TIndex n,
+    const int prev_size,
+    const int next_size,
+    const int n,
     const T* X,
     TIndex* Y,
     CPUContext* context) const {
@@ -157,14 +157,16 @@ Indices: [[1 0 0]
 
     )DOC")
     .Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
-    .Output(0,
-      "Indices",
-      "*(type: Tensor`<float>`)* Tensor of indices for the largest values.")
+    .Output(
+        0,
+        "Indices",
+        "*(type: Tensor`<float>`)* Tensor of indices for the largest values.")
     .Arg("axis", "*(type: int; default: -1)* The axis to get argmax.")
-    .Arg("keepdims",
-      "*(type: bool; default: True)* If True (default), the output tensor "
-      "shape will match the input tensor shape except the `axis` dimension "
-      "equals 1. Else, the `axis` dimension of the output tensor is removed.");
+    .Arg(
+        "keepdims",
+        "*(type: bool; default: True)* If True (default), the output tensor "
+        "shape will match the input tensor shape except the `axis` dimension "
+        "equals 1. Else, the `axis` dimension of the output tensor is removed.");
 
 OPERATOR_SCHEMA(ArgMin)
     .NumInputs(1)
@@ -227,16 +229,18 @@ Indices: [[4]
 
     )DOC")
     .Input(0, "X", "*(type: Tensor`<float>`)* Input tensor.")
-    .Output(0,
-      "Indices",
-      "*(type: Tensor`<float>`)* Tensor of indices for the smallest values.")
+    .Output(
+        0,
+        "Indices",
+        "*(type: Tensor`<float>`)* Tensor of indices for the smallest values.")
     .Arg("axis", "*(type: int; default: -1)* The axis to get argmin.")
-    .Arg("keepdims",
-      "*(type: bool; default: True)* If True (default), the output tensor "
-      "shape will match the input tensor shape except the `axis` dimension "
-      "equals 1. Else, the `axis` dimension of the output tensor is removed.");
+    .Arg(
+        "keepdims",
+        "*(type: bool; default: True)* If True (default), the output tensor "
+        "shape will match the input tensor shape except the `axis` dimension "
+        "equals 1. Else, the `axis` dimension of the output tensor is removed.");
 
-NO_GRADIENT(ArgMax);
-NO_GRADIENT(ArgMin);
+SHOULD_NOT_DO_GRADIENT(ArgMax);
+SHOULD_NOT_DO_GRADIENT(ArgMin);
 
 } // namespace caffe2

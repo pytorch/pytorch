@@ -11,11 +11,11 @@ from caffe2.python.layers.layers import (
 )
 
 
-class PairwiseDotProduct(ModelLayer):
+class PairwiseSimilarity(ModelLayer):
 
-    def __init__(self, model, input_record, output_dim,
-                 name='pairwise_dot_product', **kwargs):
-        super(PairwiseDotProduct, self).__init__(model, name, input_record, **kwargs)
+    def __init__(self, model, input_record, output_dim, pairwise_similarity_func='dot',
+                 name='pairwise_similarity', **kwargs):
+        super(PairwiseSimilarity, self).__init__(model, name, input_record, **kwargs)
         assert isinstance(input_record, schema.Struct), (
             "Incorrect input type. Excpected Struct, but received: {0}".
             format(input_record))
@@ -26,6 +26,7 @@ class PairwiseDotProduct(ModelLayer):
             "either (all_embeddings) xor (x_embeddings and y_embeddings) " +
             "should be given."
         )
+        self.pairwise_similarity_func = pairwise_similarity_func
         if 'all_embeddings' in input_record:
             x_embeddings = input_record['all_embeddings']
             y_embeddings = input_record['all_embeddings']
@@ -62,11 +63,26 @@ class PairwiseDotProduct(ModelLayer):
         )
 
     def add_ops(self, net):
-        Y = net.BatchMatMul(
-            [self.x_embeddings(), self.y_embeddings()],
-            [self.x_embeddings() + '_matmul'],
-            trans_b=1,
-        )
+        if self.pairwise_similarity_func == "cosine_similarity":
+            x_embeddings_norm = net.Normalize(self.x_embeddings(), axis=1)
+            y_embeddings_norm = net.Normalize(self.y_embeddings(), axis=1)
+            Y = net.BatchMatMul(
+                [x_embeddings_norm, y_embeddings_norm],
+                [x_embeddings_norm + '_matmul'],
+                trans_b=1,
+            )
+        elif self.pairwise_similarity_func == "dot":
+            Y = net.BatchMatMul(
+                [self.x_embeddings(), self.y_embeddings()],
+                [self.x_embeddings() + '_matmul'],
+                trans_b=1,
+            )
+        else:
+            raise NotImplementedError(
+                "pairwise_similarity_func={} is not valid".format(
+                    self.pairwise_similarity_func
+                )
+            )
 
         if self.indices_to_gather:
             flattened = net.Flatten(

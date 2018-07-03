@@ -637,7 +637,7 @@ class TestCollectEnv(TestCase):
 
     def _preprocess_info_for_test(self, info_output):
         # Remove the version hash
-        version_hash_regex = re.compile(r'(a\d+)\+.......')
+        version_hash_regex = re.compile(r'(a\d+)\+\w+')
         result = re.sub(version_hash_regex, r'\1', info_output).strip()
 
         # Substitutions to lower the specificity of the versions listed
@@ -673,7 +673,6 @@ class TestCollectEnv(TestCase):
         self.assertTrue(info_output.count('\n') >= 17)
 
     @unittest.skipIf('BUILD_ENVIRONMENT' not in os.environ.keys(), 'CI-only test')
-    @unittest.skip('temporarily skip to change cmake version in CI')
     def test_expect(self):
         info_output = get_pretty_env_info()
 

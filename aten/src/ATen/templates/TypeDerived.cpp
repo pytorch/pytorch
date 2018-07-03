@@ -53,9 +53,9 @@ std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, con
     return std::unique_ptr<Storage>(
       new ${Storage}(context,data,size,deleter));
 }
-std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const {
     return std::unique_ptr<Storage>(
-        new ${Storage}(context, size, std::move(allocator)));
+        new ${Storage}(context, size, allocator));
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)

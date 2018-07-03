@@ -35,28 +35,41 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
   explicit ConvImpl(ConvOptions<D> options);
 
   void reset() override;
-  const ConvOptions<D>& options() const noexcept;
 
- protected:
-  Tensor weight_;
-  Tensor bias_;
-  ConvOptions<D> options_;
+  ConvOptions<D> options;
+  Tensor weight;
+  Tensor bias;
 };
 
-#define CONV_D(D)                                               \
-  class Conv##D##dImpl : public ConvImpl<D, Conv##D##dImpl> {   \
-   public:                                                      \
-    using ConvImpl<D, Conv##D##dImpl>::ConvImpl;                \
-    std::vector<Tensor> forward(std::vector<Tensor> input); \
-  };                                                            \
-  using Conv##D##dOptions = ConvOptions<D>;                     \
-  TORCH_MODULE(Conv##D##d)
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-CONV_D(1);
-CONV_D(2);
-CONV_D(3);
+class Conv1dImpl : public ConvImpl<1, Conv1dImpl> {
+ public:
+  using ConvImpl<1, Conv1dImpl>::ConvImpl;
+  Tensor forward(Tensor input);
+};
+using Conv1dOptions = ConvOptions<1>;
+TORCH_MODULE(Conv1d);
 
-#undef CONV_D
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv2d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class Conv2dImpl : public ConvImpl<2, Conv2dImpl> {
+ public:
+  using ConvImpl<2, Conv2dImpl>::ConvImpl;
+  Tensor forward(Tensor input);
+};
+using Conv2dOptions = ConvOptions<2>;
+TORCH_MODULE(Conv2d);
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv3d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+class Conv3dImpl : public ConvImpl<3, Conv3dImpl> {
+ public:
+  using ConvImpl<3, Conv3dImpl>::ConvImpl;
+  Tensor forward(Tensor input);
+};
+using Conv3dOptions = ConvOptions<3>;
+TORCH_MODULE(Conv3d);
 
 } // namespace nn
 } // namespace torch

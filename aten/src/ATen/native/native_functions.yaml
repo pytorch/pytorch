@@ -75,6 +75,9 @@
     CPU: _acos_out_cpu
     CUDA: _acos_out_cuda
 
+- func: avg_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, bool ceil_mode=false, bool count_include_pad=true) -> Tensor
+  variants: function
+
 - func: adaptive_avg_pool1d(Tensor self, IntList[1] output_size) -> Tensor
   variants: function
 
@@ -300,7 +303,7 @@
     CPU: _cosh_out_cpu
     CUDA: _cosh_out_cuda
 
-- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
+- func: cosine_embedding_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function
 
 - func: cudnn_affine_grid_generator(Tensor theta, int64_t N, int64_t C, int64_t H, int64_t W) -> Tensor
@@ -614,7 +617,7 @@
 - func: hamming_window(int64_t window_length, bool periodic, double alpha, double beta, TensorOptions options={}) -> Tensor
   variants: function
 
-- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, bool size_average=true, bool reduce=true) -> Tensor
+- func: hinge_embedding_loss(Tensor self, Tensor target, double margin=1.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function
 
 - func: ger(Tensor self, Tensor vec2) -> Tensor
@@ -751,12 +754,16 @@
   dispatch:
     CPU: _log1p__cpu
     CUDA: _log1p__cuda
+    SparseCPU: log1p_sparse_
+    SparseCUDA: log1p_sparse_
 
 - func: log1p_out(Tensor result, Tensor self) -> Tensor
   variants: function
   dispatch:
     CPU: _log1p_out_cpu
     CUDA: _log1p_out_cuda
+    SparseCPU: log1p_out_sparse
+    SparseCUDA: log1p_out_sparse
 
 - func: log2(Tensor self) -> Tensor
 
@@ -804,7 +811,7 @@
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
 
-- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, bool size_average=true, bool reduce=true) -> Tensor
+- func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function
 
 - func: matmul(Tensor self, Tensor other) -> Tensor
@@ -814,7 +821,16 @@
 
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
-- func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+- func: max_pool1d_with_indices(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
+  variants: function
+
+- func: max_pool1d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
+  variants: function
+
+- func: max_pool2d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
+  variants: function
+
+- func: max_pool3d(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> Tensor
   variants: function
 
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
@@ -1288,7 +1304,7 @@
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
   variants: function
 
-- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, bool size_average=true, bool reduce=true) -> Tensor
+- func: triplet_margin_loss(Tensor anchor, Tensor positive, Tensor negative, double margin=1.0, double p=2, double eps=1e-6, bool swap=false, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function
 
 - func: trunc(Tensor self) -> Tensor
@@ -1417,8 +1433,6 @@
     SparseCUDA: zero_sparse_
 
 - func: zero_(Tensor self) -> Tensor
-
-
 
 - func: s_native_add_out(Tensor result, Tensor self, Tensor other, *, Scalar alpha=1) -> Tensor
   variants: function

@@ -105,6 +105,7 @@ bool DataChannelMPI::init() {
   if (provided != MPI_THREAD_MULTIPLE) {
     std::cerr << "WARNING: Used MPI implementation doesn't support multithreading, "
               << "so distributed functions might not work properly."
+              << "If you are using mpich, try setting environment MPICH_MAX_THREAD_SAFETY=multiple and rerun."
               << std::endl;
   }
 

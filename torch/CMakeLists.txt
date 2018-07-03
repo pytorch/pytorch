@@ -37,8 +37,8 @@ find_library(CAFFE2_GPU_LIBRARY caffe2_gpu
 find_library(PROTOBUF_LIBRARY protobuf
   NAMES libprotobuf.a libprotobufd.a libprotobuf.lib libprotobufd.lib
   PATHS ${CAFFE2_BUILD_LIB_DIR} NO_DEFAULT_PATH)
-find_library(NANOPB_LIBRARY protobuf-nanopb
-  PATHS ${NANOPB_BUILD_PATH} NO_DEFAULT_PATH)
+
+add_subdirectory(../third_party/nanopb protobuf-nanopb)
 
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
@@ -155,6 +155,7 @@ add_custom_command(
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.cpp"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions.h"
   "${TORCH_SRC_DIR}/csrc/autograd/generated/python_nn_functions_dispatch.h"
+  "${TORCH_SRC_DIR}/csrc/autograd/generated/variable_factories.h"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_dispatch.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_schema.cpp"
   "${TORCH_SRC_DIR}/csrc/jit/generated/aten_interned_strings.h"
@@ -178,6 +179,7 @@ add_custom_command(
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.cpp"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions.h"
   "${TOOLS_PATH}/autograd/templates/python_nn_functions_dispatch.h"
+  "${TOOLS_PATH}/autograd/templates/variable_factories.h"
   "${TOOLS_PATH}/autograd/gen_autograd.py"
   "${TOOLS_PATH}/autograd/gen_autograd_functions.py"
   "${TOOLS_PATH}/autograd/gen_variable_type.py"
@@ -254,7 +256,12 @@ if (NOT NO_API)
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/functional.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/linear.cpp
     ${TORCH_SRC_DIR}/csrc/api/src/nn/modules/rnn.cpp
-    ${TORCH_SRC_DIR}/csrc/api/src/optimizers.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/optimizer.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adam.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/adagrad.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/lbfgs.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/rmsprop.cpp
+    ${TORCH_SRC_DIR}/csrc/api/src/optim/sgd.cpp
   )
 endif()
 
@@ -289,7 +296,7 @@ target_link_libraries(torch
   ${TORCH_CUDA_LIBRARIES}
   ${CAFFE2_LIBRARY}
   ${PROTOBUF_LIBRARY}
-  ${NANOPB_LIBRARY}
+  protobuf-nanopb
 )
 if(USE_CUDA)
   if("${CMAKE_CXX_COMPILER_ID}" MATCHES "GNU")
