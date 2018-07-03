@@ -107,7 +107,7 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
   if (isSameTensor(r, t)) {
     // don't have in-place log1p for uncoalesced input because coalesce() is not in-place
     AT_CHECK(
-      r.is_coalesced(), "in-place log1p on uncoalesced tensors is not supported yet!");
+      r.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported yet!");
   }
   else {
     r = raw_copy_sparse_(r, t.coalesce());
@@ -117,7 +117,7 @@ SparseTensor& log1p_out_sparse(SparseTensor& r, const SparseTensor& t) {
 }
 
 SparseTensor& log1p_sparse_(SparseTensor& t) {
-  AT_CHECK(t.is_coalesced(), "in-place log1p on uncoalesced tensors is not supported yet!");
+  AT_CHECK(t.is_coalesced(), "log1p: in-place on uncoalesced tensors is not supported yet!");
   return log1p_out_sparse(t, t);
 }
 
@@ -130,7 +130,7 @@ SparseTensor& log1p_sparse_(SparseTensor& t) {
 SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Scalar value) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t_.is_sparse());
-  AT_CHECK(value.toDouble() != 0, "cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
+  AT_CHECK(value.toDouble() != 0, "pow: cannot raise to zeroth power on sparse tensor; it would make the result tensor dense");
 
   // This coalesce is why we can't easily provide an inplace variant
   SparseTensor t = t_.coalesce();
@@ -215,7 +215,7 @@ SparseTensor& s_add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const
     return mul_out_sparse_scalar(r, src, value);
   }
 
-  AT_CHECK(_is_same_density(t, src), "cadd operands have incompatible desnitities");
+  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t._sparseDims(), " sparse dimensions while 'other' has ", src._sparseDims(), " sparse dimensions");
 
   // saving those because they can be overwritten when doing in-place operations
   int64_t t_nnz = t._nnz(), s_nnz = src._nnz(), max_nnz = t_nnz + s_nnz;
@@ -570,7 +570,7 @@ void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t dim_j, 
             dense_ptr + col * dense_stride0, dense_stride1,
             r_ptr + h * r_stride0, r_stride1);
       } else {
-        AT_ERROR("index out of bound. spmm: ", col, " not between 1 and ", dim_j);
+        AT_ERROR("addmm: index out of bound: ", col, " not between 1 and ", dim_j);
       }
     }
   }
@@ -590,10 +590,10 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   AT_CHECK(!sparse_.is_cuda(), "addmm: expected 'mat1' to be a CPU tensor, but got a CUDA tensor");
   AT_CHECK(!dense.is_cuda(), "addmm: expected 'mat2' to be a CPU tensor, but got a CUDA tensor");
 
-  AT_CHECK(sparse_._sparseDims() == 2, "matrices expected, got ", sparse_._sparseDims(), "D tensor");
-  AT_CHECK(sparse_._denseDims() == 0, "scalar values expected, got ", sparse_._denseDims(), "D values");
-  AT_CHECK(dense.numel() != 0, "matrices expected, got empty tensor");
-  AT_CHECK(dense.dim() == 2, "matrices expected, got ", dense.dim(), "D tensor");
+  AT_CHECK(sparse_._sparseDims() == 2, "addmm: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
+  AT_CHECK(dense.numel() != 0, "addmm: matrices expected, got empty tensor");
+  AT_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
 
   SparseTensor sparse = sparse_.coalesce();
 
@@ -603,11 +603,11 @@ Tensor& s_addmm_out_sparse_dense_cpu(
   int64_t dim_k = dense.size(1);
 
   AT_CHECK(dense.size(0) == dim_j,
-      "Argument #3 (dense): Expected dim 0 size ", dim_j, ", got ", dense.size(0));
+      "addmm: Argument #3 (dense): Expected dim 0 size ", dim_j, ", got ", dense.size(0));
   AT_CHECK(t.size(0) == dim_i,
-      "Argument #1 (t): Expected dim 0 size ", dim_i, ", got ", t.size(0));
+      "addmm: Argument #1 (t): Expected dim 0 size ", dim_i, ", got ", t.size(0));
   AT_CHECK(t.size(1) == dim_k,
-      "Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", t.size(1));
+      "addmm: Argument #1 (t): Expected dim 1 size ", dim_k, ", got ", t.size(1));
 
   r.resize_({dim_i, dim_k});
 
@@ -668,18 +668,18 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
   AT_CHECK(!dense.is_cuda(), "hspmm: expected 'other' to be a CPU tensor, but got a CUDA tensor");
 
   AT_CHECK(sparse_._sparseDims() == 2,
-      "Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+      "hspmm: Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0,
-      "Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
+      "hspmm: Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
-      "Argument #3: matrices expected, got ", dense.dim(), "D tensor");
+      "hspmm: Argument #3: matrices expected, got ", dense.dim(), "D tensor");
 
   int64_t m = sparse_.size(0);
   int64_t k = sparse_.size(1);
   int64_t n = dense.size(1);
 
   AT_CHECK(dense.size(0) == k,
-      "Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
+      "hspmm: Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
 
   _get_sparse_impl(r)->raw_resize_(1, 1, {m, n});
 
