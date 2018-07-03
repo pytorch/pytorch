@@ -5,21 +5,23 @@
 
 #include "THStorage.h"
 
-#include "ATen/ScalarType.h"
-#include "ATen/ScalarTypeUtils.h"
+#include <ATen/ScalarType.h>
+#include <ATen/ScalarTypeUtils.h>
 #include "THTypeConversion.hpp"
 #include <atomic>
 
 typedef struct THStorage
 {
+    at::Backend backend; // kCPU or kCUDA only
     at::ScalarType scalar_type;
     void *data_ptr;
     ptrdiff_t size;
     std::atomic<int> refcount;
     char flag;
-    THAllocator *allocator;
+    void *allocatorVoidPtr; // Either THDeviceAllocator or THCDeviceAllocator
     void *allocatorContext;
     struct THStorage *view;
+    int device;
 
     template <typename T>
     inline T * data() const {
@@ -36,3 +38,9 @@ typedef struct THStorage
       return static_cast<T*>(this->data_ptr);
     }
 } THStorage;
+
+TH_API THStorage* THStorage_new(at::ScalarType scalar_type);
+TH_API THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size);
+TH_API THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
+                                             THAllocator *allocator,
+                                             void *allocatorContext);

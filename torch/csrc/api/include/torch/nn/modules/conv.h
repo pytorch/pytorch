@@ -35,12 +35,10 @@ class ConvImpl : public torch::nn::Cloneable<Derived> {
   explicit ConvImpl(ConvOptions<D> options);
 
   void reset() override;
-  const ConvOptions<D>& options() const noexcept;
 
- protected:
-  Tensor weight_;
-  Tensor bias_;
-  ConvOptions<D> options_;
+  ConvOptions<D> options;
+  Tensor weight;
+  Tensor bias;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ Conv1d ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
