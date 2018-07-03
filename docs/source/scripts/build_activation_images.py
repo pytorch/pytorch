@@ -25,25 +25,25 @@ if not os.path.exists(ACTIVATION_IMAGE_PATH):
 
 # In a refactor, these ought to go into their own module or entry
 # points so we can generate this list programmaticly
-functions = [
-    'ELU',
-    'Hardshrink',
-    'Hardtanh',
-    'LeakyReLU',  # Perhaps we should add text explaining slight slope?
-    'LogSigmoid',
-    'PReLU',
-    'ReLU',
-    'ReLU6',
-    'RReLU',
-    'SELU',
-    'Sigmoid',
-    'Softplus',
-    'Softshrink',
-    'Softsign',
-    'Tanh',
-    'Tanhshrink'
+functions = {
+    'ELU': (-1,),
+    'Hardshrink': None,
+    'Hardtanh': (-1, 1),
+    'LeakyReLU': None,  # Perhaps we should add text explaining slight slope?
+    'LogSigmoid': (0,),
+    'PReLU': None,
+    'ReLU': (0,),
+    'ReLU6': (0, 6,),
+    'RReLU': None,
+    'SELU': (-1.7580993408473766,),
+    'Sigmoid': (0, 1),
+    'Softplus': (0,),
+    'Softshrink': None,
+    'Softsign': (-1, 1),
+    'Tanh': (-1, 1),
+    'Tanhshrink': None
     # 'Threshold'  Omit, pending cleanup. See PR5457
-]
+}
 
 
 def plot_function(function, **args):
@@ -54,13 +54,13 @@ def plot_function(function, **args):
     xrange = torch.arange(-7.0, 7.0, 0.01)  # We need to go beyond 6 for ReLU6
     pylab.plot(
         xrange.numpy(),
-        function(torch.autograd.Variable(xrange)).data.numpy(),
+        function(xrange).detach().numpy(),
         **args
     )
 
 
 # Step through all the functions
-for function_name in functions:
+for function_name in sorted(functions.keys()):
     plot_path = os.path.join(ACTIVATION_IMAGE_PATH, function_name + ".png")
     if not os.path.exists(plot_path):
         function = torch.nn.modules.activation.__dict__[function_name]()
@@ -78,6 +78,9 @@ for function_name in functions:
 
         # Plot the current function
         plot_function(function)
+        if functions[function_name] is not None:
+            for asymptote in functions[function_name]:
+                plot_function(lambda x: torch.empty_like(x).fill_(asymptote), alpha=0.2, color='b', linestyle='--')
 
         # The titles are a little redundant, given context?
         pylab.title(function_name + " activation function")
