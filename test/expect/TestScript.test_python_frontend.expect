@@ -8,7 +8,7 @@
     (assign
       (list (variable (ident q)))
       (=)
-      (variable (ident None)))
+      (None))
     (assign
       (list (variable (ident q)))
       (=)

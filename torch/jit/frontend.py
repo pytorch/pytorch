@@ -343,7 +343,7 @@ class ExprBuilder(Builder):
         elif expr.value is False:
             return FalseLiteral(r)
         elif expr.value is None:
-            return Var(Ident(r, "None"))
+            return NoneLiteral(r)
         else:
             raise ValueError("Name constant value unsupported: " + str(expr.value))
 

@@ -1810,6 +1810,24 @@ class TestScript(JitTestCase):
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
+    def test_script_None(self):
+        @torch.jit.script
+        def test_script_None(x):
+            output = None
+            output = x
+            return output
+
+        self.assertEqual(test_script_None(torch.rand(1,2)).shape[1], 2)
+
+    def test_script_clamp_max(self):
+        @torch.jit.script
+        def test_script_clamp_max(x):
+            # return torch.clamp(x, min=0.5, max=None)
+            return torch.clamp(x, None, 0.5)
+
+        input = torch.tensor([[0.3, 0.4],[0.5, 0.51]])
+        self.assertEqual(test_script_clamp_max(input)[1][1], 0.5)
+
     def test_script_bool_constant(self):
         script = '''
         def test_script_bool_constant():
@@ -4687,8 +4705,8 @@ EXCLUDE_TRACED = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    'test_clamp_max',
-    'test_clamp_max_scalar',
+    # 'test_clamp_max',
+    # 'test_clamp_max_scalar',
     'test_clamp_min',
     'test_clamp_min_scalar',
     # TODO: Fix var/std
@@ -4766,6 +4784,7 @@ def create_traced_fn(fn):
     def traced_fn(*inputs, **kwargs):
         fn_tensors, inputs_tensors = partial_apply_nontensors(fn, inputs, **kwargs)
         traced = torch.jit.trace(*inputs_tensors)(fn_tensors)
+        print(traced.graph)
         return traced(*inputs_tensors)
     return traced_fn
 
@@ -4776,6 +4795,7 @@ def the_method({}):
 
 
 def create_script_fn(method_name, is_functional, output_process_fn):
+
     def script_fn(*args, **kwargs):
         formals = []
         tensors = []
@@ -4797,6 +4817,7 @@ def create_script_fn(method_name, is_functional, output_process_fn):
             call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
+        print(CU.__getattr__("the_method").graph)
         return output_process_fn(CU.the_method(*tensors))
     return script_fn
 
@@ -4930,6 +4951,7 @@ def add_test(
         def do_test(self, name=name, self_size=self_size, args=new_args, test_name=test_name,
                     output_process_fn=output_process_fn):
             def check(name):
+                # __import__('pdb').set_trace()
                 is_magic_method = name[:2] == '__' and name[-2:] == '__'
                 is_inplace = name[-1] == "_" and not is_magic_method
                 self_variable = create_input((self_size,))[0][0]
