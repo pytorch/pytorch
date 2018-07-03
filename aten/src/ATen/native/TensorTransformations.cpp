@@ -58,12 +58,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 }
 
 Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
-  const int64_t total_dims = self.dim();
-  int64_t total_rot_dims = dims.size();
-  if (total_rot_dims == 0) {
-    dims = IntList({0,1});
-    total_rot_dims = 2;
-  }
+  const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
 
   AT_CHECK(total_rot_dims == 2,
     "expected total rotation dims == 2, but got dims = ", total_rot_dims);
