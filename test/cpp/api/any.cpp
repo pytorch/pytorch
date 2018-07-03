@@ -1,7 +1,7 @@
 #include <catch.hpp>
 
 #include <torch/torch.h>
-
+#include <torch/utils.h>
 #include <torch/nn/modules/any.h>
 
 #include <algorithm>
@@ -14,6 +14,7 @@ using Catch::Contains;
 using Catch::StartsWith;
 
 TEST_CASE("any-module") {
+  torch::manual_seed(0);
   SECTION("int()") {
     struct M : torch::nn::Module {
       int forward() {
@@ -225,6 +226,42 @@ TEST_CASE("any-module") {
     REQUIRE(any.get<MImpl>().value == 5);
     REQUIRE(any.get<M>()->value == 5);
   }
+  SECTION("converts at::Tensor to torch::Tensor correctly") {
+    struct M : torch::nn::Module {
+      torch::Tensor forward(torch::Tensor input) {
+        return input;
+      }
+    };
+    struct N : torch::nn::Module {
+      at::Tensor forward(at::Tensor input) {
+        return input;
+      }
+    };
+    {
+      // When you get an at::Tensor by performing an operation on a
+      // torch::Tensor, the tensor should be converted back to torch::Tensor
+      // before being passed to the function (to avoid a type mismatch).
+      AnyModule any(M{});
+      at::Tensor tensor_that_is_actually_a_variable = torch::ones(5) * 2;
+      REQUIRE(
+          any.forward(tensor_that_is_actually_a_variable)
+              .get<torch::Tensor>()
+              .sum()
+              .toCFloat() == 10);
+      // But tensors that are really tensors should just error.
+      REQUIRE_THROWS_WITH(
+          any.forward(at::ones(5)),
+          StartsWith(
+              "Expected argument #0 to be of type torch::autograd::Variable, "
+              "but received value of type at::Tensor"));
+    }
+    {
+      // If the function does really accept an `at::Tensor`, this should still
+      // work.
+      AnyModule any(N{});
+      REQUIRE(any.forward(at::ones(5)).get<at::Tensor>().sum().toCFloat() == 5);
+    }
+  }
 }
 
 namespace torch {
@@ -245,6 +282,7 @@ AnyModule::Value make_value(T&& value) {
 } // namespace torch
 
 TEST_CASE("any-value") {
+  torch::manual_seed(0);
   SECTION("gets the correct value for the right type") {
     SECTION("int") {
       auto value = make_value(5);

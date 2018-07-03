@@ -165,7 +165,7 @@ bool test_mnist(
       }
     }
 
-    return data.toBackend(useGPU ? at::kCUDA : at::kCPU);
+    return data.toBackend(useGPU ? torch::kCUDA : torch::kCPU);
   };
 
   auto readLabels = [&](std::string fn) {
@@ -179,7 +179,7 @@ bool test_mnist(
     for (int i = 0; i < label_count; ++i) {
       a_data[i] = static_cast<int64_t>(rd.read_byte());
     }
-    return data.toBackend(useGPU ? at::kCUDA : at::kCPU);
+    return data.toBackend(useGPU ? torch::kCUDA : torch::kCPU);
   };
 
   auto trdata = readData("test/cpp/api/mnist/train-images-idx3-ubyte");
@@ -188,7 +188,7 @@ bool test_mnist(
   auto telabel = readLabels("test/cpp/api/mnist/t10k-labels-idx1-ubyte");
 
   if (useGPU) {
-    model->cuda();
+    model->to(torch::kCUDA);
   }
 
   std::random_device device;
@@ -201,11 +201,11 @@ bool test_mnist(
     }
     std::shuffle(shuffled_inds.begin(), shuffled_inds.end(), generator);
 
-    const auto backend = useGPU ? at::kCUDA : at::kCPU;
+    const auto backend = useGPU ? torch::kCUDA : torch::kCPU;
     auto inp =
         torch::empty({batch_size, 1, trdata.size(2), trdata.size(3)}, backend);
     auto lab =
-        torch::empty({batch_size}, at::device(backend).dtype(torch::kInt64));
+        torch::empty({batch_size}, torch::device(backend).dtype(torch::kInt64));
     for (auto p = 0U; p < shuffled_inds.size() - batch_size; p++) {
       inp[p % batch_size] = trdata[shuffled_inds[p]];
       lab[p % batch_size] = trlabel[shuffled_inds[p]];
@@ -216,7 +216,7 @@ bool test_mnist(
       torch::Tensor x = forward_op(inp);
       inp.set_requires_grad(false);
       torch::Tensor y = lab;
-      torch::Tensor loss = at::nll_loss(x, y);
+      torch::Tensor loss = torch::nll_loss(x, y);
 
       optimizer.zero_grad();
       loss.backward();
@@ -233,6 +233,7 @@ bool test_mnist(
 }
 
 TEST_CASE("integration/cartpole") {
+  torch::manual_seed(0);
   std::cerr << "Training episodic policy gradient with a critic for up to 3000"
                " episodes, rest your eyes for a bit!\n";
   auto model = std::make_shared<torch::SimpleContainer>();
@@ -249,10 +250,10 @@ TEST_CASE("integration/cartpole") {
     auto x = linear->forward(inp).clamp_min(0);
     torch::Tensor actions = policyHead->forward(x);
     torch::Tensor value = valueHead->forward(x);
-    return std::make_tuple(at::softmax(actions, -1), value);
+    return std::make_tuple(torch::softmax(actions, -1), value);
   };
 
-  auto selectAction = [&](at::Tensor state) {
+  auto selectAction = [&](torch::Tensor state) {
     // Only work on single state right now, change index to gather for batch
     auto out = forward(state);
     auto probs = torch::Tensor(std::get<0>(out));
@@ -273,8 +274,8 @@ TEST_CASE("integration/cartpole") {
       R = rewards[i] + 0.99 * R;
       rewards[i] = R;
     }
-    auto r_t =
-        at::from_blob(rewards.data(), {static_cast<int64_t>(rewards.size())});
+    auto r_t = torch::from_blob(
+        rewards.data(), {static_cast<int64_t>(rewards.size())});
     r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
 
     std::vector<torch::Tensor> policy_loss;
@@ -282,12 +283,12 @@ TEST_CASE("integration/cartpole") {
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
       auto r = rewards[i] - saved_values[i].toCFloat();
       policy_loss.push_back(-r * saved_log_probs[i]);
-      value_loss.push_back(
-          at::smooth_l1_loss(saved_values[i], torch::ones({1}) * rewards[i]));
+      value_loss.push_back(torch::smooth_l1_loss(
+          saved_values[i], torch::ones({1}) * rewards[i]));
     }
 
-    auto loss = at::stack(torch::TensorListView(policy_loss)).sum() +
-        at::stack(torch::TensorListView(value_loss)).sum();
+    auto loss = torch::stack(torch::TensorListView(policy_loss)).sum() +
+        torch::stack(torch::TensorListView(value_loss)).sum();
 
     optimizer.zero_grad();
     loss.backward();
@@ -331,6 +332,7 @@ TEST_CASE("integration/cartpole") {
 }
 
 TEST_CASE("integration/mnist", "[cuda]") {
+  torch::manual_seed(0);
   auto model = std::make_shared<torch::SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
@@ -340,16 +342,16 @@ TEST_CASE("integration/mnist", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = at::max_pool2d(conv1->forward(x), {2, 2}).relu();
+    x = torch::max_pool2d(conv1->forward(x), {2, 2}).relu();
     x = conv2->forward(x);
     x = drop2d->forward(x);
-    x = at::max_pool2d(x, {2, 2}).relu();
+    x = torch::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
     x = drop->forward(x);
     x = linear2->forward(x);
-    x = at::log_softmax(x, 1);
+    x = torch::log_softmax(x, 1);
     return x;
   };
 
@@ -366,6 +368,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
 }
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
+  torch::manual_seed(0);
   auto model = std::make_shared<torch::SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto batchnorm2d =
@@ -377,16 +380,16 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = at::max_pool2d(conv1->forward(x), {2, 2}).relu();
+    x = torch::max_pool2d(conv1->forward(x), {2, 2}).relu();
     x = batchnorm2d->forward(x);
     x = conv2->forward(x);
-    x = at::max_pool2d(x, {2, 2}).relu();
+    x = torch::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
     x = batchnorm1->forward(x);
     x = linear2->forward(x);
-    x = at::log_softmax(x, 1);
+    x = torch::log_softmax(x, 1);
     return x;
   };
 

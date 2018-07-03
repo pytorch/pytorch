@@ -9,8 +9,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
            THCIndexTensor *target,
            THCTensor *output,
            THCTensor *istarget,
-           bool sizeaverage,
-           bool reduce)
+           int64_t reduction)
 {
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
@@ -34,7 +33,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         1, dim,
-        sizeaverage
+        reduction == Reduction::ElementwiseMean
         );
     THCudaCheck(cudaGetLastError());
   }
@@ -48,7 +47,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
     dim3 blocks(input->size[0]);
     dim3 threads(MULTILABELMARGIN_THREADS);
 
-    if (reduce)
+    if (reduction != Reduction::None)
     {
       THCTensor *output_tmp = THCTensor_(newWithSize1d)(state, input->size[0]);
       THCTensor_(resize1d)(state, output, 1);
@@ -60,7 +59,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THCIndexTensor_(data)(state, target),
           THCTensor_(data)(state, istarget),
           nframe, dim,
-          sizeaverage
+          reduction == Reduction::ElementwiseMean
           );
       THCudaCheck(cudaGetLastError());
       THCTensor_(set1d)(state, output, 0, ScalarConvert<accreal, real>::to(THCTensor_(sumall)(state, output_tmp)));
@@ -97,8 +96,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
             THCTensor *gradOutput,
             THCTensor *gradInput,
             THCTensor *istarget,
-            bool sizeaverage,
-            bool reduce)
+            int64_t reduction)
 {
   input = THCTensor_(newContiguous)(state, input);
   target = THCIndexTensor_(newContiguous)(state, target);
@@ -124,8 +122,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         1, gradInput->size[0],
-        sizeaverage,
-        reduce);
+        reduction == Reduction::ElementwiseMean,
+        reduction != Reduction::None);
 
   }
   else if(gradInput->dim() == 2)
@@ -147,8 +145,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
         THCIndexTensor_(data)(state, target),
         THCTensor_(data)(state, istarget),
         gradInput->size[0], gradInput->size[1],
-        sizeaverage,
-        reduce);
+        reduction == Reduction::ElementwiseMean,
+        reduction != Reduction::None);
   }
   else
     AT_ERROR("non-empty vector or matrix expected, got size: ", gradInput->sizes());

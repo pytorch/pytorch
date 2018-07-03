@@ -6,6 +6,7 @@
 
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
+#include "caffe2/utils/fixed_divisor.h"
 
 namespace caffe2 {
 
@@ -13,61 +14,63 @@ namespace {
 
 template <typename T, int D>
 __global__ void ComputeReduceMinMaxGradientCUDAKernel(
-    const int dX_size,
-    const SimpleArray<int, D> dY_strides,
-    const SimpleArray<int, D> dX_dims,
+    const int X_size,
+    const SimpleArray<int, D> Y_strides,
+    const SimpleArray<FixedDivisor<int>, D> X_dims,
     const T* dY_data,
     const T* X_data,
     const T* Y_data,
     T* dX_data) {
-  CUDA_1D_KERNEL_LOOP(dX_index, dX_size) {
-    int dY_index = 0;
-    int dX_index_val = dX_index;
+  CUDA_1D_KERNEL_LOOP(X_index, X_size) {
+    int Y_index = 0;
+    int X_index_val = X_index;
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
-      dY_index += dY_strides.data[i] == 0
-          ? 0
-          : (dX_index_val % dX_dims.data[i]) * dY_strides.data[i];
-      dX_index_val /= dX_dims.data[i];
+      int d;
+      X_dims.data[i].DivMod(X_index_val, &X_index_val, &d);
+      Y_index += d * Y_strides.data[i];
     }
 #if __CUDA_ARCH__ >= 350
-    dX_data[dX_index] = __ldg(Y_data + dY_index) == __ldg(X_data + dX_index)
-        ? __ldg(dY_data + dY_index)
+    dX_data[X_index] = __ldg(Y_data + Y_index) == __ldg(X_data + X_index)
+        ? __ldg(dY_data + Y_index)
         : T(0);
 #else
-    dX_data[dX_index] =
-        Y_data[dY_index] == X_data[dX_index] ? dY_data[dY_index] : T(0);
+    dX_data[X_index] =
+        Y_data[Y_index] == X_data[X_index] ? dY_data[Y_index] : T(0);
 #endif
   }
 }
 
 template <typename T, int D>
 void ComputeReduceMinMaxGradientCUDAImpl(
-    const int* dY_dims,
-    const int* dX_dims,
+    const int* Y_dims,
+    const int* X_dims,
     const T* dY_data,
     const T* X_data,
     const T* Y_data,
     T* dX_data,
     CUDAContext* context) {
-  SimpleArray<int, D> dY_strides_array;
-  SimpleArray<int, D> dX_dims_array;
+  SimpleArray<int, D> Y_strides_array;
+  SimpleArray<FixedDivisor<int>, D> X_dims_array;
   int cur_stride = 1;
   for (int i = D - 1; i >= 0; --i) {
-    dY_strides_array.data[i] = dY_dims[i] == 1 ? 0 : cur_stride;
-    dX_dims_array.data[i] = dX_dims[i];
-    cur_stride *= dY_dims[i];
+    if (X_dims[i] == 0) {
+      return;
+    }
+    Y_strides_array.data[i] = Y_dims[i] == 1 ? 0 : cur_stride;
+    X_dims_array.data[i] = FixedDivisor<int>(X_dims[i]);
+    cur_stride *= Y_dims[i];
   }
-  const int dX_size =
-      std::accumulate(dX_dims, dX_dims + D, 1, std::multiplies<int>());
+  const int X_size =
+      std::accumulate(X_dims, X_dims + D, 1, std::multiplies<int>());
   ComputeReduceMinMaxGradientCUDAKernel<T, D>
-      <<<CAFFE_GET_BLOCKS(dX_size),
+      <<<CAFFE_GET_BLOCKS(X_size),
          CAFFE_CUDA_NUM_THREADS,
          0,
          context->cuda_stream()>>>(
-          dX_size,
-          dY_strides_array,
-          dX_dims_array,
+          X_size,
+          Y_strides_array,
+          X_dims_array,
           dY_data,
           X_data,
           Y_data,

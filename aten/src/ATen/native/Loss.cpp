@@ -6,7 +6,7 @@
 
 namespace at { namespace native {
 
-Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, bool size_average, bool reduce) {
+Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto prod_sum = (input1 * input2).sum(1);
   auto mag_square1 = (input1 * input1).sum(1) + EPSILON;
   auto mag_square2 = (input2 * input2).sum(1) + EPSILON;
@@ -20,31 +20,31 @@ Tensor cosine_embedding_loss(const Tensor& input1, const Tensor& input2, const T
   auto output_neg = at::where(target == -1, neg, zeros);
   auto output = output_pos + output_neg;
 
-  if (reduce && size_average) {
+  if (reduction == Reduction::ElementwiseMean) {
     return output.sum() / target.numel();
-  } else if (reduce) {
+  } else if (reduction == Reduction::Sum) {
     return output.sum();
   }
   return output;
 }
 
-Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, bool size_average, bool reduce) {
+Tensor hinge_embedding_loss(const Tensor& self, const Tensor& target, double margin, int64_t reduction) {
   auto zeros = at::zeros_like(self);
   auto margin_clamp = (margin - self).clamp_min_(0);
   auto output_margin = at::where(target != 1, margin_clamp, zeros);
   auto output_self = at::where(target != -1, self, zeros);
   auto output = output_margin + output_self;
 
-  if (reduce && size_average) {
+  if (reduction == Reduction::ElementwiseMean) {
     return output.sum() / self.numel();
-  } else if (reduce) {
+  } else if (reduction == Reduction::Sum) {
     return output.sum();
   }
   return output;
 }
 
 Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const Tensor& negative, double margin,
-                           double p, double eps, bool swap, bool size_average, bool reduce) {
+                           double p, double eps, bool swap, int64_t reduction) {
   auto dist_pos = at::pairwise_distance(anchor, positive, p, eps);
   auto dist_neg = at::pairwise_distance(anchor, negative, p, eps);
   if (swap) {
@@ -53,20 +53,20 @@ Tensor triplet_margin_loss(const Tensor& anchor, const Tensor& positive, const T
   }
   auto output = at::clamp_min(margin + dist_pos - dist_neg, 0);
 
-  if (reduce && size_average) {
+  if (reduction == Reduction::ElementwiseMean) {
     return output.sum() / output.numel();
-  } else if (reduce) {
+  } else if (reduction == Reduction::Sum) {
     return output.sum();
   }
   return output;
 }
 
-Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, bool size_average, bool reduce) {
+Tensor margin_ranking_loss(const Tensor& input1, const Tensor& input2, const Tensor& target, double margin, int64_t reduction) {
   auto output =  (-target * (input1 - input2) + margin).clamp_min_(0);
 
-  if (reduce && size_average) {
+  if (reduction == Reduction::ElementwiseMean) {
     return output.sum() / output.numel();
-  } else if (reduce) {
+  } else if (reduction == Reduction::Sum) {
     return output.sum();
   }
   return output;
