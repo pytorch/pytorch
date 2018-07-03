@@ -442,6 +442,36 @@ class NumpyTests(TestCase):
                                     [4, 0, 6],
                                     [0, 8, 0]]))
 
+    def test_boolean_indexing_weirdness(self):
+        # Weird boolean indexing things
+        a = torch.ones((2, 3, 4))
+        if torch._C._use_zero_size_dim():
+            self.assertEqual((0, 2, 3, 4), a[False, True, ...].shape)
+        else:
+            self.assertEqual((0,), a[False, True, ...].shape)
+        self.assertEqual(torch.ones(1, 2), a[True, [0, 1], True, True, [1], [[2]]])
+        if torch._C._use_zero_size_dim():
+            self.assertRaises(RuntimeError, lambda: a[False, [0, 1], ...])
+
+    def test_boolean_indexing_weirdness_tensors(self):
+        # Weird boolean indexing things
+        false = torch.tensor(False)
+        true = torch.tensor(True)
+        a = torch.ones((2, 3, 4))
+        if torch._C._use_zero_size_dim():
+            self.assertEqual((0, 2, 3, 4), a[False, True, ...].shape)
+        else:
+            self.assertEqual((0,), a[False, True, ...].shape)
+        self.assertEqual(torch.ones(1, 2), a[true, [0, 1], true, true, [1], [[2]]])
+        if torch._C._use_zero_size_dim():
+            self.assertRaises(RuntimeError, lambda: a[false, [0, 1], ...])
+
+    def test_boolean_indexing_alldims(self):
+        true = torch.tensor(True)
+        a = torch.ones((2, 3))
+        self.assertEqual((1, 2, 3), a[True, True].shape)
+        self.assertEqual((1, 2, 3), a[true, true].shape)
+
     def test_everything_returns_views(self):
         # Before `...` would return a itself.
         a = tensor([5])
