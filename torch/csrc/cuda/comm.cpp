@@ -125,9 +125,7 @@ std::vector<at::Tensor> scatter(
     int64_t dim,
     const at::optional<std::vector<THCStream*>>& streams) {
   std::vector<at::Tensor> chunks;
-  if (!chunk_sizes) {
-    chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
-  } else {
+  if (chunk_sizes) {
     const int64_t chunk_size_sum =
         std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
     AT_CHECK(
@@ -144,6 +142,8 @@ std::vector<at::Tensor> scatter(
       chunk_start += chunk_size;
     }
     AT_ASSERT(chunks.size() == chunk_sizes->size());
+  } else {
+    chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
   auto* thc_state = at::globalContext().lazyInitCUDA();
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
