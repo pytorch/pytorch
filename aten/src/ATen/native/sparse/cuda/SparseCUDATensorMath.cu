@@ -268,7 +268,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     r_.resize_as_(dense);
     r_.copy_(dense);
   } else {
-    AT_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition does not work; shout if you need it");
+    AT_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
     r = r_.contiguous();
   }
 
