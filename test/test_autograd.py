@@ -2041,6 +2041,14 @@ class TestAutograd(TestCase):
         run_test((10,), 0)
 
     def test_pinverse(self):
+        # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
+        # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
+        # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
+        # 3. This method creates two orthogonal matrices, and a constructs a test case with large
+        #    singular values (given by x to the function).
+        # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
+        #    a derivative exists.
+        # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
         m, n = 5, 10
         U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
         V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
