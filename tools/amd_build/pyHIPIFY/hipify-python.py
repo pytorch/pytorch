@@ -232,6 +232,8 @@ def processKernelLaunches(string, stats):
 
             # Get kernel ending position (adjust end point past the >>>)
             kernel_end = string.find(">>>", kernel_start) + 3
+            if kernel_end <= 0:
+                raise InputError("no kernel end found")
 
             # Add to list of traversed kernels
             kernel_positions.append({"start": kernel_start, "end": kernel_end,
