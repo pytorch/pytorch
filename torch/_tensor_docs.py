@@ -1527,7 +1527,7 @@ See :func:`torch.qr`
 
 add_docstr_all('random_',
                r"""
-random_(from=0, to=None, *, generator=None) -> Tensor
+random_(min=0, max=None, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the discrete uniform
 distribution over ``[from, to - 1]``. If not specified, the values are usually
