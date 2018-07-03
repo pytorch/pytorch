@@ -419,7 +419,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
 
     @given(stride=st.integers(1, 3),
            pad=st.integers(0, 1),
-           kernel=st.integers(3, 6),
+           kernel=st.integers(1, 5),
            adj=st.integers(0, 2),
            size=st.integers(7, 10),
            input_channels=st.integers(1, 8),
@@ -437,9 +437,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                                              order, engine, use_bias,
                                              compute_dX, gc, dc):
         np.random.seed(0)
-        stride = 1
-        kernel = 3
-        size = 7
+        pad = 0
         output_size = (size - 1) * stride + kernel + adj - 2 * pad
         assume(adj < stride)
         assume(output_size >= size)
