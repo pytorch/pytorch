@@ -1089,15 +1089,18 @@ class TestCudaUncoalescedSparse(TestCudaSparse):
 class TestSparseOneOff(TestCase):
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_from_cpu(self):
-        self.assertExpectedRaises(RuntimeError,
-            lambda: torch.sparse.FloatTensor(torch.zeros(1,4).long().cuda(),
-                                             torch.randn(4,4,4),
-                                             [3,4,4]))
+        self.assertExpectedRaises(
+            RuntimeError,
+            lambda: torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
+                                             torch.randn(4, 4, 4),
+                                             [3, 4, 4]))
 
     @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
     def test_cuda_sparse_cpu_dense_add(self):
-        x = torch.zeros(3,4,4)
-        sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1,4).long().cuda(), torch.randn(4,4,4).cuda(), [3,4,4])
+        x = torch.zeros(3, 4, 4)
+        sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
+                                                 torch.randn(4, 4, 4).cuda(),
+                                                 [3, 4, 4])
         self.assertExpectedRaises(RuntimeError, lambda: x + sparse_y)
 
 
