@@ -31,8 +31,10 @@ class _Reduction:
 
     # In order to support previous versions, accept boolean size_average and reduce
     # and convert them into the new constants for now
+
+    # We use these functions in torch/legacy as well, in which case we'll silence the warning
     @staticmethod
-    def legacy_get_string(size_average, reduce):
+    def legacy_get_string(size_average, reduce, emit_warning=True):
         warning = "size_average and reduce args will be deprecated, please use reduction='{}' instead."
 
         if size_average is None:
@@ -41,18 +43,18 @@ class _Reduction:
             reduce = True
 
         if size_average and reduce:
-            warnings.warn(warning.format('elementwise_mean'))
-            return 'elementwise_mean'
+            ret = 'elementwise_mean'
         elif reduce:
-            warnings.warn(warning.format('sum'))
-            return 'sum'
+            ret = 'sum'
         else:
-            warnings.warn(warning.format('none'))
-            return 'none'
+            ret = 'none'
+        if emit_warning:
+            warnings.warn(warning.format(ret))
+        return ret
 
     @staticmethod
-    def legacy_get_enum(size_average, reduce):
-        return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce))
+    def legacy_get_enum(size_average, reduce, emit_warning=True):
+        return _Reduction.get_enum(_Reduction.legacy_get_string(size_average, reduce, emit_warning))
 
 
 conv1d = _add_docstr(torch.conv1d, r"""
