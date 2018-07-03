@@ -34,6 +34,8 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
   new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1);
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->backend = at::kCUDA;
   storage->scalar_type = scalar_type;
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
@@ -60,25 +62,25 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   return storage;
 }
 
-void THCStorage_free(THCState *state, THCStorage *self)
+void THCStorage_free(THCState *state, THCStorage *storage)
 {
-  AT_ASSERT(self->backend == at::kCUDA);
+  AT_ASSERT(storage->backend == at::kCUDA);
 
-  if(!(self->flag & TH_STORAGE_REFCOUNTED))
-    return;
-
-  if (--self->refcount == 0)
-  {
-    if(self->flag & TH_STORAGE_FREEMEM) {
-      auto* thc_device_allocator = static_cast<THCDeviceAllocator*>(self->allocatorVoidPtr);
-      THCudaCheck(
-        (*thc_device_allocator->free)(self->allocatorContext, self->data_ptr));
+  if ((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0)) {
+    if (--storage->refcount == 0) {
+      if (storage->finalizer) {
+        (*storage->finalizer)();
+      }
+      storage->finalizer.~unique_ptr<THFinalizer>();
+      if (storage->flag & TH_STORAGE_FREEMEM) {
+        auto* thc_device_allocator = static_cast<THCDeviceAllocator*>(storage->allocatorVoidPtr);
+        THCudaCheck((*thc_device_allocator->free)(storage->allocatorContext, storage->data_ptr));
+      }
+      if (storage->flag & TH_STORAGE_VIEW) {
+        THCStorage_free(state, storage->view);
+      }
+      THStorage_weakFree(storage);
     }
-    if(self->flag & TH_STORAGE_VIEW) {
-      THCStorage_free(state, self->view);
-    }
-    self->refcount.~atomic<int>();
-    THFree(self);
   }
 }
 
@@ -174,7 +176,9 @@ THCStorage* THCStorage_newWithDataAndAllocator(
   storage->scalar_type = scalar_type;
   storage->data_ptr = data;
   storage->size = size;
-  storage->refcount = 1;
+  new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1);
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
   storage->allocatorVoidPtr = allocator;
   storage->allocatorContext = allocatorContext;
