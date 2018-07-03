@@ -101,7 +101,7 @@ class Sequential : public Cloneable<Sequential> {
   /// `Sequential`.
   template <typename M>
   void push_back(const ModuleHolder<M>& module_holder) {
-    push_back(module_holder.get());
+    push_back(module_holder.ptr());
   }
 
   /// Adds a type-erased `AnyModule` to the `Sequential`.
