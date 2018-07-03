@@ -418,7 +418,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
             rtol=1e-4)
 
     @given(stride=st.integers(1, 3),
-           pad=st.integers(0, 2),
+           pad=st.integers(0, 1),
            kernel=st.integers(3, 6),
            adj=st.integers(0, 2),
            size=st.integers(7, 10),
@@ -449,13 +449,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
         stride = 1
         pad = 0
         kernel = 3
-        adj = 0
         size = 7
-        input_channels = 1
-        output_channels = 1
-        batch_size = 1
-        order = "NHWC"
-        engine = ""
         use_bias = False
         compute_dX = False
         X = np.ones([batch_size, size, size, input_channels], np.float32)
@@ -463,6 +457,7 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                      np.float32)
         b = np.zeros([output_channels], np.float32)
         output_size = (size - 1) * stride + kernel + adj - 2 * pad
+        assume(adj < stride)
         op = core.CreateOperator(
             "ConvTranspose",
             ["X", "w", "b"] if use_bias else ["X", "w"],
