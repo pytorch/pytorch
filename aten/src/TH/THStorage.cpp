@@ -17,17 +17,16 @@
 void THStorage_free(THStorage *storage) {
   AT_ASSERT(storage->backend == at::kCPU);
 
-  if(!storage)
+  if (!storage) {
     return;
+  }
 
-  if((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0))
-  {
-    if(--storage->refcount == 0)
-    {
-      if(storage->flag & TH_STORAGE_FREEMEM) {
+  if ((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0)) {
+    if (--storage->refcount == 0) {
+      if (storage->flag & TH_STORAGE_FREEMEM) {
         static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
       }
-      if(storage->flag & TH_STORAGE_VIEW) {
+      if (storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);
       }
       storage->refcount.~atomic<int>();
@@ -115,8 +114,9 @@ THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *file
                                                   &THMapAllocator,
                                                   ctx);
 
-  if(size <= 0)
+  if (size <= 0) {
     storage->size = THMapAllocatorContext_size(ctx)/THStorage_elementSize(storage);
+  }
 
   THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
 
@@ -135,8 +135,9 @@ void THStorage_clearFlag(THStorage *storage, const char flag)
 
 void THStorage_retain(THStorage *storage)
 {
-  if(storage && (storage->flag & TH_STORAGE_REFCOUNTED))
+  if (storage && (storage->flag & TH_STORAGE_REFCOUNTED)) {
     ++storage->refcount;
+  }
 }
 
 int THStorage_retainIfLive(THStorage *storage)
@@ -181,9 +182,9 @@ void THStorage_resize(THStorage *storage, ptrdiff_t size)
 
   auto* th_allocator = static_cast<THAllocator*>(storage->allocatorVoidPtr);
 
-  if(storage->flag & TH_STORAGE_RESIZABLE)
+  if (storage->flag & TH_STORAGE_RESIZABLE)
   {
-    if(th_allocator->realloc == nullptr) {
+    if (th_allocator->realloc == nullptr) {
       /* case when the allocator does not have a realloc defined */
       void *old_data = storage->data_ptr;
       ptrdiff_t old_size = storage->size;
@@ -219,15 +220,7 @@ void THStorage_resize(THStorage *storage, ptrdiff_t size)
 
 void THStorage_swap(THStorage *storage1, THStorage *storage2)
 {
-#define SWAP(val) { val = storage1->val; storage1->val = storage2->val; storage2->val = val; }
-    void *data_ptr;
-    ptrdiff_t size;
-    char flag;
-    void *allocatorVoidPtr;
-    void *allocatorContext;
-    struct THStorage *view;
-    int device;
-
+#define SWAP(val) { std::swap(storage1->val, storage2->val); }
     SWAP(data_ptr);
     SWAP(size);
     SWAP(flag);
