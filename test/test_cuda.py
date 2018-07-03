@@ -1932,21 +1932,11 @@ def generate_tests():
                 setattr(TestCuda, test_name, test_fn)
 
 
+TestTorch.__bases__ = (object, )
+
 if __name__ == '__main__':
     if TEST_CUDA:
         load_ignore_file()
         generate_tests()
-
-    # skip TestTorch tests
-    # hide in __name__ == '__main__' because we don't want this to be run when
-    # someone imports test_cuda
-    def load_tests(loader, tests, pattern):
-        test_suite = unittest.TestSuite()
-        for test_group in tests:
-            for test in test_group:
-                if test.__class__.__name__ == 'TestTorch':
-                    continue
-                test_suite.addTest(test)
-        return test_suite
 
     run_tests()

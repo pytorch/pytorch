@@ -1075,5 +1075,8 @@ class TestCudaUncoalescedSparse(TestCudaSparse):
         super(TestCudaUncoalescedSparse, self).setUp()
         self.is_uncoalesced = True
 
+
+TestTorch.__bases__ = (object, )
+
 if __name__ == '__main__':
     run_tests()
