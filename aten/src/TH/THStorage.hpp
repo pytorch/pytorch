@@ -44,3 +44,18 @@ TH_API THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t si
 TH_API THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
                                              THAllocator *allocator,
                                              void *allocatorContext);
+
+ptrdiff_t THStorage_size(const THStorage *self);
+size_t THStorage_elementSize();
+THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags);
+void THStorage_setFlag(THStorage *storage, const char flag);
+void THStorage_clearFlag(THStorage *storage, const char flag);
+void THStorage_retain(THStorage *storage);
+int THStorage_retainIfLive(THStorage *storage);
+THStorage* THStorage_newWithData(at::ScalarType scalar_type, void *data, ptrdiff_t size);
+THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
+                                             void* data, ptrdiff_t size,
+                                             THAllocator* allocator,
+                                             void* allocatorContext);
+void THStorage_resize(THStorage *storage, ptrdiff_t size);
+void THStorage_swap(THStorage *storage1, THStorage *storage2);
