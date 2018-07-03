@@ -187,7 +187,7 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     if(storage)
     {
       self->storage = storage;
-      THCStorage_retain(state, self->storage);
+      THStorage_retain(self->storage);
     }
     else
       self->storage = THCStorage_new(state, scalar_type);
