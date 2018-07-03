@@ -324,7 +324,9 @@ def disable_function(input_string, function, replace_style):
         0 - Remove the function entirely (includes the signature).
         1 - Stub the function and return an empty object based off the type.
         2 - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
+            This macro is defined by HIP if the compiler used is hcc.
         3 - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
+            This macro is defined by HIP if either hcc or nvcc are used in the device path.
         4 - Stub the function and throw an exception at runtime.
         5 - Stub the function and throw an assert(0).
         6 - Stub the function and keep an empty body.
