@@ -67,7 +67,7 @@ for function_name in functions:
 
         # Start a new plot
         pylab.clf()
-        pylab.grid(color='k', alpha=0.03, linestyle='--')
+        pylab.grid(color='k', alpha=0.2, linestyle='--')
 
         # Plot the current function
         plot_function(function)
