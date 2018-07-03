@@ -326,6 +326,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 	  case LegacyPadding::SAME:
 		*pad_tail = (total_padding + 1) / 2;
 		*pad_head = total_padding - *pad_tail;
+        CAFFE_ENFORCE(*pad_head >= 0);
+        CAFFE_ENFORCE(*pad_tail == *pad_head);
 		break;
 	  case LegacyPadding::VALID:
 		*pad_tail = *pad_head = 0;
