@@ -33,6 +33,7 @@ import os
 import yaml
 
 from functools import reduce
+from enum import Enum
 from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 
 
@@ -56,6 +57,27 @@ class bcolors:
     UNDERLINE = '\033[4m'
 
 
+class disablefuncmode(Enum):
+    """ How to disable functions
+    0 - Remove the function entirely (includes the signature).
+    1 - Stub the function and return an empty object based off the type.
+    2 - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
+        This macro is defined by HIP if the compiler used is hcc.
+    3 - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
+        This macro is defined by HIP if either hcc or nvcc are used in the device path.
+    4 - Stub the function and throw an exception at runtime.
+    5 - Stub the function and throw an assert(0).
+    6 - Stub the function and keep an empty body.
+    """
+    REMOVE = 0
+    STUB = 1
+    HCC_MACRO = 2
+    DEVICE_MACRO = 3
+    EXCEPTION = 4
+    ASSERT = 5
+    EMPTYBODY = 6
+
+
 def update_progress_bar(total, progress):
     """
     Displays and updates a console progress bar.
@@ -72,10 +94,10 @@ def update_progress_bar(total, progress):
         status)
 
     # Send the progress to stdout.
-    sys.stdout.write(text)
+    sys.stderr.write(text)
 
     # Send the buffered text to stdout!
-    sys.stdout.flush()
+    sys.stderr.flush()
 
 
 def filename_ends_with_extension(filename, extensions):
@@ -159,7 +181,7 @@ def compute_stats(stats):
 def processKernelLaunches(string, stats):
     """ Replace the CUDA style Kernel launches with the HIP style kernel launches."""
     # Concat the namespace with the kernel names. (Find cleaner way of doing this later).
-    string = re.sub(r'([ ]+)(detail+)::[ ]+\\\n[ ]+', lambda inp: "%s%s::" % (inp.group(1), inp.group(2)), string)
+    string = re.sub(r'([ ]+)(detail?)::[ ]+\\\n[ ]+', lambda inp: "%s%s::" % (inp.group(1), inp.group(2)), string)
 
     def grab_method_and_template(in_kernel):
         # The positions for relevant kernel components.
@@ -232,6 +254,8 @@ def processKernelLaunches(string, stats):
 
             # Get kernel ending position (adjust end point past the >>>)
             kernel_end = string.find(">>>", kernel_start) + 3
+            if kernel_end <= 0:
+                raise InputError("no kernel end found")
 
             # Add to list of traversed kernels
             kernel_positions.append({"start": kernel_start, "end": kernel_end,
@@ -248,11 +272,11 @@ def processKernelLaunches(string, stats):
         # Get kernel components
         params = grab_method_and_template(kernel)
 
-        # Find paranthesis after kernel launch
-        paranthesis = string.find("(", kernel["end"])
+        # Find parenthesis after kernel launch
+        parenthesis = string.find("(", kernel["end"])
 
         # Extract cuda kernel
-        cuda_kernel = string[params[0]["start"]:paranthesis + 1]
+        cuda_kernel = string[params[0]["start"]:parenthesis + 1]
 
         # Keep number of kernel launch params consistent (grid dims, group dims, stream, dynamic shared size)
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
@@ -270,24 +294,24 @@ def processKernelLaunches(string, stats):
     return output_string
 
 
-def find_paranthesis_end(input_string, start):
-    inside_paranthesis = False
-    parans = 0
+def find_parenthesis_end(input_string, start):
+    inside_parenthesis = False
+    parens = 0
     pos = start
     p_start, p_end = -1, -1
 
     while pos < len(input_string):
         if input_string[pos] == "(":
-            if inside_paranthesis is False:
-                inside_paranthesis = True
-                parans = 1
+            if inside_parenthesis is False:
+                inside_parenthesis = True
+                parens = 1
                 p_start = pos
             else:
-                parans += 1
-        elif input_string[pos] == ")" and inside_paranthesis:
-            parans -= 1
+                parens += 1
+        elif input_string[pos] == ")" and inside_parenthesis:
+            parens -= 1
 
-            if parans == 0:
+            if parens == 0:
                 p_end = pos
                 return p_start, p_end
 
@@ -302,7 +326,7 @@ def disable_asserts(input_string):
     output_string = input_string
     asserts = list(re.finditer(r"\bassert[ ]*\(", input_string))
     for assert_item in asserts:
-        p_start, p_end = find_paranthesis_end(input_string, assert_item.end() - 1)
+        p_start, p_end = find_parenthesis_end(input_string, assert_item.end() - 1)
         start = assert_item.start()
         output_string = output_string.replace(input_string[start:p_end + 1], "")
     return output_string
@@ -321,13 +345,6 @@ def disable_function(input_string, function, replace_style):
             e.g. "overlappingIndices"
 
     replace_style - The style to use when stubbing functions.
-        0 - Remove the function entirely (includes the signature).
-        1 - Stub the function and return an empty object based off the type.
-        2 - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
-        3 - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
-        4 - Stub the function and throw an exception at runtime.
-        5 - Stub the function and throw an assert(0).
-        6 - Stub the function and keep an empty body.
     """
 # void (*)(hcrngStateMtgp32 *, int, float *, double, double)
     info = {
@@ -406,11 +423,11 @@ def disable_function(input_string, function, replace_style):
     function_body = input_string[info["function_start"]:info["function_end"] + 1]
 
     # Remove the entire function body
-    if replace_style == 0:
+    if replace_style == disablefuncmode.REMOVE:
         output_string = input_string.replace(function_body, "")
 
     # Stub the function based off its return type.
-    elif replace_style == 1:
+    elif replace_style == disablefuncmode.STUB:
         # void return type
         if func_info["return_type"] == "void" or func_info["return_type"] == "static void":
             stub = "%s{\n}" % (function_string)
@@ -423,32 +440,32 @@ def disable_function(input_string, function, replace_style):
         output_string = input_string.replace(function_body, stub)
 
     # Add HIP Preprocessors.
-    elif replace_style == 2:
+    elif replace_style == disablefuncmode.HCC_MACRO:
         output_string = input_string.replace(
             function_body,
             "#if !defined(__HIP_PLATFORM_HCC__)\n%s\n#endif" % function_body)
 
     # Add HIP Preprocessors.
-    elif replace_style == 3:
+    elif replace_style == disablefuncmode.DEVICE_MACRO:
         output_string = input_string.replace(
             function_body,
             "#if !defined(__HIP_DEVICE_COMPILE__)\n%s\n#endif" % function_body)
 
     # Throw an exception at runtime.
-    elif replace_style == 4:
+    elif replace_style == disablefuncmode.EXCEPTION:
         stub = "%s{\n%s;\n}" % (
             function_string,
             'throw std::runtime_error("The function %s is not implemented.")' %
             function_string.replace("\n", " "))
         output_string = input_string.replace(function_body, stub)
 
-    elif replace_style == 5:
+    elif replace_style == disablefuncmode.ASSERT:
         stub = "%s{\n%s;\n}" % (
             function_string,
             'assert(0)')
         output_string = input_string.replace(function_body, stub)
 
-    elif replace_style == 6:
+    elif replace_style == disablefuncmode.EMPTY:
         stub = "%s{\n;\n}" % (function_string)
         output_string = input_string.replace(function_body, stub)
     return output_string
@@ -501,8 +518,6 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
         f.seek(0)
         f.write(contents)
         f.truncate()
-        f.flush()
-        os.fsync(f)
 
 
 def file_add_header(filepath, header):
@@ -514,8 +529,6 @@ def file_add_header(filepath, header):
         f.seek(0)
         f.write(contents)
         f.truncate()
-        f.flush()
-        os.fsync(f)
 
 
 def fix_static_global_kernels(in_txt):
@@ -875,15 +888,15 @@ def main():
                 txt = f.read()
                 for func in functions:
                     # TODO - Find fix assertions in HIP for device code.
-                    txt = disable_function(txt, func, 5)
+                    txt = disable_function(txt, func, disablefuncmode.ASSERT)
 
                 for func in non_hip_functions:
                     # Disable this function on HIP stack
-                    txt = disable_function(txt, func, 2)
+                    txt = disable_function(txt, func, disablefuncmode.HCC_MACRO)
 
                 for func in not_on_device_functions:
                     # Disable this function when compiling on Device
-                    txt = disable_function(txt, func, 3)
+                    txt = disable_function(txt, func, disablefuncmode.DEVICE_MACRO)
 
                 f.seek(0)
                 f.write(txt)
