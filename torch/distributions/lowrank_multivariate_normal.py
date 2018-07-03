@@ -26,8 +26,8 @@ def _batch_capacitance_tril(W, D):
     """
     m = W.size(-1)
     Wt_Dinv = W.transpose(-1, -2) / D.unsqueeze(-2)
-    K = torch.matmul(Wt_Dinv, W)
-    K.view(-1)[::m + 1] += 1  # add identity matrix to K
+    K = torch.matmul(Wt_Dinv, W).contiguous()
+    K.view(-1, m * m)[:, ::m + 1] += 1  # add identity matrix to K
     return _batch_potrf_lower(K)
 
 
@@ -137,8 +137,8 @@ class LowRankMultivariateNormal(Distribution):
         n = self._event_shape[0]
         scale_diag_sqrt_unsqueeze = self.scale_diag.sqrt().unsqueeze(-1)
         Dinvsqrt_W = self.scale_factor / scale_diag_sqrt_unsqueeze
-        K = torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2))
-        K.view(-1)[::n + 1] += 1  # add identity matrix to K
+        K = torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2)).contiguous()
+        K.view(-1, n * n)[:, ::n + 1] += 1  # add identity matrix to K
         return scale_diag_sqrt_unsqueeze * _batch_potrf_lower(K)
 
     @lazy_property
