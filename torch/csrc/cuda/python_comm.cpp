@@ -32,6 +32,7 @@ void initCommMethods(PyObject *module) {
        py::handle handle = *py_streams;
        streams = THPUtils_PySequence_to_THCStreamList(handle.ptr());
      }
+     // Note: We're holding the GIL up to here.
      AutoNoGIL no_gil;
      return scatter(tensor, devices, chunk_sizes, dim, streams);
    },
@@ -39,8 +40,7 @@ void initCommMethods(PyObject *module) {
    py::arg("devices"),
    py::arg("chunk_sizes"),
    py::arg("dim"),
-   py::arg("streams"),
-   py::call_guard<py::gil_scoped_release>())
+   py::arg("streams"))
    .def("_gather", [](
      std::vector<at::Tensor>& tensors,
      int64_t dim,
