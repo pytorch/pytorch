@@ -18,6 +18,9 @@ struct EmbeddingOptions {
 
 class EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
+  template <typename... Ts>
+  explicit EmbeddingImpl(Ts&&... ts)
+      : EmbeddingImpl(EmbeddingOptions(std::forward<Ts>(ts)...)) {}
   explicit EmbeddingImpl(EmbeddingOptions options);
 
   void reset() override;
