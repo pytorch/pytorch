@@ -437,15 +437,32 @@ class TestConvolutionTranspose(hu.HypothesisTestCase):
                                              order, engine, use_bias,
                                              compute_dX, gc, dc):
         np.random.seed(0)
+        #output_size = (size - 1) * stride + kernel + adj - 2 * pad
+        #assume(output_size >= size)
+        #assume(adj < stride)
+        #X = np.random.rand(
+        #    batch_size, size, size, input_channels).astype(np.float32) - 0.5
+        #w = np.random.rand(
+        #    input_channels, kernel, kernel, output_channels)\
+        #    .astype(np.float32) - 0.5
+        #b = np.random.rand(output_channels).astype(np.float32) - 0.5
+        stride = 1
+        pad = 0
+        kernel = 3
+        adj = 0
+        size = 7
+        input_channels = 1
+        output_channels = 1
+        batch_size = 1
+        order = "NHWC"
+        engine = ""
+        use_bias = False
+        compute_dX = False
+        X = np.ones([batch_size, size, size, input_channels], np.float32)
+        w = np.ones([input_channels, kernel, kernel, output_channels],
+                     np.float32)
+        b = np.zeros([output_channels], np.float32)
         output_size = (size - 1) * stride + kernel + adj - 2 * pad
-        assume(output_size >= size)
-        assume(adj < stride)
-        X = np.random.rand(
-            batch_size, size, size, input_channels).astype(np.float32) - 0.5
-        w = np.random.rand(
-            input_channels, kernel, kernel, output_channels)\
-            .astype(np.float32) - 0.5
-        b = np.random.rand(output_channels).astype(np.float32) - 0.5
         op = core.CreateOperator(
             "ConvTranspose",
             ["X", "w", "b"] if use_bias else ["X", "w"],
