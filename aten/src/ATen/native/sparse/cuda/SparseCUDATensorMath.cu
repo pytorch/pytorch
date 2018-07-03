@@ -43,29 +43,31 @@ namespace {
 
 Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseTensor& sparse_, const Tensor& dense, Scalar beta, Scalar alpha) {
 #ifndef __HIP_PLATFORM_HCC__
+  AT_ASSERT(t.is_cuda()); // dispatch argument
+  AT_CHECK(r_.is_cuda(), "addmm: expected 'out' to be CUDA, but got CPU");
+  AT_CHECK(sparse_.is_cuda(), "addmm: expected 'mat1' to be CUDA, but got CPU");
+  AT_CHECK(dense.is_cuda(), "addmm: expected 'mat2' to be CUDA, but got CPU");
+
   AT_CHECK(_check_device({sparse_, r_, t, dense}));
-  // THCudaIntTensor *csr;
-  // THCIndexTensor *indices;
-  // THCTensor *values, *r__, *dense_;
 
   // TODO: This error message seems awfully opaque
-  AT_CHECK(sparse_._sparseDims() == 2, "matrices expected, got ", sparse_._sparseDims(), "D tensor");
-  AT_CHECK(sparse_._denseDims() == 0, "scalar values expected, got ", sparse_._denseDims(), "D values");
-  AT_CHECK(dense.dim() == 2, "matrices expected, got ", dense.dim(), "D tensor");
+  AT_CHECK(sparse_._sparseDims() == 2, "addmm: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
+  AT_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
 
   // mxk * kxn = mxn
   int64_t m = sparse_.size(0);
   int64_t k = sparse_.size(1);
   int64_t n = dense.size(1);
 
-  r_.resize_({m, n});
-
   AT_CHECK(t.size(0) == m,
-      "Argument #1 (t): Expected dim 0 size ", m, ", got ", t.size(0));
+      "addmm: Argument #1 (t): Expected dim 0 size ", m, ", got ", t.size(0));
   AT_CHECK(t.size(1) == n,
-      "Argument #1 (t): Expected dim 1 size ", n, ", got ", t.size(1));
+      "addmm: Argument #1 (t): Expected dim 1 size ", n, ", got ", t.size(1));
   AT_CHECK(dense.size(0) == k,
-      "Argument #3 (dense): Expected dim 0 size ", k, ", got ", dense.size(0));
+      "addmm: Argument #3 (dense): Expected dim 0 size ", k, ", got ", dense.size(0));
+
+  r_.resize_({m, n});
 
   SparseTensor sparse = sparse_.coalesce();
 
@@ -174,26 +176,31 @@ Tensor& s_addmm_sparse_dense_cuda_(
 
 SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse_, const Tensor& dense/* , Scalar alpha */) {
 #ifndef __HIP_PLATFORM_HCC__
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
-  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
-  auto policy = thrust::cuda::par(allocator).on(stream);
+  AT_ASSERT(sparse_.is_cuda()); // dispatch argument
+  AT_CHECK(r_.is_cuda(), "hspmm: expected 'out' to be CUDA, but got CPU");
+  AT_CHECK(dense.is_cuda(), "hspmm: expected 'mat2' to be CUDA, but got CPU");
 
   AT_CHECK(_check_device({r_, sparse_, dense}));
 
   AT_CHECK(sparse_._sparseDims() == 2,
-      "Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+      "hspmm: Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0,
-      "Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
+      "hspmm: Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
-      "Argument #3: matrices expected, got ", dense.dim(), "D tensor");
+      "hspmm: Argument #3: matrices expected, got ", dense.dim(), "D tensor");
 
   int64_t m = sparse_.size(0);
   int64_t k = sparse_.size(1);
   int64_t n = dense.size(1);
 
   AT_CHECK(dense.size(0) == k,
-      "Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
+      "hspmm: Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
+
   _get_sparse_impl(r_)->raw_resize_(1, 1, {m, n});
+
+  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
+  auto policy = thrust::cuda::par(allocator).on(stream);
 
   SparseTensor sparse = sparse_.coalesce();
 
@@ -240,7 +247,14 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
 #ifndef __HIP_PLATFORM_HCC__
   const SparseTensor& sparse = sparse_.tref;
 
+  AT_ASSERT(dense.is_cuda()); // dispatch argument
+  AT_CHECK(sparse.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
+  AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
+
   AT_CHECK(_check_device({sparse, r_, dense}));
+
+  AT_CHECK(dense.sizes().equals(sparse.sizes()), "add: expected 'self' and 'other' to have same size, but self has size ",
+    dense.sizes(), " while other has size ", sparse.sizes(), " (FYI: dense-sparse addition does not currently support broadcasting)");
 
   const int64_t nnz = sparse._nnz();
   if (nnz == 0) {
@@ -254,7 +268,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     r_.resize_as_(dense);
     r_.copy_(dense);
   } else {
-    AT_CHECK(r_.is_contiguous(), "CUDA dense-sparse addition known bug");
+    AT_CHECK(r_.is_contiguous(), "add: CUDA dense-sparse addition with a non-contiguous output tensor does not work; shout if you need it (see https://github.com/pytorch/pytorch/issues/1521 )");
     r = r_.contiguous();
   }
 
@@ -271,7 +285,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     cudaGetDevice(&curDevice);
     cudaStream_t stream = globalContext().getCurrentCUDAStreamOnDevice(curDevice);
     if (sparse._denseDims() == 0) {
-      AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "Argument #0: tensor too large or too many dimensions");
+      AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
       AT_DISPATCH_ALL_TYPES_AND_HALF(
           values.type(), "add_out_dense_sparse_cuda", [&] {
@@ -282,7 +296,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
                 static_cast<uint64_t>(nnz));
           });
     } else {
-      AT_CHECK(cuda::getApplyGrid(nnz * block.x, grid, curDevice), "Argument #0: tensor too large or too many dimensions");
+      AT_CHECK(cuda::getApplyGrid(nnz * block.x, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
       AT_DISPATCH_ALL_TYPES_AND_HALF(
           values.type(), "add_out_dense_sparse_cuda", [&] {
@@ -343,8 +357,12 @@ Tensor& add_dense_sparse_cuda_(Tensor& t, SparseTensorRef src, Scalar alpha) {
 
 SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const SparseTensor& src, Scalar value) {
 #ifndef __HIP_PLATFORM_HCC__
+  AT_ASSERT(t.is_cuda()); // dispatch argument
+  AT_CHECK(src.is_cuda(), "add: expected 'other' to be CUDA, but got CPU");
+  AT_CHECK(r_.is_cuda(), "add: expected 'out' to be CUDA, but got CPU");
+
   AT_CHECK(_check_device({r_, t, src}));
-  AT_CHECK(t.sizes().equals(src.sizes()), "cadd operands have incompatible sizes");
+  AT_CHECK(t.sizes().equals(src.sizes()), "add: expected 'self' and 'other' to have same size, but ", t.sizes(), " != ", src.sizes());
 
   if (src._nnz() == 0) {
     return raw_copy_sparse_(r_, t);
@@ -353,7 +371,7 @@ SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, con
     return mul_out_sparse_scalar(r_, src, value);
   }
 
-  AT_CHECK(_is_same_density(t, src), "cadd operands have incompatible desnitities");
+  AT_CHECK(_is_same_density(t, src), "add: expected 'self' and 'other' to have same density, but 'self' has ", t._sparseDims(), " sparse dimensions while 'other' has ", src._sparseDims(), " sparse dimensions");
 
   // We deliberately choose to simply concat the indices and values tensors
   // rather than merging them. This removes the need to synchronously fetch nnz
@@ -405,6 +423,10 @@ SparseTensor& s_add_sparse_cuda_(SparseTensor& t, const SparseTensor& src, Scala
 // --------------------------------------------------------------------
 
 SparseTensor& s_sub_out_sparse_cuda(SparseTensor& r, const SparseTensor& t, const SparseTensor& src, Scalar value) {
+  AT_ASSERT(t.is_cuda()); // dispatch argument
+  AT_CHECK(src.is_cuda(), "sub: expected 'other' to be CUDA, but got CPU");
+  AT_CHECK(r.is_cuda(), "sub: expected 'out' to be CUDA, but got CPU");
+
   AT_DISPATCH_ALL_TYPES(
       t.type(), "sub_sparse", [&] {
         scalar_t cast_value = value.to<scalar_t>();
@@ -430,8 +452,12 @@ SparseTensor& s_sub_sparse_cuda_(SparseTensor& t, const SparseTensor& src, Scala
 
 SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
 #ifndef __HIP_PLATFORM_HCC__
+  AT_ASSERT(t_.is_cuda()); // dispatch argument
+  AT_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
+  AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
+
   AT_CHECK(_check_device({r_, t_, src_}));
-  AT_CHECK(t_.sizes().equals(src_.sizes()), "mul operands have incompatible sizes");
+  AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 
   SparseTensor t = t_.coalesce();
   SparseTensor src = src_.coalesce();
@@ -459,7 +485,7 @@ SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, co
   int curDevice = -1;
   cudaGetDevice(&curDevice);
   cudaStream_t stream = globalContext().getCurrentCUDAStreamOnDevice(curDevice);
-  AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "Argument #0: tensor too large or too many dimensions");
+  AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
   AT_DISPATCH_ALL_TYPES_AND_HALF(

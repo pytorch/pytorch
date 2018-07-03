@@ -34,8 +34,10 @@ class TestSparse(TestCase):
         # tests
         self.is_cuda = False
         self.is_uncoalesced = False
+        self.device = 'cpu'
         self.IndexTensor = torch.LongTensor
         self.ValueTensor = torch.DoubleTensor
+        self.value_dtype = torch.float64
         self.SparseTensor = torch.sparse.DoubleTensor
         super(TestSparse, self).setUp()
 
@@ -609,6 +611,13 @@ class TestSparse(TestCase):
         self._test_basic_ops_shape([50, 30, 20], [2])
         self._test_basic_ops_shape([5, 5, 5, 5, 5, 5], [2])
 
+    def test_add_dense_sparse_mismatch(self):
+        x = torch.zeros([3, 4], dtype=self.value_dtype, device=self.device)
+        sparse_y = self.SparseTensor(torch.zeros(1, 4, dtype=torch.int64, device=self.device),
+                                     torch.randn(4, 4, 4, dtype=self.value_dtype, device=self.device),
+                                     torch.Size([3, 4, 4]))
+        self.assertExpectedRaises(RuntimeError, lambda: x + sparse_y)
+
     def _test_sparse_mask_shape(self, shape_i, shape_v=None):
         shape = shape_i + (shape_v or [])
         x1, _, _ = self._gen_sparse(len(shape_i), 9, shape)
@@ -676,9 +685,7 @@ class TestSparse(TestCase):
         self.assertEqual(expected_output, input.coalesce().log1p_().to_dense())
 
         # test in-place op on uncoalesced input
-        with self.assertRaisesRegex(RuntimeError,
-                                    "in-place log1p on uncoalesced tensors is not supported yet!"):
-            input.log1p_()
+        self.assertExpectedRaises(RuntimeError, lambda: input.log1p_(), subname="uncoalesced")
 
         input.requires_grad_()
         self.assertTrue(input.requires_grad)
@@ -686,9 +693,7 @@ class TestSparse(TestCase):
         # test autograd
         x = input.clone()
         y = input.log1p()
-        with self.assertRaisesRegex(RuntimeError,
-                                    "log1p of a sparse tensor is made to be non-differentiable since.*"):
-            y.backward(x)
+        self.assertExpectedRaises(RuntimeError, lambda: y.backward(x), subname="backward")
 
         # test uncoalesced input
         input_uncoalesced = torch.sparse.DoubleTensor(
@@ -1064,6 +1069,7 @@ class TestCudaSparse(TestSparse):
     def setUp(self):
         super(TestCudaSparse, self).setUp()
         self.is_cuda = True
+        self.device = 'cuda'
         self.IndexTensor = torch.cuda.LongTensor
         self.ValueTensor = torch.cuda.DoubleTensor
         self.SparseTensor = torch.cuda.sparse.DoubleTensor
@@ -1074,6 +1080,25 @@ class TestCudaUncoalescedSparse(TestCudaSparse):
     def setUp(self):
         super(TestCudaUncoalescedSparse, self).setUp()
         self.is_uncoalesced = True
+
+
+class TestSparseOneOff(TestCase):
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_cuda_from_cpu(self):
+        self.assertExpectedRaises(
+            RuntimeError,
+            lambda: torch.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
+                                             torch.randn(4, 4, 4),
+                                             [3, 4, 4]))
+
+    @unittest.skipIf(not TEST_CUDA, 'CUDA not available')
+    def test_cuda_sparse_cpu_dense_add(self):
+        x = torch.zeros(3, 4, 4)
+        sparse_y = torch.cuda.sparse.FloatTensor(torch.zeros(1, 4).long().cuda(),
+                                                 torch.randn(4, 4, 4).cuda(),
+                                                 [3, 4, 4])
+        self.assertExpectedRaises(RuntimeError, lambda: x + sparse_y)
+
 
 if __name__ == '__main__':
     run_tests()
