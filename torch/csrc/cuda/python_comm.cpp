@@ -2,6 +2,7 @@
 #include "torch/csrc/cuda/comm.h"
 #include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/THCP.h"
+#include "torch/csrc/utils/auto_gil.h"
 
 #include <ATen/ATen.h>
 
@@ -31,6 +32,7 @@ void initCommMethods(PyObject *module) {
        py::handle handle = *py_streams;
        streams = THPUtils_PySequence_to_THCStreamList(handle.ptr());
      }
+     AutoNoGIL no_gil;
      return scatter(tensor, devices, chunk_sizes, dim, streams);
    },
    py::arg("tensor"),

@@ -130,13 +130,11 @@ std::vector<at::Tensor> scatter(
   } else {
     const int64_t chunk_size_sum =
         std::accumulate(chunk_sizes->begin(), chunk_sizes->end(), 0);
-    // clang-format off
     AT_CHECK(
       chunk_size_sum == tensor.size(dim),
       "given chunk sizes don't sum up to the tensor's size ",
       "(sum(chunk_sizes) == ", chunk_size_sum,
       ", but expected ", tensor.size(dim), ")");
-    // clang-format on
     chunks.reserve(chunk_sizes->size());
     int64_t chunk_start = 0;
     for (size_t chunk = 0; chunk < chunk_sizes->size(); ++chunk) {
@@ -153,7 +151,8 @@ std::vector<at::Tensor> scatter(
     // We must set the current device before setting the current stream.
     const at::DeviceGuard device_guard({at::kCUDA, device_index});
     const AutoStream stream_guard(
-        streams ? (*streams)[chunk] : THCState_getStream(thc_state));
+        streams ? (*streams)[chunk]
+                : THCState_getStreamOnDevice(thc_state, device_index));
     // Copy the chunk from its current device to its destination device, which
     // we set as the default device above, thus specified as -1.
     chunks[chunk] =
@@ -178,12 +177,10 @@ at::Tensor gather(
     AT_CHECK(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
-      // clang-format off
       AT_CHECK(
           expected_size[dimension] == tensor.size(dimension),
           "Gather got an input of invalid size: got ",
           tensor.sizes(), ", but expected ", at::IntList(expected_size));
-      // clang-format on
     }
     total_size += tensor.size(dim);
   }
@@ -202,5 +199,4 @@ at::Tensor gather(
   }
   return result;
 }
-} // namespace cuda
-} // namespace torch
+}} // namespace torch::cuda
