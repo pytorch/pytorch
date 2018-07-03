@@ -33,6 +33,7 @@ import os
 import yaml
 
 from functools import reduce
+from enum import Enum
 from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 
 
@@ -54,6 +55,27 @@ class bcolors:
     ENDC = '\033[0m'
     BOLD = '\033[1m'
     UNDERLINE = '\033[4m'
+
+
+class disablefuncmode(Enum):
+    """ How to disable functions
+    0 - Remove the function entirely (includes the signature).
+    1 - Stub the function and return an empty object based off the type.
+    2 - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
+        This macro is defined by HIP if the compiler used is hcc.
+    3 - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
+        This macro is defined by HIP if either hcc or nvcc are used in the device path.
+    4 - Stub the function and throw an exception at runtime.
+    5 - Stub the function and throw an assert(0).
+    6 - Stub the function and keep an empty body.
+    """
+    REMOVE = 0
+    STUB = 1
+    HCC_MACRO = 2
+    DEVICE_MACRO = 3
+    EXCEPTION = 4
+    ASSERT = 5
+    EMPTYBODY = 6
 
 
 def update_progress_bar(total, progress):
@@ -323,15 +345,6 @@ def disable_function(input_string, function, replace_style):
             e.g. "overlappingIndices"
 
     replace_style - The style to use when stubbing functions.
-        0 - Remove the function entirely (includes the signature).
-        1 - Stub the function and return an empty object based off the type.
-        2 - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
-            This macro is defined by HIP if the compiler used is hcc.
-        3 - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
-            This macro is defined by HIP if either hcc or nvcc are used in the device path.
-        4 - Stub the function and throw an exception at runtime.
-        5 - Stub the function and throw an assert(0).
-        6 - Stub the function and keep an empty body.
     """
 # void (*)(hcrngStateMtgp32 *, int, float *, double, double)
     info = {
@@ -410,11 +423,11 @@ def disable_function(input_string, function, replace_style):
     function_body = input_string[info["function_start"]:info["function_end"] + 1]
 
     # Remove the entire function body
-    if replace_style == 0:
+    if replace_style == disablefuncmode.REMOVE:
         output_string = input_string.replace(function_body, "")
 
     # Stub the function based off its return type.
-    elif replace_style == 1:
+    elif replace_style == disablefuncmode.STUB:
         # void return type
         if func_info["return_type"] == "void" or func_info["return_type"] == "static void":
             stub = "%s{\n}" % (function_string)
@@ -427,32 +440,32 @@ def disable_function(input_string, function, replace_style):
         output_string = input_string.replace(function_body, stub)
 
     # Add HIP Preprocessors.
-    elif replace_style == 2:
+    elif replace_style == disablefuncmode.HCC_MACRO:
         output_string = input_string.replace(
             function_body,
             "#if !defined(__HIP_PLATFORM_HCC__)\n%s\n#endif" % function_body)
 
     # Add HIP Preprocessors.
-    elif replace_style == 3:
+    elif replace_style == disablefuncmode.DEVICE_MACRO:
         output_string = input_string.replace(
             function_body,
             "#if !defined(__HIP_DEVICE_COMPILE__)\n%s\n#endif" % function_body)
 
     # Throw an exception at runtime.
-    elif replace_style == 4:
+    elif replace_style == disablefuncmode.EXCEPTION:
         stub = "%s{\n%s;\n}" % (
             function_string,
             'throw std::runtime_error("The function %s is not implemented.")' %
             function_string.replace("\n", " "))
         output_string = input_string.replace(function_body, stub)
 
-    elif replace_style == 5:
+    elif replace_style == disablefuncmode.ASSERT:
         stub = "%s{\n%s;\n}" % (
             function_string,
             'assert(0)')
         output_string = input_string.replace(function_body, stub)
 
-    elif replace_style == 6:
+    elif replace_style == disablefuncmode.EMPTY:
         stub = "%s{\n;\n}" % (function_string)
         output_string = input_string.replace(function_body, stub)
     return output_string
@@ -875,15 +888,15 @@ def main():
                 txt = f.read()
                 for func in functions:
                     # TODO - Find fix assertions in HIP for device code.
-                    txt = disable_function(txt, func, 5)
+                    txt = disable_function(txt, func, disablefuncmode.ASSERT)
 
                 for func in non_hip_functions:
                     # Disable this function on HIP stack
-                    txt = disable_function(txt, func, 2)
+                    txt = disable_function(txt, func, disablefuncmode.HCC_MACRO)
 
                 for func in not_on_device_functions:
                     # Disable this function when compiling on Device
-                    txt = disable_function(txt, func, 3)
+                    txt = disable_function(txt, func, disablefuncmode.DEVICE_MACRO)
 
                 f.seek(0)
                 f.write(txt)
