@@ -60,12 +60,6 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   return storage;
 }
 
-void THCStorage_retain(THCState *state, THCStorage *self)
-{
-  if(self && (self->flag & TH_STORAGE_REFCOUNTED))
-    self->refcount++;
-}
-
 void THCStorage_free(THCState *state, THCStorage *self)
 {
   AT_ASSERT(self->backend == at::kCUDA);
@@ -162,4 +156,36 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
 int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
   return storage->device;
+}
+
+THCStorage* THCStorage_newWithData(THCState *state, at::ScalarType scalar_type, void *data, ptrdiff_t size)
+{
+  return THCStorage_newWithDataAndAllocator(state, scalar_type, data, size,
+                                            state->cudaDeviceAllocator,
+                                            state->cudaDeviceAllocator->state);
+}
+
+THCStorage* THCStorage_newWithDataAndAllocator(
+  THCState *state, at::ScalarType scalar_type, void *data, ptrdiff_t size,
+  THCDeviceAllocator *allocator, void *allocatorContext) {
+  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
+  memset(storage, 0, sizeof(THCStorage));
+  storage->backend = at::kCUDA;
+  storage->scalar_type = scalar_type;
+  storage->data_ptr = data;
+  storage->size = size;
+  storage->refcount = 1;
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  storage->allocatorVoidPtr = allocator;
+  storage->allocatorContext = allocatorContext;
+  int device;
+  if (data) {
+    struct cudaPointerAttributes attr;
+    THCudaCheck(cudaPointerGetAttributes(&attr, data));
+    device = attr.device;
+  } else {
+    THCudaCheck(cudaGetDevice(&device));
+  }
+  storage->device = device;
+  return storage;
 }
