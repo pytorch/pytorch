@@ -99,8 +99,6 @@ class RReLU(Module):
 
      See: https://arxiv.org/pdf/1505.00853.pdf
 
-    .. image:: scripts/activation_images/RReLU.png
-
     Args:
         lower: lower bound of the uniform distribution. Default: :math:`\frac{1}{8}`
         upper: upper bound of the uniform distribution. Default: :math:`\frac{1}{3}`
