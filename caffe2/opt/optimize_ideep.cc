@@ -144,6 +144,7 @@ bool fuseConvBNHelperForIdeep(repr::NNModule* nn, caffe2::Workspace* ws) {
       no_bias = true;
       nn->dataFlow.createEdge(bnInputs[2], convNode);
       convInputs = repr::nn::getInputs(convNode);
+
     }
 
 #define EXPOSE_TENSOR_DATA(name, index, nodes)                                 \

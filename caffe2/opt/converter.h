@@ -1,11 +1,12 @@
 #ifndef CAFFE2_OPT_CONVERTER_H
 #define CAFFE2_OPT_CONVERTER_H
 
+#include "caffe2/core/common.h"
+#include "caffe2/core/logging.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Representations/NeuralNet.h"
-#include "caffe2/core/common.h"
-#include "caffe2/proto/caffe2.pb.h"
 
 #include <unordered_map>
 
@@ -21,16 +22,21 @@ public:
   void setDevice(std::string device) { Device = device; }
   const std::string getDevice() const { return Device; }
 
-  void setOperatorDef(caffe2::OperatorDef* opDef) {
+  void setOperatorDef(const caffe2::OperatorDef& opDef) {
     OpDef = opDef;
+    OpDefExists = true;
   }
-  const caffe2::OperatorDef* getOperatorDef() const {
-    assert(OpDef && "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
+  const caffe2::OperatorDef& getOperatorDef() const {
+    CAFFE_ENFORCE(
+        OpDefExists,
+        "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
     return OpDef;
   }
   caffe2::OperatorDef* getMutableOperatorDef() {
-    assert(OpDef && "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
-    return OpDef;
+    CAFFE_ENFORCE(
+        OpDefExists,
+        "OperatorDef was never set.  Use Caffe2Annotation::setOperatorDef.");
+    return &OpDef;
   }
 
   static bool classof(const Annotation *A) {
@@ -39,7 +45,8 @@ public:
 
 private:
   std::string Device = "";
-  caffe2::OperatorDef* OpDef = nullptr;
+  caffe2::OperatorDef OpDef;
+  bool OpDefExists = false;
 };
 
 nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
@@ -51,7 +58,8 @@ caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 // are not reflected in changes to external_input or external_output.
 caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
 
-std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(caffe2::OperatorDef* op);
+std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+    const caffe2::OperatorDef& op);
 
 } // namespace caffe2
 

@@ -1484,6 +1484,12 @@ class TestNN(NNTestCase):
         x2 = m(inp)
         self.assertEqual(x0, x1)
         self.assertEqual(x0, x2)
+        # test that we can backward several times without running into problems
+        x1 = m(inp)
+        x1.sum().backward()
+        x1 = m(inp)
+        x1.sum().backward()
+        # test removing
         m = torch.nn.utils.remove_spectral_norm(m)
         x3 = m(inp)
         self.assertEqual(x0, x3)
@@ -2941,6 +2947,22 @@ class TestNN(NNTestCase):
         del old_state_dict['bn.running_mean']
         for k, v, in old_state_dict.items():
             self.assertTrue(v.equal(new_state_dict[k]))
+
+    def test_load_state_dict_BC(self):
+        # BatchNormNd
+        # Added num_batches_tracked buffer at version 2. For state dict with
+        # earlier versions or no versions, it should provide default value of 0.
+        bn = nn.BatchNorm2d(3)
+        state_dict = bn.state_dict()
+        del state_dict['num_batches_tracked']
+        state_dict._metadata['']['version'] = 1  # version 1
+        bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
+        del state_dict._metadata['']['version']  # no version
+        bn.load_state_dict(state_dict)
+        self.assertEqual(bn.num_batches_tracked.dtype, torch.long)
+        self.assertEqual(bn.num_batches_tracked.item(), 0)
 
     def test_parameter_assignment(self):
         l = nn.Linear(5, 5)
