@@ -184,7 +184,7 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
     }
   }
 
-  if (op->type() == "FC") {
+  if (op.type() == "FC") {
     nnOp = util::make_unique<repr::FC>();
   }
 
