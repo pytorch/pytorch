@@ -118,8 +118,7 @@ class Bilinear(Module):
         self.reset_parameters()
 
     def reset_parameters(self):
-        fan_in, _ = init._calculate_fan_in_fan_out(self.weight)
-        bound = 1 / math.sqrt(fan_in)
+        bound = 1 / math.sqrt(self.weight.size(1))
         init.uniform_(self.weight, -bound, bound)
         if self.bias is not None:
             init.uniform_(self.bias, -bound, bound)
