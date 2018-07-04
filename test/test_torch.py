@@ -6153,6 +6153,17 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([3, 3, 2, 2, 1, 1]).view(3, 2), expanded_data.flip(0))
         self.assertEqual(torch.tensor([8, 7, 4, 3, 6, 5, 2, 1]).view(2, 2, 2), tranposed_data.flip(0, 1, 2))
 
+        # test rectangular case
+        data = torch.tensor([1, 2, 3, 4, 5, 6]).view(2, 3)
+        flip0_result = torch.tensor([[4, 5, 6], [1, 2, 3]])
+        flip1_result = torch.tensor([[3, 2, 1], [6, 5, 4]])
+        if use_cuda:
+            data = data.cuda()
+            flip0_result = flip0_result.cuda()
+            flip1_result = flip1_result.cuda()
+        self.assertEqual(flip0_result, data.flip(0))
+        self.assertEqual(flip1_result, data.flip(1))
+
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
 

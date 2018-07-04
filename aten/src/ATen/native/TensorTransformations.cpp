@@ -19,7 +19,7 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 
   auto indices = std::vector<at::Tensor>(flip_dims_size);
   for (int64_t i = 0; i < flip_dims_size; i++) {
-    indices[i] = at::arange(self.size(i) - 1, -1, -1, self.type().toScalarType(at::kLong));
+    indices[i] = at::arange(self.size(flip_dims_v[i]) - 1, -1, -1, self.type().toScalarType(at::kLong));
     // creates a meshgrid
     auto temp = std::vector<int64_t>(flip_dims_size, 1);
     temp[i] = indices[i].size(0);
