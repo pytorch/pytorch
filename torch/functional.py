@@ -8,6 +8,7 @@ __all__ = [
     'argmin',
     'btrifact',
     'btriunpack',
+    'isinf',
     'isnan',
     'split',
     'unbind',
@@ -148,6 +149,25 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
+def isinf(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `+/-INF` elements and 0 otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return tensor.abs() == float('inf')
+
+
 def isnan(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
@@ -163,7 +183,7 @@ def isnan(tensor):
         tensor([ 0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor")
+        raise ValueError("The argument is not a tensor", str(tensor))
     return tensor != tensor
 
 
