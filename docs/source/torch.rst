@@ -253,6 +253,7 @@ Other Operations
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flip
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace
