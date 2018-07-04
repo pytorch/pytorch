@@ -13,7 +13,9 @@ import pdb
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2")
 include_dirs = [
-    "operators"
+    "operators",
+    "sgd",
+    "image"
 ]
 output_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2_hip")
 
