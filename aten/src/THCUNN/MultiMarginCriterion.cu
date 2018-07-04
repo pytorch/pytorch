@@ -2,6 +2,8 @@
 #include "common.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
 #define MULTIMARGIN_THREADS 128
 

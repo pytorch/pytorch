@@ -4,25 +4,29 @@
 
 #define TH_TENSOR_REFCOUNTED 1
 
-typedef struct THCTensor
-{
-    int64_t *size;
-    int64_t *stride;
-    int nDimension;
+typedef struct THCTensor THCTensor;
 
-    THCStorage *storage;
-    ptrdiff_t storageOffset;
-    int refcount;
-
-    char flag;
-
-} THCTensor;
-
+// These used to be distinct types; for some measure of backwards compatibility and documentation
+// alias these to the single THCTensor type.
+#define THCudaTensor THCTensor
+#define THCudaDoubleTensor THCTensor
+#ifdef CUDA_HALF_TENSOR
+#define THCudaHalfTensor THCTensor
+#endif
+#define THCudaByteTensor THCTensor
+#define THCudaCharTensor THCTensor
+#define THCudaShortTensor THCTensor
+#define THCudaIntTensor THCTensor
+#define THCudaLongTensor THCTensor
 
 /**** access methods ****/
 THC_API THCStorage* THCTensor_(storage)(THCState *state, const THCTensor *self);
 THC_API ptrdiff_t THCTensor_(storageOffset)(THCState *state, const THCTensor *self);
+
+// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
 THC_API int THCTensor_(nDimension)(THCState *state, const THCTensor *self);
+THC_API int THCTensor_(_nDimension)(THCState *state, const THCTensor *self);
+
 THC_API int64_t THCTensor_(size)(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_(stride)(THCState *state, const THCTensor *self, int dim);
 THC_API THLongStorage *THCTensor_(newSizeOf)(THCState *state, THCTensor *self);
@@ -73,13 +77,13 @@ THC_API THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
 // values, unless you are doing some size and stride tricks, do not use resize*.
 THC_API void THCTensor_(resize)(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
+THC_API void THCTensor_(resizeNd)(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
 THC_API void THCTensor_(resizeAs)(THCState *state, THCTensor *tensor, THCTensor *src);
 THC_API void THCTensor_(resize1d)(THCState *state, THCTensor *tensor, int64_t size0_);
 THC_API void THCTensor_(resize2d)(THCState *state, THCTensor *tensor, int64_t size0_, int64_t size1_);
 THC_API void THCTensor_(resize3d)(THCState *state, THCTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_);
 THC_API void THCTensor_(resize4d)(THCState *state, THCTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_);
 THC_API void THCTensor_(resize5d)(THCState *state, THCTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_, int64_t size4_);
-THC_API void THCTensor_(resizeNd)(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
 
 THC_API void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
@@ -130,7 +134,6 @@ THC_API real THCTensor_(get3d)(THCState *state, const THCTensor *tensor, int64_t
 THC_API real THCTensor_(get4d)(THCState *state, const THCTensor *tensor, int64_t x0, int64_t x1, int64_t x2, int64_t x3);
 
 /* CUDA-specific functions */
-THC_API cudaTextureObject_t THCTensor_(getTextureObject)(THCState *state, THCTensor *self);
 THC_API int THCTensor_(getDevice)(THCState *state, const THCTensor *self);
 THC_API int THCTensor_(checkGPU)(THCState *state, unsigned int nTensors, ...);
 

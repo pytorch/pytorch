@@ -20,8 +20,8 @@ indicated by each distribution's ``.arg_constraints`` dict. These transforms oft
 overparameterize a space in order to avoid rotation; they are thus more
 suitable for coordinate-wise optimization algorithms like Adam::
 
-    loc = Variable(torch.zeros(100), requires_grad=True)
-    unconstrained = Variable(torch.zeros(100), requires_grad=True)
+    loc = torch.zeros(100, requires_grad=True)
+    unconstrained = torch.zeros(100, requires_grad=True)
     scale = transform_to(Normal.arg_constraints['scale'])(unconstrained)
     loss = -Normal(loc, scale).log_prob(data).sum()
 
@@ -31,7 +31,7 @@ propagated in an unconstrained space, and algorithms are typically rotation
 invariant.::
 
     dist = Exponential(rate)
-    unconstrained = Variable(torch.zeros(100), requires_grad=True)
+    unconstrained = torch.zeros(100, requires_grad=True)
     sample = biject_to(dist.support)(unconstrained)
     potential_energy = -dist.log_prob(sample).sum()
 

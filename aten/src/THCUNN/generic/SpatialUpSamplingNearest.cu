@@ -10,9 +10,9 @@ static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
   THArgCheck(input != NULL, 2, "4D input tensor expected but got NULL");
   THArgCheck(scale_factor > 1, 4,
              "scale_factor must be greater than 1, but got: %d", scale_factor);
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D input tensor expected but got: %s");
-  if (input->nDimension == 3) {
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+                  "non-empty 3D or 4D input tensor expected but got: %s");
+  if (input->dim() == 3) {
     int nChannels    = THCTensor_(size)(state, input, 0);
     int inputHeight  = THCTensor_(size)(state, input, 1);
     int inputWidth   = THCTensor_(size)(state, input, 2);
@@ -49,12 +49,12 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
 
   THCUNN_assertSameGPU(state, 2, input, output);
   THNN_(SpatialUpSamplingNearest_shapeCheck)(state, input, NULL, scale_factor);
-  int inputHeight = THCTensor_(size)(state, input, input->nDimension-2);
-  int inputWidth  = THCTensor_(size)(state, input,  input->nDimension-1);
+  int inputHeight = THCTensor_(size)(state, input, input->dim()-2);
+  int inputWidth  = THCTensor_(size)(state, input,  input->dim()-1);
   int outputHeight = inputHeight * scale_factor;
   int outputWidth = inputWidth * scale_factor;
 
-   if (input->nDimension == 3) {
+   if (input->dim() == 3) {
      THCTensor_(resize3d)(state, output,
                           THCTensor_(size)(state, input, 0),
                           outputHeight, outputWidth);
@@ -68,7 +68,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   // This is for allocating output Tensor
   int64_t no_elements = 1;
-  for(int i = 0; i < input->nDimension; i++){
+  for(int i = 0; i < input->dim(); i++){
     no_elements *= input->size[i];
   }
   no_elements *= scale_factor * scale_factor;
@@ -77,7 +77,7 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
   int d2;
   int d3;
 
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     d1 = output->size[0];
     d2 = output->size[1];
     d3 = output->size[2];
@@ -130,7 +130,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   real *gradOutput_data = THCTensor_(data)(state, gradOutput);
 
   int64_t no_elements = 1;
-  for(int i = 0; i < gradInput->nDimension; i++){
+  for(int i = 0; i < gradInput->dim(); i++){
     no_elements *= gradInput->size[i];
   }
 
@@ -138,7 +138,7 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   int d2;
   int d3;
 
-  if (gradInput->nDimension == 3) {
+  if (gradInput->dim() == 3) {
     d1 = gradInput->size[0];
     d2 = gradInput->size[1];
     d3 = gradInput->size[2];

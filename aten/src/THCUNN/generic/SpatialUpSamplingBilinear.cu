@@ -16,8 +16,8 @@ static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
              " but got input (H: %d, W: %d) output (H: %d, W: %d)",
              inputHeight, inputWidth, outputHeight, outputWidth);
   if (input != NULL) {
-     THCUNN_argCheck(state, input->nDimension == 4, 2, input,
-                     "4D input tensor expected but got: %s");
+     THCUNN_argCheck(state, !input->is_empty() && input->dim() == 4, 2, input,
+                     "non-empty 4D input tensor expected but got: %s");
   }
 
   if (gradOutput != NULL) {

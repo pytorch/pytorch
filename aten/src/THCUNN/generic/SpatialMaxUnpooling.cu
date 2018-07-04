@@ -10,13 +10,13 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
            int owidth, int oheight)
 {
   THCUNN_assertSameGPU(state, 3, input, output, indices);
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+                  "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
   THCUNN_check_shape_indices(state, indices, input);
 
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
 
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     nInputCols = input->size[2];
     nInputRows = input->size[1];
     nInputPlane = input->size[0];
@@ -42,7 +42,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
       batchSize, nInputPlane, nInputRows, nInputCols, oheight, owidth, THCTensor_(data)(state, output));
   THCudaCheck(cudaGetLastError());
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
     THCTensor_(resize3d)(state, output, nInputPlane, oheight, owidth);
 
   THCTensor_(free)(state, input);
@@ -64,7 +64,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   int dimw = 2;
   int dimh = 1;
 
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     nInputPlane = input->size[0];
     batchSize = 1;
   }

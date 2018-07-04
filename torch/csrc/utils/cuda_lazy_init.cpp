@@ -1,6 +1,6 @@
 #include "cuda_lazy_init.h"
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <mutex>
 
 #include "torch/csrc/Exceptions.h"

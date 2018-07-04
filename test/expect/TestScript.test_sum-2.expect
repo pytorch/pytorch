@@ -1,0 +1,4 @@
+graph(%x : Double(1, 1, 1, 1, 4)) {
+  %1 : Double(1, 1, 1, 1) = aten::sum[dim=[4], keepdim=0](%x)
+  return (%1);
+}

@@ -9,9 +9,9 @@ static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
   THArgCheck(input != NULL, 2, "3D input tensor expected but got NULL");
   THArgCheck(scale_factor > 1, 4,
 	     "scale_factor must be greater than 1, but got: %d", scale_factor);
-  THNN_ARGCHECK(input->nDimension == 2 || input->nDimension == 3, 2, input,
-		"2D or 3D input tensor expected but got: %s");
-  if (input->nDimension == 2) {
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+		"non-empty 2D or 3D input tensor expected but got: %s");
+  if (input->dim() == 2) {
     int nChannels    = THTensor_(size)(input, 0);
     int inputWidth   = THTensor_(size)(input, 1);
     int outputWidth  = inputWidth  * scale_factor;
@@ -39,10 +39,10 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
     int scale_factor)
 {
   THNN_(TemporalUpSamplingNearest_shapeCheck)(input, NULL, scale_factor);
-  int inputWidth  = THTensor_(size)(input,  input->nDimension-1);
+  int inputWidth  = THTensor_(size)(input,  input->dim()-1);
   int outputWidth = inputWidth * scale_factor;
 
-  if (input->nDimension == 2) {
+  if (input->dim() == 2) {
     THTensor_(resize2d)(output,
 			THTensor_(size)(input, 0),
       outputWidth);
@@ -54,10 +54,10 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   }
 
   int dW = scale_factor;
-  int xDim = input->nDimension-1;
+  int xDim = input->dim()-1;
 
   // dims
-  int idim = input->nDimension;
+  int idim = input->dim();
   int osz0 = output->size[0];
   int osz1 = output->size[1];
   int osz2 = 1;
@@ -115,10 +115,10 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
 
   int dW = scale_factor;
-  int xDim = gradInput->nDimension-1;
+  int xDim = gradInput->dim()-1;
 
   // dims
-  int idim = gradInput->nDimension;  // Guaranteed to be between 2 and 4
+  int idim = gradInput->dim();  // Guaranteed to be between 2 and 4
   int isz0 = gradInput->size[0];
   int isz1 = gradInput->size[1];
   int isz2 = 1;

@@ -7,12 +7,6 @@
 #include "ATen/Tensor.h"
 #include "ATen/Context.h"
 
-#if AT_CUDA_ENABLED()
-#include <cuda.h>
-#include <cuda_runtime.h>
-#include <cuda_fp16.h>
-#endif
-
 namespace at {
 Tensor Scalar::toTensor() const {
   if (Tag::HAS_t == tag) {

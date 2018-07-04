@@ -25,6 +25,11 @@ struct SourceLocation {
   }
 };
 
+inline std::ostream& operator<<(std::ostream& out, const SourceLocation& sl) {
+  sl.highlight(out);
+  return out;
+}
+
 
 // normally a python stack trace
 struct StringSourceLocation : public SourceLocation {

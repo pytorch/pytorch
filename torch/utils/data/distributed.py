@@ -1,6 +1,6 @@
 import math
 import torch
-from .sampler import Sampler
+from . import Sampler
 from torch.distributed import get_world_size, get_rank
 
 

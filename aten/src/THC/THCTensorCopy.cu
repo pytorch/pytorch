@@ -1,6 +1,8 @@
 #include "THCApply.cuh"
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
+#include "THCTensorCopy.hpp"
+#include <type_traits>
 
 inline int curGPU() {
   int curDev;
@@ -21,16 +23,16 @@ struct CopyOp {
 };
 
 // Copy for the same type to the same type
-template <typename TensorTypeDst, typename TensorTypeSrc>
-void
-THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
-  ptrdiff_t totalElements = TensorUtils<TensorTypeDst>::getNumElements(state, dst);
+template <typename ScalarTypeDst, typename ScalarTypeSrc>
+void THC_copyTensor(THCState* state, THCTensor* dst, THCTensor* src) {
+
+  ptrdiff_t totalElements = THCTensor_nElement(state, dst);
 
   THArgCheck(totalElements ==
-             TensorUtils<TensorTypeSrc>::getNumElements(state, src),
+             THCTensor_nElement(state, src),
              2, "sizes do not match");
 
-  if (TensorUtils<TensorTypeDst>::getDims(state, dst) == 0) {
+  if (THCTensor__nDimension(state, dst) == 0) {
     // Zero-dim tensor; copy nothing
     return;
   }
@@ -43,14 +45,14 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
   // to the size/strides such that the resulting tensor is
   // contiguous).
   // -AND: both tensors have the same type.
-  bool sameType = isSameType<TensorTypeSrc, TensorTypeDst>();
-  bool srcContig = TensorUtils<TensorTypeSrc>::isContiguous(state, src);
-  bool dstContig = TensorUtils<TensorTypeDst>::isContiguous(state, dst);
+  bool sameType = std::is_same<ScalarTypeDst, ScalarTypeSrc>::value;
+  bool srcContig = THCTensor_isContiguous(state, src);
+  bool dstContig = THCTensor_isContiguous(state, dst);
   bool memcpyEligible =
     ((srcContig && dstContig) || (totalElements == 1)) && sameType;
 
-  int srcDev = TensorUtils<TensorTypeSrc>::getDevice(state, src);
-  int dstDev = TensorUtils<TensorTypeDst>::getDevice(state, dst);
+  int srcDev = THCTensor_getDevice(state, src);
+  int dstDev = THCTensor_getDevice(state, dst);
   int oldDev = curGPU();
 
   // Try to enable p2p access. This also handles the case srcDev == dstDev.
@@ -92,10 +94,10 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
   if (memcpyEligible) {
     // Perform the copy
     THCudaCheck(cudaMemcpyAsync(
-                  TensorUtils<TensorTypeDst>::getData(state, dst),
-                  TensorUtils<TensorTypeSrc>::getData(state, src),
+                  dst->template data<ScalarTypeDst>(),
+                  src->template data<ScalarTypeSrc>(),
                   totalElements *
-                  sizeof(typename TensorUtils<TensorTypeDst>::DataType),
+                  sizeof(ScalarTypeDst),
                   cudaMemcpyDeviceToDevice,
                   copyStream));
   } else {
@@ -113,10 +115,11 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
     // might be worth it to avoid non-coalesced reads or writes.
     if (p2pEnabled) {
       bool succ =
-        THC_pointwiseApply2(
+        THC_pointwiseApply2<ScalarTypeDst,
+                            ScalarTypeSrc>(
           state, dst, src,
-          CopyOp<typename TensorUtils<TensorTypeDst>::DataType,
-                 typename TensorUtils<TensorTypeSrc>::DataType>());
+          CopyOp<ScalarTypeDst,
+                 ScalarTypeSrc>());
 
       THArgCheck(succ, 2, CUTORCH_DIM_WARNING);
     } else {
@@ -125,52 +128,51 @@ THC_copyTensor(THCState* state, TensorTypeDst* dst, TensorTypeSrc* src) {
 
       // Make sure the src is contiguous and in the same type as dst
       THCudaCheck(cudaSetDevice(srcDev));
-      TensorTypeDst* srcContig = NULL;
+      THCTensor* srcContig = NULL;
 
       if (sameType) {
-        srcContig =
-          (TensorTypeDst*) // this is actually the same type as src
-          TensorUtils<TensorTypeSrc>::newContiguous(state, src);
+        srcContig = THCTensor_newContiguous<ScalarTypeSrc>(state, src);
 
       } else {
         // Types are different
         // Copy into the new format, contiguous, on the source device
-        srcContig = TensorUtils<TensorTypeDst>::newTensor(state);
-        TensorUtils<TensorTypeDst>::resizeAs(state, srcContig, dst);
+        srcContig = THCTensor_new(state,
+                                  at::CTypeToScalarType<ScalarTypeDst>::to());
+        THCTensor_resizeAs(state, srcContig, dst);
 
         bool succ =
-          THC_pointwiseApply2(
+          THC_pointwiseApply2<ScalarTypeDst,
+                              ScalarTypeSrc>(
             state, srcContig, src,
-            CopyOp<typename TensorUtils<TensorTypeDst>::DataType,
-                   typename TensorUtils<TensorTypeSrc>::DataType>());
+            CopyOp<ScalarTypeDst,
+                   ScalarTypeSrc>());
 
         THArgCheck(succ, 2, CUTORCH_DIM_WARNING);
       }
 
       // Make sure the dst is contiguous
       THCudaCheck(cudaSetDevice(dstDev));
-      TensorTypeDst* dstContig =
-        TensorUtils<TensorTypeDst>::newContiguous(state, dst);
+      THCTensor* dstContig = THCTensor_newContiguous<ScalarTypeDst>(state, dst);
 
       // Now, we are ready for a cross-device memcpy of contiguous
       // data, of the same layout and type
       THCudaCheck(cudaSetDevice(srcDev));
 
       THCudaCheck(cudaMemcpyAsync(
-                    TensorUtils<TensorTypeDst>::getData(state, dstContig),
-                    TensorUtils<TensorTypeDst>::getData(state, srcContig),
+                    dstContig->template data<ScalarTypeDst>(),
+                    srcContig->template data<ScalarTypeDst>(),
                     totalElements *
-                    sizeof(typename TensorUtils<TensorTypeDst>::DataType),
+                    sizeof(ScalarTypeDst),
                     cudaMemcpyDeviceToDevice,
                     copyStream));
 
       // We are done with the src
-      TensorUtils<TensorTypeDst>::free(state, srcContig);
+      THCTensor_free(state, srcContig);
 
       if (dst != dstContig) {
-        TensorUtils<TensorTypeDst>::freeCopyTo(state, dstContig, dst);
+        THCTensor_freeCopyTo<ScalarTypeDst>(state, dstContig, dst);
       } else {
-        TensorUtils<TensorTypeDst>::free(state, dstContig);
+        THCTensor_free(state, dstContig);
       }
 
       // We're still on srcDev at this point

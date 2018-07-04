@@ -17,7 +17,7 @@ void THNN_(HardTanh_updateOutput)(
   else
     THTensor_(resizeAs)(output, input);
 
-  if (input->nDimension == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
+  if (input->_dim() == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
     if (inplace)
     {
@@ -33,10 +33,10 @@ void THNN_(HardTanh_updateOutput)(
       TH_TENSOR_APPLY2(real, output, real, input,
         if (*input_data < min_val)
           *output_data = min_val;
-        else if (*input_data <= max_val)
-          *output_data = *input_data;
-        else
+        else if (*input_data > max_val)
           *output_data = max_val;
+        else
+          *output_data = *input_data;
       );
     }
   }
@@ -88,7 +88,7 @@ void THNN_(HardTanh_updateGradInput)(
   else
     THTensor_(resizeAs)(gradInput, input);
 
-  if (input->nDimension == 1 ||
+  if (input->_dim() == 1 ||
     !THTensor_(isContiguous)(input) ||
     !THTensor_(isContiguous)(gradOutput) ||
     !THTensor_(isContiguous)(gradInput))

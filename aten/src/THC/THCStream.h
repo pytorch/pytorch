@@ -4,15 +4,11 @@
 #include <cuda_runtime_api.h>
 #include "THCGeneral.h"
 
-struct THCStream
-{
-    cudaStream_t stream;
-    int device;
-    int refcount;
-};
-
+struct THCStream;
 
 THC_API THCStream* THCStream_new(int flags);
+THC_API cudaStream_t THCStream_stream(THCStream* self);
+THC_API int THCStream_device(THCStream* self);
 THC_API THCStream* THCStream_defaultStream(int device);
 THC_API THCStream* THCStream_newWithPriority(int flags, int priority);
 THC_API void THCStream_free(THCStream* self);

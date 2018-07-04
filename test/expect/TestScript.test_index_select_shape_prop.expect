@@ -1,0 +1,5 @@
+graph(%x : Double(2, 2)
+      %y : Long(4)) {
+  %2 : Double(2, 4) = aten::index_select[dim=1](%x, %y)
+  return (%2);
+}

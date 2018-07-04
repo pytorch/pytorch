@@ -98,6 +98,10 @@ def rebuild_storage_cuda(cls, device, handle, size, offset, view_size):
     return storage
 
 
+def rebuild_storage_empty(cls):
+    return cls()
+
+
 def reduce_storage(storage):
     from . import get_sharing_strategy
     if storage.is_cuda:
@@ -109,6 +113,10 @@ def reduce_storage(storage):
         cache_key = metadata[1]
         rebuild = rebuild_storage_filename
         storage._shared_incref()
+    elif storage.size() == 0:
+        # This is special cased because Empty tensors
+        # (with size 0) cannot be mmapped.
+        return (rebuild_storage_empty, (type(storage),))
     else:
         fd, size = storage._share_fd_()
         if sys.version_info[0] == 2:

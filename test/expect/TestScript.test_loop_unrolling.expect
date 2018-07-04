@@ -1,0 +1,37 @@
+graph(%x : Dynamic) {
+  %y.1 : Dynamic = ^FIXME_zerol()()
+  %2 : Byte() = prim::Constant[value={1}]()
+  %3 : Long() = prim::Constant[value={0}]()
+  %4 : Dynamic = aten::div[other={8}](%x)
+  %5 : Dynamic = aten::mul[other={8}](%4)
+  %6 : Dynamic = aten::sub[alpha={1}](%x, %5)
+  %7 : Dynamic, %y.3 : Dynamic = prim::Loop(%4, %2, %3, %y.1)
+    block0(%i.1 : Dynamic, %10 : Dynamic, %11 : Dynamic) {
+      %y.12 : Dynamic = aten::add[alpha={1}](%11, %10)
+      %13 : Dynamic = aten::add[alpha={1}, other={1}](%10)
+      %y.5 : Dynamic = aten::add[alpha={1}](%y.12, %13)
+      %15 : Dynamic = aten::add[alpha={1}, other={1}](%13)
+      %y.6 : Dynamic = aten::add[alpha={1}](%y.5, %15)
+      %17 : Dynamic = aten::add[alpha={1}, other={1}](%15)
+      %y.7 : Dynamic = aten::add[alpha={1}](%y.6, %17)
+      %19 : Dynamic = aten::add[alpha={1}, other={1}](%17)
+      %y.8 : Dynamic = aten::add[alpha={1}](%y.7, %19)
+      %21 : Dynamic = aten::add[alpha={1}, other={1}](%19)
+      %y.9 : Dynamic = aten::add[alpha={1}](%y.8, %21)
+      %23 : Dynamic = aten::add[alpha={1}, other={1}](%21)
+      %y.10 : Dynamic = aten::add[alpha={1}](%y.9, %23)
+      %25 : Dynamic = aten::add[alpha={1}, other={1}](%23)
+      %y.11 : Dynamic = aten::add[alpha={1}](%y.10, %25)
+      %27 : Byte() = prim::Constant[value={1}]()
+      %28 : Dynamic = aten::add[alpha={1}, other={1}](%25)
+      -> (%27, %28, %y.11)
+    }
+  %29 : Dynamic, %y : Dynamic = prim::Loop(%6, %2, %7, %y.3)
+    block0(%i : Dynamic, %32 : Dynamic, %33 : Dynamic) {
+      %y.4 : Dynamic = aten::add[alpha={1}](%33, %32)
+      %35 : Byte() = prim::Constant[value={1}]()
+      %36 : Dynamic = aten::add[alpha={1}, other={1}](%32)
+      -> (%35, %36, %y.4)
+    }
+  return (%y);
+}

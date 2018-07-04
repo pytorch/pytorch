@@ -9,9 +9,9 @@ static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
   THArgCheck(input != NULL, 2, "4D input tensor expected but got NULL");
   THArgCheck(scale_factor > 1, 4,
 	     "scale_factor must be greater than 1, but got: %d", scale_factor);
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
-		"3D or 4D input tensor expected but got: %s");
-  if (input->nDimension == 3) {
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+		"non-empty 3D or 4D input tensor expected but got: %s");
+  if (input->dim() == 3) {
     int nChannels    = THTensor_(size)(input, 0);
     int inputHeight  = THTensor_(size)(input, 1);
     int inputWidth   = THTensor_(size)(input, 2);
@@ -45,12 +45,12 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     int scale_factor)
 {
   THNN_(SpatialUpSamplingNearest_shapeCheck)(input, NULL, scale_factor);
-  int inputHeight = THTensor_(size)(input, input->nDimension-2);
-  int inputWidth  = THTensor_(size)(input,  input->nDimension-1);
+  int inputHeight = THTensor_(size)(input, input->dim()-2);
+  int inputWidth  = THTensor_(size)(input,  input->dim()-1);
   int outputHeight = inputHeight * scale_factor;
   int outputWidth = inputWidth * scale_factor;
 
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     THTensor_(resize3d)(output,
 			THTensor_(size)(input, 0),
 			outputHeight, outputWidth);    
@@ -63,11 +63,11 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
 
   int dW = scale_factor;
   int dH = scale_factor;
-  int xDim = input->nDimension-2;
-  int yDim = input->nDimension-1;
+  int xDim = input->dim()-2;
+  int yDim = input->dim()-1;
 
   // dims
-  int idim = input->nDimension;
+  int idim = input->dim();
   int osz0 = output->size[0];
   int osz1 = output->size[1];
   int osz2 = output->size[2];
@@ -132,11 +132,11 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
 
   int dW = scale_factor;
   int dH = scale_factor;
-  int xDim = gradInput->nDimension-2;
-  int yDim = gradInput->nDimension-1;
+  int xDim = gradInput->dim()-2;
+  int yDim = gradInput->dim()-1;
 
   // dims
-  int idim = gradInput->nDimension;  // Guaranteed to be between 3 and 5
+  int idim = gradInput->dim();  // Guaranteed to be between 3 and 5
   int isz0 = gradInput->size[0];
   int isz1 = gradInput->size[1];
   int isz2 = gradInput->size[2];

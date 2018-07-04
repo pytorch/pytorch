@@ -25,7 +25,7 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
     throw std::runtime_error(ss.str());
   }
   auto n = self.size(0);
-  auto num_exchanges = (p.type().arange(1, n + 1) != p).nonzero().size(0);
+  auto num_exchanges = (at::arange(1, n + 1, p.type()) != p).nonzero().size(0);
   if (num_exchanges % 2 == 1) {
     return std::make_tuple(-1., lu.diag(), int_info);
   } else {
@@ -46,7 +46,7 @@ Tensor det(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    return at::zeros(self.type(), {});
+    return at::zeros({}, self.type());
   } else {
     return diag_U.prod().mul_(det_P);
   }
@@ -65,7 +65,7 @@ Tensor logdet(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros(self.type(), {});
+    det = at::zeros({}, self.type());
   } else {
     det = diag_U.prod().mul_(det_P);
   }
@@ -89,7 +89,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros(self.type(), {});
+    det = at::zeros({}, self.type());
   } else {
     det = diag_U.prod().mul_(det_P);
   }
@@ -98,7 +98,7 @@ std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
 
 static void check_1d(const Tensor& t, const char* arg, const char* fn) {
   if (t.dim() != 1) {
-    runtime_error("%s: Expected 1-D argument %s, but got %d-D", fn, arg, t.dim());
+   AT_ERROR(fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
   }
 }
 
@@ -116,14 +116,14 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(at::zeros(mat2.type(), {}), self, mat2, 0, 1);
+    return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
   }
   return self.type()._mm(self, mat2);
 }
 
 Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm_out(result, at::zeros(mat2.type(), {}), self, mat2, 0, 1);
+    return mat2.type().addmm_out(result, at::zeros({}, mat2.type()), self, mat2, 0, 1);
   }
   return self.type()._mm_out(result, self, mat2);
 }
@@ -172,13 +172,15 @@ Tensor& addr_out(Tensor &result, const Tensor& self, const Tensor& vec1, const T
 }
 
 Tensor dot(const Tensor& self, const Tensor& tensor) {
-  if (self.dim() != 1) {
-    runtime_error("Expected argument self to have 1 dimension, but has %d", self.dim());
-  }
-  if (tensor.dim() != 1) {
-    runtime_error("Expected argument tensor to have 1 dimension, but has %d", tensor.dim());
-  }
+  check_1d(self, "self", "dot");
+  check_1d(tensor, "tensor", "dot");
   return self._dot(tensor);
+}
+
+Tensor& dot_out(Tensor& result, const Tensor& self, const Tensor& tensor) {
+  result.resize_({});
+  // dispatching through type ensures we don't allow mismatched types.
+  return self.type().fill_(result, self.dot(tensor));
 }
 
 /*
@@ -200,18 +202,21 @@ The behavior depends on the dimensionality of the Tensors as follows:
   must be broadcastable).  For example, if tensor1 is a (j x 1 x n x m) Tensor
   and tensor2 is a (k x m x p) Tensor, the returned tensor will be an (j x k x n x p) Tensor.
 */
-Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
+Tensor matmul(at::optional<Tensor> out_opt, const Tensor& tensor1, const Tensor& tensor2) {
   auto dim_tensor1 = tensor1.dim();
   auto dim_tensor2 = tensor2.dim();
+  auto has_out = out_opt.has_value();
+  Tensor out = out_opt.value_or(Tensor());
 
   if (dim_tensor1 == 1 && dim_tensor2 == 1) {
-    return tensor1.dot(tensor2);
+    return has_out ? at::native::dot_out(out, tensor1, tensor2) : tensor1.dot(tensor2);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 1) {
-    return tensor1.mv(tensor2);
+    return has_out ? at::native::mv_out(out, tensor1, tensor2) : tensor1.mv(tensor2);
   } else if (dim_tensor1 == 1 && dim_tensor2 == 2) {
-    return tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
+    return has_out ? at::native::mm_out(out, tensor1.unsqueeze(0), tensor2).squeeze_(0)
+                   : tensor1.unsqueeze(0).mm(tensor2).squeeze_(0);
   } else if (dim_tensor1 == 2 && dim_tensor2 == 2) {
-    return tensor1.mm(tensor2);
+    return has_out ? at::native::mm_out(out, tensor1, tensor2) : tensor1.mm(tensor2);
   } else if (dim_tensor1 >= 3 && (dim_tensor2 == 1 || dim_tensor2 == 2)) {
     // optimization: use mm instead of bmm by folding tensor1's batch into
     // its leading matrix dimension.
@@ -227,7 +232,9 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
 
     // fold the batch into the first dimension
     Tensor t1 = tensor1.contiguous().view({-1, size1[size1.size() - 1]});
-    return at::_unsafe_view(t1.mm(t2), output_size);
+    Tensor output = has_out ? at::_unsafe_view(at::mm_out(out, t1, t2), output_size)
+                            : at::_unsafe_view(t1.mm(t2), output_size);
+    return has_out ? out.set_(output) : output;
   } else if ((dim_tensor1 >= 1 && dim_tensor2 >= 1) && (dim_tensor1 >= 3 || dim_tensor2 >= 3)) {
     // We are multiplying b1 x n x m1 by x2 x m2 x p (where b1 can be a list);
     // we track m1 vs m2 separately even though they must match for nicer error messages
@@ -260,8 +267,6 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
     Tensor tensor1_expanded = tensor1.expand(tensor1_expand_size).contiguous().view(tensor1_bmm_view);
     Tensor tensor2_expanded = tensor2.expand(tensor2_expand_size).contiguous().view(tensor2_bmm_view);
 
-    Tensor output = tensor1_expanded.bmm(tensor2_expanded);
-
     // reshape batches back into result
     std::vector<int64_t> output_shape(expand_batch_portion);
     if (dim_tensor1 > 1) {
@@ -270,12 +275,25 @@ Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
     if (dim_tensor2 > 1) {
       output_shape.push_back(p);
     }
-    return at::_unsafe_view(output, output_shape);
+
+    Tensor output = has_out ? at::_unsafe_view(at::bmm_out(out, tensor1_expanded, tensor2_expanded), output_shape)
+                            : at::_unsafe_view(tensor1_expanded.bmm(tensor2_expanded), output_shape);
+
+    return has_out ? out.set_(output) : output;
   }
 
-  runtime_error("both arguments to matmul need to be at least 1D, but they are %dD and %dD",
-                dim_tensor1, dim_tensor2);
+ AT_ERROR("both arguments to matmul need to be at least 1D, but they are ",
+          dim_tensor1, "D and ", dim_tensor2, "D");
 
+}
+
+Tensor matmul(const Tensor & tensor1, const Tensor & tensor2) {
+  return at::native::matmul(at::nullopt, tensor1, tensor2);
+}
+
+Tensor& matmul_out(Tensor &result, const Tensor & tensor1, const Tensor & tensor2) {
+  at::native::matmul(at::optional<Tensor>(result), tensor1, tensor2);
+  return result;
 }
 
 }

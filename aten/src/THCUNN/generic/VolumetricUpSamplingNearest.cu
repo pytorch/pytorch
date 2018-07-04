@@ -10,9 +10,9 @@ static inline void THNN_(VolumetricUpSamplingNearest_shapeCheck)
   THArgCheck(input != NULL, 2, "4D input tensor expected but got NULL");
   THArgCheck(scale_factor > 1, 4,
              "scale_factor must be greater than 1, but got: %d", scale_factor);
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D input tensor expected but got: %s");
-  if (input->nDimension == 4) {
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+                  "non-empty 4D or 5D input tensor expected but got: %s");
+  if (input->dim() == 4) {
     int nChannels    = THCTensor_(size)(state, input, 0);
     int inputDepth   = THCTensor_(size)(state, input, 1);
     int inputHeight  = THCTensor_(size)(state, input, 2);
@@ -55,14 +55,14 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
 
   THCUNN_assertSameGPU(state, 2, input, output);
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(state, input, NULL, scale_factor);
-  int inputDepth = THCTensor_(size)(state, input, input->nDimension-3);
-  int inputHeight = THCTensor_(size)(state, input, input->nDimension-2);
-  int inputWidth  = THCTensor_(size)(state, input,  input->nDimension-1);
+  int inputDepth = THCTensor_(size)(state, input, input->dim()-3);
+  int inputHeight = THCTensor_(size)(state, input, input->dim()-2);
+  int inputWidth  = THCTensor_(size)(state, input,  input->dim()-1);
   int outputDepth = inputDepth * scale_factor;
   int outputHeight = inputHeight * scale_factor;
   int outputWidth = inputWidth * scale_factor;
 
-   if (input->nDimension == 4) {
+   if (input->dim() == 4) {
      THCTensor_(resize4d)(state, output,
                           THCTensor_(size)(state, input, 0),
                           outputDepth, outputHeight, outputWidth);
@@ -76,7 +76,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   // This is for allocating output Tensor
   int64_t no_elements = 1;
-  for(int i = 0; i < input->nDimension; i++){
+  for(int i = 0; i < input->dim(); i++){
     no_elements *= input->size[i];
   }
   no_elements *= scale_factor * scale_factor * scale_factor;
@@ -86,7 +86,7 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   int d3;
   int d4;
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     d1 = output->size[0];
     d2 = output->size[1];
     d3 = output->size[2];
@@ -141,7 +141,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   real *gradOutput_data = THCTensor_(data)(state, gradOutput);
 
   int64_t no_elements = 1;
-  for(int i = 0; i < gradInput->nDimension; i++){
+  for(int i = 0; i < gradInput->dim(); i++){
     no_elements *= gradInput->size[i];
   }
 
@@ -150,7 +150,7 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   int d3;
   int d4;
 
-  if (gradInput->nDimension == 4) {
+  if (gradInput->dim() == 4) {
     d1 = gradInput->size[0];
     d2 = gradInput->size[1];
     d3 = gradInput->size[2];

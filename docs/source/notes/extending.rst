@@ -98,6 +98,12 @@ non-Variable arguments::
             # Gradients of non-Tensor arguments to forward must be None.
             return grad_output * ctx.constant, None
 
+.. note::
+    Inputs to ``backward``, i.e., :attr:`grad_output`, can also be Tensors that
+    track history. So if ``backward`` is implemented with differentiable
+    operations, (e.g., invocation of another custom
+    :class:`~torch.autograd.function`), higher order derivatives will work.
+
 You probably want to check if the backward method you implemented actually
 computes the derivatives of your function. It is possible by comparing with
 numerical approximations using small finite differences::
@@ -107,9 +113,11 @@ numerical approximations using small finite differences::
     # gradcheck takes a tuple of tensors as input, check if your gradient
     # evaluated with these tensors are close enough to numerical
     # approximations and returns True if they all verify this condition.
-    input = (Variable(torch.randn(20,20).double(), requires_grad=True), Variable(torch.randn(30,20).double(), requires_grad=True),)
-    test = gradcheck(Linear.apply, input, eps=1e-6, atol=1e-4)
+    input = (torch.randn(20,20,dtype=torch.double,requires_grad=True), torch.randn(30,20,dtype=torch.double,requires_grad=True))
+    test = gradcheck(linear, input, eps=1e-6, atol=1e-4)
     print(test)
+
+See :ref:`grad-check` for more details on finite-difference gradient comparisons.
 
 Extending :mod:`torch.nn`
 -------------------------
@@ -132,7 +140,7 @@ Since :mod:`~torch.nn` heavily utilizes :mod:`~torch.autograd`, adding a new
 :class:`Module` requires implementing a :class:`~torch.autograd.Function`
 that performs the operation and can compute the gradient. From now on let's
 assume that we want to implement a ``Linear`` module and we have the function
-implementated as in the listing above. There's very little code required to
+implemented as in the listing above. There's very little code required to
 add this. Now, there are two functions that need to be implemented:
 
 - ``__init__`` (*optional*) - takes in arguments such as kernel sizes, numbers
@@ -172,6 +180,13 @@ This is how a ``Linear`` module can be implemented::
         def forward(self, input):
             # See the autograd section for explanation of what happens here.
             return LinearFunction.apply(input, self.weight, self.bias)
+
+        def extra_repr(self):
+            # (Optional)Set the extra information about this module. You can test
+            # it by printing an object of this class.
+            return 'in_features={}, out_features={}, bias={}'.format(
+                self.in_features, self.out_features, self.bias is not None
+            )
 
 
 Writing custom C extensions

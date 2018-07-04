@@ -16,10 +16,9 @@ class Pareto(TransformedDistribution):
 
     Example::
 
-        >>> m = Pareto(torch.Tensor([1.0]), torch.Tensor([1.0]))
+        >>> m = Pareto(torch.tensor([1.0]), torch.tensor([1.0]))
         >>> m.sample()  # sample from a Pareto distribution with scale=1 and alpha=1
-         1.5623
-        [torch.FloatTensor of size 1]
+        tensor([ 1.5623])
 
     Args:
         scale (float or Tensor): Scale parameter of the distribution

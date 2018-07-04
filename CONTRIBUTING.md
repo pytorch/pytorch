@@ -165,7 +165,7 @@ Make sure you continue to pass these flags on subsequent builds.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate 
+When using `python setup.py develop`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -176,12 +176,12 @@ information for the code in `torch/csrc`. More information at:
 
 #### Use Ninja
 Python `setuptools` is pretty dumb, and always rebuilds every C file in a
-project.  If you install the ninja build system with `pip install ninja`, 
+project.  If you install the ninja build system with `pip install ninja`,
 then PyTorch will use it to track dependencies correctly.
 
 #### Use CCache
 
-Even when dependencies are tracked with file modification, 
+Even when dependencies are tracked with file modification,
 there are many situations where files get rebuilt when a previous
 compilation was exactly the same.
 
@@ -226,11 +226,90 @@ export CUDA_NVCC_EXECUTABLE=~/ccache/cuda/nvcc
 
 If you are working on the CUDA code, here are some useful CUDA debugging tips:
 
-1. `CUDA_DEBUG=1` will enable CUDA debugging symbols (-g -G). This is particularly
-    helpful in debugging device code. However, it will slow down the build process,
-    so use wisely.
+1. `CUDA_DEVICE_DEBUG=1` will enable CUDA device function debug symbols (`-g -G`).
+    This will be particularly helpful in debugging device code. However, it will
+    slow down the build process for about 50% (compared to only `DEBUG=1`), so use wisely.
 2. `cuda-gdb` and `cuda-memcheck` are your best CUDA debugging friends. Unlike`gdb`,
    `cuda-gdb` can display actual values in a CUDA tensor (rather than all zeros).
 
 
 Hope this helps, and thanks for considering to contribute.
+
+## Windows development tips
+
+Occasionally, you will write a patch which works on Linux, but fails CI on Windows.
+There are a few aspects in which MSVC (the Windows compiler toolchain we use) is stricter
+than Linux, which are worth keeping in mind when fixing these problems.
+
+1. Symbols are NOT exported by default on Windows; instead, you have to explicitly
+   mark a symbol as exported/imported in a header file with `__declspec(dllexport)` /
+   `__declspec(dllimport)`.  We have codified this pattern into a set of macros
+   which follow the convention `*_API`, e.g., `AT_API` inside ATen. (Every separate
+   shared library needs a unique macro name, because symbol visibility is on a per
+   shared library basis.)
+
+   The upshot is if you see an "unresolved external" error in your Windows build, this
+   is probably because you forgot to mark a function with `*_API`.  However, there is
+   one important counterexample to this principle: if you want a *templated* function
+   to be instantiated at the call site, do NOT mark it with `*_API` (if you do mark it,
+   you'll have to explicitly instantiate all of the specializations used by the call
+   sites.)
+
+2. If you link against a library, this does not make its dependencies transitively
+   visible. You must explicitly specify a link dependency against every library whose
+   symbols you use.  (This is different from Linux where in most environments,
+   transitive dependencies can be used to fulfill unresolved symbols.)
+
+3. If you have a Windows box (we have a few on EC2 which you can request access to) and
+   you want to run the build, the easiest way is to just run `.jenkins/pytorch/win-build.sh`.
+   If you need to rebuild, run `REBUILD=1 .jenkins/pytorch/win-build.sh` (this will avoid
+   blowing away your Conda environment.)  I recommend opening `cmd.exe`, and then running
+   `bash` to work in a bash shell (which will make various Linux commands available.)
+
+Even if you don't know anything about MSVC, you can use cmake to build simple programs on
+Windows; this can be helpful if you want to learn more about some peculiar linking behavior
+by reproducing it on a small example.  Here's a simple example cmake file that defines
+two dynamic libraries, one linking with the other:
+
+```
+project(myproject CXX)
+set(CMAKE_CXX_STANDARD 11)
+add_library(foo SHARED foo.cpp)
+add_library(bar SHARED bar.cpp)
+# NB: don't forget to __declspec(dllexport) at least one symbol from foo,
+# otherwise foo.lib will not be created.
+target_link_libraries(bar PUBLIC foo)
+```
+
+You can build it with:
+
+```
+mkdir build
+cd build
+cmake ..
+cmake --build .
+```
+
+## Caffe2 notes
+
+In 2018, we merged Caffe2 into the PyTorch source repository.  While the
+steady state aspiration is that Caffe2 and PyTorch share code freely,
+in the meantime there will be some separation.
+
+If you submit a PR to only PyTorch or only Caffe2 code, CI will only
+run for the project you edited.  The logic for this is implemented
+in `.jenkins/pytorch/dirty.sh` and `.jenkins/caffe2/dirty.sh`; you
+can look at this to see what path prefixes constitute changes.
+This also means if you ADD a new top-level path, or you start
+sharing code between projects, you need to modify these files.
+
+There are a few "unusual" directories which, for historical reasons,
+are Caffe2/PyTorch specific.  Here they are:
+
+- `CMakeLists.txt`, `Makefile`, `binaries`, `cmake`, `conda`, `modules`,
+  `scripts` are Caffe2-specific.  Don't put PyTorch code in them without
+  extra coordination.
+
+- `mypy*`, `requirements.txt`, `setup.py`, `test`, `tools` are
+  PyTorch-specific.  Don't put Caffe2 code in them without extra
+  coordination.

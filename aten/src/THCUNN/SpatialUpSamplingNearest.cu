@@ -1,5 +1,6 @@
 #include "THCUNN.h"
 #include "common.h"
+#include "THCTensor.hpp"
 
 #include <thrust/transform.h>
 #include <thrust/reduce.h>

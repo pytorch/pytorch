@@ -1,6 +1,6 @@
 #pragma once
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <nvToolsExt.h>
 #endif
 #include <thread>
@@ -16,7 +16,7 @@
 #include <tuple>
 #include "ATen/ATen.h"
 #include "torch/csrc/cuda/cuda_check.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
 
@@ -26,7 +26,7 @@ struct Function;
 
 namespace profiler {
 
-constexpr inline std::size_t ceilToMultiple(std::size_t a, std::size_t b) {
+constexpr inline size_t ceilToMultiple(size_t a, size_t b) {
   return ((a + b - 1) / b) * b;
 }
 
@@ -47,7 +47,7 @@ struct Event {
   : kind_(kind)
   , name_(std::move(name))
   , thread_id_(thread_id) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     if(record_cuda) {
       TORCH_CUDA_CHECK(cudaGetDevice(&device_));
       TORCH_CUDA_CHECK(cudaEventCreate(&event));
@@ -79,7 +79,7 @@ struct Event {
     return (e.cpu_ns_ - cpu_ns_)/(1000.0);
   }
   double cuda_elapsed_us(const Event & e) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     if(!e.has_cuda() || !has_cuda()) {
       throw std::logic_error("Events were not recorded for CUDA");
     }
@@ -96,7 +96,7 @@ struct Event {
 #endif
   }
   bool has_cuda() const {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     return event != nullptr;
 #else
     return false;
@@ -110,7 +110,7 @@ private:
   std::string name_;
   uint32_t thread_id_;
   int64_t cpu_ns_; // signed to allow for negative intervals
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   cudaEvent_t event = nullptr;
 #endif
   int device_ = -1;
@@ -120,9 +120,9 @@ private:
 // a std::vector resize from taking a large amount of time inside
 // a profiling  event
 struct RangeEventList {
-  constexpr static std::size_t MB = 1024 * 1024;
-  constexpr static std::size_t event_block_size = 16 * MB;
-  constexpr static std::size_t num_block_elements =
+  constexpr static size_t MB = 1024 * 1024;
+  constexpr static size_t event_block_size = 16 * MB;
+  constexpr static size_t num_block_elements =
     event_block_size / ceilToMultiple(sizeof(Event), alignof(Event));
   static_assert(sizeof(Event[num_block_elements]) <= event_block_size,
                 "num_block_elements is calculated incorrectly");
@@ -182,7 +182,7 @@ inline RangeEventList& getEventList() {
 
 inline void mark(std::string name, bool include_cuda = true) {
   if (state == ProfilerState::NVTX) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     nvtxMarkA(name.c_str());
 #else
     throw std::logic_error("mark called with NVTX tracing, but compiled without CUDA");
@@ -194,7 +194,7 @@ inline void mark(std::string name, bool include_cuda = true) {
 
 inline void pushRange(std::string name) {
   if (state == ProfilerState::NVTX) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     nvtxRangePushA(name.c_str());
 #else
     throw std::logic_error("pushRange called with NVTX tracing, but compiled without CUDA");
@@ -206,7 +206,7 @@ inline void pushRange(std::string name) {
 
 inline void popRange() {
   if (state == ProfilerState::NVTX) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     nvtxRangePop();
 #else
     throw std::logic_error("popRange called with NVTX tracing, but compiled without CUDA");

@@ -6,7 +6,7 @@
     (param (ident z) (tensor_type)))
   (list
     (assign
-      (list (ident q))
+      (list (variable (ident q)))
       (=)
       (-
         (+
@@ -19,14 +19,16 @@
           (list)
           (list))))
     (expression statement
-      (apply
-        (variable (ident print))
-        (list (variable (ident q)))
-        (list)))
+      (list
+        (apply
+          (variable (ident print))
+          (list (variable (ident q)))
+          (list))))
     (assign
-      (list (ident w))
+      (list (variable (ident w)))
       (=)
-      (- (variable (ident z))))
+      (unary minus
+        (variable (ident z))))
     (if
       (and
         (and
@@ -35,7 +37,7 @@
         (variable (ident z)))
       (list
         (assign
-          (list (ident m))
+          (list (variable (ident m)))
           (=)
           (if
             (not (variable (ident z)))
@@ -52,7 +54,7 @@
           (variable (ident z))))
       (list
         (assign
-          (list (ident q))
+          (list (variable (ident q)))
           (=)
           (variable (ident x)))))
     (return

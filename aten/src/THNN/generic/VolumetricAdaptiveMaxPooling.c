@@ -66,7 +66,7 @@ static void THNN_(VolumetricAdaptiveMaxPooling_updateOutput_frame)(
               for(iw = 0; iw < kW; iw++)
               {
                 real val = *(ip + it*istrideT + ih*istrideH + iw*istrideW);
-                if (val > maxval)
+                if ((val > maxval) || std::isnan(val))
                 {
                   maxval = val;
                   maxindex = (it+istartT)*isizeH*isizeW + (ih+istartH)*isizeW + (iw+istartW);
@@ -100,25 +100,25 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
   int dimH = 2;
   int dimW = 3;
   int64_t sizeB = 1;
-  int64_t sizeD;
-  int64_t isizeT;
-  int64_t isizeH;
-  int64_t isizeW;
+  int64_t sizeD = 0;
+  int64_t isizeT = 0;
+  int64_t isizeH = 0;
+  int64_t isizeW = 0;
 
-  int64_t istrideB;
-  int64_t istrideD;
-  int64_t istrideT;
-  int64_t istrideH;
-  int64_t istrideW;
+  int64_t istrideB = 0;
+  int64_t istrideD = 0;
+  int64_t istrideT = 0;
+  int64_t istrideH = 0;
+  int64_t istrideW = 0;
 
-  real *input_data;
-  real *output_data;
-  THIndex_t *indices_data;
+  real *input_data = nullptr;
+  real *output_data = nullptr;
+  THIndex_t *indices_data = nullptr;
 
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-    "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+    "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     istrideB = input->stride[0];
     sizeB = input->size[0];
@@ -140,7 +140,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
   istrideW = input->stride[dimW];
 
   /* resize output */
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     THTensor_(resize4d)(output, sizeD, osizeT, osizeH, osizeW);
     /* indices will contain max input locations for each output point */
@@ -253,7 +253,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 5) {
+  if (input->dim() == 5) {
     sizeB = input->size[0];
     dimD++;
     dimT++;
@@ -276,7 +276,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     THNN_(VolumetricAdaptiveMaxPooling_updateGradInput_frame)(gradInput_data, gradOutput_data,
                                                          indices_data,

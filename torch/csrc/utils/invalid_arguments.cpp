@@ -111,8 +111,8 @@ struct Option {
 
 std::vector<std::string> _splitString(const std::string &s, const std::string& delim) {
   std::vector<std::string> tokens;
-  std::size_t start = 0;
-  std::size_t end;
+  size_t start = 0;
+  size_t end;
   while((end = s.find(delim, start)) != std::string::npos) {
     tokens.push_back(s.substr(start, end-start));
     start = end + delim.length();

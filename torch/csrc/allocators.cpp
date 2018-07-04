@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "allocators.h"
 #include "torch/csrc/utils/auto_gil.h"
@@ -59,7 +59,7 @@ THAllocator THStorageWeakRefAllocator = {
   free_wrapper<StorageWeakRefAllocator>,
 };
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 cudaError_t CudaStorageWeakRefAllocator::malloc(void** ptr, size_t size, cudaStream_t stream) {
   THError("CudaStorageWeakRefAllocator: malloc not supported");
   return cudaSuccess;

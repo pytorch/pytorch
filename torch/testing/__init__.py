@@ -6,8 +6,55 @@ import torch
 import random
 
 __all__ = [
-    'make_non_contiguous', 'rand_like', 'randn_like'
+    'assert_allclose', 'make_non_contiguous', 'rand_like', 'randn_like'
 ]
+
+rand_like = torch.rand_like
+randn_like = torch.randn_like
+
+
+def assert_allclose(actual, expected, rtol=None, atol=None, equal_nan=True):
+    if not isinstance(actual, torch.Tensor):
+        actual = torch.tensor(actual)
+    if not isinstance(expected, torch.Tensor):
+        expected = torch.tensor(expected, dtype=actual.dtype)
+    if expected.shape != actual.shape:
+        expected = expected.expand_as(actual)
+    if rtol is None or atol is None:
+        if rtol is not None or atol is not None:
+            raise ValueError("rtol and atol must both be specified or both be unspecified")
+        rtol, atol = _get_default_tolerance(actual, expected)
+
+    close = torch.isclose(actual, expected, rtol, atol, equal_nan)
+    if close.all():
+        return
+
+    # Find the worst offender
+    error = (expected - actual).abs()
+    expected_error = atol + rtol * expected.abs()
+    delta = error - expected_error
+    delta[close] = 0  # mask out NaN/inf
+    _, index = delta.reshape(-1).max(0)
+
+    # TODO: consider adding torch.unravel_index
+    def _unravel_index(index, shape):
+        res = []
+        for size in shape[::-1]:
+            res.append(int(index % size))
+            index = int(index // size)
+        return tuple(res[::-1])
+
+    index = _unravel_index(index.item(), actual.shape)
+
+    # Count number of offenders
+    count = (~close).long().sum()
+
+    msg = ('Not within tolerance rtol={} atol={} at input{} ({} vs. {}) and {}'
+           ' other locations ({:2.2f}%)')
+
+    raise AssertionError(msg.format(
+        rtol, atol, list(index), actual[index].item(), expected[index].item(),
+        count - 1, 100 * count / actual.numel()))
 
 
 def make_non_contiguous(tensor):
@@ -38,17 +85,22 @@ def make_non_contiguous(tensor):
 
 
 def get_all_dtypes():
-    cpu_dtypes = [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
-                  torch.float16, torch.float32, torch.float64]
-    cuda_dtypes = [torch.cuda.uint8, torch.cuda.int8, torch.cuda.int16, torch.cuda.int32, torch.cuda.int64,
-                   torch.cuda.float16, torch.cuda.float32, torch.cuda.float64]
-    cpum = torch.sparse
-    cpu_sparse_dtypes = [cpum.uint8, cpum.int8, cpum.int16, cpum.int32, cpum.int64,
-                         cpum.float32, cpum.float64]
-    cudam = torch.cuda.sparse
-    cuda_sparse_dtypes = [cudam.uint8, cudam.int8, cudam.int16, cudam.int32, cudam.int64,
-                          cudam.float32, cudam.float64]
-    return cpu_dtypes + cuda_dtypes + cpu_sparse_dtypes + cuda_sparse_dtypes
+    return [torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64,
+            torch.float16, torch.float32, torch.float64]
 
-rand_like = torch._C._VariableFunctions.rand_like
-randn_like = torch._C._VariableFunctions.randn_like
+
+# 'dtype': (rtol, atol)
+_default_tolerances = {
+    'float64': (1e-5, 1e-8),  # NumPy default
+    'float32': (1e-4, 1e-5),  # This may need to be changed
+    'float16': (1e-3, 1e-3),  # This may need to be changed
+}
+
+
+def _get_default_tolerance(a, b=None):
+    if b is None:
+        dtype = str(a.dtype).split('.')[-1]  # e.g. "float32"
+        return _default_tolerances.get(dtype, (0, 0))
+    a_tol = _get_default_tolerance(a)
+    b_tol = _get_default_tolerance(b)
+    return (max(a_tol[0], b_tol[0]), max(a_tol[1], b_tol[1]))

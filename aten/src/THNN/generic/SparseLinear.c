@@ -11,22 +11,22 @@
 
 static bool THNN_(checkLegacyInput)(THTensor* t)
 {
-  return t->nDimension == 3 && t->size[2] == 2;
+  return !t->is_empty() && t->dim() == 3 && t->size[2] == 2;
 }
 
 static bool THNN_(checkInput)(THTensor* t)
 {
-  return t->nDimension == 2 && t->size[1] == 3;
+  return!t->is_empty() && t->dim() == 2 && t->size[1] == 3;
 }
 
 static bool THNN_(checkSize2D)(THTensor* t, int64_t size0, int64_t size1)
 {
-  return t->nDimension == 2 && t->size[0] == size0 && t->size[1] == size1;
+  return !t->is_empty() && t->dim() == 2 && t->size[0] == size0 && t->size[1] == size1;
 }
 
 static bool THNN_(checkSize1D)(THTensor* t, int64_t size0)
 {
-  return t->nDimension == 1 && t->size[0] == size0;
+  return !t->is_empty() && t->dim() == 1 && t->size[0] == size0;
 }
 
 static void THNN_(set1d)(THTensor *t, int64_t x0, real value) {

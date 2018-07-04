@@ -1,7 +1,6 @@
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.exp_family import ExponentialFamily
 from torch.distributions.utils import broadcast_all
@@ -12,14 +11,15 @@ class Poisson(ExponentialFamily):
     Creates a Poisson distribution parameterized by `rate`, the rate parameter.
 
     Samples are nonnegative integers, with a pmf given by
-    $rate^k e^{-rate}/k!$
+
+    .. math::
+      \mathrm{rate}^k \frac{e^{-\mathrm{rate}}}{k!}
 
     Example::
 
-        >>> m = Poisson(torch.Tensor([4]))
+        >>> m = Poisson(torch.tensor([4]))
         >>> m.sample()
-         3
-        [torch.LongTensor of size 1]
+        tensor([ 3.])
 
     Args:
         rate (Number, Tensor): the rate parameter

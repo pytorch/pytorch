@@ -2,7 +2,7 @@
 
 #include "torch/csrc/utils/numpy_stub.h"
 
-#ifndef WITH_NUMPY
+#ifndef USE_NUMPY
 namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
@@ -96,6 +96,11 @@ at::Tensor tensor_from_numpy(PyObject* obj) {
   // NumPy strides use bytes. Torch strides use element counts.
   auto element_size_in_bytes = PyArray_ITEMSIZE(array);
   for (auto& stride : strides) {
+    if (stride%element_size_in_bytes != 0) {
+      throw ValueError(
+        "given numpy array strides not a multiple of the element byte size. "
+        "Copy the numpy array to reallocate the memory.");
+    }
     stride /= element_size_in_bytes;
   }
 
@@ -171,4 +176,4 @@ ScalarType numpy_dtype_to_aten(int dtype) {
 
 }} // namespace torch::utils
 
-#endif  // WITH_NUMPY
+#endif  // USE_NUMPY

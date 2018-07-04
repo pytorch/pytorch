@@ -84,7 +84,9 @@ THD_API void THDTensor_(eqTensorT)(THDTensor *r_, THDTensor *ta, THDTensor *tb);
 THD_API void THDTensor_(abs)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(sigmoid)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(log)(THDTensor *r_, THDTensor *t);
+THD_API void THDTensor_(log10)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(log1p)(THDTensor *r_, THDTensor *t);
+THD_API void THDTensor_(log2)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(exp)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(expm1)(THDTensor *r_, THDTensor *t);
 THD_API void THDTensor_(cos)(THDTensor *r_, THDTensor *t);
@@ -131,8 +133,8 @@ THD_API void THDTensor_(rand)(THDTensor *r_, THDGenerator *_generator,
                               THLongStorage *size);
 THD_API void THDTensor_(randn)(THDTensor *r_, THDGenerator *_generator,
                                THLongStorage *size);
-THD_API int THDTensor_(logicalall)(THDTensor *self);
-THD_API int THDTensor_(logicalany)(THDTensor *self);
+THD_API int THDTensor_(logicalAll)(THDTensor *self);
+THD_API int THDTensor_(logicalAny)(THDTensor *self);
 
 THD_API void THDTensor_(clshift)(THDTensor *r_, THDTensor *t, THDTensor *src);
 THD_API void THDTensor_(crshift)(THDTensor *r_, THDTensor *t, THDTensor *src);

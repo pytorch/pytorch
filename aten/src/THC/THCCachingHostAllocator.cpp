@@ -1,4 +1,5 @@
 #include "THCCachingHostAllocator.h"
+#include "THCStream.hpp"
 
 #include <cuda_runtime_api.h>
 #include <deque>

@@ -2,7 +2,6 @@ import math
 from numbers import Number
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all
@@ -15,10 +14,9 @@ class Uniform(Distribution):
 
     Example::
 
-        >>> m = Uniform(torch.Tensor([0.0]), torch.Tensor([5.0]))
+        >>> m = Uniform(torch.tensor([0.0]), torch.tensor([5.0]))
         >>> m.sample()  # uniformly distributed in the range [0.0, 5.0)
-         2.3418
-        [torch.FloatTensor of size 1]
+        tensor([ 2.3418])
 
     Args:
         low (float or Tensor): lower range (inclusive).
@@ -72,7 +70,7 @@ class Uniform(Distribution):
         if self._validate_args:
             self._validate_sample(value)
         result = (value - self.low) / (self.high - self.low)
-        return result
+        return result.clamp(min=0, max=1)
 
     def icdf(self, value):
         if self._validate_args:

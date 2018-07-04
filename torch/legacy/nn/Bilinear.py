@@ -7,7 +7,7 @@ from .utils import clear
 class Bilinear(Module):
 
     def _assertInput(self, input):
-        if len(input) != 2 or not torch.is_tensor(input[0]) or not torch.is_tensor(input[1]):
+        if len(input) != 2 or not isinstance(input[0], torch.Tensor) or not isinstance(input[1], torch.Tensor):
             raise RuntimeError('input should be a table containing two data Tensors')
         if input[0].ndimension() != 2 or input[1].ndimension() != 2:
             raise RuntimeError('input Tensors should be two-dimensional')

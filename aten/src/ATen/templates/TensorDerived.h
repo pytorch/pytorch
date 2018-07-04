@@ -1,5 +1,7 @@
 #pragma once
 
+// ${generated_comment}
+
 $th_headers
 
 #include "ATen/Tensor.h"

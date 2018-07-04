@@ -54,7 +54,7 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
 
   std::mutex mutex;
   variable_list inputs; // Used only for the duration of first stage
-
+  
   std::unique_lock<std::mutex> lock() {
     return std::unique_lock<std::mutex>(mutex);
   }

@@ -9,8 +9,8 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
                          int padT, int padH, int padW,
                          int dilationT, int dilationH, int dilationW,
                          int weight_nullable) {
-  THNN_ARGCHECK(input->nDimension == 4 || input->nDimension == 5, 2, input,
-                "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+                "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 8,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 11,
@@ -20,8 +20,8 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
              dilationT, dilationH, dilationW);
 
   if (weight != NULL) {
-    THNN_ARGCHECK(weight->nDimension == 5, 4, weight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+    THNN_ARGCHECK(!weight->is_empty() && weight->dim() == 5, 4, weight,
+                  "non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
                   "expected for weight, but got: %s");
     if (bias != NULL) {
       THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);
@@ -31,7 +31,7 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
   }
 
   // Params
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimd = 1;
   int dimh = 2;
@@ -106,7 +106,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
     THArgCheck(THTensor_(isContiguous)(ones), 6, "ones needs to be contiguous");
   }
   int is_batch = 1;
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
     THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
@@ -132,7 +132,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->nDimension != 3 ||
+  if (ones->dim() != 3 ||
       ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize3d)(ones, outputDepth, outputHeight, outputWidth);
@@ -239,7 +239,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
   THArgCheck(THTensor_(isContiguous)(gradColumns), 5, "gradColumns needs to be contiguous");
 
   int is_batch = 1;
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
     THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
@@ -349,7 +349,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   }
 
   int is_batch = 1;
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
     THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
@@ -369,7 +369,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->nDimension != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
+  if (ones->dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize3d)(ones, outputDepth, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);

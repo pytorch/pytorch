@@ -3,15 +3,15 @@
 // for context
 #define __STDC_FORMAT_MACROS
 
+// ${generated_comment}
+
 #include "ATen/Config.h"
 #include "ATen/${Tensor}.h"
 #include "ATen/${Storage}.h"
 #include "ATen/Scalar.h"
 #include "ATen/Half.h"
 
-#if AT_CUDA_ENABLED()
 $extra_cuda_headers
-#endif
 
 namespace at {
 
@@ -31,23 +31,13 @@ const char * ${Tensor}::toString() const {
 }
 
 IntList ${Tensor}::sizes() const {
-  int64_t d = ${THTensor_nDimension};
-  if (d != 0) {
-    // note: this will return "{}" for a scalar because dim() will return 0 in that case.
-    return IntList(reinterpret_cast<int64_t*>(tensor->size),dim());
-  } else {
-    return IntList(kEmptySizes);
-  }
+  return IntList(tensor->size,dim());
 }
 
 int64_t ${Tensor}::dim() const {
   if(isScalar())
     return 0;
-  int64_t d = ${THTensor_nDimension};
-  // See Note [Empty versus 0-dim tensors]
-  if (d != 0)
-    return d;
-  return kEmptySizes.size();
+  return tensor->dim();
 }
 
 const char * ${Tensor}::typeString() {

@@ -1,12 +1,25 @@
-#include "aten_dispatch.h"
+#include "torch/csrc/jit/aten_dispatch.h"
+
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
-#include <unordered_map>
+#include <ATen/ATen.h>
+
+#include <algorithm>
+#include <array>
+#include <cstddef>
 #include <cstring>
+#include <sstream>
+#include <stdexcept>
 #include <tuple>
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 // ${generated_comment}
 
@@ -18,6 +31,8 @@ using at::Scalar;
 using at::Tensor;
 using at::IntList;
 using at::TensorList;
+using at::TensorOptions;
+using at::DeviceGuard;
 
 namespace {
 
@@ -27,10 +42,14 @@ namespace {
 // pack takes the return values of aten functions pushes them onto the stack
 template<typename T>
 void pack(Stack & stack, T&& v) {
-  stack.push_back(as_tensor(std::move(v)));
+  stack.push_back(as_variable(std::move(v)));
 }
 template<>
 void pack(Stack & stack, Tensor&& v) {
+  stack.push_back(std::move(v));
+}
+template<>
+void pack(Stack & stack, autograd::Variable&& v) {
   stack.push_back(std::move(v));
 }
 template<>
@@ -76,6 +95,9 @@ int deviceForInputs(Stack & stack, size_t N) {
 // the number of inputs to choose an overload).
 std::unordered_set<Symbol> tensor_vararg_fns = {
   aten::cat,
+  aten::stack,
+  aten::index,
+  aten::index_put,
 };
 
 template<size_t N>
@@ -86,22 +108,26 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   return res;
 }
 
-ConstructorsMap constructors = {
+using operator_constructor = std::function<TensorOp(jit::Node*)>;
+std::unordered_map<std::string, operator_constructor> constructors = {
   ${constructors}
 };
 
 std::string getDescriptor(jit::Node* n) {
   std::stringstream s;
-  JIT_ASSERT(n->kind().is_aten());
+  JIT_ASSERTM(n->kind().is_aten(), "%s is not an ATen op", n->kind().toDisplayString());
   s << n->kind().toUnqualString();
   if (tensor_vararg_fns.count(n->kind()) == 0)
     s << "-" << n->inputs().size();
   else
     s << "-*";
-  std::vector<const char*> attr_names = fmap(n->attributeNames(), [](Symbol x) { return x.toUnqualString(); });
-  std::sort(attr_names.begin(), attr_names.end(), [](const char *a, const char *b) {
-    return std::strcmp(a, b) < 0;
+  std::vector<std::string> attr_names = fmap(n->attributeNames(), [&](Symbol x) {
+    std::stringstream ss;
+    ss << x.toUnqualString() << "_" << toString(n->kindOf(x));
+    return ss.str();
   });
+  std::sort(attr_names.begin(), attr_names.end());
+
   for (const auto & name : attr_names)
     s << "-" << name;
   return s.str();
@@ -109,22 +135,23 @@ std::string getDescriptor(jit::Node* n) {
 
 } // anonymous namespace
 
-ConstructorsMap::iterator findTensorOp(jit::Node* n) {
+at::optional<TensorOp> findTensorOp(jit::Node* n) {
   auto signature = getDescriptor(n);
-  return constructors.find(signature);
-}
-bool hasTensorOp(jit::Node* n) {
-  return constructors.end() != findTensorOp(n);
+  auto it = constructors.find(signature);
+  if(it == constructors.end()) {
+    return at::nullopt;
+  }
+  return it->second(n);
 }
 TensorOp getTensorOp(jit::Node* n) {
-  auto itr = findTensorOp(n);
-  if (itr == constructors.end()) {
+  auto op = findTensorOp(n);
+  if (!op) {
     throw std::runtime_error(
         "Unsupported op descriptor: " + getDescriptor(n) +
         ". "
         "File a bug report.");
   }
-  return itr->second(n);
+  return op.value();
 }
 
 }} // namespace torch::jit

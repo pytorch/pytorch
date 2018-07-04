@@ -2,7 +2,22 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/passes/shape_analysis.h"
+#include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/named_value.h"
+
+#include <torch/csrc/api/include/torch/detail/ordered_dict.h>
+
 #include <ATen/optional.h>
+#include <ATen/ArrayRef.h>
+
+#include <functional>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 // This file contains classes which assist in desugaring Python style
 // modules and their methods into flattened graphs which don't have any
@@ -19,14 +34,18 @@ namespace torch { namespace jit { namespace script {
 // Note: because Method/Module are exposed to python these
 // classes use python method naming conventions
 
+struct SourceRange;
+
 struct Method {
   Method(std::string name, bool optimize,
          std::shared_ptr<Graph> graph,
-         std::vector<at::Tensor*> initial_members)
+         std::vector<at::Tensor*> initial_members,
+         std::function<void(Method&)> method_creator)
   : name_(std::move(name))
   , graph_(std::move(graph))
   , optimize(optimize)
-  , member_inputs(std::move(initial_members)) {
+  , member_inputs(std::move(initial_members))
+  , method_creator(method_creator) {
     JIT_ASSERT(graph_->inputs().size() >= member_inputs.size());
     int i = graph_->inputs().size() - member_inputs.size();
     for(at::Tensor* member : member_inputs) {
@@ -35,13 +54,13 @@ struct Method {
   }
 
   variable_tensor_list run(variable_tensor_list && inputs) {
-    std::call_once(executor_init, [&]{
-      executor = GraphExecutor(graph_, optimize);
-    });
     for(auto tp : member_inputs) {
       inputs.push_back(*tp);
     }
-    return executor.run(std::move(inputs));
+    return get_executor().run(std::move(inputs));
+  }
+  std::shared_ptr<Graph> graph_for(const variable_tensor_list& inputs) {
+    return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {
     return graph_;
@@ -54,10 +73,13 @@ struct Method {
   // adding any extra parameters necessary to do this call
 
   // defined here to keep details of member_input handling confined to this class
-  std::vector<Value*> emit_call_to(Method & callee, ArrayRef<Value*> inputs);
+  std::vector<Value*> emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs);
+  // if this isn't yet defined, run its method_creator function
+  void ensure_defined();
+
 
   size_t num_inputs() const {
-    return graph_->inputs().size() - member_inputs.size();
+    return graph()->inputs().size() - member_inputs.size();
   }
   Value * get_or_add_parameter(at::Tensor* slot) {
     auto it = member_input_index.find(slot);
@@ -69,10 +91,65 @@ struct Method {
     member_input_index[slot] = graph()->inputs().size();
     return graph()->addInput();
   }
+
+  std::shared_ptr<Graph> propagate_shapes(std::vector<at::Tensor> inputs, bool with_grad=false) {
+    auto retval = graph_->copy();
+    for (auto inp : member_inputs) {
+      inputs.push_back(*inp);
+    }
+    PropagateInputShapes(
+      *retval,
+      ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    return retval;
+  }
+
+  std::shared_ptr<Graph> propagate_and_assign_input_and_output_shapes(std::vector<at::Tensor> inputs, std::vector<at::Tensor> outputs, bool with_grad=false, bool propagate=true) {
+    auto retval = graph_->copy();
+    for (auto inp : member_inputs) {
+      inputs.push_back(*inp);
+    }
+    if (propagate) {
+      auto inputs_copy = inputs;
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
+    }
+    JIT_ASSERT(retval->inputs().size() == inputs.size());
+    for (size_t i=0; i < retval->inputs().size(); ++i) {
+      auto scalar_type = inputs[i].type().scalarType();
+      auto sizes = inputs[i].sizes();
+      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      retval->inputs()[i]->setType(type);
+    }
+    JIT_ASSERT(retval->outputs().size() == outputs.size());
+    for (size_t i=0; i < retval->outputs().size(); ++i) {
+      auto scalar_type = outputs[i].type().scalarType();
+      auto sizes = outputs[i].sizes();
+      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      retval->outputs()[i]->setType(type);
+    }
+    return retval;
+  }
+
+  std::vector<at::Tensor*> params() {
+    return member_inputs;
+  }
+
+  Method& setSchema(FunctionSchema schema_) {
+    schema.reset(new FunctionSchema(std::move(schema_)));
+    return *this;
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize;
+
+  GraphExecutor& get_executor() {
+    std::call_once(executor_init, [&]{
+      executor = GraphExecutor(graph(), optimize);
+    });
+    return executor;
+  }
+
   GraphExecutor executor; // for execution
   // member_inputs are a list of additional arguments appended to graph that are
   // inputs that come from the members of the Module or its submodules.
@@ -94,6 +171,14 @@ private:
   // std::vector<at::Tensor*> member_outputs;
 
   std::once_flag executor_init;
+
+  // an optional function that actually creates the method when emit_call_to(this,...)
+  // is first called.
+  // this is used by the compiler so that it can construct methods out of order
+  std::function<void(Method&)> method_creator;
+
+  // if absent, then we generate a default schema based on the graph
+  std::unique_ptr<FunctionSchema> schema;
 };
 
 struct Module;
@@ -122,69 +207,12 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-// simple ordered dict used only in Module
-// contains only the minimum necessary functionality for Module
-template<typename T>
-struct OrderedDict {
-  OrderedDict(const char * what)
-  : what(what) {}
-  // note: slight difference from python here.
-  // we do not allow for insertion of an already existing value,
-  // because we not allow allow methods or submodules to be updated
-  // once created
-  T& insert(const std::string& name,  T&& value) {
-    if(index_.count(name) != 0) {
-      std::stringstream ss;
-      ss << "module " << what << "'" << name << "' already defined.";
-      throw std::runtime_error(ss.str());
-    }
-    values_.push_back(std::move(value));
-    index_[name] = values_.size() - 1;
-    return values_.back();
-  }
-  at::optional<T&> find(const std::string& str) {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<T&>(values_.at(it->second));
-  }
-  at::optional<const T&> find(const std::string& str) const {
-    auto it = index_.find(str);
-    if(it == index_.end())
-      return at::nullopt;
-    return at::optional<const T&>(values_.at(it->second));
-  }
-  T& get(const std::string& name) {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const T& get(const std::string& name) const {
-    if(auto v = find(name)) {
-      return *v;
-    }
-    std::stringstream ss;
-    ss << "module " << what << "'" << name << "' is not defined.";
-    throw std::runtime_error(ss.str());
-  }
-  const std::vector<T>& values() const {
-    return values_;
-  }
-private:
-  std::unordered_map<std::string, size_t> index_;
-  std::vector<T> values_;
-  const char * what;
-};
-
 struct Module : public std::enable_shared_from_this<Module> {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
-  : modules("modules")
-  , parameters("parameters")
-  , methods("methods")
+  : modules("Module")
+  , parameters("Parameter")
+  , methods("Method")
   , optimize(true) {}
 
   // note this doesn't change the flags of existing methods just ones
@@ -205,11 +233,14 @@ struct Module : public std::enable_shared_from_this<Module> {
     modules.insert(name, {name, std::move(module)});
   }
 
-  Method& create_method(const std::string & name, std::shared_ptr<Graph> graph = nullptr, std::vector<at::Tensor*> member_inputs = {}) {
-    if(!graph)
-      graph = std::make_shared<Graph>();
-    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs)));
+  Method& create_method(const std::string & name, std::shared_ptr<Graph> graph, std::vector<at::Tensor*> member_inputs) {
+    JIT_ASSERT(graph);
+    std::unique_ptr<Method> method(new Method(name, optimize, std::move(graph), std::move(member_inputs), nullptr));
+    return *methods.insert(name, std::move(method));
+  }
 
+  Method& create_method(const std::string & name, std::function<void(Method&)> creator) {
+    std::unique_ptr<Method> method(new Method(name, optimize, std::make_shared<Graph>(), {}, creator));
     return *methods.insert(name, std::move(method));
   }
 
@@ -222,11 +253,11 @@ struct Module : public std::enable_shared_from_this<Module> {
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
-    return static_cast<autograd::Variable&>(*parameter_slot(name));
+    return autograd::as_variable_ref(*parameter_slot(name));
   }
 
   // each module owns its method. The reference returned here
-  // is guarenteed to stay valid until this module has been destoryed
+  // is guarenteed to stay valid until this module has been destroyed
   Method& get_method(const std::string& name) const {
     return *methods.get(name);
   }
@@ -235,38 +266,38 @@ struct Module : public std::enable_shared_from_this<Module> {
     return modules.get(name).module;
   }
 
-  const std::vector<NamedModule>& get_modules() const {
-    return modules.values();
+  const detail::OrderedDict<std::string, NamedModule>& get_modules() const {
+    return modules;
   }
-  const  std::vector<NamedParameter>& get_parameters() const {
-    return parameters.values();
+  const detail::OrderedDict<std::string, NamedParameter>& get_parameters() const {
+    return parameters;
   }
-  const  std::vector<std::unique_ptr<Method>>& get_methods() const {
-    return methods.values();
+  const detail::OrderedDict<std::string, std::unique_ptr<Method>>& get_methods() const {
+    return methods;
   }
 
-
-  at::optional<NamedParameter&> find_parameter(const std::string& name) {
+  NamedParameter* find_parameter(const std::string& name) {
     return parameters.find(name);
   }
-  at::optional<NamedModule&> find_module(const std::string& name) {
+  NamedModule* find_module(const std::string& name) {
     return modules.find(name);
   }
-  at::optional<Method&> find_method(const std::string& name) {
-    if(auto pm = methods.find(name))
-      return at::optional<Method&>(**pm);
-    return at::nullopt;
+  Method* find_method(const std::string& name) {
+    if (auto* pm = methods.find(name)) {
+      return pm->get();
+    }
+    return nullptr;
   }
 
-private:
+ private:
 
   // invariant: to ensure member_inputs of Methods stay valid,
   // it is only legal to _add_ new modules and parameters.
   // removing them will allow member_inputs to point to invalid parameters
   // no such restriction exists for methods
-  OrderedDict<NamedModule> modules;
-  OrderedDict<NamedParameter> parameters;
-  OrderedDict<std::unique_ptr<Method>> methods;
+  detail::OrderedDict<std::string, NamedModule> modules;
+  detail::OrderedDict<std::string, NamedParameter> parameters;
+  detail::OrderedDict<std::string, std::unique_ptr<Method>> methods;
   bool optimize;
 };
 

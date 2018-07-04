@@ -23,7 +23,7 @@ class PixelShuffle(Module):
     Examples::
 
         >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.Tensor(1, 9, 4, 4)
+        >>> input = torch.tensor(1, 9, 4, 4)
         >>> output = ps(input)
         >>> print(output.size())
         torch.Size([1, 1, 12, 12])
@@ -39,5 +39,5 @@ class PixelShuffle(Module):
     def forward(self, input):
         return F.pixel_shuffle(input, self.upscale_factor)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(upscale_factor=' + str(self.upscale_factor) + ')'
+    def extra_repr(self):
+        return 'upscale_factor={}'.format(self.upscale_factor)

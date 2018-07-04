@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include "torch/csrc/Exceptions.h"
 #include "torch/csrc/utils/pybind.h"
@@ -8,12 +8,15 @@
 
 PyObject * THPAutograd_initExtension(PyObject *_unused)
 {
+  auto tensor_module = THPObjectPtr(PyImport_ImportModule("torch.tensor"));
+  if (!tensor_module) throw python_error();
+
+  // NOTE: "leaks" THPVariableClass
+  THPVariableClass = PyObject_GetAttrString(tensor_module, "Tensor");
+  if (!THPVariableClass) throw python_error();
+
   auto autograd_module = THPObjectPtr(PyImport_ImportModule("torch.autograd"));
   if (!autograd_module) throw python_error();
-
-  // NOTE: "leaks" Variable
-  THPVariableClass = PyObject_GetAttrString(autograd_module, "Variable");
-  if (!THPVariableClass) throw python_error();
 
   // NOTE: "leaks" Function
   THPFunctionClass = PyObject_GetAttrString(autograd_module, "Function");
@@ -74,10 +77,32 @@ static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  AnomalyMode::set_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (AnomalyMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = {
   {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
+  {"set_anomaly_enabled", (PyCFunction)set_anomaly_mode_enabled, METH_O, nullptr},
+  {"is_anomaly_enabled", (PyCFunction)is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

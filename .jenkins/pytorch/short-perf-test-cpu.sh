@@ -19,8 +19,10 @@ if [[ "$COMMIT_SOURCE" == master ]]; then
 fi
 
 # Find the master commit to test against
+git remote add upstream https://github.com/pytorch/pytorch.git
+git fetch upstream
 IFS=$'\n'
-master_commit_ids=($(git rev-list HEAD))
+master_commit_ids=($(git rev-list upstream/master))
 for commit_id in "${master_commit_ids[@]}"; do
     if aws s3 ls s3://ossci-perf-test/pytorch/cpu_runtime/${commit_id}.json; then
         LATEST_TESTED_COMMIT=${commit_id}
@@ -38,15 +40,22 @@ fi
 # Include tests
 . ./test_cpu_speed_mini_sequence_labeler.sh
 . ./test_cpu_speed_mnist.sh
+. ./test_cpu_speed_torch.sh
+. ./test_cpu_speed_torch_tensor.sh
 
 # Run tests
+export TEST_MODE="compare_with_baseline"
 if [[ "$COMMIT_SOURCE" == master ]]; then
-    run_test test_cpu_speed_mini_sequence_labeler 20 compare_and_update
-    run_test test_cpu_speed_mnist 20 compare_and_update
-else
-    run_test test_cpu_speed_mini_sequence_labeler 20 compare_with_baseline
-    run_test test_cpu_speed_mnist 20 compare_with_baseline
+    export TEST_MODE="compare_and_update"
 fi
+
+# Operator tests
+run_test test_cpu_speed_torch ${TEST_MODE}
+run_test test_cpu_speed_torch_tensor ${TEST_MODE}
+
+# Sample model tests
+run_test test_cpu_speed_mini_sequence_labeler 20 ${TEST_MODE}
+run_test test_cpu_speed_mnist 20 ${TEST_MODE}
 
 if [[ "$COMMIT_SOURCE" == master ]]; then
     # This could cause race condition if we are testing the same master commit twice,

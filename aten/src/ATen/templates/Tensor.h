@@ -1,5 +1,7 @@
 #pragma once
 
+// ${generated_comment}
+
 #include "ATen/Generator.h"
 #include "ATen/Scalar.h"
 #include "ATen/ScalarType.h"
@@ -9,10 +11,19 @@
 #include "ATen/TensorBase.h"
 #include "ATen/TensorImpl.h"
 #include "ATen/Utils.h"
+#include "ATen/Device.h"
+#include "ATen/Layout.h"
 
 namespace at {
 struct Type;
+struct Tensor;
+struct TensorOptions;
+namespace detail {
+void set_data(Tensor& tensor, Tensor new_data);
+} // namespace detail
+} // namespace at
 
+namespace at {
 // Tensor is a "generic" object holding a pointer to the underlying TensorImpl object, which
 // has an embedded reference count. In this way, Tensor is similar to boost::intrusive_ptr.
 //
@@ -75,15 +86,39 @@ struct Tensor : public detail::TensorBase {
   inline Tensor toType(ScalarType t) const;
   inline Tensor toBackend(Backend b) const;
 
-  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`,
-  /// or has undefined type. Defined in Type.h because of include order issues.
-  bool is_variable_or_undefined() const noexcept;
+  /// New-style `to()` methods.
+  /// NB: These methods are defined in TensorOptions.h.
+  Tensor to(Device device, ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(ScalarType dtype, bool non_blocking = false) const;
+  Tensor to(Device device, bool non_blocking = false) const;
+
+  /// Returns true if the `Tensor` is actually a `torch::autograd::Variable`.
+  /// Defined in Type.h because of include order issues.
+  bool is_variable() const noexcept;
+
+  /// Returns a `Tensor`'s layout. Defined in Type.h
+  Layout layout() const noexcept;
+
+  /// Returns a `Tensor`'s dtype (`ScalarType`). Defined in Type.h
+  ScalarType dtype() const noexcept;
+
+  /// Returns a `Tensor`'s device.
+  Device device() const;
+
+  /// Returns the `TensorOptions` corresponding to this `Tensor`. Defined in
+  /// TensorOptions.h.
+  TensorOptions options() const;
 
   template<typename T>
   T * data() const;
 
   void * unsafeGetTH(bool retain) const {
     return pImpl->unsafeGetTH(retain);
+  }
+
+  // non-retaining
+  TensorImpl * unsafeGetTensorImpl() const {
+    return pImpl;
   }
 
   // Purposely not defined here to avoid inlining
@@ -101,9 +136,9 @@ struct Tensor : public detail::TensorBase {
   #undef TO_C_TYPE
 
   template<typename T, size_t N>
-  TensorAccessor<T,N> accessor() {
+  TensorAccessor<T,N> accessor() const {
     static_assert(N > 0, "accessor is used for indexing tensor, for scalars use *data<T>()");
-    AT_ASSERT(dim() == N, "expected %d dims but tensor has %d",N,dim());
+    AT_CHECK(dim() == N, "expected ", N, " dims but tensor has ", dim());
     return TensorAccessor<T,N>(data<T>(),sizes().data(),strides().data());
   }
 
@@ -120,12 +155,54 @@ struct Tensor : public detail::TensorBase {
   Tensor operator[](Tensor index) const;
   Tensor operator[](int64_t index) const;
 
+  // ~~~~~ Autograd API ~~~~~
+
+  Tensor& set_requires_grad(bool requires_grad) {
+    pImpl->set_requires_grad(requires_grad);
+    return *this;
+  }
+  bool requires_grad() const {
+    return pImpl->requires_grad();
+  }
+
+  Tensor& grad() {
+    return pImpl->grad();
+  }
+  const Tensor& grad() const {
+    return pImpl->grad();
+  }
+
+  Tensor detach() const {
+    return pImpl->detach();
+  }
+  void detach_() {
+    pImpl->detach_();
+  }
+
+  /// Computes the gradient of current tensor w.r.t. graph leaves.
+  void backward(
+      at::optional<Tensor> gradient = at::nullopt,
+      bool keep_graph = false,
+      bool create_graph = false);
+
+  friend void detail::set_data(Tensor& tensor, Tensor new_data);
+
   // STOP.  Thinking of adding a method here, which only makes use
   // of other ATen methods?  Define it in native_functions.yaml.
 
   //example
   //Tensor * add(Tensor & b);
   ${tensor_method_declarations}
+
+  template <typename F, typename... Args>
+  auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
+    return func(*this, std::forward<Args>(params)...);
+  }
 };
 
-} //namespace at
+namespace detail {
+inline void set_data(Tensor& tensor, Tensor new_data) {
+  tensor.pImpl->set_data(new_data);
+}
+} // namespace detail
+} // namespace at

@@ -16,8 +16,8 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 	           "kernel size should be greater than zero, but got kW: %d", kW);
 	THArgCheck(dW > 0, 6,
 	           "stride should be greater than zero, but got dW: %d", dW);
-	THNN_ARGCHECK(weight->nDimension == 3, 3, weight,
-	              "3D weight tensor expected, but got: %s");
+	THNN_ARGCHECK(!weight->is_empty() && weight->dim() == 3, 3, weight,
+	              "non-empty 3D weight tensor expected, but got: %s");
     THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
     THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
 
@@ -26,7 +26,7 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 	}
 
 	// we're always looking at (possibly batch) x feats x seq
-	int ndim = input->nDimension;
+	int ndim = input->dim();
 	int dimF = 0;
 	int dimS = 1;
 
@@ -35,8 +35,8 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 		++dimF;
 	}
 
-	THNN_ARGCHECK(ndim == 2 || ndim == 3, 1, input,
-	              "2D or 3D (batch mode) input tensor expected, but got :%s");
+	THNN_ARGCHECK(!input->is_empty() && (ndim == 2 || ndim == 3), 1, input,
+	              "non-empty 2D or 3D (batch mode) input tensor expected, but got :%s");
 
 	int64_t inputFrameSize = weight->size[0];
 	int64_t nInputFrame = input->size[dimS];
@@ -161,7 +161,7 @@ static void THNN_(TemporalRowConvolution_updateOutput_frame)(
 	if (bias != NULL) {
 		for (i = 0; i < inputFrameSize; i++)
 			THVector_(fill)
-			        (output->storage->data + output->storageOffset
+			        (THStorage_(data)(output->storage) + output->storageOffset
 			        + output->stride[0] * i,
 			        THTensor_(get1d)(bias, i), nOutputFrame);
 	}
@@ -184,7 +184,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
 	int padW,
 	bool featFirst) {
 
-	int ndim = input->nDimension;
+	int ndim = input->dim();
 
 	THTensor *tinput;
 	if (!featFirst) {
@@ -292,7 +292,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 	int padW,
 	bool featFirst) {
 
-	int ndim = input->nDimension;
+	int ndim = input->dim();
 
 	THTensor *tinput, *tgradOutput;
 
@@ -389,13 +389,13 @@ static void THNN_(TemporalRowConvolution_accGradParameters_frame)(
 		for (i = 0; i < gradBias->size[0]; i++) {
 			int64_t k;
 			real sum = 0;
-			real *data = gradOutput3d->storage->data
+			real *data = THStorage_(data)(gradOutput3d->storage)
 			             + gradOutput3d->storageOffset
 			             + i * gradOutput3d->stride[0];
 			for (k = 0; k < gradOutput3d->size[2]; k++) {
 				sum += data[k];
 			}
-			(gradBias->storage->data + gradBias->storageOffset)[i]
+			(THStorage_(data)(gradBias->storage) + gradBias->storageOffset)[i]
 			        += scale * sum;
 		}
 	}
@@ -419,7 +419,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
 	accreal scale_) {
 
     real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-	int ndim = input->nDimension;
+	int ndim = input->dim();
 
 	THTensor *tinput, *tgradOutput;
 

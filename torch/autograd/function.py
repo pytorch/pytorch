@@ -10,15 +10,13 @@ from collections import OrderedDict
 class _ContextMethodMixin(object):
 
     def save_for_backward(self, *tensors):
-        """Saves given tensors for a future call to :func:`~Function.backward`.
+        r"""Saves given tensors for a future call to :func:`~Function.backward`.
 
         **This should be called at most once, and only from inside the**
         :func:`forward` **method.**
 
         Later, saved tensors can be accessed through the :attr:`saved_tensors`
-        attribute; or, if the corresponding Variable is needed (e.g. for double
-        backwards), those can be accessed through the :attr:`saved_variables`
-        attribute.  Before returning them to the user, a check is made, to ensure
+        attribute. Before returning them to the user, a check is made to ensure
         they weren't used in any in-place operation that modified their content.
 
         Arguments can also be ``None``.
@@ -26,7 +24,7 @@ class _ContextMethodMixin(object):
         self.to_save = tensors
 
     def mark_dirty(self, *args):
-        """Marks given tensors as modified in an in-place operation.
+        r"""Marks given tensors as modified in an in-place operation.
 
         **This should be called at most once, only from inside the**
         :func:`forward` **method, and all arguments should be inputs.**
@@ -45,7 +43,7 @@ class _ContextMethodMixin(object):
             'that calls to `set_()` are not tracked')
 
     def mark_non_differentiable(self, *args):
-        """Marks outputs as non-differentiable.
+        r"""Marks outputs as non-differentiable.
 
         **This should be called at most once, only from inside the**
         :func:`forward` **method, and all arguments should be outputs.**
@@ -108,9 +106,9 @@ class FunctionMeta(type):
 
 
 class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixin, _HookMixin)):
-    """Records operation history and defines formulas for differentiating ops.
+    r"""Records operation history and defines formulas for differentiating ops.
 
-    Every operation performed on :class:`Variable` s creates a new function
+    Every operation performed on :class:`Tensor` s creates a new function
     object, that performs the computation, and records that it happened.
     The history is retained in the form of a DAG of functions, with edges
     denoting data dependencies (``input <- output``). Then, when backward is
@@ -122,7 +120,7 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
     subclasses and defining new operations. This is a recommended way of
     extending torch.autograd.
 
-    Each function is meant to be used only once (in the forward pass).
+    Each function object is meant to be used only once (in the forward pass).
 
     Attributes:
         requires_grad: Boolean indicating whether the :func:`backward` will
@@ -152,23 +150,23 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
 
     @staticmethod
     def forward(ctx, *args, **kwargs):
-        """Performs the operation.
+        r"""Performs the operation.
 
-        This function is to be overriden by all subclasses.
+        This function is to be overridden by all subclasses.
 
         It must accept a context ctx as the first argument, followed by any
         number of arguments (tensors or other types).
 
-        The context can be used to store variables that can be then retrieved
+        The context can be used to store tensors that can be then retrieved
         during the backward pass.
         """
         raise NotImplementedError
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        """Defines a formula for differentiating the operation.
+        r"""Defines a formula for differentiating the operation.
 
-        This function is to be overriden by all subclasses.
+        This function is to be overridden by all subclasses.
 
         It must accept a context ctx as the first argument, followed by as many
         outputs did :func:`forward` return, and it should return as many
@@ -176,14 +174,13 @@ class Function(with_metaclass(FunctionMeta, _C._FunctionBase, _ContextMethodMixi
         gradient w.r.t the given output, and each returned value should be the
         gradient w.r.t. the corresponding input.
 
-        The context can be used to retrieve variables saved during the forward
+        The context can be used to retrieve tensors saved during the forward
         pass.
         """
         raise NotImplementedError
 
 
 def once_differentiable(fn):
-    from .variable import Variable
 
     @functools.wraps(fn)
     def wrapper(ctx, *args):
@@ -198,11 +195,11 @@ def once_differentiable(fn):
         # error message during (double) back-propagation.
         # XXX: this is only an approximation of requires_grad - there's no way
         # to figure out if fn didn't use ctx.saved_tensors and as a result
-        # some Variables might require grad, even if no args do.
+        # some Tensors might require grad, even if no args do.
         # Unfortunately, this leads to unexpected error messages ("no nodes
         # require computing gradients"), but I don't have a better idea.
         # These functions would raise an error in backward anyway.
-        requires_grad = any(isinstance(arg, Variable) and arg.requires_grad
+        requires_grad = any(isinstance(arg, torch.Tensor) and arg.requires_grad
                             for arg in args)
         if not requires_grad:
             return outputs
@@ -228,12 +225,12 @@ def once_differentiable(fn):
 
 
 def traceable(fn_cls):
-    """Marks Function as traceable for the JIT.
+    r"""Marks Function as traceable for the JIT.
 
     Traceable functions have additional restrictions - they can't pass any
     data-dependent values to backward (e.g. Prod passes the output, which makes
     it non-traceable), and their backward should be implemented entirely in terms
-    of operations on autograd Variables in all cases.
+    of operations on autograd Tensors in all cases.
 
     DON'T USE THIS DECORATOR. IT IS FOR INTERNAL USE ONLY AND SHOULD BE HANDLED WITH
     CARE (or can give incorrect results otherwise).
@@ -307,27 +304,27 @@ def _unflatten(input, proto):
     return unflatten_helper(input, proto)[0]
 
 
-_iter_variables = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), condition_msg="Variables")
-_iter_variables_permissive = _iter_filter(lambda o: isinstance(o, torch.autograd.Variable), allow_unknown=True)
 _iter_jit_values = _iter_filter(lambda o: o is None or isinstance(o, torch._C.Value),
                                 condition_msg="jit's Values or None")
-_iter_tensors = _iter_filter(torch.is_tensor, condition_msg="Tensors")
-_iter_None_tensors = _iter_filter(
-    lambda o: o is None or torch.is_tensor(o) or isinstance(o, torch.autograd.Variable),
-    condition_msg="Tensors or None")
-_map_variable_tensor = _nested_map(lambda o: isinstance(o, torch.autograd.Variable),
-                                   lambda o: o.data, condition_msg="Variables")
+_iter_tensors = _iter_filter(lambda x: isinstance(x, torch.Tensor), condition_msg="Tensors")
+_iter_tensors_permissive = _iter_filter(lambda x: isinstance(x, torch.Tensor),
+                                        allow_unknown=True,
+                                        condition_msg="Tensors (permissive)")
+_iter_None_tensors = _iter_filter(lambda o: o is None or isinstance(o, torch.Tensor),
+                                  condition_msg="Tensors or None")
+_map_tensor_data = _nested_map(lambda x: isinstance(x, torch.Tensor), lambda o: o.data,
+                               condition_msg="Tensors")
 
 
 class NestedIOFunction(Function):
 
     def _do_forward(self, *input):
         self._nested_input = input
-        flat_input = tuple(_iter_variables(input))
+        flat_input = tuple(_iter_tensors(input))
         flat_output = super(NestedIOFunction, self)._do_forward(*flat_input)
         nested_output = self._nested_output
-        nested_variables = _unflatten(flat_output, self._nested_output)
-        return nested_variables
+        nested_tensors = _unflatten(flat_output, self._nested_output)
+        return nested_tensors
 
     def _do_backward(self, gradients, retain_variables):
         self.retain_variables = retain_variables
@@ -345,7 +342,7 @@ class NestedIOFunction(Function):
     __call__ = _do_forward
 
     def forward(self, *args):
-        nested_tensors = _map_variable_tensor(self._nested_input)
+        nested_tensors = _map_tensor_data(self._nested_input)
         result = self.forward_extended(*nested_tensors)
         del self._nested_input
         self._nested_output = result

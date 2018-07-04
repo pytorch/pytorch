@@ -38,6 +38,16 @@ static ncclComm_t unpack_nccl_comm(PyObject* capsule) {
 }
 
 static void destroy_nccl_comm(PyObject* capsule) {
+  /*
+   * TODO(T30279827) Temporarily disable calling ncclCommDestroy
+   * Calling ncclCommDestroy while program exiting is undefined
+   * according to Nvidia, and lead to segfault in NCCL 2
+   * (whether it is called before or after the CUDA runtime destructor).
+   * Temporarily disable it in destructor to avoid segfault.
+   * Following up with Nvidia for long term solution.
+   */
+  return;
+
   HANDLE_TH_ERRORS
   ncclComm_t comm = unpack_nccl_comm(capsule);
   with_no_gil([&]{
@@ -133,12 +143,12 @@ PyObject * THCPModule_nccl_reduce(PyObject *self, PyObject *args) {
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
-    AutoGPU gpu_guard;
+    at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
-      gpu_guard.setDevice(device);
-      auto stream = (streams[i] == NULL) ? NULL : streams[i]->stream;
+      device_guard.set_index(device);
+      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
       CHECK(ncclReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
            count, data_type, (ncclRedOp_t) op, root, comms[i], stream));
     }
@@ -175,12 +185,12 @@ PyObject * THCPModule_nccl_all_reduce(PyObject *self, PyObject *args) {
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
-    AutoGPU gpu_guard;
+    at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
-      gpu_guard.setDevice(device);
-      auto stream = (streams[i] == NULL) ? NULL : streams[i]->stream;
+      device_guard.set_index(device);
+      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
       CHECK(ncclAllReduce(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }
@@ -238,12 +248,12 @@ PyObject * THCPModule_nccl_all_gather(PyObject *self, PyObject *args) {
     int64_t count = inputs[0].numel();
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
-    AutoGPU gpu_guard;
+    at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
-      gpu_guard.setDevice(device);
-      auto stream = (streams[i] == NULL) ? NULL : streams[i]->stream;
+      device_guard.set_index(device);
+      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
     #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
       CHECK(ncclAllGather(inputs[i].data_ptr(), outputs[i].data_ptr(),
         count, data_type, comms[i], stream));
@@ -283,12 +293,12 @@ PyObject * THCPModule_nccl_reduce_scatter(PyObject *self, PyObject *args) {
     int64_t count = inputs[0].numel() / len;
     std::lock_guard<std::mutex> lock(*(THCCachingAllocator_getCudaFreeMutex()));
     auto comms = user_comms.empty() ? _get_communicators(inputs) : ArrayRef<ncclComm_t>(user_comms);
-    AutoGPU gpu_guard;
+    at::DeviceGuard device_guard;
     AutoNcclGroup nccl_group_guard;
     for (size_t i = 0; i < len; i++) {
       int device = inputs[i].get_device();
-      gpu_guard.setDevice(device);
-      auto stream = (streams[i] == NULL) ? NULL : streams[i]->stream;
+      device_guard.set_index(device);
+      auto stream = (streams[i] == NULL) ? NULL : THCStream_stream(streams[i]);
       CHECK(ncclReduceScatter(inputs[i].data_ptr(), outputs[i].data_ptr(),
           count, data_type, (ncclRedOp_t) op, comms[i], stream));
     }

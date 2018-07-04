@@ -1,7 +1,6 @@
 #pragma once
 
 #include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/generic_if.h"
 #include "torch/csrc/assertions.h"
 
 #include <ATen/ATen.h>
@@ -14,7 +13,12 @@ namespace torch { namespace jit {
 #define TH_FORALL_TYPES(_) \
 _(DynamicType) \
 _(TensorType) \
-_(HandleType)
+_(HandleType) \
+_(TupleType) \
+_(ListType) \
+_(NumberType) \
+_(FloatType) \
+_(IntType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -27,6 +31,7 @@ using TypePtr = std::shared_ptr<Type>;
 
 
 struct Type : std::enable_shared_from_this<Type> {
+
 private:
   TypeKind kind_;
 
@@ -35,6 +40,14 @@ protected:
     : kind_(kind) {}
 
 public:
+  virtual bool operator==(const Type& rhs) const = 0;
+
+  // subtyping relation. By default, we return true for the case
+  // when the type is exactly equal
+  virtual bool isSubtypeOf(const Type& rhs) const {
+    return *this == rhs;
+  }
+  virtual std::string name() const = 0;
   TypeKind kind() const {
     return kind_;
   }
@@ -66,18 +79,31 @@ public:
   std::shared_ptr<Type> asShared() {
     return shared_from_this();
   }
+  virtual ~Type() {}
 };
 
+inline bool operator!=(const Type & lhs, const Type & rhs) {
+  return !(lhs == rhs);
+}
 
+// This node represents a single Tensor value, with an unknown shape.
 struct DynamicType : public Type {
   DynamicType()
   : Type(TypeKind::DynamicType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    return "Tensor";
+  }
   static const TypeKind Kind = TypeKind::DynamicType;
   // global singleton
   static TypePtr get();
 };
 
-// This node represents a single Tensor value
+struct TensorType;
+using TensorTypePtr = std::shared_ptr<TensorType>;
+// This node represents a single Tensor value with a specific size
 struct TensorType : public Type {
   friend struct Type;
   TensorType(const at::Tensor& tensor)
@@ -100,8 +126,8 @@ struct TensorType : public Type {
 
   at::ScalarType scalarType() const { return scalar_type_; }
   int device() const { return device_; }
-  const std::vector<std::int64_t>& sizes() const { return sizes_; }
-  const std::vector<std::int64_t>& strides() const { return strides_; }
+  const std::vector<int64_t>& sizes() const { return sizes_; }
+  const std::vector<int64_t>& strides() const { return strides_; }
 
   TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
     return std::make_shared<TensorType>(scalar_type_, device_, sizes, strides);
@@ -111,10 +137,37 @@ struct TensorType : public Type {
     return withSizesStrides(sizes, TensorType::contiguousStridesOf(sizes));
   }
 
-  TypePtr contiguous() const {
+  TensorTypePtr contiguous() const {
     auto t = std::make_shared<TensorType>(*this);
     t->strides_ = TensorType::contiguousStridesOf(sizes_);
     return t;
+  }
+
+  TensorTypePtr toScalarType(at::ScalarType type){
+    auto t = std::make_shared<TensorType>(*this);
+    t->scalar_type_ = type;
+    return t;
+  }
+
+  virtual bool operator==(const Type& rhs) const override {
+    if(rhs.kind() != kind())
+      return false;
+    auto rt = rhs.expect<TensorType>();
+    return scalarType() == rt->scalarType() &&
+           sizes() == rt->sizes() &&
+           strides() == rt->strides() &&
+           device() == rt->device();
+  }
+  virtual bool isSubtypeOf(const Type& rhs) const override {
+    return *this == rhs || rhs.kind() == TypeKind::DynamicType;
+  }
+  virtual std::string name() const override {
+    std::string retval = std::string(at::toString(scalarType())) + "Tensor[";
+    for (size_t i=0; i < sizes_.size(); ++i) {
+      retval += std::to_string(sizes_[i]) + (i == sizes_.size() - 1 ? "" : ",");
+    }
+    retval += "]";
+    return retval;
   }
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
@@ -122,7 +175,7 @@ private:
     if(sizes.size() == 0) // zero-dim case
       return strides;
     strides.back() = 1;
-    for(std::size_t i = strides.size() - 1; i > 0; i--) {
+    for(size_t i = strides.size() - 1; i > 0; i--) {
       strides[i-1] = strides[i] * sizes[i];
     }
     return strides;
@@ -154,26 +207,147 @@ struct HandleType : public Type {
   friend struct Type;
   HandleType()
     : Type(TypeKind::HandleType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    return "Handle";
+  }
   static const TypeKind Kind = TypeKind::HandleType;
   // global singleton
   static TypePtr get();
 };
 
-static inline bool operator==(const Type & lhs, const Type & rhs) {
-  if(lhs.kind() != rhs.kind())
-    return false;
-  if(lhs.kind() != TypeKind::TensorType)
+struct ListType : public Type {
+  friend struct Type;
+  static const TypeKind Kind = TypeKind::ListType;
+  ListType(TypePtr elem)
+  : Type(TypeKind::ListType), elem(elem) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    std::stringstream ss;
+    ss << "List[" << getElementType()->name() << "]";
+    return ss.str();
+  }
+  TypePtr getElementType() const {
+    return elem;
+  }
+  // common cast List[Tensor]
+  static TypePtr ofTensors();  
+  static TypePtr ofInts();
+private:
+  TypePtr elem;
+};
+
+struct TupleType : public Type {
+  friend struct Type;
+  TupleType(std::vector<TypePtr> elements_)
+  : Type(TypeKind::TupleType)
+  , elements_(std::move(elements_)) {}
+  static const TypeKind Kind = TypeKind::TupleType;
+  at::ArrayRef<TypePtr> elements() const {
+    return elements_;
+  }
+  virtual bool operator==(const Type& rhs) const override {
+    return compare(rhs, [](const Type& a, const Type& b) {
+      return a == b;
+    });
+  }
+  virtual bool isSubtypeOf(const Type& rhs) const override {
+    // e.g. (Tensor, Tensor, Tensor) <: List[Tensor]
+    if(auto lt = rhs.cast<ListType>()) {
+      for(auto e : elements()) {
+        if(!e->isSubtypeOf(*lt->getElementType()))
+          return false;
+      }
+      return true;
+    }
+    // co-variant rules for tuples
+    return compare(rhs, [](const Type& a, const Type&b) {
+      return a.isSubtypeOf(b);
+    });
+  }
+  virtual std::string name() const override {
+    std::stringstream ss;
+    ss << "(";
+    for(size_t i = 0; i < elements().size(); ++i) {
+      if(i > 0)
+        ss << ", ";
+      ss << elements()[i]->name();
+    }
+    ss << ")";
+    return ss.str();
+  }
+private:
+  bool compare(const Type& rhs, std::function<bool(const Type&, const Type&)> fn) const {
+    if(rhs.kind() != kind())
+      return false;
+    const auto & l_elements = elements();
+    const auto & r_elements = rhs.cast<TupleType>()->elements();
+    if(l_elements.size() != r_elements.size())
+      return false;
+    for(size_t i = 0; i < l_elements.size(); ++i) {
+      if(!fn(*l_elements[i], *r_elements[i]))
+        return false;
+    }
     return true;
-  auto lt = lhs.expect<TensorType>();
-  auto rt = lhs.expect<TensorType>();
-  return lt->scalarType() == rt->scalarType() &&
-         lt->sizes() == rt->sizes() &&
-         lt->strides() == rt->strides() &&
-         lt->device() == rt->device();
-}
-inline bool operator!=(const Type & lhs, const Type & rhs) {
-  return !(lhs == rhs);
-}
+  }
+  std::vector<TypePtr> elements_;
+};
+
+// This node represents a Python number value
+struct NumberType : public Type {
+  NumberType()
+  : Type(TypeKind::NumberType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    return "Number";
+  }
+  static const TypeKind Kind = TypeKind::NumberType;
+  // global singleton
+  static TypePtr get();
+};
+
+// This node represents a Python float number value
+struct FloatType : public Type {
+  FloatType()
+  : Type(TypeKind::FloatType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    return "float";
+  }
+  virtual bool isSubtypeOf(const Type& rhs) const override {
+    return *this == rhs || rhs.kind() == TypeKind::NumberType;
+  }
+  static const TypeKind Kind = TypeKind::FloatType;
+  // global singleton
+  static TypePtr get();
+};
+
+// This node represents a Python int number value
+struct IntType : public Type {
+  IntType()
+  : Type(TypeKind::IntType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string name() const override {
+    return "int";
+  }
+  virtual bool isSubtypeOf(const Type& rhs) const override {
+    return *this == rhs || rhs.kind() == TypeKind::NumberType;
+  }
+  static const TypeKind Kind = TypeKind::IntType;
+  // global singleton
+  static TypePtr get();
+};
+
 
 std::ostream& operator<<(std::ostream & out, const Type & t);
 

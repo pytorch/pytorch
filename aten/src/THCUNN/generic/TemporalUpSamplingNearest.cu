@@ -10,9 +10,9 @@ static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
   THArgCheck(input != NULL, 2, "3D input tensor expected but got NULL");
   THArgCheck(scale_factor > 1, 4,
              "scale_factor must be greater than 1, but got: %d", scale_factor);
-  THCUNN_argCheck(state, input->nDimension == 2 || input->nDimension == 3, 2, input,
-                  "2D or 3D input tensor expected but got: %s");
-  if (input->nDimension == 2) {
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+                  "non-empty 2D or 3D input tensor expected but got: %s");
+  if (input->dim() == 2) {
     int nChannels    = THCTensor_(size)(state, input, 0);
     int inputWidth   = THCTensor_(size)(state, input, 1);
     int outputWidth  = inputWidth  * scale_factor;
@@ -43,10 +43,10 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
 
   THCUNN_assertSameGPU(state, 2, input, output);
   THNN_(TemporalUpSamplingNearest_shapeCheck)(state, input, NULL, scale_factor);
-  int inputWidth  = THCTensor_(size)(state, input,  input->nDimension-1);
+  int inputWidth  = THCTensor_(size)(state, input,  input->dim()-1);
   int outputWidth = inputWidth * scale_factor;
 
-   if (input->nDimension == 2) {
+   if (input->dim() == 2) {
      THCTensor_(resize2d)(state, output,
                           THCTensor_(size)(state, input, 0),
                           outputWidth);
@@ -60,7 +60,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   // This is for allocating output Tensor
   int64_t no_elements = 1;
-  for(int i = 0; i < input->nDimension; i++){
+  for(int i = 0; i < input->dim(); i++){
     no_elements *= input->size[i];
   }
   no_elements *= scale_factor;
@@ -68,7 +68,7 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   int d1;
   int d2;
 
-  if (input->nDimension == 2) {
+  if (input->dim() == 2) {
     d1 = output->size[0];
     d2 = output->size[1];
   } else {
@@ -119,14 +119,14 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   real *gradOutput_data = THCTensor_(data)(state, gradOutput);
 
   int64_t no_elements = 1;
-  for(int i = 0; i < gradInput->nDimension; i++){
+  for(int i = 0; i < gradInput->dim(); i++){
     no_elements *= gradInput->size[i];
   }
 
   int d1;
   int d2;
 
-  if (gradInput->nDimension == 2) {
+  if (gradInput->dim() == 2) {
     d1 = gradInput->size[0];
     d2 = gradInput->size[1];
   } else {

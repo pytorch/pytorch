@@ -1,11 +1,11 @@
 #pragma once
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <type_traits>
 #include <memory>
 
 #include <TH/TH.h>
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <THC/THC.h>
 #endif
 
@@ -41,7 +41,7 @@ public:
   void free(void* ptr);
 };
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 class CudaStorageWeakRefAllocator {
 public:
   CudaStorageWeakRefAllocator(PyObject *wrapped_object, THCDeviceAllocator *alloc, void *ctx) {
@@ -63,6 +63,6 @@ public:
 
 extern THAllocator THObjectPtrAllocator;
 extern THAllocator THStorageWeakRefAllocator;
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 extern THCDeviceAllocator THCStorageWeakRefAllocator;
 #endif

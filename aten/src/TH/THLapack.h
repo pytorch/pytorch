@@ -21,14 +21,7 @@ if (info < 0) {                                                     \
   THError(fmt, func, info, ##__VA_ARGS__);                          \
 }
 
-#ifdef __cplusplus
-extern "C" {
-#endif
-
 #include "generic/THLapack.h"
 #include "THGenerateAllTypes.h"
 
-#ifdef __cplusplus
-}
-#endif
 #endif

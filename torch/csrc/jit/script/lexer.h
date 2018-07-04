@@ -30,7 +30,6 @@ namespace script {
   _(TK_NEWLINE, "newline", "")                   \
   _(TK_INDENT, "indent", "")                     \
   _(TK_DEDENT, "dedent", "")                     \
-  _(TK_WHERE, "where", "where")                  \
   _(TK_FLOAT, "float", "float")                  \
   _(TK_DOUBLE, "double", "double")               \
   _(TK_LONG, "long", "long")                     \
@@ -81,9 +80,12 @@ namespace script {
   _(TK_NOTHING, "nothing", "")                   \
   _(TK_LIST_LITERAL, "list-literal", "")         \
   _(TK_FOR, "for", "for")                        \
-  _(TK_IN, "in", "in")
+  _(TK_IN, "in", "in")                           \
+  _(TK_STARRED, "starred", "")                   \
+  _(TK_UNARY_MINUS, "unary minus", "")           \
+  _(TK_POW, "pow operator", "**")
 
-static const char* valid_single_char_tokens = "+-*/()[]:,={}><.";
+static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -130,10 +132,11 @@ struct SharedParserData {
         {}, // reserve a level for unary not
         {'<', '>', TK_EQ, TK_LE, TK_GE, TK_NE},
         {'+', '-'},
-        {'*', '/'},
+        {'*', '/', '@'},
+        {TK_POW},
     };
     std::vector<std::vector<int>> unary_ops = {
-        {'-'},
+        {'-', '*'},
     };
 
     std::stringstream ss;
@@ -290,6 +293,7 @@ struct SharedParserData {
   bool isRightAssociative(int kind) {
     switch (kind) {
       case '?':
+      case TK_POW:
         return true;
       default:
         return false;
@@ -372,49 +376,39 @@ struct Token {
   }
 };
 
-struct Lookahead {
-  Lookahead(const Token& t) : t(t) {}
-  Token t;
-  bool valid = false;
-  size_t repeat = 0;
-};
-
 struct Lexer {
-  std::shared_ptr<std::string> file;
   explicit Lexer(const std::string& str)
       : file(std::make_shared<std::string>(str)),
         pos(0),
-        cur_(TK_EOF, SourceRange(file, 0, 0)),
-        lookahead_(cur_),
-        repeat(0),
         nesting(0),
+        indent_stack(),
+        next_tokens(),
         shared(sharedParserData()) {
     auto first_indent = lexRaw(true);
     indent_stack.push_back(first_indent.range.size());
-    next();
+    lex();
   }
+  // Return the current token, and then move to the next one
   Token next() {
-    Token r = cur_;
-    if (repeat > 0) {
-      repeat--;
-    } else if (lookahead_.valid) {
-      lookahead_.valid = false;
-      repeat = lookahead_.repeat;
-      cur_ = lookahead_.t;
-    } else {
-      std::tie(cur_, repeat) = lex();
+    if (next_tokens.size() == 0)
+      reportError("Lexer invariant violated: empty token queue");
+    Token r = next_tokens.front();
+    next_tokens.erase(next_tokens.begin());
+    if (next_tokens.size() == 0) {
+      lex();
     }
     return r;
   }
+  // Skip the current token if it matches the given kind
   bool nextIf(int kind) {
-    if (cur_.kind != kind)
+    if (cur().kind != kind)
       return false;
     next();
     return true;
   }
 
   [[noreturn]] void reportError(const std::string& what) {
-    reportError(what, cur_);
+    reportError(what, cur());
   }[[noreturn]] void reportError(const std::string& what, const Token& t) {
     std::stringstream ss;
     ss << what << ":\n";
@@ -428,30 +422,29 @@ struct Lexer {
     t.range.highlight(ss);
     throw std::runtime_error(ss.str());
   }[[noreturn]] void expected(const std::string& what) {
-    expected(what, cur_);
+    expected(what, cur());
   }
+  // Check that the current token has a given kind, return the current token,
+  // and advance to the next one.
   Token expect(int kind) {
-    if (cur_.kind != kind) {
+    if (cur().kind != kind) {
       expected(kindToString(kind));
     }
     return next();
   }
   Token& lookahead() {
-    if (!lookahead_.valid) {
-      lookahead_.valid = true;
-      std::tie(lookahead_.t, lookahead_.repeat) = lex();
+    if (next_tokens.size() < 2) {
+      lex();
     }
-    return lookahead_.t;
+    return next_tokens[1];
   }
   Token& cur() {
-    return cur_;
+    return next_tokens.front();
   }
 
  private:
-  // token, number of times to repeat it
-  std::pair<Token, int> lex() {
+  void lex() {
     auto r = lexRaw();
-    int repeat = 0;
     switch (r.kind) {
       case '(':
       case '[':
@@ -471,27 +464,29 @@ struct Lexer {
         } else if (depth == indent_stack.back()) {
           r.kind = TK_NEWLINE;
         } else {
+          next_tokens.emplace_back(TK_NEWLINE, r.range);
           while (indent_stack.back() != depth) {
             indent_stack.pop_back();
-            repeat++;
+            next_tokens.emplace_back(TK_DEDENT, r.range);
             if (indent_stack.size() == 0) {
               reportError("invalid ident level", r);
             }
           }
-          repeat--; // first repeat is this return
-          r.kind = TK_DEDENT;
+          return; // We've already queued the tokens
         }
       } break;
       case TK_EOF:
         if (indent_stack.size() > 1) {
-          r.kind = TK_DEDENT;
+          next_tokens.emplace_back(TK_NEWLINE, r.range);
+          next_tokens.emplace_back(TK_DEDENT, r.range);
           indent_stack.pop_back();
+          return;
         }
         break;
       default:
         break;
     }
-    return std::make_pair(r, repeat);
+    next_tokens.push_back(std::move(r));
   }
   Token lexRaw(bool whitespace_token = false) {
     int kind;
@@ -514,13 +509,13 @@ struct Lexer {
     pos = start + length;
     return t;
   }
-  size_t pos;
-  Token cur_;
-  Lookahead lookahead_;
-  size_t repeat; // how many times to repeat the current token until we continue
 
+  std::shared_ptr<std::string> file;
+  size_t pos;
   size_t nesting; // depth of ( [ { nesting...
   std::vector<int> indent_stack; // stack of identation level of blocks
+  // Invariant: this should always contain at least a single element
+  std::vector<Token> next_tokens;
   SharedParserData& shared;
 };
 } // namespace script

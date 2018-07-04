@@ -18,6 +18,7 @@ import types
 from torch._six import string_classes
 from torch.autograd import Function, function
 from torch.jit import _unique_state_dict
+from torch.onnx import ONNX_ARCHIVE_MODEL_PROTO_NAME, ExportTypes, OperatorExportTypes
 
 
 @contextlib.contextmanager
@@ -41,7 +42,8 @@ def set_training(model, mode):
 
 
 def export(model, args, f, export_params=True, verbose=False, training=False,
-           input_names=None, output_names=None, aten=False):
+           input_names=None, output_names=None, aten=False, export_raw_ir=False,
+           operator_export_type=None):
     r"""
     Export a model into ONNX format.  This exporter runs your model
     once in order to get a trace of its execution to be exported;
@@ -53,11 +55,11 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
         model (torch.nn.Module): the model to be exported.
         args (tuple of arguments): the inputs to
             the model, e.g., such that ``model(*args)`` is a valid
-            invocation of the model.  Any non-Variable arguments will
-            be hard-coded into the exported model; any Variable arguments
+            invocation of the model.  Any non-Tensor arguments will
+            be hard-coded into the exported model; any Tensor arguments
             will become inputs of the exported model, in the order they
-            occur in args.  If args is a Variable, this is equivalent
-            to having called it with a 1-ary tuple of that Variable.
+            occur in args.  If args is a Tensor, this is equivalent
+            to having called it with a 1-ary tuple of that Tensor.
             (Note: passing keyword arguments to the model is not currently
             supported.  Give us a shout if you need it.)
         f: a file-like object (has to implement fileno that returns a file descriptor)
@@ -76,48 +78,58 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
             input nodes of the graph, in order
         output_names(list of strings, default empty list): names to assign to the
             output nodes of the graph, in order
-        aten (bool, default False): export the model in aten mode. If using aten mode,
-            all the ops original exported by the functions in symbolic.py are exported
-            as ATen ops.
+        aten (bool, default False): [DEPRECATED. use operator_export_type] export the
+            model in aten mode. If using aten mode, all the ops original exported
+            by the functions in symbolic.py are exported as ATen ops.
+        export_raw_ir (bool, default False): [DEPRECATED. use operator_export_type]
+            export the internal IR directly instead of converting it to ONNX ops.
     """
-    _export(model, args, f, export_params, verbose, training, input_names, output_names)
+    if aten or export_raw_ir:
+        assert operator_export_type is None
+        assert aten ^ export_raw_ir
+        operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
+    elif operator_export_type is None:
+        operator_export_type = OperatorExportTypes.ONNX
+    _export(model, args, f, export_params, verbose, training, input_names, output_names,
+            operator_export_type=operator_export_type)
 
 
-def _optimize_trace(trace, aten):
+def _optimize_graph(graph, operator_export_type):
     # run dce first to eliminate dead parts of the graph that might have been
     # left behind by things like symbolic_override
-    torch._C._jit_pass_dce(trace)
-    torch._C._jit_pass_lint(trace)
 
-    torch._C._jit_pass_peephole(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_onnx(trace, aten)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_onnx_peephole(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_dce(trace)
-    torch._C._jit_pass_lint(trace)
-    torch._C._jit_pass_canonicalize(trace)
-    torch._C._jit_pass_lint(trace)
+    torch._C._jit_pass_dce(graph)
+    torch._C._jit_pass_lint(graph)
+
+    torch._C._jit_pass_peephole(graph)
+    torch._C._jit_pass_lint(graph)
+    if operator_export_type != OperatorExportTypes.RAW:
+        graph = torch._C._jit_pass_onnx(graph, operator_export_type)
+        torch._C._jit_pass_lint(graph)
+        torch._C._jit_pass_onnx_peephole(graph)
+        torch._C._jit_pass_lint(graph)
+    torch._C._jit_pass_dce(graph)
+    torch._C._jit_pass_lint(graph)
+    torch._C._jit_pass_fixup_onnx_loops(graph)
+    torch._C._jit_pass_lint(graph)
+    graph = torch._C._jit_pass_canonicalize(graph)
+    torch._C._jit_pass_lint(graph)
+    return graph
 
 
-def _trace(func, args, return_outs=False, aten=False):
-    # Special case for common case of passing a single Variable
-    if isinstance(args, torch.autograd.Variable):
+def _trace(func, args, operator_export_type, return_outs=False):
+    # Special case for common case of passing a single Tensor
+    if isinstance(args, torch.Tensor):
         args = (args, )
 
     trace, torch_out = torch.jit.get_trace_graph(func, args)
-    _optimize_trace(trace, aten)
+    trace.set_graph(_optimize_graph(trace.graph(), operator_export_type))
     if return_outs:
         return trace, torch_out
     return trace
 
 
-def _export(model, args, f, export_params=True, verbose=False, training=False,
-            input_names=None, output_names=None, aten=False):
-    # Special case for common case of passing a single Variable
-    if isinstance(args, torch.autograd.Variable):
-        args = (args, )
+def _trace_and_get_graph_from_model(model, args, training):
 
     # A basic sanity check: make sure the state_dict keys are the same
     # before and after running the model.  Fail fast!
@@ -135,23 +147,121 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
         raise RuntimeError("state_dict changed after running the tracer; "
                            "something weird is happening in your model!")
 
-    _optimize_trace(trace, aten)
+    return trace.graph(), torch_out
 
-    _set_input_and_output_names(trace.graph(), input_names, output_names)
 
+def _model_to_graph(model, args, f, verbose=False, training=False,
+                    input_names=None, output_names=None,
+                    operator_export_type=OperatorExportTypes.ONNX,
+                    example_outputs=None, propagate=False):
+    # Special case for common case of passing a single Variable
+    if isinstance(args, torch.Tensor):
+        args = (args, )
+
+    if isinstance(model, torch.jit.ScriptModule):
+        torch_out = None
+        assert example_outputs is not None, "example_outputs must be provided when exporting a ScriptModule"
+        if isinstance(example_outputs, torch.Tensor):
+            example_outputs = [example_outputs]
+        try:
+            method = model.__getattr__('forward')
+            graph = method.propagate_and_assign_input_and_output_shapes(
+                args, example_outputs, False, propagate)
+            # Erase number types to bring the graph to a pre-NumberType state
+            torch._C._jit_pass_erase_number_types(graph)
+            params = method.params()
+        except AttributeError:
+            # TODO: just trace it
+            raise RuntimeError('\'forward\' method must be a script method')
+    else:
+        graph, torch_out = _trace_and_get_graph_from_model(model, args, training)
+        params = list(_unique_state_dict(model).values())
+
+    graph = _optimize_graph(graph, operator_export_type)
+
+    _set_input_and_output_names(graph, input_names, output_names)
     if verbose:
-        print(trace)
+        print(graph)
+
+    return graph, params, torch_out
+
+
+def export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
+                            input_names=None, output_names=None, aten=False, export_raw_ir=False,
+                            operator_export_type=None, export_type=ExportTypes.PROTOBUF_FILE,
+                            example_outputs=None, propagate=False):
+    if aten or export_raw_ir:
+        assert operator_export_type is None
+        assert aten ^ export_raw_ir
+        operator_export_type = OperatorExportTypes.ATEN if aten else OperatorExportTypes.RAW
+    elif operator_export_type is None:
+        operator_export_type = OperatorExportTypes.ONNX
+    return _export_to_pretty_string(model, args, f, export_params, verbose, training,
+                                    input_names, output_names, operator_export_type,
+                                    export_type, example_outputs, propagate)
+
+
+def _export_to_pretty_string(model, args, f, export_params=True, verbose=False, training=False,
+                             input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
+                             export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False):
+    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+                                               training, input_names,
+                                               output_names, operator_export_type,
+                                               example_outputs, propagate)
+
+    from torch.onnx.symbolic import _onnx_opset_version
+    return graph.prettyPrintExport(params, _onnx_opset_version, False, operator_export_type)
+
+
+# NOTE: the output `torch_out` will contain the output tensors resulting from
+# the trace of a Module. In the case that a torch.nn.ScriptModule is passed in,
+# this output will be None, since we are not doing any tracing but rather
+# directly extracting the graph.
+def _export(model, args, f, export_params=True, verbose=False, training=False,
+            input_names=None, output_names=None, operator_export_type=OperatorExportTypes.ONNX,
+            export_type=ExportTypes.PROTOBUF_FILE, example_outputs=None, propagate=False):
+    graph, params, torch_out = _model_to_graph(model, args, f, verbose,
+                                               training, input_names,
+                                               output_names, operator_export_type,
+                                               example_outputs, propagate)
 
     # TODO: Don't allocate a in-memory string for the protobuf
     from torch.onnx.symbolic import _onnx_opset_version
+    defer_weight_export = export_type is not ExportTypes.PROTOBUF_FILE
     if export_params:
-        # NB: OrderedDict values is not actually a list, but trace.export is
-        # not duck-typed and expects an actual list.
-        proto = trace.export(list(_unique_state_dict(model).values()), _onnx_opset_version)
+        proto, export_map = graph.export(params, _onnx_opset_version, defer_weight_export, operator_export_type)
     else:
-        proto = trace.export([], _onnx_opset_version)
+        proto, export_map = graph.export([], _onnx_opset_version, False, operator_export_type)
 
-    torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+    if export_type == ExportTypes.PROTOBUF_FILE:
+        assert(len(export_map) == 0)
+        torch.serialization._with_file_like(f, "wb", lambda f: f.write(proto))
+    elif export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
+        import zipfile
+        compression = zipfile.ZIP_DEFLATED \
+            if export_type == ExportTypes.COMPRESSED_ZIP_ARCHIVE \
+            else zipfile.ZIP_STORED
+        with zipfile.ZipFile(f, 'w', compression=compression) as z:
+            z.writestr(ONNX_ARCHIVE_MODEL_PROTO_NAME, proto)
+            for k, v in export_map.items():
+                z.writestr(k, v)
+    elif export_type == ExportTypes.DIRECTORY:
+        import os
+        if os.path.exists(f):
+            assert(os.path.isdir(f))
+        else:
+            os.makedirs(f)
+
+        model_proto_file = os.path.join(f, ONNX_ARCHIVE_MODEL_PROTO_NAME)
+        torch.serialization._with_file_like(
+            model_proto_file, "wb", lambda f: f.write(proto))
+
+        for k, v in export_map.items():
+            weight_proto_file = os.path.join(f, k)
+            torch.serialization._with_file_like(
+                weight_proto_file, "wb", lambda f: f.write(v))
+    else:
+        raise RuntimeError('Unknown export type')
     return torch_out
 
 
@@ -159,12 +269,13 @@ def _set_input_and_output_names(graph, input_names, output_names):
     def set_names(node_list, name_list, descriptor):
         if name_list is None:
             return
-        if len(name_list) != len(node_list):
+        if len(name_list) > len(node_list):
             raise RuntimeError(
-                "number of %s names provided (%d) did not match number of %ss (%d)"
+                "number of %s names provided (%d) exceeded number of %ss (%d)"
                 % (descriptor, len(name_list), descriptor, len(node_list)))
         for name, node in zip(name_list, node_list):
-            node.setUniqueName(name)
+            if node.uniqueName() != name:
+                node.setUniqueName(name)
     set_names(list(graph.inputs()), input_names, 'input')
     set_names(list(graph.outputs()), output_names, 'output')
 
@@ -187,7 +298,9 @@ def _run_symbolic_method(op_name, symbolic_fn, args):
 
 
 def _is_onnx_list(value):
-    if not isinstance(value, string_classes) and not torch.is_tensor(value) and isinstance(value, collections.Iterable):
+    if not isinstance(value, string_classes) and \
+            not isinstance(value, torch.Tensor) and \
+            isinstance(value, collections.Iterable):
         return True
     return False
 
@@ -203,7 +316,7 @@ def _add_attribute(node, key, value, aten):
     if _is_onnx_list(value):
         kind += "s"
     if aten:
-        if torch.is_tensor(value):
+        if isinstance(value, torch.Tensor):
             # Caffe2 proto does not support tensor attribute.
             if value.numel() > 1:
                 raise ValueError("Should not pass tensor attribute")
@@ -281,7 +394,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
             return g.op("Constant", value_z=arg)
 
     args = list(const_if_tensor(arg) for arg in raw_args)
-    n = g.appendNode(_newNode(g, opname, outputs, *args, **kwargs))
+    n = g.insertNode(_newNode(g, opname, outputs, *args, **kwargs))
     if outputs == 1:
         return n.output()
     return tuple(o for o in n.outputs())
@@ -296,7 +409,7 @@ def _graph_op(g, opname, *raw_args, **kwargs):
 # inplace annotations, but we are losing information this way.
 
 
-def _run_symbolic_function(g, n, inputs, aten=False):
+def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExportTypes.ONNX):
     # NB: Returning None means the node gets cloned as is into
     # the new graph
     try:
@@ -315,7 +428,10 @@ def _run_symbolic_function(g, n, inputs, aten=False):
             return None
 
         elif ns == "aten":
-            if aten:
+            is_exportable_aten_op = hasattr(torch.onnx.symbolic, op_name)
+            is_onnx_aten_export = operator_export_type == OperatorExportTypes.ONNX_ATEN
+            is_aten_fallback_export = operator_export_type == OperatorExportTypes.ONNX_ATEN_FALLBACK
+            if is_onnx_aten_export or (not is_exportable_aten_op and is_aten_fallback_export):
                 # Direct ATen export requested
                 attrs = {k + "_" + n.kindOf(k)[0]: n[k] for k in n.attributeNames()}
                 outputs = n.outputsSize()
@@ -325,7 +441,7 @@ def _run_symbolic_function(g, n, inputs, aten=False):
             else:
                 # Export it regularly
                 attrs = {k: n[k] for k in n.attributeNames()}
-                if not hasattr(torch.onnx.symbolic, op_name):
+                if not is_exportable_aten_op:
                     warnings.warn("ONNX export failed on ATen operator {} because torch.onnx.symbolic.{} does not exist"
                                   .format(op_name, op_name))
                     return None
@@ -340,7 +456,13 @@ def _run_symbolic_function(g, n, inputs, aten=False):
                 # Undefined is not an ONNX operator; keep it as prim::Undefined
                 # and let the exporter handle finally eliminating these
                 return None
-
+            elif op_name == 'Loop' or op_name == 'If':
+                new_op_outputs = g.op(op_name, *inputs, outputs=n.outputsSize())
+                new_node = new_op_outputs[0].node() if n.outputsSize() > 1 else new_op_outputs.node()
+                for b in n.blocks():
+                    new_block = new_node.addBlock()
+                    torch._C._jit_pass_onnx_block(b, new_block, operator_export_type, env)
+                return new_op_outputs
             else:
                 warnings.warn("ONNX export failed on primitive operator {}; please report a bug".format(op_name))
                 return None

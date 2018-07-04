@@ -1,9 +1,11 @@
 import warnings
-from torch.autograd import NestedIOFunction, Variable
+from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
+import torch
 from .thnn import rnnFusedPointwise as fusedBackend
 import itertools
+from functools import partial
 
 try:
     import torch.backends.cudnn.rnn
@@ -17,7 +19,7 @@ def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+    hy = torch.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
@@ -33,13 +35,13 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
-    ingate = F.sigmoid(ingate)
-    forgetgate = F.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
-    outgate = F.sigmoid(outgate)
+    ingate = torch.sigmoid(ingate)
+    forgetgate = torch.sigmoid(forgetgate)
+    cellgate = torch.tanh(cellgate)
+    outgate = torch.sigmoid(outgate)
 
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+    hy = outgate * torch.tanh(cy)
 
     return hy, cy
 
@@ -57,9 +59,9 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     i_r, i_i, i_n = gi.chunk(3, 1)
     h_r, h_i, h_n = gh.chunk(3, 1)
 
-    resetgate = F.sigmoid(i_r + h_r)
-    inputgate = F.sigmoid(i_i + h_i)
-    newgate = F.tanh(i_n + resetgate * h_n)
+    resetgate = torch.sigmoid(i_r + h_r)
+    inputgate = torch.sigmoid(i_i + h_i)
+    newgate = torch.tanh(i_n + resetgate * h_n)
     hy = newgate + inputgate * (hidden - newgate)
 
     return hy
@@ -270,14 +272,15 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
             cx = None
 
         handle = cudnn.get_handle()
-        dropout_ts = cudnn.rnn.init_dropout_state(torch.cuda.uint8, dropout, train, dropout_seed, dropout_state)
+        with torch.cuda.device(input.get_device()):
+            dropout_ts = cudnn.rnn.init_dropout_state(dropout, train, dropout_seed, dropout_state)
 
         weight_arr = list(itertools.chain.from_iterable(weight))
         weight_stride0 = len(weight[0])
 
         output, hy, cy, reserve, new_weight_buf = torch._cudnn_rnn(
             input, weight_arr, weight_stride0,
-            Variable(flat_weight) if flat_weight is not None else None,
+            flat_weight,
             hx, cx,
             mode, hidden_size, num_layers,
             batch_first, dropout, train, bool(bidirectional),
@@ -309,8 +312,13 @@ def RNN(*args, **kwargs):
         import torch
         if torch._C._jit_is_tracing(input):
             import torch.onnx.symbolic
-            decorator = torch.onnx.symbolic_override_first_arg_based(
-                torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs))
+            sym = torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
+            cell_type = args[0]
+
+            bound_symbolic = partial(torch.onnx.symbolic.rnn_trace_override_symbolic,
+                                     cell_type, func, sym)
+
+            decorator = torch.onnx.symbolic_override_first_arg_based(bound_symbolic)
             func = decorator(func)
 
         return func(input, *fargs, **fkwargs)

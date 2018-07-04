@@ -13,6 +13,8 @@ private:
   static thread_local bool _enabled;
 };
 
+// A RAII, thread local (!) guard that enables or disables grad mode upon
+// construction, and sets it back to the original value upon destruction.
 struct AutoGradMode {
   AutoGradMode(bool enabled) : prev_mode(GradMode::is_enabled()) {
     GradMode::set_enabled(enabled);

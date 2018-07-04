@@ -16,8 +16,8 @@ static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
              " but got input (D: %d, H: %d, W: %d) output (D: %d, H: %d, W: %d)",
              inputDepth, inputHeight, inputWidth, outputDepth, outputHeight, outputWidth);
   if (input != NULL) {
-     THCUNN_argCheck(state, input->nDimension == 5, 2, input,
-                     "5D input tensor expected but got: %s");
+     THCUNN_argCheck(state, !input->is_empty() && input->dim() == 5, 2, input,
+                     "non-empty 5D input tensor expected but got: %s");
   }
 
   if (gradOutput != NULL) {

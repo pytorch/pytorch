@@ -1,0 +1,14 @@
+graph(%0 : Float(1)
+      %1 : Float(1)) {
+  %2 : Float(1) = prim::FusionGroup_0[device=1](%0, %1)
+  return (%2);
+}
+with prim::FusionGroup_0 = graph(%6 : Float(1)
+      %9 : Float(1)) {
+  %10 : Float(1) = aten::add[alpha={1}](%6, %9)
+  %8 : Float(1) = aten::mul(%6, %10)
+  %5 : Float(1) = aten::add[other={1}, alpha={1}](%8)
+  %3 : Float(1) = aten::tanh(%5)
+  %1 : Float(1) = aten::sigmoid(%3)
+  return (%1);
+}

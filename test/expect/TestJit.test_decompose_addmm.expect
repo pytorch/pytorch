@@ -1,0 +1,18 @@
+graph(%mat : Dynamic
+      %mat1 : Dynamic
+      %mat2 : Dynamic
+      %alpha : Dynamic
+      %beta : Dynamic) {
+  %5 : Dynamic = aten::mm(%mat1, %mat2)
+  %6 : Dynamic = aten::add[alpha={1}](%mat, %5)
+  %7 : Dynamic = aten::mm(%mat1, %mat2)
+  %8 : Dynamic = aten::add[alpha={1}](%mat, %7)
+  %c : Dynamic = aten::addmm[beta={2}, alpha={4.2}](%mat, %mat1, %mat2)
+  %10 : Number = prim::TensorToNum(%beta)
+  %11 : Number = prim::TensorToNum(%alpha)
+  %d : Dynamic = aten::addmm(%mat, %mat1, %mat2, %10, %11)
+  %13 : Dynamic = aten::add[alpha={1}](%6, %8)
+  %14 : Dynamic = aten::add[alpha={1}](%13, %c)
+  %15 : Dynamic = aten::add[alpha={1}](%14, %d)
+  return (%15);
+}

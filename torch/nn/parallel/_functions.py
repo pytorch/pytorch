@@ -1,3 +1,5 @@
+import warnings
+
 import torch
 import torch.cuda.comm as comm
 from torch.autograd import Function
@@ -51,12 +53,23 @@ class Gather(Function):
         ctx.target_device = target_device
         ctx.dim = dim
         ctx.input_gpus = tuple(map(lambda i: i.get_device(), inputs))
+        if all(t.dim() == 0 for t in inputs) and dim == 0:
+            inputs = tuple(t.view(1) for t in inputs)
+            warnings.warn('Was asked to gather along dimension 0, but all '
+                          'input tensors were scalars; will instead unsqueeze '
+                          'and return a vector.')
+            ctx.unsqueezed_scalar = True
+        else:
+            ctx.unsqueezed_scalar = False
         ctx.input_sizes = tuple(map(lambda i: i.size(ctx.dim), inputs))
         return comm.gather(inputs, ctx.dim, ctx.target_device)
 
     @staticmethod
     def backward(ctx, grad_output):
-        return (None, None) + Scatter.apply(ctx.input_gpus, ctx.input_sizes, ctx.dim, grad_output)
+        scattered_grads = Scatter.apply(ctx.input_gpus, ctx.input_sizes, ctx.dim, grad_output)
+        if ctx.unsqueezed_scalar:
+            scattered_grads = tuple(g[0] for g in scattered_grads)
+        return (None, None) + scattered_grads
 
 
 class Scatter(Function):

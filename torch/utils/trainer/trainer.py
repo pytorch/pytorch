@@ -1,5 +1,4 @@
 import heapq
-from torch.autograd import Variable
 
 
 class Trainer(object):
@@ -54,8 +53,8 @@ class Trainer(object):
         for i, data in enumerate(self.dataset, self.iterations + 1):
             batch_input, batch_target = data
             self.call_plugins('batch', i, batch_input, batch_target)
-            input_var = Variable(batch_input)
-            target_var = Variable(batch_target)
+            input_var = batch_input
+            target_var = batch_target
 
             plugin_data = [None, None]
 
