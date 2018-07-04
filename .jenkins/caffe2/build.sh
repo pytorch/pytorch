@@ -201,9 +201,9 @@ fi
 
 
 ########## Caffe2 HIP OP GENERATOR
-cd ../../tools/amd_build
+#cd ../../tools/amd_build
 echo "START : CAFFE2 HIP OP GENERATION!!!!!!!!!!!!!!!"
-${PYTHON} build_caffe2_amd.py
+${PYTHON} /pytorch/tools/amd_build/build_caffe2_amd.py
 echo "END : CAFFE2 HIP OP GENERATION!!!!!!!!!!!!!!!"
 ###############################################################################
 # Configure and make
