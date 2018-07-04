@@ -123,7 +123,7 @@ class Bilinear(Module):
 class FiLM(Module):
     r"""Applies Feature-wise Linear Modulation to the incoming data as described in
     the paper `FiLM: Visual Reasoning with a General Conditioning Layer`_ .
-    
+
     .. math::
         y_{n,c,*} = \gamma_{n,c} * x_{n,c,*} + \beta_{n,c},
 
@@ -145,11 +145,11 @@ class FiLM(Module):
         >>> betas = torch.randn(128, 20)
         >>> m(input, gammas, betas)
         >>> print(output.size())
-        
+
     .. _`FiLM: Visual Reasoning with a General Conditioning Layer`:
         https://arxiv.org/abs/1709.07871
     """
-    
+
     def forward(self, input, gammas, betas):
         for _ in range(input.dim() - 2):
             gammas = gammas.unsqueeze(-1)
