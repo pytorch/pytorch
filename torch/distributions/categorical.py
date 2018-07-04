@@ -1,7 +1,7 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
-from torch.distributions.utils import probs_to_logits, logits_to_probs, _log_sum_exp, lazy_property, broadcast_all
+from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property, broadcast_all
 
 
 class Categorical(Distribution):
@@ -45,7 +45,7 @@ class Categorical(Distribution):
         if probs is not None:
             self.probs = probs / probs.sum(-1, keepdim=True)
         else:
-            self.logits = logits - _log_sum_exp(logits)
+            self.logits = logits - logits.logsumexp(dim=-1, keepdim=True)
         self._param = self.probs if probs is not None else self.logits
         self._num_events = self._param.size()[-1]
         batch_shape = self._param.size()[:-1] if self._param.ndimension() > 1 else torch.Size()
