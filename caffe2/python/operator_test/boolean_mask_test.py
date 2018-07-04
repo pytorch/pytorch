@@ -57,7 +57,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_with_lengths(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
