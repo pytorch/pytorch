@@ -407,9 +407,7 @@ PyObject * THPStorage_(isShared)(THPStorage *self)
 #else
   void *allocator = self->cdata->allocatorVoidPtr;
   if (allocator == &THMapAllocator ||
-      allocator == &THManagedSharedAllocator ||
-      // This is a bit racy...
-      self->cdata->weakcount.load() > 1) {
+      allocator == &THManagedSharedAllocator) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;

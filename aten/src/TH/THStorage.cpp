@@ -22,7 +22,7 @@ void THStorage_free(THStorage *storage) {
     return;
   }
 
-  if ((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0)) {
+  if (storage->flag & TH_STORAGE_REFCOUNTED) {
     if (--storage->refcount == 0) {
       if (storage->finalizer) {
         (*storage->finalizer)();
@@ -171,19 +171,6 @@ void THStorage_retain(THStorage *storage)
   }
 }
 
-int THStorage_retainIfLive(THStorage *storage)
-{
-  // TODO: Check if TH_STORAGE_REFCOUNTED?
-  int refcount = storage->refcount.load();
-  while (refcount > 0) {
-    if (storage->refcount.compare_exchange_strong(refcount, refcount + 1)) {
-      return 1;
-    }
-    refcount = storage->refcount.load();
-  }
-  return 0;
-}
-
 THStorage* THStorage_newWithData(at::ScalarType scalar_type, void *data, ptrdiff_t size)
 {
   return THStorage_newWithDataAndAllocator(scalar_type, data, size,
@@ -260,6 +247,7 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
     // don't swap refcount!
     SWAP(allocatorVoidPtr);
     SWAP(allocatorContext);
+    SWAP(finalizer);
     SWAP(view);
     SWAP(device);
 #undef SWAP

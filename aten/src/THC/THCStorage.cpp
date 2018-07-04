@@ -66,7 +66,7 @@ void THCStorage_free(THCState *state, THCStorage *storage)
 {
   AT_ASSERT(storage->backend == at::kCUDA);
 
-  if ((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0)) {
+  if (storage->flag & TH_STORAGE_REFCOUNTED) {
     if (--storage->refcount == 0) {
       if (storage->finalizer) {
         (*storage->finalizer)();

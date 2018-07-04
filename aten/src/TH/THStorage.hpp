@@ -78,7 +78,6 @@ THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *file
 void THStorage_setFlag(THStorage *storage, const char flag);
 void THStorage_clearFlag(THStorage *storage, const char flag);
 void THStorage_retain(THStorage *storage);
-int THStorage_retainIfLive(THStorage *storage);
 THStorage* THStorage_newWithData(at::ScalarType scalar_type, void *data, ptrdiff_t size);
 THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
                                              void* data, ptrdiff_t size,

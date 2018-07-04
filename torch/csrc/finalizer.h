@@ -3,6 +3,7 @@
 #include <Python.h>
 #include <TH/THStorage.hpp>
 #include <torch/csrc/utils/object_ptr.h>
+#include <torch/csrc/utils/auto_gil.h>
 
 namespace torch {
 
@@ -17,6 +18,12 @@ struct PyObjectFinalizer : public THFinalizer {
   }
   void operator()() override {
     if (next_) { (*next_)(); }
+  }
+  ~PyObjectFinalizer() {
+    // We must manually ensure that we have the GIL before
+    // pyobj gets destroyed...
+    AutoGIL gil;
+    pyobj_ = nullptr;
   }
 };
 
