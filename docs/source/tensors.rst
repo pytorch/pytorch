@@ -222,6 +222,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: expand_as
    .. automethod:: exponential_
    .. automethod:: fill_
+   .. automethod:: flip
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_
