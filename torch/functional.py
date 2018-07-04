@@ -9,6 +9,7 @@ __all__ = [
     'btrifact',
     'btriunpack',
     'isnan',
+    'isinf',
     'split',
     'unbind',
     'unique',
@@ -165,6 +166,25 @@ def isnan(tensor):
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor")
     return tensor != tensor
+
+
+def isinf(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `+/-INF` elements.
+
+    Example::
+
+        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf')]))
+        tensor([ 0,  1,  0,  1], dtype=torch.uint8)
+    """
+    if not torch.is_tensor(tensor):
+        raise ValueError("The argument is not a tensor")
+    return tensor.abs() == float('inf')
 
 
 def unique(input, sorted=False, return_inverse=False):

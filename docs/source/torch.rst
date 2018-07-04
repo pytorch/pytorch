@@ -223,6 +223,7 @@ Comparison Ops
 .. autofunction:: ge
 .. autofunction:: gt
 .. autofunction:: isnan
+.. autofunction:: isinf
 .. autofunction:: kthvalue
 .. autofunction:: le
 .. autofunction:: lt
