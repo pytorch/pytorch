@@ -6,7 +6,7 @@
 #endif
 
 #include "AVX.h"
-#include "ATen/Utils.h"
+#include "THGeneral.h"
 
 void THDoubleVector_copy_AVX(double *y, const double *x, const ptrdiff_t n) {
   ptrdiff_t i;
