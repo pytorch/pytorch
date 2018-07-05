@@ -5025,6 +5025,35 @@ class TestNN(NNTestCase):
 
         gradcheck(lambda i, w, b, pad: F.conv_tbc(i, w, b, pad), (inp, weight, bias, 3))
 
+    def test_film(self):
+        m = nn.FiLM()
+        input_1d = torch.randn(4, 10, 2, requires_grad=True)
+        input_2d = torch.randn(4, 10, 2, 2, requires_grad=True)
+        input_3d = torch.randn(4, 10, 2, 2, 2, requires_grad=True)
+        ones = torch.ones(4, 10)
+        zeros = torch.zeros(4, 10)
+        half_ones_half_zeros = torch.cat([torch.ones(4, 5), torch.zeros(4, 5)], 1)
+        half_ones_half_neg_ones = torch.cat([torch.ones(4, 5), -torch.ones(4, 5)], 1)
+
+        for inp in [input_1d, input_2d, input_3d]:
+            _assertGradAndGradgradChecks(self, lambda x: F.film(x, ones, ones), (inp,))
+
+            output = m(inp, ones, zeros)
+            self.assertEqual(F.film(inp, ones, zeros), output)
+            self.assertEqual(inp, output)
+
+            output = m(inp, zeros, ones)
+            self.assertEqual(F.film(inp, zeros, ones), output)
+            self.assertEqual(torch.ones_like(output), output)
+
+            output = m(inp, -2 * ones, 3 * ones)
+            self.assertEqual(F.film(inp, -2 * ones, 3 * ones), output)
+            self.assertEqual((-2 * inp) + 3, output)
+
+            output = m(inp, half_ones_half_zeros, half_ones_half_neg_ones)
+            self.assertEqual(F.film(inp, half_ones_half_zeros, half_ones_half_neg_ones), output)
+            self.assertEqual(output.sum(), inp[:,:5].sum())
+
     @staticmethod
     def _test_conv_noncontig_weights(self, device):
         for dim in (1, 2, 3):

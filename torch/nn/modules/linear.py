@@ -133,8 +133,8 @@ class FiLM(Module):
     Shape:
         - Input: :math:`(N, C, *)` where :math:`*` means any number of additional
           dimensions
-        - Gamma: :math:`(N, C)`
-        - Beta: :math:`(N, C)`
+        - Gammas: :math:`(N, C)`
+        - Betas: :math:`(N, C)`
         - Output: :math:`(N, C, *)`, same shape as the input
 
     Examples::
@@ -143,7 +143,7 @@ class FiLM(Module):
         >>> input = torch.randn(128, 20, 4, 4)
         >>> gammas = torch.randn(128, 20)
         >>> betas = torch.randn(128, 20)
-        >>> m(input, gammas, betas)
+        >>> output = m(input, gammas, betas)
         >>> print(output.size())
 
     .. _`FiLM: Visual Reasoning with a General Conditioning Layer`:
@@ -151,9 +151,6 @@ class FiLM(Module):
     """
 
     def forward(self, input, gammas, betas):
-        for _ in range(input.dim() - 2):
-            gammas = gammas.unsqueeze(-1)
-            betas = betas.unsqueeze(-1)
-        return gammas * input + betas
+        return F.film(input, gammas, betas)
 
 # TODO: PartialLinear - maybe in sparse?
