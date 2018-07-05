@@ -3,6 +3,7 @@
 #include <string>
 #include <vector>
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/operators/elementwise_ops.h"
 
 namespace caffe2 {

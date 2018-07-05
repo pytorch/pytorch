@@ -1,4 +1,5 @@
 #include "generate_proposals_op_util_nms.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include <gtest/gtest.h>
 

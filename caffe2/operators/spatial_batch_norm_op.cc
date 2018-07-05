@@ -1,5 +1,7 @@
 #include "caffe2/operators/spatial_batch_norm_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
+
 namespace caffe2 {
 
 template <>

@@ -1,5 +1,6 @@
 #include "caffe2/operators/pow_op.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/eigen_utils.h"
 // definition of NumericTypes and SameTypeAsInput is in below header file
 //#include "caffe2/operators/elementwise_op.h"
 #include <Eigen/Core>

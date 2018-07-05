@@ -1,6 +1,7 @@
 #include "caffe2/operators/leaky_relu_op.h"
 
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
