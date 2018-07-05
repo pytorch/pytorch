@@ -191,7 +191,7 @@ TEST_CASE("sequential") {
         Linear(10, 3),
         Conv2d(1, 2, 3),
         Dropout(0.5),
-        BatchNorm(5),
+        BatchNorm2d(5),
         Embedding(4, 10),
         LSTM(4, 5));
   }
