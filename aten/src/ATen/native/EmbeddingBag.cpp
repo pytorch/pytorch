@@ -72,7 +72,7 @@ static void make_bag_size(const Tensor &offsets, const Tensor &indices,
 static Tensor apply_bag_size(const Tensor &offsets, const Tensor &indices,
                              const int64_t mode, Tensor &output,
                              const Tensor &bag_size) {
-  if (mode == MODE_MEAN) { // MODE_MEAN
+  if (mode == MODE_MEAN) {
     if (offsets.size(0) == 1) {
       auto bag_size_ = indices.size(0);
       output /= bag_size_;
@@ -93,7 +93,7 @@ static Tensor apply_bag_size_backward(const Tensor &offsets,
                                       const Tensor &indices, const int64_t mode,
                                       Tensor &output, const Tensor &offset2bag,
                                       const Tensor &bag_size) {
-  if (mode == MODE_MEAN) { // MODE_MEAN
+  if (mode == MODE_MEAN) {
     if (offsets.size(0) == 1) {
       auto bag_size_ = indices.size(0);
       output /= bag_size_;
