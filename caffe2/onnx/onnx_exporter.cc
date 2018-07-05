@@ -362,14 +362,7 @@ ConvertedResult OnnxExporter::CreateArgMaxMinOpNodes(
   CAFFE_ENFORCE_EQ(nodes.size(), 1);
   auto& node = nodes.back();
 
-  bool explicit_axis = false;
-  for (const auto& a : def.arg()) {
-    if (a.name() == "axis") {
-      explicit_axis = true;
-      break;
-    }
-  }
-  if (!explicit_axis) {
+  if (!ArgumentHelper::HasArgument(def, "axis")) {
     const auto& x = def.input(0);
     const auto& x_shape = shapes.at(x);
     node.add_attribute()->CopyFrom(
