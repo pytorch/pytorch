@@ -262,7 +262,7 @@ class TestOptim(TestCase):
         )
         self._test_basic_cases(
             lambda weight, bias: optim.SGD(
-                self._build_params_dict_single(weight, bias, lr=1e-2, 
+                self._build_params_dict_single(weight, bias, lr=1e-2,
                                                weight_decay=1e-2, l2_reg=False))
         )
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
@@ -291,7 +291,7 @@ class TestOptim(TestCase):
                 lr=1e-3)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3, 
+            lambda weight, bias: optim.Adam([weight, bias], lr=1e-3,
                                             weight_decay=1e-2, l2_reg=False)
         )
         self._test_basic_cases(
@@ -335,7 +335,7 @@ class TestOptim(TestCase):
                 self._build_params_dict(weight, bias, rho=0.95))
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adadelta([weight, bias], 
+            lambda weight, bias: optim.Adadelta([weight, bias],
                                                 weight_decay=1e-2, l2_reg=False)
         )
         with self.assertRaisesRegex(ValueError, "Invalid rho value: 1.1"):
@@ -395,7 +395,7 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1, 
+            lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1,
                                               weight_decay=1e-2, l2_reg=False)
         )
         self._test_basic_cases(
@@ -423,7 +423,7 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2, 
+            lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2,
                                                weight_decay=1e-2, l2_reg=False)
         )
         self._test_basic_cases(
@@ -451,7 +451,7 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100, 
+            lambda weight, bias: optim.ASGD([weight, bias], lr=1e-3, t0=100,
                                             weight_decay=1e-2, l2_reg=False)
         )
         self._test_basic_cases(

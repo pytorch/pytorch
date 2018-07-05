@@ -43,7 +43,7 @@ class RMSprop(Optimizer):
         if not 0.0 <= alpha:
             raise ValueError("Invalid alpha value: {}".format(alpha))
 
-        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, 
+        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered,
                         weight_decay=weight_decay, l2_reg=l2_reg)
         super(RMSprop, self).__init__(params, defaults)
 
