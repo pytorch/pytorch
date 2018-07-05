@@ -15,8 +15,10 @@ class Adamax(Optimizer):
             running averages of gradient and its square
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay using the method from
-            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
+        weight_decay (float, optional): weight decay factor (default: 0)
+        l2_reg (boolean, optional): whether to using the default L2
+            weight regularization or the weight decay method from the paper
+            `Fixing Weight Decay Regularization in Adam` (default: True)
 
     __ https://arxiv.org/abs/1412.6980
     .. _Fixing Weight Decay Regularization in Adam:
@@ -24,7 +26,7 @@ class Adamax(Optimizer):
     """
 
     def __init__(self, params, lr=2e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0):
+                 weight_decay=0, l2_reg=True):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -36,8 +38,14 @@ class Adamax(Optimizer):
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
-        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay)
+        defaults = dict(lr=lr, betas=betas, eps=eps, weight_decay=weight_decay,
+                        l2_reg=l2_reg)
         super(Adamax, self).__init__(params, defaults)
+
+    def __setstate__(self, state):
+        super(Adamax, self).__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('l2_reg', True)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -71,6 +79,9 @@ class Adamax(Optimizer):
 
                 state['step'] += 1
 
+                if group['weight_decay'] != 0 and group['l2_reg']:
+                    grad = grad.add(group['weight_decay'], p.data)
+
                 # Update biased first moment estimate.
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 # Update the exponentially weighted infinity norm.
@@ -83,7 +94,7 @@ class Adamax(Optimizer):
                 bias_correction = 1 - beta1 ** state['step']
                 clr = group['lr'] / bias_correction
 
-                if group['weight_decay'] != 0:
+                if group['weight_decay'] != 0 and not group['l2_reg']:
                     p.data.add_(-group['weight_decay'], p.data)
 
                 p.data.addcdiv_(-clr, exp_avg, exp_inf)

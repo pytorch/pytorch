@@ -16,8 +16,10 @@ class ASGD(Optimizer):
         lambd (float, optional): decay term (default: 1e-4)
         alpha (float, optional): power for eta update (default: 0.75)
         t0 (float, optional): point at which to start averaging (default: 1e6)
-        weight_decay (float, optional): weight decay using the method from
-            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
+        weight_decay (float, optional): weight decay factor (default: 0)
+        l2_reg (boolean, optional): whether to using the default L2
+            weight regularization or the weight decay method from the paper
+            `Fixing Weight Decay Regularization in Adam` (default: True)
 
     .. _Acceleration of stochastic approximation by averaging:
         http://dl.acm.org/citation.cfm?id=131098
@@ -25,15 +27,21 @@ class ASGD(Optimizer):
         https://arxiv.org/abs/1711.05101
     """
 
-    def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0):
+    def __init__(self, params, lr=1e-2, lambd=1e-4, alpha=0.75, t0=1e6, weight_decay=0,
+                 l2_reg=True):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= weight_decay:
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, lambd=lambd, alpha=alpha, t0=t0,
-                        weight_decay=weight_decay)
+                        weight_decay=weight_decay, l2_reg=l2_reg)
         super(ASGD, self).__init__(params, defaults)
+
+    def __setstate__(self, state):
+        super(ASGD, self).__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('l2_reg', True)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -65,13 +73,15 @@ class ASGD(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    xold = p.data.clone()
+                    if group['l2_reg']:
+                        grad = grad.add(group['weight_decay'], p.data)
+                    else:
+                        xold = p.data.clone()
 
                 # decay term
                 p.data.mul_(1 - group['lambd'] * state['eta'])
 
-                # weight decay
-                if group['weight_decay'] != 0:
+                if group['weight_decay'] != 0 and not group['l2_reg']:
                     p.data.add_(-group['weight_decay'], xold)
 
                 # update parameter

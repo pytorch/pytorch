@@ -21,14 +21,17 @@ class RMSprop(Optimizer):
             numerical stability (default: 1e-8)
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
-        weight_decay (float, optional): weight decay using the method from
-            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
+        weight_decay (float, optional): weight decay factor (default: 0)
+        l2_reg (boolean, optional): whether to using the default L2
+            weight regularization or the weight decay method from the paper
+            `Fixing Weight Decay Regularization in Adam` (default: True)
 
     .. _Fixing Weight Decay Regularization in Adam:
         https://arxiv.org/abs/1711.05101
     """
 
-    def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False):
+    def __init__(self, params, lr=1e-2, alpha=0.99, eps=1e-8, weight_decay=0, momentum=0, centered=False,
+                 l2_reg=True):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -40,7 +43,8 @@ class RMSprop(Optimizer):
         if not 0.0 <= alpha:
             raise ValueError("Invalid alpha value: {}".format(alpha))
 
-        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, weight_decay=weight_decay)
+        defaults = dict(lr=lr, momentum=momentum, alpha=alpha, eps=eps, centered=centered, 
+                        weight_decay=weight_decay, l2_reg=l2_reg)
         super(RMSprop, self).__init__(params, defaults)
 
     def __setstate__(self, state):
@@ -48,6 +52,7 @@ class RMSprop(Optimizer):
         for group in self.param_groups:
             group.setdefault('momentum', 0)
             group.setdefault('centered', False)
+            group.setdefault('l2_reg', True)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -84,7 +89,10 @@ class RMSprop(Optimizer):
                 state['step'] += 1
 
                 if group['weight_decay'] != 0:
-                    p.data.add_(-group['weight_decay'], p.data)
+                    if group['l2_reg']:
+                        grad = grad.add(group['weight_decay'], p.data)
+                    else:
+                        p.data.add_(-group['weight_decay'], p.data)
 
                 square_avg.mul_(alpha).addcmul_(1 - alpha, grad, grad)
 

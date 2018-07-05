@@ -4,9 +4,9 @@ from .optimizer import Optimizer
 
 
 class Adam(Optimizer):
-    """Implements Adam algorithm.
+    r"""Implements Adam algorithm.
 
-    It has been proposed in `Adam: A Method for Stochastic Optimization`_.
+    It has been proposed in `Adam\: A Method for Stochastic Optimization`_.
 
     Arguments:
         params (iterable): iterable of parameters to optimize or dicts defining
@@ -16,10 +16,13 @@ class Adam(Optimizer):
             running averages of gradient and its square (default: (0.9, 0.999))
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
-        weight_decay (float, optional): weight decay using the method from
-            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
+        weight_decay (float, optional): weight decay factor (default: 0)
+        l2_reg (boolean, optional): whether to using the default L2
+            weight regularization or the weight decay method from the paper
+            `Fixing Weight Decay Regularization in Adam` (default: True)
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this
             algorithm from the paper `On the Convergence of Adam and Beyond`_
+            (default: False)
 
     .. _Adam\: A Method for Stochastic Optimization:
         https://arxiv.org/abs/1412.6980
@@ -30,7 +33,7 @@ class Adam(Optimizer):
     """
 
     def __init__(self, params, lr=1e-3, betas=(0.9, 0.999), eps=1e-8,
-                 weight_decay=0, amsgrad=False):
+                 weight_decay=0, l2_reg=True, amsgrad=False):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= eps:
@@ -40,12 +43,13 @@ class Adam(Optimizer):
         if not 0.0 <= betas[1] < 1.0:
             raise ValueError("Invalid beta parameter at index 1: {}".format(betas[1]))
         defaults = dict(lr=lr, betas=betas, eps=eps,
-                        weight_decay=weight_decay, amsgrad=amsgrad)
+                        weight_decay=weight_decay, l2_reg=l2_reg, amsgrad=amsgrad)
         super(Adam, self).__init__(params, defaults)
 
     def __setstate__(self, state):
         super(Adam, self).__setstate__(state)
         for group in self.param_groups:
+            group.setdefault('l2_reg', True)
             group.setdefault('amsgrad', False)
 
     def step(self, closure=None):
@@ -88,6 +92,9 @@ class Adam(Optimizer):
 
                 state['step'] += 1
 
+                if group['weight_decay'] != 0 and group['l2_reg']:
+                    grad = grad.add(group['weight_decay'], p.data)
+
                 # Decay the first and second moment running average coefficient
                 exp_avg.mul_(beta1).add_(1 - beta1, grad)
                 exp_avg_sq.mul_(beta2).addcmul_(1 - beta2, grad, grad)
@@ -103,7 +110,7 @@ class Adam(Optimizer):
                 bias_correction2 = 1 - beta2 ** state['step']
                 step_size = group['lr'] * math.sqrt(bias_correction2) / bias_correction1
 
-                if group['weight_decay'] != 0:
+                if group['weight_decay'] != 0 and not group['l2_reg']:
                     p.data.add_(-group['weight_decay'], p.data)
 
                 p.data.addcdiv_(-step_size, exp_avg, denom)

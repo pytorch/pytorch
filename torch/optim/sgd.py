@@ -13,8 +13,10 @@ class SGD(Optimizer):
             parameter groups
         lr (float): learning rate
         momentum (float, optional): momentum factor (default: 0)
-        weight_decay (float, optional): weight decay using the method from
-            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
+        weight_decay (float, optional): weight decay factor (default: 0)
+        l2_reg (boolean, optional): whether to using the default L2
+            weight regularization or the weight decay method from the paper
+            `Fixing Weight Decay Regularization in Adam` (default: True)
         dampening (float, optional): dampening for momentum (default: 0)
         nesterov (bool, optional): enables Nesterov momentum (default: False)
 
@@ -53,7 +55,7 @@ class SGD(Optimizer):
     """
 
     def __init__(self, params, lr=required, momentum=0, dampening=0,
-                 weight_decay=0, nesterov=False):
+                 weight_decay=0, nesterov=False, l2_reg=True):
         if lr is not required and lr < 0.0:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if momentum < 0.0:
@@ -62,7 +64,7 @@ class SGD(Optimizer):
             raise ValueError("Invalid weight_decay value: {}".format(weight_decay))
 
         defaults = dict(lr=lr, momentum=momentum, dampening=dampening,
-                        weight_decay=weight_decay, nesterov=nesterov)
+                        weight_decay=weight_decay, nesterov=nesterov, l2_reg=l2_reg)
         if nesterov and (momentum <= 0 or dampening != 0):
             raise ValueError("Nesterov momentum requires a momentum and zero dampening")
         super(SGD, self).__init__(params, defaults)
@@ -71,6 +73,7 @@ class SGD(Optimizer):
         super(SGD, self).__setstate__(state)
         for group in self.param_groups:
             group.setdefault('nesterov', False)
+            group.setdefault('l2_reg', True)
 
     def step(self, closure=None):
         """Performs a single optimization step.
@@ -93,6 +96,8 @@ class SGD(Optimizer):
                 if p.grad is None:
                     continue
                 d_p = p.grad.data
+                if weight_decay != 0 and group['l2_reg']:
+                    d_p.add_(weight_decay, p.data)
 
                 if momentum != 0:
                     param_state = self.state[p]
@@ -107,7 +112,7 @@ class SGD(Optimizer):
                     else:
                         d_p = buf
 
-                if weight_decay != 0:
+                if weight_decay != 0 and not group['l2_reg']:
                     p.data.add_(-weight_decay, p.data)
 
                 p.data.add_(-group['lr'], d_p)

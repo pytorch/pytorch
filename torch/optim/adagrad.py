@@ -13,8 +13,10 @@ class Adagrad(Optimizer):
             parameter groups
         lr (float, optional): learning rate (default: 1e-2)
         lr_decay (float, optional): learning rate decay (default: 0)
-        weight_decay (float, optional): weight decay using the method from
-            the paper `Fixing Weight Decay Regularization in Adam` (default: 0)
+        weight_decay (float, optional): weight decay factor (default: 0)
+        l2_reg (boolean, optional): whether to using the default L2
+            weight regularization or the weight decay method from the paper
+            `Fixing Weight Decay Regularization in Adam` (default: True)
 
     .. _Adaptive Subgradient Methods for Online Learning and Stochastic
         Optimization: http://jmlr.org/papers/v12/duchi11a.html
@@ -22,7 +24,8 @@ class Adagrad(Optimizer):
         https://arxiv.org/abs/1711.05101
     """
 
-    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0):
+    def __init__(self, params, lr=1e-2, lr_decay=0, weight_decay=0, initial_accumulator_value=0,
+                 l2_reg=True):
         if not 0.0 <= lr:
             raise ValueError("Invalid learning rate: {}".format(lr))
         if not 0.0 <= lr_decay:
@@ -33,7 +36,8 @@ class Adagrad(Optimizer):
             raise ValueError("Invalid initial_accumulator_value value: {}".format(initial_accumulator_value))
 
         defaults = dict(lr=lr, lr_decay=lr_decay, weight_decay=weight_decay,
-                        initial_accumulator_value=initial_accumulator_value)
+                        initial_accumulator_value=initial_accumulator_value,
+                        l2_reg=l2_reg)
         super(Adagrad, self).__init__(params, defaults)
 
         for group in self.param_groups:
@@ -41,6 +45,12 @@ class Adagrad(Optimizer):
                 state = self.state[p]
                 state['step'] = 0
                 state['sum'] = torch.full_like(p.data, initial_accumulator_value)
+
+    def __setstate__(self, state):
+        super(Adagrad, self).__setstate__(state)
+        for group in self.param_groups:
+            group.setdefault('initial_accumulator_value', 0)
+            group.setdefault('l2_reg', True)
 
     def share_memory(self):
         for group in self.param_groups:
@@ -69,9 +79,14 @@ class Adagrad(Optimizer):
 
                 state['step'] += 1
 
+                if group['weight_decay'] != 0 and group['l2_reg']:	
+                    if p.grad.data.is_sparse:	
+                        raise RuntimeError("L2 weight regularization option is not compatible with sparse gradients")	
+                    grad = grad.add(group['weight_decay'], p.data)
+
                 clr = group['lr'] / (1 + (state['step'] - 1) * group['lr_decay'])
 
-                if group['weight_decay'] != 0:
+                if group['weight_decay'] != 0 and not group['l2_reg']:
                     p.data.add_(-group['weight_decay'], p.data)
 
                 if grad.is_sparse:
