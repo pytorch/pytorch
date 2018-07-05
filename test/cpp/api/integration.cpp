@@ -247,7 +247,7 @@ TEST_CASE("integration/cartpole") {
   std::vector<float> rewards;
 
   auto forward = [&](torch::Tensor inp) {
-    auto x = linear->forward(inp).clamp_min(0);
+    auto x = linear->forward(inp).relu();
     torch::Tensor actions = policyHead->forward(x);
     torch::Tensor value = valueHead->forward(x);
     return std::make_tuple(torch::softmax(actions, -1), value);
@@ -348,7 +348,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
     x = torch::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
-    x = linear1->forward(x).clamp_min(0);
+    x = linear1->forward(x).relu();
     x = drop->forward(x);
     x = linear2->forward(x);
     x = torch::log_softmax(x, 1);
@@ -371,12 +371,12 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   torch::manual_seed(0);
   auto model = std::make_shared<torch::SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
-  auto batchnorm2d =
-      model->add(BatchNorm2d(BatchNormOptions(10).stateful(true)), "batchnorm2d");
+  auto batchnorm2d = model->add(
+      BatchNorm2d(BatchNormOptions(10).stateful(true)), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
-  auto batchnorm1 =
-      model->add(BatchNorm2d(BatchNormOptions(50).stateful(true)), "batchnorm1");
+  auto batchnorm1 = model->add(
+      BatchNorm1d(BatchNormOptions(50).stateful(true)), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
@@ -386,7 +386,7 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
     x = torch::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
-    x = linear1->forward(x).clamp_min(0);
+    x = linear1->forward(x).relu();
     x = batchnorm1->forward(x);
     x = linear2->forward(x);
     x = torch::log_softmax(x, 1);

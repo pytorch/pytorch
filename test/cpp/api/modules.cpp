@@ -132,9 +132,9 @@ TEST_CASE("modules") {
     auto l3 = model->add(Linear(5, 100), "l3");
 
     auto x = torch::randn({1000, 10}, torch::requires_grad());
-    x = l1->forward(x).clamp_min(0);
-    x = l2->forward(x).clamp_min(0);
-    x = l3->forward(x).clamp_min(0);
+    x = l1->forward(x).relu();
+    x = l2->forward(x).relu();
+    x = l3->forward(x).relu();
 
     x.backward();
     REQUIRE(x.ndimension() == 2);
