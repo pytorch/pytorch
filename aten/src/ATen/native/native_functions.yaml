@@ -1805,3 +1805,6 @@
 
 - func: get_device(Tensor self) -> int64_t
   device_guard: False
+
+- func: meshgrid(TensorList tensors) -> TensorList
+  variants: function
