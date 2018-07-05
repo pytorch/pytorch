@@ -17,7 +17,7 @@ class Adam(Optimizer):
         eps (float, optional): term added to the denominator to improve
             numerical stability (default: 1e-8)
         weight_decay (float, optional): weight decay factor (default: 0)
-        l2_reg (boolean, optional): whether to using the default L2
+        l2_reg (boolean, optional): whether to use the original L2
             weight regularization or the weight decay method from the paper
             `Fixing Weight Decay Regularization in Adam` (default: True)
         amsgrad (boolean, optional): whether to use the AMSGrad variant of this

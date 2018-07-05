@@ -22,7 +22,7 @@ class RMSprop(Optimizer):
         centered (bool, optional) : if ``True``, compute the centered RMSProp,
             the gradient is normalized by an estimation of its variance
         weight_decay (float, optional): weight decay factor (default: 0)
-        l2_reg (boolean, optional): whether to using the default L2
+        l2_reg (boolean, optional): whether to use the original L2
             weight regularization or the weight decay method from the paper
             `Fixing Weight Decay Regularization in Adam` (default: True)
 

@@ -14,7 +14,7 @@ class SGD(Optimizer):
         lr (float): learning rate
         momentum (float, optional): momentum factor (default: 0)
         weight_decay (float, optional): weight decay factor (default: 0)
-        l2_reg (boolean, optional): whether to using the default L2
+        l2_reg (boolean, optional): whether to use the orignial L2
             weight regularization or the weight decay method from the paper
             `Fixing Weight Decay Regularization in Adam` (default: True)
         dampening (float, optional): dampening for momentum (default: 0)

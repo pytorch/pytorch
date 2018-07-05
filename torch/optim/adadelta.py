@@ -18,7 +18,7 @@ class Adadelta(Optimizer):
         lr (float, optional): coefficient that scale delta before it is applied
             to the parameters (default: 1.0)
         weight_decay (float, optional): weight decay factor (default: 0)
-        l2_reg (boolean, optional): whether to using the original L2
+        l2_reg (boolean, optional): whether to use the original L2
             weight regularization or the weight decay method from the paper
             `Fixing Weight Decay Regularization in Adam` (default: True)
 

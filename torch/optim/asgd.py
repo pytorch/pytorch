@@ -17,7 +17,7 @@ class ASGD(Optimizer):
         alpha (float, optional): power for eta update (default: 0.75)
         t0 (float, optional): point at which to start averaging (default: 1e6)
         weight_decay (float, optional): weight decay factor (default: 0)
-        l2_reg (boolean, optional): whether to using the default L2
+        l2_reg (boolean, optional): whether to use the original L2
             weight regularization or the weight decay method from the paper
             `Fixing Weight Decay Regularization in Adam` (default: True)
 
