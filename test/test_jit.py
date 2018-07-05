@@ -1088,14 +1088,102 @@ class TestBatched(TestCase):
         return xs, xb
 
     def test_create_batchtensor(self):
+        # create from tensorlist
         xs, batch = self.rand_batch(4, (True, 3), (False, 2), (True, 5))
         self.assertEqual(xs, batch.examples())
+        # create from data, mask, dims
         batch2 = torch.BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
         self.assertEqual(xs, batch2.examples())
+        # expand a tensor to a batchtensor given batch_size
+        xs = torch.rand(3, 4, 5)
+        batch3 = torch.BatchTensor(xs, 2)
+        xs = xs.unsqueeze(0)
+        self.assertEqual([xs, xs], batch3.examples())
+
+    def test_batch_elementwise_unary(self):
+        @torch.jit.batch(batch_size = 4)
+        def tanh(a):
+            return torch.tanh(a)
+
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        res_batch = tanh(batch)
+        res = [torch.tanh(xs[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_elementwise_binary(self):
+        @torch.jit.batch(batch_size = 4)
+        def add(a, b):
+            return a + b
+
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = xs, batch
+        res_batch = add(batch, batch2)
+        res = [torch.add(xs[j], xs2[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        # test broadcast
+        xs, batch = self.rand_batch(4, (False, 3), (False, 2))
+        b = torch.rand(3, 2)
+        res_batch = add(batch, b)
+        res = [torch.add(xs[j], b) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_mm(self):
+        @torch.jit.batch(batch_size = 4)
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
+        res_batch = mm(batch, batch2)
+        res = [torch.mm(xs[j].squeeze(0), xs2[j].squeeze(0)).unsqueeze(0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        # test broadcast
+        b = torch.rand(2, 4)
+        res_batch = mm(batch, b)
+        res = [torch.mm(xs[j].squeeze(0), b).unsqueeze(0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_matmul(self):
+        @torch.jit.batch(batch_size = 4)
+        def matmul(a, b):
+            return torch.matmul(a, b)
+
+        def matmul_test(xs, batch, xs2, batch2):
+            ys = [torch.matmul(xs[j].squeeze(0), xs2[j].squeeze(0)).unsqueeze(0) for j in range(4)]
+            ybs = matmul(batch, batch2)
+            self.assertEqual(ys, ybs.examples())
+
+        # 1 dimension * 1 dimension
+        xs, batch = self.rand_batch(4, (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2))
+        matmul_test(xs, batch, xs2, batch2)
+        # 1 dimension * 2 dimension
+        xs, batch = self.rand_batch(4, (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
+        matmul_test(xs, batch, xs2, batch2)
+        # 2 dimension * 1 dimensions
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2))
+        matmul_test(xs, batch, xs2, batch2)
+        # 2 dimension * 2 dimension
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
+        matmul_test(xs, batch, xs2, batch2)
+
+    # def test_batch_select(self): # TODO: scalarType as input
+    #     @torch.jit.batch(batch_size = 4)
+    #     def select(x, dim, index):
+    #         return x.select(dim, index)
+    #
+    #     xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+    #     res_batch = select(batch, 1, 0)
+    #     res = [torch.select(xs[j], 1, 0) for j in range(4)]
+    #     self.assertEqual(res, res_batch.examples())
 
 
 class TestScript(JitTestCase):
-
     @contextmanager
     def capture_stdout(self):
         # No idea how to capture stdout from C++ on Windows

@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/passes/to_batch.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -481,6 +482,11 @@ void initJitScriptBindings(PyObject* module) {
         // There is a thin wrapper on top of this method in the C++ version of
         // ScriptModule.
         return runMethodFromPython(self.get_method("forward"), args);
+      })
+      .def("to_batch", [](Module& self, int64_t batch_size=1) {
+        auto graph = self.get_method("forward").graph();
+        // std::cout << self.get_parameters().size() << std::endl;
+        to_batch_graph(graph, batch_size);
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())

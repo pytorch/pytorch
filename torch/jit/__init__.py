@@ -18,6 +18,9 @@ import copy
 import numbers
 import collections
 import re
+# sys.path.append('/Users/chunlifu/pytorch/torch/csrc/jit/script')
+# from batch_operators import *
+# import batch_operators
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -399,6 +402,33 @@ def script_method(fn):
     return ScriptMethodStub(createResolutionCallback(frames_up=2), get_jit_ast(fn), fn)
 
 
+class batch(object):
+    def __init__(self, batch_size=1, optimize=True, _frames_up=0):
+        self.batch_size = batch_size
+        self.optimize = optimize
+        self._frames_up = _frames_up
+
+    def __call__(self, fn):
+        mod = script(fn, self.optimize, self._frames_up)
+        mod.to_batch(self.batch_size)
+        @functools.wraps(fn)
+        def wrapper(*args):
+            new_args = []
+            for arg in args:
+                if(isinstance(arg, torch.Tensor)):
+                    arg = torch.BatchTensor(arg, self.batch_size)
+                if(isinstance(arg, torch.BatchTensor)):
+                    new_args.extend([arg.get_data(), arg.get_mask(), arg.get_dims()])
+                else:
+                    new_args.append(arg)
+            res = mod(*new_args)
+            # assert len(res) / 3 == 0
+            # result = [torch.BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
+            result = torch.BatchTensor(*res)
+            return result
+        return wrapper
+
+
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
 # module with versions that get/set properties inside of script::Module.
 # This allows us to reuse most of nn.Module while still storing the
@@ -764,3 +794,120 @@ class _ConstSequential(_ConstModuleList):
 
 if not torch._C._jit_init():
     raise RuntimeError("JIT initialization failed")
+
+
+@script
+def batch_tanh(data, mask, dims):
+    data = torch.tanh(data)
+    return data, mask, dims
+
+
+@script
+def batch_sigmoid(data, mask, dims):
+    data = torch.sigmoid(data)
+    return data, mask, dims
+
+
+@script
+def batch_add(data1, mask1, dims1, data2, mask2, dims2):
+    data = torch.add(data1, data2)
+    mask = mask1 * mask2
+    dims = dims1 or dims2
+    return data, mask, dims
+
+
+@script
+def batch_mul(data1, mask1, dims1, data2, mask2, dims2):
+    data = torch.mul(data1, data2)
+    mask = mask1 * mask2
+    dims = dims1 or dims2
+    return data, mask, dims
+
+
+@script
+def batch_mm(data1, mask1, dims1, data2, mask2, dims2):
+    data1 = data1 * mask1.type_as(data1)
+    data2 = data2 * mask2.type_as(data2)
+    data = torch.bmm(data1, data2)
+    mask = torch.bmm(mask1.narrow(2, 0, 1), mask2.narrow(1, 0, 1))
+    dims = torch.cat((dims1[:1], dims2[1:dims2.size(0)]))
+    return data, mask, dims
+
+
+@script
+def batch_matmul(data1, mask1, dims1, data2, mask2, dims2):
+    d1 = data1.dim() - 1
+    d2 = data2.dim() - 1
+    data1 = data1 * mask1.type_as(data1)
+    data2 = data2 * mask2.type_as(data2)
+    if d1 == 1:
+        data1 = data1.unsqueeze(-2)
+    if d2 == 1:
+        data2 = data2.unsqueeze(-1)
+    data = torch.bmm(data1, data2)
+    mask = mask1
+    dims = dims1
+    if d1 == 1 and d2 == 1:
+        #if (batch1.dims[0] or batch2.dims[0]) and not batch1.mask.eq(batch2.mask).all():
+        #    raise ValueError("cannot contract non-matching dimensions")
+        data = data.squeeze(-1).squeeze(-1)
+        mask = mask1.narrow(1, 0, 1).squeeze(-1)
+        dims = dims1[:0]  # empty tensor
+    if d1 == 2 and d2 == 1:
+        #if (batch1.dims[1] or batch2.dims[0]) and not batch1.mask[:, 0].eq(batch2.mask).all():
+        #    raise ValueError("cannot contract non-matching dimensions")
+        data = data.squeeze(-1)
+        mask = torch.bmm(mask1.narrow(2, 0, 1), mask2.narrow(1, 0, 1).unsqueeze(-1)).squeeze(-1)
+        dims = dims1[:1]
+    elif d1 == 1 and d2 == 2:
+        #if (batch1.dims[0] or batch2.dims[0]) and not batch1.mask.eq(batch2.mask[:, :, 0]).all():
+        #    raise ValueError("cannot contract non-matching dimensions")
+        data = data.squeeze(-2)
+        mask = torch.bmm(mask1.narrow(1, 0, 1).unsqueeze(-2), mask2.narrow(1, 0, 1)).squeeze(-2)
+        dims = dims2[1:dims2.size(0)]
+    elif d1 == 2 and d2 == 2:
+        #if (batch1.dims[1] or batch2.dims[0]) and not batch1.mask[:, 0].eq(batch2.mask[:, :, 0]).all():
+        #    raise ValueError("cannot contract non-matching dimensions")
+        mask = torch.bmm(mask1.narrow(2, 0, 1), mask2.narrow(1, 0, 1))
+        dims = torch.cat((dims1[:1], dims2[1:dims2.size(0)]))
+    # else:
+    #     raise NotImplementedError("matmul not implemented with batches of 3+D tensors")
+    return data, mask, dims
+
+@script
+def batch_select(data, mask, dims, dim, index):
+    # if dim == 0:
+    #     raise ValueError("Cannot select 0 dim in BatchTensor")
+    data = data.select(dim, index)
+    if dims[dim - 1]:
+        mask = mask.select(dim, 0)
+    else:
+        mask = mask.select(dim, index)
+    dims = torch.cat((dims[:dim - 1], dims[dim:dims.size(0)]))
+    return data, mask, dims
+
+@script
+def batch_synchronize(data, mask, dims):
+    # if any(batch.dims):
+    #     raise ValueError("cannot synchronize batch with dynamic dimensions")
+    mask = mask + (1 - mask)
+    return data, mask, dims
+
+@script
+def batch_update(batch_data, batch_mask, batch_dims, new_data, new_mask, new_dims,
+            update_data, update_mask, update_dims):
+    update_mask = (new_mask if update_mask == None
+                   else update_data * update_mask)
+    data = torch.where(update_mask, new_data, batch_data)
+    return data, update_mask, new_dims
+
+
+torch.register_batch_operator("tanh", batch_tanh.graph)
+torch.register_batch_operator("sigmoid", batch_sigmoid.graph)
+torch.register_batch_operator("add", batch_add.graph)
+torch.register_batch_operator("mul", batch_mul.graph)
+torch.register_batch_operator("matmul", batch_matmul.graph)
+torch.register_batch_operator("mm", batch_mm.graph)
+torch.register_batch_operator("select", batch_select.graph)
+torch.register_batch_operator("update", batch_update.graph)
+torch.register_batch_operator("synchronize", batch_synchronize.graph)

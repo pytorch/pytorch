@@ -18,6 +18,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
+#include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
@@ -203,6 +204,7 @@ void initJITBindings(PyObject *module) {
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
   initBatchTensorBindings(module);
+  initRegisterBatchOpsBindings(module);
   registerPythonInterpreterOps();
 }
 

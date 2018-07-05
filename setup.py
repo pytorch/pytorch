@@ -778,6 +778,7 @@ main_sources = [
     "torch/csrc/jit/passes/specialize_undef.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
+    "torch/csrc/jit/passes/to_batch.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
     "torch/csrc/jit/generated/aten_dispatch.cpp",
