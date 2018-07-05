@@ -76,13 +76,14 @@ class WeightedRandomSampler(Sampler):
 
     Arguments:
         weights (sequence)   : a sequence of weights, not necessary summing up to one
-        num_samples (int): number of samples to draw
+        num_samples (int): number of samples to draw every time the sampling is done
+                            from the weights' distribution
         replacement (bool): if ``True``, samples are drawn with replacement.
             If not, they are drawn without replacement, which means that when a
             sample index is drawn for a row, it cannot be drawn again for that row.
     """
 
-    def __init__(self, weights, num_samples, replacement=True):
+    def __init__(self, weights, num_samples=1, replacement=True):
         if not isinstance(num_samples, _int_classes) or isinstance(num_samples, bool) or \
                 num_samples <= 0:
             raise ValueError("num_samples should be a positive integeral "
@@ -93,13 +94,21 @@ class WeightedRandomSampler(Sampler):
         self.weights = torch.tensor(weights, dtype=torch.double)
         self.num_samples = num_samples
         self.replacement = replacement
+        self.current_iter = 1 # To keep track of iterations
 
     def __iter__(self):
-        return iter(torch.multinomial(self.weights, self.num_samples, self.replacement))
+        return self
+
+    def __next__(self):
+        if (self.current_iter > len(self.weights)):
+            raise StopIteration
+        else:
+            self.current_iter += 1
+            return torch.multinomial(self.weights, self.num_samples, self.replacement)\
+                        .squeeze()
 
     def __len__(self):
-        return self.num_samples
-
+        return len(self.weights) * self.num_samples
 
 class BatchSampler(Sampler):
     r"""Wraps another sampler to yield a mini-batch of indices.
@@ -136,7 +145,10 @@ class BatchSampler(Sampler):
     def __iter__(self):
         batch = []
         for idx in self.sampler:
-            batch.append(idx)
+            try:
+                batch.extend(idx) # If num_samples>1 are drawn using WeightedRandomSampler
+            except TypeError:
+                batch.append(idx) # For all other samplers
             if len(batch) == self.batch_size:
                 yield batch
                 batch = []
