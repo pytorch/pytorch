@@ -70,7 +70,7 @@ except ImportError:
 
 TEST_MKL = torch.backends.mkl.is_available()
 
-NO_MULTIPROCESSING_SPAWN = 'NO_MULTIPROCESSING_SPAWN' in os.environ
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
 
 
 def skipIfNoLapack(fn):
