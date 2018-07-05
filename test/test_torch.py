@@ -4044,13 +4044,13 @@ class TestTorch(TestCase):
     @skipIfNoLapack
     def test_batch_inverse(self):
         M = torch.randn(8, 5, 5)
-        MI = torch.binverse(M)
+        MI = torch.inverse(M)
         E = torch.eye(5).repeat(8, 1, 1)
         self.assertEqual(E, torch.bmm(M, MI), 1e-8, 'inverse value')
         self.assertEqual(E, torch.bmm(MI, M), 1e-8, 'inverse value')
 
         MII = torch.Tensor(8, 5, 5)
-        torch.binverse(M, out=MII)
+        torch.inverse(M, out=MII)
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
 
     @staticmethod

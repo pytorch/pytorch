@@ -3079,42 +3079,6 @@
       default: S
 ]]
 [[
-  name: binverse
-  cname: bgetri
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-]]
-[[
-  name: inverse
-  cname: getri
-  types:
-    - Float
-    - Double
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* output
-      output: True
-    - THTensor* self
-]]
-[[
   name: potrf
   types:
     - Float

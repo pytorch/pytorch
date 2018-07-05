@@ -339,10 +339,7 @@
   self: at::zeros(self.sizes(), grad.type()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
-  self: -at::mm(output.t(), at::mm(grad, output.t()))
-
-- name: binverse(Tensor self)
-  self: -at::bmm(output, at::bmm(grad, output))
+  self: -at::matmul(result, at::matmul(grad, result))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
