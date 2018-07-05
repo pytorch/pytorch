@@ -541,6 +541,7 @@ void THTensor_(bgetri)(THTensor *ra_, THTensor *a)
     lwork = (int) wkopt;
     work = THTensor_(newWithSize1d)(lwork);
     THLapack_(getri)(n, THTensor_(data)(rai), lda, THIntTensor_data(ipiv), THTensor_(data)(work), lwork, &info);
+    THTensor_(free)(work);
     if (info != 0) {
       break;
     }
