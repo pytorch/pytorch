@@ -903,6 +903,8 @@
 
 - func: pin_memory(Tensor self) -> Tensor
 
+- func: pinverse(Tensor self, double rcond=1e-15) -> Tensor
+
 - func: rand(IntList size, *, TensorOptions options={}) -> Tensor
   variants: function
 
