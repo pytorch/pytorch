@@ -372,11 +372,11 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto model = std::make_shared<torch::SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto batchnorm2d =
-      model->add(BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
+      model->add(BatchNorm2d(BatchNormOptions(10).stateful(true)), "batchnorm2d");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto linear1 = model->add(Linear(320, 50), "linear1");
   auto batchnorm1 =
-      model->add(BatchNorm(BatchNormOptions(50).stateful(true)), "batchnorm1");
+      model->add(BatchNorm2d(BatchNormOptions(50).stateful(true)), "batchnorm1");
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {

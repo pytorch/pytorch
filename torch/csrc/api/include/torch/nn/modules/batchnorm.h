@@ -17,9 +17,11 @@ struct BatchNormOptions {
   TORCH_ARG(double, momentum) = 0.1;
 };
 
-class BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
+namespace detail {
+template <typename Derived>
+class BatchNormImplBase : public torch::nn::Cloneable<Derived> {
  public:
-  explicit BatchNormImpl(BatchNormOptions options);
+  explicit BatchNormImplBase(BatchNormOptions options);
 
   void reset() override;
 
@@ -31,9 +33,44 @@ class BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
   Tensor bias;
   Tensor running_mean;
   Tensor running_variance;
-};
 
-TORCH_MODULE(BatchNorm);
+ protected:
+  virtual void check_input_dimensions(Tensor input) const = 0;
+};
+} // namespace detail
+
+// Our usual convention is that the name of the option is <class-name> +
+// "Options", so we define these aliases.
+
+using BatchNorm1dOptions = BatchNormOptions;
+class BatchNorm1dImpl : public detail::BatchNormImplBase<BatchNorm1dImpl> {
+ public:
+  using detail::BatchNormImplBase<BatchNorm1dImpl>::BatchNormImplBase;
+
+ private:
+  virtual void check_input_dimensions(Tensor input) const override;
+};
+TORCH_MODULE(BatchNorm1d);
+
+using BatchNorm2dOptions = BatchNormOptions;
+class BatchNorm2dImpl : public detail::BatchNormImplBase<BatchNorm2dImpl> {
+ public:
+  using detail::BatchNormImplBase<BatchNorm2dImpl>::BatchNormImplBase;
+
+ private:
+  virtual void check_input_dimensions(Tensor input) const override;
+};
+TORCH_MODULE(BatchNorm2d);
+
+using BatchNorm3dOptions = BatchNormOptions;
+class BatchNorm3dImpl : public detail::BatchNormImplBase<BatchNorm3dImpl> {
+ public:
+  using detail::BatchNormImplBase<BatchNorm3dImpl>::BatchNormImplBase;
+
+ private:
+  virtual void check_input_dimensions(Tensor input) const override;
+};
+TORCH_MODULE(BatchNorm3d);
 
 } // namespace nn
 } // namespace torch

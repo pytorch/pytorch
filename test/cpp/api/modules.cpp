@@ -12,6 +12,8 @@
 
 #include <test/cpp/api/util.h>
 
+using Catch::StartsWith;
+
 using namespace torch::nn;
 
 class TestModel : public torch::nn::Module {
@@ -236,6 +238,56 @@ TEST_CASE("modules") {
       auto functional = Functional(torch::elu, /*alpha=*/1, /*scale=*/0);
       REQUIRE(functional(torch::ones({})).toCFloat() == 0);
     }
+  }
+
+  SECTION("batchnorm") {
+    BatchNorm1d bn1d(BatchNormOptions(5).stateful(true));
+    REQUIRE_THROWS_WITH(
+        bn1d->forward(torch::rand({})),
+        StartsWith("Expected 2D or 3D input (got 0D input)"));
+    REQUIRE_THROWS_WITH(
+        bn1d->forward(torch::rand({4})),
+        StartsWith("Expected 2D or 3D input (got 1D input)"));
+    REQUIRE_THROWS_WITH(
+        bn1d->forward(torch::rand({4, 5, 6, 7})),
+        StartsWith("Expected 2D or 3D input (got 4D input)"));
+
+    BatchNorm2d bn2d(BatchNormOptions(5).stateful(true));
+    REQUIRE_THROWS_WITH(
+        bn2d->forward(torch::rand({})),
+        StartsWith("Expected 4D input (got 0D input)"));
+    REQUIRE_THROWS_WITH(
+        bn2d->forward(torch::rand({1})),
+        StartsWith("Expected 4D input (got 1D input)"));
+    REQUIRE_THROWS_WITH(
+        bn2d->forward(torch::rand({1, 2})),
+        StartsWith("Expected 4D input (got 2D input)"));
+    REQUIRE_THROWS_WITH(
+        bn2d->forward(torch::rand({1, 2, 3})),
+        StartsWith("Expected 4D input (got 3D input)"));
+    REQUIRE_THROWS_WITH(
+        bn2d->forward(torch::rand({1, 2, 3, 4, 5})),
+        StartsWith("Expected 4D input (got 5D input)"));
+
+    BatchNorm3d bn3d(BatchNormOptions(5).stateful(true));
+    REQUIRE_THROWS_WITH(
+        bn3d->forward(torch::rand({})),
+        StartsWith("Expected 5D input (got 0D input)"));
+    REQUIRE_THROWS_WITH(
+        bn3d->forward(torch::rand({1})),
+        StartsWith("Expected 5D input (got 1D input)"));
+    REQUIRE_THROWS_WITH(
+        bn3d->forward(torch::rand({1, 2})),
+        StartsWith("Expected 5D input (got 2D input)"));
+    REQUIRE_THROWS_WITH(
+        bn3d->forward(torch::rand({1, 2, 3})),
+        StartsWith("Expected 5D input (got 3D input)"));
+    REQUIRE_THROWS_WITH(
+        bn3d->forward(torch::rand({1, 2, 3, 4})),
+        StartsWith("Expected 5D input (got 4D input)"));
+    REQUIRE_THROWS_WITH(
+        bn3d->forward(torch::rand({1, 2, 3, 4, 5, 6})),
+        StartsWith("Expected 5D input (got 6D input)"));
   }
 }
 
