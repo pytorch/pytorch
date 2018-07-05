@@ -149,7 +149,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor> embedding_bag_cpu_max(
     return std::tuple<Tensor, Tensor, Tensor, Tensor>(output, offset2bag, bag_size, max_indices);
 }
 
-
+// embedding_bag wrapper to enforce contiguity in tensors other than `weight`.
+// This is created to save extra `.contiguous()` call in backward.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 embedding_bag(const Tensor &weight, const Tensor &indices,
               const Tensor &offsets, const bool scale_grad_by_freq,
@@ -158,6 +160,8 @@ embedding_bag(const Tensor &weight, const Tensor &indices,
                             scale_grad_by_freq, mode, sparse);
   };
 
+// Assumes all input tensors except for `weight` are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 std::tuple<Tensor, Tensor, Tensor, Tensor>
 _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
                   const Tensor &offsets, const bool scale_grad_by_freq,
@@ -202,6 +206,8 @@ _embedding_bag_cpu(const Tensor &weight, const Tensor &indices,
   }
 }
 
+// Assumes all input tensors are contiguous.
+// See NOTE [ embedding_bag Native Functions ] in native_functions.yaml for details
 Tensor _embedding_bag_backward(const Tensor &grad, const Tensor &indices,
                               const Tensor &offsets,
                               const Tensor &offset2bag,
@@ -239,6 +245,8 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
                                   bool scale_grad_by_freq, int64_t mode) {
   // indices_, offsets_ and offset2bag__ are assumed having correct dtypes and
   // contiguous here due to the checks in _embedding_bag_backward above.
+  // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
+  // for more details.
 
   auto grad = grad_.contiguous();
   auto grad_arg = TensorArg(grad, "grad_", 1);
@@ -327,19 +335,15 @@ Tensor _embedding_bag_dense_backward_cpu(const Tensor &grad_, const Tensor &indi
 
   return index_grad_weight;
 }
+
 Tensor _embedding_bag_sparse_backward(
     const Tensor &grad_, const Tensor &indices, const Tensor &offsets,
     const Tensor &offset2bag, const Tensor &bag_size_, int64_t num_weights,
     bool scale_grad_by_freq, int64_t mode) {
-  auto indices_arg = TensorArg(indices, "indices", 1);
-  checkScalarType("embedding_bag", indices_arg, kLong);
-  checkContiguous("embedding_bag", indices_arg);
-  auto offsets_arg = TensorArg(offsets, "offsets", 1);
-  checkScalarType("embedding_bag", offsets_arg, kLong);
-  checkContiguous("embedding_bag", offsets_arg);
-  auto offset2bag_arg = TensorArg(offset2bag, "offset2bag", 1);
-  checkScalarType("embedding_bag", offset2bag_arg, kLong);
-  checkContiguous("embedding_bag", offset2bag_arg);
+  // indices, offsets and offset2bag are assumed having correct dtypes and
+  // contiguous here due to the checks in _embedding_bag_backward above.
+  // Also see NOTE [ embedding_bag Native Functions ] in native_functions.yaml
+  // for more details.
 
   Tensor grad = grad_;
   Tensor index_grad = grad_.index_select(0, offset2bag);

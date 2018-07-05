@@ -463,13 +463,18 @@
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
 
+# NOTE [ embedding_bag Native Functions ]
+# The `_embedding_bag.*` variants assume that input tensors except for `weight`,
+# e.g. `indices` and `offsets` (and `offset2bag`), are contiguous.
+# We really only need to enforce this for `_embedding_bag` (the forward) because
+# the backward inputs are the same as forward ones.
+# The above `embedding_bag` wrapper is created to achieve this, e.g.,
+# applying indices = indices.contiguous().
+# The backward functions apply a check that these input tensors are contiguous.
+
 - func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor, Tensor)
   variants: function
 
-# The `_embedding_bag.*` variants assumes that input args `weight`, `indices`, and `offsets` are contiguous
-# We really only need to enforce this for `_embedding_bag` (the forward) because the backward inputs are the same as forward ones.
-# The above `embedding_bag` wrapper is created to achieve this, e.g., indices = indices.contiguous().
-# The backward functions only do a check that they are contiguous.
 - func: _embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor, Tensor)
   variants: function
   dispatch:
