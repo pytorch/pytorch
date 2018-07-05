@@ -5052,7 +5052,7 @@ class TestNN(NNTestCase):
 
             output = m(inp, half_ones_half_zeros, half_ones_half_neg_ones)
             self.assertEqual(F.film(inp, half_ones_half_zeros, half_ones_half_neg_ones), output)
-            self.assertEqual(output.sum(), inp[:,:5].sum())
+            self.assertEqual(output.sum(), inp[:, :5].sum())
 
     @staticmethod
     def _test_conv_noncontig_weights(self, device):
