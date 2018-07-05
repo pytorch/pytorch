@@ -18,7 +18,7 @@
 #include "hip/hip_runtime.h"
 #include "caffe2/operators/elementwise_linear_op.h"
 #include "caffe2/core/hip/context_hip.h"
-#include "caffe2/operators/operator_fallback_hip.h"
+#include "caffe2/operators/hip/operator_fallback_hip.h"
 #include <cub/block/block_reduce.cuh>
 
 namespace caffe2 {
