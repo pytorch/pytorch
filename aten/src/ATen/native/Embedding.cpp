@@ -28,7 +28,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
   for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }
-  return weight.index_select(0, indices.view(-1)).view(size);
+  return weight.index_select(0, indices.reshape(-1)).view(size);
 }
 
 Tensor embedding_backward(
