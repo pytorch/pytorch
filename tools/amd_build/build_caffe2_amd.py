@@ -6,36 +6,47 @@ import subprocess
 import os
 import sys
 import glob
-#from shutil import copytree, ignore_patterns, copyfile, rmtree
 from functools import reduce
-import pdb
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2")
+
 include_dirs = [
     "operators",
     "sgd",
-    "image"
+    "image",
+    "transforms",
+    "video",
+    "distributed"
 ]
 output_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2_hip")
 
-file_extensions = ['cc','cu','h']
+file_extensions = ['cc','cu','h','cuh']
 
-# Make various replacements inside AMD_BUILD/torch directory
-#ignore_files = ["csrc/autograd/profiler.h", "csrc/autograd/profiler.cpp",
- #               "csrc/cuda/cuda_check.h", "csrc/jit/fusion_compiler.cpp"]
-pdb.set_trace()
+ignore_file_list = ["depthwise_3x3_conv_op.cu",
+					"top_k.cu",
+					"top_k_radix_selection.cuh",
+					"top_k_heap_selection.cuh",
+                    "pool_op_cudnn.cu",
+                    "utility_ops.cu",
+                    "max_pool_with_index.cu"]#REVIST THIS FILE
+
 # Execute the Hipify Script.
 args = ["--project-directory", proj_dir,
         "--output-directory", output_dir,
-        "--include-dirs"] + include_dirs + ["--extensions"] + file_extensions
+        "--include-dirs"] + include_dirs + \
+        ["--extensions"] + file_extensions + \
+        ["--ignore_files"] + ignore_file_list + \
+        ["--hipify_caffe2", "True"]
 #os.execv(os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py"), ['python'] + args)
 os.system("python " + os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py") + " " + " ".join(args))
-## copy files in hip directories
-pdb.set_trace()
+
+## copy files to hip directories
 for dir in include_dirs:
     for file in glob.glob(os.path.join(output_dir,dir)+"/*"):
         basename = os.path.basename(file)
+        if basename in ignore_file_list:
+            continue
         dest_dir = os.path.join(proj_dir,dir,"hip")
         if not os.path.exists(dest_dir):
             os.makedirs(dest_dir)
@@ -43,8 +54,10 @@ for dir in include_dirs:
             dest_filepath = os.path.join(dest_dir,basename)
             if not os.path.exists(dest_filepath):
                 shutil.copyfile(file,dest_filepath)
-pdb.set_trace()
+
 shutil.rmtree(output_dir)
+
+
 """
 import os
 import glob
