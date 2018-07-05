@@ -13,12 +13,18 @@ class _LRScheduler(object):
         if last_epoch == -1:
             for group in optimizer.param_groups:
                 group.setdefault('initial_lr', group['lr'])
+                if not group.get('l2_reg', True):
+                    group.setdefault('initial_weight_decay', group['weight_decay'])
         else:
             for i, group in enumerate(optimizer.param_groups):
                 if 'initial_lr' not in group:
                     raise KeyError("param 'initial_lr' is not specified "
                                    "in param_groups[{}] when resuming an optimizer".format(i))
+                if not group.get('l2_reg', True) and 'initial_weight_decay' not in group:
+                    raise KeyError("param 'initial_weight_decay' is not specified "
+                                   "in param_groups[{}] when resuming an optimizer".format(i))
         self.base_lrs = list(map(lambda group: group['initial_lr'], optimizer.param_groups))
+        self.base_weight_decays = list(map(lambda group: group.get('initial_weight_decay', None), optimizer.param_groups))
         self.step(last_epoch + 1)
         self.last_epoch = last_epoch
 
@@ -42,12 +48,18 @@ class _LRScheduler(object):
     def get_lr(self):
         raise NotImplementedError
 
+    def get_weight_decay(self):
+        raise NotImplementedError
+
     def step(self, epoch=None):
         if epoch is None:
             epoch = self.last_epoch + 1
         self.last_epoch = epoch
         for param_group, lr in zip(self.optimizer.param_groups, self.get_lr()):
             param_group['lr'] = lr
+        for param_group, weight_decay in zip(self.optimizer.param_groups, self.get_weight_decay()):
+            if not param_group.get('l2_reg', True):
+                param_group['weight_decay'] = weight_decay
 
 
 class LambdaLR(_LRScheduler):
@@ -88,6 +100,10 @@ class LambdaLR(_LRScheduler):
         return [base_lr * lmbda(self.last_epoch)
                 for lmbda, base_lr in zip(self.lr_lambdas, self.base_lrs)]
 
+    def get_weight_decay(self):
+        return [base_weight_decay * lmbda(self.last_epoch) if base_weight_decay else None
+                for lmbda, base_weight_decay in zip(self.lr_lambdas, self.base_weight_decays)]
+
 
 class StepLR(_LRScheduler):
     """Sets the learning rate of each parameter group to the initial lr
@@ -122,6 +138,10 @@ class StepLR(_LRScheduler):
     def get_lr(self):
         return [base_lr * self.gamma ** (self.last_epoch // self.step_size)
                 for base_lr in self.base_lrs]
+
+    def get_weight_decay(self):
+        return [base_weight_decay * self.gamma ** (self.last_epoch // self.step_size) if base_weight_decay else None
+                for base_weight_decay in self.base_weight_decays]
 
 
 class MultiStepLR(_LRScheduler):
@@ -160,6 +180,10 @@ class MultiStepLR(_LRScheduler):
         return [base_lr * self.gamma ** bisect_right(self.milestones, self.last_epoch)
                 for base_lr in self.base_lrs]
 
+    def get_weight_decay(self):
+        return [base_weight_decay * self.gamma ** bisect_right(self.milestones, self.last_epoch) if base_weight_decay else None
+                for base_weight_decay in self.base_weight_decays]
+
 
 class ExponentialLR(_LRScheduler):
     """Set the learning rate of each parameter group to the initial lr decayed
@@ -178,6 +202,10 @@ class ExponentialLR(_LRScheduler):
     def get_lr(self):
         return [base_lr * self.gamma ** self.last_epoch
                 for base_lr in self.base_lrs]
+
+    def get_weight_decay(self):
+        return [base_weight_decay * self.gamma ** self.last_epoch if base_weight_decay else None
+                for base_weight_decay in self.base_weight_decays]
 
 
 class CosineAnnealingLR(_LRScheduler):
@@ -215,6 +243,11 @@ class CosineAnnealingLR(_LRScheduler):
         return [self.eta_min + (base_lr - self.eta_min) *
                 (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2
                 for base_lr in self.base_lrs]
+
+    def get_weight_decay(self):
+        return [self.eta_min + (base_weight_decay - self.eta_min) *
+                (1 + math.cos(math.pi * self.last_epoch / self.T_max)) / 2 if base_weight_decay else None
+                for base_weight_decay in self.base_weight_decays]
 
 
 class ReduceLROnPlateau(object):
@@ -328,6 +361,7 @@ class ReduceLROnPlateau(object):
 
         if self.num_bad_epochs > self.patience:
             self._reduce_lr(epoch)
+            self._reduce_weight_decay(epoch)
             self.cooldown_counter = self.cooldown
             self.num_bad_epochs = 0
 
@@ -340,6 +374,17 @@ class ReduceLROnPlateau(object):
                 if self.verbose:
                     print('Epoch {:5d}: reducing learning rate'
                           ' of group {} to {:.4e}.'.format(epoch, i, new_lr))
+
+    def _reduce_weight_decay(self, epoch):
+        for i, param_group in enumerate(self.optimizer.param_groups):
+            if not param_group.get('l2_reg', True):
+                old_weight_decay = float(param_group['weight_decay'])
+                new_weight_decay = max(old_weight_decay * self.factor, self.min_lrs[i])
+                if old_weight_decay - new_weight_decay > self.eps:
+                    param_group['weight_decay'] = new_weight_decay
+                    if self.verbose:
+                        print('Epoch {:5d}: reducing weight decay factor'
+                            ' of group {} to {:.4e}.'.format(epoch, i, new_weight_decay))
 
     @property
     def in_cooldown(self):
