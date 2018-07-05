@@ -7750,6 +7750,25 @@ class TestTorch(TestCase):
         self.assertFalse(torch.tensor([[0]]).is_nonzero())
         self.assertTrue(torch.tensor([[1]]).is_nonzero())
 
+    def test_meshgrid(self):
+        a = torch.tensor(1)
+        b = torch.tensor([1, 2, 3])
+        c = torch.tensor([1, 2])
+        grid_a, grid_b, grid_c = torch.meshgrid([a, b, c])
+        self.assertEqual(grid_a.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_b.shape, torch.Size([1, 3, 2]))
+        self.assertEqual(grid_c.shape, torch.Size([1, 3, 2]))
+        expected_grid_a = torch.ones(1, 3, 2, dtype=torch.int64)
+        expected_grid_b = torch.tensor([[[1, 1],
+                                         [2, 2],
+                                         [3, 3]]])
+        expected_grid_c = torch.tensor([[[1, 2],
+                                         [1, 2],
+                                         [1, 2]]])
+        self.assertTrue(grid_a.equal(expected_grid_a))
+        self.assertTrue(grid_b.equal(expected_grid_b))
+        self.assertTrue(grid_c.equal(expected_grid_c))
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
