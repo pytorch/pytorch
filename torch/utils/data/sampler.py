@@ -94,7 +94,7 @@ class WeightedRandomSampler(Sampler):
         self.weights = torch.tensor(weights, dtype=torch.double)
         self.num_samples = num_samples
         self.replacement = replacement
-        self.current_iter = 1 # To keep track of iterations
+        self.current_iter = 1  # To keep track of iterations
 
     def __iter__(self):
         return self
@@ -109,6 +109,7 @@ class WeightedRandomSampler(Sampler):
 
     def __len__(self):
         return len(self.weights) * self.num_samples
+
 
 class BatchSampler(Sampler):
     r"""Wraps another sampler to yield a mini-batch of indices.
@@ -146,9 +147,9 @@ class BatchSampler(Sampler):
         batch = []
         for idx in self.sampler:
             try:
-                batch.extend(idx) # If num_samples>1 are drawn using WeightedRandomSampler
+                batch.extend(idx)  # If num_samples>1 are drawn using WeightedRandomSampler
             except TypeError:
-                batch.append(idx) # For all other samplers
+                batch.append(idx)  # For all other samplers
             if len(batch) == self.batch_size:
                 yield batch
                 batch = []
