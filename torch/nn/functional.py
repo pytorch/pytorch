@@ -1209,7 +1209,7 @@ def embedding_bag(input, weight, offsets=None, max_norm=None, norm_type=2,
             offsets = torch.arange(0, input.numel(), input.size(1),
                                    dtype=torch.long, device=input.device)
 
-            input = input.view(-1)
+            input = input.reshape(-1)
     elif input.dim() == 1:
         if offsets is None:
             raise ValueError("offsets has to be a 1D Tensor but got None")
