@@ -703,6 +703,11 @@
 - func: is_sparse(Tensor self) -> bool
   device_guard: false
 
+- func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
   variants: function
 
@@ -819,6 +824,11 @@
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
 
+- func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: max_pool1d_with_indices(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
@@ -853,6 +863,16 @@
 - func: mean_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
   variants: function
 
+- func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: median_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
+- func: min(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: min_out(Tensor min, Tensor min_indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation) -> Tensor
@@ -870,6 +890,11 @@
 - func: mm(Tensor self, Tensor mat2) -> Tensor
 
 - func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
+  variants: function
+
+- func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: mode_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
   variants: function
 
 - func: mv(Tensor self, Tensor vec) -> Tensor
