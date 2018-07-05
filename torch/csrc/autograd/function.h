@@ -103,7 +103,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   explicit Function(
       edge_list&& next_edges = edge_list())
-      : Function(next_sequence_nr_++, std::move(next_edges)) {}
+    : Function(get_next_sequence_nr()++, std::move(next_edges)) {}
 
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
@@ -307,9 +307,7 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
  protected:
-  /// Monotonically incrementing (thread local!) counter to supply sequence
-  /// numbers.
-  static thread_local uint64_t next_sequence_nr_;
+  static uint64_t& get_next_sequence_nr();
 
   /// Performs the `Function`'s actual operation.
   virtual variable_list apply(const variable_list& inputs) = 0;
