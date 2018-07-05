@@ -57,7 +57,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_with_lengths(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
@@ -90,7 +90,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_with_window(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
@@ -130,7 +130,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_triangle(self, x, mode, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
@@ -179,7 +179,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     @given(x=hu.tensor(min_dim=2,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_batching_lengths(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
@@ -229,7 +229,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     @given(x=hu.tensor(min_dim=4,
                        max_dim=4,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_batching_window(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
@@ -282,7 +282,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
            mode=st.sampled_from(['upper', 'lower', 'upperdiag', 'lowerdiag']),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_batching_triangle(self, x, mode, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
@@ -343,7 +343,7 @@ class TestBooleanMaskOp(hu.HypothesisTestCase):
     @given(x=hu.tensor(min_dim=3,
                        max_dim=5,
                        elements=st.floats(min_value=0.5, max_value=1.0)),
-           dtype=st.sampled_from([np.float32, np.float16]),
+           dtype=st.sampled_from([np.float16]),
            **hu.gcs)
     def test_sequence_mask_repeated(self, x, dtype, gc, dc):
         x, dc = self._dtype_conversion(x, dtype, gc, dc)
