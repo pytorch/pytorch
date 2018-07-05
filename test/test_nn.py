@@ -2138,7 +2138,7 @@ class TestNN(NNTestCase):
             c = shape[1]
 
             # test that GN normalizes to mean 0 and stddev 1
-            gn = nn.GroupNorm(g, c, eps=0).to(device, dtype)
+            gn = nn.GroupNorm(c, g, eps=0).to(device, dtype)
             gn.weight.data.fill_(1)
             gn.bias.data.fill_(0)
             output = gn(x)
@@ -2169,14 +2169,14 @@ class TestNN(NNTestCase):
             (2, 6, 4, 2, 2): 4,
         }
         for shape, g in bad_shape_g.items():
-            gn = nn.GroupNorm(g, shape[1])
+            gn = nn.GroupNorm(shape[1], g)
             input = torch.empty(*shape, device=device, dtype=dtype).uniform_(0, 10)
             self.assertRaises(RuntimeError, lambda: gn(input))
 
     def _test_GroupNorm_cuda_half(self):
         input = Variable(torch.empty(2, 3, 3, 2).to("cuda", torch.half).random_(1, 10), requires_grad=True)
         input = torch.zeros(2, 4, 3, 2, requires_grad=True).cuda().half().random_(1, 10)
-        m = nn.GroupNorm(2, 4).to("cuda", torch.half)
+        m = nn.GroupNorm(4, 2).to("cuda", torch.half)
         output = m(input)
         output.sum().backward()
         self.assertEqual(output.type(), input.type())
@@ -6658,7 +6658,7 @@ new_module_tests = [
     ),
     dict(
         module_name='GroupNorm',
-        constructor_args=(3, 6, 1e-3),
+        constructor_args=(6, 3, 1e-3),
         input_size=(4, 6, 5),
         cudnn=True,
         check_eval=True,
@@ -6674,7 +6674,7 @@ new_module_tests = [
     ),
     dict(
         module_name='GroupNorm',
-        constructor_args=(1, 5, 1e-3, False),
+        constructor_args=(5, 1, 1e-3, False),
         input_size=(4, 5, 5),
         cudnn=True,
         check_eval=True,
@@ -6682,7 +6682,7 @@ new_module_tests = [
     ),
     dict(
         module_name='GroupNorm',
-        constructor_args=(3, 6, 1e-3),
+        constructor_args=(6, 3, 1e-3),
         input_size=(4, 6, 2, 3),
         cudnn=True,
         check_eval=True,
@@ -6698,7 +6698,7 @@ new_module_tests = [
     ),
     dict(
         module_name='GroupNorm',
-        constructor_args=(1, 3, 1e-3, False),
+        constructor_args=(3, 1, 1e-3, False),
         input_size=(4, 3, 2, 3),
         cudnn=True,
         check_eval=True,

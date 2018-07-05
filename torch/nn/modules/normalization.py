@@ -168,8 +168,8 @@ class GroupNorm(Module):
     evaluation modes.
 
     Args:
-        num_groups (int): number of groups to separate the channels into
         num_channels (int): number of channels expected in input
+        num_groups (int): number of groups to separate the channels into
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         affine: a boolean value that when set to ``True``, this module
             has learnable per-channel affine parameters. Default: ``True``
@@ -182,20 +182,20 @@ class GroupNorm(Module):
 
         >>> input = torch.randn(20, 6, 10, 10)
         >>> # Separate 6 channels into 3 groups
-        >>> m = nn.GroupNorm(3, 6)
+        >>> m = nn.GroupNorm(6, 3)
         >>> # Separate 6 channels into 6 groups (equivalent with InstanceNorm)
         >>> m = nn.GroupNorm(6, 6)
         >>> # Put all 6 channels into a single group (equivalent with LayerNorm)
-        >>> m = nn.GroupNorm(1, 6)
+        >>> m = nn.GroupNorm(6, 1)
         >>> # Activating the module
         >>> output = m(input)
 
     .. _`Group Normalization`: https://arxiv.org/abs/1803.08494
     """
-    def __init__(self, num_groups, num_channels, eps=1e-5, affine=True):
+    def __init__(self, num_channels, num_groups, eps=1e-5, affine=True):
         super(GroupNorm, self).__init__()
-        self.num_groups = num_groups
         self.num_channels = num_channels
+        self.num_groups = num_groups
         self.eps = eps
         self.affine = affine
         if self.affine:
@@ -216,7 +216,7 @@ class GroupNorm(Module):
             input, self.num_groups, self.weight, self.bias, self.eps)
 
     def extra_repr(self):
-        return '{num_groups}, {num_channels}, eps={eps}, ' \
+        return '{num_channels}, {num_groups}, eps={eps}, ' \
             'affine={affine}'.format(**self.__dict__)
 
 
