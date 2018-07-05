@@ -2058,10 +2058,10 @@ class TestAutograd(TestCase):
             M = U.mm(torch.diag(S)).mm(V.t())
             return M.pinverse()
 
-        gradcheck(func, [torch.rand(m) + 1])
-        gradcheck(func, [torch.rand(m) + 10])
-        gradgradcheck(func, [torch.rand(m) + 1])
-        gradgradcheck(func, [torch.rand(m) + 10])
+        gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
 
     def test_profiler(self):
         x = torch.randn(10, 10)
