@@ -30,7 +30,7 @@ from itertools import product
 from random import shuffle
 
 import torch
-from common import TestCase, run_tests, set_rng_seed
+from common import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -3704,6 +3704,7 @@ class TestValidation(TestCase):
             for i, param in enumerate(params):
                 Dist(validate_args=True, **param)
 
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):

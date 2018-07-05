@@ -11,7 +11,7 @@ import torch.cuda
 import torch.multiprocessing as mp
 from torch.autograd import Variable
 from torch.nn import Parameter
-from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN
+from common import TestCase, run_tests, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN, TEST_WITH_ASAN
 
 
 TEST_REPEATS = 30
@@ -21,7 +21,6 @@ TEST_CUDA_IPC = torch.cuda.is_available() and \
     sys.platform != 'darwin' and \
     sys.platform != 'win32'
 TEST_MULTIGPU = TEST_CUDA_IPC and torch.cuda.device_count() > 1
-TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', False)
 
 
 class SubProcess(mp.Process):

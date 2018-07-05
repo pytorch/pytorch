@@ -21,17 +21,27 @@ popd
 # ASAN test is not working
 if [[ "$BUILD_ENVIRONMENT" == *asan* ]]; then
     export ASAN_OPTIONS=detect_leaks=0:symbolize=1
+    export UBSAN_OPTIONS=print_stacktrace=1
     export PYTORCH_TEST_WITH_ASAN=1
+    export PYTORCH_TEST_WITH_UBSAN=1
     # TODO: Figure out how to avoid hard-coding these paths
     export ASAN_SYMBOLIZER_PATH=/usr/lib/llvm-5.0/bin/llvm-symbolizer
     export LD_PRELOAD=/usr/lib/llvm-5.0/lib/clang/5.0.0/lib/linux/libclang_rt.asan-x86_64.so
     # Increase stack size, because ASAN red zones use more stack
     ulimit -s 81920
 
+    function get_exit_code() {
+      set +e
+      "$@"
+      retcode=$?
+      set -e
+      return $retcode
+    }
     (cd test && python -c "import torch")
-    echo "The next two invocations are expected to crash; if they don't that means ASAN is misconfigured"
-    (cd test && ! python -c "import torch; torch._C._crash_if_csrc_asan(3)")
-    (cd test && ! python -c "import torch; torch._C._crash_if_aten_asan(3)")
+    echo "The next three invocations are expected to crash; if they don't that means ASAN/UBSAN is misconfigured"
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_asan(3)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_csrc_ubsan(0)")
+    (cd test && ! get_exit_code python -c "import torch; torch._C._crash_if_aten_asan(3)")
 fi
 
 export ATEN_DISABLE_AVX=
