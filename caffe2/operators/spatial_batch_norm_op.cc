@@ -31,6 +31,7 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
 
   auto* Y = Output(OUTPUT);
   Y->ResizeLike(X);
+  auto* Y_data = Y->mutable_data<float>();
 
   if (!is_test_) {
     // training mode
@@ -45,69 +46,77 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
         Output(SAVED_MEAN)->mutable_data<float>(), C);
     EigenVectorArrayMap<float> var(
         Output(SAVED_INV_VAR)->mutable_data<float>(), C);
+    if (N > 0) {
+      if (num_batches_ > 1) {
+        ConstEigenVectorArrayMap<float> sums(Input(SUMS).data<float>(), C);
+        ConstEigenVectorArrayMap<float> sumsq(Input(SUMSQ).data<float>(), C);
+        const auto multi_batch_size = N * num_batches_ * sample_size;
+        mean = sums / multi_batch_size;
+        var = (sumsq - (sums * sums) / multi_batch_size) / multi_batch_size;
+      } else {
+        mean.setZero();
+        var.setZero();
+        switch (order_) {
+          case StorageOrder::NCHW: {
+            ConstEigenArrayMap<float> X_arr(
+                X.data<float>(), sample_size, N * C);
+            for (int nc = 0; nc < N * C; ++nc) {
+              mean(nc % C) += X_arr.col(nc).sum();
+            }
+            mean /= N * sample_size;
+            for (int nc = 0; nc < N * C; ++nc) {
+              var(nc % C) +=
+                  (X_arr.col(nc) - mean(nc % C)).matrix().squaredNorm();
+            }
+            var /= N * sample_size;
+            break;
+          }
+          case StorageOrder::NHWC: {
+            ConstEigenArrayMap<float> X_arr(
+                X.data<float>(), C, N * sample_size);
+            for (int i = 0; i < N * sample_size; ++i) {
+              mean += X_arr.col(i);
+            }
+            mean /= N * sample_size;
+            for (int i = 0; i < N * sample_size; ++i) {
+              var += (X_arr.col(i) - mean) * (X_arr.col(i) - mean);
+            }
+            var /= N * sample_size;
+            break;
+          }
+          default:
+            CAFFE_THROW("Unknown storage order: ", order_);
+        }
+      }
 
-    if (num_batches_ > 1) {
-      ConstEigenVectorArrayMap<float> sums(Input(SUMS).data<float>(), C);
-      ConstEigenVectorArrayMap<float> sumsq(Input(SUMSQ).data<float>(), C);
-      const auto multi_batch_size = N * num_batches_ * sample_size;
-      mean = sums / multi_batch_size;
-      var = (sumsq - (sums * sums) / multi_batch_size) / multi_batch_size;
+      // Compute the running mean and running inv variance.
+      auto* running_mean = Output(RUNNING_MEAN);
+      auto* running_var = Output(RUNNING_VAR);
+      // Check if they are initialized
+      if (!running_mean->size()) {
+        running_mean->Resize(C);
+        EigenVectorArrayMap<float> running_mean_map(
+            running_mean->mutable_data<float>(), C);
+        running_mean_map.setZero();
+      }
+      if (!running_var->size()) {
+        running_var->Resize(C);
+        EigenVectorArrayMap<float> running_var_map(
+            running_var->mutable_data<float>(), C);
+        running_var_map.setZero();
+      }
+      EigenVectorArrayMap<float> running_mean_arr(
+          running_mean->mutable_data<float>(), C);
+      EigenVectorArrayMap<float> running_var_arr(
+          running_var->mutable_data<float>(), C);
+      running_mean_arr = running_mean_arr * momentum_ + mean * (1. - momentum_);
+      running_var_arr = running_var_arr * momentum_ + var * (1. - momentum_);
     } else {
+      // set empty batch's mean / var output to zeros
       mean.setZero();
       var.setZero();
-      switch (order_) {
-        case StorageOrder::NCHW: {
-          ConstEigenArrayMap<float> X_arr(X.data<float>(), sample_size, N * C);
-          for (int nc = 0; nc < N * C; ++nc) {
-            mean(nc % C) += X_arr.col(nc).sum();
-          }
-          mean /= N * sample_size;
-          for (int nc = 0; nc < N * C; ++nc) {
-            var(nc % C) +=
-                (X_arr.col(nc) - mean(nc % C)).matrix().squaredNorm();
-          }
-          var /= N * sample_size;
-          break;
-        }
-        case StorageOrder::NHWC: {
-          ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * sample_size);
-          for (int i = 0; i < N * sample_size; ++i) {
-            mean += X_arr.col(i);
-          }
-          mean /= N * sample_size;
-          for (int i = 0; i < N * sample_size; ++i) {
-            var += (X_arr.col(i) - mean) * (X_arr.col(i) - mean);
-          }
-          var /= N * sample_size;
-          break;
-        }
-        default:
-          CAFFE_THROW("Unknown storage order: ", order_);
-      }
+      return true;
     }
-
-    // Compute the running mean and running inv variance.
-    auto* running_mean = Output(RUNNING_MEAN);
-    auto* running_var = Output(RUNNING_VAR);
-    // Check if they are initialized
-    if (!running_mean->size()) {
-      running_mean->Resize(C);
-      EigenVectorArrayMap<float> running_mean_map(
-          running_mean->mutable_data<float>(), C);
-      running_mean_map.setZero();
-    }
-    if (!running_var->size()) {
-      running_var->Resize(C);
-      EigenVectorArrayMap<float> running_var_map(
-          running_var->mutable_data<float>(), C);
-      running_var_map.setZero();
-    }
-    EigenVectorArrayMap<float> running_mean_arr(
-        running_mean->mutable_data<float>(), C);
-    EigenVectorArrayMap<float> running_var_arr(
-        running_var->mutable_data<float>(), C);
-    running_mean_arr = running_mean_arr * momentum_ + mean * (1. - momentum_);
-    running_var_arr = running_var_arr * momentum_ + var * (1. - momentum_);
   }
 
   // Regardless of training or testing, we will apply the estimated mean
@@ -137,7 +146,7 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
       bias_arr - mean_arr * inv_std * scale_arr;
   switch (order_) {
     case StorageOrder::NHWC: {
-      EigenArrayMap<float>(Y->mutable_data<float>(), C, N * sample_size) =
+      EigenArrayMap<float>(Y_data, C, N * sample_size) =
           (ConstEigenArrayMap<float>(X.data<float>(), C, N * sample_size)
                .colwise() *
            new_scale)
@@ -146,7 +155,7 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
       break;
     }
     case StorageOrder::NCHW: {
-      EigenArrayMap<float> Y_arr(Y->mutable_data<float>(), sample_size, N * C);
+      EigenArrayMap<float> Y_arr(Y_data, sample_size, N * C);
       ConstEigenArrayMap<float> X_arr(X.data<float>(), sample_size, N * C);
       for (int nc = 0; nc < N * C; ++nc) {
         Y_arr.col(nc) = X_arr.col(nc) * new_scale(nc % C) + new_bias(nc % C);

@@ -89,13 +89,13 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
 
 namespace caffe2 {
 
-std::unique_ptr<repr::NeuralNetOperator>
-convertToNeuralNetOperator(caffe2::OperatorDef* op) {
-  auto argMap = getArgumentsFromOperator(*op);
+std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
+    const caffe2::OperatorDef& op) {
+  auto argMap = getArgumentsFromOperator(op);
 
   std::unique_ptr<repr::NeuralNetOperator> nnOp;
 
-  if (op->type() == "Conv") {
+  if (op.type() == "Conv") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::Conv>(kernelShape);
     auto c = dyn_cast<repr::Conv>(nnOp.get());
@@ -106,30 +106,73 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
 
   }
 
-  if (op->type() == "Relu") {
+  if (op.type() == "Relu") {
     nnOp = util::make_unique<repr::Relu>();
   }
 
-  if (op->type() == "AveragePool") {
+  if (op.type() == "AveragePool") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::AveragePool>(kernelShape);
   }
 
-  if (op->type() == "MaxPool") {
+  if (op.type() == "MaxPool") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::MaxPool>(kernelShape);
   }
 
-  if (op->type() == "Sum") {
+  if (op.type() == "Sum") {
     nnOp = util::make_unique<repr::Sum>();
   }
 
-  if (op->type() == "SpatialBN") {
+  if (op.type() == "SpatialBN") {
     nnOp = util::make_unique<repr::BatchNormalization>();
   }
 
+  if (op.type() == "Concat") {
+    nnOp = util::make_unique<repr::Concat>();
+    auto c = dyn_cast<repr::Concat>(nnOp.get());
+    if (argMap.count("axis")) {
+      CAFFE_ENFORCE(argMap["axis"].has_i(), "Invalid axis argument");
+      int axis = static_cast<int>(argMap["axis"].i());
+      c->setAxis(axis);
+    }
+    if (argMap.count("add_axis")) {
+      CAFFE_ENFORCE(argMap["add_axis"].has_i(), "Invalid add_axis argument");
+      int add_axis = static_cast<int>(argMap["add_axis"].i());
+      c->setAddAxis(!!add_axis);
+    }
+  }
+
+  if (op.type() == "Flatten") {
+    nnOp = util::make_unique<repr::Flatten>();
+  }
+
+  if (op.type() == "BatchGather") {
+    nnOp = util::make_unique<repr::BatchGather>();
+  }
+
+  if (op.type() == "BatchMatMul") {
+    nnOp = util::make_unique<repr::BatchMatMul>();
+    auto c = dyn_cast<repr::BatchMatMul>(nnOp.get());
+    if (argMap.count("trans_a")) {
+      CAFFE_ENFORCE(argMap["trans_a"].has_i(), "Invalid axis argument");
+      int trans_a = static_cast<int>(argMap["trans_a"].i());
+      c->setTransA(!!trans_a);
+    }
+    if (argMap.count("trans_b")) {
+      CAFFE_ENFORCE(argMap["trans_b"].has_i(), "Invalid add_axis argument");
+      int trans_b = static_cast<int>(argMap["trans_b"].i());
+      c->setTransB(!!trans_b);
+    }
+    if (argMap.count("broadcast")) {
+      CAFFE_ENFORCE(argMap["broadcast"].has_i(), "Invalid add_axis argument");
+      int broadcast = static_cast<int>(argMap["broadcast"].i());
+      c->setBroadcast(!!broadcast);
+    }
+  }
+
   if (!nnOp) {
-    nnOp = util::make_unique<repr::GenericOperator>(op->type());
+    nnOp = util::make_unique<repr::GenericOperator>(op.type());
   }
 
   // Generic attributes associated with Ops here
@@ -138,7 +181,7 @@ convertToNeuralNetOperator(caffe2::OperatorDef* op) {
   auto annotation = util::make_unique<Caffe2Annotation>();
   annotation->setOperatorDef(op);
 
-  auto device_name = op->device_option().node_name();
+  auto device_name = op.device_option().node_name();
   if (device_name != "") {
     annotation->setDevice(device_name);
   }
@@ -336,7 +379,7 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     if (op.type() == "While") {
       handleWhileOp(dfg, cfg, opNode, bbNode, op, blobMap);
     } else {
-      opNode->resetData(convertToNeuralNetOperator(&op));
+      opNode->resetData(convertToNeuralNetOperator(op));
       auto currentBasicBlock = bbNode->mutableData()->get();
       currentBasicBlock->pushInstructionNode(opNode);
     }
@@ -401,7 +444,7 @@ caffe2::OperatorDef convertToOperatorDef(repr::NNGraph::NodeRef instrNode) {
   } else {
     switch (annotation->getKind()) {
       case repr::Annotation::AnnotationKind::Caffe2:
-        op = *dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
+        op = dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
         break;
       default:
         op.set_type("__NOMNIGRAPH_CONVERSION_ERROR__");

@@ -180,6 +180,12 @@ std::string Symbol::domainString() const {
 }
 
 Symbol Symbol::fromDomainAndUnqualString(const std::string & d, const std::string & s) {
+  if (d.compare(0, domain_prefix.size(), domain_prefix) != 0) {
+    std::ostringstream ss;
+    ss << "Symbol: domain string is expected to be prefixed with '"
+       << domain_prefix << "', e.g. 'org.pytorch.aten'";
+    throw std::runtime_error(ss.str());
+  }
   std::string qualString = d.substr(domain_prefix.size()) + "::" + s;
   return fromQualString(qualString);
 }

@@ -222,6 +222,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: expand_as
    .. automethod:: exponential_
    .. automethod:: fill_
+   .. automethod:: flip
    .. automethod:: float
    .. automethod:: floor
    .. automethod:: floor_
@@ -237,6 +238,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: geqrf
    .. automethod:: ger
    .. automethod:: gesv
+   .. automethod:: get_device
    .. automethod:: gt
    .. automethod:: gt_
    .. automethod:: half
@@ -305,6 +307,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ormqr
    .. automethod:: permute
    .. automethod:: pin_memory
+   .. automethod:: pinverse
    .. automethod:: potrf
    .. automethod:: potri
    .. automethod:: potrs

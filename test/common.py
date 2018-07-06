@@ -70,6 +70,10 @@ except ImportError:
 
 TEST_MKL = torch.backends.mkl.is_available()
 
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
+TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', False)
+TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', False)
+
 
 def skipIfNoLapack(fn):
     @wraps(fn)

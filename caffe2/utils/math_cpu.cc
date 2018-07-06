@@ -17,6 +17,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -553,12 +554,14 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, vsAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, vdAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, vsInvSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, InvSqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, vdSqr)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -612,9 +615,10 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, tan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, atan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, rsqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
+
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T)                                     \
@@ -628,10 +632,20 @@ DELEGATE_SINCOS_FUNCTION(float)
 DELEGATE_SINCOS_FUNCTION(double)
 #undef DELEGATE_SINCOS_FUNCTION
 
-#define DELEGATE_POWX_FUNCTION(T)                                             \
-  template <>                                                                 \
-  void Powx<T, CPUContext>(const int N, const T* a, T b, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b);       \
+#define DELEGATE_CBRT_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cbrt<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    std::transform(X, X + N, Y, [](const T x) { return cbrt(x); });      \
+  }
+DELEGATE_CBRT_FUNCTION(float)
+DELEGATE_CBRT_FUNCTION(double)
+#undef DELEGATE_CBRT_FUNCTION
+
+#define DELEGATE_POWX_FUNCTION(T)                                       \
+  template <>                                                           \
+  void Powx<T, CPUContext>(                                             \
+      const int N, const T* a, const T b, T* y, CPUContext*) {          \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b); \
   }
 DELEGATE_POWX_FUNCTION(float)
 #undef DELEGATE_POWX_FUNCTION
@@ -659,6 +673,17 @@ DELEGATE_SIGN_FUNCTION(double)
 DELEGATE_SIGN_FUNCTION(std::int32_t)
 DELEGATE_SIGN_FUNCTION(std::int64_t)
 #undef DELEGATE_SIGN_FUNCTION
+
+#define DELEGATE_CUBE_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cube<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    EigenVectorMap<T>(Y, N) = ConstEigenVectorArrayMap<T>(X, N).cube();  \
+  }
+DELEGATE_CUBE_FUNCTION(float)
+DELEGATE_CUBE_FUNCTION(double)
+DELEGATE_CUBE_FUNCTION(std::int32_t)
+DELEGATE_CUBE_FUNCTION(std::int64_t)
+#undef DELEGATE_CUBE_FUNCTION
 
 #define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
   template <>                                                   \

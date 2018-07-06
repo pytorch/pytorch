@@ -109,14 +109,14 @@ void fuseNNPACKConvRelu(repr::NNModule* nn) {
     if (!annotation || !isa<Caffe2Annotation>(annotation)) {
       return false;
     }
-    const auto* op = dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
+    const auto& op = dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
 
     // We only want to fuse for fast NNPACK convs
-    if (op->engine() != "NNPACK") {
+    if (op.engine() != "NNPACK") {
       return false;
     }
     caffe2::string algo = "AUTO";
-    for (const auto arg : op->arg()) {
+    for (const auto arg : op.arg()) {
       if (arg.name() == "algo") {
         algo = arg.s();
       }

@@ -69,24 +69,14 @@ class Module {
   /// True if the module is in training mode.
   virtual bool is_training() const noexcept;
 
-  /// Recursively moves all parameters to CPU memory (in place).
-  virtual void cpu();
-
-  /// Recursively moves all parameters to CUDA memory (in place).
-  /// If `non_blocking` is true and the source is in pinned memory and
-  /// destination is on the GPU or vice versa, the copy is performed
-  /// asynchronously with respect to the host. Otherwise, the argument has no
-  /// effect.
-  virtual void cuda(int32_t device_index = -1, bool non_blocking = false);
-
   /// Recursively casts all parameters to the given dtype and device.
   /// If `non_blocking` is true and the source is in pinned memory and
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
   virtual void to(
-      at::Device device,
-      at::ScalarType dtype,
+      torch::Device device,
+      torch::Dtype dtype,
       bool non_blocking = false);
 
   /// Recursively casts all parameters to the given dtype.
@@ -94,14 +84,14 @@ class Module {
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  virtual void to(at::ScalarType dtype, bool non_blocking = false);
+  virtual void to(torch::Dtype dtype, bool non_blocking = false);
 
   /// Recursively moves all parameters to the given device.
   /// If `non_blocking` is true and the source is in pinned memory and
   /// destination is on the GPU or vice versa, the copy is performed
   /// asynchronously with respect to the host. Otherwise, the argument has no
   /// effect.
-  virtual void to(at::Device device, bool non_blocking = false);
+  virtual void to(torch::Device device, bool non_blocking = false);
 
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();
@@ -126,6 +116,25 @@ class Module {
       ar(name);
       ar(params[name]);
     }
+  }
+
+  /// Returns true if the dynamic type of this module is of the given
+  /// `ModuleType`. Performs a `dynamic_cast` to check this.
+  template <
+      typename ModuleType,
+      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
+  bool is() const noexcept {
+    return dynamic_cast<const ModuleType*>(this) != nullptr;
+  }
+
+  /// Returns true if the dynamic type of this module is of the given
+  /// `ModuleType`. Performs a `dynamic_cast` to check this.
+  template <typename ModuleType>
+  torch::enable_if_t<torch::detail::is_module_holder<ModuleType>::value, bool>
+  is() const noexcept {
+    // Use the contained type of the `ModuleHolder`, e.g. `LinearImpl` for
+    // `Linear`, since `LinearImpl` inherits `nn::Module`.
+    return is<typename ModuleType::ContainedType>();
   }
 
  protected:
@@ -164,14 +173,18 @@ class Module {
 
   virtual void clone_(Module& other);
 
+  /// The implementation of the various `to()`.
   template <typename... Ts>
   void to_impl(Ts&&... ts) {
+    // First call `to()` on every child module.
     for (auto& child : children_) {
       child.value->to(ts...);
     }
+    // Then move every parameter to the new dtype/device.
     for (auto& parameter : parameters_) {
       at::detail::set_data(*parameter, parameter->data().to(ts...));
     }
+    // Then move every buffer to the new dtype/device.
     for (auto& buffer : buffers_) {
       at::detail::set_data(*buffer, buffer->data().to(ts...));
     }
