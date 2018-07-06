@@ -18,9 +18,6 @@ import copy
 import numbers
 import collections
 import re
-# sys.path.append('/Users/chunlifu/pytorch/torch/csrc/jit/script')
-# from batch_operators import *
-# import batch_operators
 
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
@@ -411,13 +408,14 @@ class batch(object):
     def __call__(self, fn):
         mod = script(fn, self.optimize, self._frames_up)
         mod.to_batch(self.batch_size)
+
         @functools.wraps(fn)
         def wrapper(*args):
             new_args = []
             for arg in args:
-                if(isinstance(arg, torch.Tensor)):
+                if isinstance(arg, torch.Tensor):
                     arg = torch.BatchTensor(arg, self.batch_size)
-                if(isinstance(arg, torch.BatchTensor)):
+                if isinstance(arg, torch.BatchTensor):
                     new_args.extend([arg.get_data(), arg.get_mask(), arg.get_dims()])
                 else:
                     new_args.append(arg)
@@ -848,31 +846,32 @@ def batch_matmul(data1, mask1, dims1, data2, mask2, dims2):
     mask = mask1
     dims = dims1
     if d1 == 1 and d2 == 1:
-        #if (batch1.dims[0] or batch2.dims[0]) and not batch1.mask.eq(batch2.mask).all():
+        # if (batch1.dims[0] or batch2.dims[0]) and not batch1.mask.eq(batch2.mask).all():
         #    raise ValueError("cannot contract non-matching dimensions")
         data = data.squeeze(-1).squeeze(-1)
         mask = mask1.narrow(1, 0, 1).squeeze(-1)
         dims = dims1[:0]  # empty tensor
     if d1 == 2 and d2 == 1:
-        #if (batch1.dims[1] or batch2.dims[0]) and not batch1.mask[:, 0].eq(batch2.mask).all():
+        # if (batch1.dims[1] or batch2.dims[0]) and not batch1.mask[:, 0].eq(batch2.mask).all():
         #    raise ValueError("cannot contract non-matching dimensions")
         data = data.squeeze(-1)
         mask = torch.bmm(mask1.narrow(2, 0, 1), mask2.narrow(1, 0, 1).unsqueeze(-1)).squeeze(-1)
         dims = dims1[:1]
     elif d1 == 1 and d2 == 2:
-        #if (batch1.dims[0] or batch2.dims[0]) and not batch1.mask.eq(batch2.mask[:, :, 0]).all():
+        # if (batch1.dims[0] or batch2.dims[0]) and not batch1.mask.eq(batch2.mask[:, :, 0]).all():
         #    raise ValueError("cannot contract non-matching dimensions")
         data = data.squeeze(-2)
         mask = torch.bmm(mask1.narrow(1, 0, 1).unsqueeze(-2), mask2.narrow(1, 0, 1)).squeeze(-2)
         dims = dims2[1:dims2.size(0)]
     elif d1 == 2 and d2 == 2:
-        #if (batch1.dims[1] or batch2.dims[0]) and not batch1.mask[:, 0].eq(batch2.mask[:, :, 0]).all():
+        # if (batch1.dims[1] or batch2.dims[0]) and not batch1.mask[:, 0].eq(batch2.mask[:, :, 0]).all():
         #    raise ValueError("cannot contract non-matching dimensions")
         mask = torch.bmm(mask1.narrow(2, 0, 1), mask2.narrow(1, 0, 1))
         dims = torch.cat((dims1[:1], dims2[1:dims2.size(0)]))
     # else:
     #     raise NotImplementedError("matmul not implemented with batches of 3+D tensors")
     return data, mask, dims
+
 
 @script
 def batch_select(data, mask, dims, dim, index):
@@ -886,6 +885,7 @@ def batch_select(data, mask, dims, dim, index):
     dims = torch.cat((dims[:dim - 1], dims[dim:dims.size(0)]))
     return data, mask, dims
 
+
 @script
 def batch_synchronize(data, mask, dims):
     # if any(batch.dims):
@@ -893,10 +893,11 @@ def batch_synchronize(data, mask, dims):
     mask = mask + (1 - mask)
     return data, mask, dims
 
+
 @script
 def batch_update(batch_data, batch_mask, batch_dims, new_data, new_mask, new_dims,
-            update_data, update_mask, update_dims):
-    update_mask = (new_mask if update_mask == None
+                    update_data, update_mask, update_dims):
+    update_mask = (new_mask if not update_mask
                    else update_data * update_mask)
     data = torch.where(update_mask, new_data, batch_data)
     return data, update_mask, new_dims

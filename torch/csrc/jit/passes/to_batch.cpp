@@ -12,11 +12,11 @@ static void ToBatch(Block* block) {
     // std::cout << *n << std::endl;
     // replace tensor operator to BatchTensor operator
     if(n->kind().is_aten()){
-      auto des_graph = batch_operator_table.at(n->kind().toUnqualString());
-      // std::cout << "des_graph:" << *des_graph << std::endl;
+      auto batch_graph = batch_operator_table.at(n->kind().toUnqualString());
+      // std::cout << "batch_graph:" << *batch_graph << std::endl;
       WithInsertPoint guard(n);
       std::vector<Value*> new_inputs;
-      for(auto input : n->inputs()){
+      for(Value *input : n->inputs()){
         if(batch_map.find(input) != batch_map.end()){
           auto new_input = batch_map.at(input);
           new_inputs.insert(new_inputs.end(), new_input.begin(), new_input.end());
@@ -25,7 +25,8 @@ static void ToBatch(Block* block) {
           new_inputs.push_back(input);
         }
       }
-      auto outputs = script::inlineCallTo(*n->owningGraph(), *des_graph, new_inputs);
+      auto outputs = script::inlineCallTo(*n->owningGraph(), *batch_graph, new_inputs);
+      // Assume all outputs from inlined operator implementation are in the triple form.
       for(size_t i = 0; i < n->outputs().size(); i++){
         auto output = n->outputs()[i];
         output->replaceAllUsesWith(outputs[i * 3]);
@@ -33,9 +34,12 @@ static void ToBatch(Block* block) {
       }
       it.destroyCurrent();
     }
-    // control flow
+    // control flow: not supported yet, will be added further
     else if(n->kind().is_prim()){
       if(n->kind() == prim::Loop){
+        // TODO
+      }
+      else if(n->kind() == prim::If){
         // TODO
       }
     }
@@ -46,6 +50,7 @@ static void ToBatch(Block* block) {
 }
 
 void to_batch_graph(std::shared_ptr<Graph>& graph, int64_t batch_size){
+  // batch_size: not used yet, will be used to deal with scalarType
   // std::cout<<graph->toString()<<std::endl;
   auto size = graph->inputs().size();
   for(size_t i = 0; i < size; i++){

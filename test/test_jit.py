@@ -1101,7 +1101,7 @@ class TestBatched(TestCase):
         self.assertEqual([xs, xs], batch3.examples())
 
     def test_batch_elementwise_unary(self):
-        @torch.jit.batch(batch_size = 4)
+        @torch.jit.batch(batch_size=4)
         def tanh(a):
             return torch.tanh(a)
 
@@ -1111,7 +1111,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
     def test_batch_elementwise_binary(self):
-        @torch.jit.batch(batch_size = 4)
+        @torch.jit.batch(batch_size=4)
         def add(a, b):
             return a + b
 
@@ -1129,7 +1129,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
     def test_batch_mm(self):
-        @torch.jit.batch(batch_size = 4)
+        @torch.jit.batch(batch_size=4)
         def mm(a, b):
             return torch.mm(a, b)
 
@@ -1146,7 +1146,7 @@ class TestBatched(TestCase):
         self.assertEqual(res, res_batch.examples())
 
     def test_batch_matmul(self):
-        @torch.jit.batch(batch_size = 4)
+        @torch.jit.batch(batch_size=4)
         def matmul(a, b):
             return torch.matmul(a, b)
 
