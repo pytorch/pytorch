@@ -726,7 +726,8 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
 
                         # Check if we have templating + static_cast information
                         argument_strings = [input_source[arg["start"]:arg["end"]] for arg in arguments]
-                        kernel_name = argument_strings[0].strip()
+                        original_kernel_name_with_template = argument_strings[0].strip()
+                        kernel_name = original_kernel_name_with_template.split("<")[0].strip()
                         ignore = ["upscale"]
                         if kernel_name in KernelTemplateParams and kernel_name not in ignore:
                             # Add template to the kernel
@@ -740,21 +741,20 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                             kernel_params = argument_strings[5:]
                             for arg_idx, arg in enumerate(kernel_params):
                                 if arg_idx in argument_types:
-                                    arg = kernel_params[arg_idx].strip()
                                     the_type = argument_types[arg_idx]
-                                    the_arg = arg.replace("\n", "").strip()
+                                    the_arg = arg.replace("\n", "").replace("\\", "").strip()
                                     if the_type in ["int", "const int", "int64_t", "THCIndex_t *", "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]:
                                         static_argument = "static_cast<%s>(%s)" % (the_type, the_arg)
-                                        static_argument = arg.replace(the_arg, static_argument)
 
-                                        # Update to static_cast
-                                        new_kernel_launch = re.sub(r'\b(%s)\b' %
-                                                                   arg, lambda x: static_argument, new_kernel_launch)
-
+                                        def replace_arg(match):
+                                          return match.group(1) + static_argument + match.group(3)
+                                        # Update to static_cast, account for cases where argument is at start/end of string
+                                        new_kernel_launch = re.sub(r'(^|\W)(%s)(\W|$)' % re.escape(the_arg), replace_arg, new_kernel_launch)
+ 
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            new_kernel_launch = re.sub(r'\b(%s)\b' % kernel_name,
+                            new_kernel_launch = re.sub(r'\b%s\b' % original_kernel_name_with_template,
                                                        lambda x: kernel_name_with_template, new_kernel_launch)
 
                             # Replace Launch
@@ -833,11 +833,6 @@ def main():
     # Verify the project directory exists.
     if not os.path.exists(args.project_directory):
         print("The project folder specified does not exist.")
-        return
-
-    # Make sure output directory exists.
-    if not os.path.exists(args.output_directory):
-        print("The output folder already exists.")
         return
 
     # If no output directory, provide a default one.
