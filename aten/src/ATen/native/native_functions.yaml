@@ -451,8 +451,8 @@
 - func: embedding_dense_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
   dispatch:
-    CPU: embedding_backward_cpu
-    CUDA: embedding_backward_cuda
+    CPU: embedding_dense_backward_cpu
+    CUDA: embedding_dense_backward_cuda
 
 - func: embedding_renorm_(Tensor self, IndexTensor indices, double max_norm, double norm_type) -> Tensor
   variants: function
@@ -463,23 +463,35 @@
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
 
+# NOTE [ embedding_bag Native Functions ]
+# The `_embedding_bag.*` variants assume that input tensors except for `weight`,
+# e.g. `indices` and `offsets` (and `offset2bag`), are contiguous.
+# We really only need to enforce this for `_embedding_bag` (the forward) because
+# the backward inputs are the same as forward ones.
+# The above `embedding_bag` wrapper is created to achieve this, e.g.,
+# applying indices = indices.contiguous().
+# The backward functions apply a check that these input tensors are contiguous.
+
 - func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor, Tensor)
   variants: function
-  dispatch:
-    CPU: embedding_bag_cpu
-    CUDA: embedding_bag_cuda
 
-- func: embedding_bag_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse) -> Tensor
-  variants: function
-
-- func: embedding_bag_sparse_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
-  variants: function
-
-- func: embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+- func: _embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: embedding_bag_backward_cpu
-    CUDA: embedding_bag_backward_cuda
+    CPU: _embedding_bag_cpu
+    CUDA: _embedding_bag_cuda
+
+- func: _embedding_bag_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse) -> Tensor
+  variants: function
+
+- func: _embedding_bag_sparse_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+
+- func: _embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _embedding_bag_dense_backward_cpu
+    CUDA: _embedding_bag_dense_backward_cuda
 
 - func: empty(IntList size, TensorOptions options={}) -> Tensor
   variants: function
