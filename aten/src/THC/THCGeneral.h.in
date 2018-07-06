@@ -110,8 +110,11 @@ THC_API int THCState_getNumDevices(THCState* state);
 /* Stream API */
 THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
+
 THC_API THCStream* THCState_getStream(THCState *state);
 THC_API void THCState_setStream(THCState *state, THCStream* stream);
+THC_API THCStream* THCState_getStreamOnDevice(THCState* state, int device);
+THC_API void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream);
 
 THC_API void THCState_reserveBlasHandles(THCState* state, int numHandles);
 THC_API int THCState_getNumBlasHandles(THCState* state);

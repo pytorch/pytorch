@@ -424,13 +424,12 @@ cusparseHandle_t THCState_getDeviceSparseHandle(THCState *state, int device, int
   return res->sparseHandles[handle - 1];
 }
 
-static THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
+THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
   return at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
 }
 
-static void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
+void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
   at::detail::CUDAStream_setStreamOnDevice(device, stream);
-}
 
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
   return at::detail::CUDAStream_stream(
