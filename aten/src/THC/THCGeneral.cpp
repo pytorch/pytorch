@@ -431,7 +431,7 @@ cusparseHandle_t THCState_getDeviceSparseHandle(THCState *state, int device, int
   return res->sparseHandles[handle - 1];
 }
 
-static THCStream* THCState_getStreamOnDevice(THCState* state, int device)
+THCStream* THCState_getStreamOnDevice(THCState* state, int device)
 {
   THCThreadLocal local = state->currentStreams[device];
   THCStream* stream = (THCStream*)THCThreadLocal_get(local);
@@ -443,7 +443,7 @@ static THCStream* THCState_getStreamOnDevice(THCState* state, int device)
   return stream;
 }
 
-static void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream)
+void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream)
 {
   THAssert(stream);
   if (stream->device != device) {
