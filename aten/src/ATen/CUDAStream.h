@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cstdint>
+#include <utility>
 
 /*
-* A CPU-friendly CUDAStream interface.
+* A CUDA stream interface with no CUDA build dependency.
 * 
-* Includes the CUDAStream RAII class and and internal stream API.
+* Includes the CUDAStream RAII class and a pointer-based stream API.
 * 
 * The ATen Context interface should be preferred when working with streams.
 */
@@ -48,9 +49,8 @@ void CUDAStream_free(CUDAStreamInternals*&);
 
 } // namespace detail
 
-// RAII for a cuda stream
-// Allows copying, moving, use as a cudaStream_t, and access to relevant
-// metadata. Holding a CUDAStream ensures the underlying stream stays live.
+// RAII for a CUDA stream
+// Allows use as a cudaStream_t, copying, moving, and metadata access.
 struct CUDAStream {
   // Constants
   static constexpr int32_t DEFAULT_FLAGS = 1; // = cudaStreamNonBlocking;
@@ -63,13 +63,17 @@ struct CUDAStream {
   // Destructor
   ~CUDAStream() { detail::CUDAStream_free(internals_); }
 
-  // Copy constructor and copy-assignment operator
+  // Copy constructor
   CUDAStream(const CUDAStream& other);
-  CUDAStream& operator=(const CUDAStream& other);
 
-  // Move constructor and move-assignment operator
+  // Move constructor
   CUDAStream(CUDAStream&& other);  
-  CUDAStream& operator=(CUDAStream&& other);
+
+  // Assignment operator
+  CUDAStream& operator=(CUDAStream other) {
+    std::swap(internals_, other.internals_);
+    return *this;
+  }
 
   // Implicit conversion to cudaStream_t
   operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
