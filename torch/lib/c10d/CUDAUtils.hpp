@@ -1,6 +1,6 @@
 #pragma once
 
-#include "THC/THCStream.h"
+typedef struct CUDAStreamInternals THCStream;
 
 #include <algorithm>
 

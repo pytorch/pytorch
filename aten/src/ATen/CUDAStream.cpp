@@ -8,13 +8,13 @@
 struct CUDAStreamInternals {
   bool is_destructible;
   std::atomic<int> refcount;
-  int32_t device; // Note: cudaGetDevice works with int32_t, not int64_t
+  int64_t device; // Note: cudaGetDevice works with int32_t, not int64_t
   cudaStream_t stream;
 };
 
 namespace at {
 
-  
+namespace detail {
 
   /*
   * Stream state
@@ -31,8 +31,8 @@ namespace at {
   // value for the pointer, and so is not actually created as usual.
   // In particular, we don't need to switch devices when creating the 
   // streams.
-  void initDefaultCUDAStreams() {
-    num_gpus = detail::getCUDAHooks().getNumGPUs();
+  static void initDefaultCUDAStreams() {
+    num_gpus = getCUDAHooks().getNumGPUs();
     default_streams = (CUDAStreamInternals*) malloc(num_gpus * sizeof(CUDAStreamInternals));
     for (auto i = decltype(num_gpus){0}; i < num_gpus; ++i) {
       default_streams[i].is_destructible = false;
@@ -43,7 +43,7 @@ namespace at {
   }
 
   // Init front-end to ensure initialization only occurs once
-  void initCUDAStreamsOnce() {
+  static void initCUDAStreamsOnce() {
     // Inits default streams (once, globally)
     std::call_once(init_flag, initDefaultCUDAStreams);
     
@@ -56,18 +56,18 @@ namespace at {
   }
 
   /*
-  * Internal Stream API
+  * Pointer-based stream API
   */
 
   // Helper to return the current device
-  inline int32_t current_device() {
+  static inline int64_t current_device() {
     int cur_device;
-    detail::DynamicCUDAInterface::get_device(&cur_device);
+    DynamicCUDAInterface::get_device(&cur_device);
     return cur_device;
   }
 
   // Helper to verify the GPU index is valid
-  inline void check_gpu(int64_t device) {
+  static inline void check_gpu(int64_t device) {
     AT_CHECK(device >= 0 && device < num_gpus);
   }
 
@@ -79,14 +79,14 @@ namespace at {
   CUDAStreamInternals* CUDAStream_getDefaultStream() {
     return CUDAStream_getDefaultStreamOnDevice(current_device());
   }
-  
+
   // Creates (and retains) and new cuda stream
   CUDAStreamInternals* CUDAStream_createAndRetainWithOptions(int32_t flags, int32_t priority) {
     CUDAStreamInternals* internals = (CUDAStreamInternals*) malloc(sizeof(CUDAStreamInternals));
     internals->is_destructible = true;
     internals->refcount = 1;
-    detail::DynamicCUDAInterface::get_device(&internals->device);
-    detail::DynamicCUDAInterface::cuda_stream_create_with_priority(&internals->stream, flags, priority);
+    internals->device = current_device();
+    DynamicCUDAInterface::cuda_stream_create_with_priority(&internals->stream, flags, priority);
     return internals;
   }
 
@@ -137,7 +137,7 @@ namespace at {
     return ptr->stream;
   }
 
-  int CUDAStream_device(CUDAStreamInternals* ptr) {
+  int64_t CUDAStream_device(CUDAStreamInternals* ptr) {
     AT_CHECK(ptr);
     return ptr->device;
   }
@@ -153,19 +153,47 @@ namespace at {
   void CUDAStream_free(CUDAStreamInternals*& ptr) {
     if (ptr && ptr->stream && ptr->is_destructible && --ptr->refcount <= 0) {
       AT_CHECK(ptr->refcount == 0);
-      detail::DynamicCUDAInterface::cuda_stream_destroy(ptr->stream);
+      DynamicCUDAInterface::cuda_stream_destroy(ptr->stream);
       free(ptr);
       ptr = nullptr;
     }
   }
 
-  CUDAStreamInternals* CUDAStream_copy(CUDAStreamInternals* ptr) {
-    AT_CHECK(CUDAStream_retain(ptr));
-    return ptr;
+} // namespace detail
+
+  /*
+  * CUDAStream functions
+  */
+
+   // Copy constructor and copy-assignment operator
+  CUDAStream::CUDAStream(const CUDAStream& other) {
+    AT_CHECK(other.internals_);
+    AT_CHECK(detail::CUDAStream_retain(other.internals_));
+
+    internals_ = other.internals_;
   }
-  
-  void CUDAStream_move(CUDAStreamInternals*& src, CUDAStreamInternals*& dst) {
-    AT_CHECK(src);
-    std::swap(src, dst);
+  CUDAStream::CUDAStream& operator=(const CUDAStream& other) {
+    AT_CHECK(other.internals_);
+    AT_CHECK(detail::CUDAStream_retain(other.internals_));
+
+    auto* tmp = internals_;
+    internals_ = other.internals_;
+    detail::CUDAStream_free(tmp);
+
+    return *this;
+  }
+
+  // Move constructor and move-assignment operator
+  CUDAStream::CUDAStream(CUDAStream&& other) {
+    AT_CHECK(other.internals_);
+
+    std::swap(internals_, other.internals_);
+  }
+  CUDAStream::CUDAStream& operator=(CUDAStream&& other) {
+    AT_CHECK(other.internals_);
+
+    std::swap(internals_, other.internals_);
+
+    return *this;
   }
 } // namespace at

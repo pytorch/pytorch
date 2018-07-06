@@ -6,7 +6,7 @@
 /*
 * Note: legacy API.
 *
-* Stream usage should be done through ATen's Context or CUDAHooks where possible.
+* Stream usage should be done through ATen/Context.h.
 */
 typedef struct CUDAStreamInternals THCStream;
 

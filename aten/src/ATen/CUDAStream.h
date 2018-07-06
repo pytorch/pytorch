@@ -1,7 +1,7 @@
 #pragma once
 
 #include <cstdint>
- 
+
 /*
 * A CPU-friendly CUDAStream interface.
 * 
@@ -20,8 +20,10 @@ struct CUDAStreamInternals;
 
 namespace at {
 
+namespace detail {
+
 // Pointer-based API (for internal use)
-// Consumers of streams should generally use ATen/Context to work with them safely
+// Note: ATen/Context is preferred to work with streams safely
 CUDAStreamInternals* CUDAStream_getDefaultStreamOnDevice(int64_t device);
 CUDAStreamInternals* CUDAStream_getDefaultStream();
 
@@ -39,13 +41,12 @@ void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* internals
 void CUDAStream_setStream(CUDAStreamInternals* internals);
 
 cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
-int CUDAStream_device(CUDAStreamInternals*);
+int64_t CUDAStream_device(CUDAStreamInternals*);
 
 bool CUDAStream_retain(CUDAStreamInternals*);
 void CUDAStream_free(CUDAStreamInternals*&);
 
-CUDAStreamInternals* CUDAStream_copy(CUDAStreamInternals*);
-void CUDAStream_move(CUDAStreamInternals*& src, CUDAStreamInternals*& dst);
+} // namespace detail
 
 // RAII for a cuda stream
 // Allows copying, moving, use as a cudaStream_t, and access to relevant
@@ -60,30 +61,18 @@ struct CUDAStream {
   CUDAStream(CUDAStreamInternals* internals) : internals_{internals} { }
   
   // Destructor
-  ~CUDAStream() { CUDAStream_free(internals_); }
+  ~CUDAStream() { detail::CUDAStream_free(internals_); }
 
   // Copy constructor and copy-assignment operator
-  CUDAStream(const CUDAStream& other) {
-    CUDAStream_free(internals_);
-    internals_ = CUDAStream_copy(other.internals_);
-  }
-  CUDAStream& operator=(const CUDAStream& other) {
-    CUDAStream_free(internals_);
-    internals_ = CUDAStream_copy(other.internals_);
-    return *this;
-  }
+  CUDAStream(const CUDAStream& other);
+  CUDAStream& operator=(const CUDAStream& other);
 
   // Move constructor and move-assignment operator
-  CUDAStream(CUDAStream&& other) {
-    CUDAStream_move(other.internals_, internals_);
-  }  
-  CUDAStream& operator=(CUDAStream&& other) {
-    CUDAStream_move(other.internals_, internals_);
-    return *this;
-  }
+  CUDAStream(CUDAStream&& other);  
+  CUDAStream& operator=(CUDAStream&& other);
 
   // Implicit conversion to cudaStream_t
-  operator cudaStream_t() const { return CUDAStream_stream(internals_); }
+  operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
 
   // Less than operator (to allow use in sets)
   friend bool operator<(const CUDAStream& left, const CUDAStream& right) {
@@ -91,8 +80,8 @@ struct CUDAStream {
   }
 
   // Getters
-  int device() const { return CUDAStream_device(internals_); }
-  cudaStream_t stream() const { return CUDAStream_stream(internals_); }
+  int64_t device() const { return detail::CUDAStream_device(internals_); }
+  cudaStream_t stream() const { return detail::CUDAStream_stream(internals_); }
   CUDAStreamInternals* internals() const { return internals_; }
 
 private:

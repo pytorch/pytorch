@@ -425,29 +425,29 @@ cusparseHandle_t THCState_getDeviceSparseHandle(THCState *state, int device, int
 }
 
 static THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
-  return at::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
+  return at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
 }
 
 static void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
-  at::CUDAStream_setStreamOnDevice(device, stream);
+  at::detail::CUDAStream_setStreamOnDevice(device, stream);
 }
 
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
-  return at::CUDAStream_stream(
-    at::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
+  return at::detail::CUDAStream_stream(
+    at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
 }
 
 cudaStream_t THCState_getCurrentStream(THCState *state) {
-  return at::CUDAStream_stream(
-    at::CUDAStream_getCurrentStreamUnsafe());
+  return at::detail::CUDAStream_stream(
+    at::detail::CUDAStream_getCurrentStreamUnsafe());
 }
 
 THCStream* THCState_getStream(THCState *state) {
-  return at::CUDAStream_getCurrentStreamUnsafe();
+  return at::detail::CUDAStream_getCurrentStreamUnsafe();
 }
 
 void THCState_setStream(THCState *state, THCStream *stream) {
-  at::CUDAStream_setStream(stream);
+  at::detail::CUDAStream_setStream(stream);
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
