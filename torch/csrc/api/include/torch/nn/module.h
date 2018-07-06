@@ -69,16 +69,6 @@ class Module {
   /// True if the module is in training mode.
   virtual bool is_training() const noexcept;
 
-  /// Recursively moves all parameters to CPU memory (in place).
-  virtual void cpu();
-
-  /// Recursively moves all parameters to CUDA memory (in place).
-  /// If `non_blocking` is true and the source is in pinned memory and
-  /// destination is on the GPU or vice versa, the copy is performed
-  /// asynchronously with respect to the host. Otherwise, the argument has no
-  /// effect.
-  virtual void cuda(int32_t device_index = -1, bool non_blocking = false);
-
   /// Recursively casts all parameters to the given dtype and device.
   /// If `non_blocking` is true and the source is in pinned memory and
   /// destination is on the GPU or vice versa, the copy is performed
@@ -106,71 +96,44 @@ class Module {
   /// Recursively zeros out the `grad` values of all parameters.
   virtual void zero_grad();
 
+  /// Serializes the `Module`.
   template <class Archive>
-  void save(Archive& ar) const {
-    auto params = parameters();
-    size_t size = params.size();
-    ar(size);
-    for (auto& p : params) {
-      ar(p.key, p.value);
-    }
-  }
+  void save(Archive& ar) const;
 
+  /// Deserializes the `Module`.
   template <class Archive>
-  void load(Archive& ar) {
-    auto params = parameters();
-    size_t size;
-    ar(size);
-    std::string name;
-    for (size_t i = 0; i < size; i++) {
-      ar(name);
-      ar(params[name]);
-    }
-  }
+  void load(Archive& ar);
 
-  /// Returns true if the dynamic type of this module is of the given
-  /// `ModuleType`. Performs a `dynamic_cast` to check this.
+  /// Attempts to cast this `Module` to the given `ModuleType`.
+  template <typename ModuleType>
+  typename ModuleType::ContainedType* as() noexcept;
+
+  /// Attempts to cast this `Module` to the given `ModuleType`.
   template <
       typename ModuleType,
       typename = torch::detail::disable_if_module_holder_t<ModuleType>>
-  bool is() const noexcept {
-    return dynamic_cast<const ModuleType*>(this) != nullptr;
-  }
-
-  /// Returns true if the dynamic type of this module is of the given
-  /// `ModuleType`. Performs a `dynamic_cast` to check this.
-  template <typename ModuleType>
-  torch::enable_if_t<torch::detail::is_module_holder<ModuleType>::value, bool>
-  is() const noexcept {
-    // Use the contained type of the `ModuleHolder`, e.g. `LinearImpl` for
-    // `Linear`, since `LinearImpl` inherits `nn::Module`.
-    return is<typename ModuleType::ContainedType>();
-  }
+  ModuleType* as() noexcept;
 
  protected:
+  /// Registers a parameter with this `Module`.
   Tensor& register_parameter(
       std::string name,
       Tensor tensor,
       bool requires_grad = true);
+  /// Registers a buffer with this `Module`.
   Tensor& register_buffer(std::string name, Tensor tensor);
 
-  template <
-      typename ModuleType,
-      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
+  /// Registers a submodule with this `Module`.
+  template <typename ModuleType>
   std::shared_ptr<ModuleType> register_module(
       std::string name,
-      std::shared_ptr<ModuleType> module) {
-    auto& base_module = children_.insert(std::move(name), std::move(module));
-    return std::static_pointer_cast<ModuleType>(base_module);
-  }
+      std::shared_ptr<ModuleType> module);
 
-  template <typename ModuleHolderType>
-  ModuleHolderType register_module(
+  /// Registers a submodule with this `Module`.
+  template <typename ModuleType>
+  std::shared_ptr<ModuleType> register_module(
       std::string name,
-      ModuleHolderType module_holder) {
-    register_module(std::move(name), module_holder.get());
-    return module_holder;
-  }
+      ModuleHolder<ModuleType> module_holder);
 
  private:
   template <typename T>
@@ -183,18 +146,9 @@ class Module {
 
   virtual void clone_(Module& other);
 
+  /// The implementation of the various `to()` methods.
   template <typename... Ts>
-  void to_impl(Ts&&... ts) {
-    for (auto& child : children_) {
-      child.value->to(ts...);
-    }
-    for (auto& parameter : parameters_) {
-      at::detail::set_data(*parameter, parameter->data().to(ts...));
-    }
-    for (auto& buffer : buffers_) {
-      at::detail::set_data(*buffer, buffer->data().to(ts...));
-    }
-  }
+  void to_impl(Ts&&... ts);
 
   OrderedDict<Tensor> parameters_;
   OrderedDict<Tensor> buffers_;
@@ -206,5 +160,73 @@ class Module {
   /// Whether the module is in training mode.
   bool is_training_{true};
 };
+
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ nn::Module ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+template <class Archive>
+void Module::save(Archive& ar) const {
+  auto params = parameters();
+  size_t size = params.size();
+  ar(size);
+  for (auto& p : params) {
+    ar(p.key, p.value);
+  }
+}
+
+template <class Archive>
+void Module::load(Archive& ar) {
+  auto params = parameters();
+  size_t size;
+  ar(size);
+  std::string name;
+  for (size_t i = 0; i < size; i++) {
+    ar(name);
+    ar(params[name]);
+  }
+}
+
+template <typename ModuleType>
+typename ModuleType::ContainedType* Module::as() noexcept {
+  // Use the contained type of the `ModuleHolder`, e.g. `LinearImpl` for
+  // `Linear`, since `LinearImpl` inherits `nn::Module`.
+  return as<typename ModuleType::ContainedType>();
+}
+
+template <typename ModuleType, typename>
+ModuleType* Module::as() noexcept {
+  return dynamic_cast<ModuleType*>(this);
+}
+
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::register_module(
+    std::string name,
+    std::shared_ptr<ModuleType> module) {
+  auto& base_module = children_.insert(std::move(name), std::move(module));
+  return std::static_pointer_cast<ModuleType>(base_module);
+}
+
+template <typename ModuleType>
+std::shared_ptr<ModuleType> Module::register_module(
+    std::string name,
+    ModuleHolder<ModuleType> module_holder) {
+  return register_module(std::move(name), module_holder.ptr());
+}
+
+template <typename... Ts>
+void Module::to_impl(Ts&&... ts) {
+  // First call `to()` on every child module.
+  for (auto& child : children_) {
+    child.value->to(ts...);
+  }
+  // Then move every parameter to the new dtype/device.
+  for (auto& parameter : parameters_) {
+    at::detail::set_data(*parameter, parameter->data().to(ts...));
+  }
+  // Then move every buffer to the new dtype/device.
+  for (auto& buffer : buffers_) {
+    at::detail::set_data(*buffer, buffer->data().to(ts...));
+  }
+}
+
 } // namespace nn
 } // namespace torch

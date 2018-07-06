@@ -25,7 +25,10 @@ def parse_default(s):
     try:
         return int(s)
     except Exception:
-        return float(s)
+        try:
+            return float(s)
+        except Exception:
+            return s
 
 
 def sanitize_types(typ):
@@ -121,12 +124,14 @@ def run(paths):
                 fn_name, arguments = func_decl.split('(')
                 arguments = arguments.split(')')[0]
                 declaration['name'] = func.get('name', fn_name)
-                declaration['return'] = list(func.get('return', return_type))
+                return_type = list(func.get('return', return_type))
+                arguments = parse_arguments(arguments, func, declaration['name'], return_type)
+                output_arguments = [x for x in arguments if x.get('output')]
+                declaration['return'] = return_type if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['method', 'function'])
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
-                declaration['arguments'] = func.get('arguments', parse_arguments(arguments, func,
-                                                    declaration['name'], declaration['return']))
+                declaration['arguments'] = func.get('arguments', arguments)
                 declaration['type_method_definition_dispatch'] = func.get('dispatch', declaration['name'])
                 declaration['aten_sparse'] = has_sparse_dispatches(
                     declaration['type_method_definition_dispatch'])

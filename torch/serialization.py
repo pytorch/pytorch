@@ -326,6 +326,11 @@ def load(f, map_location=None, pickle_module=pickle):
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
 
+    .. note::
+        When you call :meth:`torch.load()` on a file which contains GPU tensors, those tensors
+        will be loaded to GPU by default. You can call `torch.load(.., map_location='cpu')`
+        and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
+
     Example:
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU

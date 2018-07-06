@@ -2522,3 +2522,10 @@ slogdet() -> (Tensor, Tensor)
 
 See :func:`torch.slogdet`
 """)
+
+add_docstr_all('pinverse',
+               r"""
+pinverse() -> Tensor
+
+See :func:`torch.pinverse`
+""")

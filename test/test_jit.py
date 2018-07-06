@@ -9,7 +9,7 @@ from torch.autograd import Variable, Function
 from torch.autograd.function import traceable
 from torch.testing import assert_allclose
 from torch.onnx import OperatorExportTypes
-from common import TestCase, run_tests, IS_WINDOWS
+from common import TestCase, run_tests, IS_WINDOWS, TEST_WITH_UBSAN
 from textwrap import dedent
 import os
 import io
@@ -70,10 +70,10 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     gates = F.linear(input, w_ih, b_ih) + F.linear(hx, w_hh, b_hh)
 
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
-    ingate = F.sigmoid(ingate)
-    forgetgate = F.sigmoid(forgetgate)
+    ingate = torch.sigmoid(ingate)
+    forgetgate = torch.sigmoid(forgetgate)
     cellgate = F.tanh(cellgate)
-    outgate = F.sigmoid(outgate)
+    outgate = torch.sigmoid(outgate)
 
     cy = (forgetgate * cx) + (ingate * cellgate)
     hy = outgate * F.tanh(cy)
@@ -4564,7 +4564,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
 
             def decode(self, z):
                 h3 = F.relu(self.fc3(z))
-                return F.sigmoid(self.fc4(h3))
+                return torch.sigmoid(self.fc4(h3))
 
             def forward(self, x):
                 mu, logvar = self.encode(x.view(-1, 784))
@@ -4820,6 +4820,45 @@ class TestJitGenerated(TestCase):
     pass
 
 
+# UBSAN per-function exclusions don't seem to work with OpenMP pragmas,
+# and we have to disable the failing tests here instead.
+UBSAN_BLACKLISTED_TESTS = [
+    "test___rdiv___constant",
+    "test___rdiv___scalar_constant",
+    "test_addcdiv",
+    "test_addcdiv_broadcast_all",
+    "test_addcdiv_broadcast_rhs",
+    "test_addcdiv_scalar",
+    "test_addcdiv_scalar_broadcast_lhs",
+    "test_addcdiv_scalar_broadcast_rhs",
+    "test_addcdiv_scalar_scale",
+    "test_addcdiv_scalar_scale_broadcast_lhs",
+    "test_addcdiv_scalar_scale_broadcast_rhs",
+    "test_addcdiv_scale",
+    "test_addcdiv_scale_broadcast_all",
+    "test_addcdiv_scale_broadcast_rhs",
+    "test_add_broadcast_all",
+    "test_add_broadcast_lhs",
+    "test_add_broadcast_rhs",
+    "test_add_constant",
+    "test_add_scalar",
+    "test_add_scalar_broadcast_lhs",
+    "test_add_scalar_broadcast_rhs",
+    "test_div",
+    "test_div_broadcast_all",
+    "test_div_broadcast_lhs",
+    "test_div_broadcast_rhs",
+    "test_div_scalar",
+    "test_div_scalar_broadcast_lhs",
+    "test_div_scalar_broadcast_rhs",
+    "test_rsqrt",
+    "test_rsqrt_scalar",
+    "test_add",
+    "test_reciprocal",
+    "test_reciprocal_scalar",
+]
+
+
 def add_test(
         name,
         self_size,
@@ -4899,7 +4938,8 @@ def add_test(
         for skip in skipTestIf:
             do_test = skip(do_test)
 
-        setattr(TestJitGenerated, test_name, do_test)
+        if not (TEST_WITH_UBSAN and test_name in UBSAN_BLACKLISTED_TESTS):
+            setattr(TestJitGenerated, test_name, do_test)
 
 for test in method_tests:
     add_test(*test)

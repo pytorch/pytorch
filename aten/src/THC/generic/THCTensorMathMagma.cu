@@ -30,7 +30,7 @@ static void THCTensor_(copyTensor2d)(THCState *state, real *dst, THCTensor *self
   size_t len = THCTensor_(nElement)(state, self)*sizeof(real);
   THCTensor *temp = THCTensor_(newTranspose)(state, self, 0, 1);
   THCTensor *selfc = THCTensor_(newContiguous)(state, temp);
-  THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, self->storage) + selfc->storageOffset, len, cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, selfc->storage) + selfc->storageOffset, len, cudaMemcpyDeviceToHost));
   THCTensor_(free)(state, temp);
   THCTensor_(free)(state, selfc);
 }

@@ -243,7 +243,7 @@ TEST_CASE("modules_cuda", "[cuda]") {
   torch::manual_seed(0);
   SECTION("1") {
     Linear model(5, 2);
-    model->cuda();
+    model->to(torch::kCUDA);
     auto x =
         torch::randn({10, 5}, torch::device(torch::kCUDA).requires_grad(true));
     auto y = model->forward(x);
@@ -260,8 +260,8 @@ TEST_CASE("modules_cuda", "[cuda]") {
 
   SECTION("2") {
     Linear model(5, 2);
-    model->cuda();
-    model->cpu();
+    model->to(torch::kCUDA);
+    model->to(torch::kCPU);
     auto x = torch::randn({10, 5}, torch::requires_grad());
     auto y = model->forward(x);
     torch::Tensor s = y.sum();

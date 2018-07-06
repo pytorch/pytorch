@@ -93,21 +93,32 @@ TEST_CASE("module/name") {
   }
 }
 
-TEST_CASE("module/is") {
+TEST_CASE("module/as") {
   Linear module(3, 4);
-  REQUIRE(module->is<Linear>());
-  REQUIRE(module->is<LinearImpl>());
-  REQUIRE(!module->is<AGIUnit>());
+  REQUIRE(module->as<Linear>() == module.get());
+  REQUIRE(module->as<LinearImpl>() == module.get());
+  REQUIRE(module->as<Module>() == module.get());
+  REQUIRE(module->as<AGIUnit>() == nullptr);
 
-  std::shared_ptr<Module> raw = module.get();
-  REQUIRE(raw->is<Linear>());
-  REQUIRE(raw->is<LinearImpl>());
-  REQUIRE(!raw->is<AGIUnit>());
+  std::shared_ptr<Module> raw = module.ptr();
+  REQUIRE(raw->as<Linear>() == module.get());
+  REQUIRE(raw->as<LinearImpl>() == module.get());
+  REQUIRE(raw->as<Module>() == module.get());
+  REQUIRE(raw->as<AGIUnit>() == nullptr);
+
+  Module& raw_ref = *raw.get();
+  REQUIRE(raw_ref.as<Linear>() == module.get());
+  REQUIRE(raw_ref.as<LinearImpl>() == module.get());
+  REQUIRE(raw_ref.as<Module>() == module.get());
+  REQUIRE(raw_ref.as<AGIUnit>() == nullptr);
+  if (auto* linear = raw_ref.as<Linear>()) {
+    REQUIRE(linear->weight.ndimension() == 2);
+  }
 
   AGIUnit unit;
-  REQUIRE(!unit.is<Linear>());
-  REQUIRE(!unit.is<LinearImpl>());
-  REQUIRE(unit.is<AGIUnit>());
+  REQUIRE(unit.as<Linear>() == nullptr);
+  REQUIRE(unit.as<LinearImpl>() == nullptr);
+  REQUIRE(unit.as<AGIUnit>() == &unit);
 }
 
 TEST_CASE("module/conversions", "[cuda]") {
@@ -125,7 +136,7 @@ TEST_CASE("module/conversions", "[cuda]") {
       REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
       REQUIRE(parameter->device().index() == 0);
     }
-    module->cuda(1);
+    module->to({at::kCUDA, 1});
     for (auto& parameter : module->parameters()) {
       REQUIRE(parameter->device().type() == torch::Device::Type::CUDA);
       REQUIRE(parameter->device().index() == 1);
