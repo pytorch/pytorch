@@ -510,8 +510,6 @@ class TestNN(NNTestCase):
         params = []
         d_params = []
         for p in module.parameters():
-            if p.grad is None:
-                p._grad = torch.zeros_like(p)
             params.append(p)
             d_params.append(p.grad)
         return params, d_params
@@ -7136,16 +7134,33 @@ new_module_tests = [
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
-        input_fn=lambda: torch.randperm(2).repeat(1, 2),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
     ),
     dict(
         module_name='EmbeddingBag',
         constructor_args=(4, 3),
-        input_fn=lambda:torch.randperm(2).repeat(1, 2),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
+        desc='mean',
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3, None, 2, False, 'sum'),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+        jacobian_input=False,
+        check_gradgrad=False,
+        desc='sum',
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3, None, 2, False, 'max'),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+        jacobian_input=False,
+        check_gradgrad=False,
+        desc='max',
     ),
     dict(
         fullname='EmbeddingBag_sparse',
