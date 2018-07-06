@@ -70,11 +70,11 @@ TEST_CASE("Getting and Setting Streams", "Verifies streams are set properly") {
 }
 
 TEST_CASE("Stream API retain/free", "Ensures streams are destroyed properly") {
-  auto* ptr = at::CUDAStream_createAndRetainWithOptions(
+  auto ptr = at::detail::CUDAStream_createAndRetainWithOptions(
     at::CUDAStream::DEFAULT_FLAGS
   , at::CUDAStream::DEFAULT_PRIORITY);
 
-  at::CUDAStream_free(ptr);
+  at::detail::CUDAStream_free(ptr);
   REQUIRE(ptr == nullptr);
 }
 
