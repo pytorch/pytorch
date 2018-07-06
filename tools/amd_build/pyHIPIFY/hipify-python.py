@@ -162,7 +162,7 @@ def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=
 
     # Show detailed summary
     if show_detailed:
-        compute_stats(stats, show_detailed)
+        compute_stats(stats)
 
 
 def compute_stats(stats):
