@@ -77,10 +77,10 @@ class Bernoulli(ExponentialFamily):
         if self._validate_args:
             self._validate_sample(value)
         logits, value = broadcast_all(self.logits, value)
-        return -binary_cross_entropy_with_logits(logits, value, reduce=False)
+        return -binary_cross_entropy_with_logits(logits, value, reduction='none')
 
     def entropy(self):
-        return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False)
+        return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none')
 
     def enumerate_support(self):
         values = self._new((2,))
