@@ -6199,7 +6199,7 @@ class TestTorch(TestCase):
         self.assertEqual(reversed(val), torch.arange(9, -1, -1))
 
         val = torch.arange(1, 10).view(3, 3)
-        self.assertEqual(reversed(val), torch.tensor([7, 8, 9], [4, 5, 6], [1, 2, 3]))
+        self.assertEqual(reversed(val), torch.tensor([[7, 8, 9], [4, 5, 6], [1, 2, 3]]))
 
         val = torch.tensor(42)
         self.assertEqual(reversed(val), torch.tensor(42))
