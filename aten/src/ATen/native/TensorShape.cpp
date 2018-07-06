@@ -7,6 +7,7 @@
 #include <TH/THTensor.hpp>
 
 #include <algorithm>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -602,6 +603,31 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
 
 int64_t numel(const Tensor& self) {
   return self.pImpl->numel();
+}
+
+std::vector<Tensor> meshgrid(TensorList tensors) {
+  int64_t size = tensors.size();
+  AT_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
+  std::vector<int64_t> shape(size);
+  for(int64_t i = 0; i < size; i++) {
+    switch (tensors[i].dim()) {
+    case 0:
+      shape[i] = 1;
+      break;
+    case 1:
+      shape[i] = tensors[i].size(0);
+      break;
+    default:
+      AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
+    }
+  }
+  std::vector<Tensor> grids;
+  for(int64_t i = 0; i < size; i++) {
+    std::vector<int64_t> view_shape(size, 1);
+    view_shape[i] = -1;
+    grids.push_back(tensors[i].view(view_shape).expand(shape));
+  }
+  return grids;
 }
 
 }

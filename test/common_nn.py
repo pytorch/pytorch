@@ -754,7 +754,10 @@ class NNTestCase(TestCase):
             jacobian_param = torch.zeros(num_param, output_size)
 
         for i in range(output_size):
-            _, d_param = self._get_parameters(module)
+            param, d_param = self._get_parameters(module)
+            # make non grad zeros
+            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+
             d_out = torch.zeros_like(output)
             flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
@@ -948,7 +951,16 @@ class ModuleTest(TestBase):
             return [self.noncontiguize(o) for o in obj]
         tensor = obj
         ndim = tensor.dim()
-        noncontig = torch.stack([torch.zeros_like(tensor), tensor], ndim).select(ndim, 1).detach()
+        # Always making only the last dimension noncontiguous is easy to hide
+        # bugs because .view(-1) will still work. So try to find a dim with size
+        # > 1 and make that non-contiguous, i.e., stack + select on the
+        # dimension directly after that.
+        dim = ndim
+        for d in range(ndim):
+            if tensor.size(d) > 1:
+                dim = d + 1
+                break
+        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
         assert noncontig.numel() == 1 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
@@ -977,11 +989,7 @@ class ModuleTest(TestBase):
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():
-                try:
-                    out = test_case._forward(module, i)
-                except Exception:
-                    # Some modules will fail because of non contiguous inputs and we're ok with that
-                    continue
+                out = test_case._forward(module, i)
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)

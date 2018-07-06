@@ -4,6 +4,8 @@
 #include <functional>
 #include <cmath>
 
+#include "ATen/Utils.h"
+
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
@@ -173,7 +175,7 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.values[i] = a.values[i] / b.values[i];
