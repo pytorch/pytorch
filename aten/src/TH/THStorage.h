@@ -1,5 +1,4 @@
-#ifndef TH_STORAGE_INC
-#define TH_STORAGE_INC
+#pragma once
 
 #include "THGeneral.h"
 #include "THAllocator.h"
@@ -23,5 +22,3 @@ TH_API void THStorage_free(THStorage *storage);
 
 TH_API THDescBuff THLongStorage_sizeDesc(const THLongStorage *size);
 TH_API THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement);
-
-#endif

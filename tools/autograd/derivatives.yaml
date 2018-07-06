@@ -342,7 +342,7 @@
   self: -at::mm(output.t(), at::mm(grad, output.t()))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: le_(Tensor self, Scalar other)
   self: zeros_like(self)
@@ -407,7 +407,7 @@
   self: zeros_like(self).masked_scatter_(mask, grad)
 
 - name: max(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, max_indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: max(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -440,10 +440,10 @@
 # The backward implementation is correct in the sense that it returns the
 # subgradient on one side.
 - name: median(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: min(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, min_indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: min(Tensor self)
   self: select_equals_backward(grad, self, result)
@@ -457,7 +457,7 @@
   mat2: mm_mat2_backward(grad, self, mat2.sizes(), mat2.strides(), 1)
 
 - name: mode(Tensor self, int64_t dim, bool keepdim)
-  self: index_select_backward(grad, dim, indices, self.sizes(), keepdim)
+  self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
 - name: mul(Tensor self, Scalar other)
   self: grad * other
@@ -769,8 +769,8 @@
 - name: embedding(Tensor weight, Tensor indices, int64_t padding_idx, bool scale_grad_by_freq, bool sparse)
   weight: embedding_backward(grad, indices, weight.size(0), padding_idx, scale_grad_by_freq, sparse)
 
-- name: embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
-  weight: embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
+- name: _embedding_bag(Tensor weight, Tensor indices, Tensor offsets, bool scale_grad_by_freq, int64_t mode, bool sparse)
+  weight: _embedding_bag_backward(grad, indices, offsets, result1, result2, result3, weight.size(0), scale_grad_by_freq, mode, sparse)
 
 - name: embedding_renorm_(Tensor self, Tensor indices, double max_norm, double norm_type)
   self: not_implemented("embedding_renorm")
