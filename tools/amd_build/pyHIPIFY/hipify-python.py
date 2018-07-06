@@ -833,12 +833,12 @@ def main():
     # Verify the project directory exists.
     if not os.path.exists(args.project_directory):
         print("The project folder specified does not exist.")
-        return
+        sys.exit(1)
 
     # Make sure output directory exists.
     if not os.path.exists(args.output_directory):
         print("The output folder already exists.")
-        return
+        sys.exit(2)
 
     # If no output directory, provide a default one.
     if args.output_directory is "":
