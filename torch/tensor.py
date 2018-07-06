@@ -229,6 +229,13 @@ class Tensor(torch._C._TensorBase):
         """
         return self.view(tensor.size())
 
+    def __reversed__(self):
+        r"""Reverses the tensor along dimension 0."""
+        if self.dim() == 0:
+            return self
+        else:
+            return self.flip(0)
+
     def argmax(self, dim=None, keepdim=False):
         r"""See :func:`torch.argmax`"""
         return torch.argmax(self, dim, keepdim)

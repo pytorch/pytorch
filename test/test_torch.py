@@ -6194,6 +6194,16 @@ class TestTorch(TestCase):
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
 
+    def test_reversed(self):
+        val = torch.arange(0, 10)
+        self.assertEqual(reversed(val), torch.arange(9, -1, -1))
+
+        val = torch.arange(0, 10).view(3, 3)
+        self.assertEqual(reversed(val), torch.tensor([7, 8, 9], [4, 5, 6], [1, 2, 3]))
+
+        val = torch.tensor(42)
+        self.assertEqual(reversed(val), torch.tensor(42))
+
     def test_storage(self):
         v = torch.randn(3, 5)
         self.assertEqual(v.storage()[0], v.data[0][0])
