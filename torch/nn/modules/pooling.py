@@ -112,12 +112,12 @@ class MaxPool2d(_MaxPoolNd):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * padding[0] - dilation[0]
-                    * (kernel_size[0] - 1) - 1}{stride[0]} + 1\right\rfloor
+              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding[0]} - \text{dilation[0]}
+                    * (\text{kernel\_size[0]} - 1) - 1}{\text{stride[0]}} + 1\right\rfloor
 
           .. math::
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * padding[1] - dilation[1]
-                    * (kernel\_size[1] - 1) - 1}{stride[1]} + 1\right\rfloor
+              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding[1]} - \text{dilation[1]}
+                    * (\text{kernel\_size[1]} - 1) - 1}{\text{stride[1]}} + 1\right\rfloor
 
     Examples::
 
@@ -152,8 +152,8 @@ class MaxPool3d(_MaxPoolNd):
         \max_{k=0, \ldots, kD-1}
         \max_{m=0, \ldots, kH-1}
         \max_{n=0, \ldots, kW-1} \\
-        input(N_i, C_j, stride[0] *
-        k + d, stride[1] * h + m, stride[2] * w + n)
+        \text{input}(N_i, C_j, \text{stride[0]} *
+        k + d, \text{stride[1]} * h + m, \text{stride[2]} * w + n)
         \end{gathered}
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
@@ -386,13 +386,13 @@ class MaxUnpool3d(_MaxUnpoolNd):
         - Output: :math:`(N, C, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = (D_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]
+              D_{out} = (D_{in} - 1) * \text{stride[0]} - 2 * \text{padding[0]} + \text{kernel\_size[0]}
 
           .. math::
-              H_{out} = (H_{in} - 1) * stride[1] - 2 * padding[1] + kernel\_size[1]
+              H_{out} = (H_{in} - 1) * \text{stride[1]} - 2 * \text{padding[1]} + \text{kernel\_size[1]}
 
           .. math::
-              W_{out} = (W_{in} - 1) * stride[2] - 2 * padding[2] + kernel\_size[2]
+              W_{out} = (W_{in} - 1) * \text{stride[2]} - 2 * \text{padding[2]} + \text{kernel\_size[2]}
 
           or as given by :attr:`output_size` in the call operator
 

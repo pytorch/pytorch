@@ -42,7 +42,7 @@ class L1Loss(_Loss):
             \operatorname{sum}(L),  & \text{if size\_average} = \text{False.}
         \end{cases}
 
-    `x` and `y` represent arbitrary shapes with a total of `n` elements each.
+    `x` and `y` are tensors of arbitrary shapes with a total of `n` elements each.
 
     The sum operation still operates over all the elements, and divides by `n`.
 
