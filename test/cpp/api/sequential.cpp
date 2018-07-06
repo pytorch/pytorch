@@ -239,24 +239,24 @@ TEST_CASE("sequential") {
     a->extend(*b);
 
     REQUIRE(a->size() == 4);
-    REQUIRE(a[0]->is<A>());
-    REQUIRE(a[1]->is<B>());
-    REQUIRE(a[2]->is<C>());
-    REQUIRE(a[3]->is<D>());
+    REQUIRE(a[0]->as<A>());
+    REQUIRE(a[1]->as<B>());
+    REQUIRE(a[2]->as<C>());
+    REQUIRE(a[3]->as<D>());
 
     REQUIRE(b->size() == 2);
-    REQUIRE(b[0]->is<C>());
-    REQUIRE(b[1]->is<D>());
+    REQUIRE(b[0]->as<C>());
+    REQUIRE(b[1]->as<D>());
 
     std::vector<std::shared_ptr<A>> c = {std::make_shared<A>(),
                                          std::make_shared<A>()};
     b->extend(c);
 
     REQUIRE(b->size() == 4);
-    REQUIRE(b[0]->is<C>());
-    REQUIRE(b[1]->is<D>());
-    REQUIRE(b[2]->is<A>());
-    REQUIRE(b[3]->is<A>());
+    REQUIRE(b[0]->as<C>());
+    REQUIRE(b[1]->as<D>());
+    REQUIRE(b[2]->as<A>());
+    REQUIRE(b[3]->as<A>());
   }
   SECTION("has reference semantics") {
     Sequential first(Linear(2, 3), Linear(4, 4), Linear(4, 5));

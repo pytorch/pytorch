@@ -51,7 +51,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
   /// Constructs the `ModuleHolder` from a pointer to the contained type.
   /// Example: `Linear(std::make_shared<LinearImpl>(...))`.
-  explicit ModuleHolder(std::shared_ptr<Contained> module)
+  /* implicit */ ModuleHolder(std::shared_ptr<Contained> module)
       : impl_(std::move(module)) {}
 
   /// Returns true if the `ModuleHolder` contains a module, or false if it is
@@ -62,12 +62,38 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
   /// Forwards to the contained module.
   Contained* operator->() {
-    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
-    return impl_.get();
+    return get();
   }
 
   /// Forwards to the contained module.
   const Contained* operator->() const {
+    return get();
+  }
+
+  /// Returns a reference to the contained module.
+  Contained& operator*() {
+    return *get();
+  }
+
+  /// Returns a const reference to the contained module.
+  const Contained& operator*() const {
+    return *get();
+  }
+
+  /// Returns a shared pointer to the underlying module.
+  const std::shared_ptr<Contained>& ptr() const {
+    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
+    return impl_;
+  }
+
+  /// Returns a pointer to the underlying module.
+  Contained* get() {
+    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
+    return impl_.get();
+  }
+
+  /// Returns a const pointer to the underlying module.
+  const Contained* get() const {
     AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
     return impl_.get();
   }
@@ -79,28 +105,10 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
     return (*impl_)(std::forward<Args>(args)...);
   }
 
-  /// Forwards to the call operator of the contained module.
+  /// Forwards to the subscript operator of the contained module.
   template <typename Arg>
   auto operator[](Arg&& arg) -> decltype((*impl_)[std::forward<Arg>(arg)]) {
     return (*impl_)[std::forward<Arg>(arg)];
-  }
-
-  /// Returns the underlying module.
-  const std::shared_ptr<Contained>& get() const {
-    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
-    return impl_;
-  }
-
-  /// Returns a reference to the contained module.
-  Contained& operator*() {
-    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
-    return *impl_;
-  }
-
-  /// Returns a const reference to the contained module.
-  const Contained& operator*() const {
-    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
-    return *impl_;
   }
 
   /// Returns true if the `ModuleHolder` does not contain a module.
