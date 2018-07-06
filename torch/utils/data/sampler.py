@@ -101,6 +101,7 @@ class WeightedRandomSampler(Sampler):
 
     def __next__(self):
         if (self.current_iter > len(self.weights)):
+            self.current_iter = 1
             raise StopIteration
         else:
             self.current_iter += 1
