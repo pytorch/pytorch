@@ -1868,6 +1868,11 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     r"""Upsamples the input to either the given :attr:`size` or the given
     :attr:`scale_factor`
 
+    .. warning::
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
+        This is equivalent with ``nn.functional.interpolate(...)``.
+
+
     The algorithm used for upsampling is determined by :attr:`mode`.
 
     Currently temporal, spatial and volumetric upsampling are supported, i.e.
@@ -1901,44 +1906,69 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
         affects the outputs.
 
     """
+    warnings.warn("nn.functional.upsample is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode, align_corners)
+
+
+def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corners=None):
+    r"""Down/up samples the input to either the given :attr:`size` or the given
+    :attr:`scale_factor`
+
+    The algorithm used for interpolation is determined by :attr:`mode`.
+
+    Currently temporal, spatial and volumetric sampling are supported, i.e.
+    expected inputs are 3-D, 4-D or 5-D in shape.
+
+    The input dimensions are interpreted in the form:
+    `mini-batch x channels x [optional depth] x [optional height] x width`.
+
+    The modes available for resizing are: `nearest`, `linear` (3D-only),
+    `bilinear` (4D-only), `trilinear` (5D-only), `area`
+
+    Args:
+        input (Tensor): the input tensor
+        size (int or Tuple[int] or Tuple[int, int] or Tuple[int, int, int]):
+            output spatial size.
+        scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
+        mode (string): algorithm used for upsampling:
+            'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
+        align_corners (bool, optional): if True, the corner pixels of the input
+            and output tensors are aligned, and thus preserving the values at
+            those pixels. This only has effect when :attr:`mode` is `linear`,
+            `bilinear`, or `trilinear`. Default: False
+
+    .. warning::
+        With ``align_corners = True``, the linearly interpolating modes
+        (`linear`, `bilinear`, and `trilinear`) don't proportionally align the
+        output and input pixels, and thus the output values can depend on the
+        input size. This was the default behavior for these modes up to version
+        0.3.1. Since then, the default behavior is ``align_corners = False``.
+        See :class:`~torch.nn.Upsample` for concrete examples on how this
+        affects the outputs.
+
+    """
     from numbers import Integral
     from .modules.utils import _ntuple
 
-    def _check_size_scale_factor():
+    def _check_size_scale_factor(dim):
         if size is None and scale_factor is None:
             raise ValueError('either size or scale_factor should be defined')
         if size is not None and scale_factor is not None:
             raise ValueError('only one of size or scale_factor should be defined')
-        if scale_factor is not None and not isinstance(scale_factor, (Integral, tuple)):
-            raise ValueError('scale_factor must be of integer type or a tuple of integer types')
-
-    def _scale_factor(dim):
-        _check_size_scale_factor()
-        if scale_factor is not None and not isinstance(scale_factor, Integral):
-            raise ValueError('scale_factor must be a single Integer value for nearest neighbor sampling')
-        if scale_factor is not None:
-            return scale_factor
-        sizes = _ntuple(dim)(size)
-        computed_scale_factor = sizes[0] // input.size(2)
-        for d in range(dim):
-            if sizes[d] % input.size(d + 2) != 0:
-                raise RuntimeError("output size specified in UpsamplingNearest "
-                                   "({}) has to be divisible by the input size, but got: "
-                                   "{}".format('x'.join(map(str, sizes)),
-                                               'x'.join(map(str, input.size()))))
-            if sizes[d] // input.size(d + 2) != computed_scale_factor:
-                raise RuntimeError("input aspect ratio doesn't match the output ratio")
-
-        return computed_scale_factor
+        if scale_factor is not None and isinstance(scale_factor, tuple)\
+                and len(scale_factor) != dim:
+            raise ValueError('scale_factor shape must match input shape. '
+                             'Input is {}D, scale_factor size is {}'.format(dim, len(scale_factor)))
 
     def _output_size(dim):
-        _check_size_scale_factor()
+        _check_size_scale_factor(dim)
         if size is not None:
             return size
         scale_factors = _ntuple(dim)(scale_factor)
-        return [input.size(i + 2) * scale_factors[i] for i in range(dim)]
+        # math.floor might return float in py2.7
+        return [int(math.floor(input.size(i + 2) * scale_factors[i])) for i in range(dim)]
 
-    if mode == 'nearest':
+    if mode in ('nearest', 'area'):
         if align_corners is not None:
             raise ValueError("align_corners option can only be set with the "
                              "interpolating modes: linear | bilinear | trilinear")
@@ -1951,11 +1981,17 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             align_corners = False
 
     if input.dim() == 3 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest1d(input, _scale_factor(1))
+        return torch._C._nn.upsample_nearest1d(input, _output_size(1))
     elif input.dim() == 4 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest2d(input, _scale_factor(2))
+        return torch._C._nn.upsample_nearest2d(input, _output_size(2))
     elif input.dim() == 5 and mode == 'nearest':
-        return torch._C._nn.upsample_nearest3d(input, _scale_factor(3))
+        return torch._C._nn.upsample_nearest3d(input, _output_size(3))
+    elif input.dim() == 3 and mode == 'area':
+        return adaptive_avg_pool1d(input, _output_size(1))
+    elif input.dim() == 4 and mode == 'area':
+        return adaptive_avg_pool2d(input, _output_size(2))
+    elif input.dim() == 5 and mode == 'area':
+        return adaptive_avg_pool3d(input, _output_size(3))
     elif input.dim() == 3 and mode == 'linear':
         return torch._C._nn.upsample_linear1d(input, _output_size(1), align_corners)
     elif input.dim() == 3 and mode == 'bilinear':
@@ -1984,8 +2020,8 @@ def upsample_nearest(input, size=None, scale_factor=None):
     r"""Upsamples the input, using nearest neighbours' pixel values.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
-        This is equivalent with ``nn.functional.upsample(..., mode='nearest')``.
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
+        This is equivalent with ``nn.functional.interpolate(..., mode='nearest')``.
 
     Currently spatial and volumetric upsampling are supported (i.e. expected
     inputs are 4 or 5 dimensional).
@@ -1997,17 +2033,17 @@ def upsample_nearest(input, size=None, scale_factor=None):
         scale_factor (int): multiplier for spatial size. Has to be an integer.
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.upsample instead.")
-    return upsample(input, size, scale_factor, mode='nearest')
+    warnings.warn("nn.functional.upsample_nearest is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode='nearest')
 
 
 def upsample_bilinear(input, size=None, scale_factor=None):
     r"""Upsamples the input, using bilinear upsampling.
 
     .. warning::
-        This function is deprecated in favor of :func:`torch.nn.functional.upsample`.
+        This function is deprecated in favor of :func:`torch.nn.functional.interpolate`.
         This is equivalent with
-        ``nn.functional.upsample(..., mode='bilinear', align_corners=True)``.
+        ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
     Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
     volumetric (5 dimensional) inputs.
@@ -2018,8 +2054,8 @@ def upsample_bilinear(input, size=None, scale_factor=None):
         scale_factor (int or Tuple[int, int]): multiplier for spatial size
     """
     # DeprecationWarning is ignored by default
-    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.upsample instead.")
-    return upsample(input, size, scale_factor, mode='bilinear', align_corners=True)
+    warnings.warn("nn.functional.upsample_bilinear is deprecated. Use nn.functional.interpolate instead.")
+    return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
