@@ -257,6 +257,14 @@ class TestOperators(TestCase):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         self.assertONNX(lambda x: torch.clamp(x, min=-0.5, max=0.5), x)
 
+    def test_clip_min(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.clamp(min=-0.1), x)
+
+    def test_clip_max(self):
+        x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
+        self.assertONNX(lambda x: x.clamp(max=0.1), x)
+
     def test_max(self):
         x = Variable(torch.randn(3, 4), requires_grad=True)
         y = Variable(torch.randn(3, 4), requires_grad=True)
