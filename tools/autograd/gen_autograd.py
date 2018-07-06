@@ -16,7 +16,7 @@ from .utils import YamlLoader, split_name_params
 
 VIEW_FUNCTIONS = {
     'alias', 'as_strided', 'diagonal', 'expand', 'narrow', 'permute', 'select', 'slice',
-    'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view',
+    'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view', 'unbind',
 }
 
 # In principle this should live in derivatives.yaml, but I could not
