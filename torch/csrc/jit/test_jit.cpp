@@ -287,7 +287,7 @@ void internedStringsTests () {
   REQUIRE(Symbol::aten("What2") == symstart+2);
   REQUIRE(Symbol::aten("What") == symstart+1);
   REQUIRE(Symbol::aten("What2") == symstart+2);
-  REQUIRE(Symbol(SymbolNamespace::aten, symstart+2).toUnqualString() == std::string("What2"));
+  REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
 
 void fromQualStringTests() {
@@ -296,7 +296,13 @@ void fromQualStringTests() {
   REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
   REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
   REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
-  auto bad_inputs = {"scope", "foo::bar", "prim:Param", "::", ":", ""};
+  REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
+  REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
+
+  auto bad_inputs = {"scope", ":", ""};
   for (auto input : bad_inputs) {
     try {
       Symbol::fromQualString(input);
