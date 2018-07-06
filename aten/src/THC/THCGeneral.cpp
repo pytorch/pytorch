@@ -4,6 +4,7 @@
 #include "THCCachingHostAllocator.h"
 #include "THCThreadLocal.h"
 #include "THCTensorRandom.h"
+#include "THCGeneral.hpp"
 
 #include "ATen/CUDAStream.h"
 

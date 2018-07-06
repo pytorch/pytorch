@@ -1,9 +1,12 @@
 #include "caffe2/core/common.h"
 #include "caffe2/opt/backend_cutting.h"
+#include "caffe2/utils/string_utils.h"
 
 #include <gtest/gtest.h>
 
 namespace {
+  using caffe2::StartsWith;
+
   void AddConv(caffe2::NetDef* net, int tick) {
     auto* op = net->add_op();
     op->set_type("MyConv");
@@ -11,11 +14,6 @@ namespace {
     op->add_input("W" + caffe2::to_string(tick));
     op->add_input("b" + caffe2::to_string(tick));
     op->add_output("N" + caffe2::to_string(tick+1));
-  }
-
-  bool StartsWith(const std::string& str, const std::string& prefix) {
-    return std::mismatch(prefix.begin(), prefix.end(), str.begin()).first ==
-        prefix.end();
   }
 
   bool Supports(const caffe2::OperatorDef& op) {
@@ -66,7 +64,7 @@ TEST(BackendCuttingTest, line) {
 
 //  X0 -> CopyIn -> MyConv -\
 //                           > Concat -> CopyOut -> Y
-//  N2 -> MyConv -> MyRelu -/ 
+//  N2 -> MyConv -> MyRelu -/
 TEST(BackendCuttingTest, convergedPaths) {
   caffe2::NetDef net;
   net.add_external_input("X0");
@@ -100,7 +98,7 @@ TEST(BackendCuttingTest, convergedPaths) {
 
 //                -> Random -> Relu -> MyConv4
 //              /                             \
-// N0 -> MyConv -> MyRelu -> MyConv2 ---------- > Concat -> CopyOut -> Y 
+// N0 -> MyConv -> MyRelu -> MyConv2 ---------- > Concat -> CopyOut -> Y
 TEST(BackendCuttingTest, skipPath) {
   caffe2::NetDef net;
   net.add_external_input("N0");

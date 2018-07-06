@@ -384,7 +384,7 @@ void reinterleaveMultithreaded(
                                                         size_t tileId) {
     int h;
     int c;
-    divOutputH.divMod((int)tileId, c, h);
+    divOutputH.DivMod((int)tileId, &c, &h);
 
     REINTERLEAVE(N);
   };

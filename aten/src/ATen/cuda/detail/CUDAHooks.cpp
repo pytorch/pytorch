@@ -10,6 +10,7 @@
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include "THC/THC.h"
+#include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
 #include "ATen/cudnn/cudnn-wrapper.h"

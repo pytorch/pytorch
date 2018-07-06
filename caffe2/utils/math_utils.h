@@ -1,15 +1,53 @@
 #ifndef CAFFE2_UTILS_MATH_UTILS_H_
 #define CAFFE2_UTILS_MATH_UTILS_H_
 
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
+#define MATH_UTILS_DECL inline __host__ __device__
+#else
+#define MATH_UTILS_DECL inline
+#endif
+
 namespace caffe2 {
 namespace math {
 namespace utils {
+
+MATH_UTILS_DECL bool Not(const bool x) {
+  return !x;
+}
+
+template <typename T>
+MATH_UTILS_DECL T Sign(const T x) {
+  return x > 0 ? T(1) : (x < 0 ? T(-1) : T(0));
+}
+
+template <typename T>
+MATH_UTILS_DECL T Negate(const T x) {
+  return -x;
+}
+
+template <typename T>
+MATH_UTILS_DECL T Inv(const T x) {
+  return T(1) / x;
+}
+
+template <typename T>
+MATH_UTILS_DECL T Square(const T x) {
+  return x * x;
+}
+
+template <typename T>
+MATH_UTILS_DECL T Cube(const T x) {
+  return x * x * x;
+}
 
 // Increase the index digits by one based on dims.
 void IncreaseIndexInDims(const int n, const int* dims, int* index);
 
 // Get index value from dims and index digits.
 int GetIndexFromDims(const int n, const int* dims, const int* index);
+
+// Checks if the input permutation is an identity permutation;
+bool IsIdentityPermutation(const int n, const int* perm);
 
 // Computest the broadcast binary operation dims.
 void ComputeBroadcastBinaryOpDims(

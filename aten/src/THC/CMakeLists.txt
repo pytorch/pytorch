@@ -59,6 +59,7 @@ set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS}
 INSTALL(FILES
           THC.h
           ${CMAKE_CURRENT_BINARY_DIR}/THCGeneral.h
+          THCGeneral.hpp
           THCBlas.h
           THCSleep.h
           THCStorage.h

@@ -1,5 +1,6 @@
 import math
 import multiprocessing
+import socket
 import sys
 import tempfile
 import unittest
@@ -11,15 +12,21 @@ import torch.distributed.c10d as c10d
 from common import TestCase
 
 
-TCP_ADDR = '127.0.0.1'
-TCP_PORT = 29500
-
 TIMEOUT_DEFAULT = 5
 TIMEOUT_OVERRIDE = {}
 
 
 def get_timeout(test_id):
     return TIMEOUT_OVERRIDE.get(test_id.split('.')[-1], TIMEOUT_DEFAULT)
+
+
+def find_free_port():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    sock.bind(('localhost', 0))
+    sockname = sock.getsockname()
+    sock.close()
+    return sockname[1]
 
 
 if not c10d.is_available():
@@ -56,7 +63,9 @@ class FileStoreTest(TestCase, StoreTestBase):
 
 class TCPStoreTest(TestCase, StoreTestBase):
     def _create_store(self):
-        return c10d.TCPStore(TCP_ADDR, TCP_PORT, True)
+        addr = 'localhost'
+        port = find_free_port()
+        return c10d.TCPStore(addr, port, True)
 
 
 class RendezvousTest(TestCase):
@@ -111,7 +120,9 @@ class RendezvousTCPTest(TestCase):
             next(gen)
 
     def test_nominal(self):
-        url = 'tcp://127.0.0.1:23456?size=%d' % 2
+        addr = 'localhost'
+        port = find_free_port()
+        url = 'tcp://%s:%d?size=%d' % (addr, port, 2)
         gen0 = c10d.rendezvous(url + "&rank=0")
         store0, rank0, size0 = next(gen0)
         self.assertEqual(0, rank0)

@@ -30,7 +30,7 @@ from itertools import product
 from random import shuffle
 
 import torch
-from common import TestCase, run_tests, set_rng_seed
+from common import TestCase, run_tests, set_rng_seed, TEST_WITH_UBSAN
 from common_cuda import TEST_CUDA
 from torch.autograd import grad, gradcheck
 from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
@@ -597,14 +597,16 @@ class TestDistributions(TestCase):
         # performs gradient checks on log_prob
         distribution = dist_ctor(*ctor_params)
         s = distribution.sample()
+        if s.is_floating_point():
+            s.detach_().requires_grad_()
 
         expected_shape = distribution.batch_shape + distribution.event_shape
         self.assertEqual(s.size(), expected_shape)
 
-        def apply_fn(*params):
+        def apply_fn(s, *params):
             return dist_ctor(*params).log_prob(s)
 
-        gradcheck(apply_fn, ctor_params, raise_exception=True)
+        gradcheck(apply_fn, (s,) + tuple(ctor_params), raise_exception=True)
 
     def _check_log_prob(self, dist, asset_fn):
         # checks that the log_prob matches a reference function
@@ -1099,8 +1101,10 @@ class TestDistributions(TestCase):
     def test_relaxed_one_hot_categorical_2d(self):
         probabilities = [[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]]
         probabilities_1 = [[1.0, 0.0], [0.0, 1.0]]
-        temp = torch.tensor([3.00], requires_grad=True)
-        temp_2 = torch.tensor([0.2], requires_grad=True)
+        temp = torch.tensor([3.0], requires_grad=True)
+        # The lower the temperature, the more unstable the log_prob gradcheck is
+        # w.r.t. the sample. Values below 0.25 empirically fail the default tol.
+        temp_2 = torch.tensor([0.25], requires_grad=True)
         p = torch.tensor(probabilities, requires_grad=True)
         s = torch.tensor(probabilities_1, requires_grad=True)
         self.assertEqual(RelaxedOneHotCategorical(temp, p).sample().size(), (2, 3))
@@ -3704,6 +3708,7 @@ class TestValidation(TestCase):
             for i, param in enumerate(params):
                 Dist(validate_args=True, **param)
 
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_invalid(self):
         for Dist, params in BAD_EXAMPLES:
             for i, param in enumerate(params):

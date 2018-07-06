@@ -188,7 +188,7 @@ bool test_mnist(
   auto telabel = readLabels("test/cpp/api/mnist/t10k-labels-idx1-ubyte");
 
   if (useGPU) {
-    model->cuda();
+    model->to(torch::kCUDA);
   }
 
   std::random_device device;
@@ -274,8 +274,8 @@ TEST_CASE("integration/cartpole") {
       R = rewards[i] + 0.99 * R;
       rewards[i] = R;
     }
-    auto r_t =
-        torch::from_blob(rewards.data(), {static_cast<int64_t>(rewards.size())});
+    auto r_t = torch::from_blob(
+        rewards.data(), {static_cast<int64_t>(rewards.size())});
     r_t = (r_t - r_t.mean()) / (r_t.std() + 1e-5);
 
     std::vector<torch::Tensor> policy_loss;
@@ -283,8 +283,8 @@ TEST_CASE("integration/cartpole") {
     for (auto i = 0U; i < saved_log_probs.size(); i++) {
       auto r = rewards[i] - saved_values[i].toCFloat();
       policy_loss.push_back(-r * saved_log_probs[i]);
-      value_loss.push_back(
-          torch::smooth_l1_loss(saved_values[i], torch::ones({1}) * rewards[i]));
+      value_loss.push_back(torch::smooth_l1_loss(
+          saved_values[i], torch::ones({1}) * rewards[i]));
     }
 
     auto loss = torch::stack(torch::TensorListView(policy_loss)).sum() +
@@ -342,10 +342,10 @@ TEST_CASE("integration/mnist", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = std::get<0>(torch::max_pool2d(conv1->forward(x), {2, 2})).clamp_min(0);
+    x = torch::max_pool2d(conv1->forward(x), {2, 2}).relu();
     x = conv2->forward(x);
     x = drop2d->forward(x);
-    x = std::get<0>(torch::max_pool2d(x, {2, 2})).clamp_min(0);
+    x = torch::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
@@ -380,10 +380,10 @@ TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   auto linear2 = model->add(Linear(50, 10), "linear2");
 
   auto forward = [&](torch::Tensor x) {
-    x = std::get<0>(torch::max_pool2d(conv1->forward(x), {2, 2})).clamp_min(0);
+    x = torch::max_pool2d(conv1->forward(x), {2, 2}).relu();
     x = batchnorm2d->forward(x);
     x = conv2->forward(x);
-    x = std::get<0>(torch::max_pool2d(x, {2, 2})).clamp_min(0);
+    x = torch::max_pool2d(x, {2, 2}).relu();
 
     x = x.view({-1, 320});
     x = linear1->forward(x).clamp_min(0);
