@@ -51,8 +51,8 @@ class MaxPool1d(_MaxPoolNd):
         - Output: :math:`(N, C, L_{out})` where
 
           .. math::
-              L_{out} = \left\lfloor \frac{L_{in} + 2 * padding - dilation
-                    * (kernel\_size - 1) - 1}{stride} + 1\right\rfloor
+              L_{out} = \left\lfloor \frac{L_{in} + 2 * \text{padding} - \text{dilation}
+                    * (\text{kernel\_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Examples::
 
@@ -86,7 +86,7 @@ class MaxPool2d(_MaxPoolNd):
     .. math::
 
         out(N_i, C_j, h, w)  = \max_{m=0, \ldots, kH-1} \max_{n=0, \ldots, kW-1}
-                               input(N_i, C_j, stride[0] * h + m, stride[1] * w + n)
+                               \text{input}(N_i, C_j, \text{stride[0]} * h + m, \text{stride[1]} * w + n)
 
     If :attr:`padding` is non-zero, then the input is implicitly zero-padded on both sides
     for :attr:`padding` number of points. :attr:`dilation` controls the spacing between the kernel points.
