@@ -16,7 +16,8 @@ void THNN_(PReLU_updateOutput)(
     // handle shared parameter case
     real w = *THTensor_(data)(weight);
     TH_TENSOR_APPLY2(real, output, real, input,
-      *output_data = (*input_data > 0) ? *input_data : w*(*input_data);
+          const real r = (*input_data > 0) ? 1 : w;
+          *output_data = *input_data * r;
     );
     return;
   }
