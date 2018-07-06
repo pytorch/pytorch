@@ -833,18 +833,17 @@ def main():
     # Verify the project directory exists.
     if not os.path.exists(args.project_directory):
         print("The project folder specified does not exist.")
-        return
-
-    # Make sure output directory exists.
-    if not os.path.exists(args.output_directory):
-        print("The output folder already exists.")
-        return
+        sys.exit(1)
 
     # If no output directory, provide a default one.
     if args.output_directory is "":
-        args.project_directory = args.project_directory[0:-
-                                                        1] if args.project_directory.endswith("/") else args.project_directory
+        args.project_directory.rstrip("/")
         args.output_directory = args.project_directory + "_amd"
+
+    # Make sure output directory does not exist.
+    if not os.path.exists(args.output_directory):
+        print("The output folder already exists.")
+        sys.exit(2)
 
     # Copy from project directory to output directory if not done already.
     if not os.path.exists(args.output_directory):
@@ -863,8 +862,8 @@ def main():
 
     # Open YAML file with disable information.
     if args.yaml_settings != "":
-        with openf(args.yaml_settings, "r") as lines:
-            yaml_data = yaml.load(lines)
+        with openf(args.yaml_settings, "r") as f:
+            yaml_data = yaml.load(f)
 
         # Disable functions in certain files according to YAML description
         for disable_info in yaml_data["disabled_functions"]:
