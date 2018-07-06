@@ -96,10 +96,12 @@ static inline Tensor mean(const Tensor &self, optional<ScalarType> dtype) {
       "Can only calculate the mean of floating types. Got ",
       at::toString(scalarType),
       " instead.");
-  Tensor result = at::native::sum(self);
-  if (self.numel() > 0)
-    result.div_(self.numel());
-  return result;
+  if (self.numel() > 0) {
+    Tensor result = at::native::sum(self);
+    return result.div_(self.numel());
+  } else {
+    return self.type().scalarTensor(std::numeric_limits<double>::quiet_NaN());
+  }
 }
 
 Tensor mean(const Tensor &self, ScalarType dtype) {
@@ -168,7 +170,12 @@ static inline Tensor &mean_out(Tensor &result, const Tensor &self, int64_t dim,
       result, self.toType(result.type().scalarType()), dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
     int64_t numel = self.size(dim);
-    result.div_(numel);
+    if (numel > 0) {
+      result.div_(numel);
+    } else {
+      // NumPy equivalent
+      result.fill_(std::numeric_limits<double>::quiet_NaN());
+    }
   }
   return result;
 }
@@ -270,7 +277,12 @@ static inline Tensor mean(const Tensor &self, int64_t dim, bool keepdim, optiona
   Tensor result = at::native::sum(self, dim, keepdim);
   if (result.numel() > 0 && self.ndimension() > 0) {
     int64_t numel = self.size(dim);
-    result.div_(numel);
+    if (numel > 0) {
+      result.div_(numel);
+    } else {
+      // NumPy equivalent
+      result.fill_(std::numeric_limits<double>::quiet_NaN());
+    }
   }
   return result;
 }

@@ -789,30 +789,32 @@ class TestTorch(TestCase):
 
     @skipIfNoZeroSize
     def test_reduction_empty(self):
-        fn_to_identity = {
-            lambda *args, **kwargs: torch.max(*args, **kwargs): None,
-            lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs): None,
-            lambda *args, **kwargs: torch.argmax(*args, **kwargs): None,
-            lambda *args, **kwargs: torch.min(*args, **kwargs): None,
-            lambda *args, **kwargs: torch.argmin(*args, **kwargs): None,
-            lambda *args, **kwargs: torch.mode(*args, **kwargs): None,
-            lambda *args, **kwargs: torch.median(*args, **kwargs): None,
+        fns_to_test = [
+            # name, function, identity
+            ('max', lambda *args, **kwargs: torch.max(*args, **kwargs), None),
+            ('kthvalue', lambda *args, **kwargs: torch.kthvalue(*args, k=1, **kwargs), None),
+            ('argmax', lambda *args, **kwargs: torch.argmax(*args, **kwargs), None),
+            ('min', lambda *args, **kwargs: torch.min(*args, **kwargs), None),
+            ('argmin', lambda *args, **kwargs: torch.argmin(*args, **kwargs), None),
+            ('mode', lambda *args, **kwargs: torch.mode(*args, **kwargs), None),
+            ('median', lambda *args, **kwargs: torch.median(*args, **kwargs), None),
 
-            lambda *args, **kwargs: torch.prod(*args, **kwargs): 1,
-            lambda *args, **kwargs: torch.sum(*args, **kwargs): 0,
-            lambda *args, **kwargs: torch.norm(*args, p=2, **kwargs): 0,
-            lambda *args, **kwargs: torch.mean(*args, **kwargs): float('nan'),
-            lambda *args, **kwargs: torch.var(*args, **kwargs): float('nan'),
-            lambda *args, **kwargs: torch.std(*args, **kwargs): float('nan'),
-            lambda *args, **kwargs: torch.logsumexp(*args, **kwargs): float('-inf'),
-        }
+            ('prod', lambda *args, **kwargs: torch.prod(*args, **kwargs), 1),
+            ('sum', lambda *args, **kwargs: torch.sum(*args, **kwargs), 0),
+            ('norm', lambda *args, **kwargs: torch.norm(*args, p=2, **kwargs), 0),
+            ('mean', lambda *args, **kwargs: torch.mean(*args, **kwargs), float('nan')),
+            ('var', lambda *args, **kwargs: torch.var(*args, **kwargs), float('nan')),
+            ('std', lambda *args, **kwargs: torch.std(*args, **kwargs), float('nan')),
+            ('logsumexp', lambda *args, **kwargs: torch.logsumexp(*args, **kwargs), float('-inf')),
+        ]
 
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         shape = (2, 0, 4)
         for device in devices:
             x = torch.randn(shape, device=device)
 
-            for fn, identity in fn_to_identity.items():
+            for item in fns_to_test:
+                name, fn, identity = item
                 if identity is None:
                     ident_err = 'does not have an identity'
                     self.assertRaisesRegex(RuntimeError, ident_err, lambda: fn(x, dim=2))
@@ -822,15 +824,16 @@ class TestTorch(TestCase):
                 else:
                     self.assertEqual(torch.empty((2, 0), device=device), fn(x, dim=2))
                     self.assertEqual(torch.empty((2, 0, 1), device=device), fn(x, dim=2, keepdim=True))
-                    if not math.isnan(identity) and not math.isinf(identity):
-                        self.assertEqual(torch.full((2, 4), identity, device=device), fn(x, dim=1))
-                        self.assertEqual(torch.full((2, 1, 4), identity, device=device), fn(x, dim=1, keepdim=True))
-                        self.assertEqual(torch.full((), identity, device=device), fn(x))
-                    elif math.isinf(identity):
-                        # FIXME: assertEqual doesn't work with inf, -inf and two tensors.
-                        self.assertTrue(torch.allclose(torch.full((2, 4), identity, device=device), fn(x, dim=1)))
-                        self.assertTrue(torch.allclose(torch.full((2, 1, 4), identity, device=device),
-                                        fn(x, dim=1, keepdim=True)))
+                    # assertEqual doesn't work with inf, -inf, nan and two tensors.
+                    check = (torch.testing.assert_allclose if math.isnan(identity) or math.isinf(identity) else
+                             self.assertEqual)
+                    check(torch.full((2, 4), identity, device=device), fn(x, dim=1))
+                    check(torch.full((2, 1, 4), identity, device=device), fn(x, dim=1, keepdim=True))
+                    try:
+                        check(torch.full((), identity, device=device), fn(x))
+                    except TypeError as err:
+                        # ignore if there is no allreduce.
+                        self.assertTrue('required positional arguments: "dim"' in str(err))
 
             # any
             xb = x.to(torch.uint8)

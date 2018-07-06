@@ -4344,7 +4344,6 @@ accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
 
 accreal THTensor_(meanall)(THTensor *tensor)
 {
-  THArgCheck(tensor->_dim() > 0, 1, "empty Tensor");
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
@@ -4353,7 +4352,7 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
   TH_TENSOR_APPLY(real, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= THTensor_(nElement)(tensor) - (biased ? 0 : 1);
+  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (biased ? 0 : 1));
   return sum;
 }
 

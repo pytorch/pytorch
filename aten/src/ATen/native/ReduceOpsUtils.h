@@ -13,7 +13,7 @@ static Tensor &_dimreduce_setup(Tensor &result, const Tensor &self,
 }
 
 static bool _dimreduce_return_trivial(Tensor &result, const Tensor &self,
-                                      int64_t ident, int64_t dim, bool keepdim) {
+                                      Scalar ident, int64_t dim, bool keepdim) {
   if (self.numel() == 1 && self.ndimension() == 0) {
     result.resize_({});
     result.fill_(self);
