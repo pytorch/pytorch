@@ -430,6 +430,7 @@ THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
 
 void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
   at::detail::CUDAStream_setStreamOnDevice(device, stream);
+}
 
 cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
   return at::detail::CUDAStream_stream(
