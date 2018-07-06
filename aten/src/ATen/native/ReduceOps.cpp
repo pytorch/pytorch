@@ -610,7 +610,7 @@ Tensor any(const Tensor& self, int64_t dim, bool keepdim) {
 
 Tensor &any_out(Tensor &result, const Tensor &self, int64_t dim, bool keepdim) {
   AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
-           "all only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+           "any only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
   AT_CHECK(self.type().scalarType() == at::ScalarType::Byte, "any only supports torch.uint8 dtype");
   dim = maybe_wrap_dim(dim, self.dim());
   if (_dimreduce_return_trivial(result, self, 0, dim, keepdim)) {

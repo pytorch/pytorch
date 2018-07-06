@@ -2194,8 +2194,8 @@ class TestTorch(TestCase):
             self.assertEqual((0,), torch.bartlett_window(0, device=device).shape)
             self.assertEqual((0,), torch.hamming_window(0, device=device).shape)
             self.assertEqual((0,), torch.hann_window(0, device=device).shape)
-            self.assertEqual((1, 1, 0), torch.tensor([[[]]]).shape)
-            self.assertEqual((1, 1, 0), torch.as_tensor([[[]]]).shape)
+            self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
+            self.assertEqual((1, 1, 0), torch.as_tensor([[[]]], device=device).shape)
 
     def test_new_tensor(self):
         expected = torch.autograd.Variable(torch.ByteTensor([1, 1]))
@@ -6010,7 +6010,7 @@ class TestTorch(TestCase):
     def test_empty_reshape(self):
         x = torch.randn(0, 6)
         self.assertEqual((1, 0, 6, 1, 1), x.reshape(1, 0, 6, 1, 1).shape)
-        # should have been viewable.
+        # should be viewable -- i.e. data_ptr is the same.
         self.assertEqual(x.data_ptr(), x.reshape(1, 0, 6, 1, 1).data_ptr())
 
     def test_expand(self):

@@ -888,7 +888,6 @@
         - arg: bool keepdim
           default: "false"
 ]]
-
 [[
   name: _th_kthvalue
   backends:
