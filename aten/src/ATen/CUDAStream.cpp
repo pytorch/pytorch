@@ -97,7 +97,7 @@ namespace detail {
   CUDAStreamInternals* CUDAStream_getAndRetainCurrentStreamOnDevice(int64_t device) {
     initCUDAStreamsOnce();
     check_gpu(device);
-    auto* cur = current_streams[device];
+    auto cur = current_streams[device];
     AT_CHECK(CUDAStream_retain(cur));
     return cur;
   }
@@ -165,35 +165,19 @@ namespace detail {
   * CUDAStream functions
   */
 
-   // Copy constructor and copy-assignment operator
+   // Copy constructor
   CUDAStream::CUDAStream(const CUDAStream& other) {
     AT_CHECK(other.internals_);
     AT_CHECK(detail::CUDAStream_retain(other.internals_));
 
     internals_ = other.internals_;
   }
-  CUDAStream::CUDAStream& operator=(const CUDAStream& other) {
-    AT_CHECK(other.internals_);
-    AT_CHECK(detail::CUDAStream_retain(other.internals_));
 
-    auto* tmp = internals_;
-    internals_ = other.internals_;
-    detail::CUDAStream_free(tmp);
-
-    return *this;
-  }
-
-  // Move constructor and move-assignment operator
+  // Move constructor
   CUDAStream::CUDAStream(CUDAStream&& other) {
     AT_CHECK(other.internals_);
 
     std::swap(internals_, other.internals_);
   }
-  CUDAStream::CUDAStream& operator=(CUDAStream&& other) {
-    AT_CHECK(other.internals_);
-
-    std::swap(internals_, other.internals_);
-
-    return *this;
-  }
+  
 } // namespace at
