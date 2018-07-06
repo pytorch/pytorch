@@ -87,7 +87,7 @@ class RReLU(Module):
 
     `Empirical Evaluation of Rectified Activations in Convolutional Network`_.
 
-    The function is defined as.
+    The function is defined as:
 
     .. math::
         \text{RReLU}(x) =
@@ -225,9 +225,7 @@ class ReLU6(Hardtanh):
 
 
 class Sigmoid(Module):
-    r"""
-
-    Applies the element-wise function:
+    r"""Applies the element-wise function:
 
     .. math::
         \text{Sigmoid}(x) = \frac{1}{1 + \exp(-x)}

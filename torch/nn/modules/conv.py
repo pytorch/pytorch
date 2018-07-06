@@ -67,13 +67,13 @@ class Conv1d(_ConvNd):
     planes.
 
     In the simplest case, the output value of the layer with input size
-    :math:`(N, C_{in}, L)` and output :math:`(N, C_{out}, L_{out})` can be
+    :math:`(N, C_{\text{in}}, L)` and output :math:`(N, C_{\text{out}}, L_{\text{out}})` can be
     precisely described as:
 
     .. math::
-        \text{out}(N_i, C_{out_j}) = \text{bias}(C_{out_j}) +
-                                \sum_{k = 0}^{C_{in} - 1} \text{weight}(C_{out_j}, k)
-                                \star \text{input}(N_i, k)
+        \op{out}(N_i, C_{\text{out}_j}) = \op{bias}(C_{\text{out}_j}) +
+        \sum_{k = 0}^{C_{in} - 1} \op{weight}(C_{\text{out}_j}, k)
+        \star \op{input}(N_i, k)
 
     where :math:`\star` is the valid `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
@@ -118,7 +118,7 @@ class Conv1d(_ConvNd):
          In other words, for an input of size :math:`(N, C_{in}, L_{in})`, if you want a
          depthwise convolution with a depthwise multiplier `K`,
          then you use the constructor arguments
-         :math:`(in\_channels=C_{in}, out\_channels=C_{in} * K, ..., groups=C_{in})`
+         :math:`(\text{in\_channels}=C_{in}, \text{out\_channels}=C_{in} * K, ..., \text{groups}=C_{in})`
 
     Args:
         in_channels (int): Number of channels in the input image
@@ -184,12 +184,13 @@ class Conv2d(_ConvNd):
     planes.
 
     In the simplest case, the output value of the layer with input size
-    :math:`(N, C_{in}, H, W)` and output :math:`(N, C_{out}, H_{out}, W_{out})`
+    :math:`(N, C_{\text{in}}, H, W)` and output :math:`(N, C_{\text{out}}, H_{\text{out}}, W_{\text{out}})`
     can be precisely described as:
 
     .. math::
-        out(N_i, C_{out_j}) = bias(C_{out_j}) +
-        \sum_{k = 0}^{C_{in} - 1} weight(C_{out_j}, k) \star input(N_i, k)
+        \op{out}(N_i, C_{\text{out}_j}) = \op{bias}(C_{\text{out}_j}) +
+        \sum_{k = 0}^{C_{\text{in}} - 1} \op{weight}(C_{\text{out}_j}, k) \star \op{input}(N_i, k)
+
 
     where :math:`\star` is the valid 2D `cross-correlation`_ operator,
     :math:`N` is a batch size, :math:`C` denotes a number of channels,
@@ -217,7 +218,7 @@ class Conv2d(_ConvNd):
           concatenated.
         * At groups= :attr:`in_channels`, each input channel is convolved with
           its own set of filters, of size:
-          :math:`\left\lfloor\frac{out_channels}{in_channels}\right\rfloor`.
+          :math:`\left\lfloor\frac{\text{out\_channels}}{\text{in\_channels}}\right\rfloor`.
 
     The parameters :attr:`kernel_size`, :attr:`stride`, :attr:`padding`, :attr:`dilation` can either be:
 

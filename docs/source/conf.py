@@ -19,6 +19,8 @@
 #
 import os
 import sys
+
+# source code directory, relative to this file, for sphinx-autobuild
 sys.path.insert(0, os.path.abspath('../..'))
 
 import torch
@@ -58,6 +60,7 @@ extensions = [
 #
 
 katex_macros = r'''
+"\\op": "\\operatorname{{#1}}",
 "\\i": "\\mathrm{i}",
 "\\e": "\\mathrm{e}^{#1}",
 "\\w": "\\omega",
@@ -77,7 +80,8 @@ delimiters : [
    {left: "$$", right: "$$", display: true},
    {left: "\\(", right: "\\)", display: true},
    {left: "\\[", right: "\\]", display: true}
-]
+],
+strict : false
 '''
 
 napoleon_use_ivar = True

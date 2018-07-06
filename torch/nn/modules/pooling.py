@@ -314,10 +314,10 @@ class MaxUnpool2d(_MaxUnpoolNd):
         - Output: :math:`(N, C, H_{out}, W_{out})` where
 
           .. math::
-            H_{out} = (H_{in} - 1) * stride[0] - 2 * padding[0] + kernel\_size[0]
+            H_{out} = (H_{in} - 1) * \text{stride[0]} - 2 * \text{padding[0]} + \text{kernel\_size[0]}
 
           .. math::
-            W_{out} = (W_{in} - 1) * stride[1] - 2 * padding[1] + kernel\_size[1]
+            W_{out} = (W_{in} - 1) * \text{stride[1]} - 2 * \text{padding[1]} + \text{kernel\_size[1]}
 
           or as given by :attr:`output_size` in the call operator
 
