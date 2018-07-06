@@ -1241,6 +1241,11 @@ Vision functions
 
 .. autofunction:: pad
 
+:hidden:`interpolate`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: interpolate
+
 :hidden:`upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
