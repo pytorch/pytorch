@@ -27,6 +27,7 @@ from copy import deepcopy
 import random
 
 from torch.jit.frontend import NotSupportedError
+import torch.jit.batchop
 
 try:
     import torchvision
@@ -1171,16 +1172,6 @@ class TestBatched(TestCase):
         xs, batch = self.rand_batch(4, (True, 3), (False, 2))
         xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
         matmul_test(xs, batch, xs2, batch2)
-
-    # def test_batch_select(self): # TODO: scalarType as input
-    #     @torch.jit.batch(batch_size = 4)
-    #     def select(x, dim, index):
-    #         return x.select(dim, index)
-    #
-    #     xs, batch = self.rand_batch(4, (True, 3), (False, 2))
-    #     res_batch = select(batch, 1, 0)
-    #     res = [torch.select(xs[j], 1, 0) for j in range(4)]
-    #     self.assertEqual(res, res_batch.examples())
 
 
 class TestScript(JitTestCase):
