@@ -58,8 +58,37 @@ caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&);
 // are not reflected in changes to external_input or external_output.
 caffe2::NetDef convertToCaffe2Proto(nom::repr::NNModule&, const caffe2::NetDef& oldNet);
 
+// Use these functions instead of the registry directly.
 std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
     const caffe2::OperatorDef& op);
+
+caffe2::OperatorDef convertToOperatorDef(
+    const nom::repr::NNGraph::NodeRef& instrNode);
+
+class Converter {
+ public:
+  explicit Converter() {}
+  virtual std::unique_ptr<nom::repr::NeuralNetOperator>
+  convertToNeuralNetOperator(const OperatorDef&) = 0;
+  virtual OperatorDef convertToOperatorDef(const nom::repr::NeuralNetOperator*);
+  static std::map<std::string, caffe2::Argument> getArgumentsFromOperator(
+      caffe2::OperatorDef op);
+
+  virtual ~Converter() {}
+};
+
+CAFFE_DECLARE_REGISTRY(ConverterRegistry, Converter);
+#define REGISTER_CONVERTER(name, cls) \
+  CAFFE_REGISTER_CLASS(ConverterRegistry, name, cls)
+
+#define TRIVIAL_CONVERTER(opName)                                             \
+  class opName##Converter : public Converter {                                \
+    std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator( \
+        const OperatorDef& op) override {                                     \
+      return util::make_unique<repr::opName>();                               \
+    }                                                                         \
+    virtual ~opName##Converter() {}                                           \
+  };
 
 } // namespace caffe2
 
