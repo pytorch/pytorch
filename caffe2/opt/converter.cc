@@ -34,7 +34,7 @@ repr::NeuralNetOperator::NNLayout getLayout(std::map<std::string, caffe2::Argume
 
 std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) {
   // There are literally three ways to define shapes in Conv in Caffe2
-  std::vector<int> kernelShape;
+  std::vector<int> kernelShape = {0};
   if (argMap.count("kernel")) {
     CAFFE_ENFORCE(argMap["kernel"].has_i(), "Invalid kernel argument");
     int kernel = static_cast<int>(argMap["kernel"].i());
@@ -49,12 +49,16 @@ std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) 
     int kernelH = static_cast<int>(argMap["kernel_h"].i());
     int kernelW = static_cast<int>(argMap["kernel_w"].i());
     kernelShape = {kernelH, kernelW};
+  } else if (argMap.count("global_pooling")) {
+    assert(argMap["global_pooling"].has_i() && "Invalid kernel argument");
+    int global_pooling = static_cast<int>(argMap["global_pooling"].i());
+    assert(global_pooling == 1 && "Invalid kernel argument");
   }
   return kernelShape;
 }
 
 std::vector<int> getStrides(std::map<std::string, caffe2::Argument> argMap) {
-  std::vector<int> strides;
+  std::vector<int> strides = {1, 1};
   // TODO: include all the other ways of adding these args.
   // e.g. strides, stride_h, etc.
   if (argMap.count("stride")) {
@@ -66,7 +70,7 @@ std::vector<int> getStrides(std::map<std::string, caffe2::Argument> argMap) {
 }
 
 std::vector<int> getPads(std::map<std::string, caffe2::Argument> argMap) {
-  std::vector<int> pads;
+  std::vector<int> pads = {0, 0, 0, 0};
   if (argMap.count("pad")) {
     CAFFE_ENFORCE(argMap["pad"].has_i(), "Invalid pad argument");
     int pad = static_cast<int>(argMap["pad"].i());
@@ -76,13 +80,21 @@ std::vector<int> getPads(std::map<std::string, caffe2::Argument> argMap) {
 }
 
 std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
-  std::vector<int> dilations;
+  std::vector<int> dilations = {1, 1};
   if (argMap.count("dilation")) {
     CAFFE_ENFORCE(argMap["dilation"].has_i(), "Invalid dilation argument");
     int dilation = static_cast<int>(argMap["dilation"].i());
     dilations = {dilation, dilation};
   }
   return dilations;
+}
+
+int getGroup(std::map<std::string, caffe2::Argument> argMap) {
+  if (argMap.count("group")) {
+    assert(argMap["group"].has_i() && "Invalid group argument");
+    return static_cast<int>(argMap["group"].i());
+  }
+  return 1;
 }
 
 } // namespace
@@ -95,7 +107,7 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
 
   std::unique_ptr<repr::NeuralNetOperator> nnOp;
 
-  if (op.type() == "Conv") {
+  if (op.type() == "Conv" || op.type() == "ConvFusion") {
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::Conv>(kernelShape);
     auto c = dyn_cast<repr::Conv>(nnOp.get());
@@ -103,6 +115,7 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
     c->setStrides(getStrides(argMap));
     c->setPads(getPads(argMap));
     c->setDilations(getDilations(argMap));
+    c->setGroup(getGroup(argMap));
 
   }
 
@@ -169,6 +182,10 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
       int broadcast = static_cast<int>(argMap["broadcast"].i());
       c->setBroadcast(!!broadcast);
     }
+  }
+
+  if (op.type() == "FC") {
+    nnOp = util::make_unique<repr::FC>();
   }
 
   if (!nnOp) {

@@ -8,9 +8,7 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   USE_IDEEP_CONV_POOL_BASE_FUNCTIONS();
 
   IDEEPConvOp(const OperatorDef& operator_def, Workspace* ws)
-      : IDEEPConvPoolOpBase(operator_def, ws),
-        training_mode_(
-            OperatorBase::GetSingleArgument<int>("training_mode", 0)) {
+      : IDEEPConvPoolOpBase(operator_def, ws) {
     OPERATOR_NEEDS_FEATURE(
         pad_l() == pad_r() && pad_t() == pad_b(),
         "Uneven padding not supported.");
@@ -21,40 +19,22 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
     const auto& X = Input(INPUT);
     const auto& filter = Input(FILTER);
     auto* Y = Output(OUTPUT);
-    auto Y_dims = CalcOutputDims(X, filter.get_dim(0));
+    auto grouped = filter.is_grouped() ? 1 : 0;
+    auto Y_dims = CalcOutputDims(
+        X, grouped ? (filter.get_dim(0) * filter.get_dim(1)) : filter.get_dim(0));
 
     CAFFE_ENFORCE(4 == X.ndims());
-    CAFFE_ENFORCE(4 == filter.ndims());
-    CAFFE_ENFORCE(filter.get_dim(2) == kernel_h());
-    CAFFE_ENFORCE(filter.get_dim(3) == kernel_w());
+    CAFFE_ENFORCE(4 == filter.ndims() || (grouped && (group_ > 1)));
+    CAFFE_ENFORCE(filter.get_dim(2 + grouped) == kernel_h());
+    CAFFE_ENFORCE(filter.get_dim(3 + grouped) == kernel_w());
     CAFFE_ENFORCE(
-        X.get_dim(1) == filter.get_dim(1) * group_,
+        X.get_dim(1) == filter.get_dim(1 + grouped) * group_,
         "Convolution op: input channels does not match: # of input channels ",
         X.get_dim(1),
         " is not equal to kernel channels * group:",
-        filter.get_dim(1),
+        filter.get_dim(1 + grouped),
         "*",
         group_);
-
-    bool weights_changed =
-        (cached_weights_descriptor_ != filter.get_descriptor());
-    if (weights_changed && !training_mode_) {
-      cached_weights_descriptor_ = filter.get_descriptor();
-      auto filter_in = filter;
-      filter_in.make_group(group_);
-      auto expected_descriptor =
-          ideep::convolution_forward::expected_weights_descriptor(
-              filter_in.get_dims(),
-              filter_in.get_data_type(),
-              stride_,
-              pad_tl(),
-              pad_br(),
-              dilation_,
-              group_);
-      filter_.init<ideep::utils::allocator, ideep::convolution_forward>(
-          expected_descriptor);
-      ideep::reorder::compute(filter_in, filter_);
-    }
 
     // NB: actually, in the case when `group_ > 1`, IDEEP will create
     // an itermediate tensor for each run below. However, this tensor is merely
@@ -65,7 +45,7 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
     if (InputSize() > BIAS) {
       ideep::convolution_forward::compute(
           X,
-          training_mode_ ? filter : filter_,
+          filter,
           Input(BIAS),
           Y_dims,
           *Y,
@@ -77,7 +57,7 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
     } else {
       ideep::convolution_forward::compute(
           X,
-          training_mode_ ? filter : filter_,
+          filter,
           Y_dims,
           *Y,
           stride_,
@@ -91,12 +71,9 @@ class IDEEPConvOp final : public IDEEPConvPoolOpBase {
   }
 
  private:
+
   INPUT_TAGS(INPUT, FILTER, BIAS);
   OUTPUT_TAGS(OUTPUT);
-
-  bool training_mode_;
-  ideep::tensor filter_;
-  ideep::tensor::descriptor cached_weights_descriptor_;
 };
 
 class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
@@ -113,10 +90,6 @@ class IDEEPConvGradientOp final : public IDEEPConvPoolOpBase {
     CAFFE_ENFORCE(
         !(no_bias_ && OutputSize() == 3),
         "If bias is not present, you should not have 3 grad output.");
-    CAFFE_ENFORCE(
-        OperatorBase::GetSingleArgument<int>("training_mode", 0),
-        "In order to backward propagate weights correctly, "
-        "please set training_mode=1");
   }
   virtual ~IDEEPConvGradientOp() {}
 
