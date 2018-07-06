@@ -24,7 +24,7 @@ static FunctionSchema defaultSchemaFor(Method& method) {
   for(size_t i = 0; i < g.outputs().size(); ++i) {
     returns.push_back({"", DynamicType::get()});
   }
-  return { "", std::move(args), std::move(returns) };
+  return { method.name(), std::move(args), std::move(returns) };
 }
 
 std::vector<Value*> Method::emit_call_to(SourceRange loc, Method & callee, ArrayRef<NamedValue> args, ArrayRef<NamedValue> kwargs) {

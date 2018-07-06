@@ -121,8 +121,10 @@ struct SchemaParser {
           return as_tensor(static_cast<int64_t>(at::Device::Type::CPU));
         } else if("strided" == text) {
           return as_tensor(static_cast<int64_t>(at::kStrided));
+        } else if("ElementwiseMean" == text) {
+          return as_tensor(static_cast<int64_t>(Reduction::ElementwiseMean));
         } else {
-          throw ErrorReport() << "invalid numeric default value";
+          throw ErrorReport(L.cur().range) << "invalid numeric default value";
         }
       } default:
         std::string n;
@@ -228,11 +230,7 @@ struct OperatorRegistry  {
   void registerOperator(Operator&& op){
     std::lock_guard<std::mutex> guard(lock);
     Symbol sym = Symbol::fromQualString(op.schema.name);
-    auto it = operators.find(sym);
-    if(it == operators.end()) {
-      it = operators.insert({sym, {}}).first;
-    }
-    it->second.push_back(std::make_shared<Operator>(std::move(op)));
+    operators[sym].push_back(std::make_shared<Operator>(std::move(op)));
   }
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
     std::lock_guard<std::mutex> guard(lock);
@@ -255,7 +253,7 @@ void registerOperator(Operator&& op) {
   getRegsitry().registerOperator(std::move(op));
 }
 
-const std::vector<std::shared_ptr<Operator>>& getOperatorsFor(Symbol name) {
+const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegsitry().getOperators(name);
 }
 
@@ -351,7 +349,7 @@ bool Operator::matchesNode(Node* node) const {
 }
 
 std::shared_ptr<Operator> findOperatorFor(Node* node) {
-  const auto& candidates = getOperatorsFor(node->kind());
+  const auto& candidates = getAllOperatorsFor(node->kind());
   for(const auto& candidate : candidates) {
     if(candidate->matchesNode(node)) {
       return candidate;
@@ -375,7 +373,7 @@ const Operator& getOperatorFor(Node* node) {
     er << *node->inputs()[i]->type();
   }
   er << "\ncandidates were:\n";
-  const auto& candidates = getOperatorsFor(node->kind());
+  const auto& candidates = getAllOperatorsFor(node->kind());
   for(auto & candidate : candidates) {
     er << "  " << candidate->schema << "\n";
   }

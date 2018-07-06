@@ -84,7 +84,7 @@ namespace script {
   _(TK_STARRED, "starred", "")                   \
   _(TK_UNARY_MINUS, "unary minus", "")           \
   _(TK_POW, "pow operator", "**")                \
-  _(TK_ARROW, "arrow", "->")                \
+  _(TK_ARROW, "arrow", "->")                     \
 
 static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.?";
 

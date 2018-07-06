@@ -23,7 +23,6 @@
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/batched/BatchTensor.h"
-#include "torch/csrc/jit/python_interpreter.h"
 #include "torch/csrc/jit/pybind_utils.h"
 
 namespace torch  { namespace jit {
@@ -205,13 +204,7 @@ void initJITBindings(PyObject *module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
-<<<<<<< c1f102550fed195de80a01152447e0cbddcd12e1
   initBatchTensorBindings(module);
-  registerPythonInterpreterOps();
-||||||| merged common ancestors
-  registerPythonInterpreterOps();
-=======
->>>>>>> This commit unifies aten_dispatch and aten_schema into a single Operator object that both contains schema and implementation information. In the future we can use this object to also contain functionality like shape prop and autodiff needed by all operators. Operators are registered globally, and dispatch logic uses the schema information to figure out which variant to use. Descriptor keys, a frequent source of inscrutable debug errors, have been removed.
 }
 
 }}

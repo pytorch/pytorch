@@ -594,9 +594,9 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   // otherwise it will return nullptr if the builtin is not found.
   bool required) {
 
-  auto variants = getOperatorsFor(Symbol::aten(name));
+  const auto& variants = getAllOperatorsFor(Symbol::aten(name));
   std::stringstream failure_messages;
-  for (auto op : variants) {
+  for (const std::shared_ptr<Operator>& op : variants) {
     if (auto result = tryEmitBuiltin(
             op->schema, failure_messages, loc, method, name, inputs, attributes)) {
       return result;

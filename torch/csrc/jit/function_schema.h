@@ -15,13 +15,19 @@ struct Argument {
       at::optional<at::Tensor> default_value = at::nullopt,
       bool kwarg_only = true)
       : name(std::move(name)),
-        type(type),
+        type(type? type : DynamicType::get()),
         N(N),
         default_value(default_value),
         kwarg_only(kwarg_only) {}
   std::string name;
   TypePtr type;
-  at::optional<int32_t> N; // a fixed length for list types, at::nullopt means the list is dynamically sized
+
+  // for list types, an optional statically known length for the list
+  // e.g. for int[3]: type = ListType::ofInts(), N = 3
+  // If present, this will allow scalars to be broadcast to this length to
+  // become a list.
+  at::optional<int32_t> N;
+
   // encoded using as_tensor, use tensor_as<T> to get value for attribute
   at::optional<at::Tensor> default_value;
   // is this only specifyable as a keyword argument?

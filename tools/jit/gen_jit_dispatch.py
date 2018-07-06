@@ -11,7 +11,7 @@ from collections import OrderedDict
 # float is the largest float (double) we don't have the others because they are never held in tensors
 # Type = Scalar # primitive numbers
 #      | Tensor # any tensor, as defined by at::Tensor
-#      | Type[] # a dynamically sizes list of a type
+#      | Type[] # a dynamically sized list[ of a type
 #      | Scalar[N] # a homogenous fixed size scalar list, single scalars can expand to this list
 #      | (Type1, Type2, ...) # a heterogenous tuple
 #      | Layout | ScalarType | Device | Generator # special singleton types for built-in concepts in tensor lib
@@ -294,7 +294,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         all_scalars = all(r['dynamic_type'] != 'TensorList' for r in returns)
 
         constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                             call=[call],
+                                             call=[call],  # in an array so that substitute handles newlines correctly
                                              kw_assignments=kw_assignments,
                                              pos_assignments=pos_assignments,
                                              num_dynamic_inputs=num_dynamic_inputs)
@@ -315,6 +315,9 @@ def gen_jit_dispatch(declarations, out, template_path):
         only_tensors_are_inputs = tuple(is_tensor_arg(arg) for arg in arguments)
 
         variants = [emit_decl_variant(decl, all_real_arguments_are_inputs, has_tensorlist)]
+        # in some cases there are no inputs that are possibly attributes, so the
+        # variants are actually the same. If so avoid generating both to save compilation
+        # time.
         if all_real_arguments_are_inputs != only_tensors_are_inputs:
             variants += [',', emit_decl_variant(decl, only_tensors_are_inputs, has_tensorlist)]
 
@@ -425,6 +428,7 @@ def signature(decl):
                 .replace('true', 'True') \
                 .replace('false', 'False') \
                 .replace('nullptr', 'None') \
+                .replace('Reduction::ElementwiseMean', 'ElementwiseMean') \
                 .replace('{}', 'None' if is_tensor_arg(arg) else '[]')
 
             default = default_map.get(default, default)
