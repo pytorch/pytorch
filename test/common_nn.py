@@ -954,7 +954,7 @@ class ModuleTest(TestBase):
         # Always making only the last dimension noncontiguous is easy to hide
         # bugs because .view(-1) will still work. So try to find a dim with size
         # > 1 and make that non-contiguous, i.e., stack + select on the
-        # dimension after that.
+        # dimension directly after that.
         dim = ndim
         for d in range(ndim):
             if tensor.size(d) > 1:
