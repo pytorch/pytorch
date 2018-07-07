@@ -2235,12 +2235,16 @@ def assert_int_or_pair(arg, arg_name, message):
 
 
 def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
-    r"""Creates array of convolution patches from :math:`(N,C,H,W)`-tensor
+    r"""Extracts sliding local blocks from an batched input tensor.
+
+    .. warning::
+        Currently, only 4-D input tensors (batched image-like tensors) are
+        supported.
 
     See :class:`torch.nn.Unfold` for details
     """
 
-    if input is not None and input.dim() == 4:
+    if input.dim() == 4:
         msg = '{} must be int or 2-tuple for 4D input'
         assert_int_or_pair(kernel_size, 'kernel_size', msg)
         assert_int_or_pair(dilation, 'dilation', msg)
@@ -2250,15 +2254,20 @@ def unfold(input, kernel_size, dilation=1, padding=0, stride=1):
         return Im2Col.apply(input, _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
     else:
-        raise NotImplementedError("Input Error: Only 4D input Tensors supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only 4D input Tensors are supported (got {}D)".format(input.dim()))
 
 
 def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
-    r"""Combines array of convolution patches to :math:`(N,C,H,W)`-tensor
+    r"""Combines an array of sliding local blocks into a large containing
+    tensor.
+
+    .. warning::
+        Currently, only 4-D output tensors (batched image-like tensors) are
+        supported.
 
     See :class:`torch.nn.Fold` for details
     """
-    if input is not None and input.dim() == 3:
+    if input.dim() == 3:
         msg = '{} must be int or 2-tuple for 3D input'
         assert_int_or_pair(output_size, 'output_size', msg)
         assert_int_or_pair(kernel_size, 'kernel_size', msg)
@@ -2269,4 +2278,4 @@ def fold(input, output_size, kernel_size, dilation=1, padding=0, stride=1):
         return Col2Im.apply(input, _pair(output_size), _pair(kernel_size),
                             _pair(dilation), _pair(padding), _pair(stride))
     else:
-        raise NotImplementedError("Input Error: Only 3D input Tensors supported (got {}D)".format(input.dim()))
+        raise NotImplementedError("Input Error: Only 3D input Tensors are supported (got {}D)".format(input.dim()))
