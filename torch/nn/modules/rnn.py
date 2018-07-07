@@ -113,9 +113,9 @@ class RNNBase(Module):
         return ret
 
     def reset_parameters(self):
-        stdv = 1.0 / math.sqrt(self.hidden_size)
+        size = math.sqrt(3.0 / self.hidden_size)
         for weight in self.parameters():
-            weight.data.uniform_(-stdv, stdv)
+            weight.data.uniform_(-size, size)
 
     def check_forward_args(self, input, hidden, batch_sizes):
         is_input_packed = batch_sizes is not None
