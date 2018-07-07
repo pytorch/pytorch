@@ -2040,6 +2040,17 @@ class TestAutograd(TestCase):
         run_test((10, 10), torch.zeros(10, 10))
         run_test((10,), 0)
 
+    def test_std_result_zero(self):
+        def run_test(input_size, val):
+            input = torch.full(input_size, val).requires_grad_()
+            input.std().backward()
+            self.assertEqual((input.grad == torch.full(input_size, float('inf'))).all().item(), 1)
+
+        run_test((10,), 0)
+        run_test((10,), 0.5)
+        run_test((10, 10), 0)
+        run_test((10, 10), 0.5)
+
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
         # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
