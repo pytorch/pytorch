@@ -255,35 +255,9 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  if(BUILD_ATEN)
-    get_directory_property(MY_DEFINITIONS COMPILE_DEFINITIONS)
-    if(MY_DEFINITIONS)
-      foreach(_item ${MY_DEFINITIONS})
-        LIST(APPEND HIP_HCC_FLAGS "-D${_item}")
-      endforeach()
-    endif()
-    hip_include_directories(${Caffe2_HIP_INCLUDES})
-  endif()
-
-  # Include all the necessary cuh files.
-  file(GLOB_RECURSE ATen_CUDA_HEADER_SRCS "${CMAKE_CURRENT_LIST_DIR}/../aten/src/*.cuh")
-
-  # Will uncomment the line below after all *.cuh files can compile standalone.
-  # SET(Caffe2_HIP_SRCS ${ATen_CUDA_HEADER_SRCS} ${Caffe2_HIP_SRCS})
-
   # Necessary in order to build all the source code
-  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-
-  # Strip out all *.h files from the source list when building with HCC.
-  if(BUILD_ATEN)
-    foreach(hip_source ${Caffe2_HIP_SRCS})
-      get_filename_component(extension ${hip_source} EXT)
-      if (${extension} MATCHES "\\.h$")
-        # Set to 0 to disable device compilation of regular header files.
-        set_source_files_properties(${hip_source} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 0)
-      endif()
-    endforeach()
+  if(BUILD_CAFFE2)
+    set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   endif()
 
   # Add the HIP library
