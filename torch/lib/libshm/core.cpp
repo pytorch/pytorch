@@ -124,12 +124,7 @@ void * libshm_alloc(void *_ctx, ptrdiff_t size) {
   } catch(std::exception &e) {
     THError(e.what());
   }
-  return THRefcountedMapAllocator.malloc(ctx->th_context, size);
-}
-
-void * libshm_realloc(void *_ctx, void *data, ptrdiff_t size) {
-  THError("cannot realloc shared memory");
-  return NULL;
+  return getTHRefcountedMapAllocator()->allocate(ctx->th_context, size);
 }
 
 void libshm_free(void *_ctx, void *data) {
@@ -137,13 +132,21 @@ void libshm_free(void *_ctx, void *data) {
   AllocInfo info = get_alloc_info(ctx);
   info.free = true;
   ClientSocket &socket = get_manager_socket(ctx->manager_handle);
-  THRefcountedMapAllocator.free(ctx->th_context, data);
+  getTHRefcountedMapAllocator()->deallocate(ctx->th_context, data);
   libshm_context_free(ctx);
   socket.register_deallocation(info);
 }
 
-THAllocator THManagedSharedAllocator = {
-  libshm_alloc,
-  libshm_realloc,
-  libshm_free,
+struct THManagedSharedAllocator : public at::Allocator {
+  void* allocate(void* ctx, size_t size) const override {
+    return libshm_alloc(ctx, size);
+  }
+  void deallocate(void* ctx, void* data) const override {
+    return libshm_free(ctx, data);
+  }
 };
+
+static THManagedSharedAllocator th_managed_shared_allocator;
+at::Allocator* getTHManagedSharedAllocator() {
+  return &th_managed_shared_allocator;
+}

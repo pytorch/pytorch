@@ -19,67 +19,10 @@ ${Storage}::${Storage}(Context* context, THStorage* storage):
 ${Storage}::${Storage}(Context* context, size_t storage_size)
   : storage(${THStorage}_newWithSize(${state,} storage_size)), context(context) {}
 
-#if ${isCUDA}
-static cudaError_t call_deleter(void * ctx, void * data) {
-  auto fnptr = (std::function<void(void*)>*) ctx;
-  (*fnptr)(data);
-  delete fnptr;
-  return cudaSuccess;
-}
-static THCDeviceAllocator storage_deleter = {
-  nullptr,
-  nullptr,
-  call_deleter,
-  nullptr,
-  nullptr,
-};
-static cudaError_t wrapped_alloc(void * ctx, void** result, size_t size, cudaStream_t stream) {
-  auto ac = static_cast<Allocator*>(ctx);
-  *result = ac->allocate(size);
-  return cudaSuccess;
-}
-static cudaError_t wrapped_free(void * ctx, void * data) {
-  auto ac = static_cast<Allocator*>(ctx);
-  ac->deallocate(data);
-  return cudaSuccess;
-}
-static THCDeviceAllocator wrapped_allocator = {
-  wrapped_alloc,
-  nullptr,
-  wrapped_free,
-  nullptr,
-  nullptr,
-};
-#else
-static void call_deleter(void * ctx, void * data) {
-  auto fnptr = (std::function<void(void*)>*) ctx;
-  (*fnptr)(data);
-  delete fnptr;
-}
-static THAllocator storage_deleter = {
-  nullptr,
-  nullptr,
-  call_deleter,
-};
-static void* wrapped_alloc(void * ctx, ptrdiff_t size) {
-  auto ac = static_cast<Allocator*>(ctx);
-  return ac->allocate(size);
-}
-static void wrapped_free(void * ctx, void * data) {
-  auto ac = static_cast<Allocator*>(ctx);
-  ac->deallocate(data);
-}
-static THAllocator wrapped_allocator = {
-  wrapped_alloc,
-  nullptr,
-  wrapped_free,
-};
-#endif
-
 ${Storage}::${Storage}(Context* context, size_t size, Allocator* allocator)
   : storage(nullptr),
     context(context) {
-  storage = ${THStorage}_newWithAllocator(${state,} size, &wrapped_allocator, allocator);
+  storage = ${THStorage}_newWithAllocator(${state,} size, allocator, nullptr);
   ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
 }
 
@@ -87,7 +30,9 @@ ${Storage}::${Storage}(Context* context,
   void * data, size_t size, const std::function<void(void*)> & deleter)
   : storage(${THStorage}_newWithDataAndAllocator(${state,}
      static_cast<${THScalarType}*>(data), size,
-     &storage_deleter,
+     getStorageDeleterAllocator(),
+     // NB: The memory safety of this critically relies on us not "reallocating"
+     // (which we have disabled below).
      new std::function<void(void*)>(deleter)
     )),
     context(context) {

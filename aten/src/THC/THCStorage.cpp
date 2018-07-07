@@ -18,13 +18,13 @@ THCStorage* THCStorage_newWithSize(THCState *state, at::ScalarType scalar_type, 
   return THCStorage_newWithAllocator(
     state, scalar_type, size,
     state->cudaDeviceAllocator,
-    state->cudaDeviceAllocator->state);
+    state->cudaDeviceAllocatorState);
 }
 
 THCStorage* THCStorage_newWithAllocator(THCState *state,
                                         at::ScalarType scalar_type,
                                         ptrdiff_t size,
-                                        THCDeviceAllocator* allocator,
+                                        at::Allocator* allocator,
                                         void* allocatorContext)
 {
   THArgCheck(size >= 0, 2, "invalid size");
@@ -34,10 +34,12 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
   new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1);
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->backend = at::kCUDA;
   storage->scalar_type = scalar_type;
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocatorVoidPtr = allocator;
+  storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
   storage->size = size;
   storage->device = device;
@@ -45,40 +47,37 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   if(size > 0)
   {
     // update heap *before* attempting malloc, to free space for the malloc
-    cudaError_t err =
-      (*allocator->malloc)(allocatorContext,
-                           (void**)&(storage->data_ptr),
-                           size * at::elementSize(scalar_type),
-                           THCState_getCurrentStreamOnDevice(state, device));
-    if(err != cudaSuccess){
+    try {
+      storage->data_ptr = allocator->allocate(allocatorContext,
+                           size * at::elementSize(scalar_type));
+    } catch(...) {
       free(storage);
+      throw;
     }
-    THCudaCheck(err);
   } else {
     storage->data_ptr = NULL;
   }
   return storage;
 }
 
-void THCStorage_free(THCState *state, THCStorage *self)
+void THCStorage_free(THCState *state, THCStorage *storage)
 {
-  AT_ASSERT(self->backend == at::kCUDA);
+  AT_ASSERT(storage->backend == at::kCUDA);
 
-  if(!(self->flag & TH_STORAGE_REFCOUNTED))
-    return;
-
-  if (--self->refcount == 0)
-  {
-    if(self->flag & TH_STORAGE_FREEMEM) {
-      auto* thc_device_allocator = static_cast<THCDeviceAllocator*>(self->allocatorVoidPtr);
-      THCudaCheck(
-        (*thc_device_allocator->free)(self->allocatorContext, self->data_ptr));
+  if ((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0)) {
+    if (--storage->refcount == 0) {
+      if (storage->finalizer) {
+        (*storage->finalizer)();
+      }
+      storage->finalizer.~unique_ptr<THFinalizer>();
+      if (storage->flag & TH_STORAGE_FREEMEM) {
+        storage->allocator->deallocate(storage->allocatorContext, storage->data_ptr);
+      }
+      if (storage->flag & TH_STORAGE_VIEW) {
+        THCStorage_free(state, storage->view);
+      }
+      THStorage_weakFree(storage);
     }
-    if(self->flag & TH_STORAGE_VIEW) {
-      THCStorage_free(state, self->view);
-    }
-    self->refcount.~atomic<int>();
-    THFree(self);
   }
 }
 
@@ -87,7 +86,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
   AT_ASSERT(self->backend == at::kCUDA);
 
   THArgCheck(size >= 0, 2, "invalid size");
-  THAssert(self->allocatorVoidPtr != NULL);
+  THAssert(self->allocator != nullptr);
   int device;
   THCudaCheck(cudaGetDevice(&device));
 
@@ -96,28 +95,10 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
   size_t elementSize = at::elementSize(self->scalar_type);
 
-  auto* thc_device_allocator = static_cast<THCDeviceAllocator*>(self->allocatorVoidPtr);
-
-  if (thc_device_allocator->realloc) {
-    void * data_ptr = self->data_ptr;
-    cudaError_t err = (*thc_device_allocator->realloc)(
-      self->allocatorContext,
-      (void**)&(data_ptr),
-      self->size * elementSize,
-      size * elementSize, THCState_getCurrentStreamOnDevice(state, device));
-    if (err != cudaSuccess) {
-      THCudaCheck(err);
-    }
-    self->size = size;
-    self->device = device;
-    return;
-  }
-
   if(size == 0)
   {
     if(self->flag & TH_STORAGE_FREEMEM) {
-      THCudaCheck(
-        (*thc_device_allocator->free)(self->allocatorContext, self->data_ptr));
+      self->allocator->deallocate(self->allocatorContext, self->data_ptr);
     }
     self->data_ptr = NULL;
     self->size = 0;
@@ -125,13 +106,8 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
   }
   else
   {
-    void *data = NULL;
-    cudaError_t err =
-      (*thc_device_allocator->malloc)(self->allocatorContext,
-                                 (void**)&(data),
-                                 size * elementSize,
-                                 THCState_getCurrentStreamOnDevice(state, device));
-    THCudaCheck(err);
+    void *data =
+      self->allocator->allocate(self->allocatorContext, size * elementSize);
 
     if (self->data_ptr) {
       // Enable p2p access when the memcpy is across devices
@@ -143,8 +119,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
                                   cudaMemcpyDeviceToDevice,
                                   THCState_getCurrentStream(state)));
       if(self->flag & TH_STORAGE_FREEMEM) {
-        THCudaCheck(
-          (*thc_device_allocator->free)(self->allocatorContext, self->data_ptr));
+        self->allocator->deallocate(self->allocatorContext, self->data_ptr);
       }
     }
 
@@ -162,7 +137,7 @@ THCStorage* THCStorage_newWithData(THCState *state, at::ScalarType scalar_type, 
 {
   return THCStorage_newWithDataAndAllocator(state, scalar_type, data, size,
                                             state->cudaDeviceAllocator,
-                                            state->cudaDeviceAllocator->state);
+                                            state->cudaDeviceAllocatorState);
 }
 
 THCStorage* THCStorage_newWithDataAndAllocator(
@@ -174,9 +149,11 @@ THCStorage* THCStorage_newWithDataAndAllocator(
   storage->scalar_type = scalar_type;
   storage->data_ptr = data;
   storage->size = size;
-  storage->refcount = 1;
+  new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1);
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocatorVoidPtr = allocator;
+  storage->allocator = allocator;
   storage->allocatorContext = allocatorContext;
   int device;
   if (data) {
