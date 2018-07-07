@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
+#include "ATen/Utils.h"
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/assertions.h"
@@ -195,7 +196,8 @@ struct Attributes {
   }
 
 private:
-  Derived* This() {
+  // UBSAN error: https://github.com/pytorch/pytorch/issues/9055
+  Derived* This() __ubsan_ignore_vptr__ {
     return static_cast<Derived*>(this);
   }
   template<typename T>

@@ -9,8 +9,10 @@ from torch.distributions.transforms import ExpTransform
 
 class ExpRelaxedCategorical(Distribution):
     r"""
-    Creates a ExpRelaxedCategorical parameterized by `probs` and `temperature`.
-    Returns the log of a point in the simplex. Based on the interface to OneHotCategorical.
+    Creates a ExpRelaxedCategorical parameterized by
+    :attr:`temperature`, and either :attr:`probs` or :attr:`logits`.
+    Returns the log of a point in the simplex. Based on the interface to
+    :class:`OneHotCategorical`.
 
     Implementation based on [1].
 
@@ -74,9 +76,10 @@ class ExpRelaxedCategorical(Distribution):
 
 class RelaxedOneHotCategorical(TransformedDistribution):
     r"""
-    Creates a RelaxedOneHotCategorical distribution parametrized by `temperature` and either `probs` or `logits`.
-    This is a relaxed version of the `OneHotCategorical` distribution, so its
-    values are on simplex, and has reparametrizable samples.
+    Creates a RelaxedOneHotCategorical distribution parametrized by
+    :attr:`temperature`, and either :attr:`probs` or :attr:`logits`.
+    This is a relaxed version of the :class:`OneHotCategorical` distribution, so
+    its samples are on simplex, and are reparametrizable.
 
     Example::
 

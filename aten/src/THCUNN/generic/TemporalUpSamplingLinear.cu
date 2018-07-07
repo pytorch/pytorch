@@ -40,7 +40,7 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
        (state, input, NULL,
         nbatch, channels,
         inputWidth, outputWidth);
-  input = THCTensor_(newContiguous)(state, input);
+
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resize3d)(state, output,
                        THCTensor_(size)(state, input, 0),
@@ -58,7 +58,6 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
    0 , stream>>>(num_kernels, rwidth, align_corners, idata, odata);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, input);
 }
 
 
@@ -76,7 +75,6 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
        (state, NULL, gradOutput,
         nbatch, nchannels,
         inputWidth, outputWidth);
-  gradInput = THCTensor_(newContiguous)(state, gradInput);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THCTensor_(resize3d)(state, gradInput, nbatch, nchannels, inputWidth);
@@ -91,7 +89,6 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
   caffe_gpu_interp2_kernel_backward<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),
   num_threads, 0, stream>>>(num_kernels, rwidth, align_corners, data1, data2);
   THCudaCheck(cudaGetLastError());
-  THCTensor_(free)(state, gradInput);
   THCTensor_(free)(state, gradOutput);
 }
 

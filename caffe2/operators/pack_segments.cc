@@ -32,6 +32,14 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     max_length = std::max(max_length, l[i]);
     total_length += l[i];
   }
+  if (max_length_ != -1) {
+    // Final dim must be greater than the max_length
+    CAFFE_ENFORCE_GE(
+        max_length_,
+        max_length,
+        "Pre-defined max_length should be greater than the real max_length");
+    max_length = max_length_;
+  }
 
   // Total lengths must be the same as data.dims(0)
   CAFFE_ENFORCE_EQ(

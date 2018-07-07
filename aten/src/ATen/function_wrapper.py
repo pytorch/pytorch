@@ -234,6 +234,11 @@ DYNAMIC_TYPE = {
     'long': 'int64_t',
 }
 
+NATIVE_DYNAMIC_TYPE = {
+    'Tensor &': 'Tensor',
+    'const Tensor &': 'Tensor',
+}
+
 TYPE_RETURN = {
     'THTensor*': 'Tensor',
     'THIndexTensor*': 'Tensor',
@@ -871,13 +876,13 @@ def create_generic(top_env, declarations):
 
         # not clear we need dynamic_type translation as we can specify the correct type
         # directly in native functions
-        def add_type_as_dynamic_type(argument, option):
+        def add_dynamic_type(argument, option):
             # type: (AtFormal, FunctionOption) -> AtFormal
-            argument['dynamic_type'] = argument['type']
+            argument['dynamic_type'] = NATIVE_DYNAMIC_TYPE.get(argument['type'], argument['type'])
             return argument
 
         result = pos_args + kwd_args
-        result = [add_type_as_dynamic_type(argument, option) for argument in result]
+        result = [add_dynamic_type(argument, option) for argument in result]
 
         # ensure we get reference-type formals when appropriate
         def native_translate_formals(argument, option):
@@ -928,7 +933,7 @@ def create_generic(top_env, declarations):
 
             rtype = {
                 'type': actual_return_type,
-                'dynamic_type': t,
+                'dynamic_type': NATIVE_DYNAMIC_TYPE.get(t, t),
             }  # type: ReturnType
             if name is not None:
                 rtype['name'] = name

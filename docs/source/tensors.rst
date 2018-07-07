@@ -307,6 +307,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: ormqr
    .. automethod:: permute
    .. automethod:: pin_memory
+   .. automethod:: pinverse
    .. automethod:: potrf
    .. automethod:: potri
    .. automethod:: potrs

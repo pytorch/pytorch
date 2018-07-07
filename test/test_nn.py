@@ -100,7 +100,7 @@ class PackedSequenceTest(TestCase):
         """Create ordered list of random sequences"""
         seqs = [tensor_type(random.randint(1, self.max_length))
                 for _ in range(self.batch_size)]
-        seqs = [s.random_() for s in seqs]
+        seqs = [s.random_(-128, 128) for s in seqs]
         ordered = sorted(seqs, key=len, reverse=True)
         return ordered
 
@@ -510,8 +510,6 @@ class TestNN(NNTestCase):
         params = []
         d_params = []
         for p in module.parameters():
-            if p.grad is None:
-                p._grad = torch.zeros_like(p)
             params.append(p)
             d_params.append(p.grad)
         return params, d_params
@@ -4858,13 +4856,16 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='linear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, requires_grad=True)
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), (input,))
+                input = torch.randn(1, 1, 2, requires_grad=True)
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
@@ -4891,13 +4892,16 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='bilinear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2, 2)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, 2, requires_grad=True)
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
+                input = torch.randn(1, 1, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
@@ -4920,17 +4924,20 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2, 2, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2, 2, 2)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-            self.assertEqual(
-                F.upsample(input, (4, 4, 4), **kwargs),
-                F.upsample(input, scale_factor=2, **kwargs))
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
-            gradgradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
+                input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
+                self.assertEqual(
+                    F.upsample(input, (out_size, out_size, out_size), **kwargs),
+                    F.upsample(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
@@ -4939,6 +4946,50 @@ class TestNN(NNTestCase):
         out_t_9 = m(in_t_9)
         out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
+
+    def test_interpolate(self):
+        def _test_interpolate_helper(in_t, scale_factor, layer):
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                dim = len(in_t.shape) - 2
+                out_shape = [1, 1] + [out_size] * dim
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(out_shape), out_t)
+
+                self.assertEqual(
+                    F.interpolate(in_t, (out_size,) * dim, **kwargs),
+                    F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+
+        def _make_input(dim):
+            size = [1, 1]
+            size += [2] * dim
+            return torch.ones(size, requires_grad=True)
+
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        for device in device_list:
+            for scale_factor in [0.5, 1.5, 2]:
+                for mode in ['nearest', 'area']:
+                    kwargs = dict(mode=mode)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    for input in [_make_input(1), _make_input(2), _make_input(3)]:
+                        _test_interpolate_helper(input, scale_factor, m)
+
+                for align_corners in [True, False]:
+                    kwargs = dict(mode='linear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(1), scale_factor, m)
+
+                    kwargs = dict(mode='bilinear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(2), scale_factor, m)
+
+                    kwargs = dict(mode='trilinear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(3), scale_factor, m)
 
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
@@ -7136,16 +7187,33 @@ new_module_tests = [
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
-        input_fn=lambda: torch.randperm(2).repeat(1, 2),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
     ),
     dict(
         module_name='EmbeddingBag',
         constructor_args=(4, 3),
-        input_fn=lambda:torch.randperm(2).repeat(1, 2),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
+        desc='mean',
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3, None, 2, False, 'sum'),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+        jacobian_input=False,
+        check_gradgrad=False,
+        desc='sum',
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3, None, 2, False, 'max'),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+        jacobian_input=False,
+        check_gradgrad=False,
+        desc='max',
     ),
     dict(
         fullname='EmbeddingBag_sparse',
