@@ -7311,6 +7311,20 @@ class TestTorch(TestCase):
                     self.assertEqual(tensor[i], array[i])
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
+    def test_ctor_with_numpy_scalar_ctor(self):
+        dtypes = [
+            np.double,
+            np.float,
+            np.float16,
+            np.int64,
+            np.int32,
+            np.int16,
+            np.uint8
+        ]
+        for dtype in dtypes:
+            self.assertEqual(dtype(42), torch.tensor(dtype(42)).item())
+
+    @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_numpy_index(self):
         i = np.int32([0, 1, 2])
         x = torch.randn(5, 5)
