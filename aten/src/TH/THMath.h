@@ -648,6 +648,12 @@ static inline float TH_i1f(float x){
 }
 
 /*
+ * The following function comes with the following copyright notice.
+ * It has been released under the BSD license.
+ *
+ * Cephes Math Library Release 2.8:  June, 2000
+ * Copyright 1984, 1987, 1992, 2000 by Stephen L. Moshier
+ *
  * Parts of the code are copyright:
  *
  *     Cephes Math Library Release 2.8:  June, 2000
