@@ -22,6 +22,13 @@ public:
   void setDevice(std::string device) { Device = device; }
   const std::string getDevice() const { return Device; }
 
+  void setDeviceType(int device) {
+    DeviceType = device;
+  }
+  int getDeviceType() const {
+    return DeviceType;
+  }
+
   void setOperatorDef(const caffe2::OperatorDef& opDef) {
     OpDef = opDef;
     OpDefExists = true;
@@ -47,6 +54,7 @@ private:
   std::string Device = "";
   caffe2::OperatorDef OpDef;
   bool OpDefExists = false;
+  int DeviceType = caffe2::DeviceType::CPU;
 };
 
 nom::repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::string, nom::repr::NNGraph::NodeRef>* blobMapOut = nullptr);
