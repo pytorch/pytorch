@@ -532,7 +532,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding} + \text{kernel_size} + \text{output_padding}
+              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding}
+                    + \text{kernel_size} + \text{output_padding}
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
