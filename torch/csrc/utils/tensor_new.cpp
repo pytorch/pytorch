@@ -141,7 +141,8 @@ ScalarType infer_scalar_type(PyObject *obj) {
   if (PyArray_Check(obj)) {
     auto array = (PyArrayObject*)obj;
     return numpy_dtype_to_aten(PyArray_TYPE(array));
-  } else if (PyArray_CheckScalar(obj)) {
+  }
+  if (PyArray_CheckScalar(obj)) {
     auto array = (PyArrayObject*)(PyArray_FromScalar(obj, NULL));
     return numpy_dtype_to_aten(PyArray_TYPE(array));
   }
