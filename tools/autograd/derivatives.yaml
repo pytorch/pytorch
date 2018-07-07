@@ -648,10 +648,10 @@
   self: unsqueeze_to(grad, dim, self.sizes())
 
 - name: std(Tensor self, bool unbiased)
-  self: std_backward(grad, self, result, unbiased)
+  self: var_backward(grad / (2 * result), self, unbiased).masked_fill_(result == 0., INFINITY)
 
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
-  self: std_backward(grad, self, result, dim, unbiased, keepdim)
+  self: var_backward(grad / (2 * result), self, dim, unbiased, keepdim).masked_fill_(result == 0., INFINITY)
 
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
