@@ -437,7 +437,7 @@ class develop(setuptools.command.develop.develop):
         def load(filename):
             with open(filename) as f:
                 return json.load(f)
-        ninja_files = glob.glob('build/*_compile_commands.json')
+        ninja_files = glob.glob('build/*compile_commands.json')
         cmake_files = glob.glob('torch/lib/build/*/compile_commands.json')
         all_commands = [entry
                         for f in ninja_files + cmake_files
