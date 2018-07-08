@@ -89,6 +89,9 @@ public:
     return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
   }
 #endif
+  cublasHandle_t getCurrentCublasHandle() const {
+    return detail::getCUDAHooks().getCurrentCublasHandle(thc_state.get());
+  }
   cudaDeviceProp* getCurrentDeviceProperties() const {
     return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
   }

@@ -109,6 +109,11 @@ cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) cons
   return THCState_getCurrentSparseHandle(thc_state);
 }
 #endif
+
+cublasHandle_t CUDAHooks::getCurrentCublasHandle(THCState* thc_state) const {
+  return THCState_getCurrentBlasHandle(thc_state);
+}
+
 struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
     THCState* thc_state) const {
   return THCState_getCurrentDeviceProperties(thc_state);

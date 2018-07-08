@@ -18,6 +18,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
 #ifndef __HIP_PLATFORM_HCC__
   cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const override;
 #endif
+  cublasHandle_t getCurrentCublasHandle(THCState*) const override;
   cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device) const override;
   struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const override;
   struct cudaDeviceProp* getDeviceProperties(THCState*, int device) const override;

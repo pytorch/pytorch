@@ -15,6 +15,8 @@ struct THCState;
 struct CUstream_st;
 typedef struct CUstream_st* cudaStream_t;
 struct cudaDeviceProp;
+struct cublasContext;
+typedef struct cublasContext *cublasHandle_t;
 
 #ifndef __HIP_PLATFORM_HCC__
 // pyHIPIFY rewrites this as:
@@ -98,6 +100,10 @@ struct AT_API CUDAHooksInterface {
     AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
   }
 #endif
+
+  virtual cublasHandle_t getCurrentCublasHandle(THCState*) const {
+    AT_ERROR("Cannot getCurrentCublasHandle() without ATen_cuda library. ", CUDA_HELP);
+  }
 
   virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
       const {
