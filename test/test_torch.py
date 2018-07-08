@@ -3342,9 +3342,12 @@ class TestTorch(TestCase):
         x = torch.rand(2, 3, 4, 5)
         for dim in range(4):
             res = torch.unbind(x, dim)
+            res2 = x.unbind(dim)
             self.assertEqual(x.size(dim), len(res))
+            self.assertEqual(x.size(dim), len(res2))
             for i in range(dim):
                 self.assertEqual(x.select(dim, i), res[i])
+                self.assertEqual(x.select(dim, i), res2[i])
 
     def test_linspace(self):
         _from = random.random()
