@@ -1,5 +1,4 @@
 #include "THCCachingAllocator.h"
-#include "THCStream.hpp"
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -35,7 +34,6 @@
 // ensure that the block is not reused before each recorded stream completes
 // work.
 //
-
 
 namespace {
 
@@ -302,7 +300,7 @@ struct THCCachingAllocator
     if (!block) {
       THError("invalid device pointer: %p", ptr);
     }
-    if (stream->stream == block->stream) {
+    if (THCStream_stream(stream) == block->stream) {
       // ignore uses on the allocation stream, since those don't require any
       // special synchronization
       return;
@@ -440,14 +438,14 @@ struct THCCachingAllocator
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       auto& stream = *it;
 
-      err = cudaSetDevice(stream->device);
+      err = cudaSetDevice(THCStream_device(stream.get()));
       if (err != cudaSuccess) break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
       if (err != cudaSuccess) break;
 
-      err = cudaEventRecord(event, stream->stream);
+      err = cudaEventRecord(event, THCStream_stream(stream.get()));
       if (err != cudaSuccess) break;
 
       block->event_count++;
