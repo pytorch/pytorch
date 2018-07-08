@@ -253,6 +253,7 @@ std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
   if (device_name != "") {
     annotation->setDevice(device_name);
   }
+  annotation->setDeviceType(op.device_option().device_type());
 
   nnOp->setAnnotation(std::move(annotation));
 
@@ -474,7 +475,10 @@ caffe2::OperatorDef convertToOperatorDef(
     op.set_type(nnOp->getName());
   } else {
     if (isa<Caffe2Annotation>(annotation)) {
-      op = dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
+      auto c2_annotation = dyn_cast<Caffe2Annotation>(annotation);
+      op = c2_annotation->getOperatorDef();
+      op.mutable_device_option()->set_device_type(
+          c2_annotation->getDeviceType());
     } else {
       CAFFE_THROW(
           "Couldn't convert operator annotation to Caffe2 operator def");
