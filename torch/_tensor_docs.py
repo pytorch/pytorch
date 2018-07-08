@@ -1527,10 +1527,10 @@ See :func:`torch.qr`
 
 add_docstr_all('random_',
                r"""
-random_(from=0, to=None, *, generator=None) -> Tensor
+random_(start=0, to=None, *, generator=None) -> Tensor
 
 Fills :attr:`self` tensor with numbers sampled from the discrete uniform
-distribution over ``[from, to - 1]``. If not specified, the values are usually
+distribution over ``[start, to - 1]``. If not specified, the values are usually
 only bounded by :attr:`self` tensor's data type. However, for floating point
 types, if unspecified, range will be ``[0, 2^mantissa]`` to ensure that every
 value is representable. For example, `torch.tensor(1, dtype=torch.double).random_()`

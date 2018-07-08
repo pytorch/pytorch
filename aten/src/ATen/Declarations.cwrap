@@ -3385,7 +3385,7 @@
         - arg: THGenerator* generator
           default: nullptr
           kwarg_only: True
-        - int64_t from
+        - int64_t start
         - int64_t to
 ]]
 [[
