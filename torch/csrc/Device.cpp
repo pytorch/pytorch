@@ -4,6 +4,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/pybind.h"
 
 #include <ATen/Device.h>
@@ -95,6 +96,24 @@ PyObject *THPDevice_index(THPDevice *self)
   END_HANDLE_TH_ERRORS
 }
 
+PyObject *THPDevice_hash(THPDevice *self)
+{
+  HANDLE_TH_ERRORS
+  switch (self->device.type()) {
+    case at::Device::Type::CPU: {
+      return THPUtils_packInt64(static_cast<int64_t>(self->device.index()));
+    }
+    case at::Device::Type::CUDA: {
+      if (self->device.index() > 254) {
+        AT_WARN("Device indices of > 254 might result in non-deterministic hashes");
+      }
+      return THPUtils_packInt64(static_cast<int64_t>(self->device.index() + 2));
+    }
+  }
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
 PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
   HANDLE_TH_ERRORS
   if (!THPDevice_Check(a) || !THPDevice_Check(b)) {
@@ -181,7 +200,7 @@ PyTypeObject THPDeviceType = {
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
   0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
+  (hashfunc)THPDevice_hash,              /* tp_hash  */
   0,                                     /* tp_call */
   (reprfunc)THPDevice_str,               /* tp_str */
   0,                                     /* tp_getattro */
