@@ -256,17 +256,17 @@ class ModuleDict(Module):
         return v
 
     def keys(self):
-        r"""Return an iterable of the ModuleDict’s keys.
+        r"""Return an iterable of the ModuleDict keys.
         """
         return self._modules.keys()
 
     def items(self):
-        r"""Return an iterable of the ModuleDict’s key/value pairs.
+        r"""Return an iterable of the ModuleDict key/value pairs.
         """
         return self._modules.items()
 
     def values(self):
-        r"""Return an iterable of the ModuleDict’s values.
+        r"""Return an iterable of the ModuleDict values.
         """
         return self._modules.values()
 
@@ -460,17 +460,17 @@ class ParameterDict(Module):
         return v
 
     def keys(self):
-        r"""Return an iterable of the ParameterDict’s keys.
+        r"""Return an iterable of the ParameterDict keys.
         """
         return self._parameters.keys()
 
     def items(self):
-        r"""Return an iterable of the ParameterDict’s key/value pairs.
+        r"""Return an iterable of the ParameterDict key/value pairs.
         """
         return self._parameters.items()
 
     def values(self):
-        r"""Return an iterable of the ParameterDict’s values.
+        r"""Return an iterable of the ParameterDict values.
         """
         return self._parameters.values()
 
