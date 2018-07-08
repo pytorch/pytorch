@@ -50,6 +50,10 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
+std::vector<Tensor> to_tensor_list(const variable_list& variables) {
+  return fmap(variables, [](const Variable &v) { return static_cast<Tensor>(v); } );
+}
+
 Tensor not_implemented(const char* name) {
   throw std::runtime_error(
       std::string("the derivative for '") + name + "' is not implemented");
