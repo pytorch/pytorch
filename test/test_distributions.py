@@ -267,7 +267,7 @@ EXAMPLES = [
             'scale_diag': torch.tensor([2.0, 0.25], requires_grad=True),
         },
         {
-            'loc': torch.randn(2, 3, requires_grad=True),
+            'loc': torch.randn(4, 3, requires_grad=True),
             'scale_factor': torch.randn(3, 2, requires_grad=True),
             'scale_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
         }
@@ -1517,7 +1517,6 @@ class TestDistributions(TestCase):
 
         x = dist1.sample((10,))
         expected = ref_dist.logpdf(x.numpy())
-        print(dist1.log_prob(x), MultivariateNormal(mean, cov).log_prob(x))
 
         self.assertAlmostEqual(0.0, np.mean((dist1.log_prob(x).detach().numpy() - expected)**2), places=3)
 
@@ -1562,6 +1561,7 @@ class TestDistributions(TestCase):
         self.assertEqual(m1.covariance_matrix, m2.covariance_matrix)
         self.assertEqual(m1.scale_tril, m2.scale_tril)
         self.assertEqual(m1.precision_matrix, m2.precision_matrix)
+        self.assertEqual(m1.entropy(), m2.entropy())
 
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
@@ -3064,6 +3064,18 @@ class TestKL(TestCase):
                                   MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
         self.assertEqual(expected_kl, actual_kl)
 
+    def test_kl_multivariate_normal_batched_broadcasted(self):
+        b = 7  # Number of batches
+        loc = [torch.randn(b, 3) for _ in range(0, 2)]
+        scale_tril = [transform_to(constraints.lower_cholesky)(torch.randn(b, 3, 3)),
+                      transform_to(constraints.lower_cholesky)(torch.randn(3, 3))]
+        expected_kl = torch.stack([
+            kl_divergence(MultivariateNormal(loc[0][i], scale_tril=scale_tril[0][i]),
+                          MultivariateNormal(loc[1][i], scale_tril=scale_tril[1])) for i in range(0, b)])
+        actual_kl = kl_divergence(MultivariateNormal(loc[0], scale_tril=scale_tril[0]),
+                                  MultivariateNormal(loc[1], scale_tril=scale_tril[1]))
+        self.assertEqual(expected_kl, actual_kl)
+
     def test_kl_lowrank_multivariate_normal(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         n = 5  # Number of tests for lowrank_multivariate_normal
@@ -3075,15 +3087,33 @@ class TestKL(TestCase):
                                  scale_diag[i].diag() for i in range(0, 2)]
             p = LowRankMultivariateNormal(loc[0], scale_factor[0], scale_diag[0])
             q = LowRankMultivariateNormal(loc[1], scale_factor[1], scale_diag[1])
-            actual = kl_divergence(p, q)
             p_full = MultivariateNormal(loc[0], covariance_matrix[0])
             q_full = MultivariateNormal(loc[1], covariance_matrix[1])
             expected = kl_divergence(p_full, q_full)
-            error = torch.abs(actual - expected).max()
-            self.assertLess(error, self.precision, '\n'.join([
+
+            actual_lowrank_lowrank = kl_divergence(p, q)
+            actual_lowrank_full = kl_divergence(p, q_full)
+            actual_full_lowrank = kl_divergence(p_full, q)
+
+            error_lowrank_lowrank = torch.abs(actual_lowrank_lowrank - expected).max()
+            self.assertLess(error_lowrank_lowrank, self.precision, '\n'.join([
                 'Incorrect KL(LowRankMultivariateNormal, LowRankMultivariateNormal) instance {}/{}'.format(i + 1, n),
                 'Expected (from KL MultivariateNormal): {}'.format(expected),
-                'Actual (analytic): {}'.format(actual),
+                'Actual (analytic): {}'.format(actual_lowrank_lowrank),
+            ]))
+
+            error_lowrank_full = torch.abs(actual_lowrank_full - expected).max()
+            self.assertLess(error_lowrank_full, self.precision, '\n'.join([
+                'Incorrect KL(LowRankMultivariateNormal, MultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected (from KL MultivariateNormal): {}'.format(expected),
+                'Actual (analytic): {}'.format(actual_lowrank_full),
+            ]))
+
+            error_full_lowrank = torch.abs(actual_full_lowrank - expected).max()
+            self.assertLess(error_full_lowrank, self.precision, '\n'.join([
+                'Incorrect KL(MultivariateNormal, LowRankMultivariateNormal) instance {}/{}'.format(i + 1, n),
+                'Expected (from KL MultivariateNormal): {}'.format(expected),
+                'Actual (analytic): {}'.format(actual_full_lowrank),
             ]))
 
     def test_kl_lowrank_multivariate_normal_batched(self):

@@ -14,9 +14,9 @@ def _batch_vector_diag(bvec):
     Returns the diagonal matrices of a batch of vectors.
     """
     n = bvec.size(-1)
-    flat_bvec = bvec.reshape(-1, n)
-    flat_bmat = torch.stack([v.diag() for v in flat_bvec])
-    return flat_bmat.reshape(bvec.shape + (n,))
+    bmat = bvec.new_zeros(bvec.shape + (n,))
+    bmat.view(bvec.shape[:-1] + (-1,))[..., ::n + 1] = bvec
+    return bmat
 
 
 def _batch_capacitance_tril(W, D):
@@ -31,27 +31,23 @@ def _batch_capacitance_tril(W, D):
     return _batch_potrf_lower(K)
 
 
-def _batch_lowrank_logdet(W, D, capacitance_tril=None):
+def _batch_lowrank_logdet(W, D, capacitance_tril):
     r"""
     Uses "matrix determinant lemma"::
         log|W @ W.T + D| = log|C| + log|D|,
     where :math:`C` is the capacitance matrix :math:`I + W.T @ inv(D) @ W`, to compute
     the log determinant.
     """
-    if capacitance_tril is None:
-        capacitance_tril = _batch_capacitance_tril(W, D)
     return 2 * _batch_diag(capacitance_tril).log().sum(-1) + D.log().sum(-1)
 
 
-def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril=None):
+def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril):
     r"""
     Uses "Woodbury matrix identity"::
         inv(W @ W.T + D) = inv(D) - inv(D) @ W @ inv(C) @ W.T @ inv(D),
     where :math:`C` is the capacitance matrix :math:`I + W.T @ inv(D) @ W`, to compute the squared
     Mahalanobis distance :math:`x.T @ inv(W @ W.T + D) @ x`.
     """
-    if capacitance_tril is None:
-        capacitance_tril = _batch_capacitance_tril(W, D)
     Wt_Dinv = W.transpose(-1, -2) / D.unsqueeze(-2)
     Wt_Dinv_x = _batch_mv(Wt_Dinv, x)
     mahalanobis_term1 = (x.pow(2) / D).sum(-1)
@@ -72,12 +68,14 @@ class LowRankMultivariateNormal(Distribution):
         tensor([-0.2102, -0.5429])
 
     Args:
-        loc (Tensor): mean of the distribution
-        scale_factor (Tensor): factor part of low-rank form of covariance matrix
-        scale_diag (Tensor): diagonal part of low-rank form of covariance matrix
+        loc (Tensor): mean of the distribution with shape `batch_shape + event_shape`
+        scale_factor (Tensor): factor part of low-rank form of covariance matrix with shape
+            `batch_shape + event_shape + (rank,)`
+        scale_diag (Tensor): diagonal part of low-rank form of covariance matrix with shape
+            `batch_shape + event_shape`
 
     Note:
-        The computation for determinant and inverse of covariance matrix is saved when
+        The computation for determinant and inverse of covariance matrix is avoided when
         `scale_factor.shape[1] << scale_factor.shape[0]` thanks to `Woodbury matrix identity
         <https://en.wikipedia.org/wiki/Woodbury_matrix_identity>`_ and
         `matrix determinant lemma <https://en.wikipedia.org/wiki/Matrix_determinant_lemma>`_.
@@ -93,7 +91,7 @@ class LowRankMultivariateNormal(Distribution):
 
     def __init__(self, loc, scale_factor, scale_diag, validate_args=None):
         if loc.dim() < 1:
-            loc = loc.unsqueeze(0)
+            raise ValueError("loc must be at least one-dimensional.")
         event_shape = loc.shape[-1:]
         if scale_factor.dim() < 2:
             raise ValueError("scale_factor must be at least two-dimensional, "
