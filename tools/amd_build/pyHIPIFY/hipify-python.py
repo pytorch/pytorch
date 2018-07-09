@@ -784,7 +784,7 @@ def main():
         type=str,
         default=os.getcwd(),
         help="The root of the project.",
-        required=True)
+        required=False)
 
     parser.add_argument(
         '--show-detailed',
