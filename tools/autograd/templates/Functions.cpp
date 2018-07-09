@@ -575,6 +575,22 @@ Tensor var_backward(Tensor grad, const Tensor & self, int64_t dim, bool unbiased
   return (2.0 / (self.size(dim) - unbiased)) * grad * (self - self.mean(dim, true));
 }
 
+Tensor std_backward(const Tensor & grad, const Tensor & self, Tensor result, bool unbiased) {
+  Tensor result_zero_mask = (result == 0.);
+  if (result_zero_mask.any().toCByte()) {
+    return var_backward(grad / (2 * result), self, unbiased).masked_fill_(result_zero_mask, INFINITY);
+  }
+  return var_backward(grad / (2 * result), self, unbiased);
+}
+
+Tensor std_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool unbiased, bool keepdim) {
+  Tensor result_zero_mask = (result == 0.);
+  if (result_zero_mask.any().toCByte()) {
+    return var_backward(grad / (2 * result), self, dim, unbiased, keepdim).masked_fill_(result == 0., INFINITY);
+  }
+  return var_backward(grad / (2 * result), self, dim, unbiased, keepdim);
+}
+
 Tensor masked_scatter_backward(const Tensor & grad, const Tensor & mask, IntList sizes) {
   int64_t numel = 1;
   for (auto size : sizes) {
