@@ -3557,7 +3557,7 @@ class TestTorch(TestCase):
         self.assertEqual(res1, res2)
 
     def test_slice(self):
-        empty = torch.Tensor()
+        empty = torch.empty(0, 4) if torch._C._use_zero_size_dim() else torch.Tensor()
         x = torch.arange(0., 16).view(4, 4)
         self.assertEqual(x[:], x)
         self.assertEqual(x[:4], x)
@@ -6005,8 +6005,12 @@ class TestTorch(TestCase):
         self.assertEqual(empty, empty.reshape(-1))
         self.assertEqual(empty, empty.reshape([0]))
         # TODO: fix these once we have multi-dimensional empty tensors
-        self.assertEqual(empty.reshape([0, 1]).shape, (0,))
-        self.assertEqual(empty.reshape([1, -1]).shape, (0,))
+        if torch._C._use_zero_size_dim():
+            self.assertEqual(empty.reshape([0, 1]).shape, (0, 1))
+            self.assertEqual(empty.reshape([1, -1]).shape, (1, 0))
+        else:
+            self.assertEqual(empty.reshape([0, 1]).shape, (0,))
+            self.assertEqual(empty.reshape([1, -1]).shape, (0,))
         self.assertRaises(RuntimeError, lambda: empty.reshape(1))
 
     @skipIfNoZeroSize
