@@ -19,11 +19,13 @@
 //      plus one more if refcount > 0
 //
 //  - THStorage stays live as long as there are any strong
-//    or weak pointers to it (refcount > 0 || weakcount > 0)
+//    or weak pointers to it (weakcount > 0, since strong
+//    references count as a +1 to weakcount)
 //
 //  - finalizers are called and data_ptr is deallocated when refcount == 0
 //
-//  - Once refcount == 0, it can never again be > 0 (it's monotonic)
+//  - Once refcount == 0, it can never again be > 0 (the transition
+//    from > 0 to == 0 is monotonic)
 //
 //  - When you access THStorage via a weak pointer, you must
 //    atomically increment the use count, if it is greater than 0.
