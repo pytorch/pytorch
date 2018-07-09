@@ -113,7 +113,8 @@ from tools.setup_helpers.env import check_env_flag, check_negative_env_flag
 config_env_vars = ['CUDA', 'CUDNN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED', 'DISTRIBUTED_MW',
                    'SYSTEM_NCCL', 'GLOO_IBVERBS']
 
-os.environ['CFLAGS'] = os.environ.get('CFLAGS', '') + '-DUSE_TH_SIZE_ZERO_DIM'
+os.environ['CFLAGS'] = os.environ.get('CFLAGS', '') + ' -DUSE_TH_SIZE_ZERO_DIM '
+
 
 def hotpatch_var(var):
     if check_env_flag('NO_' + var):
