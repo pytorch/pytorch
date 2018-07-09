@@ -632,6 +632,14 @@ def clamp(g, self, min, max):
     return g.op("Clip", self, min_f=min, max_f=max)
 
 
+def clamp_min(g, self, min):
+    return g.op("Clip", self, min_f=min)
+
+
+def clamp_max(g, self, max):
+    return g.op("Clip", self, max_f=max)
+
+
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 def max(g, self, *args, **kwargs):
