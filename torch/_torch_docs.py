@@ -1505,6 +1505,32 @@ Example::
             [ 0.,  0.,  1.]])
 """.format(**factory_common_args))
 
+add_docstr(torch.eye_like,
+           r"""
+eye_like(input, dtype=None, layout=None, device=None, requires_grad=False) -> Tensor
+
+Returns a 2-D tensor with ones on the diagonal and zeros everywhere,
+with the same size as :attr:`input`.
+
+Args:
+    {input}
+    {dtype}
+    {layout}
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 2-D tensor with ones on the diagonal and zeros everywhere,
+with the same size as :attr:`input`.
+
+Example::
+
+    >>> torch.eye_like(torch.randn(3, 3))
+    tensor([[ 1.,  0.,  0.],
+            [ 0.,  1.,  0.],
+            [ 0.,  0.,  1.]])
+""".format(**factory_common_args))
+
 add_docstr(torch.floor,
            r"""
 floor(input, out=None) -> Tensor

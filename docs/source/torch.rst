@@ -45,6 +45,7 @@ Creation Ops
 .. autofunction:: linspace
 .. autofunction:: logspace
 .. autofunction:: eye
+.. autofunction:: eye_like
 .. autofunction:: empty
 .. autofunction:: empty_like
 .. autofunction:: full

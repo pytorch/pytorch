@@ -160,6 +160,18 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
+Tensor eye_like(const Tensor& input) {
+  AT_CHECK(input.dim() == 2, "Expected input to be two-dimensional, instead got ",
+           input.dim(), " dimensions");
+  return native::eye(input.size(0), input.size(1), input.options());
+}
+
+Tensor eye_like(const Tensor& input, const TensorOptions& options) {
+  AT_CHECK(input.dim() == 2, "Expected input to be two-dimensional, instead got ",
+           input.dim(), " dimensions");
+  return native::eye(input.size(0), input.size(1), options);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {

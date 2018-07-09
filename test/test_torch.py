@@ -2248,6 +2248,13 @@ class TestTorch(TestCase):
         torch.eye(100, 100, out=res2)
         self.assertEqual(res1, res2)
 
+    def test_eye_like(self):
+        res1 = torch.eye(100, 100)
+        res2 = torch.eye_like(res1)
+        self.assertEqual(res1, res2)
+        with self.assertRaisesRegex("Expected input to be two-dimensional, instead got.*dimensions"):
+            torch.eye_like(torch.randn(3, 3, 3))
+
     def test_renorm(self):
         m1 = torch.randn(10, 5)
         res1 = torch.Tensor()
