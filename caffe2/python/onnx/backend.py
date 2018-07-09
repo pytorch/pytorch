@@ -990,7 +990,8 @@ class Caffe2Backend(Backend):
     def is_compatible(cls, model, device='CPU', **kwargs):
         if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
            and callable(super(Caffe2Backend, cls).is_compatible):
-            super(Caffe2Backend, cls).is_compatible(model, device, **kwargs)
+            if not super(Caffe2Backend, cls).is_compatible(model, device, **kwargs):
+              return False
         # TODO: should have an unspported list of operators, be optimistic for now
         return True
 
