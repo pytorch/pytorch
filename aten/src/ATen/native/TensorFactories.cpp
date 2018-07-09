@@ -161,12 +161,14 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 }
 
 Tensor eye_like(const Tensor& self) {
+  AT_CHECK(!self.is_sparse(), "eye_like is not implemented for sparse layout");
   AT_CHECK(self.dim() == 2, "Expected input to be two-dimensional, instead got ",
            self.dim(), " dimensions");
   return native::eye(self.size(0), self.size(1), self.options());
 }
 
 Tensor eye_like(const Tensor& self, const TensorOptions& options) {
+  AT_CHECK(!self.is_sparse(), "eye_like is not implemented for sparse layout");
   AT_CHECK(self.dim() == 2, "Expected input to be two-dimensional, instead got ",
            self.dim(), " dimensions");
   return native::eye(self.size(0), self.size(1), options);

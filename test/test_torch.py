@@ -2252,8 +2252,23 @@ class TestTorch(TestCase):
         res1 = torch.eye(100, 100)
         res2 = torch.eye_like(res1)
         self.assertEqual(res1, res2)
+
+        res1 = torch.eye(200, 20)
+        res2 = torch.eye_like(res1)
+        self.assertEqual(res1, res2)
+
+        res1 = torch.eye(20, 200)
+        res2 = torch.eye_like(res1)
+        self.assertEqual(res1, res2)
+
         with self.assertRaisesRegex(RuntimeError, "Expected input to be two-dimensional, instead got.*dimensions"):
             torch.eye_like(torch.randn(3, 3, 3))
+
+        with self.assertRaisesRegex(RuntimeError, "eye_like is not implemented for sparse layout"):
+            indices = torch.arange(0, 3).unsqueeze(0).expand(2, 3)
+            values = torch.arange(0, 3)
+            sparse_tensor = torch.sparse_coo_tensor(indices, values)
+            torch.eye_like(sparse_tensor)
 
     def test_renorm(self):
         m1 = torch.randn(10, 5)
