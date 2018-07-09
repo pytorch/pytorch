@@ -900,7 +900,6 @@ def main():
                 f.seek(0)
                 f.write(txt)
                 f.truncate()
-                f.close()
 
         # Disable modules
         disable_modules = yaml_data["disabled_modules"]
@@ -948,7 +947,6 @@ def main():
                 f.seek(0)
                 f.write(txt)
                 f.truncate()
-                f.close()
 
     # Start Preprocessor
     walk_over_directory(
