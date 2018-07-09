@@ -99,17 +99,7 @@ PyObject *THPDevice_index(THPDevice *self)
 PyObject *THPDevice_hash(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  switch (self->device.type()) {
-    case at::Device::Type::CPU: {
-      return THPUtils_packInt64(static_cast<int64_t>(self->device.index()));
-    }
-    case at::Device::Type::CUDA: {
-      if (self->device.index() > 254) {
-        AT_WARN("Device indices of > 254 might result in non-deterministic hashes");
-      }
-      return THPUtils_packInt64(static_cast<int64_t>(self->device.index() + 2));
-    }
-  }
+  return THPUtils_packInt64(std::hash<at::Device>{}(self->device));
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
