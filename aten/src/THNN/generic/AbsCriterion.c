@@ -19,7 +19,7 @@ void THNN_(AbsCriterion_updateOutput)(
     return;
   }
 
-  real sum = 0;
+  accreal sum = 0;
   THTensor_(resize1d)(output, 1);
   TH_TENSOR_APPLY2(real, input, real, target,
     sum += fabs(*input_data - *target_data);
@@ -28,7 +28,7 @@ void THNN_(AbsCriterion_updateOutput)(
   if (reduction == Reduction::ElementwiseMean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set1d)(output, 0, (real)sum);
 }
 
 void THNN_(AbsCriterion_updateGradInput)(

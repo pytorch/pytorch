@@ -18,7 +18,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   THIndex_t *target_data;
   int64_t nframe, dim;
   int64_t t, d;
-  real sum;
+  accreal sum;
 
   AT_CHECK(!input->is_empty() && (input->dim() == 1 || input->dim() == 2),
            "non-empty vector or matrix expected, got size: ", input->sizes());
@@ -107,7 +107,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
     if(reduction == Reduction::ElementwiseMean)
       sum /= nframe;
 
-    THTensor_(set1d)(output, 0, sum);
+    THTensor_(set1d)(output, 0, (real)sum);
   }
 
   THTensor_(free)(input);

@@ -1087,6 +1087,7 @@ class CriterionTest(TestBase):
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.check_forward_only = kwargs.get('check_forward_only', False)
 
     def _get_target(self):
         return self._get_arg('target', True)
@@ -1108,6 +1109,9 @@ class CriterionTest(TestBase):
             if isinstance(expected_out, torch.Tensor):
                 expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
+
+        if self.check_forward_only:
+            return
 
         test_case.check_criterion_jacobian(module, input, target)
         self._do_extra_tests(test_case, module, input, target)

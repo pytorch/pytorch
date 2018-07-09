@@ -21,7 +21,7 @@ void THNN_(DistKLDivCriterion_updateOutput)(
 
   THTensor_(resize1d)(output, 1);
 
-  real sum = 0;
+  accreal sum = 0;
 
   TH_TENSOR_APPLY2(real, input, real, target,
     sum += *target_data > 0 ? *target_data * (log(*target_data) - *input_data) : 0;
@@ -30,7 +30,7 @@ void THNN_(DistKLDivCriterion_updateOutput)(
   if (reduction == Reduction::ElementwiseMean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set1d)(output, 0, (real)sum);
 }
 
 void THNN_(DistKLDivCriterion_updateGradInput)(

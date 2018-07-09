@@ -22,7 +22,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
 
   THTensor_(resize1d)(output, 1);
 
-  real sum = 0;
+  accreal sum = 0;
   TH_TENSOR_APPLY2(real, input, real, target,
     real z = fabs(*input_data - *target_data);
     sum += z < 1 ? 0.5*z*z : z - 0.5;
@@ -31,7 +31,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
   if (reduction == Reduction::ElementwiseMean)
     sum /= THTensor_(nElement)(input);
 
-  THTensor_(set1d)(output, 0, sum);
+  THTensor_(set1d)(output, 0, (accreal)sum);
 }
 
 void THNN_(SmoothL1Criterion_updateGradInput)(
