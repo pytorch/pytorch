@@ -7,8 +7,6 @@
 #include <torch/csrc/cuda/nccl.h>
 #endif
 
-#include <torch/csrc/utils/auto_stream.h>
-
 #include <THC/THC.h>
 
 #include <ATen/ATen.h>

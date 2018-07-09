@@ -7,7 +7,6 @@
 
 #include <thread>
 #include <functional>
-#include <utility>
 
 /*
 Tests related to ATen streams.
@@ -15,7 +14,7 @@ Tests related to ATen streams.
 TEST_CASE("Copying and Moving Streams", "Verifies streams are live through copying and moving") {
   int32_t device = -1;
   cudaStream_t cuda_stream;
-
+  
   // Tests that copying works as expected and preserves the stream
   at::CUDAStream copyStream;
   {
@@ -24,7 +23,7 @@ TEST_CASE("Copying and Moving Streams", "Verifies streams are live through copyi
     cuda_stream = s.stream();
 
     copyStream = s;
-
+    
     REQUIRE(copyStream.internals() == s.internals());
     REQUIRE(copyStream.device() == device);
     REQUIRE(copyStream.stream() == cuda_stream);
@@ -58,7 +57,7 @@ TEST_CASE("Getting and Setting Streams", "Verifies streams are set properly") {
   // Sets and gets
   at::globalContext().setCurrentCUDAStream(myStream);
   at::CUDAStream curStream = at::globalContext().getCurrentCUDAStream();
-
+  
   REQUIRE(myStream == curStream);
 
   // Gets, sets, and gets default stream
