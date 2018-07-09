@@ -986,6 +986,13 @@ class Caffe2Backend(Backend):
             return workspace.has_gpu_support
         return False
 
+    @classmethod
+    def is_compatible(cls, model, device='CPU', **kwargs):
+        if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
+           and callable(super(Caffe2Backend, cls).is_compatible):
+            super(Caffe2Backend, cls).is_compatible(model, device, **kwargs)
+        # TODO: should have an unspported list of operators, be optimistic for now
+        return True
 
 prepare = Caffe2Backend.prepare
 
