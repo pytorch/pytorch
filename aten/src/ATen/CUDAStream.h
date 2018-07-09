@@ -5,9 +5,9 @@
 
 /*
 * A CUDA stream interface with no CUDA build dependency.
-* 
+*
 * Includes the CUDAStream RAII class and a pointer-based stream API.
-* 
+*
 * The ATen Context interface should be preferred when working with streams.
 */
 
@@ -39,6 +39,9 @@ CUDAStreamInternals* CUDAStream_getCurrentStreamOnDeviceUnsafe(int64_t device);
 CUDAStreamInternals* CUDAStream_getCurrentStreamUnsafe();
 
 void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* internals);
+void CUDAStream_uncheckedSetStreamOnDevice(
+    int64_t device,
+    CUDAStreamInternals* internals);
 void CUDAStream_setStream(CUDAStreamInternals* internals);
 
 cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
@@ -46,6 +49,7 @@ int64_t CUDAStream_device(CUDAStreamInternals*);
 
 bool CUDAStream_retain(CUDAStreamInternals*);
 void CUDAStream_free(CUDAStreamInternals*&);
+void CUDAStream_uncheckedFree(CUDAStreamInternals*&);
 
 } // namespace detail
 
@@ -59,7 +63,7 @@ struct CUDAStream {
   // Constructors
   CUDAStream() = default;
   CUDAStream(CUDAStreamInternals* internals) : internals_{internals} { }
-  
+
   // Destructor
   ~CUDAStream() { detail::CUDAStream_free(internals_); }
 
@@ -67,7 +71,7 @@ struct CUDAStream {
   CUDAStream(const CUDAStream& other);
 
   // Move constructor
-  CUDAStream(CUDAStream&& other);  
+  CUDAStream(CUDAStream&& other);
 
   // Assignment operator
   CUDAStream& operator=(CUDAStream other) {

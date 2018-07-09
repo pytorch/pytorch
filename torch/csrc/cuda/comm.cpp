@@ -147,16 +147,12 @@ std::vector<at::Tensor> scatter(
   }
   auto* thc_state = at::globalContext().lazyInitCUDA();
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
-    const int32_t device_index = devices[chunk];
-    // We must set the current device before setting the current stream.
-    const at::DeviceGuard device_guard({at::kCUDA, device_index});
-    const AutoStream stream_guard(
-        streams ? (*streams)[chunk]
-                : THCState_getStreamOnDevice(thc_state, device_index));
-    // Copy the chunk from its current device to its destination device, which
-    // we set as the default device above, thus specified as -1.
-    chunks[chunk] =
-        chunks[chunk].contiguous().to({at::kCUDA, -1}, /*non_blocking=*/true);
+    const at::CUDAStreamGuard stream_guard;
+    if (streams) {
+      stream_guard.set_stream(devices[chunk], (*streams)[chunk]);
+    }
+    chunks[chunk] = chunks[chunk].contiguous().to(
+        {at::kCUDA, devices[chunk]}, /*non_blocking=*/true);
   }
   return chunks;
 }

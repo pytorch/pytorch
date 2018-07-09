@@ -4,7 +4,7 @@
 
 #include <mutex>
 
-// Internal implementation is entirely hidden 
+// Internal implementation is entirely hidden
 struct CUDAStreamInternals {
   bool is_destructible;
   std::atomic<int> refcount;
@@ -29,7 +29,7 @@ namespace detail {
   // Creates a(n indestructible) default stream for each device
   // Note: the default stream on each device is signified by a zero
   // value for the pointer, and so is not actually created as usual.
-  // In particular, we don't need to switch devices when creating the 
+  // In particular, we don't need to switch devices when creating the
   // streams.
   static void initDefaultCUDAStreams() {
     num_gpus = getCUDAHooks().getNumGPUs();
@@ -46,8 +46,8 @@ namespace detail {
   static void initCUDAStreamsOnce() {
     // Inits default streams (once, globally)
     std::call_once(init_flag, initDefaultCUDAStreams);
-    
-    // Inits current streams (thread local) to default streams    
+
+    // Inits current streams (thread local) to default streams
     if (current_streams) return;
     current_streams = (CUDAStreamInternals**) malloc(num_gpus * sizeof(CUDAStreamInternals*));
     for (auto i = decltype(num_gpus){0}; i < num_gpus; ++i) {
@@ -91,7 +91,7 @@ namespace detail {
   }
 
   // Note: despite not being "unsafe," is using these methods in a multithreaded
-  // environment then the caller must be sure that streams are valid 
+  // environment then the caller must be sure that streams are valid
   // when they're requested. These methods will throw an error if an
   // invalid stream is requested.
   CUDAStreamInternals* CUDAStream_getAndRetainCurrentStreamOnDevice(int64_t device) {
@@ -127,6 +127,13 @@ namespace detail {
     CUDAStream_free(current_streams[device]);
     current_streams[device] = ptr;
   }
+
+  void CUDAStream_uncheckedSetStreamOnDevice(int64_t device, CUDAStreamInternals* ptr) {
+    initCUDAStreamsOnce();
+    CUDAStream_uncheckedFree(current_streams[device]);
+    current_streams[device] = ptr;
+  }
+
   void CUDAStream_setStream(CUDAStreamInternals* ptr) {
     CUDAStream_setStreamOnDevice(current_device(), ptr);
   }
@@ -158,6 +165,13 @@ namespace detail {
       ptr = nullptr;
     }
   }
+  void CUDAStream_uncheckedFree(CUDAStreamInternals*& ptr) {
+    if (ptr && ptr->stream && ptr->is_destructible && --ptr->refcount <= 0) {
+      DynamicCUDAInterface::unchecked_cuda_stream_destroy(ptr->stream);
+      free(ptr);
+      ptr = nullptr;
+    }
+  }
 
 } // namespace detail
 
@@ -179,5 +193,5 @@ namespace detail {
 
     std::swap(internals_, other.internals_);
   }
-  
+
 } // namespace at

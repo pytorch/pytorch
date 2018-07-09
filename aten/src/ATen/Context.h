@@ -114,6 +114,12 @@ public:
     return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
   }
 
+  void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream)
+      const {
+    return detail::CUDAStream_uncheckedSetStreamOnDevice(
+        device, stream.internals());
+  }
+
 #ifndef __HIP_PLATFORM_HCC__
   cusparseHandle_t getCurrentCUDASparseHandle() const {
     return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
