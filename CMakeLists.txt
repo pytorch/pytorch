@@ -30,20 +30,23 @@ if(NOT DEFINED BLAS_SET_BY_USER)
   set(BLAS_SET_BY_USER ${BLAS_SET_BY_USER} CACHE STRING "Marks whether BLAS was manually set by user or auto-detected")
 endif()
 
-# These lines are an attempt to make find_package(cuda) pick up
-# libcuda.dylib, and not cuda.framework.  It doesn't work all
-# the time, but it seems to help for some users.
-# TODO: replace this with a more robust fix
+# Apple specific
 if(APPLE)
+  # These lines are an attempt to make find_package(cuda) pick up
+  # libcuda.dylib, and not cuda.framework.  It doesn't work all
+  # the time, but it seems to help for some users.
+  # TODO: replace this with a more robust fix
   set(CMAKE_FIND_FRAMEWORK LAST)
   set(CMAKE_FIND_APPBUNDLE LAST)
-endif()
 
-# Get clang version on macOS
-if(APPLE)
+  # Get clang version on macOS
   EXECUTE_PROCESS( COMMAND ${CMAKE_CXX_COMPILER} --version OUTPUT_VARIABLE clang_full_version_string )
   string(REGEX REPLACE "Apple LLVM version ([0-9]+\\.[0-9]+).*" "\\1" CLANG_VERSION_STRING ${clang_full_version_string})
   MESSAGE( STATUS "CLANG_VERSION_STRING:         " ${CLANG_VERSION_STRING} )
+
+
+  # RPATH stuff
+  set(CMAKE_MACOSX_RPATH ON)
 endif()
 
 # ---[ Options.
@@ -137,6 +140,9 @@ cmake_dependent_option(
     "BUILD_CAFFE2" OFF)
 option(USE_DISTRIBUTED "Use THD (distributed)" OFF)
 option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
+
+# Used when building Caffe2 through setup.py
+option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
 if (USE_ATEN)
     set(BUILD_ATEN ${USE_ATEN})
