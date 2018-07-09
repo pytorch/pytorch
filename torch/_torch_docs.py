@@ -1529,7 +1529,7 @@ Example::
     tensor([[ 1.,  0.,  0.],
             [ 0.,  1.,  0.],
             [ 0.,  0.,  1.]])
-""".format(**factory_common_args))
+""".format(**factory_like_common_args))
 
 add_docstr(torch.floor,
            r"""
