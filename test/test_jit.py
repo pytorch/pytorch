@@ -1173,6 +1173,63 @@ class TestBatched(TestCase):
         xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
         matmul_test(xs, batch, xs2, batch2)
 
+    def test_lstm_cell(self):
+        def LSTMCell(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
+            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+            # activations
+            i_t = torch.sigmoid(i_t)
+            f_t = torch.sigmoid(f_t)
+            o_t = torch.sigmoid(o_t)
+            # cell computations
+            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+            c_t = torch.tanh(c_t)
+            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+            h_t = torch.mul(o_t, torch.tanh(c_t))
+            return h_t
+
+        @torch.jit.batch(batch_size = 4)
+        def LSTMCell_batch(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
+            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+            # activations
+            i_t = torch.sigmoid(i_t)
+            f_t = torch.sigmoid(f_t)
+            o_t = torch.sigmoid(o_t)
+            # cell computations
+            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+            c_t = torch.tanh(c_t)
+            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+            h_t = torch.mul(o_t, torch.tanh(c_t))
+            return h_t
+
+        batch_size, input_size, hidden_size = 4, 3, 2
+        xs, batch = self.rand_batch(batch_size, (False, input_size))
+        hx, h_batch = self.rand_batch(batch_size, (False, hidden_size))
+        cx, c_batch = self.rand_batch(batch_size, (False, hidden_size))
+
+        # input to hidden weights
+        w_xi = torch.rand(input_size, hidden_size)
+        w_xf = torch.rand(input_size, hidden_size)
+        w_xo = torch.rand(input_size, hidden_size)
+        w_xc = torch.rand(input_size, hidden_size)
+        # hidden to hidden weights
+        w_hi = torch.rand(hidden_size, hidden_size)
+        w_hf = torch.rand(hidden_size, hidden_size)
+        w_ho = torch.rand(hidden_size, hidden_size)
+        w_hc = torch.rand(hidden_size, hidden_size)
+        # bias terms
+        b_i = torch.rand(hidden_size)
+        b_f = torch.rand(hidden_size)
+        b_o = torch.rand(hidden_size)
+        b_c = torch.rand(hidden_size)
+
+        ys = [LSTMCell(xs[j].squeeze(0), hx[j], cx[j], w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c) for j in range(batch_size)]
+        ybs = LSTMCell_batch(batch, h_batch, c_batch, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
+        self.assertEqual(ys, ybs.examples())
+
 
 class TestScript(JitTestCase):
     @contextmanager

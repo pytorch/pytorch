@@ -1,5 +1,6 @@
 import torch
 
+
 @torch.jit.script
 def batch_tanh(data, mask, dims):
     data = torch.tanh(data)

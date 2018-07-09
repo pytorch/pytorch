@@ -402,8 +402,9 @@ def script_method(fn):
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
         mod = script(fn, optimize, _frames_up)
-        mod.to_batch(batch_size)
-
+        res_graph = mod.to_batch(batch_size)
+        res_mod = ScriptModule()
+        res_mod._create_method_from_graph('forward', res_graph)
         def wrapper(*args):
             new_args = []
             for arg in args:
@@ -413,7 +414,7 @@ def batch(batch_size=1, optimize=True, _frames_up=0):
                     new_args.extend([arg.get_data(), arg.get_mask(), arg.get_dims()])
                 else:
                     new_args.append(arg)
-            res = mod(*new_args)
+            res = res_mod(*new_args)
             # assert len(res) / 3 == 0
             # result = [torch.BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
             result = torch.BatchTensor(*res)

@@ -485,8 +485,8 @@ void initJitScriptBindings(PyObject* module) {
       })
       .def("to_batch", [](Module& self, int64_t batch_size=1) {
         auto graph = self.get_method("forward").graph();
-        // std::cout << self.get_parameters().size() << std::endl;
-        to_batch_graph(graph, batch_size);
+        auto res_graph = to_batch_graph(graph, batch_size);
+        return res_graph;
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
