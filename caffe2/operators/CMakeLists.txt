@@ -14,6 +14,10 @@ set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
 endif()
 # ------[ CUDA sources
 file(GLOB tmp *.cu)
+# Manually remove the cudnn files since we might be using USE_CUDNN=OFF
+# TODO: when we move to explicit file list, this would not be needed.
+file(GLOB tmp_cudnn *_cudnn.cu)
+exclude(tmp "${tmp}" ${tmp_cudnn})
 set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
 # exclude test files
 file(GLOB tmp *_test.cc)
