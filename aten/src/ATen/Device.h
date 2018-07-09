@@ -117,9 +117,9 @@ std::ostream& operator<<(std::ostream& stream, const at::Device& device);
 namespace std {
   template<> struct hash<at::Device>
   {
-    int64_t operator()(const at::Device& device) const noexcept {
-      int64_t hash_val = static_cast<int64_t>(device.index());
-      if (device.type() == at::Device::Type::CUDA) {
+    size_t operator()(const at::Device& device) const noexcept {
+      size_t hash_val = static_cast<size_t>(device.index());
+      if (device.is_cuda()) {
         hash_val += 2;
       }
       return hash_val;
