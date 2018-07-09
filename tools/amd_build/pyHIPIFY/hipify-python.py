@@ -871,17 +871,17 @@ def main():
             if "functions" in disable_info:
                 functions = disable_info["functions"]
             else:
-                functions = []
+                functions = disable_info.get("functions", [])
 
             if "non_hip_functions" in disable_info:
                 non_hip_functions = disable_info["non_hip_functions"]
             else:
-                non_hip_functions = []
+                non_hip_functions = disable_info.get("non_hip_functions", [])
 
             if "non_device_functions" in disable_info:
                 not_on_device_functions = disable_info["non_device_functions"]
             else:
-                not_on_device_functions = []
+                not_on_device_functions = disable_info.get("non_device_functions", [])
 
             with openf(filepath, "r+") as f:
                 txt = f.read()
