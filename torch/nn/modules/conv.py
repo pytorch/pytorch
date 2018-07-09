@@ -139,8 +139,8 @@ class Conv1d(_ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = \left\lfloor\frac{L_{in} + 2 * \text{padding} - \text{dilation}
-                        * (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
+              L_{out} = \left\lfloor\frac{L_{in} + 2 \times \text{padding} - \text{dilation}
+                        \times (\text{kernel_size} - 1) - 1}{\text{stride}} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -257,11 +257,11 @@ class Conv2d(_ConvNd):
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = \left\lfloor\frac{H_{in}  + 2 * \text{padding}[0] - \text{dilation}[0]
-                        * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+              H_{out} = \left\lfloor\frac{H_{in}  + 2 \times \text{padding}[0] - \text{dilation}[0]
+                        \times (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in}  + 2 * \text{padding}[1] - \text{dilation}[1]
-                        * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+              W_{out} = \left\lfloor\frac{W_{in}  + 2 \times \text{padding}[1] - \text{dilation}[1]
+                        \times (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -376,14 +376,14 @@ class Conv3d(_ConvNd):
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = \left\lfloor\frac{D_{in} + 2 * \text{padding}[0] - \text{dilation}[0]
-                    * (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
+              D_{out} = \left\lfloor\frac{D_{in} + 2 \times \text{padding}[0] - \text{dilation}[0]
+                    \times (\text{kernel_size}[0] - 1) - 1}{\text{stride}[0]} + 1\right\rfloor
 
-              H_{out} = \left\lfloor\frac{H_{in} + 2 * \text{padding}[1] - \text{dilation}[1]
-                    * (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
+              H_{out} = \left\lfloor\frac{H_{in} + 2 \times \text{padding}[1] - \text{dilation}[1]
+                    \times (\text{kernel_size}[1] - 1) - 1}{\text{stride}[1]} + 1\right\rfloor
 
-              W_{out} = \left\lfloor\frac{W_{in} + 2 * \text{padding}[2] - \text{dilation}[2]
-                    * (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
+              W_{out} = \left\lfloor\frac{W_{in} + 2 \times \text{padding}[2] - \text{dilation}[2]
+                    \times (\text{kernel_size}[2] - 1) - 1}{\text{stride}[2]} + 1\right\rfloor
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -532,7 +532,8 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, L_{out})` where
 
           .. math::
-              L_{out} = (L_{in} - 1) * \text{stride} - 2 * \text{padding} + \text{kernel_size} + \text{output_padding}
+              L_{out} = (L_{in} - 1) \times \text{stride} - 2 \times \text{padding}
+                    + \text{kernel_size} + \text{output_padding}
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
@@ -635,10 +636,10 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, H_{out}, W_{out})` where
 
           .. math::
-              H_{out} = (H_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0]
+              H_{out} = (H_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
                     + \text{kernel_size}[0] + \text{output_padding}[0]
 
-              W_{out} = (W_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1]
+              W_{out} = (W_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
                     + \text{kernel_size}[1] + \text{output_padding}[1]
 
     Attributes:
@@ -769,13 +770,13 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
         - Output: :math:`(N, C_{out}, D_{out}, H_{out}, W_{out})` where
 
           .. math::
-              D_{out} = (D_{in} - 1) * \text{stride}[0] - 2 * \text{padding}[0]
+              D_{out} = (D_{in} - 1) \times \text{stride}[0] - 2 \times \text{padding}[0]
                     + \text{kernel_size}[0] + \text{output_padding}[0]
 
-              H_{out} = (H_{in} - 1) * \text{stride}[1] - 2 * \text{padding}[1]
+              H_{out} = (H_{in} - 1) \times \text{stride}[1] - 2 \times \text{padding}[1]
                     + \text{kernel_size}[1] + \text{output_padding}[1]
 
-              W_{out} = (W_{in} - 1) * \text{stride}[2] - 2 * \text{padding}[2]
+              W_{out} = (W_{in} - 1) \times \text{stride}[2] - 2 \times \text{padding}[2]
                     + \text{kernel_size}[2] + \text{output_padding}[2]
 
     Attributes:

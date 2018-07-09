@@ -4752,8 +4752,6 @@ and multiple right-hand sides `b`.
 In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
 with the default keyword arguments.
 
-This method is NOT implemented for CUDA tensors.
-
 Args:
     A (Tensor): the input triangular coefficient matrix
     b (Tensor): multiple right-hand sides. Each column of `b` is a
