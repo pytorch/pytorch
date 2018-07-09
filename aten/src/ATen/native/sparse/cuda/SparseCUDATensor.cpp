@@ -22,9 +22,15 @@ SparseTensor& sparse_mask_out_cuda(SparseTensor& r, const Tensor& t, const Spars
   LongTensor mask_indices = mask._indices();
   Tensor mask_values = mask._values();
   Tensor r_values = r._values().type().tensor(mask_values.sizes());
+#ifndef USE_TH_SIZE_ZERO_DIM
   _alias_into_sparse(r, mask_indices.clone(), r_values);
+#else
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(mask_indices.clone(), r_values);
+#endif
   _get_sparse_impl(r)->set_coalesced(mask.is_coalesced());
+#ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(r)->set_nnz(mask._nnz());
+#endif
 
   LongTensor indices = at::zeros({mask._nnz()}, mask_indices.options());
 

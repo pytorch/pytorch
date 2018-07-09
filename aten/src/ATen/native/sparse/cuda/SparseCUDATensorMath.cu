@@ -196,7 +196,11 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   AT_CHECK(dense.size(0) == k,
       "hspmm: Argument #3: Expected dim 0 size ", k, ", got ", dense.size(0));
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(r_)->raw_resize_(1, 1, {m, n});
+#else
+  r_.sparse_resize_and_clear_({m, n}, 1, 1);
+#endif
 
   cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
@@ -222,9 +226,28 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   // tensor with sparse * dense multiplication
   thrust::device_ptr<int64_t> indicesIter(dstIndices.data<int64_t>());
   thrust::sequence(policy, indicesIter, indicesIter + nnz);
-  _get_sparse_impl(newSparse)->_sizes_mut()[0] = nnz; // TODO: use something safer)
+
+#ifndef USE_TH_SIZE_ZERO_DIM
+  _get_sparse_impl(newSparse)->_sizes_mut()[0] = nnz; // TODO: use something safer
+#else
+  auto sparseDims = _get_sparse_impl(newSparse)->sparseDims();
+  auto denseDims = _get_sparse_impl(newSparse)->denseDims();
+  auto newSparse_indices = _get_sparse_impl(newSparse)->indices();
+  auto newSparse_values = _get_sparse_impl(newSparse)->values();
+  std::vector<int64_t> new_size = {nnz};
+  auto size_remaining = _get_sparse_impl(newSparse)->sizes().slice(1);
+  new_size.insert(new_size.end(), size_remaining.begin(), size_remaining.end());
+
+  _get_sparse_impl(newSparse)->resize_and_clear_(sparseDims, denseDims, new_size);
+  _get_sparse_impl(newSparse)->set_indices_and_values_unsafe(newSparse_indices, newSparse_values);
+#endif
+
   s_addmm_out_sparse_dense_cuda(values, values, newSparse, dense, 0, /*alpha*/ 1);
+#ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(r_)->set_indices_and_values(indices, values);
+#else
+  _get_sparse_impl(r_)->set_indices_and_values_unsafe(indices, values);
+#endif
 
   return r_;
 #else
@@ -381,7 +404,11 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
   LongTensor r_indices_ = at::cat({t_indices_, s_indices_}, 1);
   Tensor r_values_ = at::cat({t_values_, s_values_}, 0);
   r_.resize_as_(src);
+#ifndef USE_TH_SIZE_ZERO_DIM
   _alias_into_sparse(r_, r_indices_, r_values_);
+#else
+  _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
+#endif
 
   // FIXME: add some heuristic about when to call coalesce() here, so that
   // tensors don't totally blow up in size by concatenation; e.g.
@@ -433,7 +460,9 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   LongTensor r_indices_ = t_indices_.type().tensor({sparseDims, max_nnz});
   Tensor r_values_ = _new_values_with_size_of(t_values_, max_nnz).zero_();
   r_.resize_as_(src);
+#ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(r_)->set_indices_and_values(r_indices_, r_values_);  // TODO: sigh
+#endif
 
   int64_t valueSize = t_values_.stride(0);
   const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
@@ -466,7 +495,14 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   // sync!  (surely there is a more idiomatic way to do this...)
   LongTensor cpu_resultNnz = at::empty({1}, CPU(kLong));
   cpu_resultNnz.copy_(resultNnz);
+#ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(r_)->set_nnz(cpu_resultNnz.accessor<int64_t, 1>()[0]);
+#else
+  int64_t r_nnz = cpu_resultNnz.accessor<int64_t, 1>()[0];
+  r_indices_ = r_indices_.narrow(1, 0, r_nnz);
+  r_values_ = r_values_.narrow(0, 0, r_nnz);
+  _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);  // TODO: sigh
+#endif
   _get_sparse_impl(r_)->set_coalesced(true);
 
   return r_;

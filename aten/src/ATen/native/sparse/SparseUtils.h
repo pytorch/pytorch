@@ -42,20 +42,29 @@ inline bool _check_device(ArrayRef<Tensor> ts) {
   return true;
 }
 
-inline void _raw_resize_sparse(const SparseTensor& self, int64_t sparseDims, int64_t denseDims, IntList size) {
+// TODO: remove this function when is USE_TH_SIZE_ZERO_DIM enabled by default
+inline void _raw_resize_sparse_legacy(const SparseTensor& self, int64_t sparseDims, int64_t denseDims, IntList size) {
+#ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(self)->raw_resize_(sparseDims, denseDims, size);
+#endif
 }
 
+#ifndef USE_TH_SIZE_ZERO_DIM
 // Takes indices and values and directly puts them into the sparse tensor, no
 // copy.  This used to be called THSTensor_(_move)
 inline void _alias_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {
   _get_sparse_impl(self)->set_indices_and_values(indices, values);
 }
+#endif
 
 // Take indices and values and makes a (data) copy of them to put into the sparse
 // indices/values.  This used to be called THSTensor_(_set)
 inline void _copy_into_sparse(const SparseTensor& self, const LongTensor& indices, const Tensor& values) {
+#ifndef USE_TH_SIZE_ZERO_DIM
   _alias_into_sparse(self, indices.clone(), values.clone());
+#else
+  _get_sparse_impl(self)->set_indices_and_values_unsafe(indices.clone(), values.clone());
+#endif
 }
 
 // Does NOT make copies of indices/values
@@ -67,8 +76,13 @@ inline SparseTensor _new_with_dims_and_tensor_sparse(
     const LongTensor& indices,
     const Tensor& values) {
   SparseTensor self = new_sparse(dtype);
-  _raw_resize_sparse(self, sparseDims, denseDims, sizes);
+#ifndef USE_TH_SIZE_ZERO_DIM
+  _raw_resize_sparse_legacy(self, sparseDims, denseDims, sizes);
   _alias_into_sparse(self, indices, values);
+#else
+  self.sparse_resize_and_clear_(sizes, sparseDims, denseDims);
+  _get_sparse_impl(self)->set_indices_and_values_unsafe(indices, values);
+#endif
   return self;
 }
 

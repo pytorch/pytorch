@@ -81,12 +81,20 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor empty(IntList size, const TensorOptions& options) {
+#ifndef USE_TH_SIZE_ZERO_DIM
   return options.type().tensor(size);
+#else
+  return options.type().tensor(size);
+#endif
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
-    result.sparse_raw_resize_(size, size.size(), 0);
+#ifndef USE_TH_SIZE_ZERO_DIM
+    result.sparse_raw_resize_legacy_(size, size.size(), 0);
+#else
+    result.sparse_resize_and_clear_(size, size.size(), 0);
+#endif
   } else {
     result.resize_(size);
   }
@@ -116,9 +124,14 @@ Tensor empty_like(const Tensor& self) {
 
 Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
+#ifndef USE_TH_SIZE_ZERO_DIM
     auto res = options.type().tensor({});
     // resize_as_ requires the same exact type.
-    res.sparse_raw_resize_(self.sizes(), self._sparseDims(), self._denseDims());
+    res.sparse_raw_resize_legacy_(self.sizes(), self._sparseDims(), self._denseDims());
+#else
+    auto res = options.type().tensor();
+    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
+#endif
 
     return res;
   }
@@ -473,7 +486,11 @@ Tensor zeros(IntList size, const TensorOptions& options) {
 
 Tensor& zeros_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
-    result.sparse_raw_resize_(size, size.size(), 0);
+#ifndef USE_TH_SIZE_ZERO_DIM
+    result.sparse_raw_resize_legacy_(size, size.size(), 0);
+#else
+    result.sparse_resize_and_clear_(size, size.size(), 0);
+#endif
   } else {
     result.resize_(size);
   }
@@ -486,9 +503,14 @@ Tensor zeros_like(const Tensor& self) {
 
 Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
+#ifndef USE_TH_SIZE_ZERO_DIM
     auto res = options.type().tensor({});
     // resize_as_ requires the same exact type.
-    res.sparse_raw_resize_(self.sizes(), self._sparseDims(), self._denseDims());
+    res.sparse_raw_resize_legacy_(self.sizes(), self._sparseDims(), self._denseDims());
+#else
+    auto res = options.type().tensor();
+    res.sparse_resize_and_clear_(self.sizes(), self._sparseDims(), self._denseDims());
+#endif
     return res;
   }
   return native::zeros(self.sizes(), options);

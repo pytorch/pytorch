@@ -19,7 +19,7 @@ except ImportError:
 SKIP_PYTHON_BINDINGS = [
     'alias', 'contiguous', 'is_cuda', 'is_sparse', 'size', 'stride',
     '.*_backward', '.*_backward_(out|input|weight|bias)', '.*_forward',
-    '.*_forward_out', 'sparse_raw_resize_', '_unsafe_view', 'tensor',
+    '.*_forward_out', '_unsafe_view', 'tensor',
     'sparse_coo_tensor', 'th_sparse_coo_tensor', 'native_sparse_coo_tensor',
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     '_sparse_add.*', '_sparse_div.*', '_sparse_mul.*', '_sparse_sub.*',
@@ -29,6 +29,7 @@ SKIP_PYTHON_BINDINGS = [
     'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
     '_local_scalar', '_local_scalar_dense',
     'max_pool1d', 'max_pool2d', 'max_pool3d'
+    'sparse_raw_resize_legacy_'  # TODO: remove this when USE_TH_SIZE_ZERO_DIM is enabled by default
 ]
 
 # These function signatures are not exposed to Python. Note that this signature

@@ -5,6 +5,7 @@
 #include "ATen/WrapDimUtils.h"
 #include "ATen/optional.h"
 #include <TH/THTensor.hpp>
+#include <ATen/native/sparse/SparseUtils.h>
 
 #include <algorithm>
 #include <vector>
@@ -410,7 +411,18 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    return self.sparse_raw_resize_(sizes, self._sparseDims(), self._denseDims());
+#ifndef USE_TH_SIZE_ZERO_DIM
+    return self.sparse_raw_resize_legacy_(sizes, self._sparseDims(), self._denseDims());
+#else
+    auto indices_original = _get_sparse_impl(self)->indices();
+    auto values_original = _get_sparse_impl(self)->values();
+    auto coalesced = self.is_coalesced();
+    self.sparse_resize_and_clear_(sizes, self._sparseDims(), self._denseDims());
+    _get_sparse_impl(self)->set_indices_and_values_unsafe(indices_original, values_original);
+    _get_sparse_impl(self)->set_coalesced(coalesced);
+
+    return self;
+#endif    
   } else {
     auto indices = self._indices();
     auto row0 = indices.select(0, dim0);
@@ -425,7 +437,18 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto sizes = self.sizes().vec();
     std::swap(sizes[dim0], sizes[dim1]);
 
-    return self.sparse_raw_resize_(sizes, -1, -1);
+#ifndef USE_TH_SIZE_ZERO_DIM
+    return self.sparse_raw_resize_legacy_(sizes, -1, -1);
+#else
+    auto indices_original = _get_sparse_impl(self)->indices();
+    auto values_original = _get_sparse_impl(self)->values();
+    auto coalesced = self.is_coalesced();
+    self.sparse_resize_and_clear_(sizes, -1, -1);
+    _get_sparse_impl(self)->set_indices_and_values_unsafe(indices_original, values_original);
+    _get_sparse_impl(self)->set_coalesced(coalesced);
+
+    return self;
+#endif
   }
 }
 

@@ -8,12 +8,17 @@ namespace at {
 struct AT_API SparseTensorImpl : public TensorImpl {
   // Stored in COO format, indices + values.
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   // Ideal INVARIANTS:
+#else
+  // INVARIANTS:
+#endif
   // _sparseDims: range [0, len(shape)]; _sparseDims + _denseDims = len(shape)
   // _denseDims : range [0, len(shape)]; _sparseDims + _denseDims = len(shape)
   // _indices.shape: dimensionality: 2,  shape: (_sparseDims, nnz)
   // _values.shape:  dimensionality: 1 + _denseDims.  shape: (nnz, shape[_sparseDims:])
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   // Actual INVARIANT differences:
   // 1) _sparseDims: range [1, len(shape)] (i.e. we don't allow 0 sparse dimensions)
   // 2) when nnz = 0, there is strange behavior because we lack 0-dimensional sparse tensors.  Namely:
@@ -21,6 +26,7 @@ struct AT_API SparseTensorImpl : public TensorImpl {
   // 3) For both _indices.shape and _values.shape, the nnz dimension may be larger than nnz
   // 4) For _values.shape, the non-nnz dimensions may be smaller than the corresponding dimension size, e.g.
   //    a shape (2,3) sparse tensor with _sparseDims == 1, may have _values.shape: (nnz, <=2, <=3).
+#endif
 
 
   // The true size of the sparse tensor (e.g., if you called to_dense()
@@ -28,7 +34,12 @@ struct AT_API SparseTensorImpl : public TensorImpl {
   // should move to the parent class.
   std::vector<int64_t> size_;
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   // The number of non-zero elements.
+#else
+  // The number of non-zero elements, which is guaranteed to match the
+  // corresponding nnz dimensions of indices/values.
+#endif
   int64_t nnz_ = 0;
 
   int64_t sparseDims_ = 0; // number of sparse dimensions
@@ -64,10 +75,13 @@ public:
   void * unsafeGetTH(bool retain) override;
   std::unique_ptr<Storage> storage() override;
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   // Some ops do some manual size fiddling.
   // TODO: Figure out a more safe way to provide this functionality
   std::vector<int64_t>& _sizes_mut() { return size_; }
+#endif
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with
   // respect to indices and values
   void raw_resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
@@ -80,7 +94,27 @@ public:
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
   }
+#else
+  // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
+  // The reason we do this is that it's difficult to preserve the dim invariants when we change the
+  // sparse tensor size but it doesn't agree with the dims of the existing indices or values, so we
+  // should also reset the indices and values to preserve the dim invariants.
+  void resize_and_clear_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
+    AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
+    size_ = size;
+    sparseDims_ = sparseDims;
+    denseDims_ = denseDims;
 
+    auto empty_indices = indices().type().tensor({sparseDims, 0});
+    std::vector<int64_t> values_size = {0};
+    auto dense_size = sizes().slice(sparseDims);
+    values_size.insert(values_size.end(), dense_size.begin(), dense_size.end());
+    auto empty_values = values().type().tensor(values_size);
+    set_indices_and_values_unsafe(empty_indices, empty_values);
+  }
+#endif
+
+#ifndef USE_TH_SIZE_ZERO_DIM
   // TODO: I hate these two setters, please get rid of them!!!
   void set_indices(const Tensor& indices) {
     AT_ASSERT(indices.type().backend() == at::toDense(type().backend()));
@@ -91,14 +125,25 @@ public:
     AT_ASSERT(values.type().toSparse() == type());
     values_ = values;
   }
+#endif
 
   void set_coalesced(bool coalesced) { coalesced_ = coalesced; }
+#ifndef USE_TH_SIZE_ZERO_DIM
   void set_nnz(int64_t nnz) { nnz_ = nnz; }
+#endif
 
+  // Takes indices and values and directly puts them into the sparse tensor, no copy.
+  // NOTE: this function is unsafe because it doesn't check whether any indices are
+  // out of boundaries of `sizes`, so it should ONLY be used where we know that the
+  // indices are guaranteed to be within bounds.
   // This used to be called THSTensor_(_move)
   // NB: This used to be able to avoid a refcount bump, but I was too lazy to
   // make it happen
+#ifndef USE_TH_SIZE_ZERO_DIM
   void set_indices_and_values(const Tensor& indices, const Tensor& values);
+#else
+  void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
+#endif
 };
 
 } // namespace at
