@@ -107,7 +107,7 @@ def filename_ends_with_extension(filename, extensions):
 
 def inside_included_directories(dirpath, rootpath, include_dirs):
     """Helper method to see if filename within included directories"""
-    return reduce(lambda result, included_directory: re.match(r'(%s)\b' % os.path.join(rootpath, included_directory), dirpath) or result, include_dirs, None)
+    return reduce(lambda result, included_directory: re.match(r'{0}\b'.format(os.path.join(rootpath, included_directory)), dirpath) or result, include_dirs, None)
 
 
 def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=None):
@@ -169,19 +169,19 @@ def compute_stats(stats):
     unsupported_calls = set(cuda_call for (cuda_call, _filepath) in stats["unsupported_calls"])
 
     # Print the number of unsupported calls
-    print("Total number of unsupported CUDA function calls: %d" % (len(unsupported_calls)))
+    print("Total number of unsupported CUDA function calls: {0:d}".format(len(unsupported_calls)))
 
     # Print the list of unsupported calls
     print(", ".join(unsupported_calls))
 
     # Print the number of kernel launches
-    print("\nTotal number of replaced kernel launches: %d" % (len(stats["kernel_launches"])))
+    print("\nTotal number of replaced kernel launches: {0:d}".format(len(stats["kernel_launches"])))
 
 
 def processKernelLaunches(string, stats):
     """ Replace the CUDA style Kernel launches with the HIP style kernel launches."""
     # Concat the namespace with the kernel names. (Find cleaner way of doing this later).
-    string = re.sub(r'([ ]+)(detail?)::[ ]+\\\n[ ]+', lambda inp: "%s%s::" % (inp.group(1), inp.group(2)), string)
+    string = re.sub(r'([ ]+)(detail?)::[ ]+\\\n[ ]+', lambda inp: "{0}{1}::".format(inp.group(1), inp.group(2)), string)
 
     def grab_method_and_template(in_kernel):
         # The positions for relevant kernel components.
@@ -368,7 +368,7 @@ def disable_function(input_string, function, replace_style):
         }
 
         # Create function string to search for
-        function_string = "%s%s%s" % (
+        function_string = "{0}{1}{2}".format(
             func_info["return_type"],
             func_info["function_name"],
             func_info["function_args"]
@@ -378,8 +378,7 @@ def disable_function(input_string, function, replace_style):
         info["function_start"] = input_string.find(function_string)
     else:
         # Automatically detect signature.
-        the_match = re.search(r"(((.*) (\*)?)(%s)(\([^{)]*\)))\s*{" %
-                              (function.replace("(", "\(").replace(")", "\)")), input_string)
+        the_match = re.search(r"(((.*) (\*)?)({0})(\([^{{)]*\)))\s*{{".format(function.replace("(", "\(").replace(")", "\)")), input_string)
         if the_match is None:
             return input_string
 
@@ -430,12 +429,12 @@ def disable_function(input_string, function, replace_style):
     elif replace_style == disablefuncmode.STUB:
         # void return type
         if func_info["return_type"] == "void" or func_info["return_type"] == "static void":
-            stub = "%s{\n}" % (function_string)
+            stub = "{0}{{\n}}".format(function_string)
         # pointer return type
         elif "*" in func_info["return_type"]:
-            stub = "%s{\nreturn %s;\n}" % (function_string, "NULL")  # nullptr
+            stub = "{0}{{\nreturn {1};\n}}".format(function_string, "NULL")  # nullptr
         else:
-            stub = "%s{\n%s stub_var;\nreturn stub_var;\n}" % (function_string, func_info["return_type"])
+            stub = "{0}{{\n{1} stub_var;\nreturn stub_var;\n}}".format(function_string, func_info["return_type"])
 
         output_string = input_string.replace(function_body, stub)
 
@@ -443,30 +442,30 @@ def disable_function(input_string, function, replace_style):
     elif replace_style == disablefuncmode.HCC_MACRO:
         output_string = input_string.replace(
             function_body,
-            "#if !defined(__HIP_PLATFORM_HCC__)\n%s\n#endif" % function_body)
+            "#if !defined(__HIP_PLATFORM_HCC__)\n{0}\n#endif".format(function_body))
 
     # Add HIP Preprocessors.
     elif replace_style == disablefuncmode.DEVICE_MACRO:
         output_string = input_string.replace(
             function_body,
-            "#if !defined(__HIP_DEVICE_COMPILE__)\n%s\n#endif" % function_body)
+            "#if !defined(__HIP_DEVICE_COMPILE__)\n{0}\n#endif".format(function_body))
 
     # Throw an exception at runtime.
     elif replace_style == disablefuncmode.EXCEPTION:
-        stub = "%s{\n%s;\n}" % (
+        stub = "{0}{{\n{1};\n}}".format(
             function_string,
-            'throw std::runtime_error("The function %s is not implemented.")' %
-            function_string.replace("\n", " "))
+            'throw std::runtime_error("The function {0} is not implemented.")'.format(
+            function_string.replace("\n", " ")))
         output_string = input_string.replace(function_body, stub)
 
     elif replace_style == disablefuncmode.ASSERT:
-        stub = "%s{\n%s;\n}" % (
+        stub = "{0}{{\n{1};\n}}".format(
             function_string,
             'assert(0)')
         output_string = input_string.replace(function_body, stub)
 
     elif replace_style == disablefuncmode.EMPTY:
-        stub = "%s{\n;\n}" % (function_string)
+        stub = "{0}{{\n;\n}}".format(function_string)
         output_string = input_string.replace(function_body, stub)
     return output_string
 
@@ -489,7 +488,7 @@ def preprocessor(filepath, stats):
                         stats["unsupported_calls"].append((cuda_type, filepath))
 
                 if cuda_type in output_source:
-                    output_source = re.sub(r'\b(%s)\b' % cuda_type, lambda x: hip_type, output_source)
+                    output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
 
         # Perform Kernel Launch Replacements
         output_source = processKernelLaunches(output_source, stats)
@@ -512,7 +511,7 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
     with openf(filepath, "r+") as f:
         contents = f.read()
         if strict:
-            contents = re.sub(r'\b(%s)\b' % search_string, lambda x: replace_string, contents)
+            contents = re.sub(r'\b({0})\b'.format(search_string), lambda x: replace_string, contents)
         else:
             contents = contents.replace(search_string, replace_string)
         f.seek(0)
@@ -524,8 +523,8 @@ def file_add_header(filepath, header):
     with openf(filepath, "r+") as f:
         contents = f.read()
         if header[0] != "<" and header[-1] != ">":
-            header = '"%s"' % header
-        contents = ('#include %s \n' % header) + contents
+            header = '"{0}"'.format(header)
+        contents = ('#include {0} \n'.format(header)) + contents
         f.seek(0)
         f.write(contents)
         f.truncate()
@@ -595,7 +594,7 @@ def get_kernel_template_params(the_file, KernelDictionary):
                         break
             if len(template_arguments) == 1 and template_arguments[0].strip() in ["Dtype", "T"]:
                 # Updates kernel
-                kernel_with_template = "%s<real>" % (kernel_name)
+                kernel_with_template = "{0}<real>".format(kernel_name)
             else:
                 kernel_with_template = kernel_name
             formatted_args = {}
@@ -613,10 +612,10 @@ def get_kernel_template_params(the_file, KernelDictionary):
             kernel_params = kernel.group(2).split(",")[1:]
 
             if kernel_gen_type == 1:
-                kernel_args = {1: "int", 2: "%s *" % kernel_params[0], 3: kernel_params[1]}
+                kernel_args = {1: "int", 2: "{0} *".format(kernel_params[0]), 3: kernel_params[1]}
 
             if kernel_gen_type == 2:
-                kernel_args = {1: "int", 2: "%s *" % kernel_params[0], 3: kernel_params[1], 4: kernel_params[2]}
+                kernel_args = {1: "int", 2: "{0} *".format(kernel_params[0]), 3: kernel_params[1], 4: kernel_params[2]}
 
             # Argument at position 1 should be int
             KernelDictionary[kernel_name] = {"kernel_with_template": kernel_name, "arg_types": kernel_args}
@@ -628,7 +627,7 @@ def disable_unsupported_function_call(function, input_string, replacement):
     output_string = input_string
 
     # Find all calls to the function
-    calls = re.finditer(r"\b%s\b" % function, input_string)
+    calls = re.finditer(r"\b{0}\b".format(function), input_string)
 
     # Do replacements
     for call in calls:
@@ -666,7 +665,7 @@ def disable_module(input_file):
         last = list(re.finditer(r"#include .*\n", txt))[-1]
         end = last.end()
 
-        disabled = "%s#if !defined(__HIP_PLATFORM_HCC__)\n%s\n#endif" % (txt[0:end], txt[end:])
+        disabled = "{0}#if !defined(__HIP_PLATFORM_HCC__)\n{1}\n#endif".format(txt[0:end], txt[end:])
 
         f.seek(0)
         f.write(disabled)
@@ -744,17 +743,17 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                                     the_type = argument_types[arg_idx]
                                     the_arg = arg.replace("\n", "").replace("\\", "").strip()
                                     if the_type in ["int", "const int", "int64_t", "THCIndex_t *", "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]:
-                                        static_argument = "static_cast<%s>(%s)" % (the_type, the_arg)
+                                        static_argument = "static_cast<{0}>({1})".format(the_type, the_arg)
 
                                         def replace_arg(match):
                                           return match.group(1) + static_argument + match.group(3)
                                         # Update to static_cast, account for cases where argument is at start/end of string
-                                        new_kernel_launch = re.sub(r'(^|\W)(%s)(\W|$)' % re.escape(the_arg), replace_arg, new_kernel_launch)
+                                        new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(re.escape(the_arg)), replace_arg, new_kernel_launch)
  
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            new_kernel_launch = re.sub(r'\b%s\b' % original_kernel_name_with_template,
+                            new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
                                                        lambda x: kernel_name_with_template, new_kernel_launch)
 
                             # Replace Launch
@@ -922,7 +921,7 @@ def main():
                 s_constants = []
 
             if not os.path.exists(filepath):
-                print("\n" + bcolors.WARNING + "YAML Warning: File %s does not exist." % filepath + bcolors.ENDC)
+                print("\n" + bcolors.WARNING + "YAML Warning: File {0} does not exist.".format(filepath) + bcolors.ENDC)
                 continue
 
             with openf(filepath, "r+") as f:
@@ -934,7 +933,7 @@ def main():
 
                 # Disable Constants w\ Boundary.
                 for const in constants:
-                    txt = re.sub(r"\b%s\b" % const, constants[const], txt)
+                    txt = re.sub(r"\b{0}\b".format(const), constants[const], txt)
 
                 # Disable Constants
                 for s_const in s_constants:
