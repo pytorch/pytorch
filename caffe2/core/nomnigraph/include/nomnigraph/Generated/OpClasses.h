@@ -565,13 +565,34 @@ class Clip : public NeuralNetOperator {
 
 class FC : public NeuralNetOperator {
  public:
-  FC() : NeuralNetOperator(NNKind::FC) {}
+  FC()
+    : NeuralNetOperator(NNKind::FC),
+      Axis(1),
+      Axis_w(1) {}
 
   ~FC() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(FC);
 
+  int getAxis() const {
+    return Axis;
+  }
+
+  int getAxisW() const {
+    return Axis_w;
+  }
+
+  void setAxis(int axis) {
+    Axis = axis;
+  }
+
+  void setAxisW(int axis_w) {
+    Axis_w = axis_w;
+  }
+
  private:
+  int Axis;
+  int Axis_w;
 };
 
 class GivenTensorFill : public NeuralNetOperator {

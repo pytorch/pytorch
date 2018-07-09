@@ -45,11 +45,12 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
 }
 
 int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
+  int group = 1;
   if (argMap.count("group")) {
     CAFFE_ENFORCE(argMap["group"].has_i() && "Invalid group argument");
-    return static_cast<int>(argMap["group"].i());
+    group = static_cast<int>(argMap["group"].i());
   }
-  return 1;
+  return group;
 }
 
 } // namespace
@@ -107,6 +108,10 @@ std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) 
     int kernelH = static_cast<int>(argMap["kernel_h"].i());
     int kernelW = static_cast<int>(argMap["kernel_w"].i());
     kernelShape = {kernelH, kernelW};
+  } else if (argMap.count("global_pooling")) {
+    CAFFE_ENFORCE(argMap["global_pooling"].has_i(), "Invalid kernel argument");
+    int global_pooling = static_cast<int>(argMap["global_pooling"].i());
+    CAFFE_ENFORCE(global_pooling == 1, "Invalid kernel argument");
   }
   return kernelShape;
 }
@@ -226,6 +231,33 @@ class ConcatConverter : public Converter {
   virtual ~ConcatConverter() {}
 };
 REGISTER_CONVERTER(Concat, ConcatConverter);
+
+class FCConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp =
+        util::make_unique<repr::FC>();
+    auto argMap = getArgumentsFromOperator(op);
+
+    auto c = dyn_cast<repr::FC>(nnOp.get());
+    if (argMap.count("axis")) {
+      CAFFE_ENFORCE(argMap["axis"].has_i(), "Invalid axis argument");
+      int axis = static_cast<int>(argMap["axis"].i());
+      c->setAxis(axis);
+    }
+    if (argMap.count("axis_w")) {
+      CAFFE_ENFORCE(argMap["axis_w"].has_i(), "Invalid axis_w argument");
+      int axis_w = static_cast<int>(argMap["axis_w"].i());
+      c->setAxisW(axis_w);
+    }
+
+    return nnOp;
+  }
+  // Does not override default converter to OperatorDef
+
+  virtual ~FCConverter() {}
+};
+REGISTER_CONVERTER(FC, FCConverter);
 
 } // namespace
 
