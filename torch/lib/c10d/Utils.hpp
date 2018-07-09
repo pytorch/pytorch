@@ -101,20 +101,6 @@ using SizeType = uint64_t;
       throw std::system_error(errno, std::system_category()); \
   }
 
-inline PortType convertToPort(int64_t port) {
-  if ((port < 0) || (port >= std::numeric_limits<PortType>::max()))
-    throw std::domain_error("invalid port (value out of range)");
-
-  return static_cast<PortType>(port);
-}
-
-inline RankType convertToRank(int64_t rank, int64_t min = 0) {
-  if ((rank < min) || (rank >= std::numeric_limits<RankType>::max()))
-    throw std::domain_error("invalid rank (value out of range)");
-
-  return static_cast<RankType>(rank);
-}
-
 // Helper resource guard class
 class ResourceGuard {
  public:

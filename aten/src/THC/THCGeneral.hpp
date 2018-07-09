@@ -27,8 +27,6 @@ struct THCState {
   /* Index of the current selected sparse handle. The actual sparse handle used
      depends on the current device. */
   THCThreadLocal/*<int>*/ currentPerDeviceSparseHandle;
-  /* Array of thread locals containing the current stream for each device */
-  THCThreadLocal* currentStreams;
 
   /* Table of enabled peer-to-peer access between directed pairs of GPUs.
      If i accessing allocs on j is enabled, p2pAccess[i][j] is 1; 0 otherwise. */

@@ -1284,6 +1284,13 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, grad[1])
         self.assertEqual(z.grad.data, grad[2])
 
+    def test_unbind(self):
+        stacked = torch.randn(3, 10, 10, requires_grad=True)
+        x, y, z = stacked.unbind()
+        grad = torch.randn(3, 10, 10)
+        torch.autograd.backward([x, y, z], grad.unbind())
+        self.assertEqual(stacked.grad.data, grad)
+
     def test_put(self):
         root = torch.randn(4, 5, requires_grad=True)
         values = torch.randn(6, requires_grad=True)
