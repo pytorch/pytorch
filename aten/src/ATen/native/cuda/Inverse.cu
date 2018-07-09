@@ -1,3 +1,4 @@
+#include "THC/THC.h"
 #include "ATen/native/LinearAlgebraUtils.h"
 #include "ATen/cudnn/Exceptions.h" // for ATEN_CUDA_CHECK
 
@@ -57,6 +58,7 @@ Tensor inverse_cuda(const Tensor& self) {
     }
 
     cublasHandle_t handle = globalContext().getCurrentCublasHandle();
+    THCState *thcState = globalContext().getTHCState();
     Tensor input_contiguous = self.contiguous();
 
     int n = self.size(-1);
@@ -81,11 +83,11 @@ Tensor inverse_cuda(const Tensor& self) {
         scalar_t **output_gpu;
         scalar_t **input_ptrs = new scalar_t*[batch_size];
         scalar_t **output_ptrs = new scalar_t*[batch_size];
-        AT_CUDA_CHECK(cudaMalloc(&input_gpu, batch_size*sizeof(scalar_t*)));
-        AT_CUDA_CHECK(cudaMalloc(&output_gpu, batch_size*sizeof(scalar_t*)));
+        AT_CUDA_CHECK(THCudaMalloc(thcState, (void**)&input_gpu, batch_size*sizeof(scalar_t*)));
+        AT_CUDA_CHECK(THCudaMalloc(thcState, (void**)&output_gpu, batch_size*sizeof(scalar_t*)));
         int *pivots_gpu, *info_gpu;
-        AT_CUDA_CHECK(cudaMalloc(&pivots_gpu, n*batch_size*sizeof(int)));
-        AT_CUDA_CHECK(cudaMalloc(&info_gpu, batch_size*sizeof(int)));
+        AT_CUDA_CHECK(THCudaMalloc(thcState, (void**)&pivots_gpu, n*batch_size*sizeof(int)));
+        AT_CUDA_CHECK(THCudaMalloc(thcState, (void**)&info_gpu, batch_size*sizeof(int)));
         
         const int block = 512;
         const int grid = (batch_size + block - 1) / block;
@@ -113,10 +115,10 @@ Tensor inverse_cuda(const Tensor& self) {
             }
         }
 
-        AT_CUDA_CHECK(cudaFree(input_gpu));
-        AT_CUDA_CHECK(cudaFree(output_gpu));
-        AT_CUDA_CHECK(cudaFree(pivots_gpu));
-        AT_CUDA_CHECK(cudaFree(info_gpu));
+        AT_CUDA_CHECK(THCudaFree(thcState, input_gpu));
+        AT_CUDA_CHECK(THCudaFree(thcState, output_gpu));
+        AT_CUDA_CHECK(THCudaFree(thcState, pivots_gpu));
+        AT_CUDA_CHECK(THCudaFree(thcState, info_gpu));
         delete input_ptrs;
         delete output_ptrs;
         delete info_cpu;
