@@ -671,9 +671,14 @@ def disable_module(input_file):
         f.write(disabled)
         f.truncate()
 
-
 def extract_arguments(start, string):
-    """ Return the list of arguments in the upcoming function parameter closure"""
+    """ Return the list of arguments in the upcoming function parameter closure
+        This function needs a string that contains function arguments fully encapsulated within opening and closing parantheses.
+        Eg:
+        string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
+        arguments (output): '[{'start': 1, 'end': 7}, {'start': 8, 'end': 16}, {'start': 17, 'end': 19}, {'start': 20, 'end': 53}]'
+    """
+
     arguments = []
     closures = {
         "<": 0,
@@ -708,9 +713,18 @@ def extract_arguments(start, string):
 
     return arguments
 
+# Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
 
 def add_static_casts(directory, extensions, KernelTemplateParams):
-    """Added necessary static casts to kernel launches due to issue in HIP"""
+    """Added necessary static casts to kernel launches to match kernel argument type to corresponding kernel definition
+       Eg.
+       old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state), 
+          (const real**)d_result, THCTensor_(data)(state, ra__),
+          ra__->stride[0], num_batches'
+       new_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state), 
+          (const real**)d_result, THCTensor_(data)(state, ra__),
+          static_cast<int64_t>(ra__->stride[0]), static_cast<int64_t>(num_batches)'
+    """
     # Add static_casts<> to all kernel launches.
     for (dirpath, _dirnames, filenames) in os.walk(directory):
         for filename in filenames:
