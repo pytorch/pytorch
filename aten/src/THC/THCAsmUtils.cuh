@@ -8,7 +8,7 @@ struct Bitfield {};
 
 template <>
 struct Bitfield<unsigned int> {
-  static __device__ __forceinline__ 
+  static __device__ __forceinline__
   unsigned int getBitfield(unsigned int val, int pos, int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0x1f;
@@ -24,7 +24,7 @@ struct Bitfield<unsigned int> {
 #endif
   }
 
-  static __device__ __forceinline__ 
+  static __device__ __forceinline__
   unsigned int setBitfield(unsigned int val, unsigned int toInsert, int pos, int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0x1f;
@@ -47,7 +47,7 @@ struct Bitfield<unsigned int> {
 
 template <>
 struct Bitfield<uint64_t> {
-  static __device__ __forceinline__ 
+  static __device__ __forceinline__
   uint64_t getBitfield(uint64_t val, int pos, int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0x1f;
@@ -63,7 +63,7 @@ struct Bitfield<uint64_t> {
 #endif
   }
 
-  static __device__ __forceinline__ 
+  static __device__ __forceinline__
   uint64_t setBitfield(uint64_t val, uint64_t toInsert, int pos, int len) {
 #if defined(__HIP_PLATFORM_HCC__)
     pos &= 0x1f;
@@ -84,7 +84,7 @@ struct Bitfield<uint64_t> {
   }
 };
 
-__device__ __forceinline__ static int getLaneId() {
+__device__ __forceinline__ int getLaneId() {
 #if defined(__HIP_PLATFORM_HCC__)
   return hc::__lane_id();
 #else
@@ -94,7 +94,7 @@ __device__ __forceinline__ static int getLaneId() {
 #endif
 }
 
-__device__ __forceinline__ static unsigned getLaneMaskLt() {
+__device__ __forceinline__ unsigned getLaneMaskLt() {
 #if defined(__HIP_PLATFORM_HCC__)
   std::uint64_t m = (1ull << getLaneId()) - 1ull;
   return m;
@@ -105,7 +105,7 @@ __device__ __forceinline__ static unsigned getLaneMaskLt() {
 #endif
 }
 
-__device__ __forceinline__ static unsigned getLaneMaskLe() {
+__device__ __forceinline__ unsigned getLaneMaskLe() {
 #if defined(__HIP_PLATFORM_HCC__)
   std::uint64_t m = (1ull << (getLaneId() + 1ull)) - 1ull;
   return m;
@@ -116,7 +116,7 @@ __device__ __forceinline__ static unsigned getLaneMaskLe() {
 #endif
 }
 
-__device__ __forceinline__ static unsigned getLaneMaskGt() {
+__device__ __forceinline__ unsigned getLaneMaskGt() {
 #if defined(__HIP_PLATFORM_HCC__)
   std::uint64_t m = getLaneMaskLe();
   return m ? ~m : m;
@@ -127,7 +127,7 @@ __device__ __forceinline__ static unsigned getLaneMaskGt() {
 #endif
 }
 
-__device__ __forceinline__ static unsigned getLaneMaskGe() {
+__device__ __forceinline__ unsigned getLaneMaskGe() {
 #if defined(__HIP_PLATFORM_HCC__)
   std::uint64_t m = getLaneMaskLt();
   return ~m;

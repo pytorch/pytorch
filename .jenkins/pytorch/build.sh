@@ -35,12 +35,13 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export KMTHINLTO=1
 
   # TODO: Install pyHIPIFY in the docker image
+  rm -rf pyHIPIFY || true
+  git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
+  chmod a+x pyHIPIFY/*.py
+  sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
-
-  # Invoke from the pytorch_amd directory.
-  cd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd"
   USE_ROCM=1 python setup.py install
   exit
 fi
