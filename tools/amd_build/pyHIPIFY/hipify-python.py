@@ -912,17 +912,17 @@ def main():
             if "functions" in disable:
                 functions = disable["functions"]
             else:
-                functions = []
+                functions = disable.get("functions", [])
 
             if "constants" in disable:
                 constants = disable["constants"]
             else:
-                constants = []
+                constants = disable.get("constants", [])
 
             if "s_constants" in disable:
                 s_constants = disable["s_constants"]
             else:
-                s_constants = []
+                s_constants = disable.get("s_constants", [])
 
             if not os.path.exists(filepath):
                 print("\n" + bcolors.WARNING + "YAML Warning: File %s does not exist." % filepath + bcolors.ENDC)
