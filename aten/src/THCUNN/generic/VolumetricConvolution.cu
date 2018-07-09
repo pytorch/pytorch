@@ -47,11 +47,11 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
   if (weight == NULL) {
     weight = gradWeight;
   }
-  int nOutputPlane = (int)weight->size[0];
-  int nInputPlane  = (int)weight->size[1];
-  int kT           = (int)weight->size[2];
-  int kH           = (int)weight->size[3];
-  int kW           = (int)weight->size[4];
+  int64_t nOutputPlane = weight->size[0];
+  int64_t nInputPlane  = weight->size[1];
+  int64_t kT           = weight->size[2];
+  int64_t kH           = weight->size[3];
+  int64_t kW           = weight->size[4];
 
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 4,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
@@ -267,11 +267,11 @@ void THNN_(VolumetricConvolution_updateGradInput)(
            int padT, int padW, int padH)
 {
 
-  int nOutputPlane = (int)weight->size[0];
-  int nInputPlane  = (int)weight->size[1];
-  int kT           = (int)weight->size[2];
-  int kH           = (int)weight->size[3];
-  int kW           = (int)weight->size[4];
+  int64_t nOutputPlane = weight->size[0];
+  int64_t nInputPlane  = weight->size[1];
+  int64_t kT           = weight->size[2];
+  int64_t kH           = weight->size[3];
+  int64_t kW           = weight->size[4];
 
   THCTensor *gradColumns = finput;
 
@@ -507,7 +507,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
       #endif
     }
   }
-  
+
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradOutput_n);

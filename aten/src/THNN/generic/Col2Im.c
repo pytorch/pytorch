@@ -70,8 +70,8 @@ static void THNN_(im2col)(const real* data_im, const int channels,
     int h_offset = (c_col / kernel_w) % kernel_h;
     int c_im = c_col / kernel_h / kernel_w;
     for (int h_col = 0; h_col < height_col; ++h_col) {
+      int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
       for (int w_col = 0; w_col < width_col; ++w_col) {
-        int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
         int w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
         data_col[(c_col * height_col + h_col) * width_col + w_col] =
           (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ?
@@ -98,8 +98,8 @@ static void THNN_(col2im)(const real* data_col, const int channels,
     int h_offset = (c_col / kernel_w) % kernel_h;
     int c_im = c_col / kernel_h / kernel_w;
     for (int h_col = 0; h_col < height_col; ++h_col) {
+      int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
       for (int w_col = 0; w_col < width_col; ++w_col) {
-        int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
         int w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
         if (h_im >= 0 && h_im < height && w_im >= 0 && w_im < width)
           data_im[(c_im * height + h_im) * width + w_im] +=

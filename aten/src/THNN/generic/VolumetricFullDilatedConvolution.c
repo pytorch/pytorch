@@ -3,32 +3,32 @@
 #else
 
 static void THNN_(vol2col)(
-  const real *data_vol, const int channels,
-  const int depth, const int height, const int width,
-  const int depth_col, const int height_col, const int width_col,
-  const int kT, const int kH, const int kW,
-  const int pT, const int pH, const int pW,
-  const int dT, const int dH, const int dW,
-  const int dilationT, const int dilationH, const int dilationW,
+  const real *data_vol, const int64_t channels,
+  const int64_t depth, const int64_t height, const int64_t width,
+  const int64_t depth_col, const int64_t height_col, const int64_t width_col,
+  const int64_t kT, const int64_t kH, const int64_t kW,
+  const int64_t pT, const int64_t pH, const int64_t pW,
+  const int64_t dT, const int64_t dH, const int64_t dW,
+  const int64_t dilationT, const int64_t dilationH, const int64_t dilationW,
   real *data_col)
 {
-  int c, t, h, w;
-  int channels_col = channels * kT * kH * kW;
+  int64_t c, t, h, w;
+  int64_t channels_col = channels * kT * kH * kW;
   for (c = 0; c < channels_col; ++c)
   {
-    int w_offset = c % kW;
-    int h_offset = (c / kW) % kH;
-    int t_offset = (c / kW / kH) % kT;
-    int c_vol = c / kT / kH / kW;
+    int64_t w_offset = c % kW;
+    int64_t h_offset = (c / kW) % kH;
+    int64_t t_offset = (c / kW / kH) % kT;
+    int64_t c_vol = c / kT / kH / kW;
     for (t = 0; t < depth_col; ++t)
     {
+      int64_t t_pad = t * dT - pT + t_offset * dilationT;
       for (h = 0; h < height_col; ++h)
       {
+        int64_t h_pad = h * dH - pH + h_offset * dilationH;
         for (w = 0; w < width_col; ++w)
         {
-          int t_pad = t * dT - pT + t_offset * dilationT;
-          int h_pad = h * dH - pH + h_offset * dilationH;
-          int w_pad = w * dW - pW + w_offset * dilationW;
+          int64_t w_pad = w * dW - pW + w_offset * dilationW;
           if (t_pad >= 0 && t_pad < depth &&
               h_pad >= 0 && h_pad < height &&
               w_pad >= 0 && w_pad < width)
@@ -43,36 +43,36 @@ static void THNN_(vol2col)(
 }
 
 static void THNN_(col2vol)(
-  const real* data_col, const int channels,
-  const int depth, const int height, const int width,
-  const int out_depth, const int out_height, const int out_width,
-  const int kT, const int kH, const int kW,
-  const int pT, const int pH, const int pW,
-  const int dT, const int dH, const int dW,
-  const int dilationT, const int dilationH, const int dilationW,
+  const real* data_col, const int64_t channels,
+  const int64_t depth, const int64_t height, const int64_t width,
+  const int64_t out_depth, const int64_t out_height, const int64_t out_width,
+  const int64_t kT, const int64_t kH, const int64_t kW,
+  const int64_t pT, const int64_t pH, const int64_t pW,
+  const int64_t dT, const int64_t dH, const int64_t dW,
+  const int64_t dilationT, const int64_t dilationH, const int64_t dilationW,
   real* data_vol)
 {
-  int c, t, h, w;
+  int64_t c, t, h, w;
   memset(data_vol, 0, sizeof(real) * depth * height * width * channels);
-  int depth_col  = out_depth;
-  int height_col = out_height;
-  int width_col  = out_width;
-  int channels_col = channels * kT * kH * kW;
+  int64_t depth_col  = out_depth;
+  int64_t height_col = out_height;
+  int64_t width_col  = out_width;
+  int64_t channels_col = channels * kT * kH * kW;
   for (c = 0; c < channels_col; ++c)
   {
-    int w_offset = c % kW;
-    int h_offset = (c / kW) % kH;
-    int t_offset = (c / kW / kH) % kT;
-    int c_vol = c / kT / kH / kW;
+    int64_t w_offset = c % kW;
+    int64_t h_offset = (c / kW) % kH;
+    int64_t t_offset = (c / kW / kH) % kT;
+    int64_t c_vol = c / kT / kH / kW;
     for (t = 0; t < depth_col; ++t)
     {
+      int64_t t_pad = t * dT - pT + t_offset * dilationT;
       for (h = 0; h < height_col; ++h)
       {
+        int64_t h_pad = h * dH - pH + h_offset * dilationH;
         for (w = 0; w < width_col; ++w)
         {
-          int t_pad = t * dT - pT + t_offset * dilationT;
-          int h_pad = h * dH - pH + h_offset * dilationH;
-          int w_pad = w * dW - pW + w_offset * dilationW;
+          int64_t w_pad = w * dW - pW + w_offset * dilationW;
           if (t_pad >= 0 && t_pad < depth &&
               h_pad >= 0 && h_pad < height &&
               w_pad >= 0 && w_pad < width)
@@ -324,8 +324,8 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
         input, gradOutput, weight, NULL, kT, kW, kH,
         dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, 0);
 
-  const int nInputPlane  = (int)weight->size[0];
-  const int nOutputPlane = (int)weight->size[1];
+  const int64_t nInputPlane  = weight->size[0];
+  const int64_t nOutputPlane = weight->size[1];
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
@@ -437,7 +437,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
         input, gradOutput, gradWeight, gradBias, kT, kW, kH,
         dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, 1);
 
-  int nOutputPlane;
+  int64_t nOutputPlane;
   if (gradWeight) {
     nOutputPlane = THTensor_(size)(gradWeight, 1);
   } else if (gradBias) {
