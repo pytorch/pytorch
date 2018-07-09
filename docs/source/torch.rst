@@ -253,6 +253,7 @@ Other Operations
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flip
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace
@@ -288,6 +289,7 @@ BLAS and LAPACK Operations
 .. autofunction:: mv
 .. autofunction:: orgqr
 .. autofunction:: ormqr
+.. autofunction:: pinverse
 .. autofunction:: potrf
 .. autofunction:: potri
 .. autofunction:: potrs

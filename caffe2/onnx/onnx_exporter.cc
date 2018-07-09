@@ -222,6 +222,8 @@ const std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>&
 OnnxExporter::get_special_operators() const {
   const static std::unordered_map<std::string, OnnxExporter::SpecialOpConverter>
       kSpecialOperators = {
+          {"ArgMax", &OnnxExporter::CreateArgMaxMinOpNodes},
+          {"ArgMin", &OnnxExporter::CreateArgMaxMinOpNodes},
           {"Add", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Sub", &OnnxExporter::CreateBinaryElementwiseOpNodes},
           {"Mul", &OnnxExporter::CreateBinaryElementwiseOpNodes},
@@ -348,6 +350,25 @@ ConvertedResult OnnxExporter::CommonCaffe2OpToOnnxNodes(
       CopyCaffe2ArgToOnnxAttr(attr, def.type(), a);
     }
   }
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateArgMaxMinOpNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  auto result = CommonCaffe2OpToOnnxNodes(def);
+  auto& nodes = result.first;
+
+  CAFFE_ENFORCE_EQ(nodes.size(), 1);
+  auto& node = nodes.back();
+
+  if (!ArgumentHelper::HasArgument(def, "axis")) {
+    const auto& x = def.input(0);
+    const auto& x_shape = shapes.at(x);
+    node.add_attribute()->CopyFrom(
+        MakeAttribute("axis", x_shape.dims().size() - 1));
+  }
+
   return result;
 }
 
