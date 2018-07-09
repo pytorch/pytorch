@@ -68,6 +68,9 @@ struct Parser {
         auto list = parseList('[', ',', ']', &Parser::parseExp);
         prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
+      case TK_STRINGLITERAL: {
+        prefix = parseStringLiteral();
+      } break;
       default: {
         Ident name = parseIdent();
         prefix = Var::create(name.range(), name);
@@ -173,11 +176,58 @@ struct Parser {
       L.expect(end);
     return List<T>::create(r, elements);
   }
+
   Const parseConst() {
     auto range = L.cur().range;
     auto t = L.expect(TK_NUMBER);
     return Const::create(t.range, t.text());
   }
+
+  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+    //count checks from [start, start + len)
+    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
+  }
+
+  std::string parseLexedString(const std::string &str, size_t start) {
+    //invariants: input consists of a valid adjacent python strings and start is the index at beginning
+    //of a string
+    char quote = str[start];
+    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
+    size_t end = start + quote_len;
+    while(!isCharCount(quote, str, end, quote_len)) {
+      if (str[end] == '\\') {
+        end++;
+      }
+      end++;
+    }
+    std::string ret_str = str.substr(start + quote_len, /*len*/ end - (start + quote_len));
+    //erase line continuations
+    std::string sub = "\\\n";
+    size_t pos = ret_str.find(sub);
+    while(pos != std::string::npos) {
+        ret_str.erase(pos, sub.size());
+        pos = ret_str.find(sub);
+    }
+    size_t next_start = end + quote_len;
+    //find start of next string
+    while(next_start < str.size() && str[next_start] != '\'' && str[next_start] != '\"') {
+      if (str[next_start] == '#') {
+        next_start = str.find('\n', next_start);
+      }
+      next_start++;
+    }
+    if (next_start < str.size()) {
+      ret_str.append(parseLexedString(str, next_start));
+    }
+    return ret_str;
+  }
+
+  StringLiteral parseStringLiteral() {
+    auto range = L.cur().range;
+    auto t = L.expect(TK_STRINGLITERAL);
+    return StringLiteral::create(t.range, parseLexedString(t.text(), 0));
+  }
+
   Expr parseAttributeValue() {
     return parseExp();
   }

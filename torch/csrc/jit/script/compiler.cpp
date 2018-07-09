@@ -1249,6 +1249,27 @@ private:
     return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
   }
 
+  std::shared_ptr<SugaredValue> emitPrint(Ident ident, const List<torch::jit::script::Expr> inputs) {
+    std::vector<std::int64_t> string_indices;
+    std::vector<std::string> strings; 
+    TreeList trees_;
+    for(size_t i = 0; i < inputs.size(); i++) {
+      if (inputs[i].kind() == TK_STRINGLITERAL) {
+        strings.push_back(StringLiteral(inputs[i]).text());
+        string_indices.push_back(i);
+      } else {
+        trees_.push_back(inputs[i]);
+      }
+    }
+    auto filtered_inputs = getNamedValues(trees_, true, identity);
+    ensureTensors(ident.range(), toValues(filtered_inputs));
+    Node* n = emitNode(prim::Print, ident.range(), toValues(filtered_inputs), 0);
+    n->is_(Symbol::attr("string_indices"), string_indices);
+    n->ss_(Symbol::attr("strings"), strings);
+    return std::make_shared<NoneValue>();
+  }
+
+
   std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
     // otherwise we evaluate the callee and then desugar it
     auto sv = emitSugaredExpr(callee, 1);
@@ -1285,6 +1306,10 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
+        Ident ident = Var(apply.callee()).name();
+        if(apply.callee().kind() == TK_VAR && ident.name() == "print") {
+          return emitPrint(ident, apply.inputs());
+        }
         auto inputs = getNamedValues(apply.inputs(), true, identity);
         auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
           return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value(), identity));
@@ -1360,6 +1385,9 @@ private:
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
       } break;
+      case TK_STRINGLITERAL: {  
+        throw std::runtime_error("NYI: string literals are only supported as an argument to print\n");
+        } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);

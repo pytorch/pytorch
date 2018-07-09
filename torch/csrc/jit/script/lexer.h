@@ -34,6 +34,7 @@ namespace script {
   _(TK_EQUIVALENT, "equivalent", "<=>")          \
   _(TK_IDENT, "ident", "")                       \
   _(TK_STRING, "string", "")                     \
+  _(TK_STRINGLITERAL, "string_literal", "")      \
   _(TK_CONST, "const", "")                       \
   _(TK_LIST, "list", "")                         \
   _(TK_OPTION, "option", "")                     \
@@ -186,6 +187,46 @@ struct SharedParserData {
     *len = endptr - startptr;
     return *len > 0;
   }
+
+  bool isCharCount(char c, const std::string& str, size_t start, int len) {
+    //count checks from [start, start + len) 
+    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len; 
+  }
+
+  // python conconcatenates all adjacent strings "a" "b" == "ab"
+  // strings can be enclosed with 1 or 3 single or double quotes
+  // if enclosed 3 quotes newlines are valid
+  // as elsewhere, backslash and new line should be ignored
+  bool isString(const std::string& str, size_t start, size_t* len) {
+    char quote = str[start];
+    if (quote != '\"' && quote != '\'')
+      return false;
+    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1; 
+    size_t end = start + quote_len; 
+    while(end < str.size() && !isCharCount(quote, str, end, quote_len)) {
+      if (str[end] == '\n' && quote_len != 3) {
+        return false;
+      }
+      if (str[end] == '\\') {
+        end++;
+      }
+      end++;
+    }
+    *len = end - start + quote_len; 
+    if (end == str.size()) {
+      return false;
+    }
+    int kind;
+    size_t next_start = end + 1;
+    size_t next_len;
+    //finding adjacent strings
+    match(str, end + 1, true, false, &kind, &next_start, &next_len);
+    if (kind == TK_STRINGLITERAL) {
+      *len = (next_start + next_len - start);
+    }
+    return true;
+  }
+
   bool isblank(int n) {
     return isspace(n) && n != '\n';
   }
@@ -243,6 +284,12 @@ struct SharedParserData {
       *kind = TK_NUMBER;
       return true;
     }
+    // check for string 
+    if (isString(str, pos, len)) {
+      *kind = TK_STRINGLITERAL;
+      return true;
+    }
+
     // check for either an ident or a token
     // ident tracks whether what we have scanned so far could be an identifier
     // matched indicates if we have found any match.

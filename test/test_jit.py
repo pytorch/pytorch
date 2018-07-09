@@ -1438,6 +1438,16 @@ class TestScript(JitTestCase):
         a = Variable(torch.rand(1))
         self.assertEqual(a, cu.foo(a))
 
+    def test_string_cu(self):
+        cu = torch.jit.CompilationUnit('''
+            def foo(a):
+                print(a, "a" "b" \
+                'c')
+                return a
+        ''')
+        a = Variable(torch.rand(1))
+        self.assertExpected(str(cu.foo.graph))
+
     def test_script_annotation(self):
         @torch.jit.script
         def foo(a):
@@ -1725,6 +1735,15 @@ class TestScript(JitTestCase):
 
     def _make_scalar_vars(self, arr, dtype):
         return [torch.tensor(val, dtype=dtype) for val in arr]
+
+    def test_string_print(self):
+        def func(a):
+            print(a, "a" 'b' '''c''' """d""", "a\
+            b" "c"  # ignored
+                    "d")
+            return a
+        inputs = self._make_scalar_vars([1], torch.int64)
+        self.checkScript(func, inputs, capture_output=True)
 
     def test_while(self):
         def func(a, b, max):

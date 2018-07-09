@@ -1,0 +1,4 @@
+graph(%a : Dynamic) {
+   = prim::Print[string_indices=[1], strings=[abc]](%a)
+  return (%a);
+}
