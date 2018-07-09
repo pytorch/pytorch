@@ -825,7 +825,8 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
       "Gemm",
       {x, w, b},
       {gemm_y_output},
-      {MakeAttribute("transB", 1L)},
+      {MakeAttribute("transB", 1L),
+       MakeAttribute("broadcast", legacy_mode_ ? 1 : 0)},
       def.name()));
 
   if (has_axis) {
