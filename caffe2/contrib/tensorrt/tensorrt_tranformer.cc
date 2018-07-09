@@ -380,7 +380,7 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
 
   // Debug stuff
   if (debug_builder_) {
-    DumpModel(onnx_model, "debug.onnx");
+    DumpModel(onnx_model, "debug.onnxtxt");
   }
 
   // Convert weights to initializing tensors if we are building serializable trt
