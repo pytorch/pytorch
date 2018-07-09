@@ -9,6 +9,7 @@ else()
   option(USE_CUDA "Use CUDA" ON)
   option(USE_ROCM "Use ROCm" OFF)
   option(USE_CUDNN "Use cuDNN" ON)
+  option(USE_MIOPEN "Use MIOpen" OFF)
   option(USE_MKLDNN "Use MKLDNN" ON)
   cmake_dependent_option(
       USE_CUDNN "Use cuDNN" ON
