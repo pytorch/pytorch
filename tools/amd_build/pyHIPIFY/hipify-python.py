@@ -162,7 +162,7 @@ def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=
 
     # Show detailed summary
     if show_detailed:
-        compute_stats(stats, show_detailed)
+        compute_stats(stats)
 
 
 def compute_stats(stats):
@@ -784,7 +784,7 @@ def main():
         type=str,
         default=os.getcwd(),
         help="The root of the project.",
-        required=True)
+        required=False)
 
     parser.add_argument(
         '--show-detailed',
@@ -871,17 +871,17 @@ def main():
             if "functions" in disable_info:
                 functions = disable_info["functions"]
             else:
-                functions = []
+                functions = disable_info.get("functions", [])
 
             if "non_hip_functions" in disable_info:
                 non_hip_functions = disable_info["non_hip_functions"]
             else:
-                non_hip_functions = []
+                non_hip_functions = disable_info.get("non_hip_functions", [])
 
             if "non_device_functions" in disable_info:
                 not_on_device_functions = disable_info["non_device_functions"]
             else:
-                not_on_device_functions = []
+                not_on_device_functions = disable_info.get("non_device_functions", [])
 
             with openf(filepath, "r+") as f:
                 txt = f.read()
@@ -900,7 +900,6 @@ def main():
                 f.seek(0)
                 f.write(txt)
                 f.truncate()
-                f.close()
 
         # Disable modules
         disable_modules = yaml_data["disabled_modules"]
@@ -913,17 +912,17 @@ def main():
             if "functions" in disable:
                 functions = disable["functions"]
             else:
-                functions = []
+                functions = disable.get("functions", [])
 
             if "constants" in disable:
                 constants = disable["constants"]
             else:
-                constants = []
+                constants = disable.get("constants", [])
 
             if "s_constants" in disable:
                 s_constants = disable["s_constants"]
             else:
-                s_constants = []
+                s_constants = disable.get("s_constants", [])
 
             if not os.path.exists(filepath):
                 print("\n" + bcolors.WARNING + "YAML Warning: File %s does not exist." % filepath + bcolors.ENDC)
@@ -948,7 +947,6 @@ def main():
                 f.seek(0)
                 f.write(txt)
                 f.truncate()
-                f.close()
 
     # Start Preprocessor
     walk_over_directory(
