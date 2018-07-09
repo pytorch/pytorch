@@ -385,7 +385,7 @@ lengths_out: [5]
     .Output(
         0,
         "data_out",
-        "*(type: Tensor)* Padded data tensor ($T<N + 2*padding\\_width, "
+        "*(type: Tensor)* Padded data tensor ($T<N + 2*padding_width, "
         "D_1, ..., D_n>$).")
     .Output(
         1,
@@ -483,7 +483,7 @@ lengths_out_rm: [3]
         0,
         "data_out",
         "*(type: Tensor)* Padded data tensor "
-        "($T<N + 2*padding\\_width, D_1, ..., D_n>$).")
+        "($T<N + 2*padding_width, D_1, ..., D_n>$).")
     .Output(
         1,
         "lengths_out",
