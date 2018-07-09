@@ -400,6 +400,7 @@ void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, int64_
   THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
   if (n == 0) {
+    // skip
   } else if (n == 1) THCTensor_(fill)(state, r_, a);
   else {
     THCTensor *r = THCTensor_(isContiguous)(state, r_)
@@ -423,6 +424,7 @@ void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b, int64_
   THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
   if (n == 0) {
+    // skip
   } else if (n == 1) THCTensor_(fill)(state, r_, THCNumerics<real>::exp10(a));
   else {
     THCTensor *r = THCTensor_(isContiguous)(state, r_)
