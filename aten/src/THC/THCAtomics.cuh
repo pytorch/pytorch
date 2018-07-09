@@ -135,7 +135,7 @@ static inline  __device__  void atomicAdd(double *address, double val) {
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
 } while (assumed != old);
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
+#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000)// || defined(__HIP_PLATFORM_HCC__)
   // This needs to be defined for the host side pass
   static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif
