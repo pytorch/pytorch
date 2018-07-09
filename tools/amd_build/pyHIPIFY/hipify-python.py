@@ -29,6 +29,7 @@ import shutil
 import sys
 import os
 import yaml
+import ast
 
 from functools import reduce
 from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
@@ -123,7 +124,7 @@ def walk_over_directory(rootpath, extensions, ignore_files=[], show_detailed=Fal
                 filepath = os.sep.join([dirpath, filename])
                 # Execute the preprocessor on the specified file.
                 if filename not in ignore_files:
-                    preprocessor(filepath, stats,hipify_caffe2)
+                    preprocessor(filepath, stats, hipify_caffe2)
 
                     # Update the progress
                     print(os.path.join(dirpath, filename))
@@ -265,8 +266,8 @@ def processKernelLaunches(string, stats):
 
 def processCaffe2KernelLaunches(output_source):
     # Handle the <<numBlocks, blockDim, sharedSize, stream>>> syntax:
-    output_source = re.sub(r"(\w+)\s*((?:<.*>)?)\s*<<<\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*>>>([\s*\\]*)\(", r"hipLaunchKernelGGL((\1\2), dim3(\3), dim3(\4), \5, \6, ", output_source)
-    
+    output_source = re.sub(r"(\w+)\s*((?:<.*>)?)\s*<<<\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*>>>([\s*\\]*)\(", r"hipLaunchKernelGGL(\1\2, dim3(\3), dim3(\4), \5, \6, ", output_source)
+
     # Handle the <<numBlocks, blockDim, sharedSize>>> syntax:
     output_source = re.sub(r"(\w+)\s*(<.*>)?\s*<<<\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*>>>([\s*\\]*)\(", r"hipLaunchKernelGGL((\g<1>\g<2>), dim3(\g<3>), dim3(\g<4>), \g<5>, 0, ",output_source)
     
@@ -700,7 +701,6 @@ def extract_arguments(start, string):
     }
     current_position = start
     argument_start_pos = current_position + 1
-
     # Search for final parenthesis
     while current_position < len(string):
         if string[current_position] == "(":
@@ -724,13 +724,16 @@ def extract_arguments(start, string):
             argument_start_pos = current_position + 1
 
         current_position += 1
-
     return arguments
 
 
-def add_static_casts(directory, extensions, KernelTemplateParams):
+def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=False):
     """Added necessary static casts to kernel launches due to issue in HIP"""
     # Add static_casts<> to all kernel launches.
+    if hipify_caffe2:
+        KernelTemplateParams = re.sub(r'CUDA',r'HIP', str(KernelTemplateParams))
+        KernelTemplateParams = ast.literal_eval(KernelTemplateParams)
+
     for (dirpath, _dirnames, filenames) in os.walk(directory):
         for filename in filenames:
             if filename_ends_with_extension(filename, extensions):
@@ -741,10 +744,10 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                     get_kernel_definitions = [k for k in re.finditer("hipLaunchKernelGGL\(", input_source)]
                     for kernel in get_kernel_definitions:
                         arguments = extract_arguments(kernel.end()-1, input_source)
-
                         # Check if we have templating + static_cast information
                         argument_strings = [input_source[arg["start"]:arg["end"]] for arg in arguments]
-                        kernel_name = argument_strings[0].strip()
+                        original_kernel_name_with_template = argument_strings[0].strip()
+                        kernel_name = original_kernel_name_with_template.split("<")[0].strip()
                         ignore = ["upscale"]
                         if kernel_name in KernelTemplateParams and kernel_name not in ignore:
                             # Add template to the kernel
@@ -758,20 +761,23 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                             kernel_params = argument_strings[5:]
                             for arg_idx, arg in enumerate(kernel_params):
                                 if arg_idx in argument_types:
-                                    arg = kernel_params[arg_idx].strip()
                                     the_type = argument_types[arg_idx]
-                                    the_arg = arg.replace("\n", "").strip()
+                                    the_arg = arg.replace("\n", "").replace("\\", "").strip()
                                     if the_type in ["int", "const int", "int64_t", "THCIndex_t *", "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]:
                                         static_argument = "static_cast<%s>(%s)" % (the_type, the_arg)
-                                        static_argument = arg.replace(the_arg, static_argument)
 
-                                        # Update to static_cast
-                                        new_kernel_launch = re.sub(r'\b(%s)\b' % arg, lambda x: static_argument, new_kernel_launch)
-
+                                        def replace_arg(match):
+                                          return match.group(1) + static_argument + match.group(3)
+                                        # Update to static_cast, account for cases where argument is at start/end of string
+                                        new_kernel_launch = re.sub(r'(^|\W)(%s)(\W|$)' % re.escape(the_arg), replace_arg, new_kernel_launch)
+                                        
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            new_kernel_launch = re.sub(r'\b(%s)\b' % kernel_name, lambda x: kernel_name_with_template, new_kernel_launch)
+                            
+                            if not hipify_caffe2:
+                                new_kernel_launch = re.sub(r'\b%s\b' % original_kernel_name_with_template, lambda x: kernel_name_with_template, new_kernel_launch)
+
 
 
                             # Replace Launch
@@ -875,8 +881,6 @@ def main():
     if not os.path.exists(args.output_directory):
         #os.makedirs(args.output_directory)
         shutil.copytree(args.project_directory, args.output_directory)
-
-        #pdb.set_trace()
         #print("The output folder doesn't exist.")
         #return
     """
@@ -993,10 +997,9 @@ def main():
         show_detailed=args.show_detailed,
         include_dirs=args.include_dirs,
         hipify_caffe2=args.hipify_caffe2)
-
     if args.add_static_casts:
         # Execute the Clang Tool to Automatically add static casts
-        add_static_casts(args.output_directory, args.extensions, KernelTemplateParams)
+        add_static_casts(args.output_directory, args.extensions, KernelTemplateParams, hipify_caffe2=args.hipify_caffe2)
 
 
 if __name__ == '__main__':
