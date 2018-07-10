@@ -10,7 +10,9 @@ namespace {
 #ifdef __AVX2__
 
 struct Vec256i {
+protected:
   __m256i values;
+public:
   Vec256i() {}
   Vec256i(__m256i v) : values(v) {}
   operator __m256i() const {
@@ -69,6 +71,8 @@ struct Vec256<int64_t> : public Vec256i {
       std::memcpy(ptr, tmp_values, count * sizeof(int64_t));
     }
   }
+  const int64_t& operator[](int idx) const  = delete;
+  int64_t& operator[](int idx)  = delete;
   Vec256<int64_t> abs() const {
     auto zero = _mm256_set1_epi64x(0);
     auto is_larger = _mm256_cmpgt_epi64(zero, values);
@@ -126,6 +130,8 @@ struct Vec256<int32_t> : public Vec256i {
       std::memcpy(ptr, tmp_values, count * sizeof(int32_t));
     }
   }
+  const int32_t& operator[](int idx) const  = delete;
+  int32_t& operator[](int idx)  = delete;
   Vec256<int32_t> abs() const {
     return _mm256_abs_epi32(values);
   }
@@ -230,6 +236,8 @@ struct Vec256<int16_t> : public Vec256i {
       std::memcpy(ptr, tmp_values, count * sizeof(int16_t));
     }
   }
+  const int16_t& operator[](int idx) const  = delete;
+  int16_t& operator[](int idx)  = delete;
   Vec256<int16_t> abs() const {
     return _mm256_abs_epi16(values);
   }
