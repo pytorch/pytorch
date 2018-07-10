@@ -617,9 +617,10 @@ int THTensor_(isTransposed)(const THTensor *self)
 
 int THTensor_(isContiguous)(const THTensor *self)
 {
+  if (self->is_empty()) return 1;
   int64_t z = 1;
   int d;
-  for(d = self->_dim()-1; d >= 0; d--)
+  for(d = self->dim()-1; d >= 0; d--)
   {
     if(self->size[d] != 1)
     {

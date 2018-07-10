@@ -4344,7 +4344,6 @@ accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
 
 accreal THTensor_(meanall)(THTensor *tensor)
 {
-  THArgCheck(tensor->_dim() > 0, 1, "empty Tensor");
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
@@ -4353,7 +4352,7 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
   TH_TENSOR_APPLY(real, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= THTensor_(nElement)(tensor) - (biased ? 0 : 1);
+  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (biased ? 0 : 1));
   return sum;
 }
 
@@ -4366,13 +4365,15 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, int64_t n)
 {
   real i = 0;
 
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);
   }
 
-  if(n == 1) {
+  if (n == 0) {
+  } else if (n == 1) {
     THTensor_(set1d)(r_, 0, a);
   } else {
      TH_TENSOR_APPLY(real, r_,
@@ -4386,13 +4387,15 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, int64_t n)
 {
   real i = 0;
 
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);
   }
 
-  if(n == 1) {
+  if (n == 0) {
+  } else if (n == 1) {
     THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
   } else {
     TH_TENSOR_APPLY(real, r_,
