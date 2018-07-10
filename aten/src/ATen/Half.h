@@ -20,9 +20,11 @@
 #include <iosfwd>
 
 // Copied from THCHalf.h, defines CUDA_HALF_TENSOR for CUDANumerics
-#if CUDA_VERSION >= 7050 || CUDA_HAS_FP16 || defined(__HIP_PLATFORM_HCC__)
-  #define CUDA_HALF_TENSOR 1
-#endif
+#ifdef USE_CUDA
+  #if CUDA_VERSION >= 7050 || CUDA_HAS_FP16 || defined(__HIP_PLATFORM_HCC__)
+    #define CUDA_HALF_TENSOR 1
+  #endif
+#endif 
 
 #ifdef __CUDACC__
   #include <cuda_fp16.h>
