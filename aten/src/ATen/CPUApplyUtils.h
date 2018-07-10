@@ -278,6 +278,42 @@ apply_kernel(int64_t numel, int64_t offset, const Op& op, Args... iters) {
   }
 }
 
+template <typename scalar1, typename Op>
+inline void
+CPU_tensor_parallel_kernel_apply1(Tensor tensor1, const Op op) {
+  if (!_apply_preamble({tensor1}))
+    return;
+  if (tensor1.numel() == 1) {
+    op(1, tensor1.data<scalar1>(), 0);
+    return;
+  }
+  if (tensor1.ndimension() < 8) {
+    parallel_for(
+        0,
+        tensor1.numel(),
+        1,
+        [&tensor1, &op](int64_t begin, int64_t end) {
+          apply_kernel(
+              end - begin,
+              begin,
+              op,
+              strided_tensor_iter_fixed<scalar1, 8>(tensor1));
+        });
+  } else {
+    parallel_for(
+        0,
+        tensor1.numel(),
+        1,
+        [&tensor1, &op](int64_t begin, int64_t end) {
+          apply_kernel(
+              end - begin,
+              begin,
+              op,
+              strided_tensor_iter<scalar1>(tensor1));
+        });
+  }
+}
+
 template <typename scalar1, typename scalar2, typename Op>
 inline void
 CPU_tensor_parallel_kernel_apply2(Tensor tensor1, Tensor tensor2, const Op op) {

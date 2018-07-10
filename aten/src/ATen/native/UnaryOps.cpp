@@ -24,6 +24,57 @@
 namespace at {
 namespace native {
 
+Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_out(result, self, min, max);
+}
+
+Tensor& _clamp__cpu(Tensor& self_, Scalar min, Scalar max) {
+  Tensor self = sort_strides(self_);                          
+  clamp_Impl(self, min, max);
+  return self_;
+}
+
+Tensor& _clamp_out_cpu(Tensor& result, const Tensor& self, Scalar min, Scalar max) {
+  result.resize_(self.sizes());
+  clampImpl(result, self, min, max);
+  return result;
+}
+
+Tensor clamp_max(const Tensor& self, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_max_out(result, self, max);
+}
+
+Tensor& _clamp_max__cpu(Tensor& self_, Scalar max) {
+   Tensor self = sort_strides(self_);                          
+   clampMax_Impl(self, max);
+   return self_;
+}
+
+Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  result.resize_(self.sizes());
+  clampMaxImpl(result, self, max);
+  return result;
+}
+
+Tensor clamp_min(const Tensor& self, Scalar min) {
+  Tensor result = self.type().tensor();
+  return clamp_min_out(result, self, min);
+}
+
+Tensor& _clamp_min__cpu(Tensor& self_, Scalar min) {
+  Tensor self = sort_strides(self_);                          
+  clampMin_Impl(self, min);
+  return self_;
+}
+
+Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  result.resize_(self.sizes());
+  clampMinImpl(result, self, min);
+  return result;
+}
+
 Tensor& fill_(Tensor& self, Scalar value) {
   return self._fill_(value);
 }
