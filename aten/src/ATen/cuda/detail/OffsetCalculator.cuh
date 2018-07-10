@@ -9,7 +9,7 @@
 
 template <int NARGS>
 struct OffsetCalculator {
-  static const int MAX_DIMS = 25;
+  static constexpr int MAX_DIMS = 25;
 
   // The offset for each argument (in bytes). Wrapper around fixed-size array.
   struct offsets_t {

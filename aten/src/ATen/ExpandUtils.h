@@ -133,7 +133,7 @@ inline std::vector<Tensor> expand_outplace(TensorList to_expand) {
 
 // Sums `tensor` repeatedly to produce a tensor of shape `shape`.
 // Precondition: is_expandable_to(shape, tensor.sizes()) must be true
-static inline Tensor reduce_to(Tensor tensor, IntList shape) {
+static inline Tensor sum_to(Tensor tensor, IntList shape) {
   if (shape.size() == 0) {
     return tensor.sum();
   }

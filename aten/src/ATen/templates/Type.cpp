@@ -91,12 +91,9 @@ Tensor Type::tensorWithAllocator(IntList sizes, IntList strides, Allocator* allo
   return tensor(*storage, 0, sizes, strides);
 }
 Tensor Type::scalarTensor(Scalar s) const {
-  if(s.isBackedByTensor()) {
+  if(s.isBackedByTensor())
     return Tensor(s.t).toType(*this);
-  }
-  auto result = tensor({});
-  result.fill_(s);
-  return result;
+  return tensor({}).fill_(s);
 }
 
 bool Type::operator==(const Type& other) const {

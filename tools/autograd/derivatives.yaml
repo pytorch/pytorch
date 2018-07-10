@@ -252,7 +252,7 @@
   self: grad * (result + 1)
 
 - name: expand(Tensor self, IntList size, *, bool implicit)
-  self: reduce_to(grad, self.sizes())
+  self: at::sum_to(grad, self.sizes())
 
 - name: exponential_(Tensor self, double lambd, Generator generator)
   self: zeros_like(grad)

@@ -66,6 +66,12 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
 // mul(SparseTensor, Scalar)
 // --------------------------------------------------------------------
 
+static Tensor scalar_tensor(Scalar s) {
+  auto tensor = s.toTensor();
+  tensor.get()->set_wrapped_number(true);
+  return tensor;
+}
+
 SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scalar value) {
   AT_ASSERT(r.is_sparse());
   AT_ASSERT(t.is_sparse());
@@ -77,8 +83,7 @@ SparseTensor& mul_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because mul_out takes Tensor&
-    r_values.resize_as_(t._values());
-    at::mul_out(r_values, t._values(), value.toTensor());
+    at::mul_out(r_values, t._values(), scalar_tensor(value));
     _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }
@@ -158,8 +163,7 @@ SparseTensor& div_out_sparse_scalar(SparseTensor& r, const SparseTensor& t, Scal
     r._indices().resize_as_(t._indices());
     r._indices().copy_(t._indices());
     Tensor r_values = r._values(); // Sigh... needed because div_out takes Tensor&
-    r_values.resize_as_(t._values());
-    at::div_out(r_values, t._values(), value.toTensor());
+    at::div_out(r_values, t._values(), scalar_tensor(value));
     _get_sparse_impl(r)->set_nnz(t._nnz());
     _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
   }

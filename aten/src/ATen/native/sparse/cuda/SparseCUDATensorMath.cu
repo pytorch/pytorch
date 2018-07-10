@@ -403,16 +403,15 @@ SparseTensor& add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, const
 
 SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, const SparseTensor& src_) {
 #ifndef __HIP_PLATFORM_HCC__
-  AT_ASSERT(t_.is_cuda()); // dispatch argument
-  AT_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
-  AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
-
   if (src_.dim() == 0) {
     return mul_out_sparse_scalar(r_, t_, Scalar(src_));
   } else if (t_.dim() == 0) {
     return mul_out_sparse_scalar(r_, src_, Scalar(t_));
   }
 
+  AT_ASSERT(t_.is_cuda()); // dispatch argument
+  AT_CHECK(src_.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
+  AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
   AT_CHECK(_check_device({r_, t_, src_}));
   AT_CHECK(t_.sizes().equals(src_.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", src_.sizes());
 

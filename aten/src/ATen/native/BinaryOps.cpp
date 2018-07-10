@@ -4,13 +4,12 @@
 #include <ATen/Dispatch.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/TensorIterator.h>
-#include <time.h>
 
 namespace at {
 namespace native {
 
-DispatchStub<add_fn> add_stub;
-DispatchStub<add_fn> sub_stub;
+DispatchStub<binary_fn_alpha> add_stub;
+DispatchStub<binary_fn_alpha> sub_stub;
 DispatchStub<binary_fn> mul_stub;
 DispatchStub<binary_fn> div_stub;
 
@@ -18,9 +17,6 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   if (other.is_sparse()) {
     if (!result.defined()) {
       result = self.type().tensor();
-    }
-    if (!self.sizes().equals(other.sizes())) {
-      AT_ERROR("sizes do not match");
     }
     if (self.is_sparse()) {
       at::_sparse_add_out(result, self, other, alpha);
@@ -31,7 +27,7 @@ Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   } else if (self.is_sparse()) {
     AT_ERROR("add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
   }
-  auto iter = TensorIterator::binary_op(self, other, result);
+  auto iter = TensorIterator::binary_op(result, self, other);
   add_stub(iter->backend(), *iter, alpha);
   return result;
 }
@@ -56,7 +52,7 @@ Tensor& div_out(Tensor& result, const Tensor& self, const Tensor& other) {
     }
     return at::_sparse_div_out(result, self, Scalar(other));
   }
-  auto iter = TensorIterator::binary_op(self, other, result);
+  auto iter = TensorIterator::binary_op(result, self, other);
   div_stub(iter->backend(), *iter);
   return result;
 }
@@ -77,7 +73,7 @@ Tensor& mul_out(Tensor& result, const Tensor& self, const Tensor& other) {
     }
     return at::_sparse_mul_out(result, self, other);
   }
-  auto iter = TensorIterator::binary_op(self, other, result);
+  auto iter = TensorIterator::binary_op(result, self, other);
   mul_stub(iter->backend(), *iter);
   return result;
 }
@@ -108,7 +104,7 @@ Tensor& sub_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar 
   } else if (self.is_sparse()) {
     AT_ERROR("sub(sparse, dense) is not supported. Use sub(dense, sparse) instead.");
   }
-  auto iter = TensorIterator::binary_op(self, other, result);
+  auto iter = TensorIterator::binary_op(result, self, other);
   sub_stub(iter->backend(), *iter, alpha);
   return result;
 }

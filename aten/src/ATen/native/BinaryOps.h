@@ -7,11 +7,11 @@ namespace at { struct TensorIterator; }
 
 namespace at { namespace native {
 
-using add_fn = void(*)(TensorIterator&, Scalar alpha);
+using binary_fn_alpha = void(*)(TensorIterator&, Scalar alpha);
 using binary_fn = void(*)(TensorIterator&);
 
-extern AT_API DispatchStub<add_fn> add_stub;
-extern AT_API DispatchStub<add_fn> sub_stub;
+extern AT_API DispatchStub<binary_fn_alpha> add_stub;
+extern AT_API DispatchStub<binary_fn_alpha> sub_stub;
 extern AT_API DispatchStub<binary_fn> mul_stub;
 extern AT_API DispatchStub<binary_fn> div_stub;
 

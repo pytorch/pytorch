@@ -52,9 +52,10 @@ struct AT_API TensorImpl : public Retainable {
   virtual TensorImpl* maybe_zero_dim(bool condition_when_zero_dim);
 
   // True if a tensor was auto-wrapped from a C++ or Python number.
-  // Wrapped numbers are considered "lower priority" when computing the result
-  // of an operation. Otherwise, they behave like their non-wrapped, zero-dim
-  // equivalents.
+  // Wrapped numbers do not participate in the result type computation for
+  // mixed- type operations if there are any Tensors that are not wrapped
+  // numbers. In other respsects, they behave like their non-wrapped, zero-dim
+  // equivalents. See TensorIterator.h for result type computation.
   bool is_wrapped_number() const {
     return is_wrapped_number_;
   }

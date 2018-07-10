@@ -2,7 +2,6 @@
 
 #include <ATen/ExpandUtils.h>
 #include <ATen/Parallel.h>
-#include <time.h>
 
 namespace at {
 
@@ -15,8 +14,8 @@ void TensorIterator::reorder_dimensions() {
   for (int dim = 0; dim < ndim(); dim++) {
     double sum = 0.0;
     for (const auto& op : operands_) {
-      if (op.stride_.size() == 0) continue;
-      sum += op.stride_[dim];
+      if (op.stride_bytes.size() == 0) continue;
+      sum += op.stride_bytes[dim];
     }
 
     // Weight each dimension by its index. Given two dimensions with equal
@@ -45,8 +44,8 @@ void TensorIterator::reorder_dimensions() {
   // Update shape and strides
   shape_ = reorder(shape_, perm_);
   for (auto& op : operands_) {
-    if (op.stride_.size() > 0) {
-      op.stride_ = reorder(op.stride_, perm_);
+    if (op.stride_bytes.size() > 0) {
+      op.stride_bytes = reorder(op.stride_bytes, perm_);
     }
   }
 }
@@ -57,30 +56,21 @@ compute_result_type(at::ArrayRef<OperandInfo> operands, const F& predicate) {
   auto result_type = ScalarType::Undefined;
   auto backend = Backend::Undefined;
   for (auto& op : operands) {
-    if (!op.tensor_->defined()) continue;
-    if (!predicate(*op.tensor_)) continue;
-    auto dtype = op.tensor_->type().scalarType();;
+    if (!op.tensor->defined()) continue;
+    if (!predicate(*op.tensor)) continue;
+    auto dtype = op.tensor->type().scalarType();;
     result_type = (result_type == ScalarType::Undefined
         ? dtype
         : promoteTypes(result_type, dtype));
     backend = (backend == Backend::Undefined
-        ? op.tensor_->type().backend()
+        ? op.tensor->type().backend()
         : backend);
   }
   return std::make_tuple(result_type, backend);
 }
 
 void TensorIterator::compute_common_type() {
-  // The result dtype is computed with the precedence:
-  // 1) Tensors of rank one or higher
-  // 2) Tensors of any rank that aren't wrapped numbers
-  // 3) Any tensor
-  //
-  // For example:
-  //  torch.randn(3, 3) + torch.tensor([1.0], dtype=torch.double) -> torch.double
-  //  torch.randn(3, 3) + torch.tensor(1.0, dtype=torch.double) -> torch.float
-  //  torch.tensor(3, dtype=torch.uint8) + 5 -> torch.uint8
-  //
+  // See [Result type computation] in TensorIterator.h
   auto result_type = ScalarType::Undefined;
   auto backend = Backend::Undefined;
   std::tie(result_type, backend) = compute_result_type(operands_, [](const Tensor& t) {
@@ -103,15 +93,15 @@ void TensorIterator::compute_common_type() {
   auto& type = at::globalContext().getType(backend, result_type);
 
   for (auto& op : operands_) {
-    if (!op.type_) {
-      op.type_ = &type;
-      if (op.tensor_->defined() && type != op.tensor_->type()) {
-        if (op.tensor_->dim() == 0) {
+    if (!op.type) {
+      op.type = &type;
+      if (op.tensor->defined() && type != op.tensor->type()) {
+        if (op.tensor->dim() == 0) {
           if (type.backend() != at::kCUDA) {
-            *op.tensor_ = op.tensor_->toType(type);
+            *op.tensor = op.tensor->toType(type);
           }
         } else {
-          op.needs_cast_ = true;
+          op.needs_cast = true;
         }
       }
     }
@@ -130,6 +120,7 @@ DimVector TensorIterator::compatible_stride(int element_size) const {
 DimVector TensorIterator::invert_perm(IntList input) const {
   // Invert the permutation caused by reorder_dimensions. This is not valid
   // after coalesce_dimensions is called.
+  AT_ASSERT(!has_coalesced_dimensions_);
   auto res = DimVector(input.size(), 0);
   for (int dim = 0; dim < ndim(); dim++) {
     res[perm_[dim]] = input[dim];
@@ -140,16 +131,16 @@ DimVector TensorIterator::invert_perm(IntList input) const {
 void TensorIterator::allocate_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
     auto& op = operands_[i];
-    if (!op.tensor_->defined()) {
-      int element_size = op.type_->elementSizeInBytes();
-      op.stride_ = compatible_stride(element_size);
+    if (!op.tensor->defined()) {
+      int element_size = op.type->elementSizeInBytes();
+      op.stride_bytes = compatible_stride(element_size);
 
       auto tensor_shape = invert_perm(shape_);
-      auto tensor_stride = invert_perm(op.stride_);
+      auto tensor_stride = invert_perm(op.stride_bytes);
       for (int dim = 0; dim < ndim(); dim++) {
         tensor_stride[dim] /= element_size;
       }
-      *op.tensor_ = op.type_->tensor(tensor_shape, tensor_stride);
+      *op.tensor = op.type->tensor(tensor_shape, tensor_stride);
     }
   }
 }
@@ -168,7 +159,7 @@ void TensorIterator::coalesce_dimensions() {
       return true;
     }
     for (int i = 0; i < ntensors(); i++) {
-      auto& stride = operands_[i].stride_;
+      auto& stride = operands_[i].stride_bytes;
       if (shape0 * stride[dim0] != stride[dim1]) {
         return false;
       }
@@ -176,9 +167,10 @@ void TensorIterator::coalesce_dimensions() {
     return true;
   };
 
-  auto copy_strides = [&](int dim0, int dim1) {
+  // replace each operands stride at dim0 with its stride at dim1
+  auto replace_stride = [&](int dim0, int dim1) {
     for (int i = 0; i < ntensors(); i++) {
-      auto& stride = operands_[i].stride_;
+      auto& stride = operands_[i].stride_bytes;
       stride[dim0] = stride[dim1];
     }
   };
@@ -187,20 +179,23 @@ void TensorIterator::coalesce_dimensions() {
   for (int dim = 1; dim < ndim(); dim++) {
     if (can_coalesce(prev_dim, dim)) {
       if (shape_[prev_dim] == 1) {
-        copy_strides(prev_dim, dim);
+        replace_stride(prev_dim, dim);
       }
       shape_[prev_dim] *= shape_[dim];
     } else {
       prev_dim++;
-      copy_strides(prev_dim, dim);
-      shape_[prev_dim] = shape_[dim];
+      if (prev_dim != dim) {
+        replace_stride(prev_dim, dim);
+        shape_[prev_dim] = shape_[dim];
+      }
     }
   }
 
   shape_.resize(prev_dim + 1);
   for (int i = 0; i < ntensors(); i++) {
-    operands_[i].stride_.resize(ndim());
+    operands_[i].stride_bytes.resize(ndim());
   }
+  has_coalesced_dimensions_ = true;
 }
 
 int64_t TensorIterator::numel() const {
@@ -215,7 +210,7 @@ DimVector TensorIterator::get_inner_strides() const {
   auto dims = ndim();
   auto inner_strides = DimVector();
   for (auto& op : operands_) {
-    inner_strides.push_back(dims == 0 ? 0 : op.stride_[0]);
+    inner_strides.push_back(dims == 0 ? 0 : op.stride_bytes[0]);
   }
   return inner_strides;
 }
@@ -223,7 +218,7 @@ DimVector TensorIterator::get_inner_strides() const {
 SmallVector<char*, 4> TensorIterator::get_data_ptrs(ArrayRef<char*> base, IntList counter) const {
   auto ptrs = SmallVector<char*, 4>(base);
   for (int i = 0; i < ntensors(); i++) {
-    auto& stride = operands_[i].stride_;
+    auto& stride = operands_[i].stride_bytes;
     for (int dim = 0; dim < ndim(); dim++) {
       ptrs[i] += counter[dim] * stride[dim];
     }
@@ -293,7 +288,7 @@ bool TensorIterator::is_trivial_1d() const {
 }
 
 bool TensorIterator::is_scalar(int arg) const {
-  const auto& stride = operands_[arg].stride_;
+  const auto& stride = operands_[arg].stride_bytes;
   for (int i = 0; i < ndim(); i++) {
     if (stride[i] != 0 && shape_[i] != 1) {
       return false;
@@ -303,11 +298,11 @@ bool TensorIterator::is_scalar(int arg) const {
 }
 
 bool TensorIterator::is_cpu_scalar(int arg) const {
-  return is_scalar(arg) && operands_[arg].tensor_->type().backend() == at::kCPU;
+  return is_scalar(arg) && operands_[arg].tensor->type().backend() == at::kCPU;
 }
 
 void* TensorIterator::data_ptr(int arg) const {
-  return operands_[arg].data_;
+  return operands_[arg].data;
 }
 
 void TensorIterator::remove_operand(int arg) {
@@ -318,14 +313,14 @@ void TensorIterator::narrow(int dim, int64_t start, int64_t size) {
   AT_ASSERT(dim < ndim() && size >= 1);
   shape_[dim] = size;
   for (auto& op : operands_) {
-    op.data_ = ((char*)op.data_) + op.stride_[dim] * start;
+    op.data = ((char*)op.data) + op.stride_bytes[dim] * start;
   }
   if (size == 1) {
     coalesce_dimensions();
   }
 }
 
-std::unique_ptr<TensorIterator> TensorIterator::binary_op(const Tensor& a, const Tensor& b, Tensor& out) {
+std::unique_ptr<TensorIterator> TensorIterator::binary_op(Tensor& out, const Tensor& a, const Tensor& b) {
   auto builder = TensorIterator::Builder();
   builder.add_output(out);
   builder.add_input(a);
@@ -333,21 +328,17 @@ std::unique_ptr<TensorIterator> TensorIterator::binary_op(const Tensor& a, const
   return builder.build();
 }
 
-TensorIterator TensorIterator::reduce_op(const Tensor& a, IntList dims) {
-  return TensorIterator();
-}
-
 void TensorIterator::mark_outputs() {
   for (int i = 0; i < num_outputs_; i++) {
-    operands_[i].is_output_ = true;
-    auto output = *operands_[i].tensor_;
+    operands_[i].is_output = true;
+    auto output = *operands_[i].tensor;
     if (!output.defined()) continue;
 
     // check if output is also an input
     for (int arg = num_outputs_; arg < ntensors(); arg++) {
-      auto input = *operands_[arg].tensor_;
+      auto input = *operands_[arg].tensor;
       if (output.get() == input.get()) {
-        operands_[i].is_read_write_ = true;
+        operands_[i].is_read_write = true;
       }
     }
   }
@@ -355,14 +346,14 @@ void TensorIterator::mark_outputs() {
 
 void TensorIterator::compute_shape() {
   for (auto& op : operands_) {
-    if (!op.tensor_->defined()) continue;
+    if (!op.tensor->defined()) continue;
 
     // For now, don't include output tensors that are not also input tensors.
     // This preserves the legacy behavior where torch.add(..., out=dst) resizes
     // the destination tensor.
-    if (op.is_output_ && !op.is_read_write_) continue;
+    if (op.is_output && !op.is_read_write) continue;
 
-    auto shape = op.tensor_->sizes();
+    auto shape = op.tensor->sizes();
     if (shape_.empty()) {
       shape_ = shape;
     } else if (!shape.equals(shape_)) {
@@ -371,11 +362,13 @@ void TensorIterator::compute_shape() {
   }
 
   // Outputs cannot be broadcasted. Check that the shape of the outputs matches
-  // the inferred shape. There's
+  // the inferred shape. There's an exception for write-only tensors to support
+  // our legacy behavior that functions with `out=` arguments resize their
+  // outputs.
   for (int i = 0; i < num_outputs_; i++) {
-    auto& tensor = *operands_[i].tensor_;
+    auto& tensor = *operands_[i].tensor;
     if (tensor.defined() && !tensor.sizes().equals(shape_)) {
-      if (!operands_[i].is_read_write_) {
+      if (!operands_[i].is_read_write) {
         // Preserve legacy resizing behavior of out=... arguments
         // TODO: issue warning
         tensor.resize_(shape_);
@@ -407,17 +400,17 @@ static DimVector compute_stride(const Tensor& tensor, IntList shape) {
 
 void TensorIterator::compute_strides() {
   for (auto& op : operands_) {
-    if (op.tensor_->defined()) {
-      op.stride_ = compute_stride(*op.tensor_, shape_);
+    if (op.tensor->defined()) {
+      op.stride_bytes = compute_stride(*op.tensor, shape_);
     }
   }
 }
 
 void TensorIterator::check_type_conversions() {
   for (auto& op : operands_) {
-    if (op.needs_cast_) {
-      AT_ERROR("TensorIterator expected type ", type().toString(), " but got ", op.tensor_->type().toString(),
-            op.tensor_->sizes());
+    if (op.needs_cast) {
+      AT_ERROR("TensorIterator expected type ", type().toString(), " but got ", op.tensor->type().toString(),
+            op.tensor->sizes());
     }
   }
 }
@@ -430,7 +423,7 @@ bool TensorIterator::can_use_32bit_indexing() const {
   for (auto& op : operands_) {
     int64_t max_offset = 1;
     for (int dim = 0; dim < ndim(); dim++) {
-      max_offset += (shape_[dim] - 1) * op.stride_[dim];
+      max_offset += (shape_[dim] - 1) * op.stride_bytes[dim];
     }
     if (max_offset > max_value) {
       return false;
@@ -457,7 +450,7 @@ SplitUntil32Bit TensorIterator::with_32bit_indexing() const {
 }
 
 std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
-  // compute the broadcasted shape
+  // set is_output and is_read_write flags on appropriate tensors
   iter_->mark_outputs();
   // compute the broadcasted shape
   iter_->compute_shape();
@@ -473,8 +466,8 @@ std::unique_ptr<TensorIterator> TensorIterator::Builder::build() {
   iter_->coalesce_dimensions();
 
   for (auto& op : iter_->operands_) {
-    AT_ASSERT(op.tensor_->defined());
-    op.data_ = op.tensor_->data_ptr();
+    AT_ASSERT(op.tensor->defined());
+    op.data = op.tensor->data_ptr();
   }
 
   iter_->check_type_conversions();

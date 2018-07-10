@@ -51,7 +51,9 @@ void div_kernel(TensorIterator& iter) {
   } else {
     AT_DISPATCH_FLOATING_TYPES(iter.type(), "div", [&]() {
       binary_kernel_vec(iter,
-        [=](scalar_t a, scalar_t b) -> scalar_t { return a / b; },
+        [=](scalar_t a, scalar_t b) __ubsan_ignore_float_divide_by_zero__ -> scalar_t {
+           return a / b;
+        },
         [=](Vec256<scalar_t> a, Vec256<scalar_t> b) {
           return a / b;
         });

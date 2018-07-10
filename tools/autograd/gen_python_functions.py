@@ -142,8 +142,8 @@ def should_generate_python_binding(declaration):
         if re.match('^' + pattern + '$', name):
             return False
 
-    types = [arg['simple_type'] for arg in declaration['arguments']]
-    signature = '{}({})'.format(name, ', '.join(types))
+    simple_types = [arg['simple_type'] for arg in declaration['arguments']]
+    signature = '{}({})'.format(name, ', '.join(simple_types))
     for pattern in SKIP_PYTHON_BINDINGS_SIGNATURES:
         if pattern == signature:
             return False
