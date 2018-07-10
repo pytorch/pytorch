@@ -951,6 +951,7 @@ void testIValue() {
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
+  REQUIRE(proto.SerializeAsString() != "");
 }
 
 std::string runJITCPPTests() {
