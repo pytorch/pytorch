@@ -43,7 +43,7 @@ struct ScalarConvert<In, half> {
     #ifdef __CUDA_ARCH__
         return __float2half((float) v);
     #else
-      #if #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
+      #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
         half h;
         h.x = ::at::detail::float2halfbits((float) v);
         return h;
