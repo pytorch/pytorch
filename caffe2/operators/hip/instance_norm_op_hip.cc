@@ -215,10 +215,17 @@ bool InstanceNormOp<float, HIPContext>::RunOnDeviceWithOrderNHWC() {
   const auto C_stride = 1;
   const auto dim_stride = C;
 
+<<<<<<< HEAD
   hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<int>(N), static_cast<int>(C), static_cast<int>(dim), static_cast<int>(N_stride), static_cast<int>(C_stride), static_cast<int>(dim_stride), input_data, mean_data);
 
   hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+  hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+      static_cast<int>(N), static_cast<int>(C), static_cast<int>(dim), static_cast<int>(N_stride), static_cast<int>(C_stride), static_cast<int>(dim_stride), input_data, mean_data);
+
+  hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
       static_cast<int>(N),
       static_cast<int>(C),
       static_cast<int>(dim),
@@ -230,7 +237,11 @@ bool InstanceNormOp<float, HIPContext>::RunOnDeviceWithOrderNHWC() {
       mean_data,
       inv_stdev_data);
 
+<<<<<<< HEAD
   hipLaunchKernelGGL(InstanceNormKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C) * H * W)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+  hipLaunchKernelGGL(InstanceNormKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C) * H * W)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
       static_cast<int>(N),
       static_cast<int>(C),
       static_cast<int>(dim),
@@ -280,10 +291,17 @@ bool InstanceNormOp<float, HIPContext>::RunOnDeviceWithOrderNCHW() {
   const auto C_stride = H * W;
   const auto dim_stride = 1;
 
+<<<<<<< HEAD
   hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<int>(N), static_cast<int>(C), static_cast<int>(dim), static_cast<int>(N_stride), static_cast<int>(C_stride), static_cast<int>(dim_stride), input_data, mean_data);
 
   hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+  hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+      static_cast<int>(N), static_cast<int>(C), static_cast<int>(dim), static_cast<int>(N_stride), static_cast<int>(C_stride), static_cast<int>(dim_stride), input_data, mean_data);
+
+  hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
       static_cast<int>(N),
       static_cast<int>(C),
       static_cast<int>(dim),
@@ -295,7 +313,11 @@ bool InstanceNormOp<float, HIPContext>::RunOnDeviceWithOrderNCHW() {
       mean_data,
       inv_stdev_data);
 
+<<<<<<< HEAD
   hipLaunchKernelGGL(InstanceNormKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C) * H * W)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+  hipLaunchKernelGGL(InstanceNormKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C) * H * W)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
       static_cast<int>(N),
       static_cast<int>(C),
       static_cast<int>(dim),
@@ -358,7 +380,11 @@ bool InstanceNormGradientOp<float, HIPContext>::RunOnDeviceWithOrderNHWC() {
   if (InputSize() < 5) {
     mean_.Resize(N, C);
     auto mean_mutable_data = mean_.mutable_data<float>();
+<<<<<<< HEAD
     hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+    hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
         static_cast<int>(N),
         static_cast<int>(C),
         static_cast<int>(dim),
@@ -377,7 +403,11 @@ bool InstanceNormGradientOp<float, HIPContext>::RunOnDeviceWithOrderNHWC() {
   if (InputSize() < 6) {
     inv_stdev_.Resize(N, C);
     auto inv_stdev_mutable_data = inv_stdev_.mutable_data<float>();
+<<<<<<< HEAD
     hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+    hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
         static_cast<int>(N),
         static_cast<int>(C),
         static_cast<int>(dim),
@@ -395,7 +425,11 @@ bool InstanceNormGradientOp<float, HIPContext>::RunOnDeviceWithOrderNHWC() {
 
   const auto inv_stdev_data = inv_stdev.data<float>();
 
+<<<<<<< HEAD
   hipLaunchKernelGGL(InstanceNormScaleBiasGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+  hipLaunchKernelGGL(InstanceNormScaleBiasGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
       static_cast<int>(N),
       static_cast<int>(C),
       static_cast<int>(dim),
@@ -409,7 +443,11 @@ bool InstanceNormGradientOp<float, HIPContext>::RunOnDeviceWithOrderNHWC() {
       scale_grad_data,
       bias_grad_data);
 
+<<<<<<< HEAD
   hipLaunchKernelGGL(InstanceNormGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+  hipLaunchKernelGGL(InstanceNormGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
       static_cast<int>(N),
       static_cast<int>(C),
       static_cast<int>(dim),
@@ -473,7 +511,11 @@ bool InstanceNormGradientOp<float, HIPContext>::RunOnDeviceWithOrderNCHW() {
   if (InputSize() < 5) {
     mean_.Resize(N, C);
     auto mean_mutable_data = mean_.mutable_data<float>();
+<<<<<<< HEAD
     hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+    hipLaunchKernelGGL(InstanceNormMeanKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
         static_cast<int>(N),
         static_cast<int>(C),
         static_cast<int>(dim),
@@ -492,7 +534,11 @@ bool InstanceNormGradientOp<float, HIPContext>::RunOnDeviceWithOrderNCHW() {
   if (InputSize() < 6) {
     inv_stdev_.Resize(N, C);
     auto inv_stdev_mutable_data = inv_stdev_.mutable_data<float>();
+<<<<<<< HEAD
     hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+=======
+    hipLaunchKernelGGL(InstanceNormInvStdevKernel, dim3(CAFFE_GET_BLOCKS(static_cast<int>(N) * static_cast<int>(C))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
+>>>>>>> 7f0317b4568cccb236c37f1dcb196e2828f4b38f
         static_cast<int>(N),
         static_cast<int>(C),
         static_cast<int>(dim),
