@@ -1,4 +1,4 @@
-## @package optimizer
+# @package optimizer
 # Module caffe2.python.optimizer
 from __future__ import absolute_import
 from __future__ import division
@@ -664,6 +664,48 @@ class FtrlOptimizer(Optimizer):
         return
 
 
+class GFtrlOptimizer(Optimizer):
+    """Group Lasso FTRL Optimizer."""
+
+    def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
+                 sparse_dedup_aggregator=None, engine=''):
+        super(GFtrlOptimizer, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.lambda1 = lambda1
+        self.lambda2 = lambda2
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.engine = engine
+
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
+        if self.alpha <= 0:
+            return
+
+        nz = param_init_net.ConstantFill(
+            [param],
+            str(param) + "_gftrl_nz",
+            extra_shape=[2],
+            value=0.0
+        )
+        self._aux_params.local.append(nz)
+        net.GFtrl(
+            [param, nz, grad],
+            [param, nz],
+            engine=self.engine,
+            alpha=self.alpha,
+            beta=self.beta,
+            lambda1=self.lambda1,
+            lambda2=self.lambda2
+        )
+
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
+
+
 class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
                  policy='fixed', use_lr_adaption=False, lr_alpha=0.01,
@@ -1152,7 +1194,8 @@ def _build(
 
         with core.DeviceScope(device):
             if param_info.optimizer and use_param_info_optim:
-                param_info.optimizer(model.net, model.param_init_net, param_info)
+                param_info.optimizer(
+                    model.net, model.param_init_net, param_info)
             else:
                 optimizer(model.net, model.param_init_net, param_info)
     return optimizer
@@ -1221,6 +1264,12 @@ def build_ftrl(model, engine="SIMD", **kwargs):
         assert core.IsOperator('SparseFtrl_ENGINE_SIMD')
     ftrl_optimizer = FtrlOptimizer(engine=engine, **kwargs)
     return _build(model, ftrl_optimizer)
+
+
+def build_gftrl(model, engine="", **kwargs):
+    # SIMD version of GFTRL is not supported
+    gftrl_optimizer = GFtrlOptimizer(engine=engine, **kwargs)
+    return _build(model, gftrl_optimizer)
 
 
 def build_adagrad(

@@ -95,11 +95,6 @@ void THStorage_(retain)(THStorage *storage)
   THStorage_retain(storage);
 }
 
-int THStorage_(retainIfLive)(THStorage *storage)
-{
-  return THStorage_retainIfLive(storage);
-}
-
 void THStorage_(free)(THStorage *storage)
 {
   THStorage_free(storage);

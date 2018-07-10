@@ -28,14 +28,6 @@ struct RMSpropOptions {
 
 class RMSprop : public Optimizer {
  public:
-  RMSprop(std::shared_ptr<nn::Module> model, const RMSpropOptions& options);
-
-  template <typename ModuleType>
-  RMSprop(
-      nn::ModuleHolder<ModuleType> module_holder,
-      const RMSpropOptions& options)
-      : RMSprop(module_holder.get(), options) {}
-
   template <typename ParameterContainer>
   explicit RMSprop(
       ParameterContainer&& parameters,

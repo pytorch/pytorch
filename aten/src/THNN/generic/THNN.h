@@ -732,13 +732,15 @@ TH_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int scale_factor);
+          int osizeW);
 TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int scale_factor);
+          int isizeB,
+          int isizeC,
+          int isizeW,
+          int osizeW);
 
 TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
           THNNState *state,
@@ -1192,13 +1194,19 @@ TH_API void THNN_(SpatialUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int scale_factor);
+          int osizeH,
+          int osizeW);
+
 TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int scale_factor);
+          int isizeB,
+          int isizeC,
+          int isizeH,
+          int isizeW,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THNNState *state,
@@ -1644,14 +1652,22 @@ TH_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int scale_factor);
+          int osizeT,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int scale_factor);
+          int isizeB,
+          int isizeC,
+          int isizeT,
+          int isizeH,
+          int isizeW,
+          int osizeT,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
           THNNState *state,

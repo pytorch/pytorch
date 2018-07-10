@@ -316,6 +316,17 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
+static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
+  }
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_view(base_var, std::move(tensor));
+  }
+  return tensors;
+}
+
 struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
   bool out = false;
   using IterArgs<ComputeRequiresGrad>::operator();

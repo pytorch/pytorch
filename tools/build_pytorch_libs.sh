@@ -68,6 +68,13 @@ if [[ -n "$CPPFLAGS" ]]; then
   USER_LDFLAGS="$USER_LDFLAGS $CPPFLAGS"
 fi
 
+# Use ccache if available (this path is where Homebrew installs ccache symlinks)
+if [ "$(uname)" == 'Darwin' ]; then
+  if [ -d '/usr/local/opt/ccache/libexec' ]; then
+    CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+  fi
+fi
+
 cd "$(dirname "$0")/.."
 PWD=`printf "%q\n" "$(pwd)"`
 BASE_DIR="$PWD"
@@ -182,8 +189,7 @@ function build() {
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
   popd
 
-  local lib_prefix=$INSTALL_DIR/lib/lib$1
-
+  # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
     pushd "$INSTALL_DIR/lib"
     for lib in *.dylib; do
@@ -231,10 +237,22 @@ function build_nccl() {
 # detected them (to ensure that we have a consistent view between the
 # PyTorch and Caffe2 builds.)
 function build_caffe2() {
+  if [[ -z $EXTRA_CAFFE2_CMAKE_FLAGS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS=()
+  fi
+  if [[ -n $CCACHE_WRAPPER_PATH ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")
+  fi
+  if [[ -n $CMAKE_PREFIX_PATH ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
+  fi
+
   mkdir -p build
   pushd build
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
+      -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_ATEN=ON \
@@ -256,8 +274,8 @@ function build_caffe2() {
       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
-      -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
+      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
@@ -274,6 +292,16 @@ function build_caffe2() {
     done
   fi
   popd
+
+  # Fix rpaths of shared libraries
+  if [[ $(uname) == 'Darwin' ]]; then
+    pushd "$INSTALL_DIR/lib"
+    for lib in *.dylib; do
+      echo "Updating install_name for $lib"
+      install_name_tool -id @rpath/$lib $lib
+    done
+    popd
+  fi
 }
 
 # In the torch/lib directory, create an installation directory
