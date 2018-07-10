@@ -13,7 +13,6 @@ namespace torch { namespace jit {
 #define TH_FORALL_TYPES(_) \
 _(DynamicType) \
 _(TensorType) \
-_(HandleType) \
 _(TupleType) \
 _(ListType) \
 _(NumberType) \
@@ -184,38 +183,6 @@ private:
   int device_;
   std::vector<int64_t> sizes_;
   std::vector<int64_t> strides_;
-};
-
-// This value represents an opaque handle to external state.
-// Operators that produce/consume values of this type agree on
-// the format.
-
-/* Example Usage: passing state to opaque autograd Functions:
-graph(%1, %8) {
-  %2.0, %2.1 = ^AddConstant(2, False)(%1) // first output is Type::Handle, containing ctx
-  %4.0, %4.1 = ^Add(False)(%2.1, %1) // first output is Type::Handle, containing ctx
-  %6.0, %6.1 = ^Abs()(%4.1) // first output is Type::Handle, containing ctx
-  ---------------- stage 1 ----------------
-  %13 = AutogradOp[AbsBackward](%6.0, %8) // first argument is Type::Handle, consuming ctx
-  %15 = AutogradOp[AddBackward](%4.0, %13.0) // first argument is Type::Handle, consuming ctx
-  %18 = AutogradOp[AddConstantBackward](%2.0, %15.1) // first argument is Type::Handle, consuming ctx
-  %20 = AutogradOp[N5torch8autograd3AddE](%18.0, %18.0)
-  return (%6.0, %20.0);
-}
-*/
-struct HandleType : public Type {
-  friend struct Type;
-  HandleType()
-    : Type(TypeKind::HandleType) {}
-  virtual bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  virtual std::string str() const override {
-    return "Handle";
-  }
-  static const TypeKind Kind = TypeKind::HandleType;
-  // global singleton
-  static TypePtr get();
 };
 
 struct ListType : public Type {

@@ -289,10 +289,6 @@ void Node::lint() const {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
-      // Handle invariant
-      if (i != inputs_.size() - 1) {
-        JIT_ASSERT(input->type()->kind() != TypeKind::HandleType);
-      }
       i++;
     }
   }

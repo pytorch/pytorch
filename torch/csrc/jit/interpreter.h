@@ -55,6 +55,4 @@ private:
   std::shared_ptr<InterpreterStateImpl> pImpl;
 };
 
-bool hasHandleOutput(Node * n);
-
 }}

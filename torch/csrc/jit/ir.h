@@ -189,9 +189,6 @@ public:
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
-  bool isHandle() const {
-    return type()->kind() == TypeKind::HandleType;
-  }
   bool isTensor() const {
     return type()->kind() == TypeKind::TensorType;
   }

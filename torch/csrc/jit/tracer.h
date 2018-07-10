@@ -232,10 +232,11 @@ inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
   return std::make_pair(state, inputs);
 }
 
-namespace detail {
-
-// Exit code shared between exit and TraceExitHook::run
-inline void _exit(const std::shared_ptr<TracingState>& state, const variable_list& outputs) {
+// Exit a trace, treating 'outputs' as the outputs of the trace.  These
+// are the variables whose values will be computed upon subsequent
+// invocations of the trace.
+inline void exit(const variable_list& outputs) {
+  auto state = getTracingState(outputs);
   size_t i = 0;
   for (auto& output : outputs) {
     state->graph->registerOutput(getOutputTrace(state, output, i));
@@ -243,28 +244,8 @@ inline void _exit(const std::shared_ptr<TracingState>& state, const variable_lis
   }
   state->active = false;
   state->var_flags[state->graph->stage()].second = detail::getVarFlags(outputs);
-}
-
-// Marks a backwards subgraph that should be traced as the next stage.
-// Mutates some of the outputs.
-void traceBackward(const std::shared_ptr<TracingState>& state, const variable_list& inputs,
-                   const variable_list& outputs);
-
-} // namespace detail
-
-// Exit a trace, treating 'outputs' as the outputs of the trace.  These
-// are the variables whose values will be computed upon subsequent
-// invocations of the trace.
-inline void exit(const variable_list& outputs) {
-  auto state = getTracingState(outputs);
-  detail::_exit(state, outputs);
-  detail::traceBackward(state, state->inputs, outputs);
   state->inputs.clear();
 }
-
-// Marks part of the backward graph as non-traceable (i.e. one that should be replaced
-// with an Eval in the trace).
-void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
 
 // Pre-recorded information about the trace before we actually carry
 // out the trace

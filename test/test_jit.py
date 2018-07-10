@@ -579,27 +579,6 @@ class TestJit(JitTestCase):
         ge = self.checkTrace(doit, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
 
-    def test_assign_traces(self):
-        """Check that output Variables are assigned traces before they are saved."""
-        @traceable
-        class MyFn(Function):
-            @staticmethod
-            def forward(ctx, a):
-                out = a * 2
-                ctx.save_for_backward(out)
-                return out
-
-            @staticmethod
-            def backward(ctx, grad_a):
-                a, = ctx.saved_tensors
-                return a * grad_a
-
-        x = torch.randn(10, 10, requires_grad=True)
-        trace, out = torch.jit.get_trace_graph(MyFn.apply, x, nderivs=1)
-        out.sum().backward()
-        self.run_pass('dce', trace)
-        self.assertExpectedGraph(trace)
-
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
     def test_verify(self):
