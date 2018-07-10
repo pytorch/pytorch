@@ -1899,22 +1899,20 @@ class TestNN(NNTestCase):
         input = torch.Tensor(1000)
         self._test_dropout(nn.Dropout, input)
 
-    def test_Dropout2d(self):
+    def test_FeatureDropout(self):
         b = random.randint(1, 5)
         w = random.randint(1, 5)
         h = random.randint(1, 5)
         num_features = 1000
         input = torch.Tensor(num_features, b, w, h)
-        self._test_dropout(nn.Dropout2d, input)
-
-    def test_Dropout3d(self):
+        self._test_dropout(nn.FeatureDropout, input)
         b = random.randint(1, 5)
         w = random.randint(1, 5)
         h = random.randint(1, 5)
         d = random.randint(1, 2)
         num_features = 1000
         input = torch.Tensor(num_features, b, d, w, h)
-        self._test_dropout(nn.Dropout3d, input)
+        self._test_dropout(nn.FeatureDropout, input)
 
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
@@ -3427,8 +3425,8 @@ class TestNN(NNTestCase):
         self.assertRaises(ValueError, lambda: nn.Dropout2d(1.1))
         self.assertRaises(ValueError, lambda: nn.Dropout3d(-0.1))
         self.assertRaises(ValueError, lambda: nn.Dropout3d(1.1))
-        self.assertRaises(ValueError, lambda: F.dropout(v, -0.1))
-        self.assertRaises(ValueError, lambda: F.dropout(v, 1.1))
+        self.assertRaises(RuntimeError, lambda: F.dropout(v, -0.1))
+        self.assertRaises(RuntimeError, lambda: F.dropout(v, 1.1))
 
     def test_pad_sequence(self):
         def pad(tensor, length):

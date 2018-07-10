@@ -592,7 +592,20 @@ def adaptive_avg_pool3d(input, output_size):
 
 # Activation functions
 def dropout(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.Dropout.apply(input, p, training, inplace)
+    r"""
+    Applies elementwise dropout with drop probablity :attr:`p`.
+
+    See :class:`~torch.nn.Dropout` for details.
+
+    Args:
+        p (float, optional): the drop probability. Default: 0.5
+        training (bool, optional): switch between training and evaluation mode. Default: ``False``
+        inplace (bool, optional): whether to apply dropout inplace. Default: ``False``
+    """
+    if inplace:
+        return input.dropout_(p, False, training)
+    else:
+        return input.dropout(p, False, training)
 
 
 def alpha_dropout(input, p=0.5, training=False):
@@ -626,12 +639,49 @@ def alpha_dropout(input, p=0.5, training=False):
     return output.mul_(a).add_(b)
 
 
-def dropout2d(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+def feature_dropout(input, p=0.5, training=False, inplace=False):
+    r"""
+    Applies featurewise dropout. Each full channel is dropped out with
+    probablity :attr:`p`.
+
+    See :class:`~torch.nn.FeatureDropout` for details.
+
+    Args:
+        p (float, optional): the drop probability. Default: 0.5
+        training (bool, optional): switch between training and evaluation mode. Default: ``False``
+        inplace (bool, optional): whether to apply dropout inplace. Default: ``False``
+    """
+    if inplace:
+        return input.dropout_(p, True, training)
+    else:
+        return input.dropout(p, True, training)
 
 
-def dropout3d(input, p=0.5, training=False, inplace=False):
-    return _functions.dropout.FeatureDropout.apply(input, p, training, inplace)
+def _make_deprecated_dropoutNd(N):
+    def deprecated_dropoutNd(*args, **kwargs):
+        warnings.warn(
+            "dropout{}d is deprecated. Please use nn.FeatureDropout (module) "
+            "or nn.functional.feature_dropout (functional) instead.".format(N))
+        return feature_dropout(*args, **kwargs)
+
+    deprecated_dropoutNd.__doc__ = r"""
+dropout{}d(input, p=0.5, training=False, inplace=False) -> Tensor
+
+.. warning::
+    This method is now deprecated in favor of :func:`torch.nn.functional.feature_dropout`.
+
+Args:
+    p (float, optional): the drop probability. Default: 0.5
+    training (bool, optional): switch between training and evaluation mode. Default: ``False``
+    inplace (bool, optional): whether to apply dropout inplace. Default: ``False``
+
+See :func:`~torch.nn.functional.feature_dropout` for details.""".format(N)
+    deprecated_dropoutNd.__name__ = "dropout{}d".format(N)
+    return deprecated_dropoutNd
+
+dropout1d = _make_deprecated_dropoutNd(1)
+dropout2d = _make_deprecated_dropoutNd(2)
+dropout3d = _make_deprecated_dropoutNd(3)
 
 
 def threshold(input, threshold, value, inplace=False):

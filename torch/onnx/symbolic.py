@@ -582,6 +582,17 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         return res
 
 
+def dropout(g, input, p, featurewise, train, generator):
+    # See Note [Export inplace]
+    if not featurewise:
+        r, _ = g.op("Dropout", input, ratio_f=p, is_test_i=not train, outputs=2)
+        return r
+    elif train:
+        return _unimplemented("FeatureDropout", "training mode")
+    # NB: In inference mode, FeatureDropout is exported as an identity op.
+    return input
+
+
 def unfold(g, input, dimension, size, step):
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
