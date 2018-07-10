@@ -743,7 +743,9 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
 
 half THC_float2half(float f) {
   #if CUDA_VERSION < 9000
-    return ::at::detail::float2halfbits(f);
+    half h;
+    h.x = ::at::detail::float2halfbits(f);
+    return h;
   #else 
     __half_raw h_raw;
     h_raw.x = ::at::detail::float2halfbits(f);

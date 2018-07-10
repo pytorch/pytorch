@@ -46,11 +46,13 @@ struct ScalarConvert {
           return __float2half((float) v);
       #else
         #if CUDA_VERSION < 9000
-          return ::at::detail::float2halfbits((float) v);
+          half h;
+          h.x = ::at::detail::float2halfbits((float) v);
+          return h;
         #else 
-          __half_raw v_raw;
-          v_raw.x = ::at::detail::float2halfbits((float) v);
-          return half(v_raw);
+          __half_raw h_raw;
+          h_raw.x = ::at::detail::float2halfbits((float) v);
+          return half(h_raw);
         #endif // CUDA_VERSION < 9000
       #endif
     }
