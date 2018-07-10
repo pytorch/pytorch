@@ -28,7 +28,7 @@ typedef struct at_THAllocator THAllocator;
  */
 TH_API THAllocator* getTHDefaultAllocator();
 #ifdef __cplusplus
-struct THDefaultDeleter final : public at::Deleter {
+struct TH_API THDefaultDeleter final : public at::Deleter {
   void deallocate(void* ctx, void* ptr) const override {
     THFree(ptr);
   }
@@ -56,7 +56,7 @@ TH_API void THMapAllocatorContext_free(THMapAllocatorContext *ctx);
 AT_API std::unique_ptr<void, at::BoundDeleter> THMapAllocatorContext_alloc(THMapAllocatorContext *ctx, ptrdiff_t size);
 AT_API std::unique_ptr<void, at::BoundDeleter> THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size);
 
-struct THMapDeleter final : public at::Deleter {
+struct TH_API THMapDeleter final : public at::Deleter {
   void deallocate(void* ctx, void* ptr) const override;
   static at::BoundDeleter make(THMapAllocatorContext* ctx) {
     return {&singleton_, ctx};
@@ -69,7 +69,7 @@ private:
   static THMapDeleter singleton_;
 };
 
-struct THRefcountedMapDeleter final : public at::Deleter {
+struct TH_API THRefcountedMapDeleter final : public at::Deleter {
   void deallocate(void* ctx, void* ptr) const override;
   static at::BoundDeleter make(THMapAllocatorContext* ctx) {
     return {&singleton_, ctx};
