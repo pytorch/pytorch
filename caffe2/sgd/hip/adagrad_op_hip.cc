@@ -2,7 +2,7 @@
 #include "caffe2/sgd/adagrad_op.h"
 #include "caffe2/core/hip/common_hip.h"
 #include "caffe2/core/hip/context_hip.h"
-#include "caffe2/utils/mixed_utils_hip.h"
+#include "caffe2/utils/hip/mixed_utils_hip.h"
 
 namespace caffe2 {
 
