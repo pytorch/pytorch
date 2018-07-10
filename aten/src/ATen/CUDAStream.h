@@ -82,6 +82,9 @@ struct CUDAStream {
   // Implicit conversion to cudaStream_t
   operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
 
+  // Returns true if the CUDAStream is null.
+  explicit operator bool() const noexcept { return internals_ != nullptr; }
+
   // Less than operator (to allow use in sets)
   friend bool operator<(const CUDAStream& left, const CUDAStream& right) {
     return left.internals_ < right.internals_;

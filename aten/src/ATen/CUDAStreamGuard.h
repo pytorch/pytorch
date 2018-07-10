@@ -2,7 +2,6 @@
 
 #include <ATen/CUDAStream.h>
 #include <ATen/Context.h>
-#include <ATen/optional.h>
 
 #include <cstddef>
 
@@ -31,7 +30,7 @@ struct CUDAStreamGuard {
   ~CUDAStreamGuard() {
     if (original_stream_) {
       globalContext().uncheckedSetCurrentCUDAStreamOnDevice(
-          device_index_, *original_stream_);
+          device_index_, original_stream_);
     }
   }
 
@@ -53,9 +52,8 @@ struct CUDAStreamGuard {
     return device_index_;
   }
 
-  /// Returns the CUDA stream specified in the latest call to `set_stream`, or
-  /// `nullopt` if it was never called.
-  const at::optional<CUDAStream>& original_stream() const noexcept {
+  /// Returns the CUDA stream specified in the latest call to `set_stream`.
+  const CUDAStream& original_stream() const noexcept {
     return original_stream_;
   }
 
@@ -63,7 +61,7 @@ struct CUDAStreamGuard {
   /// The device index for which we are setting the stream.
   int32_t device_index_{-1};
   /// The original stream that was active on the device.
-  at::optional<CUDAStream> original_stream_;
+  CUDAStream original_stream_;
 };
 
 } // namespace at
