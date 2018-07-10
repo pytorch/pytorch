@@ -167,7 +167,7 @@ THCTensor_(varall)(THCState *state, THCTensor *self, int biased)
 
   val = THCNumerics<accreal>::div(
     val,
-    scalar_cast<accreal>(THCTensor_(nElement)(state, self) - (biased ? 0 : 1))
+    scalar_cast<accreal>(std::max<int64_t>(0, THCTensor_(nElement)(state, self) - (biased ? 0 : 1)))
   );
 
   THCudaCheck(cudaGetLastError());
@@ -329,7 +329,6 @@ THC_API accreal
 THCTensor_(meanall)(THCState *state, THCTensor *self)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  THArgCheck(self->_dim() > 0, 1, "empty Tensor");
   return THCTensor_(sumall)(state, self)/THCTensor_(nElement)(state, self);
 }
 

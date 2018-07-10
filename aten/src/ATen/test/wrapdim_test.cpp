@@ -30,7 +30,7 @@ TEST_CASE( "wrapdim test", "[]" ) {
 
   SECTION( "empty tensor" ) {
     auto a = randn(0, T);
-    REQUIRE(a.prod(0).equal(at::empty({0}, T)));
+    REQUIRE(a.prod(0).equal(at::ones({}, T)));
   }
 
   SECTION( "scalar vs 1-dim, 1-size" ) {
