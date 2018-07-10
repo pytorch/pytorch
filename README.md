@@ -172,6 +172,9 @@ If you want to build on Windows, Visual Studio 2017 and NVTX are also needed.
 
 On Linux
 ```bash
+# Install lapack library
+sudo apt install libblas-dev liblapack-dev
+
 export CMAKE_PREFIX_PATH="$(dirname $(which conda))/../" # [anaconda root directory]
 
 # Install basic dependencies
