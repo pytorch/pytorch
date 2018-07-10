@@ -742,7 +742,7 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
 // legacy functions.
 
 half THC_float2half(float f) {
-  #if CUDA_VERSION < 9000
+  #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half h;
     h.x = ::at::detail::float2halfbits(f);
     return h;
@@ -754,7 +754,7 @@ half THC_float2half(float f) {
 }
 
 float  THC_half2float(half h) {
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
   return ::at::detail::halfbits2float(h.x);
 #else
   __half_raw h_raw(h);

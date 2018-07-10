@@ -27,12 +27,12 @@ struct ScalarConvert<half, Out> {
     #ifdef __CUDA_ARCH__
       return (Out) __half2float(v);
     #else // Host-side conversion
-      #if CUDA_VERSION < 9000
+    #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
         return (Out) ::at::detail::halfbits2float(v.x);
       #else
         __half_raw v_raw(v);
         return (Out) ::at::detail::halfbits2float(v_raw.x);
-      #endif // CUDA_VERSION < 9000
+      #endif // #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     #endif 
   }
 };
@@ -43,7 +43,7 @@ struct ScalarConvert<In, half> {
     #ifdef __CUDA_ARCH__
         return __float2half((float) v);
     #else
-      #if CUDA_VERSION < 9000
+      #if #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
         half h;
         h.x = ::at::detail::float2halfbits((float) v);
         return h;
@@ -51,7 +51,7 @@ struct ScalarConvert<In, half> {
         __half_raw h_raw;
         h_raw.x = ::at::detail::float2halfbits((float) v);
         return half(h_raw);
-      #endif // CUDA_VERSION < 9000
+      #endif // #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     #endif
   }
 };
