@@ -1,0 +1,5 @@
+graph(%x : Dynamic
+      %y : Dynamic) {
+  %2 : Dynamic = aten::type_as(%x, %y)
+  return (%2);
+}

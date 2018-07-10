@@ -1,0 +1,5 @@
+graph(%0 : Double(1)
+      %1 : Int(1)) {
+  %2 : Int(1) = aten::type_as(%0, %1)
+  return (%2);
+}

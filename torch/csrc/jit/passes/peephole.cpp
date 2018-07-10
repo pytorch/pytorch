@@ -41,6 +41,18 @@ void PeepholeOptimize(Block * block) {
           // Let DCE clean up any unused nodes at this point
         }
       } break;
+      case aten::type_as: {
+        if (n->inputs().size() != 2) {
+          continue;
+        }
+        Value* LHS(n->input(0));
+        Value* RHS(n->input(1));
+        // If LHS and RHS have the same static type, remove the type_as operator.
+        if ((RHS->type()->kind() != TypeKind::DynamicType &&
+             *LHS->type() == *RHS->type())) {
+          n->output()->replaceAllUsesWith(LHS);
+        }
+      } break;
       // Fuse mm + add into addmm
       case aten::add: {
         // Must have two inputs
