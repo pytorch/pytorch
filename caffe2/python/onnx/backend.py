@@ -991,7 +991,7 @@ class Caffe2Backend(Backend):
         if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
            and callable(super(Caffe2Backend, cls).is_compatible):
             if not super(Caffe2Backend, cls).is_compatible(model, device, **kwargs):
-              return False
+                return False
         # TODO: should have an unspported list of operators, be optimistic for now
         return True
 
