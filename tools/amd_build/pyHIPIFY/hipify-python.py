@@ -331,6 +331,18 @@ def disable_asserts(input_string):
         output_string = output_string.replace(input_string[start:p_end + 1], "")
     return output_string
 
+def replace_forceinline(input_string):
+    output_string = input_string
+    output_string = re.sub("__forceinline__", "inline", output_string)
+    return output_string
+
+def replace_math_functions(input_string):
+    """ Replace std:: invocations of match functions with non-std:: versions"""
+    output_string = input_string
+    output_string = re.sub("std::exp\(", "::exp(", output_string)
+    output_string = re.sub("std::log\(", "::log(", output_string)
+    output_string = re.sub("std::pow\(", "::pow(", output_string)
+    return output_string
 
 def disable_function(input_string, function, replace_style):
     """ Finds and disables a function in a particular file.
@@ -496,6 +508,12 @@ def preprocessor(filepath, stats):
         # Disable asserts
         if not filepath.endswith("THCGeneral.h.in"):
             output_source = disable_asserts(output_source)
+
+        # Replace std:: with non-std:: versions
+        output_source = replace_math_functions(output_source)
+
+        # Replace __forceinline__ with inline
+        output_source = replace_forceinline(output_source)
 
         # Overwrite file contents
         fileobj.seek(0)
