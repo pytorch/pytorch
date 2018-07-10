@@ -3,7 +3,9 @@
 #include <cuda.h>
 #include <limits.h>
 #include <assert.h>
-#include "ATen/Half.h"
+#include "ATen/Half.h" // for host-side fp16<->fp32 conversions
+
+#include "cuda_fp16.h"
 
 /// Class for numeric limits of the particular data type, which
 /// includes support for `half`.
@@ -24,10 +26,10 @@ struct ScalarConvert {
 template <typename Out>
 struct ScalarConvert<half, Out> {
   static __host__ __device__ Out to(const half v) {
-    #ifdef __CUDA_ARCH__
+    #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
       return (Out) __half2float(v);
     #else // Host-side conversion
-    #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
+      #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
         return (Out) ::at::detail::halfbits2float(v.x);
       #else
         __half_raw v_raw(v);
@@ -40,7 +42,7 @@ struct ScalarConvert<half, Out> {
 template <typename In>
 struct ScalarConvert<In, half> {
   static __host__ __device__ half to(const In v) {
-    #ifdef __CUDA_ARCH__
+    #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
         return __float2half((float) v);
     #else
       #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
@@ -213,7 +215,7 @@ struct CUDANumerics<half> {
 #endif
 
   static inline __host__ __device__ bool lt(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hlt(a, b);
 #else
@@ -221,13 +223,13 @@ struct CUDANumerics<half> {
     float fb = __half2float(b);
     return fa < fb;
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<float>(a) < scalar_cast<float>(b);
 #endif
   }
 
   static inline __host__ __device__ bool le(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hle(a, b);
 #else
@@ -235,13 +237,13 @@ struct CUDANumerics<half> {
     float fb = __half2float(b);
     return fa <= fb;
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<float>(a) <= scalar_cast<float>(b);
 #endif
   }
 
   static inline __host__ __device__ bool gt(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hgt(a, b);
 #else
@@ -249,13 +251,13 @@ struct CUDANumerics<half> {
     float fb = __half2float(b);
     return fa > fb;
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<float>(a) > scalar_cast<float>(b);
 #endif
   }
 
   static inline __host__ __device__ bool ge(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hge(a, b);
 #else
@@ -263,13 +265,13 @@ struct CUDANumerics<half> {
     float fb = __half2float(b);
     return fa >= fb;
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<float>(a) >= scalar_cast<float>(b);
 #endif
   }
 
   static inline __host__ __device__ bool eq(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __heq(a, b);
 #else
@@ -277,13 +279,13 @@ struct CUDANumerics<half> {
     float fb = __half2float(b);
     return fa == fb;
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<float>(a) == scalar_cast<float>(b);
 #endif
   }
 
   static inline __host__ __device__ bool ne(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hne(a, b);
 #else
@@ -291,321 +293,321 @@ struct CUDANumerics<half> {
     float fb = __half2float(b);
     return fa != fb;
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<float>(a) != scalar_cast<float>(b);
 #endif
   }
 
   static inline __host__ __device__ half exp(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hexp(a);
 #else
     float fa = __half2float(a);
     return __float2half(expf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(expf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half exp10(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hexp10(a);
 #else
     float fa = __half2float(a);
     return __float2half(exp10f(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(exp10f(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half log(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hlog(a);
 #else
     float fa = __half2float(a);
     return __float2half(logf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(logf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half log10(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(log10f(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(log10f(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half log1p(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(log1pf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(log1pf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half log2(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(log2f(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(log2f(scalar_cast<float>(a)));
 #endif
   }
 
 static inline __host__ __device__ half lgamma(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(lgammaf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(lgammaf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half expm1(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(expm1f(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(expm1f(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half cos(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hcos(a);
 #else
     float fa = __half2float(a);
     return __float2half(cosf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(cosf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half sin(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hsin(a);
 #else
     float fa = __half2float(a);
     return __float2half(sinf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(sinf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half sqrt(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hsqrt(a);
 #else
     float fa = __half2float(a);
     return __float2half(sqrtf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(sqrtf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half rsqrt(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hrsqrt(a);
 #else
     float fa = __half2float(a);
     return __float2half(rsqrtf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(rsqrtf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half ceil(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hceil(a);
 #else
     float fa = __half2float(a);
     return __float2half(ceilf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(ceilf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half floor(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return hfloor(a);
 #else
     float fa = __half2float(a);
     return __float2half(floorf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(floorf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half trunc(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return htrunc(a);
 #else
     float fa = __half2float(a);
     return __float2half(truncf(fa));
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(truncf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half neg(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hneg(a);
 #else
     float fa = __half2float(a);
     return __float2half(-fa);
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(-(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half acos(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(acosf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(acosf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half cosh(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(coshf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(coshf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half asin(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(asinf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(asinf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half sinh(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(sinhf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(sinhf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half tan(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(tanf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(tanf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half atan(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(atanf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(atanf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half tanh(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(tanhf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(tanhf(scalar_cast<float>(a)));
 #endif
   }
 
 
    static inline __host__ __device__ half erf(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(erff(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(erff(scalar_cast<float>(a)));
 #endif
   }
 
 
    static inline __host__ __device__ half erfinv(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(erfinvf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(erfinvf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half abs(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(fabs(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(fabs(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half round(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(roundf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(roundf(scalar_cast<float>(a)));
 #endif
   }
 
   static inline __host__ __device__ half frac(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(fa - truncf(fa));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = scalar_cast<float>(a);
     return scalar_cast<half>(fa - floorf(fa));
 #endif
   }
 
   static inline __host__ __device__ half cinv(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     return __float2half(1.0f / fa);
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(1.0f / scalar_cast<float>(a));
 #endif
   }
 
   static inline __host__ __device__ half add(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hadd(a, b);
 #else
@@ -613,23 +615,23 @@ static inline __host__ __device__ half lgamma(half a) {
     float fb = __half2float(b);
     return __float2half( fa + fb );
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(scalar_cast<float>(a) + scalar_cast<float>(b));
 #endif
   }
 
   static inline __host__ __device__ half div(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     float fb = __half2float(b);
     return __float2half( fa / fb );
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(scalar_cast<float>(a) / scalar_cast<float>(b));
 #endif
   }
 
   static inline __host__ __device__ half mul(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hmul(a, b);
 #else
@@ -637,13 +639,13 @@ static inline __host__ __device__ half lgamma(half a) {
     float fb = __half2float(b);
     return __float2half( fa * fb );
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(scalar_cast<float>(a) * scalar_cast<float>(b));
 #endif
   }
 
   static inline __host__ __device__ half sub(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hsub(a, b);
 #else
@@ -651,27 +653,27 @@ static inline __host__ __device__ half lgamma(half a) {
     float fb = __half2float(b);
     return __float2half( fa - fb );
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(scalar_cast<float>(a) - scalar_cast<float>(b));
 #endif
   }
 
   static inline __host__ __device__ half pow(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     float fb = __half2float(b);
     return __float2half(powf(fa, fb));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(powf(scalar_cast<float>(a), scalar_cast<float>(b)));
 #endif
   }
 
   static inline __host__ __device__ half atan2(half a, half b) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     float fa = __half2float(a);
     float fb = __half2float(b);
     return __float2half(atan2f(fa, fb));
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return scalar_cast<half>(atan2f(scalar_cast<float>(a), scalar_cast<float>(b)));
 #endif
   }
@@ -682,14 +684,14 @@ static inline __host__ __device__ half lgamma(half a) {
   }
 
   static inline __host__ __device__ bool isinf(half a) {
-#ifdef __CUDA_ARCH__
+#if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
 #ifdef CUDA_HALF_INSTRUCTIONS
     return __hisinf(a) != 0;
 #else
     float fa = __half2float(a);
     return ::isinf(fa);
 #endif
-#else // __CUDA_ARCH__
+#else // defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
     return ::isinf(scalar_cast<float>(a));
 #endif
   }
