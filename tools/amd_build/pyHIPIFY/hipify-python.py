@@ -605,9 +605,8 @@ def get_kernel_template_params(the_file, KernelDictionary):
             KernelDictionary[kernel_name] = {"kernel_with_template": kernel_with_template, "arg_types": formatted_args}
 
         # Extract generated kernels
-        get_generated_kernels = [k for k in re.finditer(r"GENERATE_KERNEL([1-9])\((.*)\)", string)]
         # curandStateMtgp32 *state, int size, T *result, ARG1
-        for kernel in get_generated_kernels:
+        for kernel in re.finditer(r"GENERATE_KERNEL([1-9])\((.*)\)", string):
             kernel_gen_type = int(kernel.group(1))
             kernel_name = kernel.group(2).split(",")[0]
             kernel_params = kernel.group(2).split(",")[1:]
@@ -720,8 +719,7 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                 with openf(filepath, "r+") as fileobj:
                     input_source = fileobj.read()
                     new_output_source = input_source
-                    get_kernel_definitions = [k for k in re.finditer("hipLaunchKernelGGL\(", input_source)]
-                    for kernel in get_kernel_definitions:
+                    for kernel in re.finditer("hipLaunchKernelGGL\(", input_source):
                         arguments = extract_arguments(kernel.end() - 1, input_source)
 
                         # Check if we have templating + static_cast information
