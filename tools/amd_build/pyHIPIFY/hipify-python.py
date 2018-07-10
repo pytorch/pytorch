@@ -488,7 +488,7 @@ def preprocessor(filepath, stats):
                         stats["unsupported_calls"].append((cuda_type, filepath))
 
                 if cuda_type in output_source:
-                    output_source = re.sub(r'\b({0})\b'.format(re.escape(cuda_type)), lambda x: hip_type, output_source)
+                    output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
 
         # Perform Kernel Launch Replacements
         output_source = processKernelLaunches(output_source, stats)
@@ -511,7 +511,7 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
     with openf(filepath, "r+") as f:
         contents = f.read()
         if strict:
-            contents = re.sub(r'\b({0})\b'.format(re.escape(search_string)), lambda x: replace_string, contents)
+            contents = re.sub(r'\b({0})\b'.format(search_string), lambda x: replace_string, contents)
         else:
             contents = contents.replace(search_string, replace_string)
         f.seek(0)
@@ -626,7 +626,7 @@ def disable_unsupported_function_call(function, input_string, replacement):
     output_string = input_string
 
     # Find all calls to the function
-    calls = re.finditer(r"\b{0}\b".format(re.escape(function)), input_string)
+    calls = re.finditer(r"\b{0}\b".format(function), input_string)
 
     # Do replacements
     for call in calls:
@@ -765,7 +765,7 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            new_kernel_launch = re.sub(r'\b{0}\b'.format(re.escape(original_kernel_name_with_template)),
+                            new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
                                                        lambda x: kernel_name_with_template, new_kernel_launch)
 
                             # Replace Launch
@@ -948,7 +948,7 @@ def main():
 
                 # Disable Constants w\ Boundary.
                 for const in constants:
-                    txt = re.sub(r"\b{0}\b".format(re.escape(const)), constants[const], txt)
+                    txt = re.sub(r"\b{0}\b".format(const), constants[const], txt)
 
                 # Disable Constants
                 for s_const in s_constants:
