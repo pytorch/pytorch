@@ -444,8 +444,6 @@
 
 - func: diagonal(Tensor self, int64_t offset=0, int64_t dim1=0, int64_t dim2=1) -> Tensor
 
-- func: dirac_(Tensor self) -> Tensor
-
 - func: dot(Tensor self, Tensor tensor) -> Tensor
 
 - func: dot_out(Tensor result, Tensor self, Tensor tensor) -> Tensor
@@ -571,8 +569,6 @@
 
 - func: eye(int64_t n, int64_t m, TensorOptions options={}) -> Tensor
   variants: function
-
-- func: eye_(Tensor self) -> Tensor
 
 - func: eye_out(Tensor result, int64_t n) -> Tensor
   variants: function
@@ -946,8 +942,6 @@
   variants: function
   deprecated: true
 
-- func: orthogonal_(Tensor self, double gain=1) -> Tensor
-
 - func: pairwise_distance(Tensor x1, Tensor x2, double p=2, double eps=1e-6, bool keepdim=false) -> Tensor
   variants: function
 
@@ -1196,8 +1190,6 @@
   dispatch:
     CPU: softmax_backward_cpu
     CUDA: softmax_backward_cuda
-
-- func: sparse_(Tensor self, double sparsity, double std=0.01) -> Tensor
 
 - func: split(Tensor self, int64_t split_size, int64_t dim=0) -> TensorList
 
@@ -1886,6 +1878,3 @@
 
 - func: meshgrid(TensorList tensors) -> TensorList
   variants: function
-
-- func: xavier_uniform_(Tensor self, double gain=1.0) -> Tensor
-- func: xavier_normal_(Tensor self, double gain=1.0) -> Tensor

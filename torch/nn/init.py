@@ -140,7 +140,8 @@ def eye_(tensor):
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     with torch.no_grad():
-        return tensor.eye_()
+        torch.eye(*tensor.shape, out=tensor, requires_grad=tensor.requires_grad)
+    return tensor
 
 
 def dirac_(tensor):
@@ -155,10 +156,23 @@ def dirac_(tensor):
         >>> w = torch.empty(3, 16, 5, 5)
         >>> nn.init.dirac_(w)
     """
-    if tensor.ndimension() not in [3, 4, 5]:
+    dimensions = tensor.ndimension()
+    if dimensions not in [3, 4, 5]:
         raise ValueError("Only tensors with 3, 4, or 5 dimensions are supported")
+
+    sizes = tensor.size()
+    min_dim = min(sizes[0], sizes[1])
     with torch.no_grad():
-        return tensor.dirac_()
+        tensor.zero_()
+
+        for d in range(min_dim):
+            if dimensions == 3:  # Temporal convolution
+                tensor[d, d, tensor.size(2) // 2] = 1
+            elif dimensions == 4:  # Spatial convolution
+                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2] = 1
+            else:  # Volumetric convolution
+                tensor[d, d, tensor.size(2) // 2, tensor.size(3) // 2, tensor.size(4) // 2] = 1
+    return tensor
 
 
 def _calculate_fan_in_and_fan_out(tensor):
@@ -201,10 +215,11 @@ def xavier_uniform_(tensor, gain=1):
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain('relu'))
     """
-    if tensor.ndimension() < 2:
-        raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions")
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    std = gain * math.sqrt(2.0 / (fan_in + fan_out))
+    a = math.sqrt(3.0) * std  # Calculate uniform bounds from standard deviation
     with torch.no_grad():
-        return tensor.xavier_uniform_(gain)
+        return tensor.uniform_(-a, a)
 
 
 def xavier_normal_(tensor, gain=1):
@@ -227,10 +242,10 @@ def xavier_normal_(tensor, gain=1):
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
     """
-    if tensor.ndimension() < 2:
-        raise ValueError("Fan in and fan out can not be computed for tensor with less than 2 dimensions")
+    fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
+    std = gain * math.sqrt(2.0 / (fan_in + fan_out))
     with torch.no_grad():
-        return tensor.xavier_normal_(gain)
+        return tensor.normal_(0, std)
 
 
 def _calculate_correct_fan(tensor, mode):
@@ -329,8 +344,28 @@ def orthogonal_(tensor, gain=1):
     """
     if tensor.ndimension() < 2:
         raise ValueError("Only tensors with 2 or more dimensions are supported")
+
+    rows = tensor.size(0)
+    cols = tensor[0].numel()
+    flattened = tensor.new(rows, cols).normal_(0, 1)
+
+    if rows < cols:
+        flattened.t_()
+
+    # Compute the qr factorization
+    q, r = torch.qr(flattened)
+    # Make Q uniform according to https://arxiv.org/pdf/math-ph/0609050.pdf
+    d = torch.diag(r, 0)
+    ph = d.sign()
+    q *= ph
+
+    if rows < cols:
+        q.t_()
+
     with torch.no_grad():
-        return tensor.orthogonal_(gain)
+        tensor.view_as(q).copy_(q)
+        tensor.mul_(gain)
+    return tensor
 
 
 def sparse_(tensor, sparsity, std=0.01):
@@ -351,8 +386,17 @@ def sparse_(tensor, sparsity, std=0.01):
     """
     if tensor.ndimension() != 2:
         raise ValueError("Only tensors with 2 dimensions are supported")
+
+    rows, cols = tensor.shape
+    num_zeros = int(math.ceil(sparsity * rows))
+
     with torch.no_grad():
-        return tensor.sparse_(sparsity, std=std)
+        tensor.normal_(0, std)
+        for col_idx in range(cols):
+            row_indices = torch.randperm(rows)
+            zero_indices = row_indices[:num_zeros]
+            tensor[zero_indices, col_idx] = 0
+    return tensor
 
 
 # for backward compatibility
