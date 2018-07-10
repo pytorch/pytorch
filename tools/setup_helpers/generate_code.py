@@ -40,8 +40,8 @@ outputs = [
     'torch/csrc/autograd/generated/variable_factories.h',
     'torch/csrc/autograd/generated/VariableType.cpp',
     'torch/csrc/autograd/generated/VariableType.h',
-    'torch/csrc/jit/generated/aten_dispatch.cpp',
-    'torch/csrc/jit/generated/aten_schema.cpp',
+    'torch/csrc/jit/generated/register_aten_ops.cpp',
+    'torch/csrc/jit/generated/operator.cpp',
 ]
 
 

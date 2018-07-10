@@ -35,6 +35,9 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     out << "float";
   } else if(t.kind() == TypeKind::IntType) {
     out << "int";
+  } else if(t.kind() == TypeKind::ListType) {
+    auto prim = t.cast<ListType>()->getElementType();
+    out << *prim << "[]";
   } else {
     barf("unknown type kind");
   }
