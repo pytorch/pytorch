@@ -31,8 +31,6 @@ static inline void THNN_(Im2Col_shapeCheck)(
   int inputWidth   = THCTensor_(size)(state, input, dim_batch + 3);
   int outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
   int outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
-  int nOutputPlane = nInputPlane * kW * kH;
-  int outputLength = outputHeight * outputWidth;
 
   if (outputHeight < 1 || outputWidth < 1) {
     THError("Given input with spatial size (%d, %d), kernel_size=(%d, %d), "
