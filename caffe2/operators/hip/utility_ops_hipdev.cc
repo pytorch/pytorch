@@ -86,7 +86,7 @@ bool NanCheckOp<HIPContext>::RunOnDevice() {
         std::cerr << "NaN idxs:" << std::endl;
         auto* cpu_X_data = cpu_X.data<float>();
         for (size_t i = 0; i < cpu_X.size(); ++i) {
-          if (isnan(cpu_X_data[i]) || isinf(cpu_X_data[i])) {
+          if (std::isnan(cpu_X_data[i]) || std::isinf(cpu_X_data[i])) {
             std::cerr << i << " ";
           }
         }
@@ -109,7 +109,7 @@ REGISTER_HIP_OPERATOR(NanCheck, NanCheckOp<HIPContext>);
 __global__ void
 ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
   HIP_1D_KERNEL_LOOP(i, N) {
-    maxout[i] = max(X[i], Y[i]);
+    maxout[i] = fmaxf(X[i], Y[i]);
   }
 }
 
@@ -136,7 +136,7 @@ REGISTER_HIP_OPERATOR(MaxGradient, MaxGradientOp<float, HIPContext>);
 __global__ void
 ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
   HIP_1D_KERNEL_LOOP(i, N) {
-    minout[i] = min(X[i], Y[i]);
+    minout[i] = fminf(X[i], Y[i]);
   }
 }
 
@@ -181,7 +181,7 @@ bool SelectGradientOpBase<float, HIPContext>::RunOnDevice() {
     auto* grad_input = Output(i);
     grad_input->ResizeLike(input);
     hipLaunchKernelGGL((MaxMinGradKernel), dim3(CAFFE_GET_BLOCKS(input.size())), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
-        static_cast<const int>(input.size()),
+        static_cast<int>(input.size()),
         output.data<float>(),
         input.data<float>(),
         grad_output.data<float>(),
@@ -305,7 +305,7 @@ bool ScatterWeightedSumOp<float, HIPContext>::DoRunWithType() {
   TIndex K = indices.size();
   TIndex block_size = M / N;
 
-  T* data = output->template mutable_data<T>();
+  float* data = output->template mutable_data<float>();
 
   // In order to have all device pointers of x_i (and weight_i similarly)
   // consecutively in device memory, copy pointers to a host vector and then
