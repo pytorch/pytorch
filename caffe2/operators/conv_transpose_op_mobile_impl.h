@@ -17,6 +17,7 @@
 #include "caffe2/utils/cpu_neon.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/eigen_utils.h"
 
 CAFFE2_DECLARE_bool(caffe2_force_shared_col_buffer);
 

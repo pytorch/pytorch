@@ -9,6 +9,7 @@
 #include "caffe2/operators/reducer_functors.h"
 #include "caffe2/perfkernels/embedding_lookup.h"
 #include "caffe2/utils/math.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
