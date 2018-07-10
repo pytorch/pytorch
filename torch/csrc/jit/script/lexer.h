@@ -1,5 +1,4 @@
 #pragma once
-#include <assert.h>
 #include <algorithm>
 #include <iostream>
 #include <memory>
@@ -7,6 +6,7 @@
 #include <string>
 #include <unordered_map>
 #include <vector>
+#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/source_location.h"
 
 
@@ -47,7 +47,7 @@ namespace script {
   _(TK_RANGE_CONSTRAINT, "range_constraint", "") \
   _(TK_PARAM, "param", "")                       \
   _(TK_INFERRED, "inferred", "")                 \
-  _(TK_BOOL, "bool", "")                         \
+  _(TK_BOOL, "bool", "bool")                     \
   _(TK_ACCESS, "access", "")                     \
   _(TK_ASSIGN, "assign", "")                     \
   _(TK_ATTRIBUTE, "attribute", "")               \
@@ -83,9 +83,10 @@ namespace script {
   _(TK_IN, "in", "in")                           \
   _(TK_STARRED, "starred", "")                   \
   _(TK_UNARY_MINUS, "unary minus", "")           \
-  _(TK_POW, "pow operator", "**")
+  _(TK_POW, "pow operator", "**")                \
+  _(TK_ARROW, "arrow", "->")                     \
 
-static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.";
+static const char* valid_single_char_tokens = "+-*/@()[]:,={}><.?";
 
 enum TokenKind {
   // we use characters to represent themselves so skip all valid characters
@@ -107,7 +108,7 @@ struct TokenTrie {
   TokenTrie() : kind(0) {}
   void insert(const char* str, int tok) {
     if (*str == '\0') {
-      assert(kind == 0);
+      TORCH_ASSERT(kind == 0);
       kind = tok;
       return;
     }
@@ -328,20 +329,43 @@ struct SourceRange : public SourceLocation {
   size_t size() const {
     return end() - start();
   }
+
+  static const size_t CONTEXT = 10;
   virtual void highlight(std::ostream& out) const override {
     const std::string& str = file();
-    size_t begin = start();
-    size_t end = start();
-    while (begin > 0 && str[begin - 1] != '\n')
-      --begin;
-    while (end < str.size() && str[end] != '\n')
-      ++end;
-    out << str.substr(0, end) << "\n";
-    out << std::string(start() - begin, ' ');
-    size_t len = std::min(size(), end - start());
+    size_t begin_line = start(); // beginning of line to highlight
+    size_t end_line = start(); // end of line to highlight
+    while (begin_line > 0 && str[begin_line - 1] != '\n')
+      --begin_line;
+    while (end_line < str.size() && str[end_line] != '\n')
+      ++end_line;
+    TORCH_ASSERT(begin_line == 0 || str[begin_line - 1] == '\n');
+    TORCH_ASSERT(end_line == str.size() || str[end_line] == '\n');
+
+    size_t begin_highlight = begin_line; // beginning of context, CONTEXT lines before the highlight line
+    for(size_t i = 0; begin_highlight > 0; --begin_highlight) {
+      if(str[begin_highlight - 1] == '\n')
+        ++i;
+      if(i >= CONTEXT)
+        break;
+    }
+    TORCH_ASSERT(begin_highlight == 0 || str[begin_highlight - 1] == '\n');
+
+    size_t end_highlight = end_line; // end of context, CONTEXT lines after the highlight line
+    for(size_t i = 0; end_highlight < str.size(); ++end_highlight) {
+      if(str[end_highlight] == '\n')
+        ++i;
+      if(i >= CONTEXT)
+        break;
+    }
+    TORCH_ASSERT(end_highlight == str.size() || str[end_highlight] == '\n');
+
+    out << str.substr(begin_highlight, end_line - begin_highlight) << "\n";
+    out << std::string(start() - begin_line, ' ');
+    size_t len = std::min(size(), end_line - start());
     out << std::string(len, '~')
         << (len < size() ? "...  <--- HERE" : " <--- HERE");
-    out << str.substr(end);
+    out << str.substr(end_line, end_highlight - end_line);
     if (str.size() > 0 && str.back() != '\n')
       out << "\n";
   }
@@ -492,7 +516,7 @@ struct Lexer {
     int kind;
     size_t start;
     size_t length;
-    assert(file);
+    TORCH_ASSERT(file);
     if (!shared.match(
             *file,
             pos,

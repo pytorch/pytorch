@@ -3160,7 +3160,7 @@ def func(t):
             def f5(a):
                 torch.cat([[a]])
 
-        with self.assertRaisesRegex(RuntimeError, 'a value of type Tensor for argument \'size\' but found'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a value of type int\\[\\] for argument \'size\''):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
@@ -4564,7 +4564,7 @@ EXCLUDE_SCRIPT = {
     # Right now, the following is happening:
     # - Shorter schemas come before longer schemas
     # - bool, int are treated as IntType rather than DynamicType like before
-    # So the schemas look like the following in aten_schema:
+    # So the schemas look like the following in operator:
     # (2) var(DynamicType, IntType)
     # (1) var(DynamicType, IntType, IntType, DynamicType)
     # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly
