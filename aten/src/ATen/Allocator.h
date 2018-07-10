@@ -10,37 +10,74 @@ namespace at {
 
 // Note [Separated Allocator and Deleter]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Why are Allocator and Deleter put in separate classes?  The key is that
-// an allocator may allocate a distinct context for every deleter.  This is
-// especially important upon reallocation: if we do not allocate a new
-// context, the contexts of the new and old data can clobber each other.
-// Imagine the following sequence of events:
+// A Deleter knows how to delete a void* pointer, freeing it back to the
+// system.  Every storage needs a deleter, so that we know how to free
+// the memory.
 //
-//  1. Storage has some data and a BoundAllocatorDeleter associated with it.
-//     The context in this case is an owning reference to "IOBuf", an
-//     enclosing struct for the data.
+// An Allocator, given a size, knows how to allocate memory of that size.
+// Generally, you don't care too much about how a given piece of memory
+// is allocated, but if you need to *reallocate* some memory, it's good
+// to know how to reallocate something "in the same way", and that means
+// you have to know what the allocator is.
 //
-//  2. A resize occurs on storage.  We call BoundAllocatorDeleter to
+// Below, Allocator and Deleter are split into two separate classes.  You
+// might wonder, why is that?  In the common case, an allocator is in
+// one-to-one correspondence with a deleter, in the same way malloc() is
+// paired with free().
+//
+// However, there is a major exception to this case: when we write
+// Allocators/Deleters for "externally" managed memory.  In this case,
+// we may need an extra, externally provided pointer to some enclosing
+// struct if we want to free this memory, and this pointer is *different* for
+// every allocated void* pointer.
+//
+// To see what can go wrong, let's suppose that we had put Allocator and Deleter
+// together with the context, in a single "Allocator" class:
+//
+//    struct Allocator {
+//        void* ctx_;
+//        Allocator* allocator_;
+//        Deleter* deleter_;
+//    }
+//
+// Here, ctx_ stores the pointer to the enclosing struct.  Imagine the following
+// sequence of events:
+//
+//  1. Storage has some data and a Allocator associated with it.
+//     The context in the Allocator is an owning reference to "IOBuf", an
+//     enclosing struct for the data; the function to free an IOBuf
+//     is freeIOBuf(IOBuf*), NOT freeIOBuf(void*).
+//
+//  2. A resize occurs on storage.  We call Allocator to
 //     allocate some new memory to store the resized data.  To allocate
-//     this new memory, we must allocate a new IOBuf.  But how can
-//     we update the context to replace the old reference with
-//     the new one?  Disaster!
+//     this new memory, we must allocate a new IOBuf.  Now we have a
+//     problem: the classic API for an allocator is void*(void* ctx, size_t size).
+//     Where are we going to put the freshly allocated IOBuf?  We can't write it
+//     into the context directly, because that will clobber the old
+//     IOBuf (which we need to keep live until we copy the data out.)
 //
-// Previously, this case was worked around by directly supporting realloc()
-// in the deleter.  But this is bad for different reasons (it assumes the
-// allocator knows how to copy data; not a safe assumption, since allocators
-// don't know what data is actually contained within them.)
+// Instead, the allocator should *return* a new context for the deleter,
+// and this is what we have done below.  (We have further simplified matters
+// by saying that an allocator never has a context; we haven't seen any cases
+// where this is necessary, but it is a possible future extension).
+//
+// By the way, previously, this case was worked around by directly supporting
+// realloc() in the deleter.  But this is bad for different reasons (it assumes
+// the allocator knows how to copy data; not a safe assumption, since allocators
+// don't know the type of the data is actually contained within them; if the
+// data has a non-trivial copy constructor, there's no way to do a resize safely
+// in this case.)
 
 struct Deleter {
   virtual ~Deleter() {}
   virtual void deallocate(void* ctx, void* ptr) const = 0;
 };
 
-// WARNING: BoundDeleter may LEAK ctx_ if you never actually call it on
-// the pointer it's supposed to delete; e.g., ctx_'s lifetime may be the
-// same as the pointer, and invocation of deallocate() is necessary to
-// ensure that deallocation of ctx_ happens at the same time ptr is
-// deallocated.
+// WARNING: A common pattern when writing BoundDeleter is to set things
+// up so that the lifetime of ctx_ is the same as pointer.  In this case,
+// you will LEAK ctx_ if you never actually call it on the pointer it's
+// supposed to delete.  Use the deleter that comes with a pointer to
+// deallocate it; don't do it some out-of-band way!
 struct BoundDeleter final {
   at::Deleter* deleter_;
   void* ctx_;
