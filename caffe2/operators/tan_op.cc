@@ -1,7 +1,5 @@
 #include "caffe2/operators/tan_op.h"
 
-#include "caffe2/utils/eigen_utils.h"
-
 #include <algorithm>
 #include <functional>
 

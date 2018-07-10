@@ -2,7 +2,6 @@
 
 #include "caffe2/utils/math.h"
 
-#include <cstring>
 #include <limits>
 #include <numeric>
 #include <vector>

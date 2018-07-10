@@ -15,7 +15,6 @@
 #include "caffe2/operators/roi_align_rotated_op.h"
 #include "caffe2/operators/softmax_op.h"
 #include "caffe2/operators/utility_ops.h"
-#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 namespace {

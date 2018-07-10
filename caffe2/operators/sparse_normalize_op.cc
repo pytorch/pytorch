@@ -1,6 +1,5 @@
 #include "caffe2/operators/sparse_normalize_op.h"
 #include "caffe2/core/tensor.h"
-#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 

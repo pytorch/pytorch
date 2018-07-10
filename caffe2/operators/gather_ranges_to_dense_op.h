@@ -10,7 +10,6 @@
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math.h"
 
-#include <cstring>
 #include <map>
 #include <utility>
 

@@ -1,5 +1,4 @@
 #include "caffe2/operators/clip_op.h"
-#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
