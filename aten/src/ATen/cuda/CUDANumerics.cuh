@@ -33,7 +33,7 @@ struct ScalarConvert {
           return (Out) ::at::detail::halfbits2float(v.x);
         #else
           __half_raw v_raw(v);
-          return ::at::detail::halfbits2float(v_raw.x);
+          return (Out) ::at::detail::halfbits2float(v_raw.x);
         #endif // CUDA_VERSION < 9000
       #endif 
     }
@@ -58,9 +58,7 @@ struct ScalarConvert {
 
   template <>
   struct ScalarConvert<half, half> {
-    static __host__ __device__ half to(const half v) {
-      return v;
-    }
+    static __host__ __device__ half to(const half v) { return v; }
   };
 
 #endif // CUDA_HALF_TENSOR
