@@ -42,9 +42,7 @@ void PeepholeOptimize(Block * block) {
         }
       } break;
       case aten::type_as: {
-        if (n->inputs().size() != 2) {
-          continue;
-        }
+        JIT_ASSERT(n->inputs().size() == 2);
         Value* LHS(n->input(0));
         Value* RHS(n->input(1));
         // If LHS and RHS have the same static type, remove the type_as operator.
