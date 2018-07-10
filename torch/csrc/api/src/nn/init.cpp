@@ -36,36 +36,9 @@ struct Fan {
 };
 } // namespace
 
-Tensor uniform_(Tensor tensor, double low, double high) {
-  NoGradGuard guard;
-  return tensor.uniform_(low, high);
-}
-
-Tensor normal_(Tensor tensor, double mean, double std) {
-  NoGradGuard guard;
-  return tensor.normal_(mean, std);
-}
-
 Tensor constant_(Tensor tensor, Scalar value) {
   NoGradGuard guard;
   return tensor.fill_(value);
-}
-
-Tensor ones_(Tensor tensor) {
-  NoGradGuard guard;
-  return tensor.fill_(1);
-}
-
-Tensor zeros_(Tensor tensor) {
-  NoGradGuard guard;
-  return tensor.zero_();
-}
-
-Tensor eye_(Tensor tensor) {
-  NoGradGuard guard;
-  AT_CHECK(
-      tensor.ndimension() == 2, "Only tensors with 2 dimensions are supported");
-  return torch::eye_out(tensor, tensor.size(0), tensor.size(1));
 }
 
 Tensor dirac_(Tensor tensor) {
@@ -94,6 +67,23 @@ Tensor dirac_(Tensor tensor) {
   }
 
   return tensor;
+}
+
+Tensor eye_(Tensor tensor) {
+  NoGradGuard guard;
+  AT_CHECK(
+      tensor.ndimension() == 2, "Only tensors with 2 dimensions are supported");
+  return torch::eye_out(tensor, tensor.size(0), tensor.size(1));
+}
+
+Tensor normal_(Tensor tensor, double mean, double std) {
+  NoGradGuard guard;
+  return tensor.normal_(mean, std);
+}
+
+Tensor ones_(Tensor tensor) {
+  NoGradGuard guard;
+  return tensor.fill_(1);
 }
 
 Tensor orthogonal_(Tensor tensor, double gain) {
@@ -151,6 +141,11 @@ Tensor sparse_(Tensor tensor, double sparsity, double std) {
   return tensor;
 }
 
+Tensor uniform_(Tensor tensor, double low, double high) {
+  NoGradGuard guard;
+  return tensor.uniform_(low, high);
+}
+
 Tensor xavier_normal_(Tensor tensor, double gain) {
   NoGradGuard guard;
 
@@ -166,6 +161,11 @@ Tensor xavier_uniform_(Tensor tensor, double gain) {
   // Calculate uniform bounds from standard deviation with
   const auto a = std::sqrt(3.0) * std;
   return tensor.uniform_(-a, a);
+}
+
+Tensor zeros_(Tensor tensor) {
+  NoGradGuard guard;
+  return tensor.zero_();
 }
 
 } // namespace init
