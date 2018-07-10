@@ -8,7 +8,7 @@
 
 namespace torch { namespace jit {
 
-// Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
+// Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->scope_root());
   std::unordered_map<Value*, Value*> env;
@@ -180,9 +180,7 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
   for (auto node : old_block->nodes()) {
     // Needed so that symbolic calls create nodes with correct stages.
     auto stage_guard = ctx.block->owningGraph()->setStageTemporary(node->stage());
-    IR_IFM(node, CppOp)
-      cloneNode(node);
-    IR_ELSEIFM(PythonOp)
+    IR_IFM(node, PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
       callPySymbolicFunction(node);

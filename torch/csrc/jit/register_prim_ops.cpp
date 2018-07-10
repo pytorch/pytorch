@@ -1,6 +1,5 @@
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
