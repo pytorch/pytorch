@@ -22,6 +22,7 @@ class LarsOp final : public Operator<Context> {
         dX.size() == X.size(), "Gradient size doesn't match parameter size.");
     CAFFE_ENFORCE_GE(offset_, 0);
 
+    auto& wd = Input(2);
     auto* lr_rescale = Output(0);
     lr_rescale->Resize(vector<TIndex>{1});
 
@@ -29,6 +30,7 @@ class LarsOp final : public Operator<Context> {
         dX.size(),
         X.template data<T>(),
         dX.template data<T>(),
+        wd.template data<T>(),
         offset_,
         lr_rescale->template mutable_data<T>());
 
@@ -40,6 +42,7 @@ class LarsOp final : public Operator<Context> {
       TIndex N,
       const T* X_data,
       const T* dX_data,
+      const T* wd,
       T offset,
       T* lr_rescale_data);
 
