@@ -92,6 +92,15 @@ def batch_select(data, mask, dims, dim, index):
     dims = torch.cat((dims[:dim - 1], dims[dim:dims.size(0)]))
     return data, mask, dims
 
+
+# assume data, data1, data2 have same size
+@torch.jit.script
+def batch_where(data, mask, dims, data1, mask1, dims1, data2, mask2, dims2):
+    res_data = torch.where(data, data1, data2)
+    res_mask = torch.where(data, mask1, mask2)
+    res_dims = dims1 or dims2
+    return res_data, res_mask, res_dims
+
 torch.register_batch_operator("tanh", batch_tanh.graph)
 torch.register_batch_operator("sigmoid", batch_sigmoid.graph)
 torch.register_batch_operator("add", batch_add.graph)
@@ -99,3 +108,4 @@ torch.register_batch_operator("mul", batch_mul.graph)
 torch.register_batch_operator("matmul", batch_matmul.graph)
 torch.register_batch_operator("mm", batch_mm.graph)
 torch.register_batch_operator("select", batch_select.graph)
+torch.register_batch_operator("where", batch_where.graph)

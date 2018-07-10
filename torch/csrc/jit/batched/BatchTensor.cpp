@@ -78,7 +78,8 @@ std::vector<at::Tensor> BatchTensor::examples() {
 
 void initBatchTensorBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  py::class_<BatchTensor>(m, "BatchTensor")
+  auto jit = m.def_submodule("_jit");
+  py::class_<BatchTensor>(jit, "BatchTensor")
       .def(py::init<at::Tensor, at::Tensor, at::Tensor>())
       .def(py::init<at::Tensor, int64_t>())
       .def(py::init<std::vector<at::Tensor>, at::Tensor>())
