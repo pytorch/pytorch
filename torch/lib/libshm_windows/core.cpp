@@ -22,6 +22,8 @@ void libshm_context_free(libshm_context *ctx) {
 
 THManagedSharedDeleter THManagedSharedDeleter::singleton_;
 
-void THManagedSharedDeleter::deallocate(void* ctx, void* data) const {
-  return libshm_free(ctx, data);
+void THManagedSharedDeleter::deallocate(void* _ctx, void* data) const {
+  auto *ctx = (libshm_context*)_ctx;
+  ctx->th_deleter(data);
+  return libshm_context_free(ctx);
 }
