@@ -250,6 +250,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
     }
   }
   int64_t n_frames = 1 + (len - n_fft) / hop_length;
+  // time2col
   input = input.as_strided(
     {batch, n_frames, n_fft},
     {input.stride(0), hop_length * input.stride(1), input.stride(1)}
@@ -257,7 +258,8 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
   if (window_.defined()) {
     input = input.mul(window_);
   }
-  auto out = input.rfft(1, normalized, onesided);
+  // rfft and transpose to get (batch x fft_size x num_frames)
+  auto out = input.rfft(1, normalized, onesided).transpose_(1, 2);
   if (self.dim() == 1) {
     return out.squeeze_(0);
   } else {

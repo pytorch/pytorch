@@ -4463,7 +4463,7 @@ class TestTorch(TestCase):
                 x = x.view(1, -1)
             result = []
             for xi in x:
-                ri = librosa.stft(xi.cpu().numpy(), n_fft, hop_length, win_length, window, center=center).T
+                ri = librosa.stft(xi.cpu().numpy(), n_fft, hop_length, win_length, window, center=center)
                 result.append(torch.from_numpy(np.stack([ri.real, ri.imag], -1)))
             result = torch.stack(result, 0)
             if input_1d:
