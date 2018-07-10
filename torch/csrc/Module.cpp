@@ -274,12 +274,26 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
+void DLPack_Capsule_Destructor(PyObject* data) {
+  HANDLE_TH_ERRORS
+  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
+  if (dlMTensor) {
+    // the dlMTensor has not been consumed, call deleter ourselves
+    dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
+  } else {
+    // the dlMTensor has been consumed
+    // PyCapsule_GetPointer has set an error indicator
+    PyErr_Clear();
+  }
+  END_HANDLE_TH_ERRORS_RET()
+}
+
 PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(data), "data must be a Tensor");
   DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_UnpackData(data));
-  return PyCapsule_New(dlMTensor, "dltensor", NULL);
+  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
   END_HANDLE_TH_ERRORS
 }
 
