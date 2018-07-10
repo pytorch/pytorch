@@ -1,5 +1,4 @@
 #include "caffe2/operators/acos_op.h"
-#include "caffe2/utils/eigen_utils.h"
 
 #include <algorithm>
 #include <functional>

@@ -1,5 +1,4 @@
 #include "caffe2/operators/affine_channel_op.h"
-#include "caffe2/utils/eigen_utils.h"
 
 #include <vector>
 

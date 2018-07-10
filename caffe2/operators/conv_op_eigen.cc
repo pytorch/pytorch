@@ -1,5 +1,4 @@
 #include "Eigen/Core"
-#include "caffe2/utils/eigen_utils.h"
 
 #if EIGEN_VERSION_AT_LEAST(3, 3, 0)
 

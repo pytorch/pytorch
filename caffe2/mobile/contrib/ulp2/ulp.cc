@@ -1,8 +1,5 @@
 #include "ulp.h"
-
-#include <cstring>
 #include "caffe2/operators/conv_pool_op_base.h"
-#include "caffe2/utils/eigen_utils.h"
 #include "ulp_neon.h"
 
 namespace caffe2 {
