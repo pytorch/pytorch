@@ -3372,8 +3372,8 @@ def func(t):
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
     def test_reassign_module_lhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'self\' because it has type '
-                                                  'value. Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\' because it has type value and self is'
+                                    ' not a first-class value.  Only reassignments to first-class values are allowed'):
             class ReassignSelfLHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
@@ -3384,8 +3384,8 @@ def func(t):
             ReassignSelfLHS()
 
     def test_reassign_module_rhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'x\' to a value of type module.'
-                                                  ' Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'x\' to a value of type module because x is not a'
+                                    ' first-class value.  Only reassignments to first-class values are allowed'):
             class ReassignSelfRHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):

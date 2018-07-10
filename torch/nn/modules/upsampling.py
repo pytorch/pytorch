@@ -48,9 +48,12 @@ class Upsample(Module):
         0.3.1. Since then, the default behavior is ``align_corners = False``.
         See below for concrete examples on how this affects the outputs.
 
+    .. warning::
+        This class is deprecated in favor of :func:`~nn.functional.interpolate`.
+
     Examples::
 
-        >>> input = torch.arange(1, 5).view(1, 1, 2, 2)
+        >>> input = torch.arange(1, 5).view(1, 1, 2, 2).float()
         >>> input
         tensor([[[[ 1.,  2.],
                   [ 3.,  4.]]]])
@@ -116,7 +119,8 @@ class Upsample(Module):
         self.align_corners = align_corners
 
     def forward(self, input):
-        return F.upsample(input, self.size, self.scale_factor, self.mode, self.align_corners)
+        warnings.warn("nn.Upsampling is deprecated. Use nn.functional.interpolate instead.")
+        return F.interpolate(input, self.size, self.scale_factor, self.mode, self.align_corners)
 
     def extra_repr(self):
         if self.scale_factor is not None:
@@ -141,7 +145,7 @@ class UpsamplingNearest2d(Upsample):
         scale_factor (int, optional): the multiplier for the image height or width
 
     .. warning::
-        This class is deprecated in favor of :class:`~nn.Upsample`.
+        This class is deprecated in favor of :func:`~nn.functional.interpolate`.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -170,7 +174,7 @@ class UpsamplingNearest2d(Upsample):
         super(UpsamplingNearest2d, self).__init__(size, scale_factor, mode='nearest')
 
     def forward(self, input):
-        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.Upsample instead.")
+        warnings.warn("nn.UpsamplingNearest2d is deprecated. Use nn.functional.interpolate instead.")
         return super(UpsamplingNearest2d, self).forward(input)
 
 
@@ -188,8 +192,8 @@ class UpsamplingBilinear2d(Upsample):
         scale_factor (int, optional): the multiplier for the image height or width
 
     .. warning::
-        This class is deprecated in favor of :class:`~nn.Upsample`. It is
-        equivalent to ``nn.Upsample(..., mode='bilinear', align_corners=True)``.
+        This class is deprecated in favor of :func:`~nn.functional.interpolate`. It is
+        equivalent to ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
     Shape:
         - Input: :math:`(N, C, H_{in}, W_{in})`
@@ -218,5 +222,5 @@ class UpsamplingBilinear2d(Upsample):
         super(UpsamplingBilinear2d, self).__init__(size, scale_factor, mode='bilinear', align_corners=True)
 
     def forward(self, input):
-        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.Upsample instead.")
+        warnings.warn("nn.UpsamplingBilinear2d is deprecated. Use nn.functional.interpolate instead.")
         return super(UpsamplingBilinear2d, self).forward(input)
