@@ -21,49 +21,45 @@ struct ScalarConvert {
   static __host__ __device__ Out to(const In v) { return (Out) v; }
 };
 
-#ifdef CUDA_HALF_TENSOR
-
-  template <typename Out>
-  struct ScalarConvert<half, Out> {
-    static __host__ __device__ Out to(const half v) {
-      #ifdef __CUDA_ARCH__
-        return (Out) __half2float(v);
-      #else // Host-side conversion
-        #if CUDA_VERSION < 9000
-          return (Out) ::at::detail::halfbits2float(v.x);
-        #else
-          __half_raw v_raw(v);
-          return (Out) ::at::detail::halfbits2float(v_raw.x);
-        #endif // CUDA_VERSION < 9000
-      #endif 
-    }
-  };
-
-  template <typename In>
-  struct ScalarConvert<In, half> {
-    static __host__ __device__ half to(const In v) {
-      #ifdef __CUDA_ARCH__
-          return __float2half((float) v);
+template <typename Out>
+struct ScalarConvert<half, Out> {
+  static __host__ __device__ Out to(const half v) {
+    #ifdef __CUDA_ARCH__
+      return (Out) __half2float(v);
+    #else // Host-side conversion
+      #if CUDA_VERSION < 9000
+        return (Out) ::at::detail::halfbits2float(v.x);
       #else
-        #if CUDA_VERSION < 9000
-          half h;
-          h.x = ::at::detail::float2halfbits((float) v);
-          return h;
-        #else 
-          __half_raw h_raw;
-          h_raw.x = ::at::detail::float2halfbits((float) v);
-          return half(h_raw);
-        #endif // CUDA_VERSION < 9000
-      #endif
-    }
-  };
+        __half_raw v_raw(v);
+        return (Out) ::at::detail::halfbits2float(v_raw.x);
+      #endif // CUDA_VERSION < 9000
+    #endif 
+  }
+};
 
-  template <>
-  struct ScalarConvert<half, half> {
-    static __host__ __device__ half to(const half v) { return v; }
-  };
+template <typename In>
+struct ScalarConvert<In, half> {
+  static __host__ __device__ half to(const In v) {
+    #ifdef __CUDA_ARCH__
+        return __float2half((float) v);
+    #else
+      #if CUDA_VERSION < 9000
+        half h;
+        h.x = ::at::detail::float2halfbits((float) v);
+        return h;
+      #else 
+        __half_raw h_raw;
+        h_raw.x = ::at::detail::float2halfbits((float) v);
+        return half(h_raw);
+      #endif // CUDA_VERSION < 9000
+    #endif
+  }
+};
 
-#endif // CUDA_HALF_TENSOR
+template <>
+struct ScalarConvert<half, half> {
+  static __host__ __device__ half to(const half v) { return v; }
+};
 
 template <typename T, typename U>
 __host__ __device__ T scalar_cast(U u) { return ScalarConvert<U, T>::to(u); }
@@ -205,8 +201,6 @@ struct CUDANumerics<int64_t> {
   static inline __host__ __device__  bool isnan(int64_t a) { return false; }
   static inline __host__ __device__  bool isinf(int64_t a) { return false; }
 };
-
-#ifdef CUDA_HALF_TENSOR
 
 template <>
 struct CUDANumerics<half> {
@@ -701,7 +695,6 @@ static inline __host__ __device__ half lgamma(half a) {
   }
 
 };
-#endif
 
 template <>
 struct CUDANumerics<float> {
