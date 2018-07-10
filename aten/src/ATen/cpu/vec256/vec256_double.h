@@ -13,9 +13,10 @@ namespace {
 #if defined(__AVX__) && !defined(_MSC_VER)
 
 template <> class Vec256<double> {
+private:
+  __m256d values;
 public:
   static constexpr int size = 4;
-  __m256d values;
   Vec256() {}
   Vec256(__m256d v) : values(v) {}
   Vec256(double val) {
@@ -61,6 +62,8 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(double));
     }
   }
+  const double& operator[](int idx) const  = delete;
+  double& operator[](int idx) = delete;
   Vec256<double> map(double (*f)(double)) const {
     __at_align32__ double tmp[4];
     store(tmp);
