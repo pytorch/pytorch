@@ -1,5 +1,5 @@
 #include "THCCachingHostAllocator.h"
-#include "THCStream.hpp"
+#include "THCStream.h"
 
 #include <cuda_runtime_api.h>
 #include <deque>
@@ -9,7 +9,6 @@
 #include <stdint.h>
 #include <unordered_map>
 #include <utility>
-
 
 namespace {
 
@@ -228,14 +227,14 @@ struct HostAllocator
     for (auto it = streams.begin(); it != streams.end(); ++it) {
       auto& stream = *it;
 
-      err = cudaSetDevice(stream->device);
+      err = cudaSetDevice(THCStream_device(stream.get()));
       if (err != cudaSuccess) break;
 
       cudaEvent_t event;
       err = cudaEventCreateWithFlags(&event, cudaEventDisableTiming);
       if (err != cudaSuccess) break;
 
-      err = cudaEventRecord(event, stream->stream);
+      err = cudaEventRecord(event, THCStream_stream(stream.get()));
       if (err != cudaSuccess) break;
 
       block.event_count++;

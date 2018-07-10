@@ -1,6 +1,26 @@
+# UBSAN triggers when compiling protobuf, so we need to disable it.
+set(UBSAN_FLAG "-fsanitize=undefined")
+
+macro(disable_ubsan)
+  if (CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
+    set(CAFFE2_UBSAN_ENABLED ON)
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  endif()
+endmacro()
+
+macro(enable_ubsan)
+  if (CAFFE2_UBSAN_ENABLED)
+    set(CMAKE_C_FLAGS "${UBSAN_FLAG} ${CMAKE_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${UBSAN_FLAG} ${CMAKE_CXX_FLAGS}")
+  endif()
+endmacro()
+
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
+  enable_ubsan()
 endif()
 
 # ---[ Threads
@@ -732,6 +752,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -752,8 +773,6 @@ endif()
 if (BUILD_ATEN)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  add_definitions(-DTH_INDEX_BASE=0)
 
   # RPATH stuff
   # see https://cmake.org/Wiki/CMake_RPATH_handling
@@ -788,26 +807,28 @@ if (BUILD_ATEN)
 
   #Check if certain std functions are supported. Sometimes
   #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  CHECK_CXX_SOURCE_COMPILES("
-  #include <cmath>
-  #include <string>
+  if (NOT ANDROID)
+    CHECK_CXX_SOURCE_COMPILES("
+    #include <cmath>
+    #include <string>
 
-  int main() {
-    int a = std::isinf(3.0);
-    int b = std::isnan(0.0);
-    std::string s = std::to_string(1);
+    int main() {
+      int a = std::isinf(3.0);
+      int b = std::isnan(0.0);
+      std::string s = std::to_string(1);
 
-    return 0;
-    }" SUPPORT_GLIBCXX_USE_C99)
+      return 0;
+      }" SUPPORT_GLIBCXX_USE_C99)
 
-  if (NOT SUPPORT_GLIBCXX_USE_C99)
-    message(FATAL_ERROR
-            "The C++ compiler does not support required functions. "
-            "This is very likely due to a known bug in GCC 5 "
-            "(and maybe other versions) on Ubuntu 17.10 and newer. "
-            "For more information, see: "
-            "https://github.com/pytorch/pytorch/issues/5229"
-           )
+    if (NOT SUPPORT_GLIBCXX_USE_C99)
+      message(FATAL_ERROR
+              "The C++ compiler does not support required functions. "
+              "This is very likely due to a known bug in GCC 5 "
+              "(and maybe other versions) on Ubuntu 17.10 and newer. "
+              "For more information, see: "
+              "https://github.com/pytorch/pytorch/issues/5229"
+             )
+    endif()
   endif()
 
   # Top-level build config

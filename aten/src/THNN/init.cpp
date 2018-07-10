@@ -167,11 +167,6 @@
 #include "generic/Threshold.c"
 #include "THGenerateFloatTypes.h"
 
-// this file is used in TemporalUpsamplingLinear, SpatialUpsamplingBilinear, and
-// VolumetricUpsamplingTrilinear, and thus needs to be included before those.
-#include "generic/linear_upsampling.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/TemporalConvolution.c"
 #include "THGenerateFloatTypes.h"
 

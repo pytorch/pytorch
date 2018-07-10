@@ -343,7 +343,7 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
  * be computed by:
  *
  *    overall_M2 = M2x + nx * (mean(x) - overall_mean)^2
- *               + M2y + ny * (mean(x) - overall_mean)^2
+ *               + M2y + ny * (mean(y) - overall_mean)^2
  *
  * This implementation assumes that each block has been launched with 16 x 32 threads.
  */

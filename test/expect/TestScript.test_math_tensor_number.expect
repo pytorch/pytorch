@@ -1,0 +1,7 @@
+graph(%x : Dynamic) {
+  %1 : int = prim::Constant[value={7}]()
+  %2 : Dynamic = prim::NumToTensor(%1)
+  %3 : Dynamic = aten::type_as(%2, %x)
+  %4 : Dynamic = aten::add[alpha={1}](%x, %3)
+  return (%4);
+}

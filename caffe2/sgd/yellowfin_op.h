@@ -111,19 +111,19 @@ class YellowFinOp final : public Operator<Context> {
   bool RunOnDevice() override {
 // Iter live on the CPU
 
-#define CAFFE2_YF_READ_INPUT(INPUT_NAME, VAR_NAME)  \
-  const auto VAR_NAME##_tensor = Input(INPUT_NAME); \
+#define CAFFE2_YF_READ_INPUT(INPUT_NAME, VAR_NAME)   \
+  const auto& VAR_NAME##_tensor = Input(INPUT_NAME); \
   VAR_NAME##_ = VAR_NAME##_tensor.template data<T>();
 
-    CAFFE2_YF_READ_INPUT(PARAM, param)
-    CAFFE2_YF_READ_INPUT(MOMENT, moment)
-    CAFFE2_YF_READ_INPUT(LR_AVG, lr_avg)
-    CAFFE2_YF_READ_INPUT(MU_AVG, mu_avg)
-    CAFFE2_YF_READ_INPUT(CURV_WIN, curv_win)
-    CAFFE2_YF_READ_INPUT(G_AVG, g_avg)
-    CAFFE2_YF_READ_INPUT(G2_AVG, g2_avg)
-    CAFFE2_YF_READ_INPUT(SCALARS_MEMORY, scalars_memory)
-    CAFFE2_YF_READ_INPUT(GRAD, grad)
+CAFFE2_YF_READ_INPUT(PARAM, param)
+CAFFE2_YF_READ_INPUT(MOMENT, moment)
+CAFFE2_YF_READ_INPUT(LR_AVG, lr_avg)
+CAFFE2_YF_READ_INPUT(MU_AVG, mu_avg)
+CAFFE2_YF_READ_INPUT(CURV_WIN, curv_win)
+CAFFE2_YF_READ_INPUT(G_AVG, g_avg)
+CAFFE2_YF_READ_INPUT(G2_AVG, g2_avg)
+CAFFE2_YF_READ_INPUT(SCALARS_MEMORY, scalars_memory)
+CAFFE2_YF_READ_INPUT(GRAD, grad)
 #undef CAFFE2_YF_READ_OUTPUT
 
     CAFFE_ENFORCE(OperatorBase::InputIsType<TensorCPU>(ITER));

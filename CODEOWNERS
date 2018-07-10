@@ -3,7 +3,7 @@
 
 /aten/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /torch/ @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
-/docs/source @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
+/docs/source @apaszke @soumith @colesbury @gchanan @zdevito @ezyang @ssnl @zou3519
 /test @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /tools @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
 /README.md @apaszke @soumith @colesbury @gchanan @zdevito @ezyang
@@ -20,5 +20,4 @@
 /torch/csrc/distributed/ @apaszke @pietern @teng-li
 /torch/distributed/ @apaszke @pietern @teng-li
 /test/test_c10d.py @apaszke @pietern @teng-li
-/third_party/ @orionr
 /torch/utils/cpp_extension.py @goldsborough @fmassa @apaszke @soumith @ezyang

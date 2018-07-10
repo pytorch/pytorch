@@ -5,7 +5,7 @@ if [[ "$BUILD_ENVIRONMENT" == "pytorch-linux-xenial-py3-clang5-asan" ]]; then
 fi
 
 # TODO: move this to Docker
-# TODO: add both NCCL and MPI in CI test by fixing these test first 
+# TODO: add both NCCL and MPI in CI test by fixing these test first
 # sudo apt-get update
 # sudo apt-get install libnccl-dev libnccl2
 # sudo apt-get install openmpi-bin libopenmpi-dev
@@ -22,6 +22,9 @@ python --version
 
 echo "GCC version:"
 gcc --version
+
+echo "CMake version:"
+cmake --version
 
 # TODO: Don't run this...
 pip install -r requirements.txt || true
@@ -49,13 +52,17 @@ if ! which conda; then
 fi
 
 # sccache will fail for CUDA builds if all cores are used for compiling
-# gcc 7.2 with sccache seems to have intermittent OOM issue if all cores are used
-if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7.2* ]]) && which sccache > /dev/null; then
+# gcc 7 with sccache seems to have intermittent OOM issue if all cores are used
+if ([[ "$BUILD_ENVIRONMENT" == *cuda* ]] || [[ "$BUILD_ENVIRONMENT" == *gcc7* ]]) && which sccache > /dev/null; then
   export MAX_JOBS=`expr $(nproc) - 1`
 fi
 
 # Target only our CI GPU machine's CUDA arch to speed up the build
 export TORCH_CUDA_ARCH_LIST=5.2
+
+if [[ "$BUILD_ENVIRONMENT" == *trusty-py3.6-gcc5.4* ]]; then
+  export DEBUG=1
+fi
 
 WERROR=1 python setup.py install
 

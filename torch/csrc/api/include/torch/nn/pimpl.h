@@ -1,6 +1,7 @@
 #pragma once
 
 #include <torch/csrc/utils/variadic.h>
+#include <torch/tensor.h>
 
 #include <memory>
 #include <type_traits>
@@ -13,6 +14,9 @@ namespace detail {
 /// `ModuleHolder` over some unknown type `ModuleType`. With this, you can do
 /// enable_if_t<is_base_of<ModuleHolderIndicator, T>::value>::type.
 struct ModuleHolderIndicator {};
+
+template <typename T>
+using is_module_holder = std::is_base_of<ModuleHolderIndicator, decay_t<T>>;
 
 template <typename T>
 using disable_if_module_holder_t =
@@ -50,7 +54,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
   /// Constructs the `ModuleHolder` from a pointer to the contained type.
   /// Example: `Linear(std::make_shared<LinearImpl>(...))`.
-  explicit ModuleHolder(std::shared_ptr<Contained> module)
+  /* implicit */ ModuleHolder(std::shared_ptr<Contained> module)
       : impl_(std::move(module)) {}
 
   /// Returns true if the `ModuleHolder` contains a module, or false if it is
@@ -71,10 +75,28 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
     return impl_.get();
   }
 
-  /// Returns the underlying module.
-  const std::shared_ptr<Contained>& get() const {
+  /// Forwards to the call operator of the contained module.
+  template <typename... Args>
+  Tensor operator()(Args&&... args) {
+    return (*impl_)(std::forward<Args>(args)...);
+  }
+
+  /// Returns a shared pointer to the underlying module.
+  const std::shared_ptr<Contained>& ptr() const {
     AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
     return impl_;
+  }
+
+  /// Returns a pointer to the underlying module.
+  Contained* get() {
+    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
+    return impl_.get();
+  }
+
+  /// Returns a pointer to the underlying module.
+  const Contained* get() const {
+    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
+    return impl_.get();
   }
 
   /// Returns true if the `ModuleHolder` does not contain a module.
@@ -109,11 +131,6 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   class Name : public torch::nn::ModuleHolder<Impl> {  \
    public:                                             \
     using torch::nn::ModuleHolder<Impl>::ModuleHolder; \
-    using torch::nn::ModuleHolder<Impl>::operator->;   \
-    using torch::nn::ModuleHolder<Impl>::get;          \
-                                                       \
-   protected:                                          \
-    using torch::nn::ModuleHolder<Impl>::impl_;        \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `Impl` name to `<Name>Impl`.

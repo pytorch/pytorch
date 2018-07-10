@@ -5,10 +5,12 @@
 #include <ATen/Error.h>
 #include <ATen/RegisterCUDA.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/native/cuda/CuFFTPlanCache.h>
 #include <ATen/cuda/PinnedMemoryAllocator.h>
 #include <ATen/detail/CUDAHooksInterface.h>
 
 #include "THC/THC.h"
+#include <THC/THCGeneral.hpp>
 
 #if AT_CUDNN_ENABLED()
 #include "ATen/cudnn/cudnn-wrapper.h"
@@ -47,12 +49,30 @@ void unchecked_set_device(int32_t device) {
   (void)return_code;
 }
 
+void cuda_stream_create_with_priority(
+  cudaStream_t* pStream
+, int32_t flags
+, int32_t priority) {
+#ifndef __HIP_PLATFORM_HCC__
+  check_status(cudaStreamCreateWithPriority(pStream, flags, priority));
+#else
+  check_status(cudaStreamCreateWithFlags(pStream, flags));
+#endif
+}
+
+void cuda_stream_destroy(cudaStream_t stream) {
+  check_status(cudaStreamDestroy(stream));
+}
+
 struct DynamicCUDAInterfaceSetter {
   DynamicCUDAInterfaceSetter() {
     at::detail::DynamicCUDAInterface::set_device = set_device;
     at::detail::DynamicCUDAInterface::get_device = get_device;
     at::detail::DynamicCUDAInterface::unchecked_set_device =
         unchecked_set_device;
+    at::detail::DynamicCUDAInterface::cuda_stream_create_with_priority = 
+      cuda_stream_create_with_priority;
+    at::detail::DynamicCUDAInterface::cuda_stream_destroy = cuda_stream_destroy;
   }
 };
 
@@ -95,14 +115,11 @@ bool CUDAHooks::hasCuDNN() const {
   return AT_CUDNN_ENABLED();
 }
 
-cudaStream_t CUDAHooks::getCurrentCUDAStream(THCState* thc_state) const {
-  return THCState_getCurrentStream(thc_state);
+#ifndef __HIP_PLATFORM_HCC__
+cusparseHandle_t CUDAHooks::getCurrentCUDASparseHandle(THCState* thc_state) const {
+  return THCState_getCurrentSparseHandle(thc_state);
 }
-cudaStream_t CUDAHooks::getCurrentCUDAStreamOnDevice(
-    THCState* thc_state,
-    int64_t device) const {
-  return THCState_getCurrentStreamOnDevice(thc_state, device);
-}
+#endif
 struct cudaDeviceProp* CUDAHooks::getCurrentDeviceProperties(
     THCState* thc_state) const {
   return THCState_getCurrentDeviceProperties(thc_state);
@@ -122,8 +139,8 @@ int64_t CUDAHooks::current_device() const {
   return -1;
 }
 
-std::unique_ptr<Allocator> CUDAHooks::newPinnedMemoryAllocator() const {
-  return std::unique_ptr<Allocator>(new PinnedMemoryAllocator());
+Allocator* CUDAHooks::getPinnedMemoryAllocator() const {
+  return at::cuda::getPinnedMemoryAllocator();
 }
 
 void CUDAHooks::registerCUDATypes(Context* context) const {
@@ -162,6 +179,38 @@ double CUDAHooks::batchnormMinEpsilonCuDNN() const {
 #else
   AT_ERROR(
       "Cannot query CUDNN_BN_MIN_EPSILON if ATen_cuda is not built with CuDNN");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheMaxSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_max_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTSetPlanCacheMaxSize(int64_t max_size) const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_set_plan_cache_max_size_impl(max_size);
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+int64_t CUDAHooks::cuFFTGetPlanCacheSize() const {
+#ifndef __HIP_PLATFORM_HCC__
+  return at::native::detail::cufft_get_plan_cache_size_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
+#endif
+}
+
+void CUDAHooks::cuFFTClearPlanCache() const {
+#ifndef __HIP_PLATFORM_HCC__
+  at::native::detail::cufft_clear_plan_cache_impl();
+#else
+  AT_ERROR("cuFFT with HIP is not supported");
 #endif
 }
 

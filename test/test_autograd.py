@@ -1284,6 +1284,13 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, grad[1])
         self.assertEqual(z.grad.data, grad[2])
 
+    def test_unbind(self):
+        stacked = torch.randn(3, 10, 10, requires_grad=True)
+        x, y, z = stacked.unbind()
+        grad = torch.randn(3, 10, 10)
+        torch.autograd.backward([x, y, z], grad.unbind())
+        self.assertEqual(stacked.grad.data, grad)
+
     def test_put(self):
         root = torch.randn(4, 5, requires_grad=True)
         values = torch.randn(6, requires_grad=True)
@@ -2030,6 +2037,39 @@ class TestAutograd(TestCase):
         run_test((10,), 1)
         run_test((10,), 1.5)
 
+    def test_pow_zero_tensor_gradient(self):
+        def run_test(input_size, exponent):
+            input = torch.zeros(*input_size, requires_grad=True)
+            input.pow(exponent).sum().backward()
+            self.assertEqual(input.grad.data.abs().sum(), 0)
+
+        run_test((10,), torch.zeros(10))
+        run_test((10, 10), torch.zeros(10, 10))
+        run_test((10,), 0)
+
+    def test_pinverse(self):
+        # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
+        # 1. Pseudo-inverses are not generally continuous, which means that they are not differentiable
+        # 2. Derivatives for pseudo-inverses exist typically for constant rank (Golub et al, 1973)
+        # 3. This method creates two orthogonal matrices, and a constructs a test case with large
+        #    singular values (given by x to the function).
+        # 4. This will ensure that small perturbations don't affect the rank of matrix, in which case
+        #    a derivative exists.
+        # 5. This test exists since pinverse is implemented using SVD, and is hence a backpropable method
+        m, n = 5, 10
+        U = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+        V = torch.randn(n, m).qr()[0].t()  # Orthogonal with dimensions m x n
+
+        def func(x):
+            S = torch.cat([x, torch.zeros(n - m)], 0)
+            M = U.mm(torch.diag(S)).mm(V.t())
+            return M.pinverse()
+
+        gradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(1).requires_grad_()])
+        gradgradcheck(func, [torch.rand(m).add_(10).requires_grad_()])
+
     def test_profiler(self):
         x = torch.randn(10, 10)
 
@@ -2053,13 +2093,42 @@ class TestAutograd(TestCase):
             self.assertTrue(hasattr(x, key))
 
     def test_as_strided(self):
-        x = Variable(torch.arange(0., 25).view(5, 5), requires_grad=True)
 
-        def as_strided(x):
-            return x.as_strided([3, 3], [6, 2], 2)
+        def test(x, repro_fn, *args):
+            def closure(x):
+                if repro_fn is not None:
+                    x = repro_fn(x)
+                return x.as_strided(*args)
 
-        gradcheck(as_strided, [x], raise_exception=True)
-        gradgradcheck(as_strided, [x], [torch.randn(3, 3)])
+            x = x.to(torch.double).detach().requires_grad_()
+            gradcheck(closure, [x])
+            gradgradcheck(closure, [x])
+
+        # test
+        test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
+
+        # test crazy stride at dim with size 1 case
+        test(torch.randn(10), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
+
+        # test expand case
+        test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
+        test(torch.randn(5), None, [3, 3, 3], [0, 0, 0], 4)
+        test(torch.randn(5), lambda x: x.expand(5, 5), [5, 5], [0, 1], 0)
+
+        # test non-expand overlapping case
+        test(torch.randn(35), None, [6, 6], [5, 1], 2)
+        test(torch.randn(15), None, [3, 2], [3, 6], 2)
+
+        # test transpose case
+        test(torch.randn(3, 4), None, [4, 3], [1, 4])
+
+        # test "getting things outside the input" case
+        x = torch.randn(6, 2)
+        test(x[3:], None, [3, 2], [2, 1], 0)  # should be all zeros
+        self.assertEqual(x[3:].as_strided([3, 2], [2, 1], 0), x[:3])
+
+        # test select on expanded input case
+        test(torch.randn(2, 3), lambda x: x.expand(10, 2, 3), [2, 3], [3, 1], 0)
 
     def _test_where_functional(self, t):
         x = Variable(t(torch.randn(5, 5)), requires_grad=True)
@@ -2334,15 +2403,19 @@ class TestAutograd(TestCase):
 
         inp = torch.rand(size, requires_grad=True)
         out = MyFunc.apply(inp, inp, True)
-        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
-            with detect_anomaly():
-                out.backward()
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 0th output."):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    out.backward()
+            self.assertIn('No forward pass information', str(w[0].message))
 
         inp = torch.rand(size, requires_grad=True)
-        out = MyFunc.apply(inp, inp, False)
-        with self.assertRaisesRegexp(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
-            with detect_anomaly():
-                out.backward()
+        with self.assertRaisesRegex(RuntimeError, "Function 'MyFuncBackward' returned nan values in its 1th output."):
+            with warnings.catch_warnings(record=True) as w:
+                with detect_anomaly():
+                    out = MyFunc.apply(inp, inp, False)
+                    out.backward()
+            self.assertIn('MyFunc.apply', str(w[0].message))
 
 
 def index_variable(shape, max_indices):
@@ -3002,6 +3075,7 @@ method_tests = [
     ('permute', (1, 2, 3, 4), (0, -2, -1, 1), 'neg_dim'),
     ('permute', (), (dont_convert(()),), 'scalar'),
     ('select', (S, S, S), (1, 2), 'dim', [0]),
+    ('select', (S, S, S), (1, -1), 'wrap_dim', [0]),
     ('select', (S,), (0, 2), '1d'),
     ('narrow', (S, S, S), (1, 2, 2), 'dim', [0]),
     ('narrow', (S, S, S), (1, 0, 0), 'empty_dim', [0], [skipIfNoZeroSize]),

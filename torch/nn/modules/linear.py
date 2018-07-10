@@ -7,7 +7,7 @@ from .module import Module
 
 
 class Linear(Module):
-    r"""Applies a linear transformation to the incoming data: :math:`y = Ax + b`
+    r"""Applies a linear transformation to the incoming data: :math:`y = xA^T + b`
 
     Args:
         in_features: size of each input sample

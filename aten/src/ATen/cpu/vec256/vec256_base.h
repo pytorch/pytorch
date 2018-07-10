@@ -4,6 +4,8 @@
 #include <functional>
 #include <cmath>
 
+#include "ATen/Utils.h"
+
 #if defined(__GNUC__)
 #define __at_align32__ __attribute__((aligned(32)))
 #elif defined(_WIN32)
@@ -123,6 +125,9 @@ struct Vec256 {
   Vec256<T> floor() const {
     return map(std::floor);
   }
+  Vec256<T> neg() const {
+    return map([](T x) { return -x; });
+  }
   Vec256<T> round() const {
     return map(std::round);
   }
@@ -143,6 +148,9 @@ struct Vec256 {
   }
   Vec256<T> sqrt() const {
     return map(std::sqrt);
+  }
+  Vec256<T> reciprocal() const {
+    return map([](T x) { return (T)(1) / x; });
   }
   Vec256<T> rsqrt() const {
     return map([](T x) { return 1 / std::sqrt(x); });
@@ -173,7 +181,7 @@ template <class T> Vec256<T> operator*(const Vec256<T> &a, const Vec256<T> &b) {
   return c;
 }
 
-template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) {
+template <class T> Vec256<T> operator/(const Vec256<T> &a, const Vec256<T> &b) __ubsan_ignore_float_divide_by_zero__ {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c.values[i] = a.values[i] / b.values[i];

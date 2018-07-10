@@ -4,6 +4,16 @@
 namespace caffe2 {
 
 template <>
+bool SparseNormalizeOp<float, CPUContext>::RunOnDevice() {
+  CAFFE_ENFORCE_EQ(
+     Input(PARAM).size_from_dim(1),
+     Input(GRAD).size_from_dim(Input(INDICES).ndim()));
+
+  return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
+     this, Input(INDICES));
+}
+
+template <>
 template <typename SIndex>
 bool SparseNormalizeOp<float, CPUContext>::DoRunWithType() {
   const auto* indices = Input(INDICES).template data<SIndex>();

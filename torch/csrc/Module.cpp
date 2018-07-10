@@ -93,7 +93,7 @@ static PyObject * THPModule_initExtension(PyObject *_unused, PyObject *shm_manag
   }
   torch::utils::initializeLayouts();
   torch::utils::initializeDtypes();
-  torch::tensor::initialize_python_bindings();
+  torch::tensors::initialize_python_bindings();
   std::string path = THPUtils_unpackString(shm_manager_path);
   libshm_init(path.c_str());
 
@@ -126,8 +126,16 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
   return PyLong_FromLong(x[0]);
 }
 
+static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
+  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_ubsan expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  int32_t x = static_cast<int>(THPUtils_unpackLong(arg));
+  double y = 1.0 / x;
+  return PyLong_FromLong((int)y);
+}
+
 static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
-  THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
+  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_aten_asan expects an int, "
           "but got %s", THPUtils_typename(arg));
   return PyLong_FromLong(at::_crash_if_asan(static_cast<int>(THPUtils_unpackLong(arg))));
 }
@@ -149,7 +157,7 @@ static PyObject * THPModule_setNumThreads(PyObject *module, PyObject *arg)
 PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 {
   HANDLE_TH_ERRORS
-  torch::tensor::py_set_default_tensor_type(type);
+  torch::tensors::py_set_default_tensor_type(type);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -157,7 +165,7 @@ PyObject * THPModule_setDefaultTensorType(PyObject *_unused, PyObject *type)
 PyObject * THPModule_setDefaultDtype(PyObject *_unused, PyObject *dtype)
 {
   HANDLE_TH_ERRORS
-  torch::tensor::py_set_default_dtype(dtype);
+  torch::tensors::py_set_default_dtype(dtype);
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
@@ -274,12 +282,26 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
+void DLPack_Capsule_Destructor(PyObject* data) {
+  HANDLE_TH_ERRORS
+  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
+  if (dlMTensor) {
+    // the dlMTensor has not been consumed, call deleter ourselves
+    dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
+  } else {
+    // the dlMTensor has been consumed
+    // PyCapsule_GetPointer has set an error indicator
+    PyErr_Clear();
+  }
+  END_HANDLE_TH_ERRORS_RET()
+}
+
 PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(data), "data must be a Tensor");
   DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_UnpackData(data));
-  return PyCapsule_New(dlMTensor, "dltensor", NULL);
+  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
   END_HANDLE_TH_ERRORS
 }
 
@@ -364,7 +386,7 @@ PyObject *THPModule_setFlushDenormal(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  auto& type = torch::tensor::get_default_tensor_type();
+  auto& type = torch::tensors::get_default_tensor_type();
   auto dtype = (PyObject*)torch::getDtype(type.scalarType());
   Py_INCREF(dtype);
   return dtype;
@@ -373,7 +395,7 @@ PyObject *THPModule_getDefaultDtype(PyObject *_unused, PyObject *arg) {
 
 PyObject *THPModule_isDefaultTypeCuda(PyObject *_unused, PyObject *arg) {
   HANDLE_TH_ERRORS
-  if (torch::tensor::get_default_tensor_type().is_cuda()) {
+  if (torch::tensors::get_default_tensor_type().is_cuda()) {
     Py_RETURN_TRUE;
   }
   Py_RETURN_FALSE;
@@ -401,6 +423,7 @@ static PyMethodDef TorchMethods[] = {
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_crash_if_csrc_asan", (PyCFunction)THPModule_crashIfCsrcASAN, METH_O, NULL},
+  {"_crash_if_csrc_ubsan", (PyCFunction)THPModule_crashIfCsrcUBSAN, METH_O, NULL},
   {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},
@@ -483,6 +506,14 @@ PyMethodDef* THCUDNN_methods() {
   return _THCUDNN_methods;
 }
 #endif
+
+// ATen warning handler for Python
+static void warning_handler(const at::SourceLocation& source_location, const char* msg) {
+  AutoGIL gil;
+  if (PyErr_WarnEx(PyExc_RuntimeWarning, msg, 1) < 0) {
+    throw python_error();
+  }
+}
 
 static PyObject* initModule() {
   HANDLE_TH_ERRORS
@@ -587,6 +618,9 @@ static PyObject* initModule() {
   // force ATen to initialize because it handles
   // setting up TH Errors so that they throw C++ exceptions
   at::init();
+
+  // Set ATen warnings to issue Python warnings
+  at::Warning::set_warning_handler(&warning_handler);
 
   ASSERT_TRUE(PyModule_AddObject(module, "has_mkl", at::hasMKL() ? Py_True : Py_False) == 0);
 

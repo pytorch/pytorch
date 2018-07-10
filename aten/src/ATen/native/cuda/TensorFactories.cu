@@ -1,7 +1,6 @@
 #include "ATen/ATen.h"
 #include "ATen/Error.h"
 #include "ATen/NativeFunctions.h"
-#include "ATen/cuda/CUDATypeConversion.cuh"
 
 #include <THC/THCGeneral.h>
 #include <THC/THCThrustAllocator.cuh>
@@ -21,8 +20,17 @@ Tensor& eye_out_cuda(Tensor& result, int64_t n) {
 }
 
 Tensor& eye_out_cuda(Tensor& result, int64_t n, int64_t m) {
-  AT_CHECK(n > 0, "n must be greater than zero, got", n);
+#ifndef USE_TH_SIZE_ZERO_DIM
+  AT_CHECK(n > 0, "n must be greater than 0, got ", n);
+#else
+  AT_CHECK(n >= 0, "n must be greater or equal to 0, got ", n);
+#endif
+
+#ifndef USE_TH_SIZE_ZERO_DIM
   if(m <= 0) {
+#else
+  if(m < 0) {
+#endif
     m = n;
   }
 
@@ -56,12 +64,10 @@ Tensor& randperm_out_cuda(Tensor& result, int64_t n, Generator* generator) {
       // Generate random values for the keys array
       AT_DISPATCH_ALL_TYPES(
         result.type(), "randperm_out_cuda", [&] {
-          using cuda_scalar_t = cuda::into_type<scalar_t>;
-
           auto keys = result.type().tensor(result.sizes()).random_(generator);
 
-          auto result_data = thrust::device_ptr<cuda_scalar_t>(result.data<cuda_scalar_t>());
-          auto keys_data = thrust::device_ptr<cuda_scalar_t>(keys.data<cuda_scalar_t>());
+          auto result_data = thrust::device_ptr<scalar_t>(result.data<scalar_t>());
+          auto keys_data = thrust::device_ptr<scalar_t>(keys.data<scalar_t>());
 
           auto state = globalContext().getTHCState();
           THCThrustAllocator thrustAlloc(state);

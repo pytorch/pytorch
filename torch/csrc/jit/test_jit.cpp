@@ -23,6 +23,7 @@
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/assertions.h"
@@ -286,7 +287,7 @@ void internedStringsTests () {
   REQUIRE(Symbol::aten("What2") == symstart+2);
   REQUIRE(Symbol::aten("What") == symstart+1);
   REQUIRE(Symbol::aten("What2") == symstart+2);
-  REQUIRE(Symbol(SymbolNamespace::aten, symstart+2).toUnqualString() == std::string("What2"));
+  REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
 
 void fromQualStringTests() {
@@ -295,7 +296,13 @@ void fromQualStringTests() {
   REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
   REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
   REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
-  auto bad_inputs = {"scope", "foo::bar", "prim:Param", "::", ":", ""};
+  REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
+  REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
+
+  auto bad_inputs = {"scope", ":", ""};
   for (auto input : bad_inputs) {
     try {
       Symbol::fromQualString(input);
@@ -604,7 +611,7 @@ void testADFormulas() {
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
     auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
-
+    LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
     auto tensor_grads_in           = fmap(var_grads_in, unwrap);
@@ -848,7 +855,9 @@ void testBlocks(std::ostream & out) {
 
 const static auto cf_examples = R"JIT(
   def if_test(a, b):
-      c = 0
+      # FIXME: use 0 instead of a.
+      # c = 0
+      c = a
       if a < b:
         c = b
       else:

@@ -1,9 +1,9 @@
 #pragma once
 
-#include <torch/functions.h>
-#include <torch/nn/module.h>
-#include <torch/nn/modules/modules.h>
+#include <torch/cuda.h>
+#include <torch/nn.h>
+#include <torch/optim.h>
+#include <torch/serialization.h>
 #include <torch/tensor.h>
-
-#include "torch/optimizers.h"
-#include "torch/serialization.h"
+#include <torch/tensor_list_view.h>
+#include <torch/utils.h>

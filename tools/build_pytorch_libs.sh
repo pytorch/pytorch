@@ -68,6 +68,13 @@ if [[ -n "$CPPFLAGS" ]]; then
   USER_LDFLAGS="$USER_LDFLAGS $CPPFLAGS"
 fi
 
+# Use ccache if available (this path is where Homebrew installs ccache symlinks)
+if [ "$(uname)" == 'Darwin' ]; then
+  if [ -d '/usr/local/opt/ccache/libexec' ]; then
+    CCACHE_WRAPPER_PATH=/usr/local/opt/ccache/libexec
+  fi
+fi
+
 cd "$(dirname "$0")/.."
 PWD=`printf "%q\n" "$(pwd)"`
 BASE_DIR="$PWD"
@@ -76,7 +83,7 @@ INSTALL_DIR="$TORCH_LIB_DIR/tmp_install"
 THIRD_PARTY_DIR="$BASE_DIR/third_party"
 
 CMAKE_VERSION=${CMAKE_VERSION:="cmake"}
-C_FLAGS=" -DTH_INDEX_BASE=0 -I\"$INSTALL_DIR/include\" \
+C_FLAGS=" -I\"$INSTALL_DIR/include\" \
   -I\"$INSTALL_DIR/include/TH\" -I\"$INSTALL_DIR/include/THC\" \
   -I\"$INSTALL_DIR/include/THS\" -I\"$INSTALL_DIR/include/THCS\" \
   -I\"$INSTALL_DIR/include/THNN\" -I\"$INSTALL_DIR/include/THCUNN\""
@@ -144,7 +151,7 @@ function build() {
   # TODO: The *_LIBRARIES cmake variables should eventually be
   # deprecated because we are using .cmake files to handle finding
   # installed libraries instead
-  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../$1 -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DTorch_FOUND="1" \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
@@ -182,8 +189,7 @@ function build() {
   ${CMAKE_INSTALL} -j"$NUM_JOBS"
   popd
 
-  local lib_prefix=$INSTALL_DIR/lib/lib$1
-
+  # Fix rpaths of shared libraries
   if [[ $(uname) == 'Darwin' ]]; then
     pushd "$INSTALL_DIR/lib"
     for lib in *.dylib; do
@@ -194,18 +200,26 @@ function build() {
   fi
 }
 
+function path_remove {
+  # Delete path by parts so we can never accidentally remove sub paths
+  PATH=${PATH//":$1:"/":"} # delete any instances in the middle
+  PATH=${PATH/#"$1:"/} # delete any instance at the beginning
+  PATH=${PATH/%":$1"/} # delete any instance in the at the end
+}
+
 function build_nccl() {
   mkdir -p build/nccl
   pushd build/nccl
-  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/FindCUDA" \
+  ${CMAKE_VERSION} ../../nccl -DCMAKE_MODULE_PATH="$BASE_DIR/cmake/Modules_CUDA_fix" \
               ${CMAKE_GENERATOR} \
               -DCMAKE_BUILD_TYPE=Release \
               -DCMAKE_INSTALL_PREFIX="$INSTALL_DIR" \
               -DCMAKE_C_FLAGS="$C_FLAGS $USER_CFLAGS" \
               -DCMAKE_CXX_FLAGS="$C_FLAGS $CPP_FLAGS $USER_CFLAGS" \
               -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS" \
-              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake"
-  ${CMAKE_INSTALL}
+              -DCMAKE_UTILS_PATH="$BASE_DIR/cmake/public/utils.cmake" \
+              -DNUM_JOBS="$NUM_JOBS"
+  ${CMAKE_INSTALL} -j"$NUM_JOBS"
   mkdir -p ${INSTALL_DIR}/lib
   cp "lib/libnccl.so.1" "${INSTALL_DIR}/lib/libnccl.so.1"
   if [ ! -f "${INSTALL_DIR}/lib/libnccl.so" ]; then
@@ -223,10 +237,22 @@ function build_nccl() {
 # detected them (to ensure that we have a consistent view between the
 # PyTorch and Caffe2 builds.)
 function build_caffe2() {
+  if [[ -z $EXTRA_CAFFE2_CMAKE_FLAGS ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS=()
+  fi
+  if [[ -n $CCACHE_WRAPPER_PATH ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_C_COMPILER=$CCACHE_WRAPPER_PATH/gcc")
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_CXX_COMPILER=$CCACHE_WRAPPER_PATH/g++")
+  fi
+  if [[ -n $CMAKE_PREFIX_PATH ]]; then
+    EXTRA_CAFFE2_CMAKE_FLAGS+=("-DCMAKE_PREFIX_PATH=$CMAKE_PREFIX_PATH")
+  fi
+
   mkdir -p build
   pushd build
   ${CMAKE_VERSION} .. \
   ${CMAKE_GENERATOR} \
+      -DBUILDING_WITH_TORCH_LIBS=ON \
       -DCMAKE_BUILD_TYPE=$BUILD_TYPE \
       -DBUILD_CAFFE2=$FULL_CAFFE2 \
       -DBUILD_ATEN=ON \
@@ -248,8 +274,8 @@ function build_caffe2() {
       -DCMAKE_EXPORT_COMPILE_COMMANDS=1 \
       -DCMAKE_C_FLAGS="$USER_CFLAGS" \
       -DCMAKE_CXX_FLAGS="$USER_CFLAGS" \
-      -DCMAKE_EXE_LINKER_FLAGS="$USER_LDFLAGS" \
-      -DCMAKE_SHARED_LINKER_FLAGS="$USER_LDFLAGS"
+      -DCMAKE_EXE_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" \
+      -DCMAKE_SHARED_LINKER_FLAGS="$LDFLAGS $USER_LDFLAGS" ${EXTRA_CAFFE2_CMAKE_FLAGS[@]}
       # STOP!!! Are you trying to add a C or CXX flag?  Add it
       # to CMakeLists.txt and aten/CMakeLists.txt, not here.
       # We need the vanilla cmake build to work.
@@ -266,6 +292,16 @@ function build_caffe2() {
     done
   fi
   popd
+
+  # Fix rpaths of shared libraries
+  if [[ $(uname) == 'Darwin' ]]; then
+    pushd "$INSTALL_DIR/lib"
+    for lib in *.dylib; do
+      echo "Updating install_name for $lib"
+      install_name_tool -id @rpath/$lib $lib
+    done
+    popd
+  fi
 }
 
 # In the torch/lib directory, create an installation directory

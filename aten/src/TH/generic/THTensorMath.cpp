@@ -288,7 +288,7 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
 #ifdef DEBUG
   THAssert(numel <= LONG_MAX);
 #endif
-  THLongTensor_resize2d(subscript, numel, tensor->_dim());
+  THLongTensor_resize2d(subscript, numel, tensor->dim());
 
   /* Second pass populates subscripts */
   subscript_data = THLongTensor_data(subscript);
@@ -296,12 +296,12 @@ void THTensor_(nonzero)(THLongTensor *subscript, THTensor *tensor)
                   if IS_NONZERO(*tensor_data) {
                     div = 1;
 
-                    for (dim = tensor->_dim() - 1; dim >= 0; dim--) {
+                    for (dim = tensor->dim() - 1; dim >= 0; dim--) {
                       *(subscript_data + dim) = (i/div) % tensor->size[dim];
                       div *= tensor->size[dim];
                     }
 
-                    subscript_data += tensor->_dim();
+                    subscript_data += tensor->dim();
                   }
                   ++i;);
 }
@@ -2236,8 +2236,8 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
 {
   int64_t batch;
 
-  THArgCheck(THTensor_(_nDimension)(batch1) == 3, 1, "expected 3D tensor");
-  THArgCheck(THTensor_(_nDimension)(batch2) == 3, 2, "expected 3D tensor");
+  THArgCheck(!batch1->is_empty() && THTensor_(nDimension)(batch1) == 3, 1, "expected non-empty 3D tensor");
+  THArgCheck(!batch2->is_empty() && THTensor_(nDimension)(batch2) == 3, 2, "expected non-empty 3D tensor");
   THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
              THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
@@ -2826,9 +2826,9 @@ void THTensor_(onesLike)(THTensor *r_, THTensor *input)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-  THArgCheck(THTensor_(_nDimension)(t) == 1 || THTensor_(_nDimension)(t) == 2, 1, "matrix or a vector expected");
+  THArgCheck(!t->is_empty() && (THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2), 1, "non-empty matrix or a vector expected");
 
-  if(THTensor_(_nDimension)(t) == 1)
+  if(THTensor_(nDimension)(t) == 1)
   {
     real *t_data = THTensor_(data)(t);
     int64_t t_stride_0 = THTensor_(stride)(t, 0);
@@ -4344,7 +4344,6 @@ accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
 
 accreal THTensor_(meanall)(THTensor *tensor)
 {
-  THArgCheck(tensor->_dim() > 0, 1, "empty Tensor");
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
@@ -4353,7 +4352,7 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
   TH_TENSOR_APPLY(real, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= THTensor_(nElement)(tensor) - (biased ? 0 : 1);
+  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (biased ? 0 : 1));
   return sum;
 }
 
@@ -4366,13 +4365,15 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, int64_t n)
 {
   real i = 0;
 
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);
   }
 
-  if(n == 1) {
+  if (n == 0) {
+  } else if (n == 1) {
     THTensor_(set1d)(r_, 0, a);
   } else {
      TH_TENSOR_APPLY(real, r_,
@@ -4386,13 +4387,15 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, int64_t n)
 {
   real i = 0;
 
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);
   }
 
-  if(n == 1) {
+  if (n == 0) {
+  } else if (n == 1) {
     THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
   } else {
     TH_TENSOR_APPLY(real, r_,

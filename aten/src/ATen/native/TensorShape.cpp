@@ -4,8 +4,10 @@
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
 #include "ATen/optional.h"
+#include <TH/THTensor.hpp>
 
 #include <algorithm>
+#include <vector>
 
 namespace at {
 namespace native {
@@ -112,6 +114,14 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
+Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
+  return self.as_strided(size, stride, self.storage_offset());
+}
+
+Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
+  return self.as_strided_(size, stride, self.storage_offset());
+}
+
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
@@ -125,7 +135,7 @@ Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
 #endif
     AT_ERROR("start (", start, ") + length (", length, ") exceeds dimension size (", cur_size, ").");
   }
-  return at::native::slice(self, dim, start, start + length, 1);
+  return at::slice(self, dim, start, start + length, 1);
 }
 
 Tensor permute(const Tensor& self, IntList dims) {
@@ -202,12 +212,14 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
     if (infer_dim) {
       res[*infer_dim] = numel / newsize;
     }
+#ifndef USE_TH_SIZE_ZERO_DIM
     if (numel == 0) {
       // Collapse zero-element shapes into one dimension because TH handles zeros
       // in sizes strangely: x.resize_(1, 0) has shape (1,). TODO: remove this
       // once we have multi-dimensional empty tensors.
       return {0};
     }
+#endif
     return res;
   }
 
@@ -216,53 +228,12 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
   throw std::runtime_error(ss.str());
 }
 
-static at::optional<std::vector<int64_t>>
-compute_stride(const Tensor& self, IntList newshape) {
-  auto oldstride = self.strides();
-  auto oldshape = self.sizes();
-  if (oldshape.empty()) {
-    return std::vector<int64_t>(newshape.size(), 1);
-  }
-
-  std::vector<int64_t> newstride(newshape.size());
-  int64_t view_d = newshape.size() - 1;
-  // stride for each subspace in the chunk
-  int64_t chunk_base_stride = oldstride.back();
-  // numel in current chunk
-  int64_t tensor_numel = 1;
-  int64_t view_numel = 1;
-  for (int64_t tensor_d = oldshape.size() - 1; tensor_d >= 0; tensor_d--) {
-    tensor_numel *= oldshape[tensor_d];
-    // if end of tensor size chunk, check view
-    if ((tensor_d == 0) ||
-        (oldshape[tensor_d - 1] != 1 && oldstride[tensor_d - 1] != tensor_numel * chunk_base_stride)) {
-      while (view_d >= 0 && (view_numel < tensor_numel || newshape[view_d] == 1)) {
-        newstride[view_d] = view_numel * chunk_base_stride;
-        view_numel *= newshape[view_d];
-        view_d--;
-      }
-      if (view_numel != tensor_numel) {
-        return {};
-      }
-      if (tensor_d > 0) {
-        chunk_base_stride = oldstride[tensor_d - 1];
-        tensor_numel = 1;
-        view_numel = 1;
-      }
-    }
-  }
-  if (view_d != -1) {
-    return {};
-  }
-  return newstride;
-}
-
 Tensor reshape(const Tensor& self, IntList proposed_shape) {
   if (self.type().is_sparse()) {
     AT_ERROR("reshape is not implemented for sparse tensors");
   }
   auto shape = infer_size(proposed_shape, self.numel());
-  if (auto stride = compute_stride(self, shape)) {
+  if (auto stride = THTensor_compute_stride(self.sizes(), self.strides(), shape)) {
     return self.as_strided(shape, *stride);
   }
   return at::_unsafe_view(self.clone(), shape);
@@ -634,6 +605,41 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
 
 int64_t numel(const Tensor& self) {
   return self.pImpl->numel();
+}
+
+std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  int64_t size = self.size(dim);
+  std::vector<Tensor> tensors(size);
+  for (int i = 0; i < size; i++) {
+    tensors[i] = self.select(dim, i);
+  }
+  return tensors;
+}
+
+std::vector<Tensor> meshgrid(TensorList tensors) {
+  int64_t size = tensors.size();
+  AT_CHECK(size > 0, "meshgrid expects a non-empty TensorList");
+  std::vector<int64_t> shape(size);
+  for(int64_t i = 0; i < size; i++) {
+    switch (tensors[i].dim()) {
+    case 0:
+      shape[i] = 1;
+      break;
+    case 1:
+      shape[i] = tensors[i].size(0);
+      break;
+    default:
+      AT_ERROR("Expected scalar or 1D tensor in the tensor list but got: ", tensors[i]);
+    }
+  }
+  std::vector<Tensor> grids;
+  for(int64_t i = 0; i < size; i++) {
+    std::vector<int64_t> view_shape(size, 1);
+    view_shape[i] = -1;
+    grids.push_back(tensors[i].view(view_shape).expand(shape));
+  }
+  return grids;
 }
 
 }

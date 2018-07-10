@@ -15,8 +15,8 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
                          int padT,
                          int padW,
                          int padH) {
-  THCUNN_argCheck(state, input->_dim() == 4 || input->_dim() == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+                  "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(!weight || THCTensor_(isContiguous)(state, weight), 4,
              "weight tensor has to be contiguous");
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
@@ -27,35 +27,35 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
              "stride should be greater than zero, but got dT: %d dH: %d dW: %d", dT, dH, dW);
 
   if (gradOutput != NULL) {
-    THCUNN_argCheck(state, gradOutput->_dim() == 4 || gradOutput->_dim() == 5, 3,
+    THCUNN_argCheck(state, !gradOutput->is_empty() && (gradOutput->dim() == 4 || gradOutput->dim() == 5), 3,
                     gradOutput,
-                    "4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
+                    "non-empty 4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
   }
 
   if (weight != NULL) {
-    THCUNN_argCheck(state, weight->_dim() == 5, 4, weight,
-                    "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+    THCUNN_argCheck(state, !weight->is_empty() && weight->dim() == 5, 4, weight,
+                    "non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
                     "expected for weight, but got: %s");
   }
 
   if (gradWeight != NULL) {
-    THCUNN_argCheck(state, gradWeight->_dim() == 5, 4, gradWeight,
-                    "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+    THCUNN_argCheck(state, !gradWeight->is_empty() && gradWeight->dim() == 5, 4, gradWeight,
+                    "non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
                     "expected for gradWeight, but got: %s");
   }
 
   if (weight == NULL) {
     weight = gradWeight;
   }
-  int nOutputPlane = (int)weight->size[0];
-  int nInputPlane  = (int)weight->size[1];
-  int kT           = (int)weight->size[2];
-  int kH           = (int)weight->size[3];
-  int kW           = (int)weight->size[4];
+  int64_t nOutputPlane = weight->size[0];
+  int64_t nInputPlane  = weight->size[1];
+  int64_t kT           = weight->size[2];
+  int64_t kH           = weight->size[3];
+  int64_t kW           = weight->size[4];
 
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 4,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
-  int ndim = input->_dim();
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -135,7 +135,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
   int kW           = (int)weight->size[4];
 
   int batch = 1;
-  if (input->_dim() == 4)
+  if (input->dim() == 4)
   {
     // Force batch
     batch = 0;
@@ -163,7 +163,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->_dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth)
+  if (ones->dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth)
   {
     // Resize plane and fill with ones...
     THCTensor_(resize3d)(state, ones, outputHeight, outputWidth, outputDepth);
@@ -267,11 +267,11 @@ void THNN_(VolumetricConvolution_updateGradInput)(
            int padT, int padW, int padH)
 {
 
-  int nOutputPlane = (int)weight->size[0];
-  int nInputPlane  = (int)weight->size[1];
-  int kT           = (int)weight->size[2];
-  int kH           = (int)weight->size[3];
-  int kW           = (int)weight->size[4];
+  int64_t nOutputPlane = weight->size[0];
+  int64_t nInputPlane  = weight->size[1];
+  int64_t kT           = weight->size[2];
+  int64_t kH           = weight->size[3];
+  int64_t kW           = weight->size[4];
 
   THCTensor *gradColumns = finput;
 
@@ -282,7 +282,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   int batch = 1;
-  if (input->_dim() == 4)
+  if (input->dim() == 4)
   {
     input = THCTensor_(newContiguous)(state, input);
     // Force batch
@@ -397,7 +397,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   int batch = 1;
-  if (input->_dim() == 4)
+  if (input->dim() == 4)
   {
     // Force batch
     batch = 0;
@@ -416,7 +416,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->_dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth)
+  if (ones->dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth)
   {
     // Resize plane and fill with ones...
     THCTensor_(resize3d)(state, ones, outputHeight, outputWidth, outputDepth);
@@ -507,7 +507,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
       #endif
     }
   }
-  
+
   // Free
   THCTensor_(free)(state, input_n);
   THCTensor_(free)(state, gradOutput_n);

@@ -125,8 +125,8 @@ std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size
 std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
 }
-std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
-  return baseType->storageWithAllocator(size, std::move(allocator));
+std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
+  return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
@@ -314,6 +314,17 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
     base_var = base_var.base();
   }
   return make_variable_view(std::move(base_var), std::move(tensor));
+}
+
+static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
+  }
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_view(base_var, std::move(tensor));
+  }
+  return tensors;
 }
 
 struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {

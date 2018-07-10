@@ -139,7 +139,7 @@ class Caffe2Backend(Backend):
     # If you increase this, make SURE you cross-reference all BC-breaking
     # changes from one version to the next, and any that you did not
     # implement, mark as broken in _broken_operators
-    _known_opset_version = 6
+    _known_opset_version = 7
 
     # This dictionary will record operators which are KNOWN to be
     # broken, so we give a good error message rather than do something
@@ -986,6 +986,14 @@ class Caffe2Backend(Backend):
             return workspace.has_gpu_support
         return False
 
+    @classmethod
+    def is_compatible(cls, model, device='CPU', **kwargs):
+        if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
+           and callable(super(Caffe2Backend, cls).is_compatible):
+            if not super(Caffe2Backend, cls).is_compatible(model, device, **kwargs):
+                return False
+        # TODO: should have an unspported list of operators, be optimistic for now
+        return True
 
 prepare = Caffe2Backend.prepare
 
@@ -996,3 +1004,5 @@ run_node = Caffe2Backend.run_node
 run_model = Caffe2Backend.run_model
 
 supports_device = Caffe2Backend.supports_device  # noqa
+
+is_compatible = Caffe2Backend.is_compatible

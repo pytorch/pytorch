@@ -211,6 +211,9 @@ void initPythonIRBindings(PyObject * module_) {
       return py::make_iterator(g.nodes().begin(), g.nodes().end());
     })
     .def("addInput",[](Graph &g) { return g.addInput(); })
+    .def("copy",[](Graph &g) {
+      return g.copy();
+    })
     .GS(advanceStage)
     .GS(stage)
     .GS(eraseInput)
@@ -419,7 +422,7 @@ void initPythonIRBindings(PyObject * module_) {
 
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
-      return t.name();
+      return t.str();
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;

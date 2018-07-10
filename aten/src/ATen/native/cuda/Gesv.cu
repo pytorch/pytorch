@@ -73,9 +73,9 @@ static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
 template<class T>
 static inline std::unique_ptr<Storage> pin_memory(int64_t size, Tensor dummy) {
   int64_t adjusted_size = size * sizeof(T);
-  auto allocator = std::unique_ptr<Allocator>(new cuda::PinnedMemoryAllocator());
+  auto* allocator = cuda::getPinnedMemoryAllocator();
   auto& backend = dummy.type().toBackend(kCPU).toScalarType(kByte);
-  return backend.storageWithAllocator(adjusted_size, std::move(allocator));
+  return backend.storageWithAllocator(adjusted_size, allocator);
 }
 
 #define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \

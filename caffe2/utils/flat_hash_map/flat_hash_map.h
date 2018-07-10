@@ -700,7 +700,7 @@ namespace ska
                 --num_elements;
                 for (EntryPointer next = current + ptrdiff_t(1); !next->is_at_desired_position(); ++current, ++next)
                 {
-                    current->emplace(next->distance_from_desired - 1, std::move(next->value));
+                    current->emplace(static_cast<int8_t>(next->distance_from_desired - 1), std::move(next->value));
                     next->destroy_value();
                 }
                 return { to_erase.current };

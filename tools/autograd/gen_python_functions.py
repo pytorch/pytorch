@@ -24,8 +24,8 @@ SKIP_PYTHON_BINDINGS = [
     '_arange.*', '_range.*', '_linspace.*', '_logspace.*',
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
-    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_sum.*', '_th_prod.*',
-    'arange.*', 'range.*', '_gesv.*', 'slice',
+    '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
+    'arange.*', 'range.*', '_gesv.*', 'slice', 'max_pool1d', 'max_pool2d', 'max_pool3d'
 ]
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
@@ -112,7 +112,7 @@ SUPPORTED_RETURN_TYPES = {
     'std::tuple<Tensor,Tensor,Tensor,Tensor>',
     'std::tuple<Tensor,Tensor,Tensor,Tensor,Tensor>',
     'std::vector<Tensor>',
-    'Scalar', 'bool', 'int64_t', 'void*'
+    'Scalar', 'bool', 'int64_t', 'void*', 'void'
 }
 
 TENSOR_OPTIONS = CodeTemplate("""\
@@ -436,7 +436,11 @@ def create_python_bindings(python_functions, has_self, is_module=False):
         if requires_grad and not has_tensor_options:
             call_dispatch = PY_VARIABLE_SET_REQUIRES_GRAD.substitute(env, call_dispatch=call_dispatch,
                                                                      requires_grad=requires_grad)
-        body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
+        if simple_return_type == 'void':
+            body.append('{call_dispatch};'.format(call_dispatch=call_dispatch))
+            body.append('Py_RETURN_NONE;')
+        else:
+            body.append(PY_VARIABLE_WRAP.substitute(env, call_dispatch=call_dispatch))
         py_method_dispatch.append(PY_VARIABLE_DISPATCH.substitute(env))
         return body
 
