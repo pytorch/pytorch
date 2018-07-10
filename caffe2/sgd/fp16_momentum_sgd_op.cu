@@ -1,7 +1,7 @@
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 
-#include "fp16_momentum_sgd_op.h"
+#include "caffe2/sgd/fp16_momentum_sgd_op.h"
 
 namespace caffe2 {
 namespace {
