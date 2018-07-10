@@ -27,9 +27,6 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   }
 
   int num_inputs = PyTuple_GET_SIZE(args);
-  if (num_inputs == 0) {
-    return PyErr_Format(PyExc_TypeError, "grad_fn not callable without any arguments");
-  }
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
