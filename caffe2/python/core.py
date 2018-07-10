@@ -2040,6 +2040,15 @@ class Net(object):
         device_option.device_type = caffe2_pb2.IDEEP
         self._net.device_option.CopyFrom(device_option)
 
+    def _output_name_from_schema(self, op_type, idx):
+        output_id = idx
+        op_schema = C.OpSchema.get(op_type)
+        if op_schema:
+            output_desc = op_schema.output_desc
+            if idx < len(output_desc) and output_desc[idx][0]:
+                output_id = output_desc[idx][0]
+        return self.NextName(prefix=op_type, output_id=output_id)
+
     def _CreateAndAddToSelf(self, op_type, inputs, outputs=None, **kwargs):
         """A helper function to create an operator and add it to self.
         """
@@ -2056,7 +2065,7 @@ class Net(object):
             # In this case, we will auto-fill the given number of outputs
             # with auto-generated names.
             outputs = [
-                self.NextName(prefix=op_type, output_id=i)
+                self._output_name_from_schema(op_type, i)
                 for i in range(outputs)]
         outputs = _RectifyInputOutput(outputs, net=self)
         op = CreateOperator(op_type, inputs, outputs, **kwargs)

@@ -271,6 +271,34 @@ class TestAutoNaming(test_util.TestCase):
         # different calls return different blob names
         self.assertNotEqual(str(net_c.NextBlob('b')), str(net_c.NextBlob('b')))
 
+    def test_implicit_one_output(self):
+        net = core.Net('net')
+        net_name = net.Name()
+        with core.NameScope('foo'):
+            net.Add(['a', 'b'])
+
+        net.Add(['c', 'd'])
+        net.Add(['e', 'f'])
+        # Single output
+        self.assertEqual(net.Proto().op[0].output[0], 'foo/{}/Add'.format(net_name))
+        self.assertEqual(net.Proto().op[1].output[0], '{}/Add'.format(net_name))
+        self.assertEqual(net.Proto().op[2].output[0], '{}/Add_2'.format(net_name))
+
+    def test_output_number(self):
+        net = core.Net('net')
+        net_name = net.Name()
+        net.Concat(['a', 'b'], 2)
+        net.Concat(['c', 'd'], 2)
+        # output names are taken from OpSchema whenever available
+        self.assertEqual(
+            net.Proto().op[0].output[0], '{}/Concat:concat_result'.format(net_name))
+        self.assertEqual(
+            net.Proto().op[0].output[1], '{}/Concat:split_info'.format(net_name))
+        self.assertEqual(
+            net.Proto().op[1].output[0], '{}/Concat_2:concat_result'.format(net_name))
+        self.assertEqual(
+            net.Proto().op[1].output[1], '{}/Concat_2:split_info'.format(net_name))
+
     def test_auto_naming(self):
         a = core.Net('net')
         b = core.Net('net')
