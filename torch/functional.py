@@ -141,7 +141,8 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
          center=True, pad_mode='reflect', normalized=False, onesided=True):
     r"""Short-time Fourier transform (STFT).
 
-    Ignoring the batch dimension, this method computes the following expression:
+    Ignoring the optional batch dimension, this method computes the following
+    expression:
 
     .. math::
         X[m, \omega] = \sum_{k = 0}^{\text{win_length}}%
@@ -149,43 +150,74 @@ def stft(input, n_fft, hop_length=None, win_length=None, window=None,
                             e^{- j \frac{2 \pi \cdot \omega k}{\text{win_length}}},
 
     where :math:`m` is the index of the sliding window, and :math:`\omega` is
-    the frequency that :math:`0 \leq \omega <` :attr:`n_fft`. When
-    :attr:`onesided` is the default value ``True``, only values for
-    :math:`\omega` in range :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n_fft}}{2} \right\rfloor + 1\right]`
-    are returned because the real-to-complex transform satisfies the Hermitian
-    symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n_fft} - \omega]^*`.
+    the frequency that :math:`0 \leq \omega < \text{n_fft}`. When
+    :attr:`onesided` is the default value ``True``,
 
-    The :attr:`input` tensor must be 1-D sequence :math:`(T)` or 2-D a batch of
-    sequences :math:`(N \times T)`. If :attr:`win_length` is ``None``, it is
-    default to same value as :attr:`n_fft`. :attr:`window` can be a
-    1-D tensor of size :attr:`win_length`, e.g., see
-    :meth:`torch.hann_window`. If :attr:`window` is the default value ``None``,
-    it is treated as if having :math:`1` everywhere in the frame.
-    :attr:`pad_end` indicates the amount of zero padding at the end of
-    :attr:`input` before STFT. If :attr:`normalized` is set to ``True``, the
-    function returns the normalized STFT results, i.e., multiplied by
-    :math:`(frame\_length)^{-0.5}`.
+    * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
+      sequences.
+
+    * If :attr:`hop_length` is ``None`` (default), it is treated as equal to
+      ``floor(n_fft / 4)``.
+
+    * If :attr:`win_length` is ``None`` (default), it is treated as equal to
+      :attr:`n_fft`.
+
+    * :attr:`window` can be a 1-D tensor of size :attr:`win_length`, e.g., from
+      :meth:`torch.hann_window`. If :attr:`window` is ``None`` (default), it is
+      treated as if having :math:`1` everywhere in the window. If
+      :math:`\text{win_length} < \text{n_fft}`, :attr:`window` will be padded on
+      both sides to length :attr:`n_fft` before being applied.
+
+    * If :attr:`center` is ``True`` (default), :attr:`input` will be padded on
+      both sides so that the :math:`t`-th frame is centered at time
+      :math:`t \times \text{hop_length}`. Otherwise, the :math:`t`-th frame
+      begins at time  :math:`t \times \text{hop_length}`.
+
+    * :attr:`pad_mode` determines the padding method used on :attr:`input` when
+      :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
+      all available options. Default is ``"reflect"``.
+
+    * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
+      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n_fft}}{2} \right\rfloor + 1\right]`
+      are returned because the real-to-complex Fourier transform satisfies the
+      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n_fft} - \omega]^*`.
+
+    * If :attr:`normalized` is ``True`` (default is ``False``), the function
+      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame_length})^{-0.5}`.
 
     Returns the real and the imaginary parts together as one tensor of size
-    :math:`(* \times N \times 2)`, where :math:`*` is the shape of input :attr:`input`,
-    :math:`N` is the number of :math:`\omega` s considered depending on
-    :attr:`n_fft` and :attr:`return_onesided`, and each pair in the last
-    dimension represents a complex number as real part and imaginary part.
+    :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
+    batch size of :attr:`input`, :math:`N` is the number of frequencies where
+    STFT is applied, :math:`T` is the total number of frames used, and each pair
+    in the last dimension represents a complex number as the real part and the
+    imaginary part.
+
+    .. warning::
+      This function changed signature at version 0.4.1. Calling with the
+      previous signature may cause error or return incorrect result.
 
     Arguments:
         input (Tensor): the input tensor
-        win_length (int): the size of window frame and STFT filter
-        hop_length (int): the distance between neighboring sliding window frames
-        n_fft (int, optional): size of Fourier transform. Default: ``None``
+        n_fft (int, optional): size of Fourier transform
+        hop_length (int): the distance between neighboring sliding window
+            frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
+        win_length (int): the size of window frame and STFT filter.
+            Default: ``None``  (treated as equal to :attr:`n_fft`)
+        window (Tensor, optional): the optional window function.
+            Default: ``None`` (treated as window of all :math:`1`s)
+        center (bool, optional): whether to pad :attr:`input` on both sides so
+            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop_length}`.
+            Default: ``True``
+        pad_mode (string, optional): controls the padding method used when
+            :attr:`center` is ``True``. Default: ``"reflect"``
         normalized (bool, optional): controls whether to return the normalized STFT results
              Default: ``False``
         onesided (bool, optional): controls whether to return half of results to
             avoid redundancy Default: ``True``
-        window (Tensor, optional): the optional window function. Default: ``None``
-        pad_end (int, optional): implicit zero padding at the end of :attr:`input`. Default: 0
 
     Returns:
-        Tensor: A tensor containing the STFT result
+        Tensor: A tensor containing the STFT result with shape described above
+
     """
     # TODO: after having proper ways to map Python strings to ATen Enum, move
     #       this and F.pad to ATen.

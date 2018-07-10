@@ -5517,7 +5517,7 @@ Arguments:
     normalized (bool, optional): controls whether to return normalized results.
         Default: ``False``
     onesided (bool, optional): controls whether to return half of results to
-        avoid redundancy Default: ``True``
+        avoid redundancy. Default: ``True``
 
 Returns:
     Tensor: A tensor containing the real-to-complex Fourier transform result

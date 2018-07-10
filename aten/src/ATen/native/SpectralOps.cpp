@@ -205,7 +205,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
   if (!at::isFloatingType(self.type().scalarType()) || self.dim() > 2 || self.dim() < 1) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D or 2D tensor of floating types";
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
   Tensor input = self;
   if (self.dim() == 1) {
@@ -217,7 +217,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < n_fft < " << len
              << ", but got n_fft=" << win_length;
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
   if (hop_length <= 0) {
     std::ostringstream ss;
@@ -228,14 +228,13 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
     std::ostringstream ss;
     REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
              << win_length;
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
   if (window.defined() && (window.dim() != 1 || window.size(0) != win_length)) {
     std::ostringstream ss;
-    REPR(ss) << ": expected a 1D window tensor of size equal to "
-             << "win_length=" << win_length
-             << ", but got window with size " << window.sizes();
-    throw std::runtime_error(ss.str());
+    REPR(ss) << ": expected a 1D window tensor of size equal to win_length="
+             << win_length << ", but got window with size " << window.sizes();
+    AT_ERROR(ss.str());
   }
   #undef REPR
   auto window_ = window;
