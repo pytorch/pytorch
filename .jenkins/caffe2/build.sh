@@ -199,12 +199,6 @@ else
   MAX_JOBS=$(nproc)
 fi
 
-
-########## Caffe2 HIP OP GENERATOR
-#cd ../../tools/amd_build
-echo "START : CAFFE2 HIP OP GENERATION!!!!!!!!!!!!!!!"
-${PYTHON} /pytorch/tools/amd_build/build_caffe2_amd.py
-echo "END : CAFFE2 HIP OP GENERATION!!!!!!!!!!!!!!!"
 ###############################################################################
 # Configure and make
 ###############################################################################
