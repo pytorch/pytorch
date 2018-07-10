@@ -10,14 +10,14 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
              "kernel size should be greater than zero, but got kW: %d", kW);
   THArgCheck(dW > 0, 6, "stride should be greater than zero, but got dW: %d",
              dW);
-  THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 3, 3,
-                  weight, "2D or 3D weight tensor expected, but got: %s");
+  THCUNN_argCheck(state, !weight->is_empty() && (weight->dim() == 2 || weight->dim() == 3), 3,
+                  weight, "non-empty 2D or 3D weight tensor expected, but got: %s");
 
   if (bias != NULL) {
     THCUNN_check_dim_size(state, bias, 1, 0, weight->size[0]);
   }
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimF = 0; // feature dimension
   int dimS = 1; // sequence dimension
 
@@ -26,8 +26,8 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
     ++dimS;
   }
 
-  THCUNN_argCheck(state, ndim == 2 || ndim == 3, 1, input,
-                  "2D or 3D (batch mode) input tensor expected, but got :%s");
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 2 || ndim == 3), 1, input,
+                  "non-empty 2D or 3D (batch mode) input tensor expected, but got :%s");
 
   int64_t inputFrameSize = weight->size[0];
   int64_t nInputFrame = input->size[dimS];
@@ -66,7 +66,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5, "bias must be contiguous");
 
   // reshape weight if necessary
-  int ndim = input->nDimension;
+  int ndim = input->dim();
 
   THCTensor *tinput;
 
@@ -104,7 +104,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever
   // gets increased and always contains ones.
-  if (ones->nDimension != 2 || ones->size[0] * ones->size[1] < nOutputFrame) {
+  if (ones->dim() != 2 || ones->size[0] * ones->size[1] < nOutputFrame) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, 1, nOutputFrame);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
@@ -195,7 +195,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 
   THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
 
   THCTensor *tinput, *tgradOutput;
 
@@ -309,7 +309,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
     THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
   }
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
 
   THCTensor *tinput, *tgradOutput;
 
@@ -345,7 +345,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
   int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->nDimension != 2 || ones->size[0] * ones->size[1] < nOutputFrame) {
+  if (ones->dim() != 2 || ones->size[0] * ones->size[1] < nOutputFrame) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, 1, nOutputFrame);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));

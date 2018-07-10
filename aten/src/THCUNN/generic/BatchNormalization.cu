@@ -11,7 +11,7 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
     return THCDeviceTensor<real, Dim>();
   }
 
-  int inDim = THCTensor_nDimension(state, t);
+  int inDim = THCTensor__nDimension(state, t);
   if (inDim == Dim) {
     return toDeviceTensor<real, Dim>(state, t);
   }
@@ -28,7 +28,7 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
       size[Dim - 1] *= t->size[i];
     }
   }
-  return THCDeviceTensor<real, Dim>(THCTensor_(data)(state, t), size);
+  return THCDeviceTensor<real, Dim>(t->data<real>(), size);
 }
 
 void THNN_(BatchNormalization_updateOutput)(

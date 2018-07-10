@@ -30,25 +30,25 @@ toDeviceTensorCast(THCState* state, THCudaTensor* t) {
 template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>
-toDeviceTensor(THCState* state, _THCTensor* t);
+toDeviceTensor(THCState* state, THCTensor* t);
 
 template <typename T, int Dim, typename IndexT>
 THCDeviceTensor<T, Dim, IndexT, DefaultPtrTraits>
-toDeviceTensor(THCState* state, _THCTensor* t) {
+toDeviceTensor(THCState* state, THCTensor* t) {
   return toDeviceTensor<T, Dim, IndexT, DefaultPtrTraits>(state, t);
 }
 
 template <typename T, int Dim>
 THCDeviceTensor<T, Dim, int, DefaultPtrTraits>
-toDeviceTensor(THCState* state, _THCTensor* t) {
+toDeviceTensor(THCState* state, THCTensor* t) {
   return toDeviceTensor<T, Dim, int, DefaultPtrTraits>(state, t);
 }
 
 template <typename T, int Dim,
           typename IndexT, template <typename U> class PtrTraits>
 THCDeviceTensor<T, Dim, IndexT, PtrTraits>
-toDeviceTensor(THCState* state, _THCTensor* t) {
-  if (Dim != THCTensor_nDimension(state, t)) {
+toDeviceTensor(THCState* state, THCTensor* t) {
+  if (Dim != THCTensor__nDimension(state, t)) {
     THError("THCudaTensor dimension mismatch");
   }
   // Determine the maximum offset into the tensor achievable; `IndexT`

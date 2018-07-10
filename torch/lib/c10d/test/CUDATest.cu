@@ -6,8 +6,8 @@ namespace c10d {
 namespace test {
 
 namespace {
-__global__ void waitClocks(const size_t count) {
-  clock_t start = clock();
+__global__ void waitClocks(const uint64_t count) {
+  clock_t start = clock64();
   clock_t offset = 0;
   while (offset < count) {
     offset = clock() - start;
@@ -16,7 +16,7 @@ __global__ void waitClocks(const size_t count) {
 
 } // namespace
 
-void cudaSleep(CUDAStream& stream, size_t clocks) {
+void cudaSleep(CUDAStream& stream, uint64_t clocks) {
   waitClocks<<<1, 1, 0, stream.getStream()>>>(clocks);
 }
 

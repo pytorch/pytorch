@@ -48,15 +48,13 @@ class ReshapeOp : public Operator<Context> {
       auto& shape = Input(1);
       CAFFE_ENFORCE(shape.ndim() == 1, "Shape should be 1-D");
 
-      if (shape.size()) {
-        const T* shape_data = shape.template data<T>();
+      const T* shape_data = shape.template data<T>();
 
-        // Bit awkward, but needed so works on both CPU and CUDA contexts
-        std::vector<T> tmpv(shape.size());
-        context_.template CopyBytes<Context, CPUContext>(
-            shape.size() * sizeof(T), shape_data, &tmpv[0]);
-        actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
-      }
+      // Bit awkward, but needed so works on both CPU and CUDA contexts
+      std::vector<T> tmpv(shape.size());
+      context_.template CopyBytes<Context, CPUContext>(
+          shape.size() * sizeof(T), shape_data, &tmpv[0]);
+      actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
     }
 
     // Copy over the dimensions for those that are specified zero.
@@ -83,8 +81,17 @@ class ReshapeOp : public Operator<Context> {
         size *= dim;
       }
     }
+    if (size == 0 && total_size != 0) {
+      CAFFE_THROW("Can not reshape a non-zero size (", total_size, ") tensor to zero size.");
+    }
 
     if (unknown_idx != -1) {
+      CAFFE_ENFORCE_NE(
+          size,
+          0,
+          "New shape at dim ",
+          unknown_idx,
+          " can not be inferred since new size is zero.");
       CAFFE_ENFORCE(
           total_size % size == 0,
           "Argument `shape` does not agree with the input data.",

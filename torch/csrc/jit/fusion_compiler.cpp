@@ -7,7 +7,7 @@
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
@@ -39,7 +39,7 @@ std::vector<bool> TensorDesc::findContiguous(
 
 namespace {
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 static int ceilDiv(int a, int b) {
   return (a + b - 1) / b;
@@ -60,7 +60,18 @@ std::ostream& operator<<(std::ostream & out, const TensorDesc & d) {
 
 namespace codegen {
 
+/*with type_as not checking type of its input, a fusion group can have non-fp32 tensor as input.
+Correct code for this case is generated, however, nvrtc does not know how to handle int*_t integer types,
+so typedefs help it handle those cases*/
+
 auto type_declarations_template = CodeTemplate(R"(
+#if defined(__CUDACC_RTC__)
+typedef unsigned char uint8_t;
+typedef signed char int8_t;
+typedef short int  int16_t;
+typedef long long int int64_t;
+${HalfHeader}
+#endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
 struct TensorInfo {
@@ -88,8 +99,8 @@ void ${kernelName}(IndexType totalElements, ${formals}) {
 
 auto cpu_compilation_unit_template = CodeTemplate(R"(
 #include <cstddef>
+#include <cstdint>
 #include <math.h>
-#include <iostream>
 ${type_declarations}
 
 #define OMP_THRESHOLD 100000
@@ -110,6 +121,44 @@ void ${kernelName}(IndexType totalElements, void ** args) {
   ${kernelName}_kernel(totalElements ${,argument_loads});
 }
 )");
+
+// This snippet enables half support in the jit. Following the pattern for
+// reductions, fp16 input data is immediately upconverted to float
+// with __half2float(). All mathematical operations are done on float
+// values, and if needed the intermediate float representation is 
+// converted to half with __float2half() when writing to a half tensor.
+constexpr auto half_support_literal  = R"(    
+#define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
+#define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
+#if defined(__cplusplus)
+  struct __align__(2) __half {
+    __host__ __device__ __half() { }
+
+  protected:
+    unsigned short __x;
+  };
+
+  /* All intrinsic functions are only available to nvcc compilers */
+  #if defined(__CUDACC__)
+    /* Definitions of intrinsics */
+    __device__ __half __float2half(const float f) {
+      __half val;
+      asm("{  cvt.rn.f16.f32 %0, %1;}\n" : "=h"(__HALF_TO_US(val)) : "f"(f));
+      return val;
+    }
+
+    __device__ float __half2float(const __half h) {
+      float val;
+      asm("{  cvt.f32.f16 %0, %1;}\n" : "=f"(val) : "h"(__HALF_TO_CUS(h)));
+      return val;
+    }
+  #endif /* defined(__CUDACC__) */
+#endif /* defined(__cplusplus) */
+#undef __HALF_TO_US
+#undef __HALF_TO_CUS
+
+typedef __half half;
+)";
 
 // curDimIndex = linearId % sizes[i]; // % sizes[i] is not needed for d == 0, because we already guard for numel outside the index calculation
 // offset += curDimIndex*strides[i]; // *strides[i] is optional if list_is_cont becaause strides.back() == 1
@@ -149,10 +198,14 @@ std::string valueName(Value * n) {
 }
 
 const char * scalarTypeName(at::ScalarType type) {
+  if (type == at::ScalarType::Half) {
+    return "half";
+  }
+
   switch(type) {
     #define DEFINE_CASE(ctype,name,_) \
       case at::ScalarType::name: return #ctype;
-    AT_FORALL_SCALAR_TYPES(DEFINE_CASE)
+    AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(DEFINE_CASE)
     #undef DEFINE_CASE
     default:
       throw std::runtime_error("unknown scalar type");
@@ -164,6 +217,7 @@ std::string encodeRHS(Node * n) {
     // unary
     {aten::abs, "absf(${0})"},
     {aten::sigmoid, "1.f / (1.f + expf(-${0}))"},
+    {aten::relu, "${0} < 0 ? 0.f : ${0} "},
     {aten::log, "logf(${0})"},
     {aten::log10, "log10f(${0})"},
     {aten::log1p, "log1pf(${0})"},
@@ -206,10 +260,11 @@ std::string encodeRHS(Node * n) {
     {aten::div, "${0} / ${1}"},
     {aten::eq, "${0} == ${1}"},
     {aten::fmod, "fmodf(${0}, ${1})"},
-    {aten::ge, "${0} >= ${1})"},
+    {aten::ge, "(${0} >= ${1})"},
     {aten::gt, "${0} > ${1}"},
-    {aten::le, "${0} <= ${1})"},
+    {aten::le, "(${0} <= ${1})"},
     {aten::lt, "${0} < ${1}"},
+    {aten::type_as, "(${0})"}, //everything is implicitly convertible to float
     {aten::mul, "${0} * ${1}"},
     {aten::ne, "${0} != ${1}"},
     {aten::remainder, "remainderf(${0}, ${1})"},
@@ -305,14 +360,28 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
       }
     }
   }
+
+  bool has_half_tensor = false;
   size_t formal_count = 0;
   for(auto p : subgraph.inputs()) {
     env.s("node",valueName(p));
     env.d("formal",formal_count++);
-    env.s("access",format("t${formal}.data[t${formal}_offset]",env));
+
+    // Acquires and converts (if needed) inputs
+    auto pt = p->type()->cast<TensorType>();
+    if (use_cuda && pt && pt->scalarType() == at::ScalarType::Half) {
+      env.s(
+        "access"
+      , format("__half2float(t${formal}.data[t${formal}_offset])", env));
+      has_half_tensor = true;
+    } else {
+      env.s("access", format("t${formal}.data[t${formal}_offset]", env));
+    }
+    
     //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }
+
   for(auto n : subgraph.nodes()) {
     if(n->kind() == aten::cat)
       continue; // Concat nodes by narrowing the output Tensors before the kernel runs
@@ -320,12 +389,29 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
   }
+
   for(auto o : flat_output_nodes) {
     env.d("formal",formal_count++);
     env.s("access",format("t${formal}.data[t${formal}_offset]",env));
     env.s("node",valueName(o));
-    body << format("${access} = ${node};\n",env);
+
+    // Acquires and converts (if needed) outputs
+    auto ot = o->type()->cast<TensorType>();
+    if (use_cuda && ot && ot->scalarType() == at::ScalarType::Half) {
+      body << format("${access} = __float2half(${node});\n",env);
+      has_half_tensor = true;
+    } else {
+      body << format("${access} = ${node};\n",env);
+    }
   }
+
+  // Includes half support if any half tensors are involved
+  if (has_half_tensor) {
+    env.s("HalfHeader", half_support_literal);
+  } else {
+    env.s("HalfHeader", "");
+  }
+
   env.s("tensorOffsets",tensorOffsets.str());
   env.s("kernelBody",body.str());
   env.v("formals",formals);
@@ -336,6 +422,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
   } else {
     out << cpu_compilation_unit_template.format(env);
   }
+
   return concat_desc;
 }
 
@@ -412,7 +499,7 @@ void compressContiguous(
 } // anonymous namespace
 
 void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs, at::ArrayRef<at::Tensor> outputs) {
-  AutoGPU gpu_guard(inputs);
+  at::DeviceGuard device_guard(inputs);
   JIT_ASSERT(inputs.size() == input_desc.size());
   JIT_ASSERT(outputs.size() == output_desc.size());
   size_t flat_outputs_size = 0;
@@ -472,7 +559,7 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
 }
 
 void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector<at::Tensor> & outputs) {
-  AutoGPU guard(inputs.back());
+  at::DeviceGuard guard(inputs.back());
   outputs.clear();
   outputs.reserve(outputDescriptors().size());
   for(auto & od : outputDescriptors()) {
@@ -481,7 +568,7 @@ void CompiledFusionFunction::launch(at::ArrayRef<at::Tensor> inputs, std::vector
   launch_with_tensors(inputs, outputs);
 }
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 
 void checkCUDAVersion(const cudaDeviceProp & prop) {
   if ((prop.major >= 6 && CUDA_VERSION < 8000) ||
@@ -497,7 +584,7 @@ void checkCUDAVersion(const cudaDeviceProp & prop) {
 struct CUDAFusionFunction : public CompiledFusionFunction {
   CUDAFusionFunction(const std::string & name, AnnotatedGraph & agraph)
   : CompiledFusionFunction(name, agraph) {
-    AutoGPU gpu_guard(agraph.device);
+    at::DeviceGuard device_guard(agraph.device);
 
     TORCH_CUDA_CHECK(cudaGetDeviceProperties(&prop, agraph.device));
     checkCUDAVersion(prop);
@@ -661,7 +748,7 @@ static const std::string compile_string =
 #ifndef __PPC64__
   "-march=native "
 #endif
-  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\"";
+  "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
 static void runCompiler(FusionCompilerConfig & config, const std::string & cpp_file, const std::string & so_file) {
   TemplateEnv env;
@@ -736,7 +823,7 @@ std::shared_ptr<CompiledFusionFunction> FusionCompiler::getOrCompile(AnnotatedGr
     std::string name = "kernel_" + std::to_string(cache.size());
     CompiledFusionFunction * raw_func;
     if(agraph.device != kCPUDevice) {
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
       raw_func = new CUDAFusionFunction(name, agraph);
 #else
       throw std::runtime_error("cannot compile a CUDA fusion group, CUDA is not enabled.");
@@ -823,7 +910,7 @@ FusionCompiler & sharedFusionCompiler() {
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "ATen/ATen.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>

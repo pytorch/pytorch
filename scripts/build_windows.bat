@@ -37,6 +37,9 @@ if NOT DEFINED CMAKE_GENERATOR (
   )
 )
 
+:: Install pyyaml for Aten codegen
+pip install pyyaml
+
 echo CAFFE2_ROOT=%CAFFE2_ROOT%
 echo CMAKE_GENERATOR=%CMAKE_GENERATOR%
 echo CMAKE_BUILD_TYPE=%CMAKE_BUILD_TYPE%

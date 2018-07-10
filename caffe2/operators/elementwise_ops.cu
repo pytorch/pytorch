@@ -172,6 +172,12 @@ bool SumReduceLikeOp<CUDAContext>::DoRunWithType() {
   C->ResizeLike(B);
   const T* Adata = A.template data<T>();
   auto* Cdata = C->template mutable_data<T>();
+
+  if (C->size() == 0) {
+    // output is empty, nothing to do, not even launching the CUDA kernel
+    return true;
+  }
+
   if (B.size() == 1) {
     device_reduce<T>(Adata, Cdata, count, &sum_buffer_, &context_);
   } else {

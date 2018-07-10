@@ -3,8 +3,8 @@
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
 #include <torch/nn/modules/any.h>
-
-#include <torch/csrc/autograd/variable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
 #include <ATen/Error.h>
 
@@ -20,9 +20,10 @@ namespace nn {
 /// A `Sequential` module is a container for any number of other modules. Its
 /// `forward()` method chains outputs to inputs and returns the final output.
 /// The `Sequential` class reference semantics.
-class Sequential : public CloneableModule<Sequential> {
+class Sequential : public Cloneable<Sequential> {
  public:
   using Iterator = std::vector<std::shared_ptr<AnyModule>>::iterator;
+  using ConstIterator = std::vector<std::shared_ptr<AnyModule>>::const_iterator;
 
   /// Constructs the `Sequential` from a pack of modules. Each module can either
   /// be a plain value (e.g. `Linear`) or a boxed value (e.g.
@@ -42,7 +43,7 @@ class Sequential : public CloneableModule<Sequential> {
 
   /// Feeds the `inputs` to the first module, then chains the output of each
   /// module with the input of the next, in order of construction.
-  template <typename ReturnType = autograd::Variable, typename... ArgumentTypes>
+  template <typename ReturnType = Tensor, typename... ArgumentTypes>
   ReturnType forward(ArgumentTypes&&... arguments) {
     AT_CHECK(!is_empty(), "Cannot call forward() on an empty Sequential");
 
@@ -80,17 +81,15 @@ class Sequential : public CloneableModule<Sequential> {
     static_assert(
         torch::detail::has_forward<ModuleType>::value,
         "Can only add modules with a forward() method to Sequential");
-    modules_.push_back(std::make_shared<AnyModule>(std::move(module_ptr)));
-    const auto index = modules_.size() - 1;
-    register_module(std::to_string(index), modules_[index]->ptr());
+    push_back(std::make_shared<AnyModule>(std::move(module_ptr)));
   }
 
   /// Adds a new `Module` to the `Sequential` container, moving or copying it
   /// into a `shared_ptr` internally. This method allows passing value types,
   /// and letting the container deal with the boxing. This means you can write
-  /// `Sequential(Linear(3, 4), ReLU())` instead of
-  /// `Sequential(std::make_shared<Linear>(3, 4), std::make_shared<ReLU>())`.
-  template <typename M>
+  /// `Sequential(Module(3, 4))` instead of
+  /// `Sequential(std::make_shared<Module>(3, 4))`.
+  template <typename M, typename = torch::detail::disable_if_module_holder_t<M>>
   void push_back(M&& module) {
     // Need to get rid of any reference components for make_unique.
     using Type = typename std::remove_reference<M>::type;
@@ -98,13 +97,42 @@ class Sequential : public CloneableModule<Sequential> {
     push_back(std::make_shared<Type>(std::forward<M>(module)));
   }
 
+  /// Unwraps the contained module of a `ModuleHolder` and adds it to the
+  /// `Sequential`.
+  template <typename M>
+  void push_back(const ModuleHolder<M>& module_holder) {
+    push_back(module_holder.ptr());
+  }
+
+  /// Adds a type-erased `AnyModule` to the `Sequential`.
+  void push_back(std::shared_ptr<AnyModule> any_module) {
+    modules_.push_back(std::move(any_module));
+    const auto index = modules_.size() - 1;
+    register_module(std::to_string(index), modules_[index]->ptr());
+  }
+
+  /// Iterates over the container and calls `push_back()` on each iterated
+  /// value.
+  template <typename Container>
+  void extend(const Container& container) {
+    for (const auto& module : container) {
+      push_back(module);
+    }
+  }
+
   /// Returns an iterator to the start of the `Sequential`.
   Iterator begin() {
+    return modules_.begin();
+  }
+  ConstIterator begin() const {
     return modules_.begin();
   }
 
   /// Returns an iterator to the end of the `Sequential`.
   Iterator end() {
+    return modules_.end();
+  }
+  ConstIterator end() const {
     return modules_.end();
   }
 

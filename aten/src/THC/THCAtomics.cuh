@@ -5,6 +5,8 @@
 #include "THCHalf.h"
 #include "THCNumerics.cuh"
 
+namespace at { struct Half; }
+
 template <typename T, size_t n>
 struct AtomicAddIntegerImpl;
 
@@ -103,7 +105,7 @@ static inline  __device__ void atomicAdd(half *address, half val) {
 
   do {
     assumed = old;
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
     half hsum;
     hsum.x = (size_t)address & 2 ? (old >> 16) : (old & 0xffff);
     hsum = THCNumerics<half>::add(hsum, val);
@@ -116,6 +118,9 @@ static inline  __device__ void atomicAdd(half *address, half val) {
     old = (size_t)address & 2 ? (old & 0xffff) | (hsum.x << 16) : (old & 0xffff0000) | hsum.x;
     old = atomicCAS(address_as_ui, assumed, old);
   } while (assumed != old);
+}
+static inline __device__ void atomicAdd(at::Half *address, half val) {
+  return atomicAdd(reinterpret_cast<half*>(address), val);
 }
 #endif
 
@@ -135,7 +140,7 @@ static inline  __device__  void atomicAdd(double *address, double val) {
     // Note: uses integer comparison to avoid hang in case of NaN (since NaN != NaN)
 } while (assumed != old);
 }
-#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000)
+#elif !defined(__CUDA_ARCH__) && (CUDA_VERSION < 8000) || defined(__HIP_PLATFORM_HCC__)
   // This needs to be defined for the host side pass
   static inline  __device__  void atomicAdd(double *address, double val) { }
 #endif

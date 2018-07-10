@@ -12,12 +12,20 @@ namespace caffe2 {
 AsyncSchedulingNet::AsyncSchedulingNet(
     const std::shared_ptr<const NetDef>& net_def,
     Workspace* ws)
-    : AsyncNetBase(net_def, ws), running_(false) {}
+    : AsyncNetBase(net_def, ws), running_(false), use_dfs_scheduling_(false) {
+  for (int arg_idx = 0; arg_idx < net_def->arg_size(); ++arg_idx) {
+    auto& arg = net_def->arg(arg_idx);
+    if (arg.has_name() && arg.name() == "deferrable_mode") {
+      CAFFE_ENFORCE(arg.has_i(), "deferrable_mode should be an int");
+      use_dfs_scheduling_ = arg.i() == 1; // corr. to DFS scheduling
+      break;
+    }
+  }
+}
 
 void AsyncSchedulingNet::reset() {
   AsyncNetBase::reset();
   processed_tasks_num_ = 0;
-  success_ = true;
 }
 
 void AsyncSchedulingNet::Wait() {
@@ -27,20 +35,17 @@ void AsyncSchedulingNet::Wait() {
   }
 }
 
-void AsyncSchedulingNet::schedule(int task_id) {
+void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
   if (!testAndSetScheduled(task_id)) {
     return;
   }
-  const auto& device_option = event(task_id).GetDeviceOption();
-  pool(device_option)->run([this, task_id]() {
+  auto schedule_func = [this, task_id]() {
     if (success_) {
       int stream_id = 0;
       if (streams_per_gpu_ > 1) {
         stream_id = stream(task_id);
       }
-      try {
-        run(task_id, stream_id);
-      } catch (const std::exception& e) {
+      if (!run(task_id, stream_id)) {
         success_ = false;
       }
     }
@@ -56,7 +61,9 @@ void AsyncSchedulingNet::schedule(int task_id) {
         // - in all other cases, check parents with canSchedule
         if (!success_ || always_schedule_child_ || finish_chain_ ||
             canSchedule(child_id)) {
-          schedule(child_id);
+          // if DFS scheduling is enabled, run children inline,
+          // ignore DFS scheduling in callbacks
+          schedule(child_id, use_dfs_scheduling_);
         } else {
           bool parent_failed = false;
           bool parent_needs_polling = false;
@@ -95,7 +102,7 @@ void AsyncSchedulingNet::schedule(int task_id) {
           if (parent_failed) {
             // one of parents failed, set failure flag and wrap up execution
             success_ = false;
-            schedule(child_id);
+            schedule(child_id, use_dfs_scheduling_);
           } else if (parent_needs_polling) {
             // some parents are blocking us from scheduling a child and don't
             // support callbacks, using polling
@@ -112,7 +119,7 @@ void AsyncSchedulingNet::schedule(int task_id) {
             }
           } else {
             // we're ready to schedule a child
-            schedule(child_id);
+            schedule(child_id, use_dfs_scheduling_);
           }
         }
       }
@@ -127,7 +134,14 @@ void AsyncSchedulingNet::schedule(int task_id) {
     if (cur_processed_tasks == tasks_num) {
       finishRun();
     }
-  });
+  };
+
+  if (run_inline) {
+    schedule_func();
+  } else {
+    const auto& device_option = event(task_id).GetDeviceOption();
+    pool(device_option)->run(schedule_func);
+  }
 }
 
 void AsyncSchedulingNet::parentCallback(int parent_id) {
@@ -201,6 +215,10 @@ bool AsyncSchedulingNet::RunAsync() {
 
   if (tasksNum() == 0) {
     finishRun();
+  }
+
+  if (is_blocking_) {
+    Wait();
   }
 
   return true;

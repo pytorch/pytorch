@@ -66,10 +66,10 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
   real *input_data;
   real *output_data;
 
-  THNN_ARGCHECK(input->nDimension == 3 || input->nDimension == 4, 2, input,
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
 		"3D or 4D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -94,7 +94,7 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
   input = THTensor_(newContiguous)(input);
 
   /* resize output */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THTensor_(resize3d)(output, nslices, oheight, owidth);
 
@@ -198,7 +198,7 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
   int64_t oheight;
   int64_t owidth;
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -228,7 +228,7 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
   THTensor_(zero)(gradInput);
 
   /* backprop */
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     THNN_(SpatialReplicationPadding_updateGradInput_frame)(
       THTensor_(data)(gradInput),
       THTensor_(data)(gradOutput),

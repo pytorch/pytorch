@@ -56,13 +56,17 @@
 # define TH_UNUSED
 #endif
 
+#if defined(__clang__)
+#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+#else
+#define __ubsan_ignore_float_divide_by_zero__
+#endif
+
 #ifndef M_PI
 # define M_PI 3.14159265358979323846
 #endif
 
-#ifndef TH_INDEX_BASE
-#define TH_INDEX_BASE 1
-#endif
+#define TH_INDEX_BASE 0
 
 typedef void (*THErrorHandlerFunction)(const char *msg, void *data);
 typedef void (*THArgErrorHandlerFunction)(int argNumber, const char *msg, void *data);

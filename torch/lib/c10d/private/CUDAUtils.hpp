@@ -7,7 +7,7 @@
 #include <cuda_runtime.h>
 
 #include <ATen/ATen.h>
-#include <THCStream.h>
+#include <THC/THCStream.h>
 
 #include "../CUDAUtils.hpp"
 

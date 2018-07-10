@@ -1,5 +1,5 @@
 diff --git a/aten/src/THC/generic/THCTensorRandom.cu b/aten/src/THC/generic/THCTensorRandom.cu
-index 906780b4f..c99f156ab 100644
+index 906780b4f..b03e051cb 100644
 --- a/aten/src/THC/generic/THCTensorRandom.cu
 +++ b/aten/src/THC/generic/THCTensorRandom.cu
 @@ -504,11 +504,11 @@ THC_API void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_
@@ -7,7 +7,7 @@ index 906780b4f..c99f156ab 100644
    if (range > 1ULL << 32) {
      generate_random_64<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
 -        gen->state.gen_states, size, data, min_val, range);
-+        gen->state.gen_states, static_cast<int>(size), data, static_cast<std::conditional<std::is_same<real,float>::value, float, double>::type>(min_val), static_cast<std::conditional<std::is_same<real,float>::value, float, double>::type>(range));
++        gen->state.gen_states, static_cast<int>(size), data, min_val, range);
    } else {
  #endif
      generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
@@ -17,7 +17,7 @@ index 906780b4f..c99f156ab 100644
    }
  #endif
 @@ -534,19 +534,19 @@ THC_API void THCTensor_(random)(THCState* state, THCTensor *self_)
-
+ 
  #if defined(THC_REAL_IS_HALF)
    generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
 -      gen->state.gen_states, size, data, 0UL, (1UL << HLF_MANT_DIG) + 1);
@@ -39,5 +39,5 @@ index 906780b4f..c99f156ab 100644
 -      gen->state.gen_states, size, data, 0UL, static_cast<uint32_t>(std::numeric_limits<real>::max()) + 1);
 +      gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(0UL), static_cast<uint32_t>(std::numeric_limits<real>::max()) + 1);
  #endif
-
+ 
    THCTensor_(freeCopyTo)(state, self, self_);

@@ -6,6 +6,7 @@ from __future__ import unicode_literals
 import copy
 from caffe2.proto import caffe2_pb2
 from caffe2.python import core
+import caffe2.python._import_c_extension as C
 
 
 def rewrite_init_net_simple(net, ideep=True):
@@ -18,6 +19,21 @@ def last_producer(ops, blob):
         if blob in op.output:
             return i
     raise ValueError("Failed to find last producer of blob, %s", blob)
+
+
+def fix_BoxWithNMSLimit(net):
+    outputs = set()
+    for op in net.op:
+        if op.type == 'BoxWithNMSLimit':
+            outputs.add(op.output[0])
+            outputs.add(op.output[1])
+            outputs.add(op.output[2])
+    for op in net.op:
+        if op.type == 'CopyIDEEPToCPU':
+            if op.input[0] in outputs:
+                print("Chaning CopyIDEEPToCPU to Copy for {}".format(op.input[0]))
+                op.type = 'Copy'
+                op.device_option.device_type = caffe2_pb2.CPU
 
 
 def rewrite_run_net_simple(net, ideep=True):
@@ -62,6 +78,12 @@ def rewrite_run_net_simple(net, ideep=True):
         op.device_option.MergeFrom(
             core.DeviceOption(device_type=device))
         op.engine = ""
+
+    if ideep:
+        # Temporarily disbale conv+relu fusion until we verify further
+        # net.ParseFromString(
+        #     C.transform_optimizeForIDEEP(net.SerializeToString()))
+        fix_BoxWithNMSLimit(net)
 
 
 def rewrite_model_helper_simple(model, ideep=True):

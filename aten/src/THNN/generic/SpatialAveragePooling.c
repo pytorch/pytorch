@@ -12,7 +12,7 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -23,8 +23,8 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
     dimw++;
   }
 
-  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
-		"3D or 4D input tensor expected but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+		"non-empty 3D or 4D input tensor expected but got: %s");
 
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
 	     "pad should be smaller than half of kernel size, but got "
@@ -102,7 +102,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   THNN_(SpatialAveragePooling_shapeCheck)
     (input, NULL, kH, kW, dH, dW, padH, padW, ceil_mode);
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     nbatch = input->size[0];
     dimw++;
     dimh++;
@@ -133,7 +133,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
       --outputWidth;
   }
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
   else
     THTensor_(resize4d)(output, input->size[0], nInputPlane, outputHeight, outputWidth);
@@ -231,7 +231,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
     (input, gradOutput, kH, kW, dH, dW, padH, padW, ceil_mode);
 
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     nbatch = input->size[0];
     dimw++;
     dimh++;

@@ -29,13 +29,13 @@ struct Vec256<int64_t> : public Vec256i {
     __at_align32__ int64_t tmp_values[size];
     a.store(tmp_values);
     if (mask & 0x01)
-      tmp_values[0] = _mm256_extract_epi16(b.values, 0);
+      tmp_values[0] = _mm256_extract_epi64(b.values, 0);
     if (mask & 0x02)
-      tmp_values[1] = _mm256_extract_epi16(b.values, 1);
+      tmp_values[1] = _mm256_extract_epi64(b.values, 1);
     if (mask & 0x04)
-      tmp_values[2] = _mm256_extract_epi16(b.values, 2);
+      tmp_values[2] = _mm256_extract_epi64(b.values, 2);
     if (mask & 0x08)
-      tmp_values[3] = _mm256_extract_epi16(b.values, 3);
+      tmp_values[3] = _mm256_extract_epi64(b.values, 3);
     return loadu(tmp_values);
   }
   static Vec256<int64_t>

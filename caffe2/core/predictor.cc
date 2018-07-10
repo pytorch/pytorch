@@ -92,8 +92,9 @@ Predictor::Predictor(
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   }
-
+#if CAFFE2_MOBILE
   GlobalInit();
+#endif
 
   if (optimization) {
 #ifdef CAFFE2_OPTIMIZER

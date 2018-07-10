@@ -4,6 +4,7 @@
 #include "THCTensorCopy.h"
 #include "THCReduceApplyUtils.cuh"
 #include "THCTensorTypeUtils.cuh"
+#include "THCTensorCopy.hpp"
 
 //
 // This file contains pointwise operation functions and kernels that
@@ -189,12 +190,11 @@ bool THC_pointwiseApply1(THCState* state,
                          TensorTypeA* a,
                          const Op& op,
                          TensorArgType aType = ReadWrite) {
-  static_assert(std::is_same<ScalarTypeA, typename TensorUtils<TensorTypeA>::DataType>::value, "ScalarTypeA must match");
-  if (THCTensor_nDimension(state, a) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, a) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) == 0) {
+  if (THCTensor__nDimension(state, a) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -221,7 +221,7 @@ bool THC_pointwiseApply1(THCState* state,
       THCTensor_maybeOverlappingIndices(state, a)) {
     // Must perform in contiguous space
     oldA = a;
-    a = TensorUtils<TensorTypeA>::newContiguous(state, a);
+    a = (TensorTypeA*)THCTensor_newContiguous<ScalarTypeA>(state, a);
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -309,7 +309,7 @@ bool THC_pointwiseApply1(THCState* state,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    TensorUtils<TensorTypeA>::copyIgnoringOverlaps(state, oldA, a);
+    THCTensor_copyIgnoringOverlaps<ScalarTypeA>(state, oldA, a);
     THCTensor_free(state, a);
     a = oldA;
   }
@@ -328,20 +328,17 @@ bool THC_pointwiseApply2(THCState* state,
                          const Op& op,
                          TensorArgType aType = ReadWrite,
                          TensorArgType bType = ReadOnly) {
-  static_assert(std::is_same<ScalarTypeA, typename TensorUtils<TensorTypeA>::DataType>::value, "ScalarTypeA must match");
-  static_assert(std::is_same<ScalarTypeB, typename TensorUtils<TensorTypeB>::DataType>::value, "ScalarTypeB must match");
-
   ptrdiff_t totalElements = THCTensor_nElement(state, a);
   if (totalElements != THCTensor_nElement(state, b)) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) > MAX_CUTORCH_DIMS ||
-      THCTensor_nDimension(state, b) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, a) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, b) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) == 0) {
+  if (THCTensor__nDimension(state, a) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -367,13 +364,13 @@ bool THC_pointwiseApply2(THCState* state,
       THCTensor_maybeOverlappingIndices(state, a)) {
     // Must perform in contiguous space
     oldA = a;
-    a = TensorUtils<TensorTypeA>::newContiguous(state, a);
+    a = (TensorTypeA*)THCTensor_newContiguous<ScalarTypeA>(state, a);
   }
   if (bType == ReadWrite &&
       THCTensor_maybeOverlappingIndices(state, b)) {
     // Must perform in contiguous space
     oldB = b;
-    b = TensorUtils<TensorTypeB>::newContiguous(state, b);
+    b = (TensorTypeB*)THCTensor_newContiguous<ScalarTypeB>(state, b);
   }
 
   // It is possible that the tensor dimensions are able to be collapsed,
@@ -491,7 +488,7 @@ bool THC_pointwiseApply2(THCState* state,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    TensorUtils<TensorTypeA>::copyIgnoringOverlaps(state, oldA, a);
+    THCTensor_copyIgnoringOverlaps<ScalarTypeA>(state, oldA, a);
     THCTensor_free(state, a);
     a = oldA;
   }
@@ -500,7 +497,7 @@ bool THC_pointwiseApply2(THCState* state,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    TensorUtils<TensorTypeB>::copyIgnoringOverlaps(state, oldB, b);
+    THCTensor_copyIgnoringOverlaps<ScalarTypeB>(state, oldB, b);
     THCTensor_free(state, b);
     b = oldB;
   }
@@ -523,10 +520,6 @@ bool THC_pointwiseApply3(THCState* state,
                          TensorArgType aType = ReadWrite,
                          TensorArgType bType = ReadOnly,
                          TensorArgType cType = ReadOnly) {
-  static_assert(std::is_same<ScalarTypeA, typename TensorUtils<TensorTypeA>::DataType>::value, "ScalarTypeA must match");
-  static_assert(std::is_same<ScalarTypeB, typename TensorUtils<TensorTypeB>::DataType>::value, "ScalarTypeB must match");
-  static_assert(std::is_same<ScalarTypeC, typename TensorUtils<TensorTypeC>::DataType>::value, "ScalarTypeB must match");
-
   ptrdiff_t totalElements = THCTensor_nElement(state, a);
 
   if (totalElements != THCTensor_nElement(state, b) ||
@@ -534,13 +527,13 @@ bool THC_pointwiseApply3(THCState* state,
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) > MAX_CUTORCH_DIMS ||
-      THCTensor_nDimension(state, b) > MAX_CUTORCH_DIMS ||
-      THCTensor_nDimension(state, c) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, a) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, b) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, c) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) == 0) {
+  if (THCTensor__nDimension(state, a) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -567,19 +560,19 @@ bool THC_pointwiseApply3(THCState* state,
       THCTensor_maybeOverlappingIndices(state, a)) {
     // Must perform in contiguous space
     oldA = a;
-    a = TensorUtils<TensorTypeA>::newContiguous(state, a);
+    a = (TensorTypeA*)THCTensor_newContiguous<ScalarTypeA>(state, a);
   }
   if (bType == ReadWrite &&
       THCTensor_maybeOverlappingIndices(state, b)) {
     // Must perform in contiguous space
     oldB = b;
-    b = TensorUtils<TensorTypeB>::newContiguous(state, b);
+    b = (TensorTypeB*)THCTensor_newContiguous<ScalarTypeB>(state, b);
   }
   if (cType == ReadWrite &&
       THCTensor_maybeOverlappingIndices(state, c)) {
     // Must perform in contiguous space
     oldC = c;
-    c = TensorUtils<TensorTypeC>::newContiguous(state, c);
+    c = (TensorTypeC*)THCTensor_newContiguous<ScalarTypeC>(state, c);
   }
 
 #define HANDLE_CASE(TYPE, A, B, C)                                      \
@@ -723,7 +716,7 @@ bool THC_pointwiseApply3(THCState* state,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldA contiguous.
-    TensorUtils<TensorTypeA>::copyIgnoringOverlaps(state, oldA, a);
+    THCTensor_copyIgnoringOverlaps<ScalarTypeA>(state, oldA, a);
     THCTensor_free(state, a);
     a = oldA;
   }
@@ -732,7 +725,7 @@ bool THC_pointwiseApply3(THCState* state,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldB contiguous.
-    TensorUtils<TensorTypeB>::copyIgnoringOverlaps(state, oldB, b);
+    THCTensor_copyIgnoringOverlaps<ScalarTypeB>(state, oldB, b);
     THCTensor_free(state, b);
     b = oldB;
   }
@@ -741,7 +734,7 @@ bool THC_pointwiseApply3(THCState* state,
     // Ignore overlaps when copying back; if we use THCTensor_copy
     // instead, it will recursively try and invoke ourselves to make
     // oldC contiguous.
-    TensorUtils<TensorTypeC>::copyIgnoringOverlaps(state, oldC, c);
+    THCTensor_copyIgnoringOverlaps<ScalarTypeC>(state, oldC, c);
     THCTensor_free(state, c);
     c = oldC;
   }

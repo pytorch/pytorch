@@ -13,8 +13,8 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
                          int padT, int padH, int padW,
                          int dilationT, int dilationH, int dilationW,
                          int weight_nullable) {
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
-                  "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
+                  "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 8,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 11,
@@ -27,8 +27,8 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
 
    // number of input & output planes and kernel size is indirectly defined by the weight tensor
   if (weight != NULL) {
-    THCUNN_argCheck(state, weight->nDimension == 5, 4, weight,
-                  "5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
+    THCUNN_argCheck(state, !weight->is_empty() && weight->dim() == 5, 4, weight,
+                  "non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
                   "expected for weight, but got: %s");
     if (bias != NULL) {
       THCUNN_check_dim_size(state, bias, 1, 0, weight->size[0]);
@@ -37,7 +37,7 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimd = 1;
   int dimh = 2;
@@ -113,7 +113,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   bias = bias ? THCTensor_(newContiguous)(state, bias) : bias;
 
   int is_batch = 1;
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
     THCTensor_(resize5d)(state, input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
@@ -138,7 +138,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THCTensor_(resize3d)(state, ones, outputDepth, outputHeight, outputWidth);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
@@ -262,7 +262,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   int is_batch = 1;
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
     THCTensor_(resize5d)(state, input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
@@ -372,7 +372,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   int is_batch = 1;
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
     THCTensor_(resize5d)(state, input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
@@ -392,7 +392,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->nDimension != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
+  if (ones->dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THCTensor_(resize3d)(state, ones, outputDepth, outputHeight, outputWidth);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));

@@ -248,7 +248,7 @@ class RNN(RNNBase):
     where :math:`h_t` is the hidden state at time `t`, :math:`x_t` is
     the input at time `t`, and :math:`h_{(t-1)}` is the hidden state of the
     previous layer at time `t-1` or the initial hidden state at time `0`.
-    If :attr:`nonlinearity`='relu', then `ReLU` is used instead of `tanh`.
+    If :attr:`nonlinearity` is `'relu'`, then `ReLU` is used instead of `tanh`.
 
     Args:
         input_size: The number of expected features in the input `x`
@@ -261,7 +261,7 @@ class RNN(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            as `(batch, seq, feature)`
+            as `(batch, seq, feature)`. Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             RNN layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -364,7 +364,7 @@ class LSTM(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            as (batch, seq, feature)
+            as (batch, seq, feature). Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             LSTM layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -457,7 +457,7 @@ class GRU(RNNBase):
         bias: If ``False``, then the layer does not use bias weights `b_ih` and `b_hh`.
             Default: ``True``
         batch_first: If ``True``, then the input and output tensors are provided
-            as (batch, seq, feature)
+            as (batch, seq, feature). Default: ``False``
         dropout: If non-zero, introduces a `Dropout` layer on the outputs of each
             GRU layer except the last layer, with dropout probability equal to
             :attr:`dropout`. Default: 0
@@ -544,7 +544,7 @@ class RNNCell(RNNCellBase):
 
         h' = \tanh(w_{ih} x + b_{ih}  +  w_{hh} h + b_{hh})
 
-    If :attr:`nonlinearity`='relu', then ReLU is used in place of tanh.
+    If :attr:`nonlinearity` is `'relu'`, then ReLU is used in place of tanh.
 
     Args:
         input_size: The number of expected features in the input `x`
@@ -603,8 +603,10 @@ class RNNCell(RNNCellBase):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, hx):
+    def forward(self, input, hx=None):
         self.check_forward_input(input)
+        if hx is None:
+            hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
         if self.nonlinearity == "tanh":
             func = self._backend.RNNTanhCell
@@ -698,8 +700,11 @@ class LSTMCell(RNNCellBase):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, hx):
+    def forward(self, input, hx=None):
         self.check_forward_input(input)
+        if hx is None:
+            hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
+            hx = (hx, hx)
         self.check_forward_hidden(input, hx[0], '[0]')
         self.check_forward_hidden(input, hx[1], '[1]')
         return self._backend.LSTMCell(
@@ -778,8 +783,10 @@ class GRUCell(RNNCellBase):
         for weight in self.parameters():
             weight.data.uniform_(-stdv, stdv)
 
-    def forward(self, input, hx):
+    def forward(self, input, hx=None):
         self.check_forward_input(input)
+        if hx is None:
+            hx = input.new_zeros(input.size(0), self.hidden_size, requires_grad=False)
         self.check_forward_hidden(input, hx)
         return self._backend.GRUCell(
             input, hx,

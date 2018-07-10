@@ -247,6 +247,12 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
   FormatGuard guard(stream);
   if(!tensor_.defined()) {
     stream << "[ Tensor (undefined) ]";
+  } else if (tensor_.is_sparse()) {
+    stream << "[ " << tensor_.pImpl->toString() << "{}\n";
+    stream << "indices:\n" << tensor_._indices() << "\n";
+    stream << "values:\n" << tensor_._values() << "\n";
+    stream << "size:\n" << tensor_.sizes() << "\n";
+    stream << "]";
   } else {
     Type& cpudouble = tensor_.type().toBackend(kCPU).toScalarType(kDouble);
     Tensor tensor = tensor_.toType(cpudouble).contiguous();
@@ -254,10 +260,7 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
       stream << defaultfloat << tensor.data<double>()[0] << std::endl;
       stream << "[ " << tensor_.pImpl->toString() << "{} ]";
     } else if(tensor.ndimension() == 1) {
-      if (tensor.numel() == 0) {
-        stream << "[ Tensor (empty) ]";
-      }
-      else {
+      if (tensor.numel() > 0) {
         double scale;
         int64_t sz;
         std::tie(scale, sz) =  __printFormat(stream, tensor);
@@ -268,18 +271,22 @@ std::ostream& print(std::ostream& stream, const Tensor & tensor_, int64_t linesi
         for(int64_t i = 0; i < tensor.size(0); i++) {
           stream << std::setw(sz) << tensor_p[i]/scale << std::endl;
         }
-        stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "} ]";
       }
+      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "} ]";
     } else if(tensor.ndimension() == 2) {
-      __printMatrix(stream, tensor, linesize, 0);
+      if (tensor.numel() > 0) {
+        __printMatrix(stream, tensor, linesize, 0);
+      }
       stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0) << "," <<  tensor.size(1) << "} ]";
     } else {
+      if (tensor.numel() > 0) {
         __printTensor(stream, tensor, linesize);
-        stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0);
-        for(int64_t i = 1; i < tensor.ndimension(); i++) {
-          stream << "," << tensor.size(i);
-        }
-        stream << "} ]";
+      }
+      stream << "[ " << tensor_.pImpl->toString() << "{" << tensor.size(0);
+      for(int64_t i = 1; i < tensor.ndimension(); i++) {
+        stream << "," << tensor.size(i);
+      }
+      stream << "} ]";
     }
   }
   return stream;

@@ -6,13 +6,8 @@
 #
 import re
 from .utils import nested_dict, CodeTemplate, write
-from .gen_autograd import VIEW_FUNCTIONS, template_path
+from .gen_autograd import VIEW_FUNCTIONS
 from .utils import IDENT_REGEX
-
-FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
-FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
-PY_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_functions.h')
-PY_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_functions.cpp')
 
 FUNCTION_DECLARATION = CodeTemplate("""\
 struct ${op} : public ${superclass} {
@@ -86,12 +81,18 @@ if (should_compute_output({ ${idx_ranges} })) {
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
-def gen_autograd_functions(out, autograd_functions):
+def gen_autograd_functions(out, autograd_functions, template_path):
     """Functions.h and Functions.cpp body
 
     These contain the auto-generated subclasses of torch::autograd::Function
     for each every differentiable torch function.
     """
+
+    FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
+    FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
+    PY_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_functions.h')
+    PY_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_functions.cpp')
+
     function_definitions = []
     function_declarations = []
     py_function_initializers = []

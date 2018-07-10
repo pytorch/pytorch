@@ -5,6 +5,8 @@ import re
 import unittest
 import sys
 from itertools import repeat
+import os
+from contextlib import contextmanager
 
 import torch
 import torch.cuda
@@ -12,7 +14,8 @@ import torch.cuda.comm as comm
 from torch import multiprocessing as mp
 
 from test_torch import TestTorch
-from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, PY3
+from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
+    PY3, IS_WINDOWS, NO_MULTIPROCESSING_SPAWN
 
 # We cannot import TEST_CUDA and TEST_MULTIGPU from common_cuda here,
 # because if we do that, the TEST_CUDNN line from common_cuda will be executed
@@ -101,7 +104,14 @@ M = 50
 
 
 def make_tensor(t, *sizes):
-    return t(*sizes).copy_(torch.randn(*sizes))
+    if 'Half' in t.__name__:
+        return t(*sizes).copy_(torch.randn(*sizes))
+    else:
+        tensor = t(*sizes)
+        if tensor.is_floating_point():
+            return tensor.normal_()
+        else:
+            return tensor.random_(0, 10)
 
 
 def make_sparse_tensor(t, n, *sizes):
@@ -405,10 +415,14 @@ tests = [
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [-2], 'neg_dim'),
     ('view', small_3d, lambda t: [100, 10], 'contiguous'),
-    ('view_as', small_3d, lambda t: [t(100, 10)],),
+    ('view_as', small_3d, lambda t: [make_tensor(t, 100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
+    ('flip', small_3d, lambda t: [0], 'd0', types, True),
+    ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
+    ('flip', small_3d, lambda t: [0, 2], 'd02', types, True),
+    ('flip', small_3d, lambda t: [2, 0], 'd20', types, True),
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
@@ -427,6 +441,23 @@ tests = [
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
     ('inverse', new_t(20, 20), lambda t: [], None, float_types, False),
     ('geqrf', new_t(20, 20), lambda t: [], None, float_types, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(10, 10), lambda t: [], 'square', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(10, 10)(t).t(), lambda t: [True], 'square_col_maj',
+        float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(20, 5), lambda t: [True], 'tall_some', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', new_t(20, 5), lambda t: [False], 'tall_all', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [True],
+        'tall_some_col_maj', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('svd', lambda t: new_t(5, 20)(t).t(), lambda t: [False],
+        'tall_all_col_maj', float_types_no_half, False,
+        unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
+    ('eig', new_t(10, 10), lambda t: [True], 'with_eigvec', float_types_no_half, False,
         unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")),
 ]
 
@@ -771,7 +802,6 @@ class TestCuda(TestCase):
             w = torch.randn(5, 5).cuda()
             self.assertEqual(w.get_device(), 1)
             self.assertEqual(y.cuda().get_device(), 1)
-            self.assertEqual(y.cuda(-1).get_device(), 1)
         z = z.cuda()
         self.assertEqual(z.get_device(), 0)
 
@@ -855,6 +885,8 @@ class TestCuda(TestCase):
         for i, t in enumerate(result):
             self.assertEqual(t.get_device(), i)
             self.assertEqual(t, input)
+            if input.is_cuda and input.get_device() == i:
+                self.assertEqual(t.data_ptr(), input.data_ptr())
 
     def test_broadcast_cpu(self):
         self._test_broadcast(torch.randn(5, 5))
@@ -1105,6 +1137,9 @@ class TestCuda(TestCase):
         y = torch.randn(1, SIZE, SIZE).cuda()
         z = torch.cat([x, y])
         self.assertEqual(z.size(), (21, SIZE, SIZE))
+
+    def test_cat_empty_legacy(self):
+        TestTorch._test_cat_empty_legacy(self, use_cuda=True)
 
     def test_cat_empty(self):
         TestTorch._test_cat_empty(self, use_cuda=True)
@@ -1358,6 +1393,10 @@ class TestCuda(TestCase):
         return TestTorch._select_broadcastable_dims(dims_full)
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_pinverse(self):
+        TestTorch._test_pinverse(self, lambda t: t.cuda())
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):
         TestTorch._test_det_logdet_slogdet(self, lambda t: t.cuda())
 
@@ -1372,15 +1411,42 @@ class TestCuda(TestCase):
     def test_view(self):
         TestTorch._test_view(self, lambda t: t.cuda())
 
+    def test_flip(self):
+        TestTorch._test_flip(self, use_cuda=True)
+
+    def test_signal_window_functions(self):
+        TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))
+
     def test_fft_ifft_rfft_irfft(self):
-        def cuda_randn_double(*sizes):
-            return torch.cuda.DoubleTensor(*sizes).normal_()
-        TestTorch._test_fft_ifft_rfft_irfft(self, build_fn=cuda_randn_double)
+        TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        @contextmanager
+        def plan_cache_max_size(n):
+            original = torch.backends.cuda.cufft_plan_cache.max_size
+            torch.backends.cuda.cufft_plan_cache.max_size = n
+            yield
+            torch.backends.cuda.cufft_plan_cache.max_size = original
+
+        with plan_cache_max_size(max(1, torch.backends.cuda.cufft_plan_cache.size - 10)):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with plan_cache_max_size(0):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        torch.backends.cuda.cufft_plan_cache.clear()
+
+        # check that stll works after clearing cache
+        with plan_cache_max_size(10):
+            TestTorch._test_fft_ifft_rfft_irfft(self, device=torch.device('cuda'))
+
+        with self.assertRaisesRegex(RuntimeError, r"must be non-negative"):
+            torch.backends.cuda.cufft_plan_cache.max_size = -1
+
+        with self.assertRaisesRegex(RuntimeError, r"read-only property"):
+            torch.backends.cuda.cufft_plan_cache.size = -1
 
     def test_stft(self):
-        def cuda_randn_double(*sizes):
-            return torch.cuda.DoubleTensor(*sizes).normal_()
-        TestTorch._test_stft(self, build_fn=cuda_randn_double)
+        TestTorch._test_stft(self, device=torch.device('cuda'))
 
     def test_multinomial(self):
         TestTorch._test_multinomial(self, torch.cuda.FloatTensor)
@@ -1406,13 +1472,20 @@ class TestCuda(TestCase):
         sample = torch.multinomial(freqs, 1000, True)
         self.assertNotEqual(freqs[sample].min(), 0)
 
+    @staticmethod
+    def mute():
+        os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
+
     def _spawn_method(self, method, arg):
         try:
             mp.set_start_method('spawn')
         except RuntimeError:
             pass
-        with mp.Pool(1) as pool:
-            self.assertTrue(pool.map(method, [arg]))
+        with mp.Pool(1, initializer=self.mute) as pool:
+            errors = pool.map(method, [arg])
+            for e in errors:
+                if 'device-side assert triggered' not in str(e):
+                    self.fail(e)
 
     @staticmethod
     def _test_multinomial_invalid_probs_cuda(probs):
@@ -1422,8 +1495,11 @@ class TestCuda(TestCase):
                 torch.cuda.synchronize()
             return False  # Should not be reached
         except RuntimeError as e:
-            return 'device-side assert triggered' in str(e)
+            return e
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
+    @unittest.skipIf(IS_WINDOWS, 'FIXME: CUDA OOM error on Windows')
     @unittest.skipIf(not PY3,
                      "spawn start method is not supported in Python 2, \
                      but we need it for creating another process with CUDA")
@@ -1661,6 +1737,16 @@ class TestCuda(TestCase):
             torch.arange(0, 10, out=b)
             self.assertEqual(a, b.cuda())
 
+    def test_linspace(self):
+        a = torch.linspace(0, 10, 10, device='cuda')
+        b = torch.linspace(0, 10, 10)
+        self.assertEqual(a, b.cuda())
+
+    def test_logspace(self):
+        a = torch.logspace(1, 10, 10, device='cuda')
+        b = torch.logspace(1, 10, 10)
+        self.assertEqual(a, b.cuda())
+
     def test_diagonal(self):
         TestTorch._test_diagonal(self, dtype=torch.float32, device='cuda')
 
@@ -1737,6 +1823,27 @@ class TestCuda(TestCase):
                    stride=a.stride())
         a += 5
         self.assertEqual(a, b)
+
+    def test_bincount_cuda(self):
+        TestTorch._test_bincount(self, device='cuda')
+        # ensure CUDA code coverage
+        input_size = (5000,)
+        w = torch.randn(input_size, device='cuda')
+        w_cpu = w.cpu()
+        # test shared memory impl
+        t = torch.randint(50, input_size, dtype=torch.int8, device='cuda')
+        self.assertEqual(t.cpu().bincount(), t.bincount())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        # test multi block memory impl
+        # see `THRESH_NUMBER_BINS_FOR_MULTI_BLOCK_MEM` in SummaryOps.cu
+        t = torch.randint(500, input_size, dtype=torch.int64, device='cuda')
+        self.assertEqual(t.cpu().bincount(), t.bincount())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
+        # test global memory impl
+        # see `THRESH_NUMBER_BINS_FOR_GLOBAL_MEM` in SummaryOps.cu
+        t = torch.randint(2000, input_size, dtype=torch.int64, device='cuda')
+        self.assertEqual(t.cpu().bincount(), t.bincount())
+        self.assertEqual(t.cpu().bincount(w_cpu), t.bincount(w))
 
     def test_tiny_half_norm_(self):
         a = torch.arange(25).cuda().float()

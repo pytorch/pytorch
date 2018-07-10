@@ -330,7 +330,7 @@ void fixDefaultRNNState(Graph* graph, Node * n, int input_index) {
 
   Node * hidden_size = graph->create(onnx::Constant, 1);
   hidden_size->insertBefore(n);
-  hidden_size->t_(attr::value, at::CPU(at::kLong).tensor({1}).fill_(n->i(attr::hidden_size))); // at::Scalar(n->i(attr::hidden_size)).toTensor());
+  hidden_size->t_(attr::value, at::full({1}, n->i(attr::hidden_size), at::kLong)); // at::Scalar(n->i(attr::hidden_size)).toTensor());
 
   Node * num_directions = graph->create(onnx::Constant, 1);
   num_directions->insertBefore(n);

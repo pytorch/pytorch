@@ -12,6 +12,10 @@
 #include "caffe2/core/types.h"
 #include "caffe2/proto/caffe2.pb.h"
 
+#ifndef CAFFE2_USE_CUDNN
+#error("This Caffe2 install is not built with cudnn, so you should not include this file.");
+#endif
+
 static_assert(
     CUDNN_VERSION >= 5000,
     "Caffe2 requires cudnn version 5.0 or above.");

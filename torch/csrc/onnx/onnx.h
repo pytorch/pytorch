@@ -1,6 +1,6 @@
 #pragma once
 
-#include "torch/csrc/onnx/onnx.pb.h"
+#include "torch/csrc/onnx/onnx.npb.h"
 #include "torch/csrc/assertions.h"
 
 #include <pb_encode.h>
@@ -423,6 +423,13 @@ public:
     dump(ss, 0);
     return ss.str();
   }
+};
+
+enum class OperatorExportTypes {
+  ONNX, // Strict ONNX export
+  ONNX_ATEN, // ONNX With ATen op everywhere
+  ONNX_ATEN_FALLBACK, // ONNX export with ATen fallback
+  RAW, // Raw export (no ONNX)
 };
 
 }} // namespace torch::onnx

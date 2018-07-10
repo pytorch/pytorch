@@ -15,7 +15,7 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 11,
          "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -26,8 +26,8 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
     dimw++;
   }
 
-  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
-        "3D or 4D input tensor expected but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+        "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t nInputPlane = weight->size[2] / (kH * kW);
   int64_t nOutputPlane = weight->size[1];
@@ -50,9 +50,9 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
 static THTensor* THNN_(view_weight_local)(THTensor *_weight)
 {
   THTensor *weight = THTensor_(newContiguous)(_weight);
-  THArgCheck(weight->nDimension == 3 || weight->nDimension == 6, 4,
-          "weight tensor should be 3D or 6D - got %dD", weight->nDimension);
-  if (weight->nDimension == 6) {
+  AT_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6),
+           "weight tensor should be (non-empty) 3D or 6D - got size: ", weight->sizes());
+  if (weight->dim() == 6) {
     int64_t s1 = weight->size[0] * weight->size[1];
     int64_t s2 = weight->size[2];
     int64_t s3 = weight->size[3] * weight->size[4] * weight->size[5];
@@ -127,7 +127,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
   int64_t nInputPlane = THTensor_(size)(weight, 2)/ (kW * kH);
   int64_t nOutputPlane = THTensor_(size)(weight, 1);
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
   {
     THTensor_(resize2d)(finput, kW*kH*nInputPlane, outputHeight*outputWidth);
     THTensor_(resize3d)(output, nOutputPlane, outputHeight, outputWidth);
@@ -233,7 +233,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   THTensor *tweight = THTensor_(new)();
   THTensor_(transpose)(tweight, weight, 1, 2);
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
   {
     THNN_(SpatialConvolutionLocal_updateGradInput_frame)
       (gradInput, gradOutput, tweight,
@@ -329,7 +329,7 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
   int64_t nInputPlane = THTensor_(size)(gradWeight,2)/(kW*kH);
   int64_t nOutputPlane = THTensor_(size)(gradWeight,1);
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
   {
     THNN_(SpatialConvolutionLocal_accGradParameters_frame)
       (gradOutput, gradWeight, gradBias, finput, scale,

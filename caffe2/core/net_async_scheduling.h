@@ -18,7 +18,7 @@ class AsyncSchedulingNet : public AsyncNetBase {
   bool RunAsync() override;
 
   void pollAndSchedule(int task_id);
-  void schedule(int task_id);
+  void schedule(int task_id, bool run_inline = false);
   void reset() override;
   virtual void finishRun();
   void parentCallback(int parent_id);
@@ -26,7 +26,7 @@ class AsyncSchedulingNet : public AsyncNetBase {
   std::mutex running_mutex_;
   std::condition_variable running_cv_;
   std::atomic<bool> running_;
-  std::atomic<bool> success_;
+  bool use_dfs_scheduling_;
 
   std::atomic<int> processed_tasks_num_;
 

@@ -18,7 +18,7 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
              dilationH, dilationW);
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -31,8 +31,8 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
     dimw++;
   }
 
-  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
-                  "3D or 4D input tensor expected but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+                  "non-empty 3D or 4D input tensor expected but got: %s");
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
              "pad should be smaller than half of kernel size, but got "
              "padW = %d, padH = %d, kW = %d, kH = %d",
@@ -101,7 +101,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
 
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     nInputCols = input->size[2];
     nInputRows = input->size[1];
     nInputPlane = input->size[0];
@@ -151,7 +151,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
       kH, kW, dH, dW, padH, padW, dilationH, dilationW, output_data, indices_data);
   THCudaCheck(cudaGetLastError());
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
     THCTensor_(resize3d)(state, output, nInputPlane, nOutputRows, nOutputCols);
 
   THCTensor_(free)(state, input);
@@ -180,7 +180,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
 
-  if (input->nDimension == 3) {
+  if (input->_dim() == 3) {
     nInputCols = input->size[2];
     nInputRows = input->size[1];
     nInputPlane = input->size[0];

@@ -1,12 +1,11 @@
 #pragma once
 
+typedef struct CUDAStreamInternals THCStream;
+
 #include <algorithm>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
-
-// Forward declaration
-struct THCStream;
 
 namespace c10d {
 
@@ -34,7 +33,7 @@ class CUDAEvent {
 
   ~CUDAEvent();
 
-  static CUDAEvent create();
+  static CUDAEvent create(unsigned int flags = cudaEventDefault);
 
   // Must not be copyable.
   CUDAEvent& operator=(const CUDAEvent&) = delete;

@@ -63,7 +63,9 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
       EigenArrayMap<float> dX_arr(
           dX->mutable_data<float>(), sample_size, N * C);
       dX_arr.setZero();
-
+      if (N == 0) {
+        return true;
+      }
       if (num_batches_ == 1) {
         for (int nc = 0; nc < N * C; ++nc) {
           int c = nc % C;
@@ -92,6 +94,9 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
       EigenArrayMap<float> dX_arr(
           dX->mutable_data<float>(), C, N * sample_size);
       dX_arr.setZero();
+      if (N == 0) {
+        return true;
+      }
 
       const auto dYRowSum = dY_arr.rowwise().sum();
       const auto XMinusMean = X_arr.colwise() - mean_arr;

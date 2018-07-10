@@ -14,8 +14,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
   if (weight != NULL) {
-    THCUNN_argCheck(state, weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
-                    "2D or 4D weight tensor expected, but got: %s");
+    THCUNN_argCheck(state, !weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
+                    "non-empty 2D or 4D weight tensor expected, but got: %s");
     if (bias != NULL) {
       THCUNN_check_dim_size(state, bias, 1, 0, weight->size[0]);
     }
@@ -23,7 +23,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -34,8 +34,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
     dimw++;
   }
 
-  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
-                  "3D or 4D input tensor expected but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+                  "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size[dimh];
   int64_t inputWidth   = input->size[dimw];
@@ -60,7 +60,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
 
   if (weight != NULL) {
     int64_t nInputPlane = weight->size[1];
-    if (weight->nDimension == 2) {
+    if (weight->dim() == 2) {
       nInputPlane /= (kH * kW);
     }
     THCUNN_check_dim_size(state, input, ndim, dimf, nInputPlane);
@@ -103,10 +103,10 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   int freeWeight = 0;
 
   // Params:
-  int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kH*kW) : weight->size[1];
+  int nInputPlane = weight->dim() == 2 ? weight->size[1]/(kH*kW) : weight->size[1];
   int nOutputPlane = weight->size[0];
 
-  if (weight->nDimension == 4) {
+  if (weight->dim() == 4) {
     int64_t s1 = weight->size[0];
     int64_t s2 = weight->size[1] * weight->size[2] * weight->size[3];
     weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
@@ -118,7 +118,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   int is_batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
@@ -141,7 +141,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, outputHeight, outputWidth);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
@@ -257,11 +257,11 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
        (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW, 0);
 
   // Params
-  int nInputPlane = weight->nDimension == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
+  int nInputPlane = weight->dim() == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
   int nOutputPlane = weight->size[0];
 
   int freeWeight = 0;
-  if (weight->nDimension == 4) {
+  if (weight->dim() == 4) {
     int64_t s1 = weight->size[0];
     int64_t s2 = weight->size[1] * weight->size[2] * weight->size[3];
     weight = THCTensor_(newWithStorage2d)(state, weight->storage, weight->storageOffset, s1, -1, s2, -1);
@@ -272,7 +272,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   int is_batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
@@ -384,7 +384,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   int is_batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
@@ -395,7 +395,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   int64_t nOutputPlane = gradOutput->size[1];
 
   int freeWeight = 0;
-  if (gradWeight && gradWeight->nDimension == 4) {
+  if (gradWeight && gradWeight->dim() == 4) {
     int64_t s1 = gradWeight->size[0];
     int64_t s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
     gradWeight = THCTensor_(newWithStorage2d)(state, gradWeight->storage, gradWeight->storageOffset, s1, -1, s2, -1);
@@ -411,7 +411,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, outputHeight, outputWidth);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));

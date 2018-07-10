@@ -13,8 +13,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
 	     "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
   if (weight != NULL) {
-    THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
-                    "2D or 4D weight tensor expected, but got: %s");
+    THNN_ARGCHECK(!weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
+                    "non-empty 2D or 4D weight tensor expected, but got: %s");
     if (bias != NULL) {
       THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);
     }
@@ -22,7 +22,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -33,8 +33,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
     dimw++;
   }
 
-  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
-		"3D or 4D input tensor expected but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+		"non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size[dimh];
   int64_t inputWidth   = input->size[dimw];
@@ -59,7 +59,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
 
   if (weight != NULL) {
     int64_t nInputPlane = weight->size[1];
-    if (weight->nDimension == 2) {
+    if (weight->dim() == 2) {
       nInputPlane /= (kH * kW);
     }
     THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
@@ -80,7 +80,7 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
 
 static THTensor* THNN_(newViewWeightMM2d)(THTensor *weight) {
   weight = THTensor_(newContiguous)(weight);
-  if (weight->nDimension == 4) {
+  if (weight->dim() == 4) {
     int64_t s1 = weight->size[0];
     int64_t s2 = weight->size[1] * weight->size[2] * weight->size[3];
     THTensor *old_weight = weight;
@@ -155,7 +155,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
     (input, NULL, weight, bias, kH, kW, dH, dW, padH, padW, 0);
 
   input = THTensor_(newContiguous)(input);
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -173,7 +173,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   int64_t outputHeight = (inputHeight + 2*padH - kH) / dH + 1;
   int64_t outputWidth  = (inputWidth + 2*padW - kW) / dW + 1;
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
   {
     THTensor_(resize2d)(finput, kW*kH*nInputPlane, outputHeight*outputWidth);
     THTensor_(resize3d)(output, nOutputPlane, outputHeight, outputWidth);
@@ -275,7 +275,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   THTensor *tweight = THTensor_(new)();
   THTensor_(transpose)(tweight, weight, 0, 1);
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
   {
     THNN_(SpatialConvolutionMM_updateGradInput_frame)(gradInput, gradOutput,
 						      tweight, fgradInput,
@@ -375,7 +375,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
 
-  if(input->nDimension == 3)
+  if(input->dim() == 3)
   {
     THNN_(SpatialConvolutionMM_accGradParameters_frame)(gradOutput, gradWeight,
 							gradBias, finput, scale);

@@ -9,18 +9,11 @@
 #endif
 
 template<>
-void THPPointer<THWTensor>::free() {
-  if (ptr)
-    THWTensor_(free)(LIBRARY_STATE ptr);
-}
-
-template<>
 void THPPointer<THPStorage>::free() {
   if (ptr)
     Py_DECREF(ptr);
 }
 
-template class THPPointer<THWTensor>;
 template class THPPointer<THPStorage>;
 
 #undef GENERATE_SPARSE

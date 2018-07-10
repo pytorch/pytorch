@@ -19,12 +19,12 @@ class WorkersPool;
 
 constexpr size_t kCacheLineSize = 64;
 
-// A work-stealing threadpool with the given number of threads.
+// A threadpool with the given number of threads.
 // NOTE: the kCacheLineSize alignment is present only for cache
 // performance, and is not strictly enforced (for example, when
 // the object is created on the heap). Thus, in order to avoid
 // misaligned intrinsics, no SSE instructions shall be involved in
-// the ThreadPool implemetation.
+// the ThreadPool implementation.
 class alignas(kCacheLineSize) ThreadPool {
  public:
   static std::unique_ptr<ThreadPool> defaultThreadPool();

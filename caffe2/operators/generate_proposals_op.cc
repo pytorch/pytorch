@@ -103,7 +103,6 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
     const utils::ConstTensorView<float>& scores_tensor,
     ERArrXXf* out_boxes,
     EArrXf* out_probs) const {
-  const auto& pre_nms_topN = rpn_pre_nms_topN_;
   const auto& post_nms_topN = rpn_post_nms_topN_;
   const auto& nms_thresh = rpn_nms_thresh_;
   const auto& min_size = rpn_min_size_;
@@ -139,11 +138,39 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   Eigen::Map<ERMatXf>(scores.data(), H * W, A) =
       Eigen::Map<const ERMatXf>(scores_tensor.data(), A, H * W).transpose();
 
+  std::vector<int> order(scores.size());
+  std::iota(order.begin(), order.end(), 0);
+  if (rpn_pre_nms_topN_ <= 0 || rpn_pre_nms_topN_ >= scores.size()) {
+    // 4. sort all (proposal, score) pairs by score from highest to lowest
+    // 5. take top pre_nms_topN (e.g. 6000)
+    std::sort(order.begin(), order.end(), [&scores](int lhs, int rhs) {
+      return scores[lhs] > scores[rhs];
+    });
+  } else {
+    // Avoid sorting possibly large arrays; First partition to get top K
+    // unsorted and then sort just those (~20x faster for 200k scores)
+    std::partial_sort(
+        order.begin(),
+        order.begin() + rpn_pre_nms_topN_,
+        order.end(),
+        [&scores](int lhs, int rhs) { return scores[lhs] > scores[rhs]; });
+    order.resize(rpn_pre_nms_topN_);
+  }
+
+  ERArrXXf bbox_deltas_sorted;
+  ERArrXXf all_anchors_sorted;
+  EArrXf scores_sorted;
+  utils::GetSubArrayRows(
+      bbox_deltas, utils::AsEArrXt(order), &bbox_deltas_sorted);
+  utils::GetSubArrayRows(
+      all_anchors.array(), utils::AsEArrXt(order), &all_anchors_sorted);
+  utils::GetSubArray(scores, utils::AsEArrXt(order), &scores_sorted);
+
   // Transform anchors into proposals via bbox transformations
   static const std::vector<float> bbox_weights{1.0, 1.0, 1.0, 1.0};
   auto proposals = utils::bbox_transform(
-      all_anchors.array(),
-      bbox_deltas,
+      all_anchors_sorted,
+      bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
       correct_transform_coords_);
@@ -154,30 +181,21 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
 
   // 3. remove predicted boxes with either height or width < min_size
   auto keep = utils::filter_boxes(proposals, min_size, im_info);
-  DCHECK_LE(keep.size(), scores.size());
-
-  // 4. sort all (proposal, score) pairs by score from highest to lowest
-  // 5. take top pre_nms_topN (e.g. 6000)
-  std::sort(keep.begin(), keep.end(), [&scores](int lhs, int rhs) {
-    return scores[lhs] > scores[rhs];
-  });
-
-  if (pre_nms_topN > 0 && pre_nms_topN < keep.size()) {
-    keep.resize(pre_nms_topN);
-  }
+  DCHECK_LE(keep.size(), scores_sorted.size());
 
   // 6. apply loose nms (e.g. threshold = 0.7)
   // 7. take after_nms_topN (e.g. 300)
   // 8. return the top proposals (-> RoIs top)
   if (post_nms_topN > 0 && post_nms_topN < keep.size()) {
-    keep = utils::nms_cpu(proposals, scores, keep, nms_thresh, post_nms_topN);
+    keep = utils::nms_cpu(
+        proposals, scores_sorted, keep, nms_thresh, post_nms_topN);
   } else {
-    keep = utils::nms_cpu(proposals, scores, keep, nms_thresh);
+    keep = utils::nms_cpu(proposals, scores_sorted, keep, nms_thresh);
   }
 
   // Generate outputs
   utils::GetSubArrayRows(proposals, utils::AsEArrXt(keep), out_boxes);
-  utils::GetSubArray(scores, utils::AsEArrXt(keep), out_probs);
+  utils::GetSubArray(scores_sorted, utils::AsEArrXt(keep), out_probs);
 }
 
 template <>
@@ -224,14 +242,15 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   out_rois->Resize(0, roi_col_count);
   out_rois_probs->Resize(0);
 
-  // Use openmp for acceleration?
+  std::vector<ERArrXXf> im_boxes(num_images);
+  std::vector<EArrXf> im_probs(num_images);
   for (int i = 0; i < num_images; i++) {
     auto cur_im_info = im_info.row(i);
     auto cur_bbox_deltas = GetSubTensorView<float>(bbox_deltas, i);
     auto cur_scores = GetSubTensorView<float>(scores, i);
 
-    ERArrXXf im_i_boxes;
-    EArrXf im_i_probs;
+    ERArrXXf& im_i_boxes = im_boxes[i];
+    EArrXf& im_i_probs = im_probs[i];
     ProposalsForOneImage(
         cur_im_info,
         all_anchors,
@@ -239,25 +258,31 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
         cur_scores,
         &im_i_boxes,
         &im_i_probs);
+  }
 
+  int roi_counts = 0;
+  for (int i = 0; i < num_images; i++) {
+    roi_counts += im_boxes[i].rows();
+  }
+  out_rois->Extend(roi_counts, 50, &context_);
+  out_rois_probs->Extend(roi_counts, 50, &context_);
+  float* out_rois_ptr = out_rois->mutable_data<float>();
+  float* out_rois_probs_ptr = out_rois_probs->mutable_data<float>();
+  for (int i = 0; i < num_images; i++) {
+    const ERArrXXf& im_i_boxes = im_boxes[i];
+    const EArrXf& im_i_probs = im_probs[i];
     int csz = im_i_boxes.rows();
-    int cur_start_idx = out_rois->dim(0);
-
-    out_rois->Extend(csz, 50, &context_);
-    out_rois_probs->Extend(csz, 50, &context_);
 
     // write rois
-    Eigen::Map<ERArrXXf> cur_rois(
-        out_rois->mutable_data<float>() + cur_start_idx * roi_col_count,
-        csz,
-        5);
+    Eigen::Map<ERArrXXf> cur_rois(out_rois_ptr, csz, 5);
     cur_rois.col(0).setConstant(i);
     cur_rois.block(0, 1, csz, 4) = im_i_boxes;
 
     // write rois_probs
-    Eigen::Map<EArrXf>(
-        out_rois_probs->mutable_data<float>() + cur_start_idx, csz) =
-        im_i_probs;
+    Eigen::Map<EArrXf>(out_rois_probs_ptr, csz) = im_i_probs;
+
+    out_rois_ptr += csz * roi_col_count;
+    out_rois_probs_ptr += csz;
   }
 
   return true;

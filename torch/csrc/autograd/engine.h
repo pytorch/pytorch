@@ -5,6 +5,7 @@
 
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/input_buffer.h"
+#include "torch/csrc/autograd/anomaly_mode.h"
 
 #include <deque>
 #include <exception>
@@ -41,6 +42,9 @@ struct Engine {
       bool keep_graph,
       bool create_graph,
       const edge_list& outputs = {});
+  virtual std::unique_ptr<AnomalyMetadata> make_anomaly_metadata() {
+    return nullptr;
+  }
 
   void queue_callback(std::function<void()> callback);
 

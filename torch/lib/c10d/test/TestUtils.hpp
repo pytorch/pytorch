@@ -36,6 +36,13 @@ class Semaphore {
 };
 
 std::string tmppath() {
+  // TMPFILE is for manual test execution during which the user will specify
+  // the full temp file path using the environmental variable TMPFILE
+  const char* tmpfile = getenv("TMPFILE");
+  if (tmpfile) {
+    return std::string(tmpfile);
+  }
+
   const char* tmpdir = getenv("TMPDIR");
   if (tmpdir == nullptr) {
     tmpdir = "/tmp";

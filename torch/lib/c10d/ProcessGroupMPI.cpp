@@ -86,6 +86,8 @@ bool ProcessGroupMPI::WorkMPI::isSuccess() const {
   return !workException_;
 }
 
+void ProcessGroupMPI::WorkMPI::synchronize() {}
+
 bool ProcessGroupMPI::WorkMPI::wait() {
   std::unique_lock<std::mutex> lock(workMutex_);
   while (!completed_) {

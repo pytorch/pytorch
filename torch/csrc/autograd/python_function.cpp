@@ -15,12 +15,21 @@
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/python_hook.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/autograd/python_anomaly_mode.h"
 #include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"
+
+#include <exception>
+#include <functional>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 using namespace torch;
 using namespace torch::autograd;
@@ -36,7 +45,6 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
-  , device(-1)
   , size(var.sizes())
   , requires_grad(var.requires_grad()) {
   if (var.type().is_cuda()) {
@@ -44,9 +52,9 @@ VariableInfo::VariableInfo(const Variable& var)
   }
 }
 
-Variable VariableInfo::zeros(AutoGPU& gpu_guard) const {
-  gpu_guard.setDevice(device);
-  return at::zeros(*type, size);
+Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
+  device_guard.set_index(device);
+  return at::zeros(size, *type);
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -98,7 +106,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // C++'s Function::apply to a Python method "apply".
 auto PyFunction::apply(const variable_list& inputs) -> variable_list {
   AutoGIL gil;
-  AutoGPU _gpu_guard(-1);
+  at::DeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
   THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
@@ -116,7 +124,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     if (inputs[i].defined()) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input = THPVariable_Wrap(output_info[i].zeros(_gpu_guard));
+      input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
     }
     if (!input) throw python_error();
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
@@ -173,7 +181,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     if (output == Py_None) {
       auto& info = input_info[results.size()];
       if (info.requires_grad) {
-        results.emplace_back(info.zeros(_gpu_guard));
+        results.emplace_back(info.zeros(_device_guard));
       } else {
         results.emplace_back();
       }
@@ -750,7 +758,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
 static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
 {
-  AutoGPU gpu_guard(-1);
+  at::DeviceGuard device_guard;
   int num_grads = PyTuple_GET_SIZE(raw_grads.get());
   // First, check if any of grads is None. If not, there's nothing to do
   bool has_none = false;
@@ -770,7 +778,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
   for (int i = 0; i < num_grads; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
     if (grad == Py_None) {
-      grad = THPVariable_Wrap(grads_info[i].zeros(gpu_guard));
+      grad = THPVariable_Wrap(grads_info[i].zeros(device_guard));
       if (!grad) throw python_error();
     } else {
       Py_INCREF(grad);
@@ -938,6 +946,13 @@ PyObject *THPFunction_next_functions(THPFunction *self, void *_unused)
   return result.release();
 }
 
+PyObject *THPFunction_metadata(THPFunction *self, void *_unused)
+{
+  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata.metadata())->dict();
+
+  Py_INCREF(metadata);
+  return metadata;
+}
 
 typedef PyObject *(*getter)(PyObject *, void *);
 typedef int (*setter)(PyObject *, PyObject *, void *);
@@ -995,6 +1010,7 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
   {"_is_tracing", &getMember<char, &THPFunction::is_traced, PyBool_FromLong>, nullptr, nullptr, nullptr},
+  {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
   {nullptr}
 };
 

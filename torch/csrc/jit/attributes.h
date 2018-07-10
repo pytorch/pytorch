@@ -5,6 +5,7 @@
 #include <memory>
 #include <vector>
 #include <ATen/ATen.h>
+#include "ATen/Utils.h"
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/assertions.h"
@@ -177,7 +178,7 @@ struct Attributes {
 
   // does not use CREATE_ACCESSOR because we need additional asserts
   Derived* t_(Symbol name, TensorAttr::ConstructorType v) {
-    JIT_ASSERT(!v.defined() || !v.is_variable_or_undefined());
+    JIT_ASSERT(!v.defined() || !v.is_variable());
     return set<TensorAttr>(name,std::forward<TensorAttr::ConstructorType>(v));
   }
   const TensorAttr::ValueType& t(Symbol name) const {
@@ -186,7 +187,7 @@ struct Attributes {
 
   Derived* ts_(Symbol name, TensorsAttr::ConstructorType v) {
     for(auto & t : v) {
-      JIT_ASSERT(!t.defined() || !t.is_variable_or_undefined());
+      JIT_ASSERT(!t.defined() || !t.is_variable());
     }
     return set<TensorsAttr>(name,std::forward<TensorsAttr::ConstructorType>(v));
   }
@@ -195,7 +196,8 @@ struct Attributes {
   }
 
 private:
-  Derived* This() {
+  // UBSAN error: https://github.com/pytorch/pytorch/issues/9055
+  Derived* This() __ubsan_ignore_vptr__ {
     return static_cast<Derived*>(this);
   }
   template<typename T>

@@ -239,15 +239,11 @@ struct Parser {
 
     return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
   }
+
   TreeRef parseParam() {
-    auto typ = parseType();
-    if (L.cur().kind != TK_IDENT && typ->trees()[0]->kind() == TK_IDENT) {
-      // oops, it wasn't a type but just a param without any type specified
-      return Param::create(
-          typ->range(), Ident(typ->trees()[0]), Type(c(TK_INFERRED, typ->range(), {})));
-    }
+    auto typ = TensorType::create(L.cur().range);
     auto ident = parseIdent();
-    return Param::create(typ->range(), Ident(ident), Type(typ));
+    return Param::create(typ.range(), Ident(ident), Type(typ));
   }
 
   // 'first' has already been parsed since expressions can exist
@@ -311,9 +307,6 @@ struct Parser {
       list = c(TK_LIST, L.cur().range, {});
     }
     return list;
-  }
-  TreeRef parseType() {
-    return TensorType::create(SourceRange(std::make_shared<std::string>(""), 0, 0));
   }
   TreeRef parseIf() {
     auto r = L.cur().range;

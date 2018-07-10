@@ -40,15 +40,11 @@ class NeuralNetData;
 /// to use them.
 class Annotation {
  public:
-  enum class AnnotationKind {
-    Generic,
-    Caffe2,
-    ProfilingOperator,
-    ProfilingData
-  };
+  enum class AnnotationKind { Generic, Caffe2 };
 
   Annotation(AnnotationKind K) : Kind(K) {}
   Annotation() : Kind(AnnotationKind::Generic) {}
+  virtual ~Annotation() {}
 
   AnnotationKind getKind() const {
     return Kind;
@@ -385,7 +381,6 @@ template <typename NewT, typename OldT>
 NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
   assert(is<OldT>(node) && "Cannot get type from node.");
 
-  auto* nnOp = get<NeuralNetOperator>(node);
   NeuralNetOperator* nnOpPtr =
       dyn_cast<NeuralNetOperator>(node->mutableData()->release());
 
@@ -399,7 +394,6 @@ NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
 }
 
 /// NeuralNetData specific helpers.
-bool hasProducer(NNGraph::NodeRef n);
 bool hasProducer(NNGraph::NodeRef n);
 NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
 bool hasConsumer(NNGraph::NodeRef n);

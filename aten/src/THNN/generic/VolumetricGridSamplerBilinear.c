@@ -12,10 +12,10 @@
 
 static inline void THNN_(VolumetricGridSamplerBilinear_shapeCheck)
      (THTensor *input, THTensor *grid, THTensor *gradOutput) {
-  THNN_ARGCHECK(input->nDimension == 5, 2, input,
-    "5D input tensor expected but got: %s");
-  THNN_ARGCHECK(grid->nDimension == 5, 2, grid,
-    "5D grid tensor expected but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && input->dim() == 5, 2, input,
+    "non-empty 5D input tensor expected but got: %s");
+  THNN_ARGCHECK(!grid->is_empty() && grid->dim() == 5, 2, grid,
+    "non-empty 5D grid tensor expected but got: %s");
 
   int nbatch   = THTensor_(size)(input, 0);
   int channels = THTensor_(size)(input, 1);

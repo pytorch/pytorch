@@ -1,5 +1,7 @@
 CMAKE_MINIMUM_REQUIRED(VERSION 2.8)
-SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake ${CMAKE_MODULE_PATH})
+# TODO(jiayq): once we have unified CMake entry, remove this module path.
+SET(CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/../../../cmake/Modules ${CMAKE_MODULE_PATH})
+SET(Gloo_USE_CUDA TRUE)
 
 ################################################################################
 # Helper functions
@@ -38,7 +40,6 @@ IF(NOT HAS_THREAD_LOCAL)
                         "XCode 8 or newer.")
 ENDIF(NOT HAS_THREAD_LOCAL)
 
-FIND_PACKAGE(NCCL)
 
 FIND_PACKAGE(MPI)
 
@@ -47,7 +48,7 @@ FIND_PACKAGE(Gloo)
 FIND_PACKAGE(Caffe2 REQUIRED)
 INCLUDE_DIRECTORIES(${CAFFE2_INCLUDE_DIR})
 
-IF(NO_CUDA)
+IF(NOT USE_CUDA)
   MESSAGE(STATUS "ignoring CUDA")
 ELSE()
   FIND_PACKAGE(CUDA 7.5)
@@ -55,8 +56,10 @@ ELSE()
     INCLUDE_DIRECTORIES(${CUDA_INCLUDE_DIRS})
     LINK_DIRECTORIES("${CUDA_TOOLKIT_ROOT_DIR}/lib" "${CUDA_TOOLKIT_ROOT_DIR}/lib64")
 
-    ADD_DEFINITIONS(-DWITH_CUDA=1)
+    ADD_DEFINITIONS(-DUSE_CUDA=1)
   ENDIF()
+
+  FIND_PACKAGE(NCCL)
 ENDIF()
 
 IF(MPI_FOUND)
@@ -67,9 +70,9 @@ ENDIF()
 IF(GLOO_FOUND)
   ADD_DEFINITIONS(-DWITH_GLOO=1)
   MESSAGE(STATUS "Found Gloo, will compile with Gloo distributed backend")
-  IF(WITH_GLOO_IBVERBS)
+  IF(USE_GLOO_IBVERBS)
     MESSAGE(STATUS "Building the gloo backend with both TCP and infiniband support")
-    ADD_DEFINITIONS(-DWITH_GLOO_IBVERBS=1)
+    ADD_DEFINITIONS(-DUSE_GLOO_IBVERBS=1)
   ELSE()
     MESSAGE(STATUS "Building the gloo backend with TCP support only")
   ENDIF()
@@ -81,7 +84,7 @@ IF(NCCL_FOUND)
     MESSAGE(STATUS "NCCL Version 2 or higher found, will "
                    "compile with NCCL distributed backend")
     SET(DISTRIBUTED_NCCL_FOUND TRUE)
-    ADD_DEFINITIONS(-DWITH_DISTRIBUTED_NCCL=1)
+    ADD_DEFINITIONS(-DUSE_DISTRIBUTED_NCCL=1)
   ELSE()
     MESSAGE(STATUS "Found NCCL, but the NCCL version is either not 2+ or not "
                    "determinable, will not compile with NCCL distributed "
@@ -130,8 +133,8 @@ EXCLUDE_DIR(master_worker_cpp ".*/dispatch/.*\\.cpp$")
 SET(all_cpp ${base_cpp} ${process_group_cpp})
 SET(all_h THD.h ${base_h} ${process_group_h})
 
-IF(WITH_DISTRIBUTED_MW)
-  ADD_DEFINITIONS(-DWITH_DISTRIBUTED_MW=1)
+IF(USE_DISTRIBUTED_MW)
+  ADD_DEFINITIONS(-DUSE_DISTRIBUTED_MW=1)
   SET(all_cpp ${all_cpp} ${master_worker_cpp})
   SET(all_h THD.h ${all_h} ${master_worker_h})
 ENDIF()
@@ -140,7 +143,7 @@ EXCLUDE_DIR(all_cpp ".*/generic/.*\\.cpp$")
 
 # Need to include external NCCL first
 IF(DISTRIBUTED_NCCL_FOUND)
-  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIR})
+  INCLUDE_DIRECTORIES(${NCCL_INCLUDE_DIRS})
   FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${NCCL_LIBRARIES};")
 ENDIF()
 
@@ -168,7 +171,8 @@ ENDIF()
 
 IF(GLOO_FOUND)
   INCLUDE_DIRECTORIES(${GLOO_INCLUDE_DIR})
-  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${GLOO_LIBRARIES};")
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_LIBRARY};")
+  FILE(APPEND "${CMAKE_INSTALL_PREFIX}/THD_deps.txt" "${Gloo_NATIVE_LIBRARY};")
 ENDIF()
 
 # Test executables

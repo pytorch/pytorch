@@ -30,6 +30,15 @@ int GetIndexFromDims(const int n, const int* dims, const int* index) {
   return sum;
 }
 
+bool IsIdentityPermutation(const int n, const int* perm) {
+  for (int i = 0; i < n; ++i) {
+    if (perm[i] != i) {
+      return false;
+    }
+  }
+  return true;
+}
+
 void ComputeBroadcastBinaryOpDims(
     const int A_ndim,
     const int* A_dims,

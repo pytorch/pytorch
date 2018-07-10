@@ -176,6 +176,7 @@ In-place version of :meth:`~Tensor.acos`
 add_docstr_all('add',
                r"""
 add(value) -> Tensor
+add(value=1, other) -> Tensor
 
 See :func:`torch.add`
 """)
@@ -183,6 +184,7 @@ See :func:`torch.add`
 add_docstr_all('add_',
                r"""
 add_(value) -> Tensor
+add_(value=1, other) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
 """)
@@ -516,6 +518,11 @@ clone() -> Tensor
 
 Returns a copy of the :attr:`self` tensor. The copy has the same size and data
 type as :attr:`self`.
+
+.. note::
+
+    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
+    propagating to the cloned tensor will propagate to the original tensor.
 """)
 
 add_docstr_all('contiguous',
@@ -805,6 +812,13 @@ frac_() -> Tensor
 In-place version of :meth:`~Tensor.frac`
 """)
 
+add_docstr_all('flatten',
+               r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+see :func:`torch.flatten`
+""")
+
 add_docstr_all('gather',
                r"""
 gather(dim, index) -> Tensor
@@ -864,6 +878,21 @@ add_docstr_all('gesv',
 gesv(A) -> Tensor, Tensor
 
 See :func:`torch.gesv`
+""")
+
+add_docstr_all('get_device',
+               r"""
+get_device(A) -> Device ordinal (Integer)
+
+For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
+For CPU tensors, an error is thrown.
+
+Example::
+
+    >>> x = torch.randn(3, 4, 5, device='cuda:0')
+    >>> x.get_device()
+    0
+    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
 """)
 
 add_docstr_all('gt',
@@ -2492,4 +2521,18 @@ add_docstr_all('slogdet',
 slogdet() -> (Tensor, Tensor)
 
 See :func:`torch.slogdet`
+""")
+
+add_docstr_all('unbind',
+               r"""
+unbind(dim=0) -> seq
+
+See :func:`torch.unbind`
+""")
+
+add_docstr_all('pinverse',
+               r"""
+pinverse() -> Tensor
+
+See :func:`torch.pinverse`
 """)

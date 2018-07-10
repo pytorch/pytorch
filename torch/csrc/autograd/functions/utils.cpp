@@ -50,7 +50,7 @@ void check_input_variables(const char* name, const variable_list& inputs, int ar
   for (int i = 0; i < required_args; ++i) {
     if (!inputs[i].defined()) {
       std::stringstream ss;
-      ss << name << ": expected Variable at argument " << i << " (got None)";
+      ss << name << ": expected Tensor at argument " << i << " (got None)";
       throw std::runtime_error(ss.str());
     }
   }

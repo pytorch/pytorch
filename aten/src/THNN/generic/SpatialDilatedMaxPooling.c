@@ -15,7 +15,7 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
              dilationH, dilationW);
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -26,8 +26,8 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
     dimw++;
   }
 
-  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
-		"3D or 4D input tensor expected but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+		"non-empty 3D or 4D input tensor expected but got: %s");
 
   THArgCheck(kW/2 >= padW && kH/2 >= padH, 2,
 	     "pad should be smaller than half of kernel size, but got "
@@ -182,7 +182,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
     (input, NULL, NULL, kH, kW, dH, dW,
      padH, padW, dilationH, dilationW, ceil_mode);
 
-  if (input->nDimension == 4)
+  if (input->dim() == 4)
   {
     nbatch = input->size[0];
     dimw++;
@@ -218,7 +218,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   input = THTensor_(newContiguous)(input);
 
   /* resize output */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THTensor_(resize3d)(output, nInputPlane, outputHeight, outputWidth);
     /* indices will contain the locations for each output point */
@@ -348,7 +348,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     nbatch = input->size[0];
     dimw++;
     dimh++;
@@ -367,7 +367,7 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   indices_data = THIndexTensor_(data)(indices);
 
   /* backprop */
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     THNN_(SpatialDilatedMaxPooling_updateGradInput_frame)
       (gradInput_data, gradOutput_data,

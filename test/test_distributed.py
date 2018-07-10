@@ -17,11 +17,12 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from common import TestCase
 
+from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
+
 BACKEND = os.environ['BACKEND']
 TEMP_DIR = os.environ['TEMP_DIR']
 INIT_METHOD = os.getenv('INIT_METHOD', 'env://')
 MASTER_PORT = '29500'
-MASTER_ADDR = '127.0.0.1'
 
 DEFAULT_TIMEOUT = 15
 CUSTOMIZED_TIMEOUT = {'test_DistributedDataParallel': 25}

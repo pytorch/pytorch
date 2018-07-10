@@ -55,9 +55,6 @@ private:
   std::shared_ptr<InterpreterStateImpl> pImpl;
 };
 
-using Operation = std::function<int(std::vector<at::Tensor>&)>;
-using OpHandler = std::function<at::optional<Operation>(Node* n)>;
-void addInterpreterOpHandler(OpHandler handler);
 bool hasHandleOutput(Node * n);
 
 }}

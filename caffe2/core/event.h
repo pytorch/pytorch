@@ -49,7 +49,7 @@ typedef void (*EventResetFunction)(Event*);
 
 // Sets callback that is called when event is finished
 typedef std::function<void()> EventCallbackFunction;
-typedef bool (*EventSetCallbackFunction)(Event*, EventCallbackFunction);
+typedef void (*EventSetCallbackFunction)(Event*, EventCallbackFunction);
 
 class Event {
  public:
@@ -124,10 +124,10 @@ class Event {
     return event_callback_setter_[type_] != nullptr;
   }
 
-  bool SetCallback(EventCallbackFunction callback) {
+  void SetCallback(EventCallbackFunction callback) {
     CAFFE_ENFORCE(
         event_callback_setter_[type_], "Event does not support callbacks");
-    return event_callback_setter_[type_](this, callback);
+    event_callback_setter_[type_](this, callback);
   }
 
   // If parent op has succeeded, then we can run any child op;

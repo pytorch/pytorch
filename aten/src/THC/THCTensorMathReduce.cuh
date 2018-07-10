@@ -6,7 +6,7 @@
 #include "THCNumerics.cuh"
 #include "THCReduce.cuh"
 #include "THCReduceAll.cuh"
-#include "THCTensorCopy.h"
+#include "THCTensorCopy.hpp"
 #include "THCThrustAllocator.cuh"
 #include <thrust/functional.h>
 #include <thrust/device_ptr.h>
@@ -80,7 +80,11 @@ struct ReduceMin {
 template <typename T>
 struct ReduceMax {
   inline __device__ T operator()(T a, T b) const {
+#if defined(__HIP_PLATFORM_HCC__)
+    return (static_cast<int>(THCNumerics<T>::sub(a, b)) > 0 || THCNumerics<T>::isnan(a)) ? a : b;
+#else
     return (THCNumerics<T>::gt(a, b) || THCNumerics<T>::isnan(a)) ? a : b;
+#endif
   }
 };
 
@@ -117,6 +121,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
   buffer[tx] = scalar_cast<AccT>(0);
   AccT norm;
 
+#if !defined(__HIP_DEVICE_COMPILE__)
   if (THCNumerics<AccT>::eq(value, scalar_cast<AccT, float>(INFINITY))) {
     // get norm of axis
     for (ptrdiff_t i = tx; i < size; i += step) {
@@ -163,6 +168,7 @@ __global__ void THCTensor_kernel_renorm(T *data,
       row[i] = scalar_cast<T>(THCNumerics<AccT>::mul(val, norm));
     }
   }
+#endif
 }
 
 template <typename T>
@@ -290,7 +296,7 @@ __global__ void THCTensor_kernel_varOuterDim(T *tgt, T *src_, unsigned num_orows
 
 template<typename TensorTypeK, typename T, typename AccT, bool apply_sqrt>
 __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int64_t dimension, int flag) {
-  unsigned ndim = THCTensor_nDimension(state, src);
+  unsigned ndim = THCTensor__nDimension(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
   for (int64_t dim = 0; dim < dimension; dim++) {
@@ -337,7 +343,7 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
  * be computed by:
  *
  *    overall_M2 = M2x + nx * (mean(x) - overall_mean)^2
- *               + M2y + ny * (mean(x) - overall_mean)^2
+ *               + M2y + ny * (mean(y) - overall_mean)^2
  *
  * This implementation assumes that each block has been launched with 16 x 32 threads.
  */
@@ -436,7 +442,7 @@ __global__ void THCTensor_kernel_varInnermostDim(T *tgt, T *src_, unsigned num_r
 
 template<typename TensorTypeK, typename T, typename AccT, bool apply_sqrt>
 __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, TensorTypeK *src, int flag) {
-  unsigned ndim = THCTensor_nDimension(state, src);
+  unsigned ndim = THCTensor__nDimension(state, src);
   // Treat all outer dimensions as a single dimension.
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
@@ -509,7 +515,7 @@ THC_transformReduceOuterDimIndex(THCState *state,
                                  int64_t rdim,
                                  const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                  BinaryFunction binary_op) {
-  unsigned ndim = THCTensor_nDimension(state, src);
+  unsigned ndim = THCTensor__nDimension(state, src);
   unsigned num_orows = 1;
   for (int64_t dim = 0; dim < rdim; dim++) {
     num_orows *= THCTensor_size(state, src, dim);
@@ -612,7 +618,7 @@ THC_transformReduceInnermostDimIndex(THCState *state,
                                      TensorTypeK *src,
                                      const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                                      BinaryFunction binary_op) {
-  unsigned ndim = THCTensor_nDimension(state, src);
+  unsigned ndim = THCTensor__nDimension(state, src);
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
     num_rows *= THCTensor_size(state, src, dim);
@@ -647,16 +653,14 @@ THC_reduceDimIndex(THCState *state,
                    const thrust::pair<ScalarTypeK, ScalarTypeIndex>& init,
                    BinaryFunction binary_op)
 {
-  static_assert(std::is_same<ScalarTypeK, typename TensorUtils<TensorTypeK>::DataType>::value, "ScalarTypeK must match");
-  static_assert(std::is_same<ScalarTypeIndex, typename TensorUtils<TensorTypeIndex>::DataType>::value, "ScalarTypeIndex must match");
   THArgCheck(dimension >= 0 &&
-             dimension < THCTensor_nDimension(state, src),
+             dimension < THCTensor__nDimension(state, src),
              3, "dimension out of range");
 
 
   // Unsqueeze tgt1_/tgt_2 if necessary so that their contiguity traits
   // are preserved if they are the same size as the correct reduction output.
-  int src_dims = THCTensor_nDimension(state, src);
+  int src_dims = THCTensor__nDimension(state, src);
   THCTensor_preserveReduceDimSemantics(
       state, tgt1_, src_dims, dimension, keepdim);
   THCTensor_preserveReduceDimSemantics(
@@ -668,19 +672,19 @@ THC_reduceDimIndex(THCState *state,
   THCTensor_resize(state, tgt2_, dim, NULL);
   THLongStorage_free(dim);
 
-  TensorTypeK *tgt1 = TensorUtils<TensorTypeK>::newContiguous(state, tgt1_);
-  TensorTypeIndex *tgt2 = TensorUtils<TensorTypeIndex>::newContiguous(state, tgt2_);
-  src = TensorUtils<TensorTypeK>::newContiguous(state, src);
+  TensorTypeK *tgt1 = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, tgt1_);
+  TensorTypeIndex *tgt2 = (TensorTypeIndex*)THCTensor_newContiguous<ScalarTypeIndex>(state, tgt2_);
+  src = (TensorTypeK*)THCTensor_newContiguous<ScalarTypeK>(state, src);
 
-  if (dimension == THCTensor_nDimension(state, src) - 1) {
+  if (dimension == THCTensor__nDimension(state, src) - 1) {
     THC_transformReduceInnermostDimIndex(state, tgt1, tgt2, src, init, binary_op);
   } else {
     THC_transformReduceOuterDimIndex(state, tgt1, tgt2, src, dimension, init, binary_op);
   }
 
   THCTensor_free(state, src);
-  TensorUtils<TensorTypeK>::freeCopyTo(state, tgt1, tgt1_);
-  TensorUtils<TensorTypeIndex>::freeCopyTo(state, tgt2, tgt2_);
+  THCTensor_freeCopyTo<ScalarTypeK>(state, tgt1, tgt1_);
+  THCTensor_freeCopyTo<ScalarTypeIndex>(state, tgt2, tgt2_);
   if (!keepdim) {
     THCTensor_squeeze1d(state, tgt1_, tgt1_, dimension);
     THCTensor_squeeze1d(state, tgt2_, tgt2_, dimension);

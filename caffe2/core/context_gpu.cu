@@ -7,8 +7,13 @@
 #include "THCCachingAllocator.h"
 #include "cub/util_allocator.cuh"
 
+// Needed to be included first to check the CAFFE2_USE_CUDNN macros.
+#include "caffe2/core/macros.h"
+
 #include "caffe2/core/asan.h"
+#ifdef CAFFE2_USE_CUDNN
 #include "caffe2/core/common_cudnn.h"
+#endif // CAFFE2_USE_CUDNN
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/init.h"
 #include "caffe2/core/logging.h"
@@ -166,8 +171,10 @@ static void Caffe2InitializeCuda() {
   RegisterTensorInfoFunction(
       TypeMeta::Id<Tensor<CUDAContext>>(), GetCUDATensorInfo);
 
+#ifdef CAFFE2_USE_CUDNN
   // Check the versions of cuDNN that were compiled and linked with are compatible
   CheckCuDNNVersions();
+#endif // CAFFE2_USE_CUDNN
 }
 
 static void SetUpCub() {
