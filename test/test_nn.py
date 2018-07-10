@@ -1220,9 +1220,11 @@ class TestNN(NNTestCase):
         param = nn.Parameter(torch.randn(10))
         cpu = torch.device('cpu')
         cuda = torch.device('cuda')
-        self.assertEqual(param.to(cpu), param)
+        param.to(cpu)
+        self.assertIsInstance(param, nn.Parameter)
         if TEST_CUDA:
-            self.assertEqual(param.to(cuda), nn.Parameter(param.data.to(cuda)))
+            param.to(cuda)
+            self.assertIsInstance(param, nn.Parameter)
 
     def test_type(self):
         l = nn.Linear(10, 20)
