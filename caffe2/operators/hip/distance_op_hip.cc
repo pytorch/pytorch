@@ -50,7 +50,7 @@ bool SquaredL2DistanceOp<float, HIPContext>::RunOnDevice() {
   int N = X.ndim() > 0 ? X.dim32(0) : 1;
   int D = X.size() / N;
   distance->Resize(vector<TIndex>(size_t(1), N));
-  hipLaunchKernelGGL(SquaredL2DistanceKernel, dim3(std::min(static_cast<const int>(N), CAFFE_MAXIMUM_NUM_BLOCKS)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
+  hipLaunchKernelGGL(SquaredL2DistanceKernel, dim3(std::min(static_cast<const int>(N), CAFFE_MAXIMUM_NUM_BLOCKS)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<const int>(N), static_cast<const int>(D), X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
   return true;
 }
@@ -96,7 +96,7 @@ bool SquaredL2DistanceGradientOp<float, HIPContext>::RunOnDevice() {
       dX->mutable_data<float>(),
       &context_);
 
-  hipLaunchKernelGGL(StripedScaleKernel<float>, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N) * static_cast<const int>(D))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
+  hipLaunchKernelGGL(StripedScaleKernel<float>, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N) * static_cast<const int>(D))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<const int>(N),
       static_cast<const int>(D),
       dDistance.data<float>(),
@@ -149,7 +149,7 @@ bool L1DistanceOp<float, HIPContext>::RunOnDevice() {
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
   const int D = N > 0 ? X.size() / N : 0;
   distance->Resize(vector<TIndex>(size_t(1), N));
-  hipLaunchKernelGGL(L1DistanceKernel, dim3(std::min(static_cast<const int>(N), CAFFE_MAXIMUM_NUM_BLOCKS)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
+  hipLaunchKernelGGL(L1DistanceKernel, dim3(std::min(static_cast<const int>(N), CAFFE_MAXIMUM_NUM_BLOCKS)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<const int>(N), static_cast<const int>(D), X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
 
   return true;
@@ -206,7 +206,7 @@ bool L1DistanceGradientOp<float, HIPContext>::RunOnDevice() {
   dX->ResizeLike(X);
   dY->ResizeLike(Y);
 
-  hipLaunchKernelGGL(L1DistanceGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N) * static_cast<const int>(D))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
+  hipLaunchKernelGGL(L1DistanceGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N) * static_cast<const int>(D))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<const int>(N),
       static_cast<const int>(D),
       X.data<float>(),
@@ -301,7 +301,7 @@ bool CosineSimilarityOp<float, HIPContext>::RunOnDevice() {
   math::Maximum<float, HIPContext>(N, kEps, x2, x2, &context_);
   math::Maximum<float, HIPContext>(N, kEps, y2, y2, &context_);
   math::Mul(N, x2, y2, scale, &context_);
-  math::InvSqrt(N, scale, scale, &context_);
+  math::Rsqrt(N, scale, scale, &context_);
   math::Mul(N, result_data, scale, result_data, &context_);
   return true;
 }
@@ -385,7 +385,7 @@ bool DotProductOp<float, HIPContext>::RunOnDevice() {
   }
   result->Resize(N);
 
-  hipLaunchKernelGGL(DotProductKernel, dim3(std::min(static_cast<const int>(N), CAFFE_MAXIMUM_NUM_BLOCKS)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
+  hipLaunchKernelGGL(DotProductKernel, dim3(std::min(static_cast<const int>(N), CAFFE_MAXIMUM_NUM_BLOCKS)), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<const int>(N), static_cast<const int>(D), X.data<float>(), Y.data<float>(), result->mutable_data<float>());
 
   return true;
@@ -432,7 +432,7 @@ bool DotProductGradientOp<float, HIPContext>::RunOnDevice() {
   CAFFE_ENFORCE(dDot.dim32(0) == N);
   dX->ResizeLike(X);
   dY->ResizeLike(Y);
-  hipLaunchKernelGGL(DotProductGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N) * static_cast<const int>(D))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(), 
+  hipLaunchKernelGGL(DotProductGradientKernel, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N) * static_cast<const int>(D))), dim3(CAFFE_HIP_NUM_THREADS), 0, context_.hip_stream(),
       static_cast<const int>(N),
       static_cast<const int>(D),
       X.data<float>(),
