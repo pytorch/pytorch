@@ -1216,6 +1216,14 @@ class TestNN(NNTestCase):
         with self.assertRaises(TypeError):
             net.to(cpu, torch.tensor(3, dtype=torch.long), non_blocking=True)
 
+    def test_parameter_to_argparse(self):
+        param = nn.Parameter(torch.randn(10))
+        cpu = torch.device('cpu')
+        cuda = torch.device('cuda')
+        self.assertEqual(param.to(cpu), param)
+        if TEST_CUDA:
+            self.assertEqual(param.to(cuda), nn.Parameter(param.data.to(cuda)))
+
     def test_type(self):
         l = nn.Linear(10, 20)
         net = nn.Module()

@@ -28,3 +28,10 @@ class Parameter(torch.Tensor):
 
     def __reduce_ex__(self, proto):
         return Parameter, (super(Parameter, self), self.requires_grad)
+
+    def to(self, *args, **kwargs):
+        device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
+        dtype = dtype if self.data.is_floating_point() else None
+        self.data = self.data.to(device, dtype, non_blocking)
+        if self.grad is not None:
+            self.grad.data = self.grad.data.to(device, dtype, non_blocking)
