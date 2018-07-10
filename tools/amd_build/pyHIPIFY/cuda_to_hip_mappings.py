@@ -2106,8 +2106,6 @@ CAFFE2_SPECIFIC_MAPPINGS = {
      "CAFFE_CUDA_NUM_THREADS" : ("CAFFE_HIP_NUM_THREADS", API_CAFFE2),
      "HasCudaGPU" : ("HasHipGPU", API_CAFFE2),
      "__expf" : ("expf", API_CAFFE2),
-     "abs" : ("hip_abs", API_CAFFE2),
-     "pow" : ("hip_pow", API_CAFFE2),
      "CUBLAS_ENFORCE" : ("ROCBLAS_ENFORCE", API_CAFFE2),
      "cublas_handle" : ("rocblas_handle", API_CAFFE2)
 }

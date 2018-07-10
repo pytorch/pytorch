@@ -12,8 +12,6 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/logging.h"
 
-#include "caffe2/utils/hip/func_selector_hip.h"
-
 /**
  * The maximum number of AMD HIP GPUs that caffe2 recognizes.
  */
