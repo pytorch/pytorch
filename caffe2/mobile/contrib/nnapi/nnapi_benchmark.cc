@@ -13,10 +13,11 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
+
 #include "caffe2/core/init.h"
 #include "caffe2/core/operator.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/core/tensor_int8.h"
 #include "caffe2/core/timer.h"
 #include "caffe2/utils/math.h"
 #include "caffe2/utils/proto_utils.h"
@@ -204,6 +205,111 @@ static double benchmark_conv_nnapi(
   return double(timer.MilliSeconds()) / run;
 }
 
+static double benchmark_conv_caffe2_int8(
+    Workspace* ws,
+    int N,
+    int C,
+    int H,
+    int W,
+    int M,
+    int kernel,
+    int group,
+    int warmup = 5,
+    int run = 10) {
+  caffe2::Workspace localWs;
+  if (!ws) {
+    ws = &localWs;
+  }
+  {
+    auto* qt = ws->CreateBlob("X_cpu")->GetMutable<int8::Int8TensorCPU>();
+    qt->scale = 1.0 / 8;
+    qt->zero_point = 127;
+    auto& t = qt->t;
+    t.Resize(N, H, W, C);
+    for (int i = 0; i < t.size(); i++) {
+      t.mutable_data<uint8_t>()[i] = rand() % 10;
+    }
+  }
+  {
+    auto* qt = ws->CreateBlob("W")->GetMutable<int8::Int8TensorCPU>();
+    qt->scale = 1.0 / 8;
+    qt->zero_point = 127;
+    auto& t = qt->t;
+    if (group > 1) {
+      // Only supports depthwise
+      CAFFE_ENFORCE_EQ(C, group);
+      // note the order of weights is different from caffe2 for depthwise
+      // caffe2: MxKHxKWx1
+      // nnapi: 1xKHxKWxM
+      t.Resize(C, kernel, kernel, 1);
+    } else {
+      t.Resize(M, kernel, kernel, C);
+    }
+    for (int i = 0; i < t.size(); i++) {
+      t.mutable_data<uint8_t>()[i] = rand() % 10;
+    }
+  }
+
+  {
+    auto* qt = ws->CreateBlob("B")->GetMutable<int8::Int8TensorCPU>();
+    qt->scale = 1.0 / 64;
+    qt->zero_point = 0;
+    auto& t = qt->t;
+    t.Resize(M);
+    for (int i = 0; i < t.size(); i++) {
+      t.mutable_data<int32_t>()[i] = rand() % 10;
+    }
+  }
+
+  OperatorDef op;
+  {
+    op.set_type("Int8Conv");
+    op.add_input("X_cpu");
+    op.add_input("W");
+    op.add_input("B");
+    op.add_output("Y_cpu");
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("order");
+      arg.set_s("NHWC");
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("kernel");
+      arg.set_i(kernel);
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("group");
+      arg.set_i(group);
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("Y_scale");
+      arg.set_f(1.0 / 32);
+    }
+    {
+      auto& arg = *(op.add_arg());
+      arg.set_name("Y_zero_point");
+      arg.set_i(127);
+    }
+  }
+
+  // Caffe2 Int8
+  std::unique_ptr<caffe2::OperatorBase> op1(CreateOperator(op, ws));
+
+  Timer timer;
+  CAFFE_ENFORCE(op1->Run());
+  for (int i = 0; i < warmup; i++) {
+    op1->Run();
+  }
+  timer.Start();
+  for (int i = 0; i < run; i++) {
+    op1->Run();
+  }
+  return double(timer.MilliSeconds()) / run;
+}
+
 static double benchmark_conv_nnapi_int8(
     Workspace* ws,
     int N,
@@ -373,6 +479,17 @@ int main(int argc, char** argv) {
             1,
             warmup,
             mainrun);
+        const double cpu_time_int8 = caffe2::benchmark_conv_caffe2_int8(
+            &ws,
+            1,
+            input_channel,
+            space,
+            space,
+            output_channel,
+            kernel,
+            1,
+            warmup,
+            mainrun);
         const double nn_time_int8 = caffe2::benchmark_conv_nnapi_int8(
             &ws,
             1,
@@ -388,10 +505,11 @@ int main(int argc, char** argv) {
             kernel * (kernel == 1 ? space : space - 2) *
             (kernel == 1 ? space : space - 2) * 2;
         printf(
-            "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t32b"
-            "NNPACK GFLOPS: %.2f\t32b"
-            "NN-API GFLOPS: %.2f\t8b"
-            "NN-API GOPS: %.2f\n",
+            "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t"
+            "32bNNPACK GFLOPS: %.2f\t"
+            "32bNN-API GFLOPS: %.2f\t"
+            "8bCaffe2 GOPS: %.2f\t"
+            "8bNN-API GOPS: %.2f\n",
             space,
             space,
             input_channel,
@@ -400,6 +518,7 @@ int main(int argc, char** argv) {
             kernel,
             flops / cpu_time / 1E6,
             flops / nn_time_fp32 / 1E6,
+            flops / cpu_time_int8 / 1E6,
             flops / nn_time_int8 / 1E6);
       }
     }
@@ -433,6 +552,17 @@ int main(int argc, char** argv) {
             channel,
             warmup,
             mainrun);
+        const double cpu_time_int8_dwise = caffe2::benchmark_conv_caffe2_int8(
+            &ws,
+            1,
+            channel,
+            space,
+            space,
+            channel,
+            kernel,
+            channel,
+            warmup,
+            mainrun);
         const double nn_time_int8_dwise = caffe2::benchmark_conv_nnapi_int8(
             &ws,
             1,
@@ -445,12 +575,15 @@ int main(int argc, char** argv) {
             warmup,
             mainrun);
         const double dwise_bandwidth = sizeof(float) * double(channel) *
-            (2 * (space - 2) * (space - 2) + kernel * kernel);
+            (space * space + kernel == 1
+                 ? space * space
+                 : (space - 2) * (space - 2) + kernel * kernel);
         printf(
-            "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t32b"
-            "Caffe2 Dwise GB/s: %.2f\t32b"
-            "NN-API Dwise GB/s: %.2f\t8b"
-            "NN-API Dwise GB/s: %.2f\n",
+            "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t"
+            "32bCaffe2 Dwise GB/s: %.2f\t"
+            "32bNN-API Dwise GB/s: %.2f\t"
+            "8bCaffe2 Dwise GB/s: %.2f\t"
+            "8bNN-API Dwise GB/s: %.2f\n",
             space,
             space,
             channel,
@@ -459,6 +592,7 @@ int main(int argc, char** argv) {
             kernel,
             dwise_bandwidth / cpu_time / 1E6,
             dwise_bandwidth / nn_time_fp32_dwise / 1E6,
+            dwise_bandwidth / sizeof(float) / cpu_time_int8_dwise / 1E6,
             dwise_bandwidth / sizeof(float) / nn_time_int8_dwise / 1E6);
       }
     }
