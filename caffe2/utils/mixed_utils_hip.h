@@ -2,8 +2,8 @@
 #ifndef CAFFE2_UTILS_MIXED_UTILS_HIP_H
 #define CAFFE2_UTILS_MIXED_UTILS_HIP_H
 
-#include "caffe2/core/common_hip.h"
-#include "caffe2/core/context_hip.h"
+#include "caffe2/core/hip/common_hip.h"
+#include "caffe2/core/hip/context_hip.h"
 
 // define functions to allow add/mult/store operaions for input/output with
 // mixed precisions.
