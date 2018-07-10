@@ -45,16 +45,9 @@ class TestClip(hu.HypothesisTestCase):
     def test_clip_default(self, X, inplace, gc, dc):
         # go away from the origin point to avoid kink problems
         X += 0.04 * np.sign(X)
-        X[X == -1.0] += 0.04
-        X[X == 1.0] += 0.04
 
         def clip_ref(X):
-            Y = X.copy()
-            to_min = X < -1
-            to_max = X > 1
-            Y[to_min] = -1
-            Y[to_max] = 1
-            return (Y,)
+            return (X,)
 
         op = core.CreateOperator(
             "Clip",
