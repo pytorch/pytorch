@@ -490,7 +490,7 @@ replication_pad3d = replication_pad
 def upsample_nearest2d(g, input, output_size):
     return g.op("Upsample", input,
                 height_scale_f=float(output_size[-2]) / input.type().sizes()[-2],
-                weight_scale_f=float(output_size[-1]) / input.type().sizes()[-1],
+                width_scale_f=float(output_size[-1]) / input.type().sizes()[-1],
                 mode_s="nearest")
 
 
