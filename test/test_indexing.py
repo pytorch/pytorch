@@ -1,4 +1,4 @@
-from common import TestCase, run_tests
+from common import TestCase, run_tests, skipIfNoZeroSize
 import torch
 import warnings
 from torch import tensor
@@ -93,6 +93,36 @@ class TestIndexing(TestCase):
         y[mask] = -1
         self.assertEqual(x, y)
 
+    @skipIfNoZeroSize
+    def test_empty_ndim_index(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.randn(5, device=device)
+            self.assertEqual(torch.empty(0, 2, device=device), x[torch.empty(0, 2, dtype=torch.int64, device=device)])
+
+            x = torch.randn(2, 3, 4, 5, device=device)
+            self.assertEqual(torch.empty(2, 0, 6, 4, 5, device=device),
+                             x[:, torch.empty(0, 6, dtype=torch.int64, device=device)])
+
+    @skipIfNoZeroSize
+    def test_empty_ndim_index_bool(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.randn(5, device=device)
+            self.assertRaises(IndexError, lambda: x[torch.empty(0, 2, dtype=torch.uint8, device=device)])
+
+    @skipIfNoZeroSize
+    def test_empty_slice(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.randn(2, 3, 4, 5, device=device)
+            y = x[:, :, :, 1]
+            z = y[:, 1:1, :]
+            self.assertEqual((2, 0, 4), z.shape)
+            # this isn't technically necessary, but matches NumPy stride calculations.
+            self.assertEqual((60, 20, 5), z.stride())
+            self.assertTrue(z.is_contiguous())
+
     def test_index_getitem_copy_bools_slices(self):
         true = torch.tensor(1, dtype=torch.uint8)
         false = torch.tensor(0, dtype=torch.uint8)
@@ -101,9 +131,9 @@ class TestIndexing(TestCase):
 
         for a in tensors:
             self.assertNotEqual(a.data_ptr(), a[True].data_ptr())
-            self.assertEqual(torch.tensor([]), a[False])
+            self.assertEqual(torch.empty(0, *a.shape), a[False])
             self.assertNotEqual(a.data_ptr(), a[true].data_ptr())
-            self.assertEqual(torch.tensor([]), a[false])
+            self.assertEqual(torch.empty(0, *a.shape), a[false])
             self.assertEqual(a.data_ptr(), a[None].data_ptr())
             self.assertEqual(a.data_ptr(), a[...].data_ptr())
 
