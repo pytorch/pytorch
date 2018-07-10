@@ -32,7 +32,8 @@ class Parameter(torch.Tensor):
     def to(self, *args, **kwargs):
         device, dtype, non_blocking = torch._C._nn._parse_to(*args, **kwargs)
         dtype = dtype if self.data.is_floating_point() else None
-        new_param = Parameter(self.data.to(device, dtype, non_blocking), self.requires_grad)
-        if self.grad is not None:
-            new_param.grad.data = self.grad.data.to(device, dtype, non_blocking)
+        new_param = self.clone()
+        new_param.grad = self.grad.clone()
+        if new_param.grad is not None:
+            new_param.grad.data = new_param.grad.data.to(device, dtype, non_blocking)
         return new_param
