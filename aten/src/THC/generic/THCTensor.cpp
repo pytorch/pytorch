@@ -456,7 +456,9 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
   if(!src)
     src = self;
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(!src->is_empty(), 1, "cannot unfold an empty tensor");
+#endif
   THArgCheck(dimension < src->dim(), 2, "out of range");
   THArgCheck(size <= src->size[dimension], 3, "out of range");
   THArgCheck(step > 0, 4, "invalid step");
@@ -468,7 +470,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
 
   newSize[self->dim()] = size;
   newStride[self->dim()] = self->stride[dimension];
-  for(d = 0; d < self->_dim(); d++)
+  for(d = 0; d < self->dim(); d++)
   {
     if(d == dimension)
     {
