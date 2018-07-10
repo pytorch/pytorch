@@ -360,7 +360,6 @@ def leaky_relu(g, input, negative_slope, inplace=False):
 
 
 def hardtanh(g, self, min_val, max_val, inplace=False):
-    # See Note [Export inplace]
     return g.op("Clip", self, min_f=_scalar(min_val), max_f=_scalar(max_val))
 
 
