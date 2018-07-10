@@ -87,6 +87,14 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
 }
 
 void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>& types) {
+
+  std::cerr
+    << "WARNING: we are doing shape propagation on\n"
+    << *node << "\n"
+    << "by running it. PropagateShapeOnNodeByRunningIt in general can be\n"
+    << "be quite slow; please consider adding an explicit case for this\n"
+    << "op in torch/csrc/jit/passes/shape_analysis.cpp\n";
+
   auto op_info = getTensorOp(node);
   std::vector<at::Tensor> stack;
 
