@@ -27,7 +27,7 @@ SHM_API libshm_context * libshm_context_new(const char *manager_handle, const ch
 SHM_API std::unique_ptr<void, at::BoundDeleter> libshm_alloc(void *_ctx, ptrdiff_t size);
 SHM_API void libshm_context_free(libshm_context *context);
 
-struct THManagedSharedDeleter : public at::Deleter {
+struct SHM_API THManagedSharedDeleter : public at::Deleter {
   void deallocate(void* ctx, void* data) const override;
   static at::BoundDeleter make(libshm_context* ctx, at::BoundDeleter deleter) {
     ctx->th_deleter = deleter;
