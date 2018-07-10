@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/python3
 """ The Python Hipify script.
 ##
 # Copyright (c) 2015-2016 Advanced Micro Devices, Inc. All rights reserved.
@@ -332,12 +332,17 @@ def disable_asserts(input_string):
     return output_string
 
 def replace_forceinline(input_string):
+    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP. 
+    Adding 'static' to all such methods leads to compilation errors, so
+    replacing '__forceinline__' with 'inline' as a workaround
+    https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
+    """
     output_string = input_string
     output_string = re.sub("__forceinline__", "inline", output_string)
     return output_string
 
 def replace_math_functions(input_string):
-    """ Replace std:: invocations of match functions with non-std:: versions"""
+    """ Replace std:: invocations of match functions with non-std:: versions to prevent linker errors"""
     output_string = input_string
     output_string = re.sub("std::exp\(", "::exp(", output_string)
     output_string = re.sub("std::log\(", "::log(", output_string)
