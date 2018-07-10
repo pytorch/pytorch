@@ -1146,6 +1146,19 @@
 - func: selu_(Tensor self) -> Tensor
   variants: function
 
+- func: sigmoid(Tensor self) -> Tensor
+
+- func: sigmoid_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sigmoid__cpu
+    CUDA: _sigmoid__cuda
+
+- func: sigmoid_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sigmoid_out_cpu
+    CUDA: _sigmoid_out_cuda
+
 - func: sin(Tensor self) -> Tensor
 
 - func: sin_(Tensor self) -> Tensor
