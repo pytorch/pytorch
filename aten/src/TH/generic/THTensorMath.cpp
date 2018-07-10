@@ -3653,7 +3653,10 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor* input0 = inputs[j];
         real* input0_data = THStorage_(data)(input0->storage) + input0->storageOffset;
         int64_t input0_size = THTensor_(nElement)(input0);
-        memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
+        // C standard says you can't pass nullptrs to memcpy, even if the size is 0; ubsan checks this.
+        if (input0_size != 0) {
+          memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
+        }
         offset += input0_size;
       }
     }
