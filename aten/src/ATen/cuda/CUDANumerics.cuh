@@ -204,7 +204,7 @@ struct CUDANumerics<int64_t> {
 
 template <>
 struct CUDANumerics<half> {
-#if CUDA_VERSION < 9000
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
   static inline __host__ __device__ half min() { half h; h.x = 0xfbff; return h; }
   static inline __host__ __device__ half max() { half h; h.x = 0x7bff; return h; }
 #else
