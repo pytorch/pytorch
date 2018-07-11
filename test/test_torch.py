@@ -725,7 +725,7 @@ class TestTorch(TestCase):
                 return nan
             return 1.0 / math.sqrt(x)
 
-        self._test_math(torch.rsqrt, rsqrt, nonzero=True, offset=1e-6)
+        self._test_math(torch.rsqrt, rsqrt, nonzero=True, offset=1e-4)
 
     def test_sigmoid(self):
         # TODO: why not simulate math.sigmoid like with rsqrt?
