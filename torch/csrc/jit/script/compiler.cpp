@@ -297,7 +297,7 @@ static bool isNumberSubtype(const TypePtr& type) {
 }
 
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
-  auto list = constant_as<at::IntList>(input);
+  auto list = constant_as<std::vector<int64_t>>(input);
   if(list)
     return std::vector<int64_t>(*list);
   // broadcast IntList[3] with value 4 -> {4, 4, 4}

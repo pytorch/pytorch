@@ -19,6 +19,7 @@ struct InterpreterStateImpl;
 struct Graph;
 struct Node;
 struct TensorType;
+struct IValue;
 
 struct Code {
   Code()
@@ -44,7 +45,7 @@ struct InterpreterState {
   // advance the interpreter state by running one stage. Returning the
   // outputs for that stage, suspending the computation.
   // Call this function again continues computation where it left off.
-  void runOneStage(std::vector<at::Tensor> & stack);
+  void runOneStage(std::vector<IValue> & stack);
   const TensorType & tensorTypeForInput(size_t i) const;
   ~InterpreterState();
   // create a copy of InterpreterState with its current state
