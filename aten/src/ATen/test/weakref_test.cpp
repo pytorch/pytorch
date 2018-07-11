@@ -15,20 +15,19 @@ TEST_CASE( "Weak pointer tests", "" ) {
     Tensor a = at::ones({2, 2});
     WeakTensor b = a;
     a.reset();
-    REQUIRE_FALSE(b.lock());
+    REQUIRE_FALSE(b.lock().defined());
   }
 
   SECTION("can successfully lock") {
     Tensor a = at::ones({2, 2});
     WeakTensor b = a;
-    auto locked = b.lock();
-    REQUIRE(locked);
-    Tensor & c = *locked;
+    auto c = b.lock();
+    REQUIRE(c.defined());
 
     a.reset();
-    REQUIRE(b.lock());
+    REQUIRE(b.lock().defined());
     c.reset();
-    REQUIRE_FALSE(b.lock());
+    REQUIRE_FALSE(b.lock().defined());
   }
 
   SECTION("updates refcounts correctly") {
@@ -47,7 +46,7 @@ TEST_CASE( "Weak pointer tests", "" ) {
       WeakTensor b = a;
       REQUIRE(ai->use_count() == 1);
       auto locked = b.lock();
-      REQUIRE(locked);
+      REQUIRE(locked.defined());
       REQUIRE(ai->use_count() == 2);
     }
     REQUIRE(ai->use_count() == 1);

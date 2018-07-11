@@ -235,8 +235,10 @@ struct WeakTensor : public detail::WeakTensorBase {
     return pImpl;
   }
 
-  at::optional<Tensor> lock() {
-    return pImpl->weakLock() ? at::optional<Tensor>{Tensor(pImpl, false)} : at::nullopt;
+  // XXX: this can return undefined tensors
+  // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
+  Tensor lock() {
+    return pImpl->weakLock() ? Tensor(pImpl, false) : Tensor();
   }
 };
 
