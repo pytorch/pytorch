@@ -1,16 +1,19 @@
 #include "THCAllocator.h"
 
-THCudaHostDeleter THCudaHostDeleter::singleton_;
+static void THCudaHostDeleter(void* ptr) {
+  THCudaCheck(cudaFreeHost(ptr));
+}
 
 struct THCudaHostAllocator : public at::Allocator {
   at::SupervisedPtr allocate(size_t size) const override {
-    if (size == 0) return nullptr;
-    void* ptr;
-    THCudaCheck(cudaMallocHost(&ptr, size));
-    return {ptr, THCudaHostDeleter::make()};
+    void* ptr = nullptr;
+    if (size != 0) {
+      THCudaCheck(cudaMallocHost(&ptr, size));
+    }
+    return {ptr, {ptr, &THCudaHostDeleter}};
   }
-  at::BoundDeleter maybeGlobalBoundDeleter() const override {
-    return THCudaHostDeleter::make();
+  DeleterFnPtr raw_deleter() const override {
+    return &THCudaHostDeleter;
   }
 };
 
@@ -19,25 +22,45 @@ at::Allocator* getTHCudaHostAllocator() {
   return &th_cuda_host_allocator;
 }
 
-THCIpcDeleter THCIpcDeleter::singleton_;
-THCUVADeleter THCUVADeleter::singleton_;
+static void THCUVADeleter(void* ptr) {
+  THCudaCheck(cudaFree(ptr));
+}
 
 struct THCUVAAllocator : public at::Allocator {
   at::SupervisedPtr allocate(size_t size) const override {
-    if (size == 0) return nullptr;
-
     // See J.1.1 of the CUDA_C_Programming_Guide.pdf for UVA and coherence rules
     // on various compute capabilities.
-    void* ptr;
-    THCudaCheck(cudaMallocManaged(&ptr, size, cudaMemAttachGlobal));
-    return {ptr, THCUVADeleter::make()};
+    void* ptr = nullptr;
+    if (size != 0) {
+      THCudaCheck(cudaMallocManaged(&ptr, size, cudaMemAttachGlobal));
+    }
+    return {ptr, {ptr, &THCUVADeleter}};
   }
-  at::BoundDeleter maybeGlobalBoundDeleter() const override {
-    return THCUVADeleter::make();
+  at::BoundDeleter raw_deleter() const override {
+    return &THCUVADeleter;
   }
 };
 
 static THCUVAAllocator thc_uva_allocator;
 at::Allocator* getTHCUVAAllocator() {
   return &thc_uva_allocator;
+}
+
+
+THCIpcDeleter::~THCIpcDeleter() {
+  int prev_device;
+  THCudaCheck(cudaGetDevice(&prev_device));
+  THCudaCheck(cudaSetDevice(device_));
+  THCudaCheck(cudaIpcCloseMemHandle(data_));
+  THCudaCheck(cudaSetDevice(prev_device));
+}
+
+void deleteTHCIpcDeleter(void* ptr) {
+  delete static_cast<THCIpcDeleter*>(ptr);
+}
+
+at::SupervisedPtr THCIpcDeleter::makeSupervisedPtr(void* data, int device) {
+  // The dynamic allocation here is a bit unfortunate
+  auto* supervisor = new THCIpcDeleter(data, device);
+  return {data, {supervisor, &deleteTHCIpcDeleter}};
 }

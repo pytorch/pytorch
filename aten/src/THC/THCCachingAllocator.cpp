@@ -494,17 +494,9 @@ struct THCCachingAllocator
 
 THCCachingAllocator caching_allocator;
 
-struct CudaCachingDeleter : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override {
-    AT_CUDA_CHECK(caching_allocator.free(ptr));
-  }
-  static at::BoundDeleter make() {
-    return {&singleton_, nullptr};
-  }
-private:
-  static CudaCachingDeleter singleton_;
-};
-CudaCachingDeleter CudaCachingDeleter::singleton_;
+static void CudaCachingDeleter(void* ptr) {
+  AT_CUDA_CHECK(caching_allocator.free(ptr));
+}
 
 // NB: I decided not to fold this into THCCachingAllocator, because the latter
 // has a lot more methods and it wasn't altogether clear that they should
@@ -515,10 +507,10 @@ struct CudaCachingAllocator : public at::Allocator {
     THCudaCheck(cudaGetDevice(&device));
     void* r;
     AT_CUDA_CHECK(caching_allocator.malloc(&r, size, at::globalContext().getCurrentCUDAStreamOnDevice(device)));
-    return {r, CudaCachingDeleter::make()};
+    return {r, {r, &CudaCachingDeleter}};
   }
-  at::BoundDeleter maybeGlobalBoundDeleter() const override {
-    return CudaCachingDeleter::make();
+  at::DeleterFnPtr raw_deleter() const override {
+    return &CudaCachingDeleter;
   }
 };
 

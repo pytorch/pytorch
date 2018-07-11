@@ -8,48 +8,14 @@ THC_API THAllocator* getTHCUVAAllocator();
 // IPC doesn't support (re)allocation
 
 #ifdef __cplusplus
-struct THCudaHostDeleter : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override {
-    if (!ptr) return;
-
-    THCudaCheck(cudaFreeHost(ptr));
-  }
-  static at::BoundDeleter make() {
-    return {&singleton_, nullptr};
-  }
+class AT_API THCIpcDeleter {
+public:
+  THCIpcDeleter(void* data, int device) : data_(data), device_(device) {};
+  ~THCIpcDeleter();
+  static at::SupervisedPtr makeSupervisedPtr(void* data, int device);
 private:
-  static THCudaHostDeleter singleton_;
-};
-
-struct THCIpcDeleter : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override {
-    int prev_device;
-    int device = (int)(int64_t)ctx;
-
-    THCudaCheck(cudaGetDevice(&prev_device));
-    THCudaCheck(cudaSetDevice(device));
-    THCudaCheck(cudaIpcCloseMemHandle(ptr));
-    THCudaCheck(cudaSetDevice(prev_device));
-  }
-
-  static at::BoundDeleter make(int device) {
-    // TODO: Do this properly with intptr_t (but is it portable enough?)
-    return {&singleton_, (void*)(int64_t)device};
-  }
-private:
-  static THCIpcDeleter singleton_;
-};
-
-struct THCUVADeleter : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override {
-    if (!ptr) return;
-    THCudaCheck(cudaFree(ptr));
-  }
-  static at::BoundDeleter make() {
-    return {&singleton_, nullptr};
-  }
-private:
-  static THCUVADeleter singleton_;
+  void* data_;
+  int device_;
 };
 #endif
 

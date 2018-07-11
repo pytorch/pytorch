@@ -65,7 +65,7 @@ void THCStorage_free(THCState *state, THCStorage *storage)
         (*storage->finalizer)();
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~unique_ptr<void, at::BoundDeleter>();
+      storage->data_ptr.~SupervisedPtr();
       if (storage->flag & TH_STORAGE_VIEW) {
         THCStorage_free(state, storage->view);
       }
