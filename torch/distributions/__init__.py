@@ -95,6 +95,7 @@ from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
+from .negative_binomial import NegativeBinomial
 from .normal import Normal
 from .one_hot_categorical import OneHotCategorical
 from .pareto import Pareto

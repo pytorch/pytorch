@@ -77,10 +77,10 @@ class NegativeBinomial(Distribution):
         if self._validate_args:
             self._validate_sample(value)
 
-        log_unnormalized_prob = self.total_count * torch.logsigmoid(-self.logits) +
-            value * torch.logsigmoid(self.logits)
+        log_unnormalized_prob = (self.total_count * torch.logsigmoid(-self.logits) +
+            value * torch.logsigmoid(self.logits))
 
-        log_normalization = -torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
-            torch.lgamma(self.total_count)
+        log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
+            torch.lgamma(self.total_count))
 
         return log_unnormalized_prob - log_normalization
