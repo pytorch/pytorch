@@ -70,7 +70,7 @@ class NegativeBinomial(Distribution):
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
             rate = torch.distributions.Gamma(concentration=self.total_count,
-                                             rate=(1-self.probs)/self.probs).sample()
+                                             rate=(1 - self.probs) / self.probs).sample()
             return torch.poisson(rate)
 
     def log_prob(self, value):
@@ -78,9 +78,9 @@ class NegativeBinomial(Distribution):
             self._validate_sample(value)
 
         log_unnormalized_prob = (self.total_count * torch.logsigmoid(-self.logits) +
-            value * torch.logsigmoid(self.logits))
+                value * torch.logsigmoid(self.logits))
 
         log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
-            torch.lgamma(self.total_count))
+                torch.lgamma(self.total_count))
 
         return log_unnormalized_prob - log_normalization
