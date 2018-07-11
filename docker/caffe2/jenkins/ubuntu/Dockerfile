@@ -1,6 +1,10 @@
 ARG UBUNTU_VERSION
 FROM ubuntu:${UBUNTU_VERSION}
 
+# Set locale to C.UTF-8
+ENV LANG C.UTF-8  
+ENV LC_ALL C.UTF-8  
+
 # Install required packages to build Caffe2
 ARG EC2
 ARG UBUNTU_VERSION
