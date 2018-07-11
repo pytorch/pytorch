@@ -70,6 +70,7 @@ test_aten() {
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
     ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
     ls build/bin
     aten/tools/run_tests.sh build/bin
   fi
