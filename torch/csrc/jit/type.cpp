@@ -23,8 +23,6 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
       }
     }
     out << ")";
-  } else if(t.kind() == TypeKind::HandleType) {
-    out << "Handle";
   } else if(t.kind() == TypeKind::DynamicType) {
     out << "Dynamic";
   } else if(t.kind() == TypeKind::TupleType) {
@@ -44,10 +42,6 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
   return out;
 }
 
-TypePtr HandleType::get() {
-  static auto value = std::make_shared<HandleType>();
-  return value;
-}
 TypePtr DynamicType::get() {
   static auto value = std::make_shared<DynamicType>();
   return value;

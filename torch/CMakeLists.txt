@@ -201,7 +201,6 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/input_buffer.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
-  ${TORCH_SRC_DIR}/csrc/autograd/functions/special.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
