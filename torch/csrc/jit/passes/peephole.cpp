@@ -46,9 +46,13 @@ void PeepholeOptimize(Block * block) {
         Value* LHS(n->input(0));
         Value* RHS(n->input(1));
         // If LHS and RHS have the same static type, remove the type_as operator.
-        if ((RHS->type()->kind() != TypeKind::DynamicType &&
-             *LHS->type() == *RHS->type())) {
-          n->output()->replaceAllUsesWith(LHS);
+        if (RHS->type()->kind() == TypeKind::TensorType) {
+           auto LType = (*LHS->type()).cast<TensorType>();
+           auto RType = (*RHS->type()).cast<TensorType>();
+           if(LType->device() == RType->device() &&
+              LType->scalarType() == RType->scalarType()) {
+              n->output()->replaceAllUsesWith(LHS);
+           }
         }
       } break;
       // Fuse mm + add into addmm
