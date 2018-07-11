@@ -661,7 +661,6 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
   THPObjectPtr sequence;
   size_t length;
   std::vector<at::Tensor> descriptors;
-  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   at::Tensor desc;
 
@@ -689,14 +688,13 @@ PyObject* THDPModule_allGather(PyObject *_unused, PyObject *args)
     descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_Fast_GET_ITEM(sequence.get(), i))
     );
-    raw_descriptors.push_back(descriptors.back());
   }
 
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
   desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1));
   {
     AutoNoGIL guard;
-    THDAllGather(raw_descriptors.data(), length, desc, group);
+    THDAllGather(descriptors.data(), length, desc, group);
   }
   Py_RETURN_NONE;
 
@@ -733,7 +731,6 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
   THPObjectPtr sequence;
   size_t length;
   std::vector<at::Tensor> descriptors;
-  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   at::Tensor desc;
 
@@ -760,14 +757,13 @@ PyObject* THDPModule_gatherRecv(PyObject *_unused, PyObject *args)
     descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_Fast_GET_ITEM(sequence.get(), i))
     );
-    raw_descriptors.push_back(descriptors.back());
   }
 
   desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1));
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
   {
     AutoNoGIL guard;
-    THDGatherRecv(raw_descriptors.data(), length, desc, group);
+    THDGatherRecv(descriptors.data(), length, desc, group);
   }
   Py_RETURN_NONE;
 
@@ -784,7 +780,6 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
   THPObjectPtr sequence;
   size_t length;
   std::vector<at::Tensor> descriptors;
-  std::vector<at::Tensor> raw_descriptors;
   THDGroup group;
   at::Tensor desc;
 
@@ -811,14 +806,13 @@ PyObject* THDPModule_scatterSend(PyObject *_unused, PyObject *args)
     descriptors.push_back(
       THDPModule_makeDescriptor(PySequence_Fast_GET_ITEM(sequence.get(), i))
     );
-    raw_descriptors.push_back(descriptors.back());
   }
 
   desc = THDPModule_makeDescriptor(PyTuple_GET_ITEM(args, 1));
   group = _getGroup(PyTuple_GET_ITEM(args, 2));
   {
     AutoNoGIL guard;
-    THDScatterSend(raw_descriptors.data(), length, desc, group);
+    THDScatterSend(descriptors.data(), length, desc, group);
   }
   Py_RETURN_NONE;
 

@@ -313,7 +313,7 @@ AnyModule::AnyModule(ModuleType&& module)
 
 template <typename ModuleType>
 AnyModule::AnyModule(const ModuleHolder<ModuleType>& module_holder)
-    : AnyModule(module_holder.get()) {}
+    : AnyModule(module_holder.ptr()) {}
 
 template <typename ModuleType>
 AnyModule& AnyModule::operator=(std::shared_ptr<ModuleType> module) {

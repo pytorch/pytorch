@@ -63,6 +63,9 @@ Add
 Reshape
 Flatten
 
+CopyToOpenCL
+CopyFromOpenCL
+
 NCHW2NHWC
 NHWC2NCHW
 

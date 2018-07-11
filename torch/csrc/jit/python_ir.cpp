@@ -422,7 +422,7 @@ void initPythonIRBindings(PyObject * module_) {
 
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
-      return t.name();
+      return t.str();
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;

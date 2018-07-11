@@ -21,6 +21,7 @@ class PackSegmentsOp final : public Operator<Context> {
 
   PackSegmentsOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws),
+        max_length_(OperatorBase::GetSingleArgument<int>("max_length", -1)),
         pad_minf_(OperatorBase::GetSingleArgument<bool>("pad_minf", false)),
         return_presence_mask_(OperatorBase::GetSingleArgument<bool>(
             "return_presence_mask",
@@ -45,6 +46,7 @@ class PackSegmentsOp final : public Operator<Context> {
   INPUT_TAGS(LENGTHS, DATA);
 
  private:
+  TIndex max_length_;
   bool pad_minf_;
   float padding_;
   bool return_presence_mask_;

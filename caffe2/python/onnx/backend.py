@@ -381,12 +381,13 @@ class Caffe2Backend(Backend):
     @classmethod
     def _create_upsample(cls, init_model, pred_model, n, opset_version):
         c2_op = cls._common_onnx_node_to_caffe2_op(init_model, pred_model, n, opset_version)
-        if len(n.attrs['scales']) != 4:
-            raise ValueError("The scales argument should have size 4")
-        elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
-            raise ValueError("The first two elements in the scales argument must be 1")
-        c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
-        c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
+        if opset_version >= 7:
+            if len(n.attrs['scales']) != 4:
+                raise ValueError("The scales argument should have size 4")
+            elif not (np.isclose(n.attrs['scales'][0], 1) and np.isclose(n.attrs['scales'][1], 1)):
+                raise ValueError("The first two elements in the scales argument must be 1")
+            c2_op.arg.extend([caffe2.python.utils.MakeArgument('height_scale', n.attrs['scales'][2])])
+            c2_op.arg.extend([caffe2.python.utils.MakeArgument('width_scale', n.attrs['scales'][3])])
 
         return c2_op
 
@@ -986,6 +987,14 @@ class Caffe2Backend(Backend):
             return workspace.has_gpu_support
         return False
 
+    @classmethod
+    def is_compatible(cls, model, device='CPU', **kwargs):
+        if hasattr(super(Caffe2Backend, cls), 'is_compatible') \
+           and callable(super(Caffe2Backend, cls).is_compatible):
+            if not super(Caffe2Backend, cls).is_compatible(model, device, **kwargs):
+                return False
+        # TODO: should have an unspported list of operators, be optimistic for now
+        return True
 
 prepare = Caffe2Backend.prepare
 

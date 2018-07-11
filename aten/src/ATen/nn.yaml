@@ -202,14 +202,20 @@
   scalar_check:
     grad_input: 'false'
 
-- name: upsample_nearest1d(Tensor self, int64_t scale_factor)
+- name: upsample_nearest1d(Tensor self, IntList[1] output_size)
   cname: TemporalUpSamplingNearest
+  scalar_check:
+    grad_input: 'false'
 
-- name: upsample_nearest2d(Tensor self, int64_t scale_factor)
+- name: upsample_nearest2d(Tensor self, IntList[2] output_size)
   cname: SpatialUpSamplingNearest
+  scalar_check:
+    grad_input: 'false'
 
-- name: upsample_nearest3d(Tensor self, int64_t scale_factor)
+- name: upsample_nearest3d(Tensor self, IntList[3] output_size)
   cname: VolumetricUpSamplingNearest
+  scalar_check:
+    grad_input: 'false'
 
 
 # Private functions. These also exist in TH, but we want the backwards functions
@@ -268,3 +274,11 @@
 - name: thnn_conv_dilated3d(Tensor self, Tensor weight, IntList[3] kernel_size, Tensor bias={}, IntList[3] stride=1, IntList[3] padding=0, IntList[3] dilation=1)
   cname: VolumetricDilatedConvolution
   buffers: [columns, ones]
+
+# Vision
+
+- name: thnn_grid_sampler_bilinear2d(Tensor self, Tensor grid, int64_t padding_mode)
+  cname: SpatialGridSamplerBilinear
+
+- name: thnn_grid_sampler_bilinear3d(Tensor self, Tensor grid, int64_t padding_mode)
+  cname: VolumetricGridSamplerBilinear
