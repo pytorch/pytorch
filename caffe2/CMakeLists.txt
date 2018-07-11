@@ -255,13 +255,12 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
-  IF(BUILD_ATEN)
-     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
-  ENDIF()
-  IF(BUILD_CAFFE2)
-     set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-  ENDIF()
+  # Necessary in order to build all the source code
+  if(BUILD_CAFFE2)
+    set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  endif()
+
+  # Add the HIP library
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
   # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
@@ -273,16 +272,14 @@ if(USE_ROCM)
   target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
   target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
-  IF(BUILD_ATEN)
-    aten_set_target_props(caffe2_hip)
-  ENDIF()
+  aten_set_target_props(caffe2_hip)
 
   # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
 
+  install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
   caffe2_interface_library(caffe2_hip caffe2_hip_library)
   list(APPEND Caffe2_MAIN_LIBS caffe2_hip_library)
-  install(TARGETS caffe2_hip EXPORT Caffe2Targets DESTINATION lib)
 endif()
 
 # ---[ Check if warnings should be errors.
