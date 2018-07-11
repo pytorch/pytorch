@@ -120,8 +120,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
             output_shape_.push_back(
                 OperatorBase::GetSingleArgument<int>("output_shape_w", 0));
           }
-	//	use_pad_ = true;
-//		pads_.resize(4, 1);
         }
 
         const int default_size = kernel_.size() > 0 ? kernel_.size() : 2;
