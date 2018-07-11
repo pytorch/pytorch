@@ -108,12 +108,12 @@ THManagedMapAllocator::THManagedMapAllocator(const char *manager_handle, const c
     initializeManager();
 }
 
-THManagedMapAllocator::~THManagedMapAllocator() {
+void THManagedMapAllocator::close() {
+  if (closed_) return;
   AllocInfo info = get_alloc_info(this);
   info.free = true;
   ClientSocket &socket = get_manager_socket(manager_handle_);
-  // TODO: I think its OK to register deallocation before we actually
-  // deallocate; I hope so!
+  THRefcountedMapAllocator::close();
   socket.register_deallocation(info);
 }
 
