@@ -912,7 +912,7 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
   auto& attributes = onnx_node->attributes;
   attributes.remove("mode");
   if (opset_version >= 7) {
-    auto scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
+    const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
     if (scales.size() != 4) {
       CAFFE_THROW("The scales argument should have size 4");
     } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
