@@ -6075,21 +6075,21 @@ class TestTorch(TestCase):
             # stack, split, chunk
             self.assertEqual((4, 0, 1, 3, 0), torch.stack((x, x, x, x)).shape)
             self.assertEqual([(0, 1, 3, 0)],
-                             [y.shape for y in torch.chunk(x, 1, dim=0)])
+                             [z.shape for z in torch.chunk(x, 1, dim=0)])
 
-            self.assertEqual([(0, 1, 3, 0), ] * 3, [y.shape for y in torch.chunk(x, 3, dim=0)])
-            self.assertEqual([(0, 1, 1, 0), ] * 3, [y.shape for y in torch.chunk(x, 3, dim=2)])
+            self.assertEqual([(0, 1, 3, 0), ] * 3, [z.shape for z in torch.chunk(x, 3, dim=0)])
+            self.assertEqual([(0, 1, 1, 0), ] * 3, [z.shape for z in torch.chunk(x, 3, dim=2)])
 
             # NOTE: split_with_sizes behaves differently than NumPy in that it
             # takes sizes rather than offsets
             self.assertEqual([(0, 1, 0, 0), (0, 1, 1, 0), (0, 1, 2, 0)],
-                             [x.shape for x in torch.split(x, (0, 1, 2), dim=2)])
+                             [z.shape for z in torch.split(x, (0, 1, 2), dim=2)])
 
             self.assertRaises(RuntimeError, lambda: torch.split(x, 0, dim=1))
             # This is strange because the split size is larger than the dim size, but consistent with
             # how split handles that case generally (when no 0s are involved).
-            self.assertEqual([(0, 1, 3, 0)], [y.shape for y in torch.split(x, 1, dim=0)])
-            self.assertEqual([(0, 1, 3, 0)], [y.shape for y in torch.split(x, 0, dim=0)])
+            self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 1, dim=0)])
+            self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)
