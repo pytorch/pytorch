@@ -20,3 +20,13 @@ matrix:
         python: "3.6"
         install: pip install mypy mypy-extensions
         script: mypy @mypy-files.txt
+      - env: CLANG_FORMAT_CHECK
+        install:
+          - sudo apt-get install -y clang-format-3.9 expect-dev
+          - sudo ln -s /usr/bin/clang-format-3.9 /usr/bin/clang-format
+          - wget https://llvm.org/svn/llvm-project/cfe/trunk/tools/clang-format/git-clang-format -O git-clang-format.py
+        script:
+          - unbuffer python git-clang-format.py --verbose --diff master | tee output
+          - grep -E 'clang-format did not modify any files|no modified files to format' output
+    allow_failures:
+      - env: CLANG_FORMAT_CHECK
