@@ -18,7 +18,6 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
                  int64_t padding_idx, bool scale_grad_by_freq, bool sparse) {
   auto indices_arg = TensorArg(indices, "indices", 1);
   checkScalarType("embedding", indices_arg, kLong);
-  checkContiguous("embedding", indices_arg);
 
   // TODO: use tensor.index() after improving perf
   if (indices.dim() == 1) {
@@ -29,7 +28,7 @@ Tensor embedding(const Tensor & weight, const Tensor & indices,
   for (auto d : weight.sizes().slice(1)) {
     size.push_back(d);
   }
-  return weight.index_select(0, indices.view(-1)).view(size);
+  return weight.index_select(0, indices.reshape(-1)).view(size);
 }
 
 Tensor embedding_backward(
@@ -50,7 +49,6 @@ Tensor embedding_sparse_backward(
 
   auto indices_arg = TensorArg(indices_, "indices", 2);
   checkScalarType("embedding_backward", indices_arg, kLong);
-  checkContiguous("embedding_backward", indices_arg);
 
   // TODO: implement scale_grad_by_freq
   if (scale_grad_by_freq) {
@@ -73,24 +71,25 @@ Tensor embedding_sparse_backward(
 
   // check if all our grad come from padding_idx
   if (grad.numel() == 0) {
+    // FIXME: USE_TH_SIZE_ZERO_DIM
     return sparse_type._sparse_coo_tensor_unsafe(indices_.type().tensor(),
                                          dense_type.tensor(), weight_size);
   }
 
-  auto index = indices.view({1, -1});
-  auto values = grad.contiguous().view({-1, num_features});
+  auto index = indices.reshape({1, -1});
+  auto values = grad.reshape({-1, num_features});
   return sparse_type._sparse_coo_tensor_unsafe(index, values, weight_size);
 }
 
-Tensor embedding_backward_cpu(
+Tensor embedding_dense_backward_cpu(
     const Tensor & grad_, const Tensor & indices, int64_t num_weights,
     int64_t padding_idx, bool scale_grad_by_freq) {
 
   auto indices_arg = TensorArg(indices, "indices", 2);
   checkScalarType("embedding_backward", indices_arg, kLong);
-  checkContiguous("embedding_backward", indices_arg);
 
-  auto indices_data = indices.data<int64_t>();
+  auto indices_contig = indices.contiguous();
+  auto indices_data = indices_contig.data<int64_t>();
   int64_t numel = indices.numel();
 
   std::unique_ptr<int64_t[]> counts;
@@ -105,7 +104,7 @@ Tensor embedding_backward_cpu(
   }
 
   auto grad = grad_.contiguous().view({numel, grad_.size(-1)});
-  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.type());
+  auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
 
 #ifdef _OPENMP
   if (numel > 1000) {
@@ -154,13 +153,13 @@ Tensor & embedding_renorm_cpu_(
     Tensor & self, const Tensor & indices, double max_norm, double norm_type) {
   auto self_arg = TensorArg(self, "self", 1);
   auto indices_arg = TensorArg(indices, "indices", 2);
-  checkContiguous("embedding_renorm_", self_arg);
   checkDim("embedding_renorm_", self_arg, 2);
-  checkContiguous("embedding_renorm_", indices_arg);
   checkScalarType("embedding_renorm_", indices_arg, kLong);
 
+  auto indices_contig = indices.contiguous();
+
   auto num_indices = indices.numel();
-  auto data_ptr = indices.data<int64_t>();
+  auto data_ptr = indices_contig.data<int64_t>();
   auto sorted_indices = std::vector<int64_t>(data_ptr, data_ptr + num_indices);
   std::sort(sorted_indices.begin(), sorted_indices.end(), std::less<int64_t>());
 

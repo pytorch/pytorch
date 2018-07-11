@@ -126,8 +126,16 @@ static PyObject * THPModule_crashIfCsrcASAN(PyObject *module, PyObject *arg) {
   return PyLong_FromLong(x[0]);
 }
 
+static PyObject * THPModule_crashIfCsrcUBSAN(PyObject *module, PyObject *arg) {
+  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_csrc_ubsan expects an int, "
+          "but got %s", THPUtils_typename(arg));
+  int32_t x = static_cast<int>(THPUtils_unpackLong(arg));
+  double y = 1.0 / x;
+  return PyLong_FromLong((int)y);
+}
+
 static PyObject * THPModule_crashIfATenASAN(PyObject *module, PyObject *arg) {
-  THPUtils_assert(THPUtils_checkLong(arg), "set_num_threads expects an int, "
+  THPUtils_assert(THPUtils_checkLong(arg), "crash_if_aten_asan expects an int, "
           "but got %s", THPUtils_typename(arg));
   return PyLong_FromLong(at::_crash_if_asan(static_cast<int>(THPUtils_unpackLong(arg))));
 }
@@ -274,12 +282,26 @@ PyObject *THPModule_hasDistributed(PyObject *_unused)
 #endif
 }
 
+void DLPack_Capsule_Destructor(PyObject* data) {
+  HANDLE_TH_ERRORS
+  DLManagedTensor * dlMTensor = (DLManagedTensor *)PyCapsule_GetPointer(data, "dltensor");
+  if (dlMTensor) {
+    // the dlMTensor has not been consumed, call deleter ourselves
+    dlMTensor->deleter(const_cast<DLManagedTensor*>(dlMTensor));
+  } else {
+    // the dlMTensor has been consumed
+    // PyCapsule_GetPointer has set an error indicator
+    PyErr_Clear();
+  }
+  END_HANDLE_TH_ERRORS_RET()
+}
+
 PyObject *THPModule_toDLPack(PyObject *_unused, PyObject *data)
 {
   HANDLE_TH_ERRORS
   THPUtils_assert(THPVariable_Check(data), "data must be a Tensor");
   DLManagedTensor* dlMTensor = at::toDLPack(THPVariable_UnpackData(data));
-  return PyCapsule_New(dlMTensor, "dltensor", NULL);
+  return PyCapsule_New(dlMTensor, "dltensor", DLPack_Capsule_Destructor);
   END_HANDLE_TH_ERRORS
 }
 
@@ -401,6 +423,7 @@ static PyMethodDef TorchMethods[] = {
   {"_set_default_dtype", (PyCFunction)THPModule_setDefaultDtype, METH_O, NULL},
   {"_infer_size",     (PyCFunction)THPModule_inferSize,         METH_VARARGS, NULL},
   {"_crash_if_csrc_asan", (PyCFunction)THPModule_crashIfCsrcASAN, METH_O, NULL},
+  {"_crash_if_csrc_ubsan", (PyCFunction)THPModule_crashIfCsrcUBSAN, METH_O, NULL},
   {"_crash_if_aten_asan", (PyCFunction)THPModule_crashIfATenASAN, METH_O, NULL},
   {"_set_backcompat_broadcast_warn", (PyCFunction)THPModule_setBackcompatBroadcastWarn, METH_O, NULL},
   {"_get_backcompat_broadcast_warn", (PyCFunction)THPModule_getBackcompatBroadcastWarn, METH_NOARGS, NULL},

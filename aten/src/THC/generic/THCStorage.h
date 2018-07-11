@@ -6,7 +6,7 @@
 #define TH_STORAGE_RESIZABLE  2
 #define TH_STORAGE_FREEMEM    4
 
-typedef struct THCStorage THCStorage;
+#define THCStorage THStorage
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THCStorage type.
@@ -52,9 +52,6 @@ THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
 THC_API void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag);
 THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
-
-/* used by StorageSharing */
-THC_API int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage);
 
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);
 THC_API void THCStorage_(resize)(THCState *state, THCStorage *storage, ptrdiff_t size);

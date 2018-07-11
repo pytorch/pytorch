@@ -213,4 +213,34 @@ TEST_CASE("sequential") {
             .sum()
             .toCFloat() == 10);
   }
+
+  SECTION("extend() pushes modules from other Sequential") {
+    struct A : torch::nn::Module { int forward(int x) { return x; } };
+    struct B : torch::nn::Module { int forward(int x) { return x; } };
+    struct C : torch::nn::Module { int forward(int x) { return x; } };
+    struct D : torch::nn::Module { int forward(int x) { return x; } };
+    Sequential a(A{}, B{});
+    Sequential b(C{}, D{});
+    a.extend(b);
+
+    REQUIRE(a.size() == 4);
+    REQUIRE(a[0]->as<A>());
+    REQUIRE(a[1]->as<B>());
+    REQUIRE(a[2]->as<C>());
+    REQUIRE(a[3]->as<D>());
+
+    REQUIRE(b.size() == 2);
+    REQUIRE(b[0]->as<C>());
+    REQUIRE(b[1]->as<D>());
+
+    std::vector<std::shared_ptr<A>> c = {std::make_shared<A>(),
+                                         std::make_shared<A>()};
+    b.extend(c);
+
+    REQUIRE(b.size() == 4);
+    REQUIRE(b[0]->as<C>());
+    REQUIRE(b[1]->as<D>());
+    REQUIRE(b[2]->as<A>());
+    REQUIRE(b[3]->as<A>());
+  }
 }

@@ -276,10 +276,11 @@ function(target_enable_style_warnings TARGET)
             -Wmissing-include-dirs
             -Woverloaded-virtual
             -Wredundant-decls
+            -Wno-shadow
             -Wsign-promo
             -Wstrict-overflow=5
             -fdiagnostics-show-option
-            -Wconversion
+            -Wno-conversion
             -Wpedantic
             -Wundef
             )
@@ -300,6 +301,9 @@ function(target_enable_style_warnings TARGET)
     if (WERROR)
       list(APPEND WARNING_OPTIONS "-Werror")
     endif()
+  endif()
+  if(APPLE)
+    set(WARNING_OPTIONS -Wno-gnu-zero-variadic-macro-arguments)
   endif()
   target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
 endfunction()

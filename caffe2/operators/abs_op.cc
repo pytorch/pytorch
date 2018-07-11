@@ -78,7 +78,7 @@ Y: [0.3005476  1.551666   1.3591481  0.39191285 0.21866608]
 </details>
 
 )DOC")
-    .Input(0, "X", "*(type: Tensor<float\\>)* Input tensor.")
+    .Input(0, "X", "*(type: Tensor<float>)* Input tensor.")
     .Output(
         0,
         "Y",

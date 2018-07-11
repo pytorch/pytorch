@@ -95,8 +95,8 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
         dilationT, dilationH, dilationW, 0);
 
   // Params:
-  int nInputPlane = weight->size[1];
-  int nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->size[1];
+  int64_t nOutputPlane = weight->size[0];
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
@@ -230,8 +230,8 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
         dilationT, dilationH, dilationW, 0);
 
   // Params
-  int nInputPlane = weight->size[1];
-  int nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->size[1];
+  int64_t nOutputPlane = weight->size[0];
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);

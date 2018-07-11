@@ -12,9 +12,9 @@
 // Forward declare these CUDA types here to avoid including CUDA headers in
 // ATen headers, which would make ATen always require CUDA to build.
 struct THCState;
+struct cudaDeviceProp;
 struct CUstream_st;
 typedef struct CUstream_st* cudaStream_t;
-struct cudaDeviceProp;
 struct cublasContext;
 typedef struct cublasContext *cublasHandle_t;
 
@@ -91,10 +91,6 @@ struct AT_API CUDAHooksInterface {
     return false;
   }
 
-  virtual cudaStream_t getCurrentCUDAStream(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
-  }
-
 #ifndef __HIP_PLATFORM_HCC__
   virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
     AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
@@ -103,11 +99,6 @@ struct AT_API CUDAHooksInterface {
 
   virtual cublasHandle_t getCurrentCublasHandle(THCState*) const {
     AT_ERROR("Cannot getCurrentCublasHandle() without ATen_cuda library. ", CUDA_HELP);
-  }
-
-  virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
-      const {
-    AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
   }
 
   virtual struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const {
@@ -190,6 +181,8 @@ struct AT_API DynamicCUDAInterface {
   static void (*set_device)(int32_t);
   static void (*get_device)(int32_t*);
   static void (*unchecked_set_device)(int32_t);
+  static void (*cuda_stream_create_with_priority)(cudaStream_t*, int32_t, int32_t);
+  static void (*cuda_stream_destroy)(cudaStream_t);
 };
 } // namespace detail
 } // namespace at

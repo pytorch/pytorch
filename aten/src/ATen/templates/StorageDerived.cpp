@@ -13,7 +13,7 @@ namespace at {
 ${Storage}::${Storage}(Context* context):
     storage(${THStorage}_new(${state})), context(context) {}
 
-${Storage}::${Storage}(Context* context, ${THStorage}* storage):
+${Storage}::${Storage}(Context* context, THStorage* storage):
     storage(storage), context(context) {}
 
 ${Storage}::${Storage}(Context* context, size_t storage_size)

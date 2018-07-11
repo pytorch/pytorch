@@ -335,6 +335,8 @@ Caffe2Backend::get_special_operators() const {
   const static std::
       unordered_map<std::string, Caffe2Backend::SpecialOpConverter>
           kSpecialOperators = {
+              {"ArgMax", &Caffe2Backend::CreateArgMaxMin},
+              {"ArgMin", &Caffe2Backend::CreateArgMaxMin},
               {"Cast", &Caffe2Backend::CreateCast},
               {"Constant", &Caffe2Backend::CreateConstant},
               {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
@@ -362,6 +364,17 @@ Caffe2Backend::get_special_operators() const {
 //============================
 // Special Operator Converters
 //============================
+
+Caffe2Ops Caffe2Backend::CreateArgMaxMin(
+    OnnxNode* onnx_node,
+    int opset_version) {
+  auto& attributes = onnx_node->attributes;
+  if (!attributes.HasAttribute("axis")) {
+    auto* attr = attributes.AddRewrittenAttribute("axis");
+    attr->set_i(0);
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+}
 
 Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
@@ -897,24 +910,26 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) {
   auto& attributes = onnx_node->attributes;
-  auto scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
-  if (scales.size() != 4) {
-    CAFFE_THROW("The scales argument should have size 4");
-  } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
-    CAFFE_THROW("The first two elements in the scales argument must be 1");
-  }
   attributes.remove("mode");
-  attributes.remove("scales");
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
-  auto* op = c2_op.ops.Mutable(0);
-  auto* c2_height = op->add_arg();
-  c2_height->set_name("height_scale");
-  c2_height->set_f(scales.Get(2));
-  auto* c2_width = op->add_arg();
-  c2_width->set_name("width_scale");
-  c2_width->set_f(scales.Get(3));
-
-  return c2_op;
+  if (opset_version >= 7) {
+    const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
+    if (scales.size() != 4) {
+      CAFFE_THROW("The scales argument should have size 4");
+    } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
+      CAFFE_THROW("The first two elements in the scales argument must be 1");
+    }
+    attributes.remove("scales");
+    auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+    auto* op = c2_op.ops.Mutable(0);
+    auto* c2_height = op->add_arg();
+    c2_height->set_name("height_scale");
+    c2_height->set_f(scales.Get(2));
+    auto* c2_width = op->add_arg();
+    c2_width->set_name("width_scale");
+    c2_width->set_f(scales.Get(3));
+    return c2_op;
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
 Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {

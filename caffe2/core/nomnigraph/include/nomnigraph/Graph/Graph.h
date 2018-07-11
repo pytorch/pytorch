@@ -326,7 +326,7 @@ class Graph {
 
   /// \brief Get a reference to the edge between two nodes if it exists.
   /// note: will fail assertion if the edge does not exist.
-  EdgeRef getEdge(NodeRef tail, NodeRef head) {
+  EdgeRef getEdge(NodeRef tail, NodeRef head) const {
     for (auto& inEdge : head->getInEdges()) {
       if (inEdge->tail() == tail) {
         return inEdge;
