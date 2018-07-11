@@ -521,10 +521,11 @@ def preprocessor(filepath, stats, hipify_caffe2):
                     # Check if supported
                     if constants.HIP_UNSUPPORTED in meta_data:
                         stats["unsupported_calls"].append((cuda_type, filepath))
-
+                
                 if cuda_type in output_source:
                     if hipify_caffe2:
-                        output_source = re.sub(r'({0})'.format(cuda_type), lambda x: hip_type, output_source)
+                        if constants.API_RAND not in meta_data:
+                            output_source = re.sub(r'({0})'.format(cuda_type), lambda x: hip_type, output_source)
                     else:
                         output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
 
