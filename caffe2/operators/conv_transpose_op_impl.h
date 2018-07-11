@@ -289,6 +289,26 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNCHW() {
   const T* filter_data = filter.template data<T>();
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
+  int output_h = dY.dim32(2), output_w = dY.dim32(3);
+  //Update padding using output size
+  if (this->use_pad() == false){
+  ConvTransposeUnpoolBase<Context>::ComputePadUsingSize(
+		H,
+		this->stride_h(),
+		this->kernel_h(),
+		this->adj_h(),
+		&(this->pads_[0]),
+		&(this->pads_[2]),
+		&output_h);
+  ConvTransposeUnpoolBase<Context>::ComputePadUsingSize(
+		W,
+		this->stride_w(),
+		this->kernel_w(),
+		this->adj_w(),
+		&(this->pads_[1]),
+		&(this->pads_[3]),
+		&output_w);
+  }
   // Pre-setting the gradients to zero
   math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
   if (!no_bias_) {
@@ -441,6 +461,26 @@ bool ConvTransposeGradientOp<T, Context>::RunOnDeviceWithOrderNHWC() {
   const T* filter_data = filter.template data<T>();
   const T* dYdata = dY.template data<T>();
   T* dfilter_data = dfilter->template mutable_data<T>();
+  int output_h = dY.dim32(1), output_w = dY.dim32(2);
+  //Update padding using output size
+  if(this->use_pad() == false){
+  ConvTransposeUnpoolBase<Context>::ComputePadUsingSize(
+		H,
+		this->stride_h(),
+		this->kernel_h(),
+		this->adj_h(),
+		&(this->pads_[0]),
+		&(this->pads_[2]),
+		&output_h);
+  ConvTransposeUnpoolBase<Context>::ComputePadUsingSize(
+		W,
+		this->stride_w(),
+		this->kernel_w(),
+		this->adj_w(),
+		&(this->pads_[1]),
+		&(this->pads_[3]),
+		&output_w);
+  }
   // Pre-setting the gradients to zero
   math::Set<T, Context>(dfilter->size(), 0, dfilter_data, &context_);
   if (!no_bias_) {

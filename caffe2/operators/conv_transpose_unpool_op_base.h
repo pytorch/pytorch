@@ -120,6 +120,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
             output_shape_.push_back(
                 OperatorBase::GetSingleArgument<int>("output_shape_w", 0));
           }
+	//	use_pad_ = true;
+//		pads_.resize(4, 1);
         }
 
         const int default_size = kernel_.size() > 0 ? kernel_.size() : 2;
@@ -132,9 +134,8 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
     if (stride_.size() == 0) {
       stride_.resize(default_size, 1);
     }
-
     if (pads_.size() == 0) {
-      pads_.resize(default_size * 2, 0);
+		pads_.resize(default_size * 2, 0);
     }
     if (output_shape_.size() == 0) {
       output_shape_.resize(default_size, 0);
@@ -157,10 +158,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       CAFFE_ENFORCE_GE(adj_[dim], 0);
       CAFFE_ENFORCE_LE(adj_[dim], stride_[dim]);
     }
-
-    // Create shared buffer mutex in the constructor
-    // to avoid race-condition in DAGNet.
-    if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
+	if (FLAGS_caffe2_force_shared_col_buffer || shared_buffer_) {
       createSharedBuffer<Context>(ws_);
     }
   }
@@ -306,7 +304,9 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   inline int output_shape_w() const {
 	return output_shape_[1];
   }
-
+  inline bool use_pad() const {
+	return use_pad_;
+  }
   inline void ComputePadUsingSize(
 	  const int in_size,
 	  const int stride,
@@ -327,7 +327,6 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
 		*pad_tail = (total_padding + 1) / 2;
 		*pad_head = total_padding - *pad_tail;
         CAFFE_ENFORCE(*pad_head >= 0);
-        CAFFE_ENFORCE(*pad_tail == *pad_head);
 		break;
 	  case LegacyPadding::VALID:
 		*pad_tail = *pad_head = 0;
@@ -347,7 +346,7 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
       int* pad_head,
       int* pad_tail,
       int* out_size) {
-    if (use_pad == false) {
+	if (!use_pad) {
       ComputePadUsingSize(
           in_size, stride, kernel, adj, pad_head, pad_tail, out_size);
     } else {
