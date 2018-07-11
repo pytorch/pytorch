@@ -5941,6 +5941,15 @@ new_criterion_tests = [
         desc='scalar'
     ),
     dict(
+        module_name='MSELoss',
+        input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
+        target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
+        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
+                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+        check_forward_only=True,
+        desc='prec',
+    ),
+    dict(
         module_name='BCELoss',
         constructor_args_fn=lambda: (torch.rand(()),),
         input_fn=lambda: torch.rand(()).clamp_(1e-2, 1 - 1e-2),
