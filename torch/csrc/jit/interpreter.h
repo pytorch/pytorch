@@ -29,7 +29,7 @@ struct Code {
   // Returns pointers to GraphExecutors created to run GraphExecutor nodes in the given graph.
   const std::vector<GraphExecutor*>& executors();
 
-  operator bool() const {
+  explicit operator bool() const {
     return pImpl != nullptr;
   }
 
