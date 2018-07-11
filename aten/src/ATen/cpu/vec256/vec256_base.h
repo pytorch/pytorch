@@ -14,6 +14,16 @@
 #define __at_align32__
 #endif
 
+
+// [NaN propagation]
+// See https://www.felixcloutier.com/x86/MINPS.html
+// In particular http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1373
+// In short: SIMD max/min and std::max/std::min treat NaNs differently
+// Also see: https://software.intel.com/en-us/forums/intel-isa-extensions/topic/759566
+// The decision here is to maintain current behavior, but there's no guarantee
+// this will always perfectly be portable, because a compiler might decide to switch the
+// order in which min or max is called. If you encounter this issue, please post an issue.
+
 namespace at {
 namespace vec256 {
 namespace {

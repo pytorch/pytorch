@@ -1576,7 +1576,6 @@ class TestNN(NNTestCase):
         test('log_softmax', 0)
         test('leaky_relu', 0.2)
 
-    @unittest.skip('testing')
     def test_nonlinearity_propagate_nan(self):
         self._test_nonlinearity_propagate_nan('cpu')
 

@@ -210,7 +210,9 @@ Vec256<float> inline operator/(const Vec256<float>& a, const Vec256<float>& b) {
 
 template <>
 Vec256<float> inline max(const Vec256<float>& a, const Vec256<float>& b) {
-  return _mm256_max_ps(a, b);
+  //NB: The order here matters because of NaN propagation!
+  //See [NaN propagation] in vec256 base class
+  return _mm256_max_ps(b, a);
 }
 
 template <>
