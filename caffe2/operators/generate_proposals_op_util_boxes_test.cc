@@ -1,4 +1,5 @@
 #include "caffe2/operators/generate_proposals_op_util_boxes.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include <gtest/gtest.h>
 
