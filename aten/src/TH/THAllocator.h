@@ -36,6 +36,10 @@ class AT_API THMapAllocator {
 public:
   THMapAllocator(const char *filename, int flags, size_t size);
   THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
+  THMapAllocator(const THMapAllocator&) = delete;
+  THMapAllocator& operator=(const THMapAllocator&) = delete;
+  THMapAllocator(THMapAllocator&&) = delete;
+  THMapAllocator& operator=(THMapAllocator&&) = delete;
   virtual ~THMapAllocator();
 
   const char* filename() const { return filename_.c_str(); }
@@ -56,7 +60,11 @@ public:
   static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
   static at::SupervisedPtr makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
+  // Closes the data.  Helps us avoid destructor shenanigans
+  virtual void close();
+
 protected:
+  bool closed_ = false;
   std::string filename_;
   int flags_ = 0;
   ptrdiff_t size_; /* mapped size */
@@ -79,7 +87,6 @@ class AT_API THRefcountedMapAllocator : private THRefcountedMapAllocatorArgCheck
 public:
   THRefcountedMapAllocator(const char *filename, int flags, size_t size);
   THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
-  virtual ~THRefcountedMapAllocator();
 
   static THRefcountedMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
   static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
@@ -89,6 +96,7 @@ public:
 
   void incref();
   int decref();
+  void close() override;
 protected:
   void checkFlags();
   void initializeAlloc();
