@@ -247,7 +247,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 
     if (fstat(fd, &file_stat) == -1) {
       if (!(flags_ & TH_ALLOCATOR_MAPPED_FROMFD)) {
-        close(fd);
+        ::close(fd);
       }
       AT_ERROR("unable to stat the file <", filename_, ">");
     }
@@ -259,7 +259,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
             AT_ERROR("unable to resize file <", filename_, "> to the right size");
           }
           if (fstat(fd, &file_stat) == -1 || file_stat.st_size < size) {
-            close(fd);
+            ::close(fd);
             AT_ERROR("unable to stretch file <", filename_, "> to the right size");
           }
 /* on macOS write returns with errno 45 (Opperation not supported) when used
@@ -267,12 +267,12 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
  */
 #ifndef __APPLE__
           if ((write(fd, "", 1)) != 1) /* note that the string "" contains the '\0' byte ... */ {
-            close(fd);
+            ::close(fd);
             AT_ERROR("unable to write to file <", filename_, ">");
           }
 #endif
         } else {
-          close(fd);
+          ::close(fd);
           AT_ERROR("file <", filename_, "> size is smaller than the required mapping size <", size, ">");
         }
       }
@@ -296,7 +296,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
     if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
       fd_ = fd;
     } else {
-      if (close(fd) == -1) {
+      if (::close(fd) == -1) {
         AT_ERROR("Error closing file <", filename_, ">");
       }
       fd_ = -1;
@@ -350,11 +350,14 @@ static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFire
 }
 #endif
 
-THMapAllocator::~THMapAllocator() {
+void THMapAllocator::close() {
+  if (closed_) {
+    return;
+  }
+  closed_ = true;
   if (base_ptr_ == nullptr) {
     return;
   }
-
 #ifdef _WIN32
   if ((flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) || (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM))
     CloseHandle(handle_);
@@ -362,7 +365,7 @@ THMapAllocator::~THMapAllocator() {
     AT_ERROR("could not unmap the shared memory file");
 #else /* _WIN32 */
   if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
-    if (close(fd_) == -1) {
+    if (::close(fd_) == -1) {
       AT_ERROR("could not close file descriptor ", fd_);
     }
   }
@@ -383,6 +386,10 @@ THMapAllocator::~THMapAllocator() {
     }
   }
 #endif /* _WIN32 */
+}
+
+THMapAllocator::~THMapAllocator() {
+  close();
 }
 
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
@@ -451,10 +458,13 @@ void THRefcountedMapAllocator::initializeAlloc() {
   }
 }
 
-THRefcountedMapAllocator::~THRefcountedMapAllocator() {
-  // Prevent the parent destructor from running
+void THRefcountedMapAllocator::close() {
+  if (closed_) {
+    return;
+  }
+  closed_ = true;
+
   void* data = base_ptr_;
-  base_ptr_ = nullptr;
 
 #ifdef _WIN32
   THMapInfo *info = (THMapInfo*)data;
