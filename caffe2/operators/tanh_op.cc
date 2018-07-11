@@ -2,6 +2,7 @@
 
 namespace caffe2 {
 
+#ifdef CAFFE2_USE_ACCELERATE
 template <>
 template <>
 bool TanhFunctor<CPUContext>::operator()<float>(
@@ -9,14 +10,10 @@ bool TanhFunctor<CPUContext>::operator()<float>(
     const float* X,
     float* Y,
     CPUContext* /* context */) const {
-#ifdef CAFFE2_USE_ACCELERATE
   vvtanhf(Y, X, &N);
-#else
-  ConstEigenVectorArrayMap<float> X_arr(X, N);
-  EigenVectorMap<float>(Y, N) = 1 - 2 * ((X_arr * 2).exp() + 1).inverse();
-#endif
   return true;
 }
+#endif // CAFFE2_USE_ACCELERATE
 
 REGISTER_CPU_OPERATOR(
     Tanh,
