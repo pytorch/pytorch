@@ -7,8 +7,8 @@ namespace torch { namespace jit {
 using bool_memo_type = std::unordered_map<Node*, bool>;
 
 bool hasSideEffects(Node * node, bool_memo_type& memo) {
-  // FIXME: PythonOp and CppOp should be treated as having side effects as well!
-  //        Unfortunately ONNX depends on them getting removed in this pass, so it's not
+  // FIXME: PythonOp should be treated as having side effects as well!
+  //        Unfortunately ONNX depends on it getting removed in this pass, so it's not
   //        a simple change.
   auto it = memo.find(node);
   if (it != memo.end())

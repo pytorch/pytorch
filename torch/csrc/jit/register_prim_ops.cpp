@@ -1,6 +1,5 @@
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
@@ -33,27 +32,6 @@ Operation noop(Node* n) {
 }
 
 RegisterOperators reg({
-
-    Operator(
-        prim::CppOp,
-        [](Node* node) {
-          CppOp* op = static_cast<CppOp*>(node);
-          std::shared_ptr<autograd::Function> func = op->fn;
-          JIT_ASSERT(!hasHandleOutput(op));
-          auto num_inputs = op->inputs().size();
-          return [=](Stack& stack) {
-            autograd::variable_list v_inputs;
-            for (size_t i = 0; i < num_inputs; i++) {
-              v_inputs.push_back(std::move(peek(stack, i, num_inputs)));
-            }
-            drop(stack, num_inputs);
-            autograd::variable_list v_outputs = (*func)(v_inputs);
-            for (auto& output : v_outputs) {
-              stack.push_back(output);
-            }
-            return 0;
-          };
-        }),
 
     Operator(
         prim::FusionGroup,

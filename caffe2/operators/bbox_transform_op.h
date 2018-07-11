@@ -22,7 +22,8 @@ class BBoxTransformOp final : public Operator<Context> {
             OperatorBase::GetSingleArgument<bool>("apply_scale", true)),
         correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
             "correct_transform_coords",
-            false)) {
+            false)),
+        rotated_(OperatorBase::GetSingleArgument<bool>("rotated", false)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
@@ -44,6 +45,9 @@ class BBoxTransformOp final : public Operator<Context> {
   // Set to true to match the detectron code, set to false for backward
   //   compatibility
   bool correct_transform_coords_{false};
+  // Set for RRPN case to handle rotated boxes. Inputs should be in format
+  // [ctr_x, ctr_y, width, height, angle (in degrees)].
+  bool rotated_{false};
 };
 
 } // namespace caffe2

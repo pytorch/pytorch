@@ -162,12 +162,12 @@ struct Environment {
     // control flow
     if(auto parent = findInParentFrame(name)) {
       if(!as_simple_value) {
-        throw ErrorReport(loc) << "Cannot re-assign '" << name << "' to a value of type " << value->kind() << 
+        throw ErrorReport(loc) << "Cannot re-assign '" << name << "' to a value of type " << value->kind() <<
 	" because " << name << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
       Value* simple_parent = asSimple(parent);
       if(!simple_parent) {
-        throw ErrorReport(loc) << "Cannot re-assign '" << name << "' because it has type " << value->kind() << 
+        throw ErrorReport(loc) << "Cannot re-assign '" << name << "' because it has type " << value->kind() <<
 	" and " << name << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
       if(!as_simple_value->type()->isSubtypeOf(*interpreterType(simple_parent->type()))) {

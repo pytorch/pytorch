@@ -3,7 +3,6 @@
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
@@ -29,7 +28,6 @@ namespace {
 Operation createPythonOperation(Node* op_) {
   PythonOp* op = static_cast<PythonOp*>(op_);
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  JIT_ASSERT(!hasHandleOutput(op));
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
     if(arg_type == 't')
