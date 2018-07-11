@@ -270,16 +270,18 @@ class TestJit(JitTestCase):
         self.run_pass('peephole', trace)
         self.assertExpectedGraph(trace, subname="different_size")
         trace, z = torch.jit.get_trace_graph(f, (a, d))
+        s = str(trace)
         self.run_pass('peephole', trace)
-        self.assertExpectedGraph(trace, subname="different_type")
+        self.assertEqual(s, str(trace))
 
     def test_peephole_dynamic(self):
         def f(x, y):
             return x.type_as(y)
 
         fn = torch.jit.script(f)
+        s = str(fn.graph)
         torch._C._jit_pass_peephole(fn.graph)
-        self.assertExpectedGraph(fn.graph)
+        self.assertEqual(s, str(fn.graph))
 
     @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_peephole_cuda(self):
@@ -291,8 +293,9 @@ class TestJit(JitTestCase):
             return x.type_as(y)
 
         trace, z = torch.jit.get_trace_graph(f, (a, c))
+        s = str(trace)
         self.run_pass('peephole', trace)
-        self.assertExpectedGraph(trace, subname="different_device")
+        self.assertEqual(s, str(trace))
         trace, z = torch.jit.get_trace_graph(f, (b, c))
         self.run_pass('peephole', trace)
         self.assertExpectedGraph(trace, subname="same_device")
