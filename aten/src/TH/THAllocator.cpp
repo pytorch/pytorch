@@ -49,7 +49,7 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 #ifdef _WIN32
   , handle_(INVALID_HANDLE_VALUE) // to be filled later
   , event_(INVALID_HANDLE_VALUE) // to be filled later
-  , eventname_(filename ? filename + "_event" : unknown_eventname)
+  , eventname_(filename ? std::string(filename) + "_event" : unknown_eventname)
 #else
   , fd_(fd)
 #endif
@@ -78,16 +78,16 @@ THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, 
 #ifdef _WIN32
   if (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM) {
     // Shadowing
-    char *filename;
-    char *eventname;
+    const char *filename;
+    const char *eventname;
     LARGE_INTEGER hfilesz;
 
     if (filename_[0] == '/') {
       filename = filename_.c_str() + 1;
       eventname = eventname_.c_str() + 1;
     } else {
-      filename = filename_;
-      eventname = eventname_;
+      filename = filename_.c_str();
+      eventname = eventname_.c_str();
     }
 
     hfilesz.QuadPart = size;
