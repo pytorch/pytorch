@@ -51,7 +51,7 @@ private:
 };
 
 struct THDefaultDeviceAllocator final : public at::Allocator {
-  SupervisedPtr allocate(size_t size) const override {
+  at::SupervisedPtr allocate(size_t size) const override {
     void* p;
     THCudaCheck(cudaMalloc(&p, size));
     return {p, THDefaultDeviceDeleter::make()};
@@ -686,7 +686,7 @@ void THCudaFree(THCState *state, void* ptr) {
   state->cudaDeviceAllocator->raw_deallocate(ptr);
 }
 
-SupervisedPtr THCudaHostAlloc(THCState *state, size_t size)
+at::SupervisedPtr THCudaHostAlloc(THCState *state, size_t size)
 {
   THCudaCheck(cudaGetLastError());
   THAllocator* allocator = state->cudaHostAllocator;

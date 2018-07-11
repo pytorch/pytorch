@@ -20,7 +20,7 @@
 /* end of stuff for mapped files */
 
 struct THDefaultAllocator final : public at::Allocator {
-  SupervisedPtr allocate(size_t size) const override {
+  at::SupervisedPtr allocate(size_t size) const override {
     auto* ptr = THAlloc(size);
     return {ptr, {ptr, THFree}};
   }
@@ -520,22 +520,22 @@ static void deleteTHRefcountedMapAllocator(void* ptr) {
   delete static_cast<THRefcountedMapAllocator*>(ptr);
 }
 
-THMapAllocator* THMapAllocator::fromSupervisedPtr(const SupervisedPtr& sptr) {
+THMapAllocator* THMapAllocator::fromSupervisedPtr(const at::SupervisedPtr& sptr) {
   if (sptr.supervisor_.get_deleter() != &deleteTHMapAllocator) return nullptr;
   return static_cast<THMapAllocator*>(sptr.supervisor_.get());
 }
 
-THRefcountedMapAllocator* THRefcountedMapAllocator::fromSupervisedPtr(const SupervisedPtr& sptr) {
+THRefcountedMapAllocator* THRefcountedMapAllocator::fromSupervisedPtr(const at::SupervisedPtr& sptr) {
   if (sptr.supervisor_.get_deleter() != &deleteTHRefcountedMapAllocator) return nullptr;
   return static_cast<THRefcountedMapAllocator*>(sptr.supervisor_.get());
 }
 
-SupervisedPtr makeSupervisedPtr(std::unique_ptr<THMapAllocator>&& supervisor_) {
+at::SupervisedPtr THMapAllocator::makeSupervisedPtr(std::unique_ptr<THMapAllocator>&& supervisor_) {
   auto* supervisor = supervisor_.release();
   return {supervisor->data(), {supervisor, &deleteTHMapAllocator}};
 }
 
-SupervisedPtr makeSupervisedPtr(std::unique_ptr<THRefcountedMapAllocator>&& supervisor_) {
+at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(std::unique_ptr<THRefcountedMapAllocator>&& supervisor_) {
   auto* supervisor = supervisor_.release();
   return {static_cast<void*>(static_cast<char*>(supervisor->data()) + TH_ALLOC_ALIGNMENT),
           {supervisor, &deleteTHRefcountedMapAllocator}};

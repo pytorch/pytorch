@@ -30,7 +30,7 @@ typedef struct {
 
 SHM_API void libshm_init(const char *manager_exec_path);
 SHM_API libshm_context * libshm_context_new(const char *manager_handle, const char *filename, int flags);
-SHM_API SupervisedPtr libshm_alloc(void *_ctx, ptrdiff_t size);
+SHM_API at::SupervisedPtr libshm_alloc(void *_ctx, ptrdiff_t size);
 SHM_API void libshm_context_free(libshm_context *context);
 
 struct SHM_API_NOEXTERNC THManagedSharedDeleter : public at::Deleter {

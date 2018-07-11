@@ -23,7 +23,7 @@ void libshm_context_free(libshm_context *ctx) {
 THManagedSharedDeleter THManagedSharedDeleter::singleton_;
 
 
-SupervisedPtr libshm_alloc(void *_ctx, ptrdiff_t size) {
+at::SupervisedPtr libshm_alloc(void *_ctx, ptrdiff_t size) {
   auto *ctx = (libshm_context*)_ctx;
   return THRefcountedMapAllocator_alloc(ctx->th_context, size);
 }

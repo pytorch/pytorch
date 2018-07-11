@@ -51,7 +51,7 @@ struct SupervisedPtr {
 
 struct Allocator {
   virtual ~Allocator() {}
-  virtual SupervisedPtr allocate(size_t n) const = 0;
+  virtual at::SupervisedPtr allocate(size_t n) const = 0;
 
   // If this returns a non nullptr, it means that allocate()
   // is guaranteed to return a unique_ptr with this deleter attached;
@@ -80,7 +80,7 @@ static void deleteInefficientStdFunctionSupervisor(void* ptr) {
   delete static_cast<InefficientStdFunctionSupervisor*>(ptr);
 }
 
-AT_API SupervisedPtr
+AT_API at::SupervisedPtr
 makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter) {
   return {ptr, SupervisorPtr{new InefficientStdFunctionSupervisor({ptr, deleter}), &deleteInefficientStdFunctionSupervisor}};
 }

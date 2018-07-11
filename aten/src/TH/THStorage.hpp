@@ -80,7 +80,7 @@ void THStorage_clearFlag(THStorage *storage, const char flag);
 void THStorage_retain(THStorage *storage);
 // THStorage* THStorage_newWithData(at::ScalarType scalar_type, void *data, ptrdiff_t size);
 THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
-                                             SupervisedPtr&& data, ptrdiff_t size,
+                                             at::SupervisedPtr&& data, ptrdiff_t size,
                                              at::Allocator* allocator);
 void THStorage_resize(THStorage *storage, ptrdiff_t size);
 void THStorage_swap(THStorage *storage1, THStorage *storage2);

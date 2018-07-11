@@ -38,7 +38,7 @@ public:
   THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
   virtual ~THMapAllocator();
 
-  char* filename() const { return filename_.c_str(); }
+  const char* filename() const { return filename_.c_str(); }
   int fd() const {
 #ifdef _WIN32
     AT_ERROR("THMapAllocator::fd() is unsupported on Windows");
@@ -50,6 +50,7 @@ public:
   void* data() const { return data_; }
 
   static THMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
+  static at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THMapAllocator>&&);
 
 private:
   std::string filename_;
@@ -77,6 +78,7 @@ public:
   virtual ~THRefcountedMapAllocator();
 
   static THRefcountedMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
+  static at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THRefcountedMapAllocator>&&);
 
   void incref();
   int decref();
@@ -84,8 +86,5 @@ private:
   void checkFlags();
   void initializeAlloc();
 };
-
-AT_API at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THMapAllocator>&&);
-AT_API at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THRefcountedMapAllocator>&&);
 
 #endif // __cplusplus

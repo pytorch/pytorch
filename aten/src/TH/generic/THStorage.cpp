@@ -106,7 +106,7 @@ THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
 }
 */
 
-THStorage* THStorage_(newWithDataAndAllocator)(SupervisedPtr&& data, ptrdiff_t size,
+THStorage* THStorage_(newWithDataAndAllocator)(at::SupervisedPtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
   return THStorage_newWithDataAndAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), std::move(data), size, allocator);
 }

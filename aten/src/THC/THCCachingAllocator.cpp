@@ -510,7 +510,7 @@ CudaCachingDeleter CudaCachingDeleter::singleton_;
 // has a lot more methods and it wasn't altogether clear that they should
 // actually be publically exposed
 struct CudaCachingAllocator : public at::Allocator {
-  SupervisedPtr allocate(size_t size) const override {
+  at::SupervisedPtr allocate(size_t size) const override {
     int device;
     THCudaCheck(cudaGetDevice(&device));
     void* r;
