@@ -399,7 +399,13 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: torch.addr(m, v, s))
         self.assertRaises(RuntimeError, lambda: torch.addr(m, s, v))
 
-    def _test_math(self, torchfn, mathfn, input=None, test_expand=False):
+    def _test_math(self, torchfn, mathfn, input=None, test_expand=False, nonzero=False, offset=0):
+        def proc(input):
+            if nonzero:
+                input = input.abs()
+            if offset:
+                input = input + offset
+            return input
         if input is None:
             input = []
             input.append(list(range(-5, 5)))
@@ -414,6 +420,7 @@ class TestTorch(TestCase):
 
         def compare_reference(input, dtype):
             input = torch.tensor(input, dtype=dtype)
+            input = proc(input)
             res1 = torchfn(input.clone())
             res2 = input.clone().apply_(lambda x: mathfn(x))
             torch.testing.assert_allclose(res1, res2)
@@ -424,6 +431,7 @@ class TestTorch(TestCase):
 
         def check_non_contiguous(shape, dtype):
             contig = torch.randn(shape, dtype=dtype)
+            contig = proc(contig)
             non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
             non_contig.copy_(contig)
             self.assertFalse(non_contig.is_contiguous())
@@ -465,6 +473,7 @@ class TestTorch(TestCase):
         # The code needs to be able to handle this
         def check_contiguous_size1(dtype):
             contig = torch.randn((5, 100), dtype=dtype)
+            contig = proc(contig)
             contig = contig[:1, :50]
             contig2 = torch.empty(contig.size(), dtype=dtype)
             contig2.copy_(contig)
@@ -477,6 +486,7 @@ class TestTorch(TestCase):
 
         def check_contiguous_size1_largedim(dtype):
             contig = torch.randn((5, 2, 3, 1, 4, 5, 3, 2, 1, 2, 3, 4), dtype=dtype)
+            contig = proc(contig)
             contig = contig[:1, :, :, :, :, :, :, :, :, :, :, :]
             contig2 = torch.empty(contig.size(), dtype=dtype)
             contig2.copy_(contig)
@@ -489,6 +499,7 @@ class TestTorch(TestCase):
 
         def check_large(dtype):
             input = torch.randn(1024, 512, dtype=dtype)
+            input = proc(input)
             actual = torchfn(input)
             expected = torch.stack([torchfn(slice) for slice in input])
             self.assertEqual(actual, expected, 'large')
@@ -714,7 +725,7 @@ class TestTorch(TestCase):
                 return nan
             return 1.0 / math.sqrt(x)
 
-        self._test_math(torch.rsqrt, rsqrt)
+        self._test_math(torch.rsqrt, rsqrt, nonzero=True, offset=1e-6)
 
     def test_sigmoid(self):
         # TODO: why not simulate math.sigmoid like with rsqrt?
