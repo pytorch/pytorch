@@ -16,7 +16,7 @@ namespace utils {
 // Reject a bounding box if its region has an intersection-overunion (IoU)
 //    overlap with a higher scoring selected bounding box larger than a
 //    threshold.
-// Reference: detectron/lib/utils/cython_nms.pyx
+// Reference: facebookresearch/Detectron/detectron/utils/cython_nms.pyx
 // proposals: pixel coordinates of proposed bounding boxes,
 //    size: (M, 4), format: [x1; y1; x2; y2]
 // scores: scores for each bounding box, size: (M, 1)
@@ -78,7 +78,7 @@ std::vector<int> nms_cpu(
 // Reject a bounding box if its region has an intersection-overunion (IoU)
 //    overlap with a higher scoring selected bounding box larger than a
 //    threshold.
-// Reference: detectron/lib/utils/cython_nms.pyx
+// Reference: facebookresearch/Detectron/detectron/utils/cython_nms.pyx
 // proposals: pixel coordinates of proposed bounding boxes,
 //    size: (M, 4), format: [x1; y1; x2; y2]
 // scores: scores for each bounding box, size: (M, 1)
@@ -100,7 +100,7 @@ std::vector<int> nms_cpu(
 
 /**
  * Soft-NMS implementation as outlined in https://arxiv.org/abs/1704.04503.
- * Reference: detectron/lib/utils/cython_nms.pyx
+ * Reference: facebookresearch/Detectron/detectron/utils/cython_nms.pyx
  * out_scores: Output updated scores after applying Soft-NMS
  * proposals: pixel coordinates of proposed bounding boxes,
  *    size: (M, 4), format: [x1; y1; x2; y2]
