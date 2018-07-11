@@ -19,7 +19,7 @@ class NegativeBinomial(Distribution):
 
     arg_constraints = {'total_count': constraints.nonnegative_integer,
                        'probs': constraints.unit_interval}
-    has_enumerate_support = False
+    support = constraints.nonnegative_integer
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
@@ -43,10 +43,6 @@ class NegativeBinomial(Distribution):
     def _new(self, *args, **kwargs):
         return self._param.new(*args, **kwargs)
 
-    @constraints.dependent_property
-    def support(self):
-        return constraints.integer_interval(0, self.total_count)
-
     @property
     def mean(self):
         return self.total_count * torch.exp(self.logits)
@@ -69,8 +65,11 @@ class NegativeBinomial(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
+            max_count = max(int(self.total_count.max()), 1)
+            shape = self._extended_shape(sample_shape) + (max_count,)
+
             rate = torch.distributions.Gamma(concentration=self.total_count,
-                                             rate=(1 - self.probs) / self.probs).sample()
+                                             rate=(1 - self.probs) / self.probs).sample(sample_shape=shape)
             return torch.poisson(rate)
 
     def log_prob(self, value):
