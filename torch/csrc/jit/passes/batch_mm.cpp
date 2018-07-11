@@ -119,7 +119,7 @@ struct TreeToken {
     return token;
   }
 
-  operator bool() {
+  explicit operator bool() {
     return is_root;
   }
 
