@@ -484,11 +484,6 @@ void initJitScriptBindings(PyObject* module) {
         // There is a thin wrapper on top of this method in the C++ version of
         // ScriptModule.
         return runMethodFromPython(self.get_method("forward"), args);
-      })
-      .def("to_batch", [](Module& self) {
-        auto graph = self.get_method("forward").graph();
-        auto res_graph = to_batch_graph(graph);
-        return res_graph;
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
