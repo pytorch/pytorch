@@ -190,7 +190,10 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
       bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
-      correct_transform_coords_);
+      correct_transform_coords_,
+      angle_bound_on_,
+      angle_bound_lo_,
+      angle_bound_hi_);
 
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
