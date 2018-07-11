@@ -47,7 +47,7 @@ const char * unknown_filename = "filename not specified";
 const char * unknown_eventname = "eventname not specified";
 #endif
 
-THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
+THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
   : filename_(filename ? filename : unknown_filename)
   , flags_(0) // to be filled later
   , size_(0) // to be filled later
@@ -56,7 +56,7 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
   , event_(INVALID_HANDLE_VALUE) // to be filled later
   , eventname_(filename ? filename + "_event" : unknown_eventname)
 #else
-  , fd_(-1)
+  , fd_(fd)
 #endif
   , base_ptr_(nullptr)
 {
@@ -67,6 +67,11 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
   if ((flags ^ TH_ALLOCATOR_MAPPED_EXCLUSIVE) == 0) {
     AT_ERROR("TH_ALLOCATOR_MAPPED_EXCLUSIVE flag requires opening the file in shared mode");
   }
+#ifdef _WIN32
+  if (fd != -1) {
+    AT_ERROR("THMapAllocator_newWithFd is unsupported on Windows");
+  }
+#endif
   flags_ = flags;
 
   // OK, now do the allocation
@@ -319,16 +324,9 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
 #endif
 }
 
-// NB: To use this correctly, it seems you still need to set
-// TH_ALLOCATOR_MAPPED_FROMFD in flags
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
-  : THMapAllocator(filename, flags, size)
-{
-  fd_ = fd;
-#ifdef _WIN32
-  AT_ERROR("THMapAllocator_newWithFd is unsupported on Windows");
-#endif
-}
+THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
+  : THMapAllocator(WITH_FD, filename, -1, flags, size)
+{}
 
 #ifdef _WIN32
 typedef struct{
