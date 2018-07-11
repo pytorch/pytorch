@@ -1861,11 +1861,10 @@ class TestScript(JitTestCase):
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
     def test_script_torch_size(self):
-        @torch.jit.script
         def func(x):
-            return torch.rand((x.size(0), 1))
+            return torch.zeros((x.size(0), 1))
 
-        self.assertEqual(func(torch.rand(2, 3)).shape[0], 2)
+        self.checkScript(func, [torch.rand(2, 3)], optimize=True)
 
     def test_script_bool_constant(self):
         script = '''

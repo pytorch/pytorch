@@ -555,8 +555,8 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   size_t num_outputs = schema.returns.size();
 
   // special case for chunk when the chunks=<const> is known
-  // DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF
-  // NEEDED
+  // DO NOT ADD MORE SPECIAL CASES HERE, REFACTOR INTO A FUNCTION IF NEEDED
+  // TODO: fix the special case after we have list supported
   if(n->kind() == aten::chunk) {
     auto value = constant_as<int64_t>((*flat_inputs)[1]);
     if(!value) {
