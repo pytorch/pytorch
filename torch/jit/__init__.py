@@ -47,7 +47,7 @@ def scope(scope_name, *vars):
             tracing_state.pop_scope()
 
 
-def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
+def get_trace_graph(f, args=tuple(), kwargs=None):
     """
     Trace a function or model, returning a tuple consisting of the both the
     *trace* of an execution, as well as the original return value.
@@ -63,28 +63,17 @@ def get_trace_graph(f, args=tuple(), kwargs=None, nderivs=0):
             be a single positional argument to be passed to the model.
         kwargs (dict): the keyword arguments to pass to the function/module
             to be traced.
-        nderivs (int, default 0): the number of derivatives to trace.
-            Traces of derivatives are recorded into the same trace returned
-            after executing the `forward` of the resulting module, but
-            are not present until you run `backward()` (an appropriate
-            number of times) on the resulting model.
 
-    Example: Trace the forwards pass only.
+    Example: Trace a cell.
 
         >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden))
-        >>> print(trace)
-
-    Example: Trace the backwards pass too.
-
-        >>> trace, out = jit.trace(nn.LSTMCell(), (input, hidden), nderivs=1)
-        >>> out.sum().backward()
         >>> print(trace)
     """
     if kwargs is None:
         kwargs = {}
     if not isinstance(args, tuple):
         args = (args,)
-    return LegacyTracedModule(f, nderivs=nderivs)(*args, **kwargs)
+    return LegacyTracedModule(f)(*args, **kwargs)
 
 
 def _unique_state_dict(module, keep_vars=False):
@@ -100,13 +89,12 @@ def _unique_state_dict(module, keep_vars=False):
 
 
 class LegacyTracedModule(Module):
-    def __init__(self, inner, nderivs=0):
+    def __init__(self, inner):
         super(LegacyTracedModule, self).__init__()
         # inner may be a Module, or it may be an arbitrary callable
         # If it's a Module, we get its parameters automatically, which lets
         # us avoid a special casing functions versus modules.
         self.inner = inner
-        self.nderivs = nderivs
 
     def forward(self, *args):
         global _tracing
@@ -114,7 +102,7 @@ class LegacyTracedModule(Module):
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
-        trace, all_trace_inputs = torch._C._tracer_enter(in_vars + module_state, self.nderivs)
+        trace, all_trace_inputs = torch._C._tracer_enter(in_vars + module_state)
         _tracing = True
         trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
         out = self.inner(*trace_inputs)

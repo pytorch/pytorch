@@ -17,6 +17,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
@@ -536,7 +537,7 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
   variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1);
+  std::tie(state, trace_vars_in) = tracer::enter(vars_in);
   auto trace_vars_out = test(trace_vars_in);
   tracer::exit(trace_vars_out);
   return state->graph;

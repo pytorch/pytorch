@@ -270,7 +270,6 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(stage)
     .VS(offset)
     .VS(uses)
-    .VS(isHandle)
     .VS(replaceAllUsesWith)
     .def("node",[](Value &v) { return v.node(); })
     .def("setTypeAs", [](Value * node, Value * other) {
@@ -427,8 +426,6 @@ void initPythonIRBindings(PyObject * module_) {
     .def("kind",[](Type& t_) {
       Type * t = &t_;
       switch(t->kind()) {
-        case TypeKind::HandleType:
-          return "HandleType";
         case TypeKind::DynamicType:
           return "DynamicType";
         case TypeKind::TensorType:
