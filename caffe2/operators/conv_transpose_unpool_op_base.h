@@ -254,7 +254,10 @@ class ConvTransposeUnpoolBase : public Operator<Context> {
   bool shared_buffer_;
   bool use_pad_;
   Workspace* ws_;
-
+  /* When use_pad_ is false, which means given output_shape_ instead of pads_,
+   * pads_ must be calculated in RunOnDevice everytime.
+   * The pads_ in this base class might be incorrect.
+   */
   // Accessors for 2D conv params.
 
   inline int pad_t() const {
