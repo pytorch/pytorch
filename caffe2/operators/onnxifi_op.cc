@@ -107,13 +107,15 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
       ONNXIFI_STATUS_SUCCESS);
 
   onnxMemoryFence input_fence;
-  input_fence.event = nullptr;
+  onnxEvent input_event;
+  input_fence.event = &input_event;
   input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
   CAFFE_ENFORCE_EQ(
       lib_->onnxInitEvent(backend_, input_fence.event), ONNXIFI_STATUS_SUCCESS);
   onnxMemoryFence output_fence;
+  onnxEvent output_event;
   output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
-  output_fence.event = nullptr;
+  output_fence.event = &output_event;
 
   // Call the asycn run on backend, singal event on input fence and wait for the
   // event on output fence
@@ -121,15 +123,15 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
       lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
       ONNXIFI_STATUS_SUCCESS);
   CAFFE_ENFORCE_EQ(
-      lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+      lib_->onnxSignalEvent(*input_fence.event), ONNXIFI_STATUS_SUCCESS);
   CAFFE_ENFORCE_EQ(
-      lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+      lib_->onnxWaitEvent(*output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
   // Destroy the event objects
   CAFFE_ENFORCE_EQ(
-      lib_->onnxReleaseEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+      lib_->onnxReleaseEvent(*input_fence.event), ONNXIFI_STATUS_SUCCESS);
   CAFFE_ENFORCE_EQ(
-      lib_->onnxReleaseEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
+      lib_->onnxReleaseEvent(*output_fence.event), ONNXIFI_STATUS_SUCCESS);
 
   return true;
 }
