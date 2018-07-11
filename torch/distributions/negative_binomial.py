@@ -69,8 +69,8 @@ class NegativeBinomial(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
-            rate = torch.gamma(concentration=self.total_count,
-                               rate=(1-self.probs)/self.probs)
+            rate = torch.distributions.Gamma(concentration=self.total_count,
+                                             rate=(1-self.probs)/self.probs).sample()
             return torch.poisson(rate)
 
     def log_prob(self, value):
