@@ -14,6 +14,6 @@ public:
   void toBatch(Block* block, Block* res_block);
 };
 
-std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph, int64_t batch_size=1);
+std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph);
 void initRegisterBatchOpsBindings(PyObject* module);
 }}
