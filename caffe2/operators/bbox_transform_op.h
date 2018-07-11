@@ -23,7 +23,13 @@ class BBoxTransformOp final : public Operator<Context> {
         correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
             "correct_transform_coords",
             false)),
-        rotated_(OperatorBase::GetSingleArgument<bool>("rotated", false)) {
+        rotated_(OperatorBase::GetSingleArgument<bool>("rotated", false)),
+        angle_bound_on_(
+            OperatorBase::GetSingleArgument<bool>("angle_bound_on", true)),
+        angle_bound_lo_(
+            OperatorBase::GetSingleArgument<int>("angle_bound_lo", -90)),
+        angle_bound_hi_(
+            OperatorBase::GetSingleArgument<int>("angle_bound_hi", 90)) {
     CAFFE_ENFORCE_EQ(
         weights_.size(),
         4,
@@ -48,6 +54,11 @@ class BBoxTransformOp final : public Operator<Context> {
   // Set for RRPN case to handle rotated boxes. Inputs should be in format
   // [ctr_x, ctr_y, width, height, angle (in degrees)].
   bool rotated_{false};
+  // If set, for rotated boxes in RRPN, output angles are normalized to be
+  // within [angle_bound_lo, angle_bound_hi].
+  bool angle_bound_on_{true};
+  int angle_bound_lo_{-90};
+  int angle_bound_hi_{90};
 };
 
 } // namespace caffe2

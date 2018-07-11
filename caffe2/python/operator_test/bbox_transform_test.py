@@ -101,7 +101,14 @@ def generate_rois(roi_counts, im_dims):
     return np.empty((0, 5)).astype(np.float32)
 
 
-def bbox_transform_rotated(boxes, deltas, weights=(1.0, 1.0, 1.0, 1.0)):
+def bbox_transform_rotated(
+    boxes,
+    deltas,
+    weights=(1.0, 1.0, 1.0, 1.0),
+    angle_bound_on=True,
+    angle_bound_lo=-90,
+    angle_bound_hi=90,
+):
     """
     Similar to bbox_transform but for rotated boxes with angle info.
     """
@@ -133,9 +140,15 @@ def bbox_transform_rotated(boxes, deltas, weights=(1.0, 1.0, 1.0, 1.0)):
     pred_boxes[:, 1::5] = dy * heights[:, np.newaxis] + ctr_y[:, np.newaxis]
     pred_boxes[:, 2::5] = np.exp(dw) * widths[:, np.newaxis]
     pred_boxes[:, 3::5] = np.exp(dh) * heights[:, np.newaxis]
-    pred_boxes[:, 4::5] = da + angles[:, np.newaxis]
 
-    # TODO (viswanath): Normalize angles
+    pred_angle = da + angles[:, np.newaxis]
+    if angle_bound_on:
+        period = angle_bound_hi - angle_bound_lo
+        assert period % 180 == 0
+        pred_angle[np.where(pred_angle < angle_bound_lo)] += period
+        pred_angle[np.where(pred_angle > angle_bound_hi)] -= period
+    pred_boxes[:, 4::5] = pred_angle
+
     return pred_boxes
 
 
@@ -159,10 +172,19 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
         im_dim=st.integers(100, 600),
         skip_batch_id=st.booleans(),
         rotated=st.booleans(),
+        angle_bound_on=st.booleans(),
         **hu.gcs_cpu_only
     )
     def test_bbox_transform(
-        self, num_rois, num_classes, im_dim, skip_batch_id, rotated, gc, dc
+        self,
+        num_rois,
+        num_classes,
+        im_dim,
+        skip_batch_id,
+        rotated,
+        angle_bound_on,
+        gc,
+        dc,
     ):
         """
         Test with all rois belonging to a single image per run.
@@ -181,7 +203,9 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
         def bbox_transform_ref(rois, deltas, im_info):
             boxes = rois if rois.shape[1] == box_dim else rois[:, 1:]
             if rotated:
-                box_out = bbox_transform_rotated(boxes, deltas)
+                box_out = bbox_transform_rotated(
+                    boxes, deltas, angle_bound_on=angle_bound_on
+                )
                 # No clipping for rotated boxes
             else:
                 box_out = bbox_transform(boxes, deltas)
@@ -196,6 +220,7 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
             apply_scale=False,
             correct_transform_coords=True,
             rotated=rotated,
+            angle_bound_on=angle_bound_on,
         )
 
         self.assertReferenceChecks(
@@ -209,9 +234,12 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
         roi_counts=st.lists(st.integers(0, 5), min_size=1, max_size=10),
         num_classes=st.integers(1, 10),
         rotated=st.booleans(),
+        angle_bound_on=st.booleans(),
         **hu.gcs_cpu_only
     )
-    def test_bbox_transform_batch(self, roi_counts, num_classes, rotated, gc, dc):
+    def test_bbox_transform_batch(
+        self, roi_counts, num_classes, rotated, angle_bound_on, gc, dc
+    ):
         """
         Test with rois for multiple images in a batch
         """
@@ -239,7 +267,9 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
                 cur_boxes = rois[offset : offset + num_rois, 1:]
                 cur_deltas = deltas[offset : offset + num_rois]
                 if rotated:
-                    cur_box_out = bbox_transform_rotated(cur_boxes, cur_deltas)
+                    cur_box_out = bbox_transform_rotated(
+                        cur_boxes, cur_deltas, angle_bound_on=angle_bound_on
+                    )
                     # No clipping for rotated boxes
                 else:
                     cur_box_out = bbox_transform(cur_boxes, cur_deltas)
@@ -261,6 +291,7 @@ class TestBBoxTransformOp(hu.HypothesisTestCase):
             apply_scale=False,
             correct_transform_coords=True,
             rotated=rotated,
+            angle_bound_on=angle_bound_on,
         )
 
         self.assertReferenceChecks(

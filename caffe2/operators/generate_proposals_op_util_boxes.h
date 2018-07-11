@@ -101,7 +101,10 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_rotated(
     const Eigen::ArrayBase<Derived2>& deltas,
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
-    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT) {
+    const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
+    const bool angle_bound_on = true,
+    const int angle_bound_lo = -90,
+    const int angle_bound_hi = 90) {
   using T = typename Derived1::Scalar;
   using EArrXX = EArrXXt<T>;
   using EArrX = EArrXt<T>;
@@ -140,7 +143,22 @@ EArrXXt<typename Derived1::Scalar> bbox_transform_rotated(
   pred_boxes.col(3) = dh.exp() * heights;
   // new angle
   pred_boxes.col(4) = da + angles;
-  // TODO (viswanath): Normalize angle
+
+  if (angle_bound_on) {
+    // Normalize angle to be within [angle_bound_lo, angle_bound_hi].
+    // Deltas are guaranteed to be <= period / 2 while computing training
+    // targets by bbox_transform_inv.
+    const int period = angle_bound_hi - angle_bound_lo;
+    CAFFE_ENFORCE(period > 0 && period % 180 == 0);
+    auto angles = pred_boxes.col(4);
+    for (int i = 0; i < angles.size(); ++i) {
+      if (angles[i] < angle_bound_lo) {
+        angles[i] += T(period);
+      } else if (angles[i] > angle_bound_hi) {
+        angles[i] -= T(period);
+      }
+    }
+  }
 
   return pred_boxes;
 }
@@ -152,7 +170,10 @@ EArrXXt<typename Derived1::Scalar> bbox_transform(
     const std::vector<typename Derived2::Scalar>& weights =
         std::vector<typename Derived2::Scalar>{1.0, 1.0, 1.0, 1.0},
     const float bbox_xform_clip = BBOX_XFORM_CLIP_DEFAULT,
-    const bool correct_transform_coords = false) {
+    const bool correct_transform_coords = false,
+    const bool angle_bound_on = true,
+    const int angle_bound_lo = -90,
+    const int angle_bound_hi = 90) {
   CAFFE_ENFORCE(boxes.cols() == 4 || boxes.cols() == 5);
   if (boxes.cols() == 4) {
     // Upright boxes
@@ -160,7 +181,14 @@ EArrXXt<typename Derived1::Scalar> bbox_transform(
         boxes, deltas, weights, bbox_xform_clip, correct_transform_coords);
   } else {
     // Rotated boxes with angle info
-    return bbox_transform_rotated(boxes, deltas, weights, bbox_xform_clip);
+    return bbox_transform_rotated(
+        boxes,
+        deltas,
+        weights,
+        bbox_xform_clip,
+        angle_bound_on,
+        angle_bound_lo,
+        angle_bound_hi);
   }
 }
 

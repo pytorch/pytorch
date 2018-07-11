@@ -42,6 +42,18 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "bool (default false). If true, then boxes (rois and deltas) include "
         "angle info to handle rotation. The format will be "
         "[ctr_x, ctr_y, width, height, angle (in degrees)].")
+    .Arg(
+        "angle_bound_on",
+        "bool (default true). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "angle_bound_lo",
+        "int (default -90 degrees). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "angle_bound_hi",
+        "int (default 90 degrees). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
     .Input(
         0,
         "rois",
@@ -152,7 +164,10 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
           cur_deltas,
           weights_,
           utils::BBOX_XFORM_CLIP_DEFAULT,
-          correct_transform_coords_);
+          correct_transform_coords_,
+          angle_bound_on_,
+          angle_bound_lo_,
+          angle_bound_hi_);
       EArrXXf clip_boxes = utils::clip_boxes(trans_boxes, img_h, img_w);
       // Do not apply scale for angle in rotated boxes
       clip_boxes.leftCols(4) *= scale_after;
