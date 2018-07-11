@@ -31,6 +31,8 @@ def vector_to_parameters(vec, parameters):
         parameters (Iterable[Tensor]): an iterator of Tensors that are the
             parameters of a model.
     """
+    # Dimensionality check
+    assert vec.numel() == sum([p.numel() for p in parameters])
     # Ensure vec of type Tensor
     if not isinstance(vec, torch.Tensor):
         raise TypeError('expected torch.Tensor, but got: {}'
