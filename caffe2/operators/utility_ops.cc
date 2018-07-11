@@ -1,6 +1,6 @@
 #include "caffe2/operators/utility_ops.h"
-
 #include <cmath>
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
