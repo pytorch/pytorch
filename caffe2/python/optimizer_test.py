@@ -4,7 +4,7 @@ from __future__ import print_function
 from caffe2.proto import caffe2_pb2
 import caffe2.python.optimizer as optimizer
 from caffe2.python.optimizer import (
-    build_sgd, build_multi_precision_sgd, build_ftrl, build_adagrad,
+    build_sgd, build_multi_precision_sgd, build_ftrl, build_gftrl, build_adagrad,
     build_adam, build_yellowfin, build_rms_prop, add_weight_decay, SgdOptimizer)
 from caffe2.python.optimizer_context import UseOptimizer
 from caffe2.python.optimizer_test_util import (
@@ -85,6 +85,29 @@ class TestFtrl(OptimizerTestBase, TestCase):
     def build_optimizer(self, model, **kwargs):
         self._skip_gpu = True
         return build_ftrl(
+            model,
+            engine=None,
+            alpha=1.0,
+            beta=0.1,
+            lambda1=0.0,
+            lambda2=0.0,
+            **kwargs
+        )
+
+    def check_optimizer(self, optimizer):
+        self.assertFalse(optimizer.get_auxiliary_parameters().shared)
+        self.assertTrue(optimizer.get_auxiliary_parameters().local)
+        for param in optimizer.get_auxiliary_parameters().local:
+            workspace.FetchBlob(param)
+
+
+class TestGFtrl(OptimizerTestBase, TestCase):
+    def testSparse(self):
+        raise unittest.SkipTest("no sparse support")
+
+    def build_optimizer(self, model, **kwargs):
+        self._skip_gpu = True
+        return build_gftrl(
             model,
             engine=None,
             alpha=1.0,

@@ -367,11 +367,12 @@ if(BUILD_CAFFE2)
   if (BUILD_PYTHON)
     # Python site-packages
     # Get canonical directory for python site packages (relative to install
-    # location).  It varys from system to system.
+    # location).  It varies from system to system.
     pycmd(PYTHON_SITE_PACKAGES "
         from distutils import sysconfig
         print(sysconfig.get_python_lib(prefix=''))
     ")
+    SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
     # ---[ Options.
     SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
     message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
@@ -391,6 +392,26 @@ if(BUILD_CAFFE2)
       endif()
     endif()
 
+    # Allow different install locations for libcaffe2
+    # For setuptools installs (that all build Python), install libcaffe2 into
+    # site-packages, alongside the torch libraries. The pybind11 library needs
+    # an rpath to the torch library folder
+    # For cmake installs, including c++ only installs, install libcaffe2 into
+    # CMAKE_INSTALL_PREFIX/lib . The pybind11 library can have a hardcoded
+    # rpath
+    if(APPLE)
+      set(_rpath_portable_origin "@loader_path")
+    else()
+      set(_rpath_portable_origin $ORIGIN)
+    endif(APPLE)
+    set(caffe2_pybind11_rpath "${_rpath_portable_origin}")
+    if(${BUILDING_WITH_TORCH_LIBS})
+      # site-packages/caffe2/python/caffe2_pybind11_state
+      # site-packages/torch/lib
+      set(caffe2_pybind11_rpath "${_rpath_portable_origin}/../../torch/lib")
+    endif(${BUILDING_WITH_TORCH_LIBS})
+
+
     # ---[ Python.
     add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -399,15 +420,19 @@ if(BUILD_CAFFE2)
     if (APPLE)
       set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
-    set_target_properties(
-        caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-        ${CMAKE_BINARY_DIR}/caffe2/python)
     target_link_libraries(
         caffe2_pybind11_state caffe2_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
     endif(WIN32)
+
+    # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
+    # so it needs an rpath to find libcaffe2
+    set_target_properties(
+        caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+        ${CMAKE_BINARY_DIR}/caffe2/python)
     install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+    set_target_properties(caffe2_pybind11_state PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
 
     if(USE_CUDA)
       add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
@@ -417,15 +442,18 @@ if(BUILD_CAFFE2)
       if (APPLE)
         set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
       endif()
-      set_target_properties(
-          caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-          ${CMAKE_BINARY_DIR}/caffe2/python)
       target_link_libraries(
           caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
       if (WIN32)
         target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
       endif(WIN32)
+
+      # Install with same rpath as non-gpu caffe2_pybind11_state
+      set_target_properties(
+          caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+          ${CMAKE_BINARY_DIR}/caffe2/python)
       install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
     endif()
 
     if(USE_ROCM)
@@ -436,15 +464,18 @@ if(BUILD_CAFFE2)
       if (APPLE)
         set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
       endif()
-      set_target_properties(
-          caffe2_pybind11_state_hip PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-          ${CMAKE_BINARY_DIR}/caffe2/python)
       target_link_libraries(
           caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
       if (WIN32)
         target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
       endif(WIN32)
+
+      # Install with same rpath as non-hip caffe2_pybind11_state
+      set_target_properties(
+          caffe2_pybind11_state_hip PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+          ${CMAKE_BINARY_DIR}/caffe2/python)
       install(TARGETS caffe2_pybind11_state_hip DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
     endif()
 
     if (MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")

@@ -10,7 +10,6 @@ __all__ = [
     'btriunpack',
     'isnan',
     'split',
-    'unbind',
     'unique',
 ]
 
@@ -85,18 +84,6 @@ def btrifact(A, info=None, pivot=True):
     # `info` is being deprecated in favor of `btrifact_with_info`. This warning
     # is in tensor.py, which we call here.
     return A.btrifact(info, pivot)
-
-
-def unbind(tensor, dim=0):
-    r"""Removes a tensor dimension.
-
-    Returns a tuple of all slices along a given dimension, already without it.
-
-    Arguments:
-        tensor (Tensor): the tensor to unbind
-        dim (int): dimension to remove
-    """
-    return tuple(tensor.select(dim, i) for i in range(tensor.size(dim)))
 
 
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):

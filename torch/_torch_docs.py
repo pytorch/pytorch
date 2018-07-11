@@ -4752,8 +4752,6 @@ and multiple right-hand sides `b`.
 In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
 with the default keyword arguments.
 
-This method is NOT implemented for CUDA tensors.
-
 Args:
     A (Tensor): the input triangular coefficient matrix
     b (Tensor): multiple right-hand sides. Each column of `b` is a
@@ -5833,6 +5831,27 @@ Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
 
 """.format(**factory_common_args))
+
+
+add_docstr(torch.unbind,
+           r"""
+unbind(tensor, dim=0) -> seq
+
+Removes a tensor dimension.
+
+Returns a tuple of all slices along a given dimension, already without it.
+
+Arguments:
+    tensor (Tensor): the tensor to unbind
+    dim (int): dimension to remove
+
+Example::
+
+    >>> torch.unbind(torch.tensor([[1, 2, 3],
+    >>>                            [4, 5, 6],
+    >>>                            [7, 8, 9]]))
+    (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
+""")
 
 
 add_docstr(torch.meshgrid,

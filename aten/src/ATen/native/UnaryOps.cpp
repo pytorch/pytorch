@@ -35,7 +35,7 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP_VEC(op)                        \
+#define IMPLEMENT_UNARY_OP_VEC(op)                              \
   Tensor op(const Tensor& self) {                               \
     Tensor result = self.type().tensor();                       \
     return at::op##_out(result, self);                          \
@@ -87,6 +87,7 @@ IMPLEMENT_UNARY_OP_VEC(log1p)
 IMPLEMENT_UNARY_OP_VEC(log2)
 IMPLEMENT_UNARY_OP_VEC(round)
 IMPLEMENT_UNARY_OP_VEC(rsqrt)
+IMPLEMENT_UNARY_OP_VEC(sigmoid)
 IMPLEMENT_UNARY_OP_VEC(sin)
 IMPLEMENT_UNARY_OP_TH(sinh)
 IMPLEMENT_UNARY_OP_VEC(sqrt)

@@ -185,7 +185,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, dimension, param.outputStride[dimension]);
+  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, THCStream_stream(stream)>>>(data, d_inputs, param, dimension, param.outputStride[dimension]);
 
     // Now we loop
     offset = 0;
@@ -210,7 +210,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
           stackInputs,
           j * sizeof(CatArrInputTensor<real, unsigned int>),
           cudaMemcpyHostToDevice,
-          stream->stream));
+          THCStream_stream(stream)));
       THCudaHostRecord(state, stackInputs);
       THCudaHostFree(state, stackInputs);
 
@@ -396,9 +396,12 @@ accreal THCTensor_(trace)(THCState *state, THCTensor *src_) {
 
 void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
-  if (n == 1) THCTensor_(fill)(state, r_, a);
+  if (n == 0) {
+    // skip
+  } else if (n == 1) THCTensor_(fill)(state, r_, a);
   else {
     THCTensor *r = THCTensor_(isContiguous)(state, r_)
                    ? r_ // if r_ is contiguous we can direct work on it
@@ -417,9 +420,12 @@ void THCTensor_(linspace)(THCState *state, THCTensor *r_, real a, real b, int64_
 
 void THCTensor_(logspace)(THCState *state, THCTensor *r_, real a, real b, int64_t n) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, r_));
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
   if (THCTensor_(nElement)(state, r_) != n) THCTensor_(resize1d)(state, r_, n);
-  if (n == 1) THCTensor_(fill)(state, r_, THCNumerics<real>::exp10(a));
+  if (n == 0) {
+    // skip
+  } else if (n == 1) THCTensor_(fill)(state, r_, THCNumerics<real>::exp10(a));
   else {
     THCTensor *r = THCTensor_(isContiguous)(state, r_)
                    ? r_

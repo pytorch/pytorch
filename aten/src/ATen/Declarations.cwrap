@@ -1018,6 +1018,18 @@
       return: real
       arguments:
         - THTensor* self
+]]
+[[
+  name: _th_all
+  types:
+    - Byte
+  variants:
+    - method
+    - function
+  backends:
+    - CPU
+    - CUDA
+  options:
     - cname: logicalAnd
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -1045,6 +1057,18 @@
       return: real
       arguments:
         - THTensor* self
+]]
+[[
+  name: _th_any
+  types:
+    - Byte
+  variants:
+    - method
+    - function
+  backends:
+    - CPU
+    - CUDA
+  options:
     - cname: logicalAny
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -1090,24 +1114,10 @@
     - THTensor* self
 ]]
 [[
-  name: sigmoid_
+  name: _th_sigmoid
   types:
     - floating_point
   backends:
-    - CPU
-    - CUDA
-  cname: sigmoid
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: sigmoid
-  types:
-    - floating_point
-  backends:
-    - CPU
     - CUDA
   cname: sigmoid
   variants:
@@ -1641,6 +1651,18 @@
           if_true: 0
           if_false: 1
           default: 0
+]]
+[[
+  name: _th_var
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  options:
     - cname: var
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -1676,6 +1698,18 @@
           if_true: 0
           if_false: 1
           default: 0
+]]
+[[
+  name: _th_std
+  types:
+    - floating_point
+  backends:
+    - CPU
+    - CUDA
+  variants:
+    - method
+    - function
+  options:
     - cname: std
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -1711,7 +1745,7 @@
           default: AS_REAL(2)
 ]]
 [[
-  name: norm
+  name: _th_norm
   types:
     - floating_point
   backends:

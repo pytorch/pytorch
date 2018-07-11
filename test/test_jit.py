@@ -74,11 +74,11 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
     ingate = torch.sigmoid(ingate)
     forgetgate = torch.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
+    cellgate = torch.tanh(cellgate)
     outgate = torch.sigmoid(outgate)
 
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+    hy = outgate * torch.tanh(cy)
     return hy, cy
 
 
@@ -299,7 +299,7 @@ class TestJit(JitTestCase):
                 out = torch.sigmoid(out)
             return out
 
-        trace, z = torch.jit.get_trace_graph(f, (x, y), nderivs=0)
+        trace, z = torch.jit.get_trace_graph(f, (x, y))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
@@ -543,7 +543,7 @@ class TestJit(JitTestCase):
             z = (x + y) * (x + y) * (x + y) + t
             return z
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
         self.run_pass('cse', trace)
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
@@ -555,7 +555,7 @@ class TestJit(JitTestCase):
 
         def fn(x, y):
             return x - y
-        trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
 
     def test_shape_analysis_broadcast(self):
         def broadcast(a, b):
@@ -580,27 +580,6 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(doit, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
-
-    def test_assign_traces(self):
-        """Check that output Variables are assigned traces before they are saved."""
-        @traceable
-        class MyFn(Function):
-            @staticmethod
-            def forward(ctx, a):
-                out = a * 2
-                ctx.save_for_backward(out)
-                return out
-
-            @staticmethod
-            def backward(ctx, grad_a):
-                a, = ctx.saved_tensors
-                return a * grad_a
-
-        x = torch.randn(10, 10, requires_grad=True)
-        trace, out = torch.jit.get_trace_graph(MyFn.apply, x, nderivs=1)
-        out.sum().backward()
-        self.run_pass('dce', trace)
-        self.assertExpectedGraph(trace)
 
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
@@ -634,7 +613,7 @@ class TestJit(JitTestCase):
 
         x = torch.tensor([0.], requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-            torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,), nderivs=0)
+            torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
 
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
@@ -645,7 +624,7 @@ class TestJit(JitTestCase):
             y.add_(3)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x,))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
 
@@ -678,7 +657,7 @@ class TestJit(JitTestCase):
             y = RegularFn.apply(y)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x,))
         self.run_pass('dce', trace)
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
@@ -866,7 +845,7 @@ class TestJit(JitTestCase):
             out.copy_(x)
             return out
 
-        trace, z = torch.jit.get_trace_graph(f, (x, ), nderivs=0)
+        trace, z = torch.jit.get_trace_graph(f, (x, ))
         self.run_pass('dce', trace)
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
@@ -882,13 +861,13 @@ class TestJit(JitTestCase):
                 return x * self.a + self.b
 
         m = MyModule()
-        trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpectedGraph(trace)
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
-        trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
 
@@ -3315,7 +3294,7 @@ def func(t):
             def f5(a):
                 torch.cat([[a]])
 
-        with self.assertRaisesRegex(RuntimeError, 'a value of type Tensor for argument \'size\' but found'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a value of type int\\[\\] for argument \'size\''):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
@@ -3527,8 +3506,8 @@ def func(t):
         self.checkScript(fn, (torch.randn(3, 2, dtype=torch.float), torch.ones(3, 2, dtype=torch.float)))
 
     def test_reassign_module_lhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'self\' because it has type '
-                                                  'value. Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'self\' because it has type value and self is'
+                                    ' not a first-class value.  Only reassignments to first-class values are allowed'):
             class ReassignSelfLHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
@@ -3539,8 +3518,8 @@ def func(t):
             ReassignSelfLHS()
 
     def test_reassign_module_rhs(self):
-        with self.assertRaisesRegex(RuntimeError, 'cannot re-assign \'x\' to a value of type module.'
-                                                  ' Only reassignments to first-class values are allowed'):
+        with self.assertRaisesRegex(RuntimeError, 'Cannot re-assign \'x\' to a value of type module because x is not a'
+                                    ' first-class value.  Only reassignments to first-class values are allowed'):
             class ReassignSelfRHS(torch.jit.ScriptModule):
                 @torch.jit.script_method
                 def forward(self, x):
@@ -4719,7 +4698,7 @@ EXCLUDE_SCRIPT = {
     # Right now, the following is happening:
     # - Shorter schemas come before longer schemas
     # - bool, int are treated as IntType rather than DynamicType like before
-    # So the schemas look like the following in aten_schema:
+    # So the schemas look like the following in operator:
     # (2) var(DynamicType, IntType)
     # (1) var(DynamicType, IntType, IntType, DynamicType)
     # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly

@@ -78,7 +78,13 @@ class GenerateProposalsOp final : public Operator<Context> {
         rpn_min_size_(OperatorBase::GetSingleArgument<float>("min_size", 16)),
         correct_transform_coords_(OperatorBase::GetSingleArgument<bool>(
             "correct_transform_coords",
-            false)) {}
+            false)),
+        angle_bound_on_(
+            OperatorBase::GetSingleArgument<bool>("angle_bound_on", true)),
+        angle_bound_lo_(
+            OperatorBase::GetSingleArgument<int>("angle_bound_lo", -90)),
+        angle_bound_hi_(
+            OperatorBase::GetSingleArgument<int>("angle_bound_hi", 90)) {}
 
   ~GenerateProposalsOp() {}
 
@@ -116,6 +122,11 @@ class GenerateProposalsOp final : public Operator<Context> {
   // Set to true to match the detectron code, set to false for backward
   // compatibility
   bool correct_transform_coords_{false};
+  // If set, for rotated boxes in RRPN, output angles are normalized to be
+  // within [angle_bound_lo, angle_bound_hi].
+  bool angle_bound_on_{true};
+  int angle_bound_lo_{-90};
+  int angle_bound_hi_{90};
 };
 
 } // namespace caffe2
