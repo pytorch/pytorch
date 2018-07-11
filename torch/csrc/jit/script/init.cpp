@@ -483,9 +483,9 @@ void initJitScriptBindings(PyObject* module) {
         // ScriptModule.
         return runMethodFromPython(self.get_method("forward"), args);
       })
-      .def("to_batch", [](Module& self, int64_t batch_size=1) {
+      .def("to_batch", [](Module& self) {
         auto graph = self.get_method("forward").graph();
-        auto res_graph = to_batch_graph(graph, batch_size);
+        auto res_graph = to_batch_graph(graph);
         return res_graph;
       });
 

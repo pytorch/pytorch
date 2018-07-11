@@ -403,7 +403,7 @@ def script_method(fn):
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
         mod = script(fn, optimize, _frames_up)
-        res_graph = mod.to_batch(batch_size)
+        res_graph = mod.to_batch()
         res_mod = ScriptModule()
         res_mod._create_method_from_graph('forward', res_graph)
 
