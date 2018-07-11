@@ -2640,6 +2640,8 @@ method_tests = [
     ('expm1', (), NO_ARGS, 'scalar'),
     ('erf', torch.rand(S, S, S), NO_ARGS),
     ('erf', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
+    ('erfc', torch.rand(S, S, S), NO_ARGS),
+    ('erfc', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
     ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
     ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
     ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS),

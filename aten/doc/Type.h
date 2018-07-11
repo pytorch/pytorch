@@ -366,6 +366,9 @@ struct AT_API Type {
   virtual Tensor & erf_(Tensor & self) const;
   virtual Tensor & erf_out(Tensor & result, const Tensor & self) const;
   virtual Tensor erf(const Tensor & self) const;
+  virtual Tensor & erfc_(Tensor & self) const;
+  virtual Tensor & erfc_out(Tensor & result, const Tensor & self) const;
+  virtual Tensor erfc(const Tensor & self) const;
   virtual Tensor & erfinv_(Tensor & self) const;
   virtual Tensor & erfinv_out(Tensor & result, const Tensor & self) const;
   virtual Tensor erfinv(const Tensor & self) const;

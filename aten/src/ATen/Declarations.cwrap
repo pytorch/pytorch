@@ -1479,6 +1479,22 @@
     - THTensor* self
 ]]
 [[
+  name: _erfc
+  cname: erfc
+  types:
+    - floating_point
+  backends:
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
   name: erfinv_
   types:
     - floating_point

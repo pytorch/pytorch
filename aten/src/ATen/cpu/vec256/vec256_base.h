@@ -103,6 +103,9 @@ public:
   Vec256<T> erf() const {
     return map(std::erf);
   }
+  Vec256<T> erfc() const {
+    return map(std::erfc);
+  }
   Vec256<T> exp() const {
     return map(std::exp);
   }
