@@ -51,19 +51,19 @@ struct SupervisedPtr {
   void* operator->() const { return data_; }
   void* get() const { return data_; }
   operator bool() { return data_ || supervisor_; }
-  SupervisedPtr& operator=( nullptr_t ) noexcept { data_ = nullptr; supervisor_ = nullptr; return *this; }
+  SupervisedPtr& operator=( std::nullptr_t ) noexcept { data_ = nullptr; supervisor_ = nullptr; return *this; }
 };
 
-inline bool operator==(const at::SupervisedPtr& sp, nullptr_t) noexcept {
+inline bool operator==(const at::SupervisedPtr& sp, std::nullptr_t) noexcept {
   return sp.data_ == nullptr && sp.supervisor_ == nullptr;
 }
-inline bool operator==(nullptr_t, const at::SupervisedPtr& sp) noexcept {
+inline bool operator==(std::nullptr_t, const at::SupervisedPtr& sp) noexcept {
   return sp.data_ == nullptr && sp.supervisor_ == nullptr;
 }
-inline bool operator!=(const at::SupervisedPtr& sp, nullptr_t) noexcept {
+inline bool operator!=(const at::SupervisedPtr& sp, std::nullptr_t) noexcept {
   return sp.data_ != nullptr || sp.supervisor_ != nullptr;
 }
-inline bool operator!=(nullptr_t, const at::SupervisedPtr& sp) noexcept {
+inline bool operator!=(std::nullptr_t, const at::SupervisedPtr& sp) noexcept {
   return sp.data_ != nullptr || sp.supervisor_ != nullptr;
 }
 
