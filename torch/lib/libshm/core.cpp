@@ -108,13 +108,6 @@ THManagedMapAllocator::THManagedMapAllocator(const char *manager_handle, const c
     initializeManager();
 }
 
-THManagedMapAllocator::THManagedMapAllocator(WithFd, const char *manager_handle, const char *filename, int fd, int flags, ptrdiff_t size)
-  : THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size)
-  , manager_handle_(manager_handle ? manager_handle : "") {
-
-    initializeManager();
-}
-
 THManagedMapAllocator::~THManagedMapAllocator() {
   AllocInfo info = get_alloc_info(this);
   info.free = true;
@@ -130,11 +123,6 @@ static void deleteTHManagedMapAllocator(void* ptr) {
 
 at::SupervisedPtr THManagedMapAllocator::makeSupervisedPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size) {
   auto* supervisor = new THManagedMapAllocator(manager_handle, filename, flags, size);
-  return {supervisor->data(), {supervisor, &deleteTHManagedMapAllocator}};
-}
-
-at::SupervisedPtr THManagedMapAllocator::makeSupervisedPtr(WithFd, const char* manager_handle, const char* filename, int fd, int flags, ptrdiff_t size) {
-  auto* supervisor = new THManagedMapAllocator(WITH_FD, manager_handle, filename, fd, flags, size);
   return {supervisor->data(), {supervisor, &deleteTHManagedMapAllocator}};
 }
 

@@ -12,11 +12,9 @@ void libshm_init(const char *manager_exec_path);
 class THManagedMapAllocator : public THRefcountedMapAllocator {
 public:
   THManagedMapAllocator(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
-  THManagedMapAllocator(WithFd, const char* manager_handle, const char* filename, int fd, int flags, ptrdiff_t size);
   virtual ~THManagedMapAllocator();
 
   static at::SupervisedPtr makeSupervisedPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
-  static at::SupervisedPtr makeSupervisedPtr(WithFd, const char* manager_handle, const char* filename, int fd, int flags, ptrdiff_t size);
   static THManagedMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
 
   const char* manager_handle() const { return manager_handle_.c_str(); }
