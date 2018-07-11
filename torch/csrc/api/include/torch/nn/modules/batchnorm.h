@@ -19,6 +19,9 @@ struct BatchNormOptions {
 
 class BatchNormImpl : public torch::nn::Cloneable<BatchNormImpl> {
  public:
+  template <typename... Ts>
+  explicit BatchNormImpl(Ts&&... ts)
+      : BatchNormImpl(BatchNormOptions(std::forward<Ts>(ts)...)) {}
   explicit BatchNormImpl(BatchNormOptions options);
 
   void reset() override;
