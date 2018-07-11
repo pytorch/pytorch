@@ -115,9 +115,7 @@ struct Function : std::enable_shared_from_this<Function> {
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
-  virtual variable_list operator()(const variable_list& inputs) {
-    TORCH_ASSERTM(num_inputs() == inputs.size(), "expected %d arguments, got %d instead",
-                  num_inputs(), inputs.size());
+  variable_list operator()(const variable_list& inputs) {
     profiler::RecordFunction rec(this);
     if (jit::tracer::isTracingVar(inputs)) {
       return traced_apply(inputs);

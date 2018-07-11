@@ -20,10 +20,6 @@ struct Error : public Function {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  variable_list operator()(const variable_list& inputs) {
-    return apply(inputs);
-  }
-
   std::string msg;
 };
 
@@ -33,10 +29,6 @@ struct DelayedError : public Function {
     : msg(std::move(msg)) {};
 
   virtual variable_list apply(const variable_list& inputs) override;
-
-  variable_list operator()(const variable_list& inputs) {
-    return apply(inputs);
-  }
 
   std::string msg;
 };
