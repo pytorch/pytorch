@@ -5,7 +5,9 @@
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
 
+#include <array>
 #include <cstddef>
+#include <tuple>
 #include <vector>
 
 namespace torch { namespace cuda {
