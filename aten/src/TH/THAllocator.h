@@ -6,6 +6,11 @@
 #include <ATen/Allocator.h>
 #endif
 
+/* stuff for mapped files */
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #define TH_ALLOCATOR_MAPPED_SHARED 1
 #define TH_ALLOCATOR_MAPPED_SHAREDMEM 2
 #define TH_ALLOCATOR_MAPPED_EXCLUSIVE 4
