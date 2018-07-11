@@ -15,11 +15,17 @@ namespace at {
 using DeleterFnPtr = void(*)(void*);
 using SupervisorPtr = std::unique_ptr<void, DeleterFnPtr>;
 
+// Does not delete anything
+AT_API void deleteNothing(void*);
+// Mints a SupervisorPtr that doesn't do anything.  You must
+// use this, not a nullptr, when you want a view.
+AT_API SupervisorPtr nonOwningSupervisorPtr();
+
 struct SupervisedPtr {
   // Lifetime tied to supervisor_
   void* data_;
   SupervisorPtr supervisor_;
-  SupervisedPtr() : data_(nullptr), supervisor_(nullptr, nullptr) {}
+  SupervisedPtr() : data_(nullptr), supervisor_(nonOwningSupervisorPtr()) {}
   SupervisedPtr(void* data, SupervisorPtr&& supervisor)
     : data_(data), supervisor_(std::move(supervisor)) {}
   void* operator->() const { return data_; }

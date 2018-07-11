@@ -2,6 +2,11 @@
 
 namespace at {
 
+void deleteNothing(void*) {}
+SupervisorPtr nonOwningSupervisorPtr() {
+  return {nullptr, &deleteNothing};
+}
+
 static void deleteInefficientStdFunctionSupervisor(void* ptr) {
   delete static_cast<InefficientStdFunctionSupervisor*>(ptr);
 }
