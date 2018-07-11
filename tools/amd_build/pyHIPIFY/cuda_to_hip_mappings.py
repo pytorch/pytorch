@@ -2101,6 +2101,7 @@ CAFFE2_SPECIFIC_MAPPINGS = {
      "context_gpu" : ("hip/context_hip", API_CAFFE2),
      "common_gpu"  : ("hip/common_hip", API_CAFFE2),
      "operator_fallback_gpu" : ("hip/operator_fallback_hip", API_CAFFE2),
+     "recurrent_network_executor_gpu" : ("hip/recurrent_network_executor_hip", API_CAFFE2),
      "CUDA_1D_KERNEL_LOOP" : ("HIP_1D_KERNEL_LOOP", API_CAFFE2),
      "CUDAContext" : ("HIPContext", API_CAFFE2),
      "CAFFE_CUDA_NUM_THREADS" : ("CAFFE_HIP_NUM_THREADS", API_CAFFE2),
