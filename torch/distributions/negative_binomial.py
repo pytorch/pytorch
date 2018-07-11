@@ -65,11 +65,8 @@ class NegativeBinomial(Distribution):
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
-            max_count = max(int(self.total_count.max()), 1)
-            shape = self._extended_shape(sample_shape) + (max_count,)
-
             rate = torch.distributions.Gamma(concentration=self.total_count,
-                                             rate=(1 - self.probs) / self.probs).sample(sample_shape=shape)
+                                             rate=(1 - self.probs) / self.probs).sample(sample_shape=sample_shape)
             return torch.poisson(rate)
 
     def log_prob(self, value):
