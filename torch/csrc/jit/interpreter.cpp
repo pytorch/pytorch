@@ -2,7 +2,6 @@
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
@@ -364,13 +363,6 @@ public:
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
-
-bool hasHandleOutput(Node * n) {
-  if(n->outputs().size() == 0)
-    return false;
-  auto & last = n->outputs().back();
-  return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
-}
 
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
