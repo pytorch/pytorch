@@ -49,6 +49,11 @@ void * ${Tensor}::unsafeGetTH(bool retain) {
   return tensor;
 }
 
+void ${Tensor}::releaseResources() {
+  ${THTensor}_free(${state,} tensor);
+  tensor = nullptr;
+}
+
 ${TensorDenseOrSparse}
 
 }
