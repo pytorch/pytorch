@@ -379,7 +379,7 @@ void initJitScriptBindings(PyObject* module) {
             auto self = has_self ? std::make_shared<ModuleValue>(m.shared_from_this()) : nullptr;
             return defineMethodsInModule(m, script, pythonResolver(rcb), self);
           })
-      .def("_create_methods", [](Module& m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
+      .def("_create_methods", [](Module& m, const std::vector<DefAndTypes>& defs, const std::vector<ResolutionCallback>& rcbs) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
@@ -501,11 +501,18 @@ void initJitScriptBindings(PyObject* module) {
     .def("params", &Method::params)
     .def("graph_for", [](Method& self, py::args args) {
       return self.graph_for(createVariableTensorList(args));
-    });
+    })
+    .def("pretty_print_schema", &Method::prettyPrintSchema);
 
-  m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
-    return compileFunction(def, pythonResolver(rcb));
+  m.def("_jit_script_compile_pure_fn", [](Module &m, DefAndTypes def, ResolutionCallback rcb) {
+    defineMethodsInModule(m, {def}, {pythonResolver(rcb)}, nullptr, true);
   });
+  m.def("_jit_script_compile", [](Module &m, DefAndTypes def, ResolutionCallback rcb) {
+    compileFunction(m, def, pythonResolver(rcb));
+  });
+
+  py::class_<DefAndTypes>(m, "DefAndTypes")
+    .def(py::init<Def, std::vector<TypePtr>, TypePtr>());
 
 }
 

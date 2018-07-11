@@ -138,6 +138,13 @@ struct Method {
     return *this;
   }
 
+  std::string prettyPrintSchema() const {
+    JIT_ASSERT(schema);
+    std::stringstream ss;
+    ss << *schema;
+    return ss.str();
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining

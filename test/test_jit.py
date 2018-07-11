@@ -4212,6 +4212,25 @@ def func(t):
             def some_func(x):
                 return sm(x)
 
+    def test_annotated_script_fn(self):
+        @torch.jit.script
+        def foo(x, y, z):
+            # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
+            return x
+
+        self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
+
+    def test_annotated_script_method(self):
+        class SM(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                # type: (Tuple[Tensor, Tensor], Tensor) -> Tuple[Tensor, Tensor, Tensor]
+                return y, y, y
+
+        sm = SM()
+
+        self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 

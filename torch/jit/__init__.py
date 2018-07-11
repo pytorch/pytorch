@@ -3,6 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
+import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -22,6 +23,7 @@ import re
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
+_jit_script_compile_pure_fn = torch._C._jit_script_compile_pure_fn
 BatchTensor = torch._C._jit.BatchTensor
 
 # This global variable is set when we are tracing a *forwards* computation.
@@ -354,22 +356,38 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def _script_graph(fn, _frames_up=0):
+def _compile_fn(fn, _frames_up=0):
+    mod = ScriptModule()
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn)
-    return _jit_script_compile(ast, rcb)
+    arg_types, ret_type = annotations.get_signature(fn, ast.num_params(), 0)
+    _jit_script_compile(mod, torch._C.DefAndTypes(ast, arg_types, ret_type), rcb)
+    return mod
+
+
+def _script_pure_function(mod, fn, _frames_up=0):
+    rcb = createResolutionCallback(_frames_up + 1)
+    ast = get_jit_ast(fn)
+    arg_types, ret_type = annotations.get_signature(fn, ast.num_params(), 0)
+    _jit_script_compile_pure_fn(mod, torch._C.DefAndTypes(ast, arg_types, ret_type), rcb)
+
+
+def _script_graph(fn, _frames_up=0):
+    mod = ScriptModule()
+    _script_pure_function(mod, fn, _frames_up + 1)
+    return mod.graph
 
 
 def script(fn, optimize=True, _frames_up=0):
-    graph = _script_graph(fn, _frames_up=_frames_up + 1)
     mod = ScriptModule()
-    mod._create_method_from_graph('forward', graph)
+    _script_pure_function(mod, fn, _frames_up=_frames_up + 1)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', (
+    'resolution_callback', 'ast', 'original_method', 'arg_types', 'return_type'))
 
 
 def script_method(fn):
@@ -385,7 +403,12 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    return ScriptMethodStub(createResolutionCallback(frames_up=2), get_jit_ast(fn), fn)
+    ast = get_jit_ast(fn)
+    arg_types, return_type = annotations.get_signature(fn, ast.num_params() - 1, 0)
+    # Dumb handling for `self`
+    if len(arg_types) == ast.num_params():
+        arg_types = arg_types[1:]
+    return ScriptMethodStub(createResolutionCallback(frames_up=2), ast, fn, arg_types, return_type)
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -588,9 +611,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            asts = [m.ast for m in methods]
+            defs = [torch._C.DefAndTypes(m.ast, m.arg_types, m.return_type) for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(asts, rcbs)
+            self._create_methods(defs, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)

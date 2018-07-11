@@ -669,14 +669,14 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 
 struct to_ir {
   to_ir(
-      Def def,
+      DefAndTypes def_and_types,
       FunctionTable& function_table,
       const Resolver& resolver,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
-      , def(def)
+      , def(def_and_types.def)
       , function_table(function_table)
       , resolver(resolver)
       , environment_stack(nullptr) {
@@ -686,6 +686,11 @@ struct to_ir {
     // inputs
     auto it = def.params().begin();
     auto end = def.params().end();
+    size_t arg_annotation_idx = 0;
+    size_t expected_annotation_size = self ? def.params().size() - 1 : def.params().size();
+    if (def_and_types.arg_types.size() && def_and_types.arg_types.size() != expected_annotation_size) {
+      throw ErrorReport(def.params().range()) << "Number of type annotations for function parameters (" << def_and_types.arg_types.size() << ") does not match the number of actual parameters (" << expected_annotation_size << ")!";
+    }
     if(self) {
       if(it == end)
         throw ErrorReport(def.params().range()) << "methods must have a self argument";
@@ -694,7 +699,11 @@ struct to_ir {
     }
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
-      arguments.push_back({name, DynamicType::get()});
+      TypePtr arg_type = DynamicType::get();
+      if (def_and_types.arg_types.size()) {
+        arg_type = def_and_types.arg_types[arg_annotation_idx++];
+      }
+      arguments.push_back({name, arg_type});
       environment_stack->setVar((*it).ident().range(), name, graph->addInput(name));
     }
     // body
@@ -722,9 +731,20 @@ struct to_ir {
         }
       }
       ensureTensors(return_stmt.range(), results);
+      std::vector<TypePtr> flattened_return_types;
+      if (def_and_types.return_type) {
+        if (def_and_types.return_type->kind() == TypeKind::TupleType) {
+          const auto &tuple_type_elmts = def_and_types.return_type->cast<TupleType>()->elements();
+          flattened_return_types.insert(flattened_return_types.begin(), tuple_type_elmts.begin(), tuple_type_elmts.end());
+        } else {
+          flattened_return_types = {def_and_types.return_type};
+        }
+      }
+      size_t return_type_idx = 0;
       for(auto r : results) {
         graph->registerOutput(r);
-        returns.push_back({"", DynamicType::get()});
+        auto type = flattened_return_types.size() ? flattened_return_types[return_type_idx++] : DynamicType::get();
+        returns.push_back({"", type});
       }
     }
 
@@ -1673,13 +1693,16 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::vector<DefAndTypes>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self, bool pure_func) {
   FunctionTable table;
   JIT_ASSERT(definitions.size() == resolvers.size());
+  if (pure_func) {
+    JIT_ASSERT(definitions.size() == 1);
+  }
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
-  for(Def def : definitions) {
-    const std::string& name = def.name().name();
+  for(DefAndTypes def : definitions) {
+    const std::string& name = pure_func ? "forward" : def.def.name().name();
     Resolver resolver = *resolver_it++;
     auto creator = [def, &table, resolver, self](Method& method) {
       to_ir(def, table, resolver, self,  method);
@@ -1701,19 +1724,18 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
 
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
   Parser p(source);
-  std::vector<Def> definitions;
+  std::vector<DefAndTypes> definitions;
   std::vector<Resolver> resolvers;
+  // TODO: Implement type annotation parsing for the string frontend
   while (p.lexer().cur().kind != TK_EOF) {
-    definitions.push_back(Def(p.parseFunction()));
+    definitions.push_back({Def(p.parseFunction()), {}, nullptr});
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
-  Module m; //note: we don't use 'm' to execute so this setting is unused
+void compileFunction(Module & m, DefAndTypes def, const Resolver& resolver) {
   defineMethodsInModule(m, {def}, {resolver}, nullptr);
-  return m.get_method(def.name().name()).graph();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
