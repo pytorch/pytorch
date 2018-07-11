@@ -208,8 +208,8 @@ void initJITBindings(PyObject *module) {
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
   initBatchTensorBindings(module);
-  initRegisterBatchOpsBindings(module);
   registerPythonInterpreterOps();
+  initRegisterBatchOpsBindings(module);
 }
 
 }}
