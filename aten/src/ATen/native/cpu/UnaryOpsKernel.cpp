@@ -30,8 +30,8 @@ int64_t _sigmoid(float* x, float* y, int64_t size) {
     ret = ret.neg();
     ret2 = ret2.neg();
 #if defined(__AVX2__) && !defined(_MSC_VER)
-    ret.values = exp256_ps(ret.values);
-    ret2.values = exp256_ps(ret2.values);
+    ret = exp256_ps(ret);
+    ret2 = exp256_ps(ret2);
 #else
     ret = ret.exp();
     ret2 = ret2.exp();
