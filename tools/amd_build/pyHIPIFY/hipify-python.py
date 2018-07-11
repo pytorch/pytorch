@@ -792,6 +792,24 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
                     # Flush to disk
                     os.fsync(fileobj)
 
+def copy_files_to_hip_dirs(output_directory, project_directory, include_dirs):
+    """
+    Copies hipified files to hip directory under corresponding
+    include directories in project directory
+    """
+    for dirpath, _dir, filenames in os.walk(output_directory):
+        if inside_included_directories(dirpath, output_directory, include_dirs) and os.path.basename(dirpath) != "hip":
+            for file in filenames: 
+                rel_path = os.path.relpath(dirpath,output_directory)
+                dest_dir = os.path.join(project_directory,rel_path,"hip")
+                if not os.path.exists(dest_dir):
+                    os.makedirs(dest_dir)
+                if file.endswith("hip.cc") or file.endswith("hip.h"):
+                    dest_filepath = os.path.join(dest_dir,file)
+                    if not os.path.exists(dest_filepath):
+                        shutil.copyfile(os.path.join(dirpath,file),dest_filepath)
+
+    shutil.rmtree(output_directory)
 
 def main():
     """Example invocation
@@ -879,8 +897,6 @@ def main():
     """    
     # Make sure output directory exists.
     if not os.path.exists(args.output_directory):
-        #os.makedirs(args.output_directory)
-        shutil.copytree(args.project_directory, args.output_directory)
         #print("The output folder doesn't exist.")
         #return
     """
@@ -1001,6 +1017,8 @@ def main():
         # Execute the Clang Tool to Automatically add static casts
         add_static_casts(args.output_directory, args.extensions, KernelTemplateParams, hipify_caffe2=args.hipify_caffe2)
 
+    if args.hipify_caffe2:
+        copy_files_to_hip_dirs(args.output_directory, args.project_directory, args.include_dirs)
 
 if __name__ == '__main__':
     main()
