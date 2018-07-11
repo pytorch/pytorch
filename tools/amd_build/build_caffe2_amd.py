@@ -1,24 +1,16 @@
 #!/usr/bin/env python
 
-"""Requires the hipify-python.py script (https://github.com/ROCm-Developer-Tools/pyHIPIFY)."""
-import shutil
-import subprocess
 import os
-import sys
-import glob
-from functools import reduce
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2")
 
-include_dirs = [
-    "operators",
-    "sgd",
-    "image",
-    "transforms",
-    "video",
-    "distributed"
-]
+include_dirs = ["operators",
+                "sgd",
+                "image",
+                "transforms",
+                "video",
+                "distributed"]
 
 output_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2_hip")
 
@@ -40,22 +32,6 @@ args = ["--project-directory", proj_dir,
         ["--ignore_files"] + ignore_file_list + \
         ["--hipify_caffe2", "True"] + \
         ["--add-static-casts", "True"]
-#os.execv(os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py"), ['python'] + args)
+
 os.system("python " + os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py") + " " + " ".join(args))
-
-## copy files to hip directories
-for dir in include_dirs:
-    for file in glob.glob(os.path.join(output_dir,dir)+"/*"):
-        basename = os.path.basename(file)
-        if basename in ignore_file_list:
-            continue
-        dest_dir = os.path.join(proj_dir,dir,"hip")
-        if not os.path.exists(dest_dir):
-            os.makedirs(dest_dir)
-        if basename.endswith("hip.cc") or basename.endswith("hip.h"):
-            dest_filepath = os.path.join(dest_dir,basename)
-            if not os.path.exists(dest_filepath):
-                shutil.copyfile(file,dest_filepath)
-
-shutil.rmtree(output_dir)
 
