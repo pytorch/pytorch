@@ -30,7 +30,7 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
           new_inputs.insert(new_inputs.end(), new_input.begin(), new_input.end());
         }
         else{
-          new_inputs.push_back(input);
+          throw std::runtime_error("NYI: non-tensor input for aten operator is not supported yet");
         }
       }
       auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_graph, new_inputs);
