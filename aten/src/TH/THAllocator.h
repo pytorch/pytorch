@@ -50,9 +50,10 @@ public:
   void* data() const { return data_; }
 
   static THMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
-  static at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THMapAllocator>&&);
+  static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
+  static at::SupervisedPtr makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
-private:
+protected:
   std::string filename_;
   int flags_ = 0;
   ptrdiff_t size_; /* mapped size */
@@ -78,11 +79,12 @@ public:
   virtual ~THRefcountedMapAllocator();
 
   static THRefcountedMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
-  static at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THRefcountedMapAllocator>&&);
+  static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
+  static at::SupervisedPtr makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
   void incref();
   int decref();
-private:
+protected:
   void checkFlags();
   void initializeAlloc();
 };

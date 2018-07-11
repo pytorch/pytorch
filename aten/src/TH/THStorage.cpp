@@ -28,7 +28,7 @@ void THStorage_free(THStorage *storage) {
         (*storage->finalizer)();
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~unique_ptr<void, at::BoundDeleter>();
+      storage->data_ptr.~SupervisedPtr();
       if (storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);
       }
@@ -135,15 +135,18 @@ size_t THStorage_elementSize(const THStorage *self)
 
 THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags)
 {
-  THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
-
+  size_t actual_size = -1;
   THStorage *storage = THStorage_newWithDataAndAllocator(scalar_type,
-                                                         THMapAllocatorContext_alloc(ctx, size * at::elementSize(scalar_type)),
+                                                         THMapAllocator::makeSupervisedPtr(
+                                                            filename,
+                                                            flags,
+                                                            size * at::elementSize(scalar_type),
+                                                            &actual_size),
                                                          size,
                                                          /* allocator */ nullptr);
 
   if (size <= 0) {
-    storage->size = THMapAllocatorContext_size(ctx)/THStorage_elementSize(storage);
+    storage->size = actual_size/THStorage_elementSize(storage);
   }
 
   THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);

@@ -32,6 +32,19 @@ struct SupervisedPtr {
   void* get() const { return data_; }
 };
 
+inline bool operator==(const at::SupervisedPtr& sp, nullptr_t) noexcept {
+  return sp.data_ == nullptr && sp.supervisor_ == nullptr;
+}
+inline bool operator==(nullptr_t, const at::SupervisedPtr& sp) noexcept {
+  return sp.data_ == nullptr && sp.supervisor_ == nullptr;
+}
+inline bool operator!=(const at::SupervisedPtr& sp, nullptr_t) noexcept {
+  return sp.data_ != nullptr || sp.supervisor_ != nullptr;
+}
+inline bool operator!=(nullptr_t, const at::SupervisedPtr& sp) noexcept {
+  return sp.data_ != nullptr || sp.supervisor_ != nullptr;
+}
+
 // Note [raw_allocate/raw_deallocate and Thrust]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // Thrust's support for custom allocators requires us to write something

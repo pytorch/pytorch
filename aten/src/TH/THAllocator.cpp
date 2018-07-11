@@ -24,7 +24,7 @@ struct THDefaultAllocator final : public at::Allocator {
     auto* ptr = THAlloc(size);
     return {ptr, {ptr, THFree}};
   }
-  MemoryDeleter* raw_deleter() const override {
+  at::DeleterFnPtr raw_deleter() const override {
     return &THFree;
   }
 };
@@ -49,14 +49,15 @@ const char * unknown_eventname = "eventname not specified";
 
 THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
   : filename_(filename ? filename : unknown_filename)
+  , flags_(0) // to be filled later
+  , size_(0) // to be filled later
 #ifdef _WIN32
+  , handle_(INVALID_HANDLE_VALUE) // to be filled later
+  , event_(INVALID_HANDLE_VALUE) // to be filled later
   , eventname_(filename ? filename + "_event" : unknown_eventname)
-  , handle_(INVALID_HANDLE_VALUE)
 #else
   , fd_(-1)
 #endif
-  // NB: we don't set size_(size) immediately because some rounding may be involved
-  , size_(0)
   , data_(nullptr)
 {
 
@@ -267,7 +268,7 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
 #endif
         } else {
           close(fd);
-          THError("file <", filename_, "> size is smaller than the required mapping size <", size, ">");
+          AT_ERROR("file <", filename_, "> size is smaller than the required mapping size <", size, ">");
         }
       }
     } else {
@@ -320,11 +321,12 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
 
 // NB: To use this correctly, it seems you still need to set
 // TH_ALLOCATOR_MAPPED_FROMFD in flags
-THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags)
-  : THMapAllocator(filename, flags), fd_(fd)
+THMapAllocator::THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
+  : THMapAllocator(filename, flags, size)
 {
+  fd_ = fd;
 #ifdef _WIN32
-  THError("THMapAllocator_newWithFd is unsupported on Windows");
+  AT_ERROR("THMapAllocator_newWithFd is unsupported on Windows");
 #endif
 }
 
@@ -350,7 +352,7 @@ static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFire
 }
 #endif
 
-THMapAllocator::~THMapAllocator(THMapAllocator* ctx) {
+THMapAllocator::~THMapAllocator() {
   if (data_ == nullptr) {
     return;
   }
@@ -359,7 +361,7 @@ THMapAllocator::~THMapAllocator(THMapAllocator* ctx) {
   if ((flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) || (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM))
     CloseHandle(handle_);
   if(UnmapViewOfFile(data_) == 0)
-    THError("could not unmap the shared memory file");
+    AT_ERROR("could not unmap the shared memory file");
 #else /* _WIN32 */
   if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
     if (close(fd_) == -1) {
@@ -424,7 +426,7 @@ THRefcountedMapAllocator::THRefcountedMapAllocator(const char *filename, int fla
 }
 THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size)
   : THRefcountedMapAllocatorArgCheck(flags)
-  , THMapAllocator(filename, flags, fd, size + TH_ALLOC_ALIGNMENT) {
+  , THMapAllocator(WITH_FD, filename, flags, fd, size + TH_ALLOC_ALIGNMENT) {
 
     initializeAlloc();
 }
@@ -530,13 +532,28 @@ THRefcountedMapAllocator* THRefcountedMapAllocator::fromSupervisedPtr(const at::
   return static_cast<THRefcountedMapAllocator*>(sptr.supervisor_.get());
 }
 
-at::SupervisedPtr THMapAllocator::makeSupervisedPtr(std::unique_ptr<THMapAllocator>&& supervisor_) {
-  auto* supervisor = supervisor_.release();
+at::SupervisedPtr THMapAllocator::makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* supervisor = new THMapAllocator(filename, flags, size);
+  if (actual_size_out) *actual_size_out = supervisor->size();
   return {supervisor->data(), {supervisor, &deleteTHMapAllocator}};
 }
 
-at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(std::unique_ptr<THRefcountedMapAllocator>&& supervisor_) {
-  auto* supervisor = supervisor_.release();
+at::SupervisedPtr THMapAllocator::makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+  auto* supervisor = new THMapAllocator(WITH_FD, filename, fd, flags, size);
+  if (actual_size_out) *actual_size_out = supervisor->size();
+  return {supervisor->data(), {supervisor, &deleteTHMapAllocator}};
+}
+
+at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* supervisor = new THRefcountedMapAllocator(filename, flags, size);
+  if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
+  return {static_cast<void*>(static_cast<char*>(supervisor->data()) + TH_ALLOC_ALIGNMENT),
+          {supervisor, &deleteTHRefcountedMapAllocator}};
+}
+
+at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+  auto* supervisor = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
+  if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
   return {static_cast<void*>(static_cast<char*>(supervisor->data()) + TH_ALLOC_ALIGNMENT),
           {supervisor, &deleteTHRefcountedMapAllocator}};
 }

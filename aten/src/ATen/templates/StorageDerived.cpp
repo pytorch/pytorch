@@ -29,7 +29,7 @@ ${Storage}::${Storage}(Context* context, size_t size, Allocator* allocator)
 ${Storage}::${Storage}(Context* context,
   void * data, size_t size, const std::function<void(void*)> & deleter)
   : storage(${THStorage}_newWithDataAndAllocator(${state,}
-     {data, InefficientStdFunctionDeleter::make(deleter)}, size,
+     makeInefficientStdFunctionSupervisedPtr(data, deleter), size,
      /* allocator */ nullptr
     )),
     context(context) {
