@@ -1319,6 +1319,10 @@ void addGlobalMethods(py::module& m) {
     return python_detail::fetchBlob(gWorkspace, name);
   });
   m.def(
+      "get_blob",
+      [](const std::string& name) { return gWorkspace->GetBlob(name); },
+      py::return_value_policy::reference);
+  m.def(
       "feed_blob",
       [](const std::string& name, py::object arg, py::object device_option) {
         DeviceOption option;
