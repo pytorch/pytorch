@@ -19,7 +19,7 @@ class NegativeBinomial(Distribution):
 
     arg_constraints = {'total_count': constraints.nonnegative_integer,
                        'probs': constraints.unit_interval}
-    has_enumerate_support = True
+    has_enumerate_support = False
 
     def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
