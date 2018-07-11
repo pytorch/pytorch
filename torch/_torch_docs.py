@@ -1418,7 +1418,7 @@ erfc(tensor, out=None) -> Tensor
 Computes the complementary error function of each element. The complementary error function is defined as follows:
 
 .. math::
-    \mathrm{erf}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
+    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
 
 Args:
     tensor (Tensor): the input tensor
