@@ -8,7 +8,6 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/type_and_shape.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
@@ -222,11 +221,6 @@ struct Function : std::enable_shared_from_this<Function> {
     });
   }
 
-  jit::tracer::FunctionTracingState& tracing_state() noexcept {
-    // Dereferencing will create the `TracingState` if the pointer is empty.
-    return *tracing_state_;
-  }
-
   /// Returns the `PyObject` stored for this `Function` (for Python
   /// interaction).
   PyObject* pyobj() const noexcept {
@@ -241,12 +235,6 @@ struct Function : std::enable_shared_from_this<Function> {
   /// Returns the anomaly metadata stored for this `Function`.
   /// If none exist, creates a new empty one.
   AnomalyMetadata* metadata() noexcept;
-
-  /// Create a context edge for the JIT.
-  static void set_up_context_edge(
-      jit::Node* this_node,
-      const variable_list& inputs,
-      const variable_list& outputs);
 
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -338,7 +326,6 @@ struct Function : std::enable_shared_from_this<Function> {
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
-  auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state_;
   at::SmallVector<TypeAndShape, 2> input_metadata_;
 };
 
