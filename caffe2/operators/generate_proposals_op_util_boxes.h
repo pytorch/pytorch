@@ -177,6 +177,8 @@ clip_boxes(const Eigen::ArrayBase<Derived>& boxes, int height, int width) {
   CAFFE_ENFORCE(boxes.cols() == 4 || boxes.cols() == 5);
   if (boxes.cols() == 5) {
     // No clipping for rotated boxes.
+    // TODO (viswanath): Should this be implemented for backward compatibility
+    // with angle=0 case?
     return boxes;
   }
 
