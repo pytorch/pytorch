@@ -17,7 +17,8 @@ output_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caff
 file_extensions = ['cc','cu','h','cuh']
 
 ignore_file_list = ["depthwise_3x3_conv_op.cu",
-					"top_k.cu",
+					"depthwise_3x3_conv_op_cudnn.cu",
+                    "top_k.cu",
 					"top_k_radix_selection.cuh",
 					"top_k_heap_selection.cuh",
                     "pool_op_cudnn.cu",
