@@ -19,6 +19,7 @@ struct SupervisedPtr {
   // Lifetime tied to supervisor_
   void* data_;
   SupervisorPtr supervisor_;
+  SupervisedPtr() : data_(nullptr), supervisor_(nullptr, nullptr) {}
   SupervisedPtr(void* data, SupervisorPtr&& supervisor)
     : data_(data), supervisor_(std::move(supervisor)) {}
   void* operator->() const { return data_; }
@@ -76,13 +77,7 @@ struct AT_API InefficientStdFunctionSupervisor {
     : ptr_(std::move(ptr)) {}
 };
 
-static void deleteInefficientStdFunctionSupervisor(void* ptr) {
-  delete static_cast<InefficientStdFunctionSupervisor*>(ptr);
-}
-
 AT_API at::SupervisedPtr
-makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter) {
-  return {ptr, SupervisorPtr{new InefficientStdFunctionSupervisor({ptr, deleter}), &deleteInefficientStdFunctionSupervisor}};
-}
+makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter);
 
 }  // namespace at
