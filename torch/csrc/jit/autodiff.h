@@ -33,7 +33,7 @@ using value_list = std::vector<Value*>;
 // Terminology: vjp = vector-jacobian product
 
 struct Gradient {
-  operator bool() const {
+  explicit operator bool() const {
     return df != nullptr;
   }
   std::shared_ptr<Graph> f;
