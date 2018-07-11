@@ -1,5 +1,4 @@
-#ifndef TH_ALLOCATOR_INC
-#define TH_ALLOCATOR_INC
+#pragma once
 
 #include "THGeneral.h"
 
@@ -27,63 +26,66 @@ typedef struct at_THAllocator THAllocator;
  * THError) on allocation failure.
  */
 TH_API THAllocator* getTHDefaultAllocator();
+
 #ifdef __cplusplus
-struct AT_API THDefaultDeleter final : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override {
-    THFree(ptr);
-  }
-  static at::BoundDeleter make() {
-    return {&singleton_, nullptr};
-  }
-private:
-  static THDefaultDeleter singleton_;
-};
+// Sentinel value/type to help distinguish the file descriptor constructor from
+// the non-file descriptor constructor
+enum WithFd { WITH_FD };
+
+class AT_API THMapAllocator {
+public:
+  THMapAllocator(const char *filename, int flags, size_t size);
+  THMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
+  virtual ~THMapAllocator();
+
+  char* filename() const { return filename_.c_str(); }
+  int fd() const {
+#ifdef _WIN32
+    AT_ERROR("THMapAllocator::fd() is unsupported on Windows");
+#else
+    return fd_;
 #endif
-
-/* file map allocator
- */
-typedef struct THMapAllocatorContext_  THMapAllocatorContext;
-TH_API THMapAllocatorContext *THMapAllocatorContext_new(const char *filename, int flags);
-TH_API THMapAllocatorContext *THMapAllocatorContext_newWithFd(const char *filename,
-    int fd, int flags);
-TH_API char * THMapAllocatorContext_filename(THMapAllocatorContext *ctx);
-TH_API int THMapAllocatorContext_fd(THMapAllocatorContext *ctx);
-TH_API ptrdiff_t THMapAllocatorContext_size(THMapAllocatorContext *ctx);
-TH_API void THMapAllocatorContext_free(THMapAllocatorContext *ctx);
-
-// NB: These functions steal the passed context
-#ifdef __cplusplus
-AT_API std::unique_ptr<void, at::BoundDeleter> THMapAllocatorContext_alloc(THMapAllocatorContext *ctx, ptrdiff_t size);
-AT_API std::unique_ptr<void, at::BoundDeleter> THRefcountedMapAllocator_alloc(void *_ctx, ptrdiff_t size);
-
-struct AT_API THMapDeleter final : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override;
-  static at::BoundDeleter make(THMapAllocatorContext* ctx) {
-    return {&singleton_, ctx};
   }
-  static THMapAllocatorContext* getContext(at::BoundDeleter bd) {
-    if (bd.deleter_ != &singleton_) return nullptr;
-    return static_cast<THMapAllocatorContext*>(bd.ctx_);
-  }
+  ptrdiff_t size() const { return size_; }
+  void* data() const { return data_; }
+
+  static THMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
+
 private:
-  static THMapDeleter singleton_;
+  std::string filename_;
+  int flags_ = 0;
+  ptrdiff_t size_; /* mapped size */
+#ifdef _WIN32
+  HANDLE handle_;
+  HANDLE event_;
+  std::string eventname_;
+#else
+  int fd_ = -1;
+#endif
+  void *data_ = nullptr;
 };
 
-struct AT_API THRefcountedMapDeleter final : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override;
-  static at::BoundDeleter make(THMapAllocatorContext* ctx) {
-    return {&singleton_, ctx};
-  }
-  static THMapAllocatorContext* getContext(at::BoundDeleter bd) {
-    if (bd.deleter_ != &singleton_) return nullptr;
-    return static_cast<THMapAllocatorContext*>(bd.ctx_);
-  }
-private:
-  static THRefcountedMapDeleter singleton_;
+// Base-from-member idiom
+struct AT_API THRefcountedMapAllocatorArgCheck {
+  THRefcountedMapAllocatorArgCheck(int flags);
 };
-#endif
 
-TH_API void THRefcountedMapAllocator_incref(THMapAllocatorContext *ctx, void *data);
-TH_API int THRefcountedMapAllocator_decref(THMapAllocatorContext *ctx, void *data);
+class AT_API THRefcountedMapAllocator : private THRefcountedMapAllocatorArgCheck, public THMapAllocator {
+public:
+  THRefcountedMapAllocator(const char *filename, int flags, size_t size);
+  THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
+  virtual ~THRefcountedMapAllocator();
 
-#endif
+  static THRefcountedMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
+
+  void incref();
+  int decref();
+private:
+  void checkFlags();
+  void initializeAlloc();
+};
+
+AT_API at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THMapAllocator>&&);
+AT_API at::SupervisedPtr makeSupervisedPtr(std::unique_ptr<THRefcountedMapAllocator>&&);
+
+#endif // __cplusplus

@@ -58,7 +58,7 @@ TH_API THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                                THAllocator* allocator);
 #ifdef __cplusplus
 TH_API THStorage* THStorage_(newWithDataAndAllocator)(
-    std::unique_ptr<void, at::BoundDeleter>&& data, ptrdiff_t size, at::Allocator* allocator);
+    SupervisedPtr&& data, ptrdiff_t size, at::Allocator* allocator);
 #endif
 
 /* should not differ with API */

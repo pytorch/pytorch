@@ -144,7 +144,7 @@ THC_API void* THCudaMalloc(THCState *state, size_t size);
 THC_API void THCudaFree(THCState *state, void* ptr);
 
 #ifdef __cplusplus
-std::unique_ptr<void, at::BoundDeleter> THCudaHostAlloc(THCState *state, size_t size);
+SupervisedPtr THCudaHostAlloc(THCState *state, size_t size);
 #endif
 
 THC_API void THCudaHostRecord(THCState *state, void *ptr);

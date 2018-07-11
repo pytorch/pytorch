@@ -273,7 +273,7 @@ private:
 THCCachingHostDeleter THCCachingHostDeleter::singleton_;
 
 struct THCCachingHostAllocator final : public at::Allocator {
-  std::unique_ptr<void, at::BoundDeleter> allocate(size_t size) const override {
+  SupervisedPtr allocate(size_t size) const override {
     THAssert(size >= 0);
     void *ptr;
     THCudaCheck(allocator.malloc(&ptr, size));

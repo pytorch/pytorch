@@ -18,7 +18,7 @@ typedef struct {
 
 EXPORT_API void libshm_init(const char *manager_exec_path);
 EXPORT_API libshm_context * libshm_context_new(const char *manager_handle, const char *filename, int flags);
-EXPORT_API std::unique_ptr<void, at::BoundDeleter> libshm_alloc(void *_ctx, ptrdiff_t size);
+EXPORT_API SupervisedPtr libshm_alloc(void *_ctx, ptrdiff_t size);
 EXPORT_API void libshm_context_free(libshm_context *context);
 
 struct EXPORT_API THManagedSharedDeleter : public at::Deleter {

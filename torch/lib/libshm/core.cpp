@@ -117,7 +117,7 @@ void libshm_free(void *_ctx, void *data) {
 
 THManagedSharedDeleter THManagedSharedDeleter::singleton_;
 
-std::unique_ptr<void, at::BoundDeleter> libshm_alloc(void *_ctx, ptrdiff_t size) {
+SupervisedPtr libshm_alloc(void *_ctx, ptrdiff_t size) {
   // TODO: unlock GIL when contacting the manager
   auto *ctx = (libshm_context*)_ctx;
   try {

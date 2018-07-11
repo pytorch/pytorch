@@ -41,7 +41,7 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   storage->size = size;
   storage->device = device;
 
-  std::unique_ptr<void, at::BoundDeleter> ptr = nullptr;
+  SupervisedPtr ptr = nullptr;
   if (size > 0) {
     // update heap *before* attempting malloc, to free space for the malloc
     try {
@@ -51,7 +51,7 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
       throw;
     }
   }
-  new (&storage->data_ptr) std::unique_ptr<void, at::BoundDeleter>(std::move(ptr));
+  new (&storage->data_ptr) SupervisedPtr(std::move(ptr));
   return storage;
 }
 
@@ -96,7 +96,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
   }
   else
   {
-    std::unique_ptr<void, at::BoundDeleter> data =
+    SupervisedPtr data =
       self->allocator->allocate(size * elementSize);
 
     if (self->data_ptr) {
@@ -122,13 +122,13 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
 }
 
 THCStorage* THCStorage_newWithDataAndAllocator(
-  THCState *state, at::ScalarType scalar_type, std::unique_ptr<void, at::BoundDeleter>&& data, ptrdiff_t size,
+  THCState *state, at::ScalarType scalar_type, SupervisedPtr&& data, ptrdiff_t size,
   at::Allocator *allocator) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
   storage->backend = at::kCUDA;
   storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) std::unique_ptr<void, at::BoundDeleter>(std::move(data));
+  new (&storage->data_ptr) SupervisedPtr(std::move(data));
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   new (&storage->weakcount) std::atomic<int>(1);

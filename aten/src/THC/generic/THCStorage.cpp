@@ -96,7 +96,7 @@ THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, p
 }
 
 THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, std::unique_ptr<void, at::BoundDeleter>&& data, ptrdiff_t size,
+  THCState *state, SupervisedPtr&& data, ptrdiff_t size,
   at::Allocator *allocator) {
   return THCStorage_newWithDataAndAllocator(state, at::CTypeToScalarType<real>::to(), std::move(data), size, allocator);
 }

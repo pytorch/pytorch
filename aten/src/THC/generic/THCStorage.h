@@ -41,7 +41,7 @@ THC_API THCStorage* THCStorage_(newWithAllocator)(
   THCState *state, ptrdiff_t size,
   at::Allocator* allocator);
 THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, std::unique_ptr<void, at::BoundDeleter>&& data, ptrdiff_t size,
+  THCState *state, SupervisedPtr&& data, ptrdiff_t size,
   at::Allocator* allocator);
 #endif
 
