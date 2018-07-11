@@ -255,10 +255,6 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  add_custom_target(
-      hipify_caffe2
-      COMMAND ${PYCMD} ${CMAKE_CURRENT_SOURCE_DIR}/../tools/amd_build/build_caffe2_amd.py
-      )
   # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
   IF(BUILD_ATEN)
      HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
@@ -267,7 +263,6 @@ if(USE_ROCM)
      set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
   ENDIF()
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
-  add_dependencies(caffe2 hipify_caffe2)
   set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
