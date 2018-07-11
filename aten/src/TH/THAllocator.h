@@ -47,7 +47,10 @@ public:
 #endif
   }
   ptrdiff_t size() const { return size_; }
-  void* data() const { return data_; }
+  // Return a pointer to the actual data for this allocator
+  // (in the case of the refcounted allocator, this is offset
+  // from the base pointer.)
+  virtual void* data() const { return base_ptr_; }
 
   static THMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
   static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
@@ -64,7 +67,7 @@ protected:
 #else
   int fd_ = -1;
 #endif
-  void *data_ = nullptr;
+  void *base_ptr_ = nullptr;
 };
 
 // Base-from-member idiom
@@ -81,6 +84,8 @@ public:
   static THRefcountedMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
   static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
   static at::SupervisedPtr makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
+
+  void* data() const override;
 
   void incref();
   int decref();

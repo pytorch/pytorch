@@ -30,6 +30,7 @@ struct SupervisedPtr {
     : data_(data), supervisor_(std::move(supervisor)) {}
   void* operator->() const { return data_; }
   void* get() const { return data_; }
+  operator bool() { return data_ || supervisor_; }
   SupervisedPtr& operator=( nullptr_t ) noexcept { data_ = nullptr; supervisor_ = nullptr; return *this; }
 };
 

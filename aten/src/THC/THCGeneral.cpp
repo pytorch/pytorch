@@ -24,6 +24,11 @@
  * enabled in groups of 8). */
 #define THC_CUDA_MAX_PEER_SIZE 8
 
+void THCState_free(THCState* state)
+{
+  free(state);
+}
+
 THCCudaResourcesPerDevice* THCState_getDeviceResourcePtr(
   THCState *state, int device);
 
@@ -34,34 +39,20 @@ THCState* THCState_alloc(void)
   return state;
 }
 
-void THCState_free(THCState* state)
-{
-  free(state);
+static void THDefaultDeviceDeleter(void* ptr) {
+  THCudaCheck(cudaFree(ptr));
 }
-
-struct THDefaultDeviceDeleter : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override {
-    THCudaCheck(cudaFree(ptr));
-  }
-  static at::BoundDeleter make() {
-    return {&singleton_, nullptr};
-  }
-private:
-  static THDefaultDeviceDeleter singleton_;
-};
 
 struct THDefaultDeviceAllocator final : public at::Allocator {
   at::SupervisedPtr allocate(size_t size) const override {
     void* p;
     THCudaCheck(cudaMalloc(&p, size));
-    return {p, THDefaultDeviceDeleter::make()};
+    return {p, {p, &THDefaultDeviceDeleter}};
   }
-  at::BoundDeleter maybeGlobalBoundDeleter() const override {
-    return THDefaultDeviceDeleter::make();
+  at::DeleterFnPtr raw_deleter() const override {
+    return &THDefaultDeviceDeleter;
   }
 };
-
-THDefaultDeviceDeleter THDefaultDeviceDeleter::singleton_;
 
 static THDefaultDeviceAllocator defaultDeviceAllocator;
 

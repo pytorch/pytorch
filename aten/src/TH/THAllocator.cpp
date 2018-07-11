@@ -58,7 +58,7 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
 #else
   , fd_(-1)
 #endif
-  , data_(nullptr)
+  , base_ptr_(nullptr)
 {
 
   if (!(flags & TH_ALLOCATOR_MAPPED_SHARED) && !(flags & TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
@@ -111,8 +111,8 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
     }
 
     size_ = size;
-    data_ = MapViewOfFile(handle_, FILE_MAP_ALL_ACCESS, 0, 0, size);
-    if (!data_) {
+    base_ptr_ = MapViewOfFile(handle_, FILE_MAP_ALL_ACCESS, 0, 0, size);
+    if (!base_ptr_) {
       AT_ERROR("Couldn't map view of shared file <", filename, ">, error code: <", GetLastError(), ">");
     }
   } else {
@@ -190,9 +190,9 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
 
     /* map the stuff */
     if(flags_) {
-      data_ = MapViewOfFile(hmfile, FILE_MAP_ALL_ACCESS, 0, 0, 0);
+      base_ptr_ = MapViewOfFile(hmfile, FILE_MAP_ALL_ACCESS, 0, 0, 0);
     } else {
-      data_ = MapViewOfFile(hmfile, FILE_MAP_COPY, 0, 0, 0);
+      base_ptr_ = MapViewOfFile(hmfile, FILE_MAP_COPY, 0, 0, 0);
     }
 
     CloseHandle(hfile);
@@ -279,13 +279,13 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
 
     /* map it */
     if (flags_ & (TH_ALLOCATOR_MAPPED_SHARED | TH_ALLOCATOR_MAPPED_SHAREDMEM)) {
-      data_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
+      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_SHARED, fd, 0);
     } else {
-      data_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
+      base_ptr_ = mmap(nullptr, size_, PROT_READ|PROT_WRITE, MAP_PRIVATE, fd, 0);
     }
 
-    if (data_ == MAP_FAILED) {
-      data_ = nullptr; /* let's be sure it is NULL */
+    if (base_ptr_ == MAP_FAILED) {
+      base_ptr_ = nullptr; /* let's be sure it is NULL */
     }
 
     if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
@@ -312,7 +312,7 @@ THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size)
       }
     }
 
-    if (data_ == MAP_FAILED) {
+    if (base_ptr_ == MAP_FAILED) {
       AT_ERROR("$ Torch: unable to mmap memory: you tried to mmap ", size_/1073741824, " GB.");
     }
   }
@@ -353,14 +353,14 @@ static VOID CALLBACK WaitForReleaseHandle(PVOID lpParam, BOOLEAN TimerOrWaitFire
 #endif
 
 THMapAllocator::~THMapAllocator() {
-  if (data_ == nullptr) {
+  if (base_ptr_ == nullptr) {
     return;
   }
 
 #ifdef _WIN32
   if ((flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) || (flags_ & TH_ALLOCATOR_MAPPED_SHAREDMEM))
     CloseHandle(handle_);
-  if(UnmapViewOfFile(data_) == 0)
+  if(UnmapViewOfFile(base_ptr_) == 0)
     AT_ERROR("could not unmap the shared memory file");
 #else /* _WIN32 */
   if (flags_ & TH_ALLOCATOR_MAPPED_KEEPFD) {
@@ -369,7 +369,7 @@ THMapAllocator::~THMapAllocator() {
     }
   }
 
-  if (munmap(data_, size_)) {
+  if (munmap(base_ptr_, size_)) {
     AT_ERROR("could not unmap the shared memory file");
   }
 
@@ -432,8 +432,8 @@ THRefcountedMapAllocator::THRefcountedMapAllocator(WithFd, const char *filename,
 }
 
 void THRefcountedMapAllocator::initializeAlloc() {
-  char *data = ((char*)data_) + TH_ALLOC_ALIGNMENT;
-  THMapInfo *map_info = (THMapInfo*)data_;
+  char *data = ((char*)base_ptr_) + TH_ALLOC_ALIGNMENT;
+  THMapInfo *map_info = (THMapInfo*)base_ptr_;
 
 #ifdef _WIN32
   ReleaseContext* r_ctx = (ReleaseContext *) THAlloc(sizeof(ReleaseContext));
@@ -455,8 +455,8 @@ void THRefcountedMapAllocator::initializeAlloc() {
 
 THRefcountedMapAllocator::~THRefcountedMapAllocator() {
   // Prevent the parent destructor from running
-  void* data = data_;
-  data_ = nullptr;
+  void* data = base_ptr_;
+  base_ptr_ = nullptr;
 
 #ifdef _WIN32
   THMapInfo *info = (THMapInfo*)data;
@@ -486,13 +486,13 @@ THRefcountedMapAllocator::~THRefcountedMapAllocator() {
 
 void THRefcountedMapAllocator::incref()
 {
-  THMapInfo *map_info = static_cast<THMapInfo*>(data_);
+  THMapInfo *map_info = static_cast<THMapInfo*>(base_ptr_);
   ++map_info->refcount;
 }
 
 int THRefcountedMapAllocator::decref()
 {
-  THMapInfo *map_info = static_cast<THMapInfo*>(data_);
+  THMapInfo *map_info = static_cast<THMapInfo*>(base_ptr_);
   return --map_info->refcount == 0;
 }
 
@@ -547,13 +547,15 @@ at::SupervisedPtr THMapAllocator::makeSupervisedPtr(WithFd, const char *filename
 at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THRefcountedMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
-  return {static_cast<void*>(static_cast<char*>(supervisor->data()) + TH_ALLOC_ALIGNMENT),
-          {supervisor, &deleteTHRefcountedMapAllocator}};
+  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}};
 }
 
 at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
-  return {static_cast<void*>(static_cast<char*>(supervisor->data()) + TH_ALLOC_ALIGNMENT),
-          {supervisor, &deleteTHRefcountedMapAllocator}};
+  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}};
+}
+
+void* THRefcountedMapAllocator::data() const {
+  return static_cast<void*>(static_cast<char*>(base_ptr_) + TH_ALLOC_ALIGNMENT);
 }

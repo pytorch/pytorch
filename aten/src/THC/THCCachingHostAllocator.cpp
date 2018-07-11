@@ -260,27 +260,19 @@ void THCCachingHostAllocator_emptyCache()
   allocator.emptyCache();
 }
 
-struct THCCachingHostDeleter : public at::Deleter {
-  void deallocate(void* ctx, void* ptr) const override {
-    allocator.free(ptr);
-  }
-  static at::BoundDeleter make() {
-    return {&singleton_, nullptr};
-  }
-private:
-  static THCCachingHostDeleter singleton_;
-};
-THCCachingHostDeleter THCCachingHostDeleter::singleton_;
+static void THCCachingHostDeleter(void* ptr) {
+  allocator.free(ptr);
+}
 
 struct THCCachingHostAllocator final : public at::Allocator {
   at::SupervisedPtr allocate(size_t size) const override {
     THAssert(size >= 0);
     void *ptr;
     THCudaCheck(allocator.malloc(&ptr, size));
-    return {ptr, THCCachingHostDeleter::make()};
+    return {ptr, {ptr, &THCCachingHostDeleter}};
   }
-  at::BoundDeleter maybeGlobalBoundDeleter() {
-    return THCCachingHostDeleter::make();
+  at::DeleterFnPtr raw_deleter() const override {
+    return &THCCachingHostDeleter;
   }
 };
 

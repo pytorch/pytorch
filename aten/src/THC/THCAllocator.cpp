@@ -12,7 +12,7 @@ struct THCudaHostAllocator : public at::Allocator {
     }
     return {ptr, {ptr, &THCudaHostDeleter}};
   }
-  DeleterFnPtr raw_deleter() const override {
+  at::DeleterFnPtr raw_deleter() const override {
     return &THCudaHostDeleter;
   }
 };
@@ -36,7 +36,7 @@ struct THCUVAAllocator : public at::Allocator {
     }
     return {ptr, {ptr, &THCUVADeleter}};
   }
-  at::BoundDeleter raw_deleter() const override {
+  at::DeleterFnPtr raw_deleter() const override {
     return &THCUVADeleter;
   }
 };

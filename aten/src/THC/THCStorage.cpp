@@ -41,7 +41,7 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   storage->size = size;
   storage->device = device;
 
-  at::SupervisedPtr ptr = nullptr;
+  at::SupervisedPtr ptr;
   if (size > 0) {
     // update heap *before* attempting malloc, to free space for the malloc
     try {
