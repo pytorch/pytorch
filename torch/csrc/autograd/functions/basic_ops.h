@@ -20,7 +20,7 @@ struct Error : public Function {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  virtual variable_list operator()(const variable_list& inputs) {
+  variable_list operator()(const variable_list& inputs) {
     return apply(inputs);
   }
 
@@ -34,7 +34,7 @@ struct DelayedError : public Function {
 
   virtual variable_list apply(const variable_list& inputs) override;
 
-  virtual variable_list operator()(const variable_list& inputs) {
+  variable_list operator()(const variable_list& inputs) {
     return apply(inputs);
   }
 
