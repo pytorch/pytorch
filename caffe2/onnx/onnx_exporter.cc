@@ -821,11 +821,15 @@ ConvertedResult OnnxExporter::CreateGemmNodes(
   }
 
   auto gemm_y_output = (has_axis) ? dummy_->NewDummyName() : y;
+  std::vector<AttributeProto> attrs = {MakeAttribute("transB", 1L)};
+  if (legacy_mode_) {
+    attrs.emplace_back(MakeAttribute("broadcast", 1));
+  }
   nodes.emplace_back(MakeNode(
       "Gemm",
       {x, w, b},
       {gemm_y_output},
-      {MakeAttribute("transB", 1L)},
+      attrs,
       def.name()));
 
   if (has_axis) {

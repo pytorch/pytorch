@@ -212,12 +212,14 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
     if (infer_dim) {
       res[*infer_dim] = numel / newsize;
     }
+#ifndef USE_TH_SIZE_ZERO_DIM
     if (numel == 0) {
       // Collapse zero-element shapes into one dimension because TH handles zeros
       // in sizes strangely: x.resize_(1, 0) has shape (1,). TODO: remove this
       // once we have multi-dimensional empty tensors.
       return {0};
     }
+#endif
     return res;
   }
 
@@ -603,6 +605,16 @@ Tensor view_as(const Tensor& self, const Tensor& other) {
 
 int64_t numel(const Tensor& self) {
   return self.pImpl->numel();
+}
+
+std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  int64_t size = self.size(dim);
+  std::vector<Tensor> tensors(size);
+  for (int i = 0; i < size; i++) {
+    tensors[i] = self.select(dim, i);
+  }
+  return tensors;
 }
 
 std::vector<Tensor> meshgrid(TensorList tensors) {

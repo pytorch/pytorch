@@ -122,11 +122,6 @@ void THCStorage_(retain)(THCState *state, THCStorage *self)
   THStorage_retain(self);
 }
 
-int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)
-{
-  return THStorage_retainIfLive(storage);
-}
-
 void THCStorage_(free)(THCState *state, THCStorage *self)
 {
   THCStorage_free(state, self);

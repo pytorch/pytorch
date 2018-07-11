@@ -117,7 +117,6 @@ void EliminateCommonSubexpression(Block * block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
     auto node = *it;
     if (node->kind() == prim::PythonOp
-        || node->kind() == prim::CppOp
         || node->kind() == prim::Eval
         || node->blocks().size() > 0
        ) {

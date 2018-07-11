@@ -2,7 +2,7 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/aten_dispatch.h"
+#include "torch/csrc/jit/operator.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -87,7 +87,7 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
 }
 
 void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>& types) {
-  auto op_info = getTensorOp(node);
+  auto op = getOperation(node);
   std::vector<at::Tensor> stack;
 
   for(auto & type : types) {
@@ -98,7 +98,7 @@ void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>&
   // is to uncover any mistakes we could make when editing this code,
   // and eventually it shouldn't matter, because this phase should be
   // preceded by schema checking.
-  op_info.op(stack);
+  op(stack);
 
   JIT_ASSERT(stack.size() == node->outputs().size());
   for(size_t i = 0; i < stack.size(); ++i) {

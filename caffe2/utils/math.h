@@ -72,6 +72,10 @@ void Tan(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Atan(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Sinh(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Cosh(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void SinCos(const int N, const T* x, T* ys, T* yc, Context* context);
 template <typename T, class Context>
 void Abs(const int N, const T* x, T* y, Context* context);

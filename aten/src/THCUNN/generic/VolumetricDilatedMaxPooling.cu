@@ -377,7 +377,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   THCDeviceTensor<THCIndex_t, 4> cudaIndices =
     toDeviceTensor<THCIndex_t, 4>(state, indices1);
 
-  int totalZ = outputTime * inputSlices * batchSize;
+  int64_t totalZ = outputTime * inputSlices * batchSize;
   int offsetZ = 0;
   dim3 block(32, 8);
 
