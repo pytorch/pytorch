@@ -262,14 +262,14 @@ EXAMPLES = [
     ]),
     Example(LowRankMultivariateNormal, [
         {
-            'loc': torch.randn(5, 2, requires_grad=True),
-            'cov_factor': torch.randn(5, 2, 1, requires_grad=True),
-            'cov_diag': torch.tensor([2.0, 0.25], requires_grad=True),
+            'loc': torch.randn(5, 3, requires_grad=True),
+            'cov_factor': torch.randn(5, 3, 1, requires_grad=True),
+            'cov_diag': torch.tensor([2.0, 0.25, 0.4], requires_grad=True),
         },
         {
-            'loc': torch.randn(4, 3, requires_grad=True),
+            'loc': torch.randn(5, 3, requires_grad=True),
             'cov_factor': torch.randn(3, 2, requires_grad=True),
-            'cov_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
+            'cov_diag': torch.tensor([2.0, 1.5, 0.5], requires_grad=True),
         }
     ]),
     Example(MultivariateNormal, [
