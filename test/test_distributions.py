@@ -1539,9 +1539,9 @@ class TestDistributions(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "NumPy not found")
     def test_lowrank_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
-        mean = torch.randn(3, requires_grad=True)
-        scale_factor = torch.randn(3, 1, requires_grad=True)
-        scale_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
+        mean = torch.randn(5, requires_grad=True)
+        scale_factor = torch.randn(5, 1, requires_grad=True)
+        scale_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
         cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
 
         self._check_sampler_sampler(LowRankMultivariateNormal(mean, scale_factor, scale_diag),

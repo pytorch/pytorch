@@ -187,7 +187,7 @@ class MultivariateNormal(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new(*shape).normal_()
+        eps = self.loc.new_empty(shape).normal_()
         return self.loc + _batch_mv(self._unbroadcasted_scale_tril, eps)
 
     def log_prob(self, value):

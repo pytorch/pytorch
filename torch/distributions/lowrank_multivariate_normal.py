@@ -156,8 +156,9 @@ class LowRankMultivariateNormal(Distribution):
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps = self.loc.new(*shape).normal_()
-        return self.loc + _batch_mv(self.scale_tril, eps)
+        eps_W = self.loc.new_empty(shape[:-1] + (self.scale_factor.size(-1),)).normal_()
+        eps_D = self.loc.new_empty(shape).normal_()
+        return self.loc + _batch_mv(self.scale_factor, eps_W) + self.scale_diag * eps_D
 
     def log_prob(self, value):
         if self._validate_args:
