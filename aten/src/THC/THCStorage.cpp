@@ -136,7 +136,7 @@ THCStorage* THCStorage_newWithDataAndAllocator(
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
   storage->allocator = allocator;
   int device;
-  if (storage->data_ptr) {
+  if (storage->data_ptr.get()) {
     struct cudaPointerAttributes attr;
     THCudaCheck(cudaPointerGetAttributes(&attr, storage->data_ptr.get()));
     device = attr.device;
