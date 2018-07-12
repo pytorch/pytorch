@@ -13,6 +13,18 @@ BatchTensor::BatchTensor(at::Tensor data, at::Tensor mask, at::Tensor dims){
   this->dims = dims;
 }
 
+BatchTensor::BatchTensor(at::Tensor data, int64_t batch_size){
+  dims = data.type().toScalarType(at::kByte).tensor(data.dim());
+  dims.fill_(0);
+  std::vector<int64_t> sizes(data.dim() + 1, -1);
+  sizes[0] = batch_size;
+  this->data = data.unsqueeze(0).expand(sizes);
+  std::vector<int64_t> mask_sizes(data.dim() + 1, 1);
+  mask_sizes[0] = batch_size;
+  mask = data.type().toScalarType(at::kByte).tensor(mask_sizes);
+  mask.fill_(1);
+}
+
 BatchTensor::BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims) {
   auto bs = datalist.size();
   std::vector<int64_t> sizes(dims.size(0) + 1, 0), mask_sizes(dims.size(0) + 1, 0);
@@ -66,8 +78,10 @@ std::vector<at::Tensor> BatchTensor::examples() {
 
 void initBatchTensorBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
-  py::class_<BatchTensor>(m, "BatchTensor")
+  auto jit = m.def_submodule("_jit");
+  py::class_<BatchTensor>(jit, "BatchTensor")
       .def(py::init<at::Tensor, at::Tensor, at::Tensor>())
+      .def(py::init<at::Tensor, int64_t>())
       .def(py::init<std::vector<at::Tensor>, at::Tensor>())
       .def("examples", &BatchTensor::examples)
       .def("get_data", &BatchTensor::get_data)

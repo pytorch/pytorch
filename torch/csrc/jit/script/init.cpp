@@ -7,6 +7,7 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/passes/to_batch.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
