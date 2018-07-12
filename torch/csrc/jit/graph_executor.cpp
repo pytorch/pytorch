@@ -51,7 +51,7 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
   : graph(std::move(graph)) {
     captures.reserve(capture_size);
   }
-  virtual variable_list apply(const variable_list& inputs) override {
+  virtual variable_list apply(variable_list&& inputs) override {
     // TODO: expensive copies here to convert to/from tensor_list
     // TODO: because inputs is passed by const reference there is no
     // way to release tensors incrementally as this runs
