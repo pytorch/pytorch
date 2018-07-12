@@ -212,6 +212,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: equal
    .. automethod:: erf
    .. automethod:: erf_
+   .. automethod:: erfc
+   .. automethod:: erfc_
    .. automethod:: erfinv
    .. automethod:: erfinv_
    .. automethod:: exp

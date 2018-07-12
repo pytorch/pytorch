@@ -482,6 +482,9 @@ class TestTorch(TestCase):
     def test_erf(self):
         self._test_math_by_name('erf')
 
+    def test_erfc(self):
+        self._test_math_by_name('erfc')
+
     def test_erfinv(self):
         def checkType(tensor):
             inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
