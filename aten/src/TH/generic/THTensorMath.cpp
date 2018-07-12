@@ -4347,7 +4347,14 @@ accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
 
 accreal THTensor_(meanall)(THTensor *tensor)
 {
-  return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
+  auto nElement = THTensor_(nElement)(tensor);
+  // this just matches the native function implementation; this can go away when we can call
+  // ATen functions directly from here.
+  if (nElement != 0 || !std::numeric_limits<accreal>::has_quiet_NaN) {
+    return THTensor_(sumall)(tensor) / nElement;
+  } else {
+    return std::numeric_limits<accreal>::quiet_NaN();
+  }
 }
 
 accreal THTensor_(varall)(THTensor *tensor, int biased)
