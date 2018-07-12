@@ -7,6 +7,7 @@
 #include "THCGeneral.hpp"
 
 #include "ATen/CUDAStream.h"
+#include "ATen/Half.h"
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -736,29 +737,27 @@ cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* 
 #include "THCStorage.cpp"
 #include "THCAllocator.cpp"
 
-/* from THCHalf.h */
+// Host half <-> float conversions, defined in THCHalf.h
+// Note: using scalar_cast from CUDANumerics should be preferred to these
+// legacy functions.
 
-half THC_float2half(float f)
-{
-#if CUDA_VERSION < 9000
-  half h;
-  TH_float2halfbits(&f, &h.x);
-  return h;
-#else
-  __half_raw h_raw;
-  TH_float2halfbits(&f, &h_raw.x);
-  return half(h_raw);
-#endif
+half THC_float2half(float f) {
+  #if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
+    half h;
+    h.x = ::at::detail::float2halfbits(f);
+    return h;
+  #else 
+    __half_raw h_raw;
+    h_raw.x = ::at::detail::float2halfbits(f);
+    return half(h_raw);
+  #endif 
 }
 
-float  THC_half2float(half h)
-{
-  float f;
-#if CUDA_VERSION < 9000
-  TH_halfbits2float(&h.x, &f);
+float  THC_half2float(half h) {
+#if CUDA_VERSION < 9000 && !defined(__HIP_PLATFORM_HCC__)
+  return ::at::detail::halfbits2float(h.x);
 #else
   __half_raw h_raw(h);
-  TH_halfbits2float(&h_raw.x, &f);
+  return ::at::detail::halfbits2float(h_raw.x);
 #endif
-  return f;
 }

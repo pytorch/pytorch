@@ -24,9 +24,6 @@ typedef struct __thalign__(4) {
 typedef __THHalf THHalf;
 typedef __THHalf2 THHalf2;
 
-TH_API void TH_float2halfbits(float*, unsigned short*);
-TH_API void TH_halfbits2float(unsigned short*, float*);
-
 TH_API THHalf TH_float2half(float);
 TH_API float  TH_half2float(THHalf);
 
