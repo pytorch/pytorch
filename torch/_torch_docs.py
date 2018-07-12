@@ -1411,6 +1411,25 @@ Example::
     tensor([ 0.0000, -0.8427,  1.0000])
 """)
 
+add_docstr(torch.erfc,
+           r"""
+erfc(tensor, out=None) -> Tensor
+
+Computes the complementary error function of each element. The complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 1.8427,  0.0000])
+""")
+
 add_docstr(torch.erfinv,
            r"""
 erfinv(tensor, out=None) -> Tensor
