@@ -32,7 +32,7 @@ def vector_to_parameters(vec, parameters):
             parameters of a model.
     """
     # Dimensionality check
-    assert vec.numel() == sum([p.numel() for p in parameters])
+    assert vec.numel() == sum([p.numel() for p in parameters if p.requires_grad])
     # Ensure vec of type Tensor
     if not isinstance(vec, torch.Tensor):
         raise TypeError('expected torch.Tensor, but got: {}'
