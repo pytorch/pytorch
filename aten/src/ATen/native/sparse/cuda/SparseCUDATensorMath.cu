@@ -8,7 +8,6 @@
 
 #include <THC/THCTensorMathPointwise.cuh>
 #include <THC/THCThrustAllocator.cuh>
-#include <THC/THCNumerics.cuh>
 #include <thrust/device_ptr.h>
 #include <thrust/sequence.h>
 #include <thrust/system/cuda/execution_policy.h>
@@ -89,7 +88,7 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
         scalar_t cast_alpha = alpha.to<scalar_t>();
         if (cast_beta == 0) {
           r_.zero_();
-        } else if (cast_beta == ScalarConvert<int, scalar_t>::to(1)) {
+        } else if (cast_beta == 1) {
           if (!isSameTensor(t, r_)) {
             r_.copy_(t);
           }
@@ -314,7 +313,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     // NB: Purposely not inplace!
     AT_DISPATCH_ALL_TYPES_AND_HALF(
         values.type(), "add_out_dense_sparse_cuda", [&] {
-          if (value.to<scalar_t>() != ScalarConvert<int, scalar_t>::to(1)) {
+          if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
             values = values.mul(value);
           }
         });
@@ -383,7 +382,7 @@ SparseTensor& s_add_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t, con
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(
       s_values_.type(), "s_add_out_sparse_cuda", [&] {
-        if (value.to<scalar_t>() != ScalarConvert<int, scalar_t>::to(1)) {
+        if (value.to<scalar_t>() != static_cast<scalar_t>(1)) {
           s_values_ = s_values_.mul(value);
         }
       });
@@ -429,7 +428,7 @@ SparseTensor& s_sub_out_sparse_cuda(SparseTensor& r, const SparseTensor& t, cons
   AT_DISPATCH_ALL_TYPES(
       t.type(), "sub_sparse", [&] {
         scalar_t cast_value = value.to<scalar_t>();
-        s_add_out_sparse_cuda(r, t, src, ScalarNegate<scalar_t>::to(cast_value));
+        s_add_out_sparse_cuda(r, t, src, -cast_value);
       }
   );
   return r;
