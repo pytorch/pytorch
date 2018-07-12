@@ -252,6 +252,8 @@ struct Tensor : public detail::TensorBase {
   Tensor tanh() const;
   Tensor & erf_();
   Tensor erf() const;
+  Tensor & erfc_();
+  Tensor erfc() const;
   Tensor & erfinv_();
   Tensor erfinv() const;
   Tensor & sqrt_();

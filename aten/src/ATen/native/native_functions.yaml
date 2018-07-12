@@ -532,6 +532,19 @@
     CPU: _erf_out_cpu
     CUDA: _erf_out_cuda
 
+- func: erfc(Tensor self) -> Tensor
+
+- func: erfc_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _erfc__cpu
+    CUDA: _erfc__cuda
+
+- func: erfc_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _erfc_out_cpu
+    CUDA: _erfc_out_cuda
+
 - func: exp(Tensor self) -> Tensor
 
 - func: exp_(Tensor self) -> Tensor
