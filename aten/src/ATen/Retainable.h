@@ -13,11 +13,14 @@ struct Retainable {
   }
   void release() {
     if(--refcount == 0) {
-      // Skip releaseResources() when this is the last weak reference.
-      if (weak_refcount > 1) {
+      // If we know that this is the last reference then we can skip
+      // all the decrements and releaseResources().
+      if (weak_refcount == 1) {
+        delete this;
+      } else {
         releaseResources();
+        weakRelease();
       }
-      weakRelease();
     }
   }
   void weakRetain() {
