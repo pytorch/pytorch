@@ -45,7 +45,7 @@ std::shared_ptr<torch::jit::Graph> createGraphByTracing(
         py::function func,
         tracer::variable_list trace_inputs,
         size_t num_func_inputs) {
-  auto enter_info = tracer::enter(std::move(trace_inputs), 1);
+  auto enter_info = tracer::enter(std::move(trace_inputs));
   py::tuple py_inputs(num_func_inputs);
   for(size_t i = 0; i < num_func_inputs; ++i) {
     py_inputs[i] = py::cast(enter_info.second[i]);
@@ -84,8 +84,6 @@ void pythonRecordSourceLocation(Node* n) {
   n->setSourceLocation(sl);
 }
 
-#define ASSERT_UNEXPIRED(METHOD_NAME) if (s.is_expired()) throw std::runtime_error("calling " METHOD_NAME " on an expired trace")
-
 void initPythonTracerBindings(PyObject* module_) {
   setRecordSourceLocation(pythonRecordSourceLocation);
 
@@ -98,34 +96,25 @@ void initPythonTracerBindings(PyObject* module_) {
       return ss.str();
     })
     .def("__str__", [](const TracingState& s) -> std::string {
-      if (s.is_expired()) return "<expired TracingState>";
       std::ostringstream ss;
       ss << *s.graph;
       return ss.str();
     })
     .def("push_scope", [](TracingState& s, const std::string& scope_name) {
-      ASSERT_UNEXPIRED("push_scope");
-      s.push_scope(scope_name);
+      s.graph->push_scope(scope_name);
     })
     .def("pop_scope", [](TracingState& s) {
-      ASSERT_UNEXPIRED("pop_scope");
-      s.pop_scope();
+      s.graph->pop_scope();
     })
     .def("set_graph", [](TracingState& s, std::shared_ptr<Graph> g) {
       s.graph = g;
     })
     .def("graph", [](TracingState& s) {
       return s.graph;
-    })
-    .def_property_readonly("is_expired", [](TracingState& s) {
-      return s.is_expired();
-    })
-    .def_property_readonly("is_complete", [](TracingState& s) {
-      return s.is_complete();
     });
 
-  m.def("_tracer_enter", [](variable_list trace_inputs, size_t num_backwards) {
-    return tracer::enter(std::move(trace_inputs), num_backwards + 1);
+  m.def("_tracer_enter", [](variable_list trace_inputs) {
+    return tracer::enter(std::move(trace_inputs));
   });
   m.def("_tracer_exit", [](variable_list var_outputs) {
     tracer::exit(var_outputs);

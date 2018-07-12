@@ -151,6 +151,7 @@ def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=
                 filepath = os.sep.join([dirpath, filename])
 
                 # Execute the preprocessor on the specified file.
+
                 if filename not in ignore_files:
                     preprocessor(filepath, stats, hipify_caffe2)
 
@@ -758,7 +759,6 @@ def extract_arguments(start, string):
     return arguments
 
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
-
 def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=False):
     """Added necessary static casts to kernel launches to match kernel argument type to corresponding kernel definition
        Eg.
@@ -774,7 +774,7 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
         # substitute CUDA with HIP in KernelTemplateParams to align with hipified names
         KernelTemplateParams = re.sub(r'CUDA', r'HIP', str(KernelTemplateParams))
         KernelTemplateParams = ast.literal_eval(KernelTemplateParams)
-
+        
     for (dirpath, _dirnames, filenames) in os.walk(directory):
         for filename in filenames:
             if filename_ends_with_extension(filename, extensions):
@@ -922,7 +922,6 @@ def main():
         help="list of file names to ignore for hipifying",
         required=False)
 
-
     args = parser.parse_args()
 
     # Verify the project directory exists.
@@ -1058,6 +1057,7 @@ def main():
 
     if args.hipify_caffe2:
         copy_files_to_hip_dirs(args.output_directory, args.project_directory, args.include_dirs)
+
 
 if __name__ == '__main__':
     main()

@@ -4740,6 +4740,13 @@ class TestNN(NNTestCase):
             if TEST_CUDA:
                 test_cpu_against_cuda(N, C, H, W, padding_mode)
 
+                # test channels >1024, which doesn't work on cudnn 7102 and further
+                N, C, H, W = 1, 1025, 3, 3
+                self.assertTrue(gradcheck(
+                    lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
+                    (input, grid)))
+                test_cpu_against_cuda(N, C, H, W, padding_mode)
+
     def test_grid_sample_3d(self):
         def test_cpu_against_cuda(N, C, D, H, W, padding_mode):
             def test_shape(N, C, ID, IH, IW, D, H, W, padding_mode):
@@ -5932,6 +5939,15 @@ new_criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
         check_sum_reduction=True,
         desc='scalar'
+    ),
+    dict(
+        module_name='MSELoss',
+        input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
+        target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
+        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
+                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+        check_forward_only=True,
+        desc='prec',
     ),
     dict(
         module_name='BCELoss',

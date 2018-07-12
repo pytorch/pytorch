@@ -19,8 +19,7 @@ template <typename T>
 using is_module_holder = std::is_base_of<ModuleHolderIndicator, decay_t<T>>;
 
 template <typename T>
-using disable_if_module_holder_t =
-    disable_if_t<std::is_base_of<ModuleHolderIndicator, decay_t<T>>::value>;
+using disable_if_module_holder_t = disable_if_t<is_module_holder<T>::value>;
 } // namespace detail
 
 namespace nn {
@@ -30,27 +29,25 @@ namespace nn {
 /// the kind of constructions we want to allow for our modules.
 template <typename Contained>
 class ModuleHolder : torch::detail::ModuleHolderIndicator {
+ protected:
+  /// The module pointer this class wraps.
+  /// NOTE: Must be placed at the top of the class so that we can use it with
+  /// trailing return types below.
+  std::shared_ptr<Contained> impl_;
+
  public:
   using ContainedType = Contained;
 
-  /// Constructs the `ModuleHolder` with an empty contained value.
-  ModuleHolder() = default;
+  /// Constructs the `ModuleHolder` with an empty contained value. Access to
+  /// the underlying module is not permitted and will throw an exception, until
+  /// a value is assigned.
+  explicit ModuleHolder(std::nullptr_t) : impl_(nullptr) {}
 
-  /// Single argument constructor of the underlying type.
-  /// Example: `Linear(4)` or `Linear(LinearOptions(4))`.
-  template <typename T>
-  explicit ModuleHolder(T&& t)
-      : impl_(std::make_shared<Contained>(std::forward<T>(t))) {}
-
-  /// Multi-argument constructor. This constructor is special in that the
-  /// expectation is that the constructor of the contained type takes an object
-  /// that can be constructed with the given arguments. For our modules, this is
-  /// always the `Options` struct. For this reason, the arguments are forwarded
-  /// inside braces, as to construct the constructor argument.
-  /// Example: `Linear(3, 4)`, equivalent to `Linear(LinearOptions(3, 4))`.
-  template <typename T, typename... Ts>
-  explicit ModuleHolder(T&& t, Ts&&... ts)
-      : impl_(new Contained({std::forward<T>(t), std::forward<Ts>(ts)...})) {}
+  /// Constructs the `ModuleHolder` with a contained module, forwarding all
+  /// arguments to its constructor.
+  template <typename... Ts>
+  explicit ModuleHolder(Ts&&... ts)
+      : impl_(new Contained(std::forward<Ts>(ts)...)) {}
 
   /// Constructs the `ModuleHolder` from a pointer to the contained type.
   /// Example: `Linear(std::make_shared<LinearImpl>(...))`.
@@ -65,20 +62,22 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
   /// Forwards to the contained module.
   Contained* operator->() {
-    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
-    return impl_.get();
+    return get();
   }
 
   /// Forwards to the contained module.
   const Contained* operator->() const {
-    AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
-    return impl_.get();
+    return get();
   }
 
-  /// Forwards to the call operator of the contained module.
-  template <typename... Args>
-  Tensor operator()(Args&&... args) {
-    return (*impl_)(std::forward<Args>(args)...);
+  /// Returns a reference to the contained module.
+  Contained& operator*() {
+    return *get();
+  }
+
+  /// Returns a const reference to the contained module.
+  const Contained& operator*() const {
+    return *get();
   }
 
   /// Returns a shared pointer to the underlying module.
@@ -93,20 +92,29 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
     return impl_.get();
   }
 
-  /// Returns a pointer to the underlying module.
+  /// Returns a const pointer to the underlying module.
   const Contained* get() const {
     AT_CHECK(!is_empty(), "Accessing empty ModuleHolder");
     return impl_.get();
+  }
+
+  /// Forwards to the call operator of the contained module.
+  template <typename... Args>
+  auto operator()(Args&&... args)
+      -> decltype((*impl_)(std::forward<Args>(args)...)) {
+    return (*impl_)(std::forward<Args>(args)...);
+  }
+
+  /// Forwards to the subscript operator of the contained module.
+  template <typename Arg>
+  auto operator[](Arg&& arg) -> decltype((*impl_)[std::forward<Arg>(arg)]) {
+    return (*impl_)[std::forward<Arg>(arg)];
   }
 
   /// Returns true if the `ModuleHolder` does not contain a module.
   bool is_empty() const noexcept {
     return impl_ == nullptr;
   }
-
- protected:
-  /// The module pointer this class wraps.
-  std::shared_ptr<Contained> impl_;
 };
 } // namespace nn
 } // namespace torch
@@ -127,10 +135,15 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
 
 /// Defines a class `Name` which inherits from `nn::ModuleHolder` to provide a
 /// wrapper over a `std::shared_ptr<Impl>`.
-#define TORCH_MODULE_IMPL(Name, Impl)                  \
-  class Name : public torch::nn::ModuleHolder<Impl> {  \
-   public:                                             \
-    using torch::nn::ModuleHolder<Impl>::ModuleHolder; \
+#define TORCH_MODULE_IMPL(Name, Impl)                            \
+  class Name : public torch::nn::ModuleHolder<Impl> {            \
+   public:                                                       \
+    using torch::nn::ModuleHolder<Impl>::ModuleHolder;           \
+    Name(const Name&) = default;                                 \
+    Name(Name&&) = default;                                      \
+    Name(Name& other) : Name(static_cast<const Name&>(other)) {} \
+    Name& operator=(const Name&) = default;                      \
+    Name& operator=(Name&&) = default;                           \
   }
 
 /// Like `TORCH_MODULE_IMPL`, but defaults the `Impl` name to `<Name>Impl`.

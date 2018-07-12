@@ -1411,6 +1411,25 @@ Example::
     tensor([ 0.0000, -0.8427,  1.0000])
 """)
 
+add_docstr(torch.erfc,
+           r"""
+erfc(tensor, out=None) -> Tensor
+
+Computes the complementary error function of each element. The complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 1.8427,  0.0000])
+""")
+
 add_docstr(torch.erfinv,
            r"""
 erfinv(tensor, out=None) -> Tensor
@@ -4820,9 +4839,9 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A negative `dim` value within the range
-[-:attr:`input.dim()`, :attr:`input.dim()`) can be used and
-will correspond to :meth:`unsqueeze` applied at :attr:`dim` = :attr:`dim + input.dim() + 1`
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
+can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
+applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
 Args:
     input (Tensor): the input tensor

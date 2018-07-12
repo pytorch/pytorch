@@ -13,9 +13,10 @@ namespace {
 #if defined(__AVX__) && !defined(_MSC_VER)
 
 template <> class Vec256<float> {
+private:
+  __m256 values;
 public:
   static constexpr int64_t size = 8;
-  __m256 values;
   Vec256() {}
   Vec256(__m256 v) : values(v) {}
   Vec256(float val) {
@@ -66,6 +67,8 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
+  const float& operator[](int idx) const  = delete;
+  float& operator[](int idx) = delete;
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[8];
     store(tmp);
@@ -89,6 +92,9 @@ public:
   }
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));
+  }
+  Vec256<float> erfc() const {
+    return Vec256<float>(Sleef_erfcf8_u15(values));
   }
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));

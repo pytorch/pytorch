@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
@@ -50,7 +51,7 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
   : graph(std::move(graph)) {
     captures.reserve(capture_size);
   }
-  virtual variable_list apply(const variable_list& inputs) override {
+  virtual variable_list apply(variable_list&& inputs) override {
     // TODO: expensive copies here to convert to/from tensor_list
     // TODO: because inputs is passed by const reference there is no
     // way to release tensors incrementally as this runs

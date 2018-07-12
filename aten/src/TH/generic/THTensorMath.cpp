@@ -3653,7 +3653,10 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor* input0 = inputs[j];
         real* input0_data = THStorage_(data)(input0->storage) + input0->storageOffset;
         int64_t input0_size = THTensor_(nElement)(input0);
-        memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
+        // C standard says you can't pass nullptrs to memcpy, even if the size is 0; ubsan checks this.
+        if (input0_size != 0) {
+          memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
+        }
         offset += input0_size;
       }
     }
@@ -4064,6 +4067,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(log10,TH_MATH_NAME(log10))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
 LAB_IMPLEMENT_BASIC_FUNCTION(log2,TH_MATH_NAME(log2))
 LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf))
+LAB_IMPLEMENT_BASIC_FUNCTION(erfc,TH_MATH_NAME(erfc))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))

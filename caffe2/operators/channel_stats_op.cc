@@ -1,4 +1,5 @@
 #include "caffe2/operators/channel_stats_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
