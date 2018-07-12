@@ -257,19 +257,15 @@ class TestJit(JitTestCase):
     def test_peephole(self):
         a = torch.tensor([0.4], requires_grad=True)
         b = torch.tensor([0.7], requires_grad=True)
-        c = torch.tensor([0.4, 0.5], requires_grad=True)
-        d = torch.tensor([0], dtype=torch.int32)
+        c = torch.tensor([0], dtype=torch.int32)
 
         def f(x, y):
             return x.type_as(y)
 
         trace, z = torch.jit.get_trace_graph(f, (a, b))
         self.run_pass('peephole', trace)
-        self.assertExpectedGraph(trace, subname="same_size")
+        self.assertExpectedGraph(trace)
         trace, z = torch.jit.get_trace_graph(f, (a, c))
-        self.run_pass('peephole', trace)
-        self.assertExpectedGraph(trace, subname="different_size")
-        trace, z = torch.jit.get_trace_graph(f, (a, d))
         s = str(trace)
         self.run_pass('peephole', trace)
         self.assertEqual(s, str(trace))
