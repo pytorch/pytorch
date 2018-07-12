@@ -176,6 +176,7 @@ In-place version of :meth:`~Tensor.acos`
 add_docstr_all('add',
                r"""
 add(value) -> Tensor
+add(value=1, other) -> Tensor
 
 See :func:`torch.add`
 """)
@@ -183,6 +184,7 @@ See :func:`torch.add`
 add_docstr_all('add_',
                r"""
 add_(value) -> Tensor
+add_(value=1, other) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
 """)
@@ -516,6 +518,11 @@ clone() -> Tensor
 
 Returns a copy of the :attr:`self` tensor. The copy has the same size and data
 type as :attr:`self`.
+
+.. note::
+
+    Unlike `copy_()`, this function is recorded in the computation graph. Gradients
+    propagating to the cloned tensor will propagate to the original tensor.
 """)
 
 add_docstr_all('contiguous',
@@ -599,14 +606,14 @@ Args:
 
 add_docstr_all('cumprod',
                r"""
-cumprod(dim) -> Tensor
+cumprod(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumprod`
 """)
 
 add_docstr_all('cumsum',
                r"""
-cumsum(dim) -> Tensor
+cumsum(dim, dtype=None) -> Tensor
 
 See :func:`torch.cumsum`
 """)
@@ -805,6 +812,13 @@ frac_() -> Tensor
 In-place version of :meth:`~Tensor.frac`
 """)
 
+add_docstr_all('flatten',
+               r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+see :func:`torch.flatten`
+""")
+
 add_docstr_all('gather',
                r"""
 gather(dim, index) -> Tensor
@@ -866,6 +880,21 @@ gesv(A) -> Tensor, Tensor
 See :func:`torch.gesv`
 """)
 
+add_docstr_all('get_device',
+               r"""
+get_device(A) -> Device ordinal (Integer)
+
+For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
+For CPU tensors, an error is thrown.
+
+Example::
+
+    >>> x = torch.randn(3, 4, 5, device='cuda:0')
+    >>> x.get_device()
+    0
+    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
+""")
+
 add_docstr_all('gt',
                r"""
 gt(other) -> Tensor
@@ -885,17 +914,6 @@ add_docstr_all('histc',
 histc(bins=100, min=0, max=0) -> Tensor
 
 See :func:`torch.histc`
-""")
-
-add_docstr_all('index',
-               r"""
-index(m) -> Tensor
-
-Selects elements from :attr:`self` tensor using a binary mask or along a given
-dimension. The expression ``tensor.index(m)`` is equivalent to ``tensor[m]``.
-
-Args:
-    m (int or ByteTensor or slice): the dimension or mask used to select elements
 """)
 
 add_docstr_all('index_add_',
@@ -1407,6 +1425,24 @@ ormqr(input2, input3, left=True, transpose=False) -> Tensor
 See :func:`torch.ormqr`
 """)
 
+
+add_docstr_all('permute',
+               r"""
+permute(*dims) -> Tensor
+
+Permute the dimensions of this tensor.
+
+Args:
+    *dims (int...): The desired ordering of dimensions
+
+Example:
+    >>> x = torch.randn(2, 3, 5)
+    >>> x.size()
+    torch.Size([2, 3, 5])
+    >>> x.permute(2, 0, 1).size()
+    torch.Size([5, 2, 3])
+""")
+
 add_docstr_all('potrf',
                r"""
 potrf(upper=True) -> Tensor
@@ -1444,7 +1480,7 @@ In-place version of :meth:`~Tensor.pow`
 
 add_docstr_all('prod',
                r"""
-prod(dim=None, keepdim=False) -> Tensor
+prod(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.prod`
 """)
@@ -1550,6 +1586,13 @@ repeat(*sizes) -> Tensor
 Repeats this tensor along the specified dimensions.
 
 Unlike :meth:`~Tensor.expand`, this function copies the tensor's data.
+
+.. warning::
+
+    :func:`torch.repeat` behaves differently from
+    `numpy.repeat <https://docs.scipy.org/doc/numpy/reference/generated/numpy.repeat.html>`_,
+    but is more similar to
+    `numpy.tile <https://docs.scipy.org/doc/numpy/reference/generated/numpy.tile.html>`_.
 
 Args:
     sizes (torch.Size or int...): The number of times to repeat this tensor along each
@@ -1943,7 +1986,7 @@ In-place version of :meth:`~Tensor.sub`
 
 add_docstr_all('sum',
                r"""
-sum(dim=None, keepdim=False) -> Tensor
+sum(dim=None, keepdim=False, dtype=None) -> Tensor
 
 See :func:`torch.sum`
 """)
@@ -1996,15 +2039,20 @@ Here are the ways to call ``to``:
 
     Returns a Tensor with the specified :attr:`dtype`
 
-.. function:: to(device, dtype=None) -> Tensor
+.. function:: to(device=None, dtype=None, non_blocking=False) -> Tensor
 
     Returns a Tensor with the specified :attr:`device` and (optional)
     :attr:`dtype`. If :attr:`dtype` is ``None`` it is inferred to be ``self.dtype``.
+    When :attr:`non_blocking`, tries to convert asynchronously with respect to
+    the host if possible, e.g., converting a CPU Tensor with pinned memory to a
+    CUDA Tensor.
 
-.. function:: to(other) -> Tensor
+.. function:: to(other, non_blocking=False) -> Tensor
 
-    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as the Tensor
-    :attr:`other`.
+    Returns a Tensor with same :class:`torch.dtype` and :class:`torch.device` as
+    the Tensor :attr:`other`. When :attr:`non_blocking`, tries to convert
+    asynchronously with respect to the host if possible, e.g., converting a CPU
+    Tensor with pinned memory to a CUDA Tensor.
 
 Example::
 
@@ -2023,7 +2071,7 @@ Example::
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
     >>> other = torch.randn((), dtype=torch.float64, device=cuda0)
-    >>> tensor.to(other)
+    >>> tensor.to(other, non_blocking=True)
     tensor([[-0.5044,  0.0005],
             [ 0.3310, -0.0584]], dtype=torch.float64, device='cuda:0')
 
@@ -2473,4 +2521,18 @@ add_docstr_all('slogdet',
 slogdet() -> (Tensor, Tensor)
 
 See :func:`torch.slogdet`
+""")
+
+add_docstr_all('unbind',
+               r"""
+unbind(dim=0) -> seq
+
+See :func:`torch.unbind`
+""")
+
+add_docstr_all('pinverse',
+               r"""
+pinverse() -> Tensor
+
+See :func:`torch.pinverse`
 """)

@@ -2,12 +2,14 @@ import os
 import subprocess
 import glob
 
-from .env import IS_CONDA, IS_WINDOWS, CONDA_DIR, check_env_flag, gather_paths
+from .env import IS_CONDA, IS_LINUX, IS_WINDOWS, CONDA_DIR, check_env_flag, check_negative_env_flag, gather_paths
+from .cuda import USE_CUDA
 
 # On ROCm, RCCL development isn't complete. https://github.com/ROCmSoftwarePlatform/rccl
-WITH_DISTRIBUTED = not check_env_flag("NO_DISTRIBUTED") and not IS_WINDOWS and not check_env_flag("WITH_ROCM")
-WITH_DISTRIBUTED_MW = WITH_DISTRIBUTED and check_env_flag("WITH_DISTRIBUTED_MW")
-WITH_GLOO_IBVERBS = False
+USE_DISTRIBUTED = not check_negative_env_flag("USE_DISTRIBUTED") and not IS_WINDOWS and not check_env_flag("USE_ROCM")
+USE_DISTRIBUTED_MW = USE_DISTRIBUTED and check_env_flag("USE_DISTRIBUTED_MW")
+USE_GLOO_IBVERBS = False
+USE_C10D = USE_DISTRIBUTED and USE_CUDA and IS_LINUX
 
 IB_DEVINFO_CMD = "ibv_devinfo"
 
@@ -102,10 +104,10 @@ def should_build_ib():
 
     return ib_util_found and ib_lib_found and ib_lib_found
 
-if WITH_DISTRIBUTED:
+if USE_DISTRIBUTED:
     # If the env variable is specified, use the value,
     # otherwise only build with IB when IB support is detected on the system
-    if "WITH_GLOO_IBVERBS" in os.environ:
-        WITH_GLOO_IBVERBS = check_env_flag("WITH_GLOO_IBVERBS")
+    if "USE_GLOO_IBVERBS" in os.environ:
+        USE_GLOO_IBVERBS = check_env_flag("USE_GLOO_IBVERBS")
     else:
-        WITH_GLOO_IBVERBS = should_build_ib()
+        USE_GLOO_IBVERBS = should_build_ib()

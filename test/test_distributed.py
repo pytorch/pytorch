@@ -17,11 +17,12 @@ import torch.nn.functional as F
 from torch.autograd import Variable
 from common import TestCase
 
+from torch._utils_internal import TEST_MASTER_ADDR as MASTER_ADDR
+
 BACKEND = os.environ['BACKEND']
 TEMP_DIR = os.environ['TEMP_DIR']
 INIT_METHOD = os.getenv('INIT_METHOD', 'env://')
 MASTER_PORT = '29500'
-MASTER_ADDR = '127.0.0.1'
 
 DEFAULT_TIMEOUT = 15
 CUSTOMIZED_TIMEOUT = {'test_DistributedDataParallel': 25}
@@ -900,7 +901,6 @@ if BACKEND == 'tcp' or BACKEND == 'gloo' or BACKEND == 'nccl':
     WORLD_SIZE = os.environ['WORLD_SIZE']
 
     class TestDistBackend(TestCase, _DistTestBase):
-
         MANAGER_PROCESS_RANK = -1
 
         @staticmethod
@@ -998,4 +998,6 @@ elif BACKEND == 'mpi':
         pass
 
 if __name__ == '__main__':
+    assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
+
     unittest.main()

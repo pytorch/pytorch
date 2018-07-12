@@ -43,7 +43,7 @@ void unlockFile(int fd) {
 }
 
 // file_descriptor, number_of_lines_in_file
-std::pair<int, std::size_t> waitForGroup(std::string file_path, std::string group_name,
+std::pair<int, size_t> waitForGroup(std::string file_path, std::string group_name,
                                          std::fstream& file) {
   int fd;
   std::string content;
@@ -85,8 +85,8 @@ std::pair<int, std::size_t> waitForGroup(std::string file_path, std::string grou
   return {fd, std::count(content.begin(), content.end(), '\n')};
 }
 
-std::size_t waitForData(int fd, std::fstream& file, rank_type world_size) {
-  std::size_t lines = 0;
+size_t waitForData(int fd, std::fstream& file, rank_type world_size) {
+  size_t lines = 0;
   // Wait until all processes will write their info
   while (lines < world_size) {
     unlockFile(fd);
@@ -111,9 +111,9 @@ parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
   std::vector<std::string> master_addrs;
   std::vector<int> ranks(world_size);
   // Parse the file
-  for (std::size_t i = 0; i < world_size; ++i) {
+  for (size_t i = 0; i < world_size; ++i) {
     std::string proc_group_name;
-    std::size_t proc_addrs_count;
+    size_t proc_addrs_count;
     int proc_rank;
     port_type proc_port;
 
@@ -140,8 +140,8 @@ parseFile(std::fstream& file, rank_type world_size, std::string group_name) {
   }
 
   // Ensure there are no duplicates
-  for (std::size_t i = 0; i < ranks.size(); ++i) {
-    for (std::size_t j = i + 1; j < ranks.size(); ++j) {
+  for (size_t i = 0; i < ranks.size(); ++i) {
+    for (size_t j = i + 1; j < ranks.size(); ++j) {
       if (ranks[i] >= 0 && (ranks[i] == ranks[j]))
         throw std::logic_error("more than one node have assigned same rank");
     }
@@ -173,7 +173,7 @@ InitMethod::Config initFile(std::string argument,
 
   InitMethod::Config config;
   int fd;
-  std::size_t order;
+  size_t order;
   std::fstream file;
 
   std::tie(fd, order) = waitForGroup(file_path, group_name, file);
@@ -192,7 +192,7 @@ InitMethod::Config initFile(std::string argument,
   }
   file << std::endl;
 
-  std::size_t lines = waitForData(fd, file, world_size);
+  size_t lines = waitForData(fd, file, world_size);
 
   port_type master_port;
   std::vector<std::string> master_addrs;

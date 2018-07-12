@@ -70,6 +70,19 @@ def _cuda_deserialize(obj, location):
             device = 0
         else:
             device = max(int(location[5:]), 0)
+
+        if not torch.cuda.is_available():
+            raise RuntimeError('Attempting to deserialize object on a CUDA '
+                               'device but torch.cuda.is_available() is False. '
+                               'If you are running on a CPU-only machine, '
+                               'please use torch.load with map_location=\'cpu\' '
+                               'to map your storages to the CPU.')
+        if device >= torch.cuda.device_count():
+            raise RuntimeError('Attempting to deserialize object on CUDA device '
+                               '{} but torch.cuda.device_count() is {}. Please use '
+                               'torch.load with map_location to map your storages '
+                               'to an existing device.'.format(
+                                   device, torch.cuda.device_count()))
         return obj.cuda(device)
 
 
@@ -124,14 +137,46 @@ def _with_file_like(f, mode, body):
             f.close()
 
 
-def _is_real_file(f):
-    """Checks if f is backed by a real file (has a fileno)"""
+def _is_compressed_file(f):
+    compress_modules = ['gzip']
+    try:
+        return f.__module__ in compress_modules
+    except AttributeError:
+        return False
+
+
+def _should_read_directly(f):
+    """
+    Checks if f is a file that should be read directly. It should be read
+    directly if it is backed by a real file (has a fileno) and is not a
+    a compressed file (e.g. gzip)
+    """
+    if _is_compressed_file(f):
+        return False
     try:
         return f.fileno() >= 0
     except io.UnsupportedOperation:
         return False
     except AttributeError:
         return False
+
+
+def _check_seekable(f):
+
+    def raise_err_msg(patterns, e):
+        for p in patterns:
+            if p in str(e):
+                msg = (str(e) + ". You can only torch.load from a file that is seekable." +
+                                " Please pre-load the data into a buffer like io.BytesIO and" +
+                                " try to load from it instead.")
+                raise type(e)(msg)
+        raise e
+
+    try:
+        f.seek(f.tell())
+        return True
+    except (io.UnsupportedOperation, AttributeError) as e:
+        raise_err_msg(["seek", "tell"], e)
 
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
@@ -238,7 +283,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
     for key in serialized_storage_keys:
-        serialized_storages[key]._write_file(f, _is_real_file(f))
+        serialized_storages[key]._write_file(f, _should_read_directly(f))
 
 
 def load(f, map_location=None, pickle_module=pickle):
@@ -280,6 +325,11 @@ def load(f, map_location=None, pickle_module=pickle):
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
+
+    .. note::
+        When you call :meth:`torch.load()` on a file which contains GPU tensors, those tensors
+        will be loaded to GPU by default. You can call `torch.load(.., map_location='cpu')`
+        and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
 
     Example:
         >>> torch.load('tensors.pt')
@@ -452,8 +502,10 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    f_is_real_file = _is_real_file(f)
-    if f_is_real_file and f.tell() == 0:
+    _check_seekable(f)
+    f_should_read_directly = _should_read_directly(f)
+
+    if f_should_read_directly and f.tell() == 0:
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
         try:
@@ -476,10 +528,10 @@ def _load(f, map_location, pickle_module):
 
     deserialized_storage_keys = pickle_module.load(f)
 
-    offset = f.tell() if f_is_real_file else None
+    offset = f.tell() if f_should_read_directly else None
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
-        deserialized_objects[key]._set_from_file(f, offset, f_is_real_file)
+        deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
         offset = None
 
     return result

@@ -2,8 +2,17 @@ import os
 import itertools
 import importlib
 
-THNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THNN.h')
-THCUNN_H_PATH = os.path.join(os.path.dirname(__file__), '..', 'lib', 'THCUNN.h')
+try:
+    # when compiling a cffi extension, this works. When compiling
+    # torch itself, it doesn't work because the parent module can't
+    # yet be imported. However that's fine because we don't need it in
+    # that case.
+    from .._utils_internal import get_file_path
+
+    THNN_H_PATH = get_file_path('torch', 'lib', 'THNN.h')
+    THCUNN_H_PATH = get_file_path('torch', 'lib', 'THCUNN.h')
+except Exception as e:
+    pass
 
 
 def _unpickle_backend(backend_name):

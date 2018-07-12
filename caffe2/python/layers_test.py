@@ -389,7 +389,7 @@ class TestLayers(LayersTestCase):
         predict_net = self.get_predict_net()
         self.assertNetContainOps(predict_net, [sparse_lookup_op_spec])
 
-    def testPairwiseDotProductWithAllEmbeddings(self):
+    def testPairwiseSimilarityWithAllEmbeddings(self):
         embedding_dim = 64
         N = 5
         record = schema.NewRecord(self.model.net, schema.Struct(
@@ -397,7 +397,7 @@ class TestLayers(LayersTestCase):
                 ((np.float32, (N, embedding_dim)))
             )),
         ))
-        current = self.model.PairwiseDotProduct(
+        current = self.model.PairwiseSimilarity(
             record, N * N)
 
         self.assertEqual(
@@ -412,7 +412,7 @@ class TestLayers(LayersTestCase):
             OpSpec("Flatten", None, None),
         ])
 
-    def testPairwiseDotProductWithXandYEmbeddings(self):
+    def testPairwiseSimilarityWithXandYEmbeddings(self):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
@@ -422,7 +422,7 @@ class TestLayers(LayersTestCase):
                 ((np.float32, (6, embedding_dim)))
             )),
         ))
-        current = self.model.PairwiseDotProduct(
+        current = self.model.PairwiseSimilarity(
             record, 5 * 6)
 
         self.assertEqual(
@@ -437,7 +437,7 @@ class TestLayers(LayersTestCase):
             OpSpec("Flatten", None, None),
         ])
 
-    def testPairwiseDotProductWithXandYEmbeddingsAndGather(self):
+    def testPairwiseSimilarityWithXandYEmbeddingsAndGather(self):
         embedding_dim = 64
 
         output_idx = [1, 3, 5]
@@ -460,11 +460,11 @@ class TestLayers(LayersTestCase):
             )),
             ('indices_to_gather', indices_to_gather),
         ))
-        current = self.model.PairwiseDotProduct(
+        current = self.model.PairwiseSimilarity(
             record, len(output_idx))
 
         # This assert is not necessary,
-        # output size is passed into PairwiseDotProduct
+        # output size is passed into PairwiseSimilarity
         self.assertEqual(
             schema.Scalar((np.float32, (len(output_idx), ))),
             current
@@ -478,7 +478,7 @@ class TestLayers(LayersTestCase):
             OpSpec("BatchGather", None, None),
         ])
 
-    def testPairwiseDotProductIncorrectInput(self):
+    def testPairwiseSimilarityIncorrectInput(self):
         embedding_dim = 64
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('x_embeddings', schema.Scalar(
@@ -486,14 +486,14 @@ class TestLayers(LayersTestCase):
             )),
         ))
         with self.assertRaises(AssertionError):
-            self.model.PairwiseDotProduct(
+            self.model.PairwiseSimilarity(
                 record, 25)
 
         record = schema.NewRecord(self.model.net, schema.Struct(
             ('all_embeddings', schema.List(np.float32))
         ))
         with self.assertRaises(AssertionError):
-            self.model.PairwiseDotProduct(
+            self.model.PairwiseSimilarity(
                 record, 25)
 
     def testConcat(self):
@@ -611,6 +611,72 @@ class TestLayers(LayersTestCase):
                     sampled_fc.field_blobs()
                 )
             ]
+        )
+
+    def testDistillBatchLRLoss(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float64, (1,)))),
+            ('logit', schema.Scalar((np.float32, (2,)))),
+            ('teacher_label', schema.Scalar((np.float32(1,)))),
+            ('weight', schema.Scalar((np.float64, (1,))))
+        ))
+        loss = self.model.BatchDistillLRLoss(input_record)
+        self.assertEqual(schema.Scalar((np.float32, tuple())), loss)
+
+    def testDistillBatchLRLossWithTeacherWeightScreen(self):
+        input_record = self.new_record(schema.Struct(
+            ('label', schema.Scalar((np.float32, (2,)))),
+            ('logit', schema.Scalar((np.float32, (2, 1)))),
+            ('teacher_label', schema.Scalar((np.float32(2,)))),
+            ('weight', schema.Scalar((np.float64, (2,))))
+        ))
+        label_items = np.array([1.0, 1.0], dtype=np.float32)
+        logit_items = np.array([[1.0], [1.0]], dtype=np.float32)
+        teacher_label_items = np.array([0.8, -1.0], dtype=np.float32)
+        weight_items = np.array([1.0, 1.0], dtype=np.float32)
+        schema.FeedRecord(
+            input_record,
+            [label_items, logit_items, teacher_label_items, weight_items]
+        )
+        loss = self.model.BatchDistillLRLoss(
+            input_record,
+            teacher_weight=0.5,
+            filter_invalid_teacher_label=True
+        )
+        self.run_train_net_forward_only()
+        tensor_loss = workspace.FetchBlob(loss.field_blobs()[0])
+
+        def cross_entropy(label, logit):
+            return logit - logit * label + np.log(1 + np.exp(-1.0 * logit))
+
+        def cal_cross_entropy(
+            label_items, logit_items, teacher_label_items, weight_items
+        ):
+            total_ce = 0
+            for i in range(label_items.shape[0]):
+                true_xent = cross_entropy(label_items[i], logit_items[i, 0])
+                if teacher_label_items[i] > 0:
+                    teacher_xent = cross_entropy(
+                        teacher_label_items[i], logit_items[i, 0]
+                    )
+                else:
+                    teacher_xent = 0
+                teacher_weight = 0.5 if teacher_label_items[i] > 0 else 0
+                total_ce += (true_xent * (1 - teacher_weight) +
+                            teacher_xent * teacher_weight) * weight_items[i]
+            return total_ce / label_items.shape[0]
+
+        correct_ace = cal_cross_entropy(
+            label_items,
+            logit_items,
+            teacher_label_items,
+            weight_items
+        )
+        self.assertAlmostEqual(
+            tensor_loss,
+            np.array(correct_ace),
+            delta=0.0000001,
+            msg="Wrong cross entropy {}".format(tensor_loss)
         )
 
     def testBatchLRLoss(self):
@@ -757,6 +823,20 @@ class TestLayers(LayersTestCase):
 
         schema.FeedRecord(input_record, [X])
         workspace.RunNetOnce(predict_net)
+
+    @given(
+        X=hu.arrays(dims=[2, 5, 6]),
+    )
+    def testLayerNormalization(self, X):
+        input_record = self.new_record(schema.Scalar((np.float32, (5, 6,))))
+        schema.FeedRecord(input_record, [X])
+        ln_output = self.model.LayerNormalization(input_record)
+        self.assertEqual(schema.Scalar((np.float32, (5, 6,))), ln_output)
+        self.model.output_schema = schema.Struct()
+
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
 
     @given(
         X=hu.arrays(dims=[5, 2]),
@@ -1729,25 +1809,50 @@ class TestLayers(LayersTestCase):
     @given(
         num=st.integers(min_value=10, max_value=100),
         feed_weight=st.booleans(),
+        use_inv_var_parameterization=st.booleans(),
+        use_log_barrier=st.booleans(),
+        enable_diagnose=st.booleans(),
         **hu.gcs
     )
-    def testAdaptiveWeight(self, num, feed_weight, gc, dc):
+    def testAdaptiveWeight(
+        self, num, feed_weight, use_inv_var_parameterization, use_log_barrier,
+        enable_diagnose, gc, dc
+    ):
         input_record = self.new_record(schema.RawTuple(num))
         data = np.random.random(num)
         schema.FeedRecord(
-            input_record,
-            [np.array(x).astype(np.float32) for x in data]
+            input_record, [np.array(x).astype(np.float32) for x in data]
         )
         weights = np.random.random(num) if feed_weight else None
-        result = self.model.AdaptiveWeight(input_record, weights=weights)
+        result = self.model.AdaptiveWeight(
+            input_record,
+            weights=weights,
+            estimation_method=(
+                'inv_var' if use_inv_var_parameterization else 'log_std'
+            ),
+            pos_optim_method=(
+                'log_barrier' if use_log_barrier else 'pos_grad_proj'
+            ),
+            enable_diagnose=enable_diagnose
+        )
         train_init_net, train_net = self.get_training_nets(True)
         workspace.RunNetOnce(train_init_net)
         workspace.RunNetOnce(train_net)
         result = workspace.FetchBlob(result())
         if not feed_weight:
-            weights = 1. / num
-        expected = np.sum(weights * data + np.log(1. / 2. / weights))
+            weights = np.array([1. / num for _ in range(num)])
+        expected = np.sum(weights * data + 0.5 * np.log(1. / 2. / weights))
         npt.assert_allclose(expected, result, atol=1e-4, rtol=1e-4)
+        if enable_diagnose:
+            assert len(self.model.ad_hoc_plot_blobs) == num
+            reconst_weights_from_ad_hoc = np.array(
+                [workspace.FetchBlob(b) for b in self.model.ad_hoc_plot_blobs]
+            ).flatten()
+            npt.assert_allclose(
+                reconst_weights_from_ad_hoc, weights, atol=1e-4, rtol=1e-4
+            )
+        else:
+            assert len(self.model.ad_hoc_plot_blobs) == 0
 
     @given(num=st.integers(min_value=10, max_value=100), **hu.gcs)
     def testConstantWeight(self, num, gc, dc):
@@ -1843,3 +1948,66 @@ class TestLayers(LayersTestCase):
     )
     def testLabelSmoothForBinaryProbLabel(self, bsz, gc, dc):
         self._testLabelSmooth(2, True, bsz)
+
+    @given(
+        num_inputs=st.integers(min_value=2, max_value=10),
+        batch_size=st.integers(min_value=2, max_value=10),
+        input_dim=st.integers(min_value=5, max_value=10),
+        seed=st.integers(1, 10),
+    )
+    def testBlobWeightedSum(self, num_inputs, batch_size, input_dim, seed):
+
+        def get_blob_weighted_sum():
+            weights = []
+            for i in range(num_inputs):
+                w_blob_name = 'blob_weighted_sum/w_{0}'.format(i)
+                assert workspace.HasBlob(w_blob_name), (
+                    "cannot fine blob {}".format(w_blob_name)
+                )
+                w = workspace.FetchBlob(w_blob_name)
+                weights.append(w)
+
+            result = np.sum([
+                input_data[idx] * weights[idx] for idx in range(num_inputs)
+            ], axis=0)
+            return result
+
+        np.random.seed(seed)
+        expected_output_schema = schema.Scalar((np.float32, (input_dim,)))
+        input_schema = schema.Tuple(
+            *[expected_output_schema for _ in range(num_inputs)]
+        )
+        input_data = [
+            np.random.random((batch_size, input_dim)).astype(np.float32)
+            for _ in range(num_inputs)
+        ]
+        input_record = self.new_record(input_schema)
+        schema.FeedRecord(input_record, input_data)
+
+        # test output schema
+        ws_output = self.model.BlobWeightedSum(input_record)
+        self.assertEqual(len(self.model.layers), 1)
+        assert schema.equal_schemas(ws_output, expected_output_schema)
+
+        # test train net
+        train_init_net, train_net = self.get_training_nets()
+        workspace.RunNetOnce(train_init_net)
+        workspace.RunNetOnce(train_net)
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+        self.run_train_net_forward_only()
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+        # test eval net
+        eval_net = self.get_eval_net()
+        workspace.RunNetOnce(eval_net)
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)
+
+        # test pred net
+        pred_net = self.get_predict_net()
+        workspace.RunNetOnce(pred_net)
+        output = workspace.FetchBlob(ws_output())
+        npt.assert_almost_equal(get_blob_weighted_sum(), output, decimal=5)

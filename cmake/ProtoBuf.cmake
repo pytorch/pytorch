@@ -13,17 +13,14 @@ macro(custom_protobuf_find)
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
     # If we are going to link protobuf locally, we will need to turn off
     # shared libs build for protobuf.
-    set(protobuf_BUILD_SHARED_LIBS OFF)
+    option(protobuf_BUILD_SHARED_LIBS "" OFF)
   else()
     # If we are building Caffe2 as shared libs, we will also build protobuf as
     # shared libs.
-    set(protobuf_BUILD_SHARED_LIBS ${BUILD_SHARED_LIBS})
+    option(protobuf_BUILD_SHARED_LIBS "" ${BUILD_SHARED_LIBS})
   endif()
   # We will make sure that protobuf and caffe2 uses the same msvc runtime.
-  set(protobuf_MSVC_STATIC_RUNTIME ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
-  if (MSVC AND BUILD_SHARED_LIBS)
-    add_definitions(-DPROTOBUF_USE_DLLS)
-  endif()
+  option(protobuf_MSVC_STATIC_RUNTIME "" ${CAFFE2_USE_MSVC_STATIC_RUNTIME})
 
   if (${CAFFE2_LINK_LOCAL_PROTOBUF})
     set(__caffe2_CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS ${CMAKE_WINDOWS_EXPORT_ALL_SYMBOLS})
@@ -41,7 +38,7 @@ macro(custom_protobuf_find)
   set(__caffe2_CMAKE_POSITION_INDEPENDENT_CODE ${CMAKE_POSITION_INDEPENDENT_CODE})
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
-  add_subdirectory(${PROJECT_SOURCE_DIR}/third_party/protobuf/cmake)
+  add_subdirectory(${CMAKE_CURRENT_LIST_DIR}/../third_party/protobuf/cmake)
 
   set(CMAKE_POSITION_INDEPENDENT_CODE ${__caffe2_CMAKE_POSITION_INDEPENDENT_CODE})
 
@@ -184,7 +181,7 @@ function(caffe2_protobuf_generate_cpp_py srcs_var hdrs_var python_var)
 
         # If we remove all reference to these pb.h files from external
         # libraries and binaries this rewrite can be removed.
-        COMMAND ${CMAKE_COMMAND} -DFILENAME=${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h -P ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake
+        COMMAND ${CMAKE_COMMAND} -DFILENAME=${CMAKE_CURRENT_BINARY_DIR}/${fil_we}.pb.h -DNAMESPACES=caffe\;caffe2\;onnx -P ${PROJECT_SOURCE_DIR}/cmake/ProtoBufPatch.cmake
 
         DEPENDS ${CAFFE2_PROTOC_EXECUTABLE} ${abs_fil}
         COMMENT "Running C++/Python protocol buffer compiler on ${fil}" VERBATIM )

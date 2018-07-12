@@ -18,5 +18,5 @@ discoverMaster(std::vector<std::string> addresses, port_type port);
 // Helper that gets the rank based on the input order
 rank_type getRank(const std::vector<int>& ranks,
                   int assigned_rank,
-                  std::size_t order);
+                  size_t order);
 } // namespace thd

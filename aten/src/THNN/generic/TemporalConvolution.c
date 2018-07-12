@@ -17,13 +17,13 @@ static inline void THNN_(TemporalConvolution_shapeCheck)(
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
-  THNN_ARGCHECK(input->nDimension == 2 || input->nDimension == 3, 2, input,
-                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+                  "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
   if (inputFrameSize != NULL) {
     THArgCheck(input->size[dimF] == *inputFrameSize, 2,
                "invalid input frame size. Got: %d, Expected: %d",
@@ -51,7 +51,7 @@ void THNN_(TemporalConvolution_updateOutput)(
 
   int dimS = 0; // sequence dimension
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
   }
@@ -67,7 +67,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   nInputFrame = input->size[dimS];
   nOutputFrame = (nInputFrame - kW) / dW + 1;
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     THTensor_(resize2d)(output,
                         nOutputFrame,
@@ -180,7 +180,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
 
   int dimS = 0; // sequence dimension
 
-  if (gradOutput->nDimension == 3)
+  if (gradOutput->dim() == 3)
   {
     dimS = 1;
   }
@@ -200,7 +200,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  if (gradOutput->nDimension == 2)
+  if (gradOutput->dim() == 2)
   {
     /* ouch */
     for(k = 0; nOutputFrame > 0; k++)
@@ -287,7 +287,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
 
   int dimS = 0; // sequence dimension
 
-  if (gradOutput->nDimension == 3)
+  if (gradOutput->dim() == 3)
   {
     dimS = 1;
   }
@@ -302,7 +302,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
   gradOutputWindow = THTensor_(new)();
   inputWindow = THTensor_(new)();
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     /* bias first */
     for(k = 0; k < nOutputFrame; k++)

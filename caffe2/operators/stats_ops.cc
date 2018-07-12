@@ -173,28 +173,6 @@ struct TimerGetOp : public Operator<CPUContext> {
   }
 };
 
-struct CpuUtilizationReportOp : public Operator<CPUContext> {
-  CpuUtilizationReportOp(const OperatorDef& operator_def, Workspace* ws)
-      : Operator(operator_def, ws),
-        statsName_(GetSingleArgument<std::string>("stats_name", "utilization")),
-        stat_([this]() { return statsName_; }()) {}
-
-  bool RunOnDevice() override {
-    float utilization = Input(0).template data<float>()[0];
-    // Utilization is a float value, but CAFFE_EVENT only keeps int64_t values.
-    // We will keep 100x of the received utilization to maintain accuracy.
-    CAFFE_EVENT(stat_, cpu_utilization, (int)(utilization * 100));
-    return true;
-  }
-
- private:
-  std::string statsName_;
-  struct CpuStats {
-    CAFFE_STAT_CTOR(CpuStats);
-    CAFFE_EXPORTED_STAT(cpu_utilization);
-  } stat_;
-};
-
 REGISTER_CPU_OPERATOR(StatRegistryCreate, StatRegistryCreateOp);
 REGISTER_CPU_OPERATOR(StatRegistryUpdate, StatRegistryUpdateOp);
 REGISTER_CPU_OPERATOR(StatRegistryExport, StatRegistryExportOp);
@@ -203,7 +181,6 @@ REGISTER_CPU_OPERATOR(TimerBegin, TimerBeginOp);
 REGISTER_CPU_OPERATOR(TimerEnd, TimerEndOp);
 REGISTER_CPU_OPERATOR(TimerGetAndEnd, TimerGetAndEndOp);
 REGISTER_CPU_OPERATOR(TimerGet, TimerGetOp);
-REGISTER_CPU_OPERATOR(CpuUtilizationReport, CpuUtilizationReportOp);
 
 OPERATOR_SCHEMA(StatRegistryCreate)
     .NumInputs(0)
@@ -249,42 +226,115 @@ OPERATOR_SCHEMA(TimerBegin)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Start a wallclock timer, returning a pointer to it.
-The timer is stopped by calling TimerEnd)DOC")
-    .Arg("counter_name", "Name of the timer. If not provided, use output name.")
-    .Output(0, "timer", "Pointer to timer, to be passed to TimerEnd.");
+Start a wallclock timer, returning a scalar tensor containing a pointer to it. The timer is stopped by calling **TimerEnd**.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_ops.cc
+
+    )DOC")
+    .Arg("counter_name", "(*str*): name of the timer object; if not set use output name")
+    .Output(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object");
 
 OPERATOR_SCHEMA(TimerEnd)
     .NumInputs(1)
     .NumOutputs(0)
-    .SetDoc("Stop a timer started with TimerBegin, publishing a CAFFE_EVENT")
-    .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.");
+    .SetDoc(R"DOC(
+Stop a timer started with **TimerBegin**. Publishes a CAFFE_EVENT.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_ops.cc
+
+    )DOC")
+    .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op");
 
 OPERATOR_SCHEMA(TimerGetAndEnd)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Queries the current time of a timer in nanos, stops the timer
-            publishing a CAFFE_EVENT)DOC")
-    .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.")
-    .Output(0, "nanos", "nanoseconds in int64");
+    .SetDoc(R"DOC(
+Queries the current time of a timer in nanos, stops the timer publishing a CAFFE_EVENT.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+timerbegin_op = core.CreateOperator(
+    "TimerBegin",
+    [],
+    ["timer"]
+)
+
+timerget_op = core.CreateOperator(
+    "TimerGet",
+    ["timer"],
+    ["nanos"]
+)
+
+timerend_op = core.CreateOperator(
+    "TimerEnd",
+    ["timer"],
+    []
+)
+
+timergetandend_op = core.CreateOperator(
+    "TimerGetAndEnd",
+    ["timer"],
+    ["nanos"]
+)
+
+# Test TimerBegin/TimerGet/TimerEnd
+workspace.RunOperatorOnce(timerbegin_op)
+print("timer:", workspace.FetchBlob("timer"))
+workspace.RunOperatorOnce(timerget_op)
+print("nanos:", workspace.FetchBlob("nanos"))
+workspace.RunOperatorOnce(timerend_op)
+
+
+# Test TimerBegin/TimerGetAndEnd
+workspace.RunOperatorOnce(timerbegin_op)
+print("timer:", workspace.FetchBlob("timer"))
+workspace.RunOperatorOnce(timergetandend_op)
+print("nanos:", workspace.FetchBlob("nanos"))
+
+```
+
+**Result**
+
+```
+
+timer: b'timer, a C++ native class of type caffe2::TimerInstance*.'
+nanos: 361140
+timer: b'timer, a C++ native class of type caffe2::TimerInstance*.'
+nanos: [252250]
+
+```
+
+</details>
+
+      )DOC")
+    .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op")
+    .Output(0, "nanos", "(*Tensor`<int64>`*): scalar tensor containing time in nanoseconds");
 
 OPERATOR_SCHEMA(TimerGet)
     .NumInputs(1)
     .NumOutputs(1)
-    .SetDoc(R"DOC(Queries the current time of a timer in nanos)DOC")
-    .Input(0, "timer", "Pointer to timer, obtained from TimerBegin.")
-    .Output(0, "nanos", "nanoseconds in int64");
+    .SetDoc(R"DOC(
+Queries the current time of a timer object in nanoseconds.
 
-OPERATOR_SCHEMA(CpuUtilizationReport)
-    .NumInputs(1)
-    .NumOutputs(0)
-    .SetDoc(R"DOC(Report the delta in max CPU utilization observed so far in the
-            plan)DOC")
-    .Input(
-        0,
-        "utilization",
-        "Delta in max CPU utilization observed, in percentage as a float value")
-    .Arg("stats_name", "String name of the stat entry holding CPU utilization");
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/stats_ops.cc
+
+    )DOC")
+    .Input(0, "timer", "(*Tensor`<ptr>`*): pointer to a timer object; obtained from **TimerBegin** op")
+    .Output(0, "nanos", "(*Tensor`<int64>`*): scalar containing time in nanoseconds");
 
 CAFFE_KNOWN_TYPE(TimerInstance*);
 CAFFE_KNOWN_TYPE(std::unique_ptr<caffe2::StatRegistry>);

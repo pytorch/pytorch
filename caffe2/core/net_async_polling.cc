@@ -64,11 +64,6 @@ void AsyncPollingNet::schedule(int task_id) {
           task_timers_[task_id]->MicroSeconds());
     }
 
-    // Non-blocking wait, setups scheduling of dependent async computations;
-    // canSchedule ensures that there's no busy wait,
-    // for CUDA events we need to insert CUDA event synchronization to ensure
-    // that async CUDA computations are executed in correct order
-    asyncWait(task_id, stream_id, parents(task_id));
     try {
       if (FLAGS_caffe2_dag_net_collect_stats) {
         Timer run_time;

@@ -22,7 +22,7 @@ Graph::Graph(const NetDef& net) : netdef_(net) {
   // In python, this is known as "versions".
   std::unordered_map<string, int> edge_parent;
 
-  for (int i = 0; i < nodes_.size(); i++) {
+  for (int i = 0; i < (int)nodes_.size(); i++) {
     for (const string& blob : node(i).op.input()) {
       auto it = edge_parent.find(blob);
       if (it != edge_parent.end()) {
@@ -43,7 +43,7 @@ Graph::Graph(const NetDef& net) : netdef_(net) {
   // For any blob, which operator was the last to read to from it?
   std::unordered_map<string, int> edge_child;
 
-  for (int i = nodes_.size() - 1; i >= 0; i--) {
+  for (int i = (int)nodes_.size() - 1; i >= 0; i--) {
     for (const string& blob : node(i).op.output()) {
       auto it = edge_child.find(blob);
       if (it == edge_child.end()) {
@@ -76,7 +76,7 @@ const std::vector<std::pair<string, int>> Graph::GetSubgraphPerimeterHelper(
     const std::vector<int>& match) {
   std::vector<std::pair<string, int>> edge_list;
   std::unordered_set<int> match_set(match.begin(), match.end());
-  for (int x = 0; x < nodes_.size(); x++) {
+  for (int x = 0; x < (int)nodes_.size(); x++) {
     if (!is_node_active(x)) {
       continue;
     }
@@ -142,7 +142,7 @@ NetDef Graph::GetNetDef() {
   // However, giving each blob unique names via SSA will satisfy this condition.
   // Then, the resulting graph can be optimized with memonger.
 
-  for (int i = 0; i < nodes_.size(); i++) {
+  for (int i = 0; i < (int)nodes_.size(); i++) {
     unchecked_parent_count.push_back(node(i).parents.size());
     if (node(i).parents.size() == 0 && is_node_active(i)) {
       q.push(i);

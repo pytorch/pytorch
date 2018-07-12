@@ -29,11 +29,25 @@ PyObject *THPDtype_is_floating_point(THPDtype *self)
   }
 }
 
+PyObject *THPDtype_reduce(THPDtype *self)
+{
+  /*
+  * For singletons, a string is returned. The string should be interpreted
+  * as the name of a global variable.
+  */
+  return THPUtils_packString(self->name);
+}
+
 typedef PyObject *(*getter)(PyObject *, void *);
 
 static struct PyGetSetDef THPDtype_properties[] = {
   {"is_floating_point", (getter)THPDtype_is_floating_point, nullptr, nullptr, nullptr},
   {nullptr}
+};
+
+static PyMethodDef THPDtype_methods[] = {
+  {"__reduce__", (PyCFunction)THPDtype_reduce, METH_NOARGS, nullptr},
+  {NULL}  /* Sentinel */
 };
 
 PyObject *THPDtype_repr(THPDtype *self)
@@ -69,7 +83,7 @@ PyTypeObject THPDtypeType = {
   0,                                     /* tp_weaklistoffset */
   0,                                     /* tp_iter */
   0,                                     /* tp_iternext */
-  0,                                     /* tp_methods */
+  THPDtype_methods,                      /* tp_methods */
   0,                                     /* tp_members */
   THPDtype_properties,                   /* tp_getset */
   0,                                     /* tp_base */

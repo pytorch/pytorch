@@ -58,7 +58,7 @@ class SubsetRandomSampler(Sampler):
     r"""Samples elements randomly from a given list of indices, without replacement.
 
     Arguments:
-        indices (list): a list of indices
+        indices (sequence): a sequence of indices
     """
 
     def __init__(self, indices):
@@ -75,7 +75,7 @@ class WeightedRandomSampler(Sampler):
     r"""Samples elements from [0,..,len(weights)-1] with given probabilities (weights).
 
     Arguments:
-        weights (list)   : a list of weights, not necessary summing up to one
+        weights (sequence)   : a sequence of weights, not necessary summing up to one
         num_samples (int): number of samples to draw
         replacement (bool): if ``True``, samples are drawn with replacement.
             If not, they are drawn without replacement, which means that when a
@@ -101,7 +101,7 @@ class WeightedRandomSampler(Sampler):
         return self.num_samples
 
 
-class BatchSampler(object):
+class BatchSampler(Sampler):
     r"""Wraps another sampler to yield a mini-batch of indices.
 
     Args:
@@ -111,9 +111,9 @@ class BatchSampler(object):
             its size would be less than ``batch_size``
 
     Example:
-        >>> list(BatchSampler(range(10), batch_size=3, drop_last=False))
+        >>> list(BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=False))
         [[0, 1, 2], [3, 4, 5], [6, 7, 8], [9]]
-        >>> list(BatchSampler(range(10), batch_size=3, drop_last=True))
+        >>> list(BatchSampler(SequentialSampler(range(10)), batch_size=3, drop_last=True))
         [[0, 1, 2], [3, 4, 5], [6, 7, 8]]
     """
 
@@ -136,7 +136,7 @@ class BatchSampler(object):
     def __iter__(self):
         batch = []
         for idx in self.sampler:
-            batch.append(int(idx))
+            batch.append(idx)
             if len(batch) == self.batch_size:
                 yield batch
                 batch = []

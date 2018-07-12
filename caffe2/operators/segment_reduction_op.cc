@@ -54,13 +54,263 @@ REGISTER_CPU_OPERATOR(
         SumReducerDef::template ReducerGradient<float, CPUContext>,
         true /*GradientNeedIndices*/>);
 
+// registering 3 input version
+// gradient of SparseLengthsMean
+OPERATOR_SCHEMA(SparseLengthsIndicesInGradientMeanGradient)
+    .NumInputs(3)
+    .NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    SparseLengthsIndicesInGradientMeanGradient,
+    AbstractLengthsGradientOp<
+        float,
+        int,
+        CPUContext,
+        MeanReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*GradientNeedIndices*/>);
+// gradient of LengthsMean
+OPERATOR_SCHEMA(LengthsIndicesInGradientMeanGradient)
+    .NumInputs(3)
+    .NumOutputs(1);
+REGISTER_CPU_OPERATOR(
+    LengthsIndicesInGradientMeanGradient,
+    AbstractLengthsGradientOp<
+        float,
+        int,
+        CPUContext,
+        MeanReducerDef::template ReducerGradient<float, CPUContext>,
+        true /*GradientNeedIndices*/>);
+
 namespace {
+
+static const char* kLengthsMaxExtra = R"DOC(
+The *LengthsMax* op takes two inputs *DATA* and *LENGTHS*, and produces a single output *OUTPUT*. The op finds the maximum value in each of the segments of *DATA*, where segments are defined by their lengths.
+For example, if $DATA = [2,4,3,1,2,10]$ and $LENGTHS = [2,3,1]$ then $OUTPUT = [max([2,4]), max([3,1,2]), max([10])] = [4,3,10]$.
+
+Github Link:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/segment_reduction_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LengthsMax",
+    ["DATA", "LENGTHS"],
+    ["OUTPUT"],
+)
+
+workspace.FeedBlob("DATA", np.array([2,4,3,1,2,10]).astype(np.float32))
+print("DATA:\n", workspace.FetchBlob("DATA"))
+
+workspace.FeedBlob("LENGTHS", np.array([2,3,1]).astype(np.int32))
+print("LENGTHS:\n", workspace.FetchBlob("LENGTHS"))
+
+workspace.RunOperatorOnce(op)
+print("OUTPUT: \n", workspace.FetchBlob("OUTPUT"))
+
+```
+
+**Result**
+
+```
+
+DATA:
+ [ 2.  4.  3.  1.  2. 10.]
+LENGTHS:
+ [2 3 1]
+OUTPUT:
+ [ 4.  3. 10.]
+
+```
+
+</details>
+
+)DOC";
+
+static const char* kLengthsMeanExtra = R"DOC(
+The *LengthsMean* op takes two inputs *DATA* and *LENGTHS*, and produces a single output *OUTPUT*. The op finds the mean value in each of the segments of *DATA*, where segments are defined by their lengths.
+For example, if $DATA = [2,4,3,1,2,10]$ and $LENGTHS = [2,3,1]$ then $OUTPUT = [mean([2,4]), mean([3,1,2]), mean([10])] = [3,2,10]$.
+
+Github Link:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/segment_reduction_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LengthsMean",
+    ["DATA", "LENGTHS"],
+    ["OUTPUT"],
+)
+
+workspace.FeedBlob("DATA", np.array([2,4,3,1,2,10]).astype(np.float32))
+print("DATA:\n", workspace.FetchBlob("DATA"))
+
+workspace.FeedBlob("LENGTHS", np.array([2,3,1]).astype(np.int32))
+print("LENGTHS:\n", workspace.FetchBlob("LENGTHS"))
+
+workspace.RunOperatorOnce(op)
+print("OUTPUT: \n", workspace.FetchBlob("OUTPUT"))
+
+```
+
+**Result**
+
+```
+
+DATA:
+ [ 2.  4.  3.  1.  2. 10.]
+LENGTHS:
+ [2 3 1]
+OUTPUT:
+ [ 3.  2. 10.]
+
+```
+
+</details>
+
+)DOC";
+
+static const char* kLengthsSumExtra = R"DOC(
+The *LengthsSum* op takes two inputs *DATA* and *LENGTHS*, and produces a single output *OUTPUT*. The op finds the sum in each of the segments of *DATA*, where segments are defined by their lengths.
+For example, if $DATA = [2,4,3,1,2,10]$ and $LENGTHS = [2,3,1]$ then $OUTPUT = [sum([2,4]), sum([3,1,2]), sum([10])] = [6,6,10]$.
+
+Github Link:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/segment_reduction_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LengthsSum",
+    ["DATA", "LENGTHS"],
+    ["OUTPUT"],
+)
+
+workspace.FeedBlob("DATA", np.array([2,4,3,1,2,10]).astype(np.float32))
+print("DATA:\n", workspace.FetchBlob("DATA"))
+
+workspace.FeedBlob("LENGTHS", np.array([2,3,1]).astype(np.int32))
+print("LENGTHS:\n", workspace.FetchBlob("LENGTHS"))
+
+workspace.RunOperatorOnce(op)
+print("OUTPUT: \n", workspace.FetchBlob("OUTPUT"))
+
+```
+
+**Result**
+
+```
+
+DATA:
+ [ 2.  4.  3.  1.  2. 10.]
+LENGTHS:
+ [2 3 1]
+OUTPUT:
+ [ 6.  6. 10.]
+
+```
+
+</details>
+
+)DOC";
+
+static const char* kLengthsWeightedSumExtra = R"DOC(
+The *LengthsWeightedSum* op takes three inputs *DATA*, *LENGTHS*, and *SCALARS*, and produces a single output *OUTPUT*. The op finds the weighted sum in each of the segments of *DATA*, where segments are defined by their lengths. Before calculating the sums, the input *DATA* is weighted by the contents of *SCALARS*.
+For example, if $DATA = [2,4,3,1,2,10]$, $SCALARS = [8, 2, 1, 4, 1, 0.6]$, and $LENGTHS = [2,3,1]$, then $OUTPUT = [sum([8*2,2*4]), sum([1*3,4*1,1*2]), sum([0.6*10])] = [24,9,6]$.
+
+Github Link:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/segment_reduction_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LengthsWeightedSum",
+    ["DATA", "SCALARS","LENGTHS"],
+    ["OUTPUT"],
+)
+
+workspace.FeedBlob("DATA", np.array([2,4,3,1,2,10]).astype(np.float32))
+print("DATA:\n", workspace.FetchBlob("DATA"))
+
+workspace.FeedBlob("SCALARS", np.array([8, 2, 1, 4, 1, 0.6]).astype(np.float32))
+print("SCALARS:\n", workspace.FetchBlob("SCALARS"))
+
+workspace.FeedBlob("LENGTHS", np.array([2,3,1]).astype(np.int32))
+print("LENGTHS:\n", workspace.FetchBlob("LENGTHS"))
+
+workspace.RunOperatorOnce(op)
+print("OUTPUT: \n", workspace.FetchBlob("OUTPUT"))
+
+```
+
+**Result**
+
+```
+
+DATA:
+ [ 2.  4.  3.  1.  2. 10.]
+SCALARS:
+ [8.  2.  1.  4.  1.  0.6]
+LENGTHS:
+ [2 3 1]
+OUTPUT:
+ [24.  9.  6.]
+
+```
+
+</details>
+
+)DOC";
 
 template <typename Def>
 string FormatDoc() {
   string doc = Def::doc;
   ReplaceAll(doc, "{op}", Def::OpDef::name);
   ReplaceAll(doc, "{op_doc}", Def::OpDef::doc);
+  if (strcmp(Def::OpDef::name,"Max") == 0){
+    ReplaceAll(doc, "{extra}", kLengthsMaxExtra);
+  }
+  else if (strcmp(Def::OpDef::name,"Mean") == 0){
+    ReplaceAll(doc, "{extra}", kLengthsMeanExtra);
+  }
+  else if (strcmp(Def::OpDef::name,"Sum") == 0){
+    ReplaceAll(doc, "{extra}", kLengthsSumExtra);
+  }
+  else if (strcmp(Def::OpDef::name,"WeightedSum") == 0){
+    ReplaceAll(doc, "{extra}", kLengthsWeightedSumExtra);
+  }
+  else{
+    ReplaceAll(doc, "{extra}", " ");
+  }
   return doc;
 }
 
@@ -183,7 +433,7 @@ REGISTER_SEGMENT_DEF(
 REGISTER_SEGMENT_DEF(
     LengthsMean,
     LengthsMeanGradient,
-    AbstractLengthsDef<float, int, CPUContext, MeanReducerDef, false>);
+    AbstractLengthsDef<float, int, CPUContext, MeanReducerDef, true>);
 
 REGISTER_SEGMENT_DEF(
     ReduceFrontWeightedSum,
@@ -242,7 +492,12 @@ REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
 REGISTER_SEGMENT_DEF_SCHEMA_GRADIENT_ONLY(
     SparseLengthsMean,
     SparseLengthsMeanGradient,
-    AbstractSparseLengthsDef<float, int, CPUContext, MeanReducerDef>);
+    AbstractSparseLengthsDef<
+        float,
+        int,
+        CPUContext,
+        MeanReducerDef,
+        true /*GradientNeedIndices*/>)
 
 // Auxiliary output gradients are currently implemented only for Lengths version
 #define REGISTER_GRADIENT_WITH_MAIN_INPUT(gradient_name, ...)        \

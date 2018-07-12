@@ -4,7 +4,7 @@
 namespace at {
 
 UndefinedType::UndefinedType(Context* context)
-: Type(context, /*is_variable_or_undefined=*/true) {}
+    : Type(context, /*is_variable=*/false, /*is_undefined=*/true) {}
 ScalarType UndefinedType::scalarType() const {
   return ScalarType::Undefined;
 }
@@ -27,7 +27,7 @@ std::unique_ptr<Storage> UndefinedType::storageFromBlob(void * data, int64_t siz
 std::unique_ptr<Storage> UndefinedType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   AT_ERROR("unsafeStorageFromTH not defined for UndefinedType");
 }
-std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
+std::unique_ptr<Storage> UndefinedType::storageWithAllocator(int64_t size, Allocator* allocator) const {
   AT_ERROR("storageWithAllocator not defined for UndefinedType");
 }
 Tensor UndefinedType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
@@ -44,7 +44,7 @@ TypeID UndefinedType::ID() const {
   return TypeID::Undefined;
 }
 
-std::size_t UndefinedType::elementSizeInBytes() const {
+size_t UndefinedType::elementSizeInBytes() const {
   AT_ERROR("elementSizeInBytes not defined for UndefinedType");
 }
 

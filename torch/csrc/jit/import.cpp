@@ -1,5 +1,5 @@
 #include "torch/csrc/jit/import.h"
-#include "torch/csrc/onnx/onnx.pb.h"
+#include "torch/csrc/onnx/onnx.npb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
 
@@ -431,7 +431,6 @@ void buildBlock(const Graph_& graph_, Block* block,
   }
 
   for (auto & node_ : graph_.nodes) {
-    TORCH_ASSERT(node_.op_type != "CppOp");
     TORCH_ASSERT(node_.op_type != "PythonOp");
 
     auto node = block->owningGraph()->create(Symbol::fromDomainAndUnqualString(node_.domain, node_.op_type),

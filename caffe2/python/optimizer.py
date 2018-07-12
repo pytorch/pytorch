@@ -1,4 +1,4 @@
-## @package optimizer
+# @package optimizer
 # Module caffe2.python.optimizer
 from __future__ import absolute_import
 from __future__ import division
@@ -10,12 +10,11 @@ from past.builtins import basestring
 
 import numpy as np
 
-from caffe2.python import core, scope, workspace
+from caffe2.python import core, scope, utils, workspace
 from caffe2.python.modeling import parameter_info
 from caffe2.proto import caffe2_pb2
 
 
-_OPTIMIZER_ITERATION_NAME = "optimizer_iteration"
 _LEARNING_RATE_INJECTION = "lr_injection"
 
 AuxOptimizerParams = namedtuple("AuxOptimizerParams", ["local", "shared"])
@@ -89,20 +88,11 @@ class Optimizer(object):
         if learning_rate_blob is None:
             learning_rate_blob = self.make_unique_blob_name('lr')
 
-        optimization_iter_blob = _OPTIMIZER_ITERATION_NAME
-        if not param_init_net.BlobIsDefined(optimization_iter_blob):
-            # Add training operators.
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                iteration = param_init_net.ConstantFill(
-                    [], optimization_iter_blob, shape=[1],
-                    value=iter_val,
-                    dtype=core.DataType.INT64)
-                iter_mutex = param_init_net.CreateMutex(
-                    [], ["iteration_mutex"]
-                )
-                net.AtomicIter([iter_mutex, iteration], [iteration])
-        else:
-            iteration = param_init_net.GetBlobRef(optimization_iter_blob)
+        iteration = utils.BuildUniqueMutexIter(
+            param_init_net,
+            net,
+            iter_val=iter_val
+        )
 
         if not net.BlobIsDefined(learning_rate_blob):
             # There is one interesting thing here: since we are minimizing, we are
@@ -674,16 +664,62 @@ class FtrlOptimizer(Optimizer):
         return
 
 
+class GFtrlOptimizer(Optimizer):
+    """Group Lasso FTRL Optimizer."""
+
+    def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
+                 sparse_dedup_aggregator=None, engine=''):
+        super(GFtrlOptimizer, self).__init__()
+        self.alpha = alpha
+        self.beta = beta
+        self.lambda1 = lambda1
+        self.lambda2 = lambda2
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.engine = engine
+
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
+        if self.alpha <= 0:
+            return
+
+        nz = param_init_net.ConstantFill(
+            [param],
+            str(param) + "_gftrl_nz",
+            extra_shape=[2],
+            value=0.0
+        )
+        self._aux_params.local.append(nz)
+        net.GFtrl(
+            [param, nz, grad],
+            [param, nz],
+            engine=self.engine,
+            alpha=self.alpha,
+            beta=self.beta,
+            lambda1=self.lambda1,
+            lambda2=self.lambda2
+        )
+
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
+
+
 class AdamOptimizer(Optimizer):
     def __init__(self, alpha=0.001, beta1=0.9, beta2=0.999, epsilon=1e-8,
-                 policy='fixed', sparse_dedup_aggregator=None, rowWise=False,
-                 engine='', **kwargs):
+                 policy='fixed', use_lr_adaption=False, lr_alpha=0.01,
+                 normalized_lr_adaption=True, sparse_dedup_aggregator=None,
+                 rowWise=False, engine='', **kwargs):
         super(AdamOptimizer, self).__init__()
         self.alpha = alpha
         self.beta1 = beta1
         self.beta2 = beta2
         self.epsilon = epsilon
         self.policy = policy
+        self.use_lr_adaption = use_lr_adaption
+        self.lr_alpha = lr_alpha
+        self.normalized_lr_adaption = normalized_lr_adaption
         self.sparse_dedup_aggregator = sparse_dedup_aggregator
         self.rowWise = rowWise
         self.engine = engine
@@ -703,11 +739,25 @@ class AdamOptimizer(Optimizer):
             **(self.init_kwargs)
         )
 
+        if self.use_lr_adaption:
+            effective_grad = param_init_net.ConstantFill(
+                [param],
+                param + "_effgrad",
+                value=0.0
+            )
+            self._aux_params.local.append(effective_grad)
+            net.LearningRateAdaption(
+                [lr, grad, effective_grad],
+                [lr],
+                lr_alpha=self.lr_alpha,
+                normalized_lr_adaption=self.normalized_lr_adaption)
+
         m1 = param_init_net.ConstantFill(
             [param],
             param + "_first_moment",
             value=0.0
         )
+
         if self.rowWise:
             shapes, types = workspace.InferShapesAndTypes([param_init_net])
             m2 = param_init_net.ConstantFill(
@@ -716,9 +766,7 @@ class AdamOptimizer(Optimizer):
                 shape=[shapes[param][0]],
                 value=0.0
             )
-
         else:
-
             m2 = param_init_net.ConstantFill(
                 [param],
                 param + "_second_moment",
@@ -749,12 +797,20 @@ class AdamOptimizer(Optimizer):
             )
 
         else:
-            net.Adam(
-                [param, m1, m2, grad, lr, iteration],
-                [param, m1, m2],
-                beta1=self.beta1,
-                beta2=self.beta2,
-                epsilon=self.epsilon)
+            if self.use_lr_adaption:
+                net.Adam(
+                    [param, m1, m2, grad, lr, iteration],
+                    [param, m1, m2, effective_grad],
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon)
+            else:
+                net.Adam(
+                    [param, m1, m2, grad, lr, iteration],
+                    [param, m1, m2],
+                    beta1=self.beta1,
+                    beta2=self.beta2,
+                    epsilon=self.epsilon)
 
     def scale_learning_rate(self, scale):
         self.alpha *= scale
@@ -841,20 +897,11 @@ class YellowFinOptimizer(Optimizer):
         assert not isinstance(grad, core.GradientSlice), \
             "YellowFin does not support sparse gradients"
 
-        if not param_init_net.BlobIsDefined(_OPTIMIZER_ITERATION_NAME):
-            # Add training operators.
-            with core.DeviceScope(core.DeviceOption(caffe2_pb2.CPU)):
-                iteration = param_init_net.ConstantFill(
-                    [],
-                    _OPTIMIZER_ITERATION_NAME,
-                    shape=[1],
-                    value=0,
-                    dtype=core.DataType.INT64)
-                iter_mutex = param_init_net.CreateMutex([],
-                                                        ["iteration_mutex"])
-                net.AtomicIter([iter_mutex, iteration], [iteration])
-        else:
-            iteration = param_init_net.GetBlobRef(_OPTIMIZER_ITERATION_NAME)
+        iteration = utils.BuildUniqueMutexIter(
+            param_init_net,
+            net,
+            iter_val=0
+        )
 
         self._aux_params.shared.append(iteration)
         self._aux_params.local.append(moment)
@@ -1147,7 +1194,8 @@ def _build(
 
         with core.DeviceScope(device):
             if param_info.optimizer and use_param_info_optim:
-                param_info.optimizer(model.net, model.param_init_net, param_info)
+                param_info.optimizer(
+                    model.net, model.param_init_net, param_info)
             else:
                 optimizer(model.net, model.param_init_net, param_info)
     return optimizer
@@ -1216,6 +1264,12 @@ def build_ftrl(model, engine="SIMD", **kwargs):
         assert core.IsOperator('SparseFtrl_ENGINE_SIMD')
     ftrl_optimizer = FtrlOptimizer(engine=engine, **kwargs)
     return _build(model, ftrl_optimizer)
+
+
+def build_gftrl(model, engine="", **kwargs):
+    # SIMD version of GFTRL is not supported
+    gftrl_optimizer = GFtrlOptimizer(engine=engine, **kwargs)
+    return _build(model, gftrl_optimizer)
 
 
 def build_adagrad(

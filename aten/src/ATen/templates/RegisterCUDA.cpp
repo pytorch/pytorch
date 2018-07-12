@@ -1,3 +1,7 @@
+#include <ATen/RegisterCUDA.h>
+
+// ${generated_comment}
+
 #include <ATen/Type.h>
 #include <ATen/Context.h>
 #include <ATen/detail/VariableHooksInterface.h>

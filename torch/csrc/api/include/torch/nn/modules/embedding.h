@@ -1,22 +1,36 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/cloneable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
+#include <cstddef>
+#include <vector>
 
-#include <cstdint>
+namespace torch {
+namespace nn {
 
-namespace torch { namespace nn {
-class Embedding : public torch::nn::CloneableModule<Embedding> {
+struct EmbeddingOptions {
+  EmbeddingOptions(int64_t count, int64_t dimension);
+  TORCH_ARG(int64_t, count);
+  TORCH_ARG(int64_t, dimension);
+};
+
+class EmbeddingImpl : public torch::nn::Cloneable<EmbeddingImpl> {
  public:
-  Embedding(int64_t count, int64_t dimension);
+  template <typename... Ts>
+  explicit EmbeddingImpl(Ts&&... ts)
+      : EmbeddingImpl(EmbeddingOptions(std::forward<Ts>(ts)...)) {}
+  explicit EmbeddingImpl(EmbeddingOptions options);
 
   void reset() override;
+  Tensor forward(Tensor);
 
-  variable_list forward(variable_list) override;
-
-  TORCH_ATTR(int64_t, count);
-  TORCH_ATTR(int64_t, dimension);
-  TORCH_ATTR(Variable, table);
+  EmbeddingOptions options;
+  Tensor table;
 };
-}} // namespace torch::nn
+
+TORCH_MODULE(Embedding);
+
+} // namespace nn
+} // namespace torch

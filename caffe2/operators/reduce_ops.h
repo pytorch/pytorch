@@ -120,7 +120,7 @@ class ReduceGradientOp final : public Operator<Context> {
 
  private:
   std::vector<int> axes_;
-  const Reducer reducer_{};
+  Reducer reducer_{};
 };
 
 template <class Context>

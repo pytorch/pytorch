@@ -2,6 +2,7 @@
 #include "THNN.h"
 
 #include "THTensor.hpp"
+#include <cmath>
 
 #define torch_(NAME) TH_CONCAT_3(torch_, Real, NAME)
 #define nn_(NAME) TH_CONCAT_3(nn_, Real, NAME)
@@ -88,9 +89,6 @@
 #include "generic/ELU.c"
 #include "THGenerateFloatTypes.h"
 
-#include "generic/HardShrink.c"
-#include "THGenerateFloatTypes.h"
-
 #include "generic/HardTanh.c"
 #include "THGenerateFloatTypes.h"
 
@@ -167,11 +165,6 @@
 #include "THGenerateFloatTypes.h"
 
 #include "generic/Threshold.c"
-#include "THGenerateFloatTypes.h"
-
-// this file is used in TemporalUpsamplingLinear, SpatialUpsamplingBilinear, and
-// VolumetricUpsamplingTrilinear, and thus needs to be included before those.
-#include "generic/linear_upsampling.c"
 #include "THGenerateFloatTypes.h"
 
 #include "generic/TemporalConvolution.c"

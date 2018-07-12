@@ -592,8 +592,8 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   ptrdiff_t nelem;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
-  THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
 
@@ -698,8 +698,8 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
   ptrdiff_t nelem;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
-  THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
 
@@ -810,8 +810,8 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   ptrdiff_t nelem;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
-  THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
   THArgCheck(*vf == 'V' || *vf == 'F', 7, "type of convolution can 'V' or 'F'");
@@ -941,8 +941,8 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   ptrdiff_t nelem;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
-  THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
   THArgCheck(*vf == 'V' || *vf == 'F', 7, "type of convolution can 'V' or 'F'");
@@ -1079,8 +1079,8 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   real *output_data;
   int64_t p;
 
-  THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
-  THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
   THArgCheck(*vf == 'V' || *vf == 'F', 7, "type of convolution can 'V' or 'F'");
@@ -1228,8 +1228,8 @@ void THTensor_(conv2Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   real *output_data;
   ptrdiff_t nelem;
 
-  THArgCheck(t_->nDimension == 2 , 3, "input: 2D Tensor expected");
-  THArgCheck(k_->nDimension == 2 , 4, "kernel: 2D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 2, "input: non-empty 2D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 2, "kernel: non-empty 2D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
 
@@ -1287,8 +1287,8 @@ void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   ptrdiff_t nelem;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
-  THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
 
@@ -1365,9 +1365,9 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   ptrdiff_t nelem;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
-  THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
-  THArgCheck(map->nDimension == 2 , 4, "map: 2D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
+  THArgCheck(map->_dim() == 2 , 4, "map: 2D Tensor expected");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
 
@@ -1453,8 +1453,8 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   ptrdiff_t nelem;
   int64_t k, i;
 
-  THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
-  THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
   THArgCheck(sdepth >= 1, 5, "Stride should be a positive integer");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
@@ -1539,8 +1539,8 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   ptrdiff_t nelem;
   int64_t k, i;
 
-  THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
-  THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
   THArgCheck(sdepth >= 1, 5, "Stride should be a positive integer");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
@@ -1630,8 +1630,8 @@ void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   ptrdiff_t nelem;
   int64_t k, i;
 
-  THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
-  THArgCheck(k_->nDimension == 5 , 4, "kernel: 5D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 5, "kernel: non-empty 5D Tensor expected, got size: ", k_->sizes());
   THArgCheck(sdepth >= 1, 5, "Stride should be a positive integer");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
@@ -1725,8 +1725,8 @@ void THTensor_(conv3Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   real *output_data;
   ptrdiff_t nelem;
 
-  THArgCheck(t_->nDimension == 3 , 3, "input: 3D Tensor expected");
-  THArgCheck(k_->nDimension == 3 , 4, "kernel: 3D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 3, "input: non-empty 3D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 3, "kernel: non-empty 3D Tensor expected, got size: ", k_->sizes());
   THArgCheck(sdepth >= 1, 5, "Stride should be a positive integer");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
@@ -1792,8 +1792,8 @@ void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   ptrdiff_t nelem;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 4 , 3, "input: 3D Tensor expected");
-  THArgCheck(k_->nDimension == 4 , 4, "kernel: 3D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
   THArgCheck(srow >= 1, 5, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 6, "Stride should be a positive integer");
   THArgCheck(*vf == 'V' || *vf == 'F', 7, "type of convolution can 'V' or 'F'");
@@ -1878,9 +1878,9 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   int64_t nmaps;
   int64_t k;
 
-  THArgCheck(t_->nDimension == 4 , 3, "input: 4D Tensor expected");
-  THArgCheck(k_->nDimension == 4 , 4, "kernel: 4D Tensor expected");
-  THArgCheck(map->nDimension == 2 , 4, "map: 2D Tensor expected");
+  AT_CHECK(!t_->is_empty() && t_->dim() == 4, "input: non-empty 4D Tensor expected, got size: ", t_->sizes());
+  AT_CHECK(!k_->is_empty() && k_->dim() == 4, "kernel: non-empty 4D Tensor expected, got size: ", k_->sizes());
+  THArgCheck(map->_dim() == 2 , 4, "map: 2D Tensor expected");
   THArgCheck(srow >= 1, 6, "Stride should be a positive integer");
   THArgCheck(scol >= 1, 7, "Stride should be a positive integer");
   THArgCheck(*vf == 'V' || *vf == 'F', 8, "type of convolution can 'V' or 'F'");

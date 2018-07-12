@@ -2,7 +2,7 @@
 #define CAFFE2_OPERATORS_STRING_OPS_H_
 
 #include "caffe2/core/operator.h"
-#include "caffe2/operators/elementwise_op.h"
+#include "caffe2/operators/elementwise_ops.h"
 
 namespace caffe2 {
 
@@ -19,11 +19,13 @@ struct ForEach {
   explicit ForEach(OperatorBase& op) : functor(op) {}
 
   template <typename In, typename Out, typename Context>
-  void operator()(int n, const In* in, Out* out, Context* /*c*/) {
+  bool operator()(int n, const In* in, Out* out, Context* /*c*/) {
     for (int i = 0; i < n; ++i) {
       out[i] = functor(in[i]);
     }
+    return true;
   }
+
   Functor functor;
 };
 

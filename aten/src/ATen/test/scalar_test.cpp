@@ -85,7 +85,7 @@ TEST_CASE( "scalar test", "[]" ) {
   auto && C = at::globalContext();
   if(at::hasCUDA()) {
     auto & CUDAFloat = C.getType(Backend::CUDA,ScalarType::Float);
-    auto t2 = zeros(CUDAFloat, {4,4});
+    auto t2 = zeros({4,4}, CUDAFloat);
     cout << &t2 << "\n";
     cout << "AFTER GET TYPE " << &CUDAFloat << "\n";
     auto s = CUDAFloat.storage(4);
@@ -93,9 +93,9 @@ TEST_CASE( "scalar test", "[]" ) {
     s->fill(7);
     REQUIRE( s->get(3).toFloat() == 7.0 );
   }
-  auto t = ones(CPU(Float), {4,4});
+  auto t = ones({4,4});
 
-  auto wha2 = zeros(CPU(Float), {4,4}).add(t).sum();
+  auto wha2 = zeros({4,4}).add(t).sum();
   REQUIRE( wha2.toCDouble() == 16.0 );
 
   REQUIRE( t.sizes()[0] == 4 );
@@ -104,10 +104,10 @@ TEST_CASE( "scalar test", "[]" ) {
   REQUIRE( t.strides()[1] == 1 );
 
   Type & T = CPU(Float);
-  Tensor x = randn(T, {1,10});
-  Tensor prev_h = randn(T, {1,20});
-  Tensor W_h = randn(T, {20,20});
-  Tensor W_x = randn(T, {20,10});
+  Tensor x = randn({1,10}, T);
+  Tensor prev_h = randn({1,20}, T);
+  Tensor W_h = randn({20,20}, T);
+  Tensor W_x = randn({20,10}, T);
   Tensor i2h = at::mm(W_x, x.t());
   Tensor h2h = at::mm(W_h, prev_h.t());
   Tensor next_h = i2h.add(h2h);
@@ -122,12 +122,12 @@ TEST_CASE( "scalar test", "[]" ) {
     auto r = CUDA(Float).copy(next_h);
     REQUIRE(CPU(Float).copy(r).equal(next_h));
   }
-  REQUIRE_NOTHROW(randn(T, {10,10,2}));
+  REQUIRE_NOTHROW(randn({10,10,2}, T));
 
   // check Scalar.toTensor on Scalars backed by different data types
   REQUIRE(bar.toTensor().type().scalarType() == kDouble);
   REQUIRE(what.toTensor().type().scalarType() == kLong);
-  REQUIRE(Scalar(ones(CPU(kFloat), {})).toTensor().type().scalarType() == kFloat);
+  REQUIRE(Scalar(ones({})).toTensor().type().scalarType() == kFloat);
 
   if (x.type().scalarType() != ScalarType::Half) {
     AT_DISPATCH_ALL_TYPES(x.type(), "foo", [&] {
@@ -141,10 +141,10 @@ TEST_CASE( "scalar test", "[]" ) {
 
   // test direct C-scalar type conversions
   {
-    auto x = ones(T, {1,2});
+    auto x = ones({1,2}, T);
     REQUIRE_THROWS(x.toCFloat());
   }
-  auto float_one = ones(T, {});
+  auto float_one = ones({}, T);
   REQUIRE(float_one.toCFloat() == 1);
   REQUIRE(float_one.toCInt() == 1);
   REQUIRE((float_one.toCHalf() == 1));

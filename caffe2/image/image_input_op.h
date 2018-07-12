@@ -139,9 +139,13 @@ class ImageInputOp final
   vector<int> random_scale_;
   bool random_scaling_;
 
-
   // Working variables
   std::vector<std::mt19937> randgen_per_thread_;
+
+  // number of exceptions produced by opencv while reading image data
+  std::atomic<long> num_decode_errors_in_batch_{0};
+  // opencv exceptions tolerance
+  float max_decode_error_ratio_;
 };
 
 template <class Context>
@@ -197,8 +201,12 @@ ImageInputOp<Context>::ImageInputOp(
       // output type only supported with CUDA and use_gpu_transform for now
       output_type_(
           cast::GetCastDataType(ArgumentHelper(operator_def), "output_type")),
-      random_scale_(
-          OperatorBase::template GetRepeatedArgument<int>("random_scale", {-1,-1})) {
+      random_scale_(OperatorBase::template GetRepeatedArgument<int>(
+          "random_scale",
+          {-1, -1})),
+      max_decode_error_ratio_(OperatorBase::template GetSingleArgument<float>(
+          "max_decode_error_ratio",
+          1.0)) {
   if ((random_scale_[0] == -1) || (random_scale_[1] == -1)) {
     random_scaling_ = false;
   } else {
@@ -448,13 +456,23 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     prefetched_label_.mutable_data<int>()[item_id] = datum.label();
     if (datum.encoded()) {
       // encoded image in datum.
-      src = cv::imdecode(
-          cv::Mat(
-              1,
-              datum.data().size(),
-              CV_8UC1,
-              const_cast<char*>(datum.data().data())),
-          color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+      // count the number of exceptions from opencv imdecode
+      try {
+        src = cv::imdecode(
+            cv::Mat(
+                1,
+                datum.data().size(),
+                CV_8UC1,
+                const_cast<char*>(datum.data().data())),
+            color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+        if (src.rows == 0 or src.cols == 0) {
+          num_decode_errors_in_batch_++;
+          src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
+        }
+      } catch (cv::Exception& e) {
+        num_decode_errors_in_batch_++;
+        src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
+      }
     } else {
       // Raw image in datum.
       CAFFE_ENFORCE(datum.channels() == 3 || datum.channels() == 1);
@@ -487,6 +505,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
     CAFFE_ENFORCE(protos.ParseFromString(value));
     const TensorProto& image_proto = protos.protos(0);
     const TensorProto& label_proto = protos.protos(1);
+    // add handle protos
     vector<TensorProto> additional_output_protos;
     int start = additional_inputs_offset_;
     int end = start + additional_inputs_count_;
@@ -512,13 +531,23 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
       const string& encoded_image_str = image_proto.string_data(0);
       int encoded_size = encoded_image_str.size();
       // We use a cv::Mat to wrap the encoded str so we do not need a copy.
-      src = cv::imdecode(
-          cv::Mat(
-              1,
-              &encoded_size,
-              CV_8UC1,
-              const_cast<char*>(encoded_image_str.data())),
-          color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+      // count the number of exceptions from opencv imdecode
+      try {
+        src = cv::imdecode(
+            cv::Mat(
+                1,
+                &encoded_size,
+                CV_8UC1,
+                const_cast<char*>(encoded_image_str.data())),
+            color_ ? CV_LOAD_IMAGE_COLOR : CV_LOAD_IMAGE_GRAYSCALE);
+        if (src.rows == 0 or src.cols == 0) {
+          num_decode_errors_in_batch_++;
+          src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
+        }
+      } catch (cv::Exception& e) {
+        num_decode_errors_in_batch_++;
+        src = cv::Mat::zeros(cv::Size(224, 224), CV_8UC3);
+      }
     } else if (image_proto.data_type() == TensorProto::BYTE) {
       // raw image content.
       int src_c = (image_proto.dims_size() == 3) ? image_proto.dims(2) : 1;
@@ -536,6 +565,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
       LOG(FATAL) << "Unknown image data type.";
     }
 
+    // TODO: if image decoding was unsuccessful, set label to 0
     if (label_proto.data_type() == TensorProto::FLOAT) {
       if (label_type_ == SINGLE_LABEL || label_type_ == SINGLE_LABEL_WEIGHTED) {
         DCHECK_EQ(label_proto.float_data_size(), 1);
@@ -728,6 +758,7 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         *img = scaled_img;
       }
   }
+
   // TODO(Yangqing): return false if any error happens.
   return true;
 }
@@ -1030,9 +1061,8 @@ void ImageInputOp<Context>::DecodeAndTransform(
   cv::Mat img;
   // Decode the image
   PerImageArg info;
-  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id,
-    randgen));
-
+  CHECK(
+      GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id, randgen));
   // Factor out the image transformation
   TransformImage<Context>(img, channels, image_data,
     color_jitter_, img_saturation_, img_brightness_, img_contrast_,
@@ -1054,8 +1084,8 @@ void ImageInputOp<Context>::DecodeAndTransposeOnly(
   cv::Mat img;
   // Decode the image
   PerImageArg info;
-  CHECK(GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id,
-    randgen));
+  CHECK(
+      GetImageAndLabelAndInfoFromDBValue(value, &img, info, item_id, randgen));
 
   // Factor out the image transformation
   CropTransposeImage<Context>(img, channels, image_data, crop_, mirror_,
@@ -1154,6 +1184,15 @@ bool ImageInputOp<Context>::Prefetch() {
   }
   thread_pool_->waitWorkComplete();
 
+  // we allow to get at most max_decode_error_ratio from
+  // opencv imdecode until raising a runtime exception
+  if ((float)num_decode_errors_in_batch_ / batch_size_ >
+      max_decode_error_ratio_) {
+    throw std::runtime_error(
+        "max_decode_error_ratio exceeded " +
+        caffe2::to_string(max_decode_error_ratio_));
+  }
+
   // If the context is not CPUContext, we will need to do a copy in the
   // prefetch function as well.
   if (!std::is_same<Context, CPUContext>::value) {
@@ -1165,6 +1204,9 @@ bool ImageInputOp<Context>::Prefetch() {
           prefetched_additional_outputs_[i], &context_);
     }
   }
+
+  num_decode_errors_in_batch_ = 0;
+
   return true;
 }
 

@@ -1,11 +1,13 @@
 #include "THCGeneral.h"
-#include "THCStream.hpp"
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
-#include "THCStream.h"
 #include "THCThreadLocal.h"
 #include "THCTensorRandom.h"
+#include "THCGeneral.hpp"
+
+#include "ATen/CUDAStream.h"
+
 #include <stdlib.h>
 #include <stdint.h>
 
@@ -74,11 +76,6 @@ void THCudaInit(THCState* state)
   int device = 0;
   THCudaCheck(cudaGetDevice(&device));
 
-  /* Start in the default stream on the current device */
-  state->currentStreams = (THCThreadLocal*) malloc(numDevices * sizeof(THCThreadLocal));
-  for (int i = 0; i < numDevices; ++i) {
-    state->currentStreams[i] = THCThreadLocal_alloc();
-  }
   state->currentPerDeviceBlasHandle = THCThreadLocal_alloc();
   state->currentPerDeviceSparseHandle = THCThreadLocal_alloc();
 
@@ -179,8 +176,6 @@ void THCudaShutdown(THCState* state)
 
     free(res->blasHandles);
     free(res->sparseHandles);
-    THCStream_free((THCStream*)THCThreadLocal_get(state->currentStreams[dev]));
-    THCThreadLocal_free(state->currentStreams[dev]);
   }
   free(state->resourcesPerDevice);
   if (state->cudaDeviceAllocator->emptyCache) {
@@ -189,7 +184,6 @@ void THCudaShutdown(THCState* state)
   if (state->cudaHostAllocator == &THCCachingHostAllocator) {
     THCCachingHostAllocator_emptyCache();
   }
-  free(state->currentStreams);
   THCThreadLocal_free(state->currentPerDeviceBlasHandle);
 
   THCudaCheck(cudaSetDevice(prevDev));
@@ -430,51 +424,30 @@ cusparseHandle_t THCState_getDeviceSparseHandle(THCState *state, int device, int
   return res->sparseHandles[handle - 1];
 }
 
-static THCStream* THCState_getStreamOnDevice(THCState* state, int device)
-{
-  THCThreadLocal local = state->currentStreams[device];
-  THCStream* stream = (THCStream*)THCThreadLocal_get(local);
-  if (!stream) {
-    stream = THCStream_defaultStream(device);
-    THCStream_retain(stream);
-    THCThreadLocal_set(local, stream);
-  }
-  return stream;
+THCStream* THCState_getStreamOnDevice(THCState* state, int device) {
+  return at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device);
 }
 
-static void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream)
-{
-  THAssert(stream);
-  if (stream->device != device) {
-    THError("invalid stream; expected stream for device %d, but was on %d",
-        device, stream->device);
-  }
-  THCStream_retain(stream);
-  THCThreadLocal local = state->currentStreams[device];
-  THCStream_free((THCStream*)THCThreadLocal_get(local));
-  THCThreadLocal_set(local, stream);
+void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream) {
+  at::detail::CUDAStream_setStreamOnDevice(device, stream);
 }
 
-cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device)
-{
-  THCStream* stream = THCState_getStreamOnDevice(state, device);
-  THAssert(stream);
-  return stream->stream;
+cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device) {
+  return at::detail::CUDAStream_stream(
+    at::detail::CUDAStream_getCurrentStreamOnDeviceUnsafe(device));
 }
 
-cudaStream_t THCState_getCurrentStream(THCState *state)
-{
-  /* This is called at the point of kernel execution.
-     For some debugging code or improperly instrumented kernels,
-     `state` is null */
-  if (state) {
-    int device;
-    THCudaCheck(cudaGetDevice(&device));
-    return THCState_getCurrentStreamOnDevice(state, device);
-  } else {
-    /* assume default stream */
-    return NULL;
-  }
+cudaStream_t THCState_getCurrentStream(THCState *state) {
+  return at::detail::CUDAStream_stream(
+    at::detail::CUDAStream_getCurrentStreamUnsafe());
+}
+
+THCStream* THCState_getStream(THCState *state) {
+  return at::detail::CUDAStream_getCurrentStreamUnsafe();
+}
+
+void THCState_setStream(THCState *state, THCStream *stream) {
+  at::detail::CUDAStream_setStream(stream);
 }
 
 cublasHandle_t THCState_getCurrentBlasHandle(THCState *state)
@@ -525,20 +498,6 @@ int THCState_getCurrentSparseHandleIndex(THCState *state)
     return 1;
   }
   return (int) (intptr_t) value;
-}
-
-THCStream* THCState_getStream(THCState *state)
-{
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-  return THCState_getStreamOnDevice(state, device);
-}
-
-void THCState_setStream(THCState *state, THCStream *stream)
-{
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-  THCState_setStreamOnDevice(state, device, stream);
 }
 
 void THCState_setCurrentBlasHandleIndex(THCState *state, int handle)
@@ -731,8 +690,7 @@ void THCudaHostFree(THCState *state, void *ptr)
   return allocator->free(NULL, ptr);
 }
 
-void THCudaHostRecord(THCState *state, void *ptr)
-{
+void THCudaHostRecord(THCState *state, void *ptr) {
   if (state->cudaHostAllocator == &THCCachingHostAllocator) {
     THCStream* stream = THCState_getStream(state);
     THCCachingHostAllocator_recordEvent(ptr, stream);

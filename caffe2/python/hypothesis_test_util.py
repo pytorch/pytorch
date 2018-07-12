@@ -383,6 +383,7 @@ class HypothesisTestCase(test_util.TestCase):
             threshold=threshold,
             device_option=device_option,
             workspace_name=str(device_option),
+            input_device_options=input_device_options,
         )
         res, grad, grad_estimated = gc.CheckSimple(
             op, inputs, outputs_to_check, outputs_with_grads,

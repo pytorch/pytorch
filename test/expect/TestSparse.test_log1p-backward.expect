@@ -1,0 +1,1 @@
+log1p of a sparse tensor is made to be non-differentiable since local gradient of zero is 1 / (0 + 1) = 1 and it makes the tensor dense. Use a different mathematical operation which preserves sparsity of gradients, or report a bug if you think this is an error.

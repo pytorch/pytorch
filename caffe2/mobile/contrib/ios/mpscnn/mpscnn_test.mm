@@ -1166,7 +1166,7 @@ void testMPSCNN() {
                         // FP16 <-> FP32 round trip, accumulation, etc.
                         const float t1_i = t1.data<float>()[i];
                         const float t2_i = t2.data<float>()[i];
-                        CHECK_NEAR(t1_i, t2_i, 0.3);
+                        CHECK_NEAR(t1_i, t2_i, 0.2);
                       }
                     }
                   }
@@ -2871,6 +2871,74 @@ void testMPSCNN() {
           const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
           CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
           LOG(INFO) << t1.dims();
+          for (auto i = 0; i < t1.size(); ++i) {
+            // FP16 <-> FP32 round trip, accumulation, etc.
+            const float t1_i = t1.data<float>()[i];
+            const float t2_i = t2.data<float>()[i];
+            CHECK_NEAR(t1_i, t2_i, 0.1);
+          }
+        }
+      }
+    }
+  }
+
+  @autoreleasepool {
+    for (const auto& batchSize : std::vector<size_t>{1, 2, 3, 4}) {
+      for (const auto& inputChannels :
+           std::vector<size_t>{1, 2, 3, 4, 16, 24, 32, 48, 96, 128, 256}) {
+        for (const auto& groups : std::vector<int>{1, 4, 8, 16}) {
+          if (inputChannels % groups != 0) {
+            continue;
+          }
+          Workspace ws;
+          {
+            auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
+            t->Resize(batchSize, inputChannels, 53, 47);
+            CPUContext ctx;
+            math::RandGaussian<float, CPUContext>(
+                t->size(), 0, 1, t->mutable_data<float>(), &ctx);
+          }
+          NetDef netdef;
+#define ADD_ARGS(op)                                          \
+  do {                                                        \
+    add_arg_str(op, "order", "NCHW");                         \
+    add_arg_int_list(                                         \
+        op,                                                   \
+        std::vector<string>{"kernel_w", "kernel_h", "group"}, \
+        std::vector<int>{1, 1, groups});                      \
+  } while (false)
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("CopyToMPSCNN");
+            op.add_input("X_cpu");
+            op.add_output("X_mtl");
+          }
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("MPSCNNChannelShuffle");
+            op.add_input("X_mtl");
+            ADD_ARGS(op);
+            op.add_output("Y_mtl");
+          }
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("CopyFromMPSCNN");
+            op.add_input("Y_mtl");
+            op.add_output("Y_cpu");
+          }
+          {
+            auto& op = *(netdef.add_op());
+            op.set_type("ChannelShuffle");
+            op.add_input("X_cpu");
+            ADD_ARGS(op);
+            op.add_output("Y_ref");
+          }
+#undef ADD_ARGS
+          ws.RunNetOnce(netdef);
+          const auto& t2 = ws.GetBlob("Y_cpu")->Get<TensorCPU>();
+          const auto& t1 = ws.GetBlob("Y_ref")->Get<TensorCPU>();
+
+          CAFFE_ENFORCE_EQ(t1.dims(), t2.dims());
           for (auto i = 0; i < t1.size(); ++i) {
             // FP16 <-> FP32 round trip, accumulation, etc.
             const float t1_i = t1.data<float>()[i];

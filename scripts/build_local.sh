@@ -31,6 +31,18 @@ if [ -n "${USE_ANACONDA}" ]; then
   export CONDA_INSTALL_LOCALLY=1
   "${ROOT_DIR}/scripts/build_anaconda.sh" "$@"
 else
+  # Make sure that pyyaml is installed for the codegen of building Aten to work
+  if [[ -n "$(python -c 'import yaml' 2>&1)" ]]; then
+    echo "Installing pyyaml with pip at $(which pip)"
+    pip install --user pyyaml
+  fi
+
+  # Make sure that typing is installed for the codegen of building Aten to work
+  if [[ -n "$(python -c 'import typing' 2>&1)" ]]; then
+    echo "Installing typing with pip at $(which pip)"
+    pip install --user typing
+  fi
+
   # Build protobuf compiler from third_party if configured to do so
   if [ -n "${USE_HOST_PROTOC:-}" ]; then
     echo "USE_HOST_PROTOC is set; building protoc before building Caffe2..."

@@ -45,6 +45,8 @@ namespace script {
 //       |     Sub                                                      '-'
 //       |     Mul                                                      '*'
 //       |     Div                                                      '/'
+//       |     MatMult                                                  '@'
+//       |     Pow                                                      TK_POW
 //       | UnaryOp(Expr expr)
 //       |     Not                                                      TK_NOT
 //       |     USub                                                     '-'
@@ -103,7 +105,7 @@ struct TreeView {
   }
 
 protected:
-  const TreeRef& subtree(std::size_t i) const {
+  const TreeRef& subtree(size_t i) const {
     return tree_->trees().at(i);
   }
   TreeRef tree_;
@@ -257,6 +259,8 @@ struct Expr : public TreeView {
       case TK_GATHER:
       case TK_VAR:
       case TK_LIST_LITERAL:
+      case '@':
+      case TK_POW:
         return;
       default:
         throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid Expr";
@@ -515,6 +519,8 @@ struct BinOp : public Expr {
       case '*':
       case '/':
       case '-':
+      case '@':
+      case TK_POW:
         if (tree->trees().size() != 2)
           throw ErrorReport(tree) << "BinOp expected 2 subtrees, found " << tree->trees().size();
         return;

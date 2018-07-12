@@ -1,14 +1,17 @@
 #include "torch/csrc/utils/python_arg_parser.h"
 
-#include <stdexcept>
-#include <sstream>
-#include <unordered_map>
-
 #include "torch/csrc/Exceptions.h"
-#include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/Layout.h"
 #include "torch/csrc/utils/invalid_arguments.h"
+#include "torch/csrc/utils/python_strings.h"
 
-using namespace at;
+#include <ATen/ATen.h>
+
+#include <sstream>
+#include <stdexcept>
+#include <string>
+#include <unordered_map>
+#include <vector>
 
 namespace torch {
 
@@ -177,11 +180,12 @@ void FunctionParameter::set_default_str(const std::string& str) {
     if (str == "None") {
       // This is a bit awkward, but convenient for clamp which takes Scalars,
       // but allows None.
-      default_scalar = Scalar(NAN);
+      default_scalar = at::Scalar(NAN);
     } else {
       // we sometimes rely on integer-vs-float values, e.g. with arange.
-      auto as_integer = parse_as_integer(str);
-      default_scalar = Scalar(as_integer.value_or(atof(str.c_str())));
+      const auto as_integer = parse_as_integer(str);
+      default_scalar = as_integer.has_value() ? at::Scalar(as_integer.value()) :
+                                                at::Scalar(atof(str.c_str()));
     }
   } else if (type_ == ParameterType::INT_LIST) {
     if (str != "None") {

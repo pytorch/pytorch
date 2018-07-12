@@ -66,7 +66,7 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
       for(ih = 0; ih < kH; ih++) {
         for(iw = 0; iw < kW; iw++) {
           T val = ptr_input[iw*istrideW];
-          if (val > max) {
+          if ((val > max) || THCNumerics<T>::isnan(val)) {
             max = val;
             argmax = (ih+istartH)*isizeW + iw+istartW;
           }

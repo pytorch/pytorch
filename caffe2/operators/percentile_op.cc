@@ -85,6 +85,7 @@ REGISTER_CPU_OPERATOR(Percentile, PercentileOp<CPUContext>);
 OPERATOR_SCHEMA(Percentile)
     .NumInputs(3)
     .NumOutputs(1)
+    .IdenticalTypeAndShapeOfInput(0)
     .SetDoc(R"DOC(
     This operator is used to find percentile representations for raw values, given a sample
     set of raw values, labeled with their corresponding percentiles from the same distribution.

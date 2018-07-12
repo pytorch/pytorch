@@ -10,17 +10,17 @@
 
 namespace thd {
 
-using object_id_type = std::uint64_t;
+using object_id_type = uint64_t;
 
 namespace rpc {
 
-using function_id_type = std::uint16_t;
+using function_id_type = uint16_t;
 
 class RPCMessage {
 public:
   using size_type = ByteArray::size_type;
   RPCMessage();
-  RPCMessage(char* str, std::size_t size);
+  RPCMessage(char* str, size_t size);
   RPCMessage(const ByteArray& str);
   RPCMessage(ByteArray&& str);
 
@@ -28,11 +28,11 @@ public:
   const char* data() const; // Offset data.
   bool isEmpty() const;
   size_type remaining() const; // Length of the msg left to read.
-  const char* read(std::size_t num_bytes);
+  const char* read(size_t num_bytes);
 
 private:
   ByteArray _msg;
-  std::size_t _offset;
+  size_t _offset;
 };
 
 template <typename ...Args>

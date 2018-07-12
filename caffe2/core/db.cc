@@ -52,10 +52,10 @@ class MiniDBCursor : public Cursor {
     CAFFE_ENFORCE_GT(key_len_, 0);
     CAFFE_ENFORCE_GT(value_len_, 0);
     // Resize if the key and value len is larger than the current one.
-    if (key_len_ > key_.size()) {
+    if (key_len_ > (int)key_.size()) {
       key_.resize(key_len_);
     }
-    if (value_len_ > value_.size()) {
+    if (value_len_ > (int)value_.size()) {
       value_.resize(value_len_);
     }
     // Actually read in the contents.

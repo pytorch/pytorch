@@ -1898,18 +1898,19 @@ struct AbstractLengthsDef {
   static constexpr const char* basename = "Lengths";
   static constexpr const char* doc = R"DOC(
 Applies '{op}' to each segment of the input tensor. Segments are defined
-by their LENGTHS.
+by their *LENGTHS*. *LENGTHS* is a vector that maps each of the slices of
+*DATA* to a particular segment. Values belonging to the same segment are
+aggregated together and considered for the '{op}' operation.
 
-LENGTHS is a vector that maps each of the first dimension slices of the
-DATA to a particular group (segment). Values belonging to the same segment are
-aggregated together.
+For example *LENGTHS = [2, 1]* stands for segments *DATA[0..1]* and *DATA[2]*
 
-For example LENGTHS = [2, 1] stands for segments DATA[0..1] and DATA[2]
-
-The first dimension of the output is equal to the number of input segments,
-i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
+The sum of elements in *LENGTHS* must equal the number of elements in the first
+dimension of *DATA*. The length of *OUTPUT* is equal to the number of input
+segments, i.e. len(*LENGTHS*).
 
 {op_doc}
+
+{extra}
   )DOC";
   static void PopulateSchema(OpSchema& schema) {
     schema.Input(0, "DATA", "Input tensor, slices of which are aggregated.");

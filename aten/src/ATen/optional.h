@@ -9,7 +9,9 @@
 //
 // From https://github.com/akrzemi1/Optional
 //
-// ATen: move to at namespace
+// ATen:
+// - Move to `at` namespace.
+// - Remove macro use in line 478 because the nvcc device compiler cannot handle it.
 
 #pragma once
 
@@ -144,7 +146,7 @@ struct has_overloaded_addressof
   template <class X>
   constexpr static bool has_overload(...) { return false; }
 
-  template <class X, std::size_t S = sizeof(std::declval<X&>().operator&()) >
+  template <class X, size_t S = sizeof(std::declval<X&>().operator&()) >
   constexpr static bool has_overload(bool) { return true; }
 
   constexpr static bool value = has_overload<T>(true);
@@ -475,7 +477,7 @@ public:
   }
 
   constexpr T const& operator *() const {
-    return TR2_OPTIONAL_ASSERTED_EXPRESSION(initialized(), contained_val());
+    return contained_val();
   }
 
   T& operator *() {

@@ -62,6 +62,16 @@ class Tags(object):
     """
     Valid tag prefixes for distributed training framework.
     """
+    """
+    Used to pass on info to the 'extra_info' field in the net
+    Proto. Typically to provide info for distributed training.
+    """
+    EXTRA_INFO = 'extra_info:'
+    """
+    An empty tag, used to make conditional statement on with(Tags) block more concise
+    """
+    EMPTY_TAG = 'empty_tag'
+
     DT_TAGS = (SPARSE_SHARDED, SPARSE_DONT_SHARD, COMPONENT)
 
     # In certain cases we want to have different schema for training and

@@ -326,6 +326,16 @@ class TestElementwiseBroadcast(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X, Y], [0])
 
     @given(**hu.gcs)
+    def test_sum_reduce_empty_blob(self, gc, dc):
+        net = core.Net('test')
+
+        with core.DeviceScope(gc):
+            net.GivenTensorFill([], ["X"], values=[], shape=[2, 0, 5])
+            net.GivenTensorFill([], ["Y"], values=[], shape=[2, 0])
+            net.SumReduceLike(["X", "Y"], "out", axis=0)
+            workspace.RunNetOnce(net)
+
+    @given(**hu.gcs)
     def test_sum_reduce(self, gc, dc):
         # Set broadcast and no axis, i.e. broadcasting last dimensions.
         X = np.random.rand(2, 3, 4, 5).astype(np.float32)

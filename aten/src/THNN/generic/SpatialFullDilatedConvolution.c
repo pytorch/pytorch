@@ -20,8 +20,8 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
              adjH, adjW, dH, dW, dilationH, dilationW);
 
   if (weight != NULL) {
-    THNN_ARGCHECK(weight->nDimension == 2 || weight->nDimension == 4, 5, weight,
-  		"2D or 4D weight tensor expected, but got: %s");
+    THNN_ARGCHECK(!weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
+                  "non-empty 2D or 4D weight tensor expected, but got: %s");
     if (bias != NULL) {
       THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[1]);
     }
@@ -29,7 +29,7 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -40,8 +40,8 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
     dimw++;
   }
 
-  THNN_ARGCHECK(ndim == 3 || ndim == 4, 2, input,
-		"3D or 4D input tensor expected but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+		"non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t inputHeight  = input->size[dimh];
   int64_t inputWidth   = input->size[dimw];
@@ -102,7 +102,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
   }
 
   int is_batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
@@ -126,7 +126,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize2d)(ones, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -230,7 +230,7 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
   THArgCheck(THTensor_(isContiguous)(gradColumns), 5, "gradColumns needs to be contiguous");
 
   int is_batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
@@ -349,7 +349,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   }
 
   int is_batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
     THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
@@ -365,7 +365,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   int64_t batchSize = input->size[0];
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->nDimension != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize2d)(ones, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);

@@ -57,14 +57,33 @@ vector<TensorShape> TensorInferenceForBatchOneHot(
       CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
 }
 
+vector<TensorShape> TensorInferenceForBucketBatchOneHot(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  std::vector<TIndex> output_dims(2);
+  output_dims[0] = in[0].dims(0); // N
+  output_dims[1] = in[1].dims(0) + in[2].dims(0); // vals.size() + length.size()
+  return vector<TensorShape>{
+      CreateTensorShape(vector<TIndex>{output_dims}, in[0].data_type())};
+}
+
 OpSchema::Cost CostInferenceForBatchOneHot(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_EQ(in.size(), 3, "BatchOneHot requires three inputs");
   struct OpSchema::Cost c;
   const TensorShape output = TensorInferenceForBatchOneHot(def, in)[0];
 
+  const auto& data = in[0];
+  const auto& length = in[1];
+  const auto& values = in[2];
+
+  uint64_t nBytesData = nElemFromDim(data) * sizeof(data.data_type());
+  uint64_t nBytesLength = nElemFromDim(length) * sizeof(length.data_type());
+  uint64_t nBytesValues = nElemFromDim(values) * sizeof(values.data_type());
   c.flops = 0;
-  c.bytes_moved = output.dims(0) * output.dims(1) * sizeof(int32_t);
+  c.bytes_read = nBytesData + nBytesLength + nBytesValues;
+  c.bytes_written = nElemFromDim(output) * sizeof(output.data_type());
   c.params_bytes = 0;
   return c;
 }
@@ -219,7 +238,8 @@ For example
         0,
         "output",
         "output matrix that expands each input column with one hot encoding"
-        "based on the bucketization");
+        "based on the bucketization")
+    .TensorInferenceFunction(TensorInferenceForBucketBatchOneHot);
 
 OPERATOR_SCHEMA(BatchOneHot)
     .NumInputs(3)
@@ -250,9 +270,60 @@ OPERATOR_SCHEMA(OneHot)
     .NumInputs(2)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given a sequence of indices, one for each example in a batch, returns a matrix
-where each inner dimension has the size of the index and has 1.0 in the index
-active in the given example, and 0.0 everywhere else.
+The *OneHot* op accepts two inputs *indices* and *index_size_tensor*, and produces a single output *one_hots*.  For each index in *indices* the op creates a one-hot row in *one_hots* of length *index_size_tensor* where all entries are zero except the entry at the index is 1. The size of *one_hots* is *len(indices)* x *index_size_tensor*.
+
+Github Links:
+
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/one_hot_ops.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/one_hot_ops.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "OneHot",
+    ["indices", "index_size_tensor"],
+    ["one_hots"],
+)
+
+workspace.FeedBlob("indices", np.array([0,1,2,3,4]).astype(np.long))
+print("indices:\n", workspace.FetchBlob("indices"))
+
+workspace.FeedBlob("index_size_tensor", np.array([5]).astype(np.long))
+print("index_size_tensor:\n", workspace.FetchBlob("index_size_tensor"))
+
+workspace.RunOperatorOnce(op)
+print("one_hots: \n", workspace.FetchBlob("one_hots"))
+
+```
+
+**Result**
+
+```
+
+indices:
+ [0 1 2 3 4]
+index_size_tensor:
+ [5]
+one_hots:
+ [[1. 0. 0. 0. 0.]
+ [0. 1. 0. 0. 0.]
+ [0. 0. 1. 0. 0.]
+ [0. 0. 0. 1. 0.]
+ [0. 0. 0. 0. 1.]]
+
+```
+
+</details>
+
 )DOC")
     .Input(0, "indices", "The active index for each example in the batch.")
     .Input(

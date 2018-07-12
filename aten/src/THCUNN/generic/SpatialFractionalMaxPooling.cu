@@ -17,8 +17,8 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
   int64_t numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 3 || numInputDims == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 3 || numInputDims == 4), 2, input,
+                  "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 4) {
     numBatch = THCTensor_(size)(state, input, 0);

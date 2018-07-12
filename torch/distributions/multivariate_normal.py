@@ -84,7 +84,7 @@ class MultivariateNormal(Distribution):
 
     The multivariate normal distribution can be parameterized either
     in terms of a positive definite covariance matrix :math:`\mathbf{\Sigma}`
-    or a positive definite precition matrix :math:`\mathbf{\Sigma}^{-1}`
+    or a positive definite precision matrix :math:`\mathbf{\Sigma}^{-1}`
     or a lower-triangular matrix :math:`\mathbf{L}` with positive-valued
     diagonal entries, such that
     :math:`\mathbf{\Sigma} = \mathbf{L}\mathbf{L}^\top`. This triangular matrix
@@ -94,9 +94,7 @@ class MultivariateNormal(Distribution):
 
         >>> m = MultivariateNormal(torch.zeros(2), torch.eye(2))
         >>> m.sample()  # normally distributed with mean=`[0,0]` and covariance_matrix=`I`
-        -0.2102
-        -0.5429
-        [torch.FloatTensor of size 2]
+        tensor([-0.2102, -0.5429])
 
     Args:
         loc (Tensor): mean of the distribution
@@ -121,6 +119,8 @@ class MultivariateNormal(Distribution):
     has_rsample = True
 
     def __init__(self, loc, covariance_matrix=None, precision_matrix=None, scale_tril=None, validate_args=None):
+        if loc.dim() < 1:
+            loc = loc.unsqueeze(0)
         event_shape = torch.Size(loc.shape[-1:])
         if (covariance_matrix is not None) + (scale_tril is not None) + (precision_matrix is not None) != 1:
             raise ValueError("Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified.")

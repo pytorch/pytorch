@@ -9,6 +9,7 @@
 #include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/autograd/python_anomaly_mode.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -113,6 +114,14 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
     PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());
   }
   return py_functions.release();
+}
+
+PyObject* THPCppFunction_metadata(THPCppFunction *self, void *_unused)
+{
+  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
+
+  Py_INCREF(metadata);
+  return metadata;
 }
 
 PyObject* THPCppFunction_requires_grad(THPCppFunction* self) {

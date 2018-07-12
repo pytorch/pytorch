@@ -15,6 +15,7 @@
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_transpose_op_mobile.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
 
@@ -384,7 +385,7 @@ void reinterleaveMultithreaded(
                                                         size_t tileId) {
     int h;
     int c;
-    divOutputH.divMod((int)tileId, c, h);
+    divOutputH.DivMod((int)tileId, &c, &h);
 
     REINTERLEAVE(N);
   };

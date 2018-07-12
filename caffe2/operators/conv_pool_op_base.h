@@ -165,15 +165,6 @@ class ConvPoolOpBase : public Operator<Context> {
       CAFFE_ENFORCE_GE(dilation_[dim], 0);
       CAFFE_ENFORCE_GE(stride_[dim], 0);
     }
-
-    if (group_ != 1) {
-      for (int dim = 0; dim < kernel_.size(); ++dim) {
-        CAFFE_ENFORCE_EQ(
-            dilation_[dim],
-            1,
-            "When group is used, dilation should not be set at the same time.");
-      }
-    }
   }
 
   // Returns the input image dimensions for the current storage order type.
@@ -394,6 +385,7 @@ class ConvPoolOpBase : public Operator<Context> {
   static struct OpSchema::Cost CostInferenceForConv(
       const OperatorDef& def,
       const vector<TensorShape>& inputs) {
+    CAFFE_ENFORCE_GE(inputs.size(), 2, "Conv requires at least 2 inputs");
     struct OpSchema::Cost c;
     const TensorShape X = inputs[0];
     const TensorShape W = inputs[1];
@@ -401,17 +393,19 @@ class ConvPoolOpBase : public Operator<Context> {
     ArgumentHelper helper(def);
     const auto order =
         StringToStorageOrder(helper.GetSingleArgument<string>("order", "NCHW"));
+    uint64_t N;
+    uint64_t Y_t = 1;
+    uint64_t Y_h;
+    uint64_t Y_w;
+    uint64_t kernel_t = 1;
+    uint64_t kernel_h;
+    uint64_t kernel_w;
+    uint64_t in_channels;
+    uint64_t out_channels;
 
-    unsigned long long N;
-    unsigned long long Y_t = 1;
-    unsigned long long Y_h;
-    unsigned long long Y_w;
-    unsigned long long kernel_t = 1;
-    unsigned long long kernel_h;
-    unsigned long long kernel_w;
-    unsigned long long in_channels;
-    unsigned long long out_channels;
-
+    if (X.dims_size() == 0 || W.dims_size() == 0) {
+      return c;
+    }
     N = X.dims(0);
     if (X.dims_size() == 5) {
       // 3D convolution
@@ -427,6 +421,7 @@ class ConvPoolOpBase : public Operator<Context> {
     } else {
       // 2D convolution
       CAFFE_ENFORCE_EQ(X.dims_size(), 4, "Conv2D should have 4D input tensor");
+      CAFFE_ENFORCE_EQ(W.dims_size(), 4, "Conv2D should have 4D filter tensor");
       if (order == StorageOrder::NHWC) {
         Y_h = Y.dims(1);
         Y_w = Y.dims(2);
@@ -443,12 +438,19 @@ class ConvPoolOpBase : public Operator<Context> {
         out_channels = W.dims(0);
       }
     }
+
+    uint64_t nElemX = nElemFromDim(X);
+    uint64_t nElemW = nElemFromDim(W);
+    uint64_t nElemBias = inputs.size() > 2 ? nElemFromDim(inputs[2]) : 0;
+
     // grouping is NOT properly handled yet
     c.flops = N * Y_t * Y_h * Y_w * kernel_t * kernel_w * kernel_h *
         in_channels * out_channels * 2;
-    c.bytes_moved = N * out_channels * Y_t * Y_h * Y_w * sizeof(float);
+    c.bytes_read = (nElemX + nElemW + nElemBias) * sizeof(X.data_type());
+    c.bytes_written =
+        N * out_channels * Y_t * Y_h * Y_w * sizeof(Y.data_type());
     c.params_bytes = out_channels * in_channels * kernel_t * kernel_h *
-        kernel_w * sizeof(float);
+        kernel_w * sizeof(W.data_type());
     return c;
   }
 
@@ -539,22 +541,22 @@ class ConvPoolOpBase : public Operator<Context> {
     return out;
   }
 
-  static vector<TensorShape> TensorInferenceForConv(
+  static std::vector<TensorShape> TensorInferenceForConv(
       const OperatorDef& def,
-      const vector<TensorShape>& in) {
+      const std::vector<TensorShape>& in) {
     if (in[0].unknown_shape()) {
-      vector<TensorShape> out(1);
+      std::vector<TensorShape> out(1);
       out[0].set_unknown_shape(true);
       return out;
     }
     return TensorInferenceForSchema(def, in, in[1].dims(0));
   }
 
-  static vector<TensorShape> TensorInferenceForPool(
+  static std::vector<TensorShape> TensorInferenceForPool(
       const OperatorDef& def,
-      const vector<TensorShape>& in) {
+      const std::vector<TensorShape>& in) {
     if (in[0].unknown_shape()) {
-      vector<TensorShape> out(1);
+      std::vector<TensorShape> out(1);
       out[0].set_unknown_shape(true);
       return out;
     }
@@ -564,6 +566,18 @@ class ConvPoolOpBase : public Operator<Context> {
     int num_channels =
         (order == StorageOrder::NCHW ? in[0].dims(1) : in[0].dims(3));
     return TensorInferenceForSchema(def, in, num_channels);
+  }
+
+  static std::vector<TensorShape> TensorInferenceForLC(
+      const OperatorDef& def,
+      const std::vector<TensorShape>& in) {
+    if (in[0].unknown_shape()) {
+      std::vector<TensorShape> out(1);
+      out[0].set_unknown_shape(true);
+      return out;
+    }
+    const int img_ndim = in[0].dims_size() - 2;
+    return TensorInferenceForSchema(def, in, in[1].dims(img_ndim));
   }
 
   virtual ~ConvPoolOpBase() {}

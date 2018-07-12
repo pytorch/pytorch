@@ -136,10 +136,10 @@ static void tensorResizeAs(rpc::RPCMessage& raw_message) {
   tensor.resize_as_(src);
 }
 
-static void tensorResizeNd(rpc::RPCMessage& raw_message, std::size_t N) {
+static void tensorResizeNd(rpc::RPCMessage& raw_message, size_t N) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   std::vector<int64_t> size(N);
-  for (std::size_t i = 0; i < N; ++i) {
+  for (size_t i = 0; i < N; ++i) {
     size[i] = unpackInteger(raw_message);
   }
   finalize(raw_message);

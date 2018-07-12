@@ -76,9 +76,11 @@ class TestReduceOps(hu.HypothesisTestCase):
         self.run_reduce_op_test(
             "ReduceMax", X, keepdims, num_axes, np.max, gc, dc)
 
-    @given(X=hu.tensor(dtype=np.float32), keepdims=st.booleans(),
-           num_axes=st.integers(1, 4), **hu.gcs)
-    def test_reduce_sum(self, X, keepdims, num_axes, gc, dc):
+    @given(n=st.integers(0, 5), m=st.integers(0, 5), k=st.integers(0, 5),
+           t=st.integers(0, 5), keepdims=st.booleans(),
+           num_axes=st.integers(1, 3), **hu.gcs)
+    def test_reduce_sum(self, n, m, k, t, keepdims, num_axes, gc, dc):
+        X = np.random.randn(n, m, k, t).astype(np.float32)
         self.run_reduce_op_test(
             "ReduceSum", X, keepdims, num_axes, np.sum, gc, dc)
 
@@ -181,6 +183,40 @@ class TestReduceFrontReductions(hu.HypothesisTestCase):
             "ReduceFrontSum", ref_sum, [X], ["input"], num_reduce_dim, gc)
         self.grad_variant_input_test(
             "ReduceFrontSumGradient", X, ref_sum, num_reduce_dim)
+
+    @given(num_reduce_dim=st.integers(0, 4), seed=st.integers(0, 4), **hu.gcs)
+    def test_reduce_front_sum_empty_batch(self, num_reduce_dim, seed, gc, dc):
+        np.random.seed(seed)
+        X = np.random.rand(0, 4, 3, 5).astype(np.float32)
+
+        def ref_sum(X):
+            return [np.sum(X, axis=(tuple(range(num_reduce_dim))))]
+
+        self.reduce_op_test(
+            "ReduceFrontSum", ref_sum, [X], ["input"], num_reduce_dim, gc)
+        self.grad_variant_input_test(
+            "ReduceFrontSumGradient", X, ref_sum, num_reduce_dim)
+
+        # test the second iteration
+        not_empty_X = np.random.rand(2, 4, 3, 5).astype(np.float32)
+        net = core.Net('test')
+        with core.DeviceScope(gc):
+            net.ReduceFrontSum(
+                ['X'], ['output'],
+                num_reduce_dim=num_reduce_dim
+            )
+            workspace.CreateNet(net)
+
+            workspace.FeedBlob('X', not_empty_X)
+            workspace.RunNet(workspace.GetNetName(net))
+            output = workspace.FetchBlob('output')
+            np.testing.assert_allclose(
+                output, ref_sum(not_empty_X)[0], atol=1e-3)
+
+            workspace.FeedBlob('X', X)
+            workspace.RunNet(workspace.GetNetName(net))
+            output = workspace.FetchBlob('output')
+            np.testing.assert_allclose(output, ref_sum(X)[0], atol=1e-3)
 
     @given(**hu.gcs)
     def test_reduce_front_sum_with_length(self, dc, gc):

@@ -206,37 +206,24 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
-def mean(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Mean", self)
-    # NB: ONNX's default is different from PyTorch's
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceMean", self, axes_i=[dim], keepdims_i=keepdim)
+def _reduce_op_symbolic(onnx_op_name):
+    def symbolic(g, self, dim=None, keepdim=None):
+        params = {}
+        if dim is not None:
+            if isinstance(dim, numbers.Number):
+                dim = [dim]
+            params['axes_i'] = dim
+        params['keepdims_i'] = int(bool(keepdim))
+        return g.op(onnx_op_name, self, **params)
+    return symbolic
 
-
-def sum(g, self, dim=None, keepdim=None):
-    if dim is None and keepdim is None:
-        return g.op("Sum", self)
-    if keepdim is None:
-        keepdim = 0
-    if isinstance(dim, numbers.Number):
-        dim = [dim]
-    return g.op("ReduceSum", self, axes_i=dim, keepdims_i=keepdim)
+mean = _reduce_op_symbolic('ReduceMean')
+sum = _reduce_op_symbolic('ReduceSum')
+prod = _reduce_op_symbolic('ReduceProd')
 
 
 def cumsum(g, input, dim):
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
-
-
-def prod(g, self, dim=None, keepdim=None):
-    if dim is None:
-        dims = None
-    else:
-        dims = [dim]
-    if keepdim is None:
-        keepdim = 0
-    return g.op("ReduceProd", self, axes_i=dims, keepdims_i=keepdim)
 
 
 def t(g, self):
@@ -309,8 +296,8 @@ def stack(g, *tensors, **kwargs):
     dim = kwargs.pop('dim')
     if kwargs:
         raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
-    if len(tensors) < 2:
-        raise RuntimeError("Expected at least two arguments to stack node")
+    if len(tensors) < 1:
+        raise RuntimeError("Expected at least one argument to stack node")
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
@@ -409,11 +396,11 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
-def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool1d", "ceil_mode")
+        return _unimplemented("max_pool1d_with_indices", "ceil_mode")
     if set(_single(dilation)) != {1}:
-        return _unimplemented("max_pool1d", "dilation")
+        return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -423,11 +410,11 @@ def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
-def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool2d", "ceil_mode")
+        return _unimplemented("max_pool2d_with_indices", "ceil_mode")
     if set(_pair(dilation)) != {1}:
-        return _unimplemented("max_pool2d", "dilation")
+        return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -437,11 +424,11 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
-def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool3d", "ceil_mode")
+        return _unimplemented("max_pool3d_with_indices", "ceil_mode")
     if set(_triple(dilation)) != {1}:
-        return _unimplemented("max_pool3d", "dilation")
+        return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -500,9 +487,11 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-def upsample_nearest2d(g, input, scale_factor):
-    return g.op("Upsample", input, width_scale_f=scale_factor,
-                height_scale_f=scale_factor, mode_s="nearest")
+def upsample_nearest2d(g, input, output_size):
+    return g.op("Upsample", input,
+                height_scale_f=float(output_size[-2]) / input.type().sizes()[-2],
+                width_scale_f=float(output_size[-1]) / input.type().sizes()[-1],
+                mode_s="nearest")
 
 
 def upsample_bilinear2d(g, input, output_size, align_corners):
@@ -612,13 +601,20 @@ def index_select(g, self, index, dim):
     return g.op("Gather", self, index, axis_i=dim)
 
 
+def index_put(g, *inputs, **kwargs):
+    return g.op("ATen", *inputs, operator_s='index_put', **kwargs)
+
+
 def type_as(g, self, other):
-    if self.type().scalarType() == other.type().scalarType():
-        # no-op
+    if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
         return self
-    else:
-        other_type_name = self.type().scalarType().lower()
+
+    if other.isTensor():
+        other_type_name = other.type().scalarType()
         return g.op("Cast", self, to_i=cast_pytorch_to_onnx[other_type_name])
+    else:
+        # We don't know the type of other, bail by emitting ATen
+        return g.op("ATen", self, other, operator_s="type_as")
 
 
 # ignore clone operators that are inserted by PyTorch autograd
@@ -631,11 +627,19 @@ def abs(g, self):
 
 
 def pow(g, self, exponent):
-    return g.op("Pow", self, exponent)
+    return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
 
 
 def clamp(g, self, min, max):
     return g.op("Clip", self, min_f=min, max_f=max)
+
+
+def clamp_min(g, self, min):
+    return g.op("Clip", self, min_f=min)
+
+
+def clamp_max(g, self, max):
+    return g.op("Clip", self, max_f=max)
 
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
@@ -700,14 +704,25 @@ def _unique(g, input, sorted, return_inverse):
 # TODO: remove these once we support Type's in the JIT IR and we can once again
 # use the unified toType operator
 cast_pytorch_to_onnx = {
-    'uint8_t': torch.onnx.TensorProtoDataType.UINT8,
-    'int8_t': torch.onnx.TensorProtoDataType.INT8,
-    'double': torch.onnx.TensorProtoDataType.DOUBLE,
-    'float': torch.onnx.TensorProtoDataType.FLOAT,
+    'Byte': torch.onnx.TensorProtoDataType.UINT8,
+    'Char': torch.onnx.TensorProtoDataType.INT8,
+    'Double': torch.onnx.TensorProtoDataType.DOUBLE,
+    'Float': torch.onnx.TensorProtoDataType.FLOAT,
     'Half': torch.onnx.TensorProtoDataType.FLOAT16,
-    'int': torch.onnx.TensorProtoDataType.INT32,
-    'int64_t': torch.onnx.TensorProtoDataType.INT64,
-    'int16_t': torch.onnx.TensorProtoDataType.INT16,
+    'Int': torch.onnx.TensorProtoDataType.INT32,
+    'Long': torch.onnx.TensorProtoDataType.INT64,
+    'Short': torch.onnx.TensorProtoDataType.INT16,
+}
+
+scalar_name_to_pytorch = {
+    'uint8_t': 'Byte',
+    'int8_t': 'Char',
+    'double': 'Double',
+    'float': 'Float',
+    'half': 'Half',
+    'int': 'Int',
+    'int64_t': 'Long',
+    'int16_t': 'Short',
 }
 
 
@@ -724,6 +739,10 @@ def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
+def hardtanh(g, self, min_val, max_val):
+    return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
 
 def alias(g, self):
@@ -974,8 +993,17 @@ def RNN_variant_symbolic_builder(
                                                  **extra_kwargs)
 
             if bidirectional:
-                prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 1, 0, -1])))
-            prev_output = g.op('Squeeze', prev_output, axes_i=[1])
+                # The ONNX RNN/GRU/LSTM produce an output of dimensions
+                #   seq_len, num_directions, batch, hidden_size
+                # We have to convert to match pytorch's expected
+                #   seq_len, batch, hidden_size * num_directions
+                # by first moving num_directions to the end with
+                # Transpose, and then combining it with hidden_size
+                # with Reshape.
+                prev_output = g.op('Transpose', prev_output, perm_i=[0, 2, 3, 1])
+                prev_output = g.op('Reshape', prev_output, g.op('Constant', value_t=torch.LongTensor([0, 0, -1])))
+            else:
+                prev_output = g.op('Squeeze', prev_output, axes_i=[1])
 
             h_outs.append(h_out)
             if variant == 'LSTM':
@@ -988,3 +1016,7 @@ def RNN_variant_symbolic_builder(
             return prev_output, h_outs, c_outs
 
     return symbolic
+
+
+def _dim_arange(g, like, dim):
+    return g.op('ATen', like, dim_i=dim, operator_s='_dim_arange')

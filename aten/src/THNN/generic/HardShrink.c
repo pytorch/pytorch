@@ -14,10 +14,10 @@ void THNN_(HardShrink_updateOutput)(
   TH_TENSOR_APPLY2(real, output, real, input,
     if (*input_data > lambda)
       *output_data = *input_data;
-    else if (*input_data < -lambda)
-      *output_data = *input_data;
-    else
+    else if (*input_data >= -lambda)
       *output_data = 0;
+    else
+      *output_data = *input_data;  // let NaN case pass through here
   );
 }
 
@@ -32,10 +32,10 @@ void THNN_(HardShrink_updateGradInput)(
   THNN_CHECK_NELEMENT(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
   TH_TENSOR_APPLY3(real, gradInput, real, gradOutput, real, input,
-    if (*input_data > lambda || *input_data < -lambda)
-      *gradInput_data = *gradOutput_data;
-    else
+    if (*input_data >= -lambda && *input_data <= lambda)
       *gradInput_data = 0;
+    else
+      *gradInput_data = *gradOutput_data;  // let NaN case pass through here
   );
 }
 

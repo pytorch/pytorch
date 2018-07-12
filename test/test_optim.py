@@ -11,7 +11,7 @@ from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
 from torch.optim.early_stopping import EarlyStoppingCriterion
-from common import TestCase, run_tests
+from common import TestCase, run_tests, TEST_WITH_UBSAN
 
 
 def rosenbrock(tensor):
@@ -476,6 +476,7 @@ class TestOptim(TestCase):
             ignore_multidevice=True
         )
 
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_lbfgs_return_type(self):
         params = [torch.randn(10, 5), torch.randn(10)]
         opt1 = optim.LBFGS(params, 0.01, tolerance_grad=float('inf'))

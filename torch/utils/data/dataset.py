@@ -51,7 +51,7 @@ class ConcatDataset(Dataset):
     on-the-fly manner.
 
     Arguments:
-        datasets (iterable): List of datasets to be concatenated
+        datasets (sequence): List of datasets to be concatenated
     """
 
     @staticmethod
@@ -88,6 +88,13 @@ class ConcatDataset(Dataset):
 
 
 class Subset(Dataset):
+    """
+    Subset of a dataset at specified indices.
+
+    Arguments:
+        dataset (Dataset): The whole Dataset
+        indices (sequence): Indices in the whole set selected for subset
+    """
     def __init__(self, dataset, indices):
         self.dataset = dataset
         self.indices = indices
@@ -101,12 +108,11 @@ class Subset(Dataset):
 
 def random_split(dataset, lengths):
     """
-    Randomly split a dataset into non-overlapping new datasets of given lengths
-    ds
+    Randomly split a dataset into non-overlapping new datasets of given lengths.
 
     Arguments:
         dataset (Dataset): Dataset to be split
-        lengths (iterable): lengths of splits to be produced
+        lengths (sequence): lengths of splits to be produced
     """
     if sum(lengths) != len(dataset):
         raise ValueError("Sum of input lengths does not equal the length of the input dataset!")

@@ -1,33 +1,30 @@
-#ifndef NO_PYTHON
-#include "torch/csrc/python_headers.h"
-#endif
 #include "interpreter.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/aten_dispatch.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 
+#include <exception>
+#include <iostream>
+#include <memory>
+#include <mutex>
+#include <ostream>
+#include <stdexcept>
 #include <typeinfo>
-
-#ifndef NO_PYTHON
-#include "torch/csrc/autograd/python_engine.h"
-#include "torch/csrc/autograd/python_variable.h"
-#include "torch/csrc/jit/pybind.h"
-#include "torch/csrc/utils/auto_gil.h"
-
-namespace py = pybind11;
-#endif
+#include <unordered_map>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
-
 
 // Before we translate to intepreter instructions, we do
 // some preprocessing of the graph to turn it into a form that is closer
@@ -96,7 +93,7 @@ void desugarTripCounts(Block * b) {
         WithInsertPoint guard(n);
         // int i = 0
         Value* initial_trip_count =
-            g->insertNode(g->createConstant(at::zeros(at::CPU(at::kLong), {1})))
+            g->insertNode(g->createConstant(at::zeros({1}, at::kLong)))
                 ->output();
         // Set up initial iteration number value for loop-carried dependency
         n->removeInput(0);
@@ -116,7 +113,7 @@ void desugarTripCounts(Block * b) {
         // conjunctive stopping condition as above.
 
         Value* const_one =
-            g->insertNode(g->createConstant(at::ones(at::CPU(at::kLong), {1})))
+            g->insertNode(g->createConstant(at::ones({1}, at::kLong)))
                 ->output();
 
         Value* inc_trip_count =
@@ -336,6 +333,8 @@ struct PreprocessGraph {
 // which are annoying to handle since 99% of values are at::Tensor anyway
 // instead we create a fake subclass of TensorImpl that can be subclassed
 // to hold arbitrary things
+// Note: this is currently unused but will probably be useful in the future,
+// so we keep it around
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
@@ -364,393 +363,6 @@ public:
     throw std::runtime_error("storage() on ContainerTensor");
   }
 };
-
-
-// Dummy function is the last function that the autograd engine calls
-// when evaluating Eval nodes. Its input tensors are the outputs that the
-// Eval node needs to produce.
-// We interscept these values using an Autograd callback. So the function itself
-// never runs.
-struct DummyFunction : autograd::Function {
-  virtual autograd::variable_list apply(const autograd::variable_list& inputs) override {
-    throw std::logic_error("DummyFunction::apply() called, but it should be blocked by a callback returning false");
-  }
-};
-
-// An AutogradHandle holds the information needed to run an Autograd backward pass
-// after running a forward operator (such as PythonOp, CppOp, or for double-backwards another Eval Op)
-// The EvalOperation uses AutogradHandle to perform this operation.
-struct AutogradHandle : public ContainerTensor {
-
-  // The inputs of DummyFunction are the gradients of the forward passes
-  // inputs, and the _outputs_ of the run of the Autograd engine computing backward.
-  // there is one entry in this list for each forward input that requires
-  // gradients
-  std::shared_ptr<DummyFunction> forward_inputs;
-
-  // there is one entry in this list for each output of the forward pass
-  // that represents the location in the backwaard pass where the gradient
-  // of this output should be inserted at the beginning of the backward pass
-  autograd::edge_list forward_outputs;
-};
-
-// HandleBuilder is used to construct the correct Autograd Handle objects
-// for use in a future stage.
-// It is used even when the future stage does not require a handle since
-// it also performs the conversions between Tensor and Variable, which
-// behave differently depending on whether a future handle needs to be
-// created.
-struct HandleBuilder {
-  HandleBuilder(bool requires_handle) {
-    if(requires_handle) {
-      handle = new AutogradHandle();
-      handle->forward_inputs = std::make_shared<DummyFunction>();
-    }
-  }
-  autograd::Variable addInput(at::Tensor && input_, const VariableFlags & flags_) {
-    autograd::Variable& input = static_cast<autograd::Variable&>(input_);
-    if(handle && flags_.requires_grad) {
-      auto variable = autograd::make_variable(input.data(), /*requires_grad=*/false);
-      autograd::create_gradient_edge(variable, handle->forward_inputs);
-      return variable;
-    } else {
-      return autograd::make_variable(input.data(), /*requires_grad=*/false);
-    }
-  }
-  at::Tensor addOutput(const autograd::Variable & output) {
-    if(handle) {
-      handle->forward_outputs.push_back(output.gradient_edge());
-    }
-    return output.detach();
-  }
-  void writeTo(Stack & outputs) {
-    // outputs takes ownership of handle
-    if(handle) {
-      outputs.push_back(at::Tensor(handle, /*retain=*/false));
-      handle = nullptr;
-    }
-  }
-private:
-  AutogradHandle* handle = nullptr;
-};
-
-bool hasHandleOutput(Node * n) {
-  if(n->outputs().size() == 0)
-    return false;
-  auto & last = n->outputs().back();
-  return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
-}
-
-#ifndef NO_PYTHON
-Operation createPythonOperation(PythonOp* op) {
-  py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  bool tracing_autograd_python_function = op->tracing_autograd_python_function;
-  bool has_handle = hasHandleOutput(op);
-  size_t num_inputs = 0;
-  for(auto arg_type : op->cconv) {
-    if(arg_type == 't')
-      num_inputs++;
-  }
-  return [=](Stack & stack) {
-    AutoGIL gil;
-    py::tuple py_inputs(op->cconv.size());
-    size_t i = 0;
-    size_t next_scalar = 0;
-    size_t next_tensor = 0;
-    HandleBuilder builder(has_handle);
-    // Note: The first branch here should be considered deprecated and will
-    // probably be removed in the future.
-    //
-    // tracing_autograd_python_function indicates that we need to hook this
-    // PythonOp up to autograd with the HandleBuilder
-    if (tracing_autograd_python_function) {
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          py_inputs[i] = py::reinterpret_steal<py::object>(
-              THPVariable_Wrap(builder.addInput(
-                  std::move(peek(stack, next_tensor, num_inputs)),
-                  op->var_flags.at(next_tensor))));
-          next_tensor++;
-        }
-        i++;
-      }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function.apply returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        stack.push_back(builder.addOutput(var->cdata));
-      };
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        for (py::handle entry : output_tuple) {
-          addOutput(entry);
-        }
-      }
-      builder.writeTo(stack);
-      return 0;
-    } else {
-      for (auto arg_type : op->cconv) {
-        if (arg_type == 's') {
-          py_inputs[i] = py::reinterpret_borrow<py::object>(
-              op->scalar_args[next_scalar++].get());
-        } else if (arg_type == 't') {
-          auto var = peek(stack, next_tensor, num_inputs);
-          py_inputs[i] =
-              py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
-          next_tensor++;
-        }
-        i++;
-      }
-      drop(stack, num_inputs);
-      py::object py_outputs(func(*py_inputs));
-
-      auto num_outputs = op->outputs().size();
-      auto addOutput = [&](py::handle entry) {
-        if (!THPVariable_Check(entry.ptr())) {
-          throw std::runtime_error(
-              "Function application returned a non-Variable output");
-        }
-        THPVariable* var = (THPVariable*)entry.ptr();
-        auto cdata = var->cdata;
-        stack.push_back(std::move(cdata));
-      };
-
-      if (!PyTuple_Check(py_outputs.ptr())) {
-        if (num_outputs != 1) {
-          throw std::runtime_error(
-              "Function.apply returned the wrong number of outputs.");
-        }
-        addOutput(py_outputs);
-      } else {
-        auto output_tuple = py::tuple(py_outputs);
-        if (output_tuple.size() != num_outputs) {
-          throw std::runtime_error(
-              "Function application returned the wrong number of outputs.");
-        }
-        for (py::handle entry : py::tuple(py_outputs)) {
-          addOutput(entry);
-        }
-      }
-      return 0;
-    }
-  };
-}
-#else
-Operation createPythonOperation(PythonOp* op) {
-  throw std::runtime_error("Trying to create Python operation from a C++ build");
-  return [=](Stack & stack) {
-    return 0;
-  };
-}
-#endif
-
-Operation createCppOperation(CppOp* op) {
-  std::shared_ptr<autograd::Function> func = op->fn;
-  bool has_handle = hasHandleOutput(op);
-  auto num_inputs = op->inputs().size();
-  return [=](Stack & stack) {
-    HandleBuilder builder(has_handle);
-    autograd::variable_list v_inputs;
-    for(size_t i = 0; i < num_inputs; i++) {
-      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
-    }
-    drop(stack, num_inputs);
-    autograd::variable_list v_outputs = (*func)(v_inputs);
-    for(auto & output : v_outputs) {
-      stack.push_back(builder.addOutput(output));
-    }
-    builder.writeTo(stack);
-    return 0;
-  };
-}
-
-Operation createEvalOperation(CppOp * op) {
-  bool has_handle_output = hasHandleOutput(op);
-  auto num_inputs = op->inputs().size();
-  return [=](Stack & stack) {
-    at::Tensor handle_t = std::move(stack.back());
-    AutogradHandle * handle_in = dynamic_cast<AutogradHandle*>(handle_t.get());
-    JIT_ASSERT(handle_in);
-    HandleBuilder builder(has_handle_output);
-    auto& engine = torch::autograd::Engine::getDefaultEngine();
-    autograd::variable_list v_inputs;
-    for(size_t i = 0; i < num_inputs - 1; i++) {
-      v_inputs.push_back(builder.addInput(std::move(peek(stack, i, num_inputs)), op->var_flags[i]));
-    }
-    drop(stack, num_inputs);
-    // TODO: handle create_graph appropriately
-    bool create_graph = true;
-    // note: node handle_in->use_count() == 1 means that we are guarenteed that we have the only
-    // only copy of the handle. This might make it seem it is ok to pass keep_graph=False.
-    // However, it is possible for 'copied_next_fns' to grab functions used by _other_ handles,
-    // and these functions will be executed in this run. Since these other handles
-    // may still be alive, it is not safe to release the graph
-    // TODO: we could cache this list in AutogradHandle (it's read only)
-    autograd::edge_list output_edges;
-    const auto num_inputs = handle_in->forward_inputs->num_inputs();
-    output_edges.reserve(num_inputs);
-    for (uint32_t i = 0; i < num_inputs; ++i)
-      output_edges.emplace_back(handle_in->forward_inputs, i);
-    auto values = engine.execute(handle_in->forward_outputs, v_inputs, true, create_graph, output_edges);
-    for(auto & v : values)
-      stack.push_back(builder.addOutput(v));
-    builder.writeTo(stack);
-    return 0;
-  };
-}
-
-// Returns a function implementing functionality of a given node,
-// or nullptr if it's a no-op for autograd.
-Operation getOperation(jit::Node* node) {
-  IR_IFM(node, PythonOp)
-    return createPythonOperation(value);
-  IR_ELSEIFM(CppOp)
-    if(dynamic_cast<autograd::Eval*>(value->fn.get())) {
-      return createEvalOperation(value);
-    } else {
-      return createCppOperation(value);
-    }
-  IR_ELSEIF(FusionGroup)
-    auto fusion_fn = sharedFusionCompiler().getOrCompile(value);
-    auto num_inputs = value->inputs().size();
-    return [fusion_fn, num_inputs](Stack & stack) {
-      autograd::profiler::RecordFunction record("FusionGroup");
-      std::vector<at::Tensor> toutputs;
-      // TODO: have fusion_fn work off of a stack as well
-      fusion_fn->launch(last(stack, num_inputs), toutputs);
-      drop(stack, num_inputs);
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-      return 0;
-    };
-  IR_ELSEIF(Constant)
-    auto t = autograd::make_variable(value->t(attr::value));
-    return [t](Stack & stack) {
-      stack.push_back(t);
-      return 0;
-    };
-  IR_ELSEIF(Undefined)
-    return [](Stack & stack) {
-      stack.push_back(at::Tensor());
-      return 0;
-    };
-  IR_ELSEIF(ReplaceIfUndef)
-    return [](Stack & stack) {
-      auto alternate = pop(stack);
-      auto result = pop(stack);
-      if(result.defined()) {
-        stack.push_back(std::move(result));
-      } else {
-        stack.push_back(std::move(alternate));
-      }
-      return 0;
-    };
-  IR_ELSEIF(Print)
-    size_t num_inputs = value->inputs().size();
-    return [num_inputs](Stack & stack) {
-      bool first = true;
-      for (at::Tensor i : last(stack, num_inputs)) {
-        if (!first) std::cout << " ";
-        first = false;
-        if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
-          std::cout << at::Tensor(tensor_impl, true);
-        } else if (!i.defined()) {
-          std::cout << "<undefined tensor>";
-        } else {
-          auto& r = *i.get();
-          std::cout << "<" << typeid(r).name() << " at " << i << ">";
-        }
-      }
-      drop(stack, num_inputs);
-      std::cout << std::endl;
-      return 0;
-    };
-  IR_ELSEIF(GraphExecutor)
-    GraphExecutor executor(value->g(attr::Subgraph));
-    auto num_inputs = value->inputs().size();
-    return [=](Stack& stack) mutable {
-      autograd::profiler::RecordFunction record("GraphExecutor");
-      auto inputs = last(stack, num_inputs);
-      variable_tensor_list tinputs(inputs.begin(), inputs.end());
-      drop(stack, num_inputs);
-      //TODO: has graph executor work from a stack as well
-      variable_tensor_list toutputs = executor.run(variable_tensor_list(std::move(tinputs)));
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
-      return 0;
-    };
-
-
-  // Load x, y
-  // loads values from registers onto the stack, the actual callback does
-  // nothing since the stack manipulation is already encoded in inst.inputs
-  // and inst.outputs
-  IR_ELSEIF(Load)
-    return [=](Stack& stack) {
-      return 0;
-    };
-
-  // x, y = Store
-  // stores values from stack into registers, the actual callback does
-  // nothing since the stack manipulation is already encoded in inst.inputs
-  // and inst.outputs
-  IR_ELSEIF(Store)
-    return [=](Stack& stack) {
-      return 0;
-    };
-  IR_ELSEIF(Drop)
-    auto N = value->inputs().size();
-    return [=](Stack& stack) {
-      drop(stack, N);
-      return 0;
-    };
-  IR_ELSE()
-    switch (node->kind()) {
-      case onnx::Reshape: {
-        return [=](Stack& stack) {
-          auto shape = pop(stack).contiguous();
-          auto input = pop(stack);
-          JIT_ASSERT(shape.ndimension() == 1);
-          at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
-          stack.push_back(input.reshape(shape_list));
-          return 0;
-        };
-      } break;
-      case onnx::Shape: {
-        return [=](Stack& stack) {
-          auto t = pop(stack);
-          at::IntList sizes = t.sizes();
-          auto sizes_tensor = torch::CPU(at::kLong).tensor(sizes.size());
-          auto accessor = sizes_tensor.accessor<int64_t, 1>();
-          for (size_t i=0; i<sizes.size(); ++i) {
-            accessor[i] = sizes[i];
-          }
-          stack.push_back(sizes_tensor);
-          return 0;
-        };
-      } break;
-      default: ;
-    };
-    return getTensorOp(node).op;
-  IR_END()
-}
-
 
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
@@ -913,7 +525,7 @@ struct CodeImpl {
 
   size_t insertInstruction(Node * n) {
     auto inst = insertInstruction(n->kind(), n->getSourceLocation(), n->inputs(), moveFlags(n) , n->outputs());
-    instructions[inst].callback = getOperation(n);
+    instructions[inst].callback = getInterpreterOperation(n);
     return inst;
   }
   size_t insertInstruction(Symbol sym,
@@ -1001,6 +613,35 @@ struct CodeImpl {
     return r;
   }
 
+  // Returns a function implementing functionality of a given node,
+  // or nullptr if it's a no-op for autograd.
+  Operation getInterpreterOperation(jit::Node* node) {
+    if(node->kind() != prim::GraphExecutor) {
+      return getOperation(node);
+    }
+    // recursive graph executors cannot be Operators because they
+    // have to register themselves with the interpreter so that
+    // we can provide useful debugging information
+
+    auto executor = std::make_shared<GraphExecutor>(node->g(attr::Subgraph));
+    graph_executors.emplace_back(executor.get());
+    auto num_inputs = node->inputs().size();
+    return [=](Stack& stack) mutable {
+      autograd::profiler::RecordFunction record("GraphExecutor");
+      auto inputs = last(stack, num_inputs);
+      variable_tensor_list tinputs(inputs.begin(), inputs.end());
+      drop(stack, num_inputs);
+      //TODO: has graph executor work from a stack as well
+      variable_tensor_list toutputs = executor->run(variable_tensor_list(std::move(tinputs)));
+      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+      return 0;
+    };
+  }
+
+  const std::vector<GraphExecutor*>& executors() {
+    return graph_executors;
+  }
+
   void dumpInstruction(std::ostream & out, size_t pc) const {
     auto writeList = [&](const ListHandle<int> & list) {
       for(int i = 0; i < list.size; i++) {
@@ -1039,6 +680,7 @@ struct CodeImpl {
   // It is also very useful for debugging interpreter problems to
   // keep this around.
   std::shared_ptr<Graph> graph;
+  std::vector<GraphExecutor*> graph_executors; // for debugging
   PreprocessGraph preprocess;
 
   std::unordered_map<size_t, int> unique_to_reg; // map from unique of nodes to register in register table
@@ -1147,18 +789,27 @@ std::ostream & operator<<(std::ostream & out, const Code & code) {
 Code::Code(std::shared_ptr<Graph>& graph)
     : pImpl(new CodeImpl(graph)) {}
 Code::~Code() {}
+
+const std::vector<GraphExecutor*>& Code::executors() {
+  return pImpl->executors();
+}
+
 InterpreterState::InterpreterState(const Code & function)
-: pImpl(new InterpreterStateImpl(function)) {}
+  : pImpl(new InterpreterStateImpl(function)) {}
 InterpreterState::~InterpreterState() {}
+
 void InterpreterState::runOneStage(Stack & stack) {
     return pImpl->runOneStage(stack);
 }
+
 const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {
   return pImpl->tensorTypeForInput(i);
 }
+
 InterpreterState InterpreterState::clone() const {
   return InterpreterState(new InterpreterStateImpl(*pImpl));
 }
+
 InterpreterState::InterpreterState(InterpreterStateImpl * pImpl) : pImpl(pImpl) {}
 
 }}

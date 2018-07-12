@@ -1,6 +1,7 @@
 #ifndef THC_DEVICE_UTILS_INC
 #define THC_DEVICE_UTILS_INC
 
+#include <cuda.h>
 /* The largest consecutive integer representable in float32 (2^24) */
 #define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
 
@@ -43,7 +44,7 @@ __device__ __forceinline__ unsigned int ACTIVE_MASK()
 #endif
 }
 
-__device__ __forceinline__ int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
+__device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int mask = 0xffffffff)
 {
 #if CUDA_VERSION >= 9000
     return __ballot_sync(mask, predicate);

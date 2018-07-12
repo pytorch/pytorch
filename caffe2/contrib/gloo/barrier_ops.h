@@ -46,7 +46,7 @@ class BarrierOp final : public Operator<Context> {
         signalFailure(ws_->GetBlob(status_blob_), ioe);
         return false;
       } else {
-        throw ioe;
+        throw;
       }
     }
     return true;

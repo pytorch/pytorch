@@ -11,7 +11,8 @@ class OneHotCategorical(Distribution):
 
     Samples are one-hot coded vectors of size ``probs.size(-1)``.
 
-    .. note:: :attr:`probs` will be normalized to be summing to 1.
+    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
+    and it will be normalized to sum to 1.
 
     See also: :func:`torch.distributions.Categorical` for specifications of
     :attr:`probs` and :attr:`logits`.
@@ -20,11 +21,7 @@ class OneHotCategorical(Distribution):
 
         >>> m = OneHotCategorical(torch.tensor([ 0.25, 0.25, 0.25, 0.25 ]))
         >>> m.sample()  # equal probability of 0, 1, 2, 3
-         0
-         0
-         1
-         0
-        [torch.FloatTensor of size 4]
+        tensor([ 0.,  0.,  0.,  1.])
 
     Args:
         probs (Tensor): event probabilities
@@ -84,6 +81,6 @@ class OneHotCategorical(Distribution):
     def enumerate_support(self):
         n = self.event_shape[0]
         values = self._new((n, n))
-        torch.eye(n, out=values.data)
+        torch.eye(n, out=values)
         values = values.view((n,) + (1,) * len(self.batch_shape) + (n,))
         return values.expand((n,) + self.batch_shape + (n,))

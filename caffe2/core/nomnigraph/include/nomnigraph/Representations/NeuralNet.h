@@ -44,6 +44,7 @@ class Annotation {
 
   Annotation(AnnotationKind K) : Kind(K) {}
   Annotation() : Kind(AnnotationKind::Generic) {}
+  virtual ~Annotation() {}
 
   AnnotationKind getKind() const {
     return Kind;
@@ -52,16 +53,8 @@ class Annotation {
   Annotation(const Annotation&) = delete;
   Annotation& operator=(Annotation&) = delete;
 
-  void* getSaved() const {
-    return Saved;
-  }
-  void setSaved(void* saved) {
-    Saved = saved;
-  }
-
  private:
   const AnnotationKind Kind;
-  void* Saved = nullptr;
 };
 
 class NeuralNetOperator : public Instruction {
@@ -241,8 +234,8 @@ class GenericOperator : public NeuralNetOperator {
   std::string name_;
 };
 
-using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>, int>;
-using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>, int>;
+using NNGraph = nom::Graph<std::unique_ptr<nom::repr::Value>>;
+using NNSubgraph = nom::Subgraph<std::unique_ptr<nom::repr::Value>>;
 using NNCFGraph = nom::repr::ControlFlowGraph<NNGraph>;
 
 struct NNModule {
@@ -263,7 +256,8 @@ using enable_if_t = typename std::enable_if<B, T>::type;
 
 template <typename T, typename U>
 struct inheritedFrom {
-    static constexpr bool value = std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
+  static constexpr bool value =
+      std::is_base_of<U, T>::value && !std::is_same<U, T>::value;
 };
 
 // This is just a way to fix issues when the isa<> implementation
@@ -387,7 +381,6 @@ template <typename NewT, typename OldT>
 NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
   assert(is<OldT>(node) && "Cannot get type from node.");
 
-  auto* nnOp = get<NeuralNetOperator>(node);
   NeuralNetOperator* nnOpPtr =
       dyn_cast<NeuralNetOperator>(node->mutableData()->release());
 
@@ -401,7 +394,6 @@ NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
 }
 
 /// NeuralNetData specific helpers.
-bool hasProducer(NNGraph::NodeRef n);
 bool hasProducer(NNGraph::NodeRef n);
 NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
 bool hasConsumer(NNGraph::NodeRef n);

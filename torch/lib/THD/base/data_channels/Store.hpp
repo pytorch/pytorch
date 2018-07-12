@@ -32,7 +32,7 @@ private:
     std::thread _deamon;
     store_type _store;
     std::unordered_map<std::string, std::vector<rank_type>> _waiting;
-    std::vector<std::size_t> _keys_awaited;
+    std::vector<size_t> _keys_awaited;
     std::vector<int> _sockets;
   };
 

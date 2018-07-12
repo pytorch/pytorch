@@ -1,3 +1,5 @@
+#include <climits>
+
 #include "THStorage.hpp"
 
 #include "generic/THStorage.cpp"
@@ -12,9 +14,58 @@
 #include "generic/THStorageCopy.cpp"
 #include "THGenerateHalfType.h"
 
+// Free a non-weak pointer to THStorage
+void THStorage_free(THStorage *storage) {
+  AT_ASSERT(storage->backend == at::kCPU);
+
+  if (!storage) {
+    return;
+  }
+
+  if (storage->flag & TH_STORAGE_REFCOUNTED) {
+    if (--storage->refcount == 0) {
+      if (storage->finalizer) {
+        (*storage->finalizer)();
+      }
+      storage->finalizer.~unique_ptr<THFinalizer>();
+      if (storage->flag & TH_STORAGE_FREEMEM) {
+        static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
+      }
+      if (storage->flag & TH_STORAGE_VIEW) {
+        THStorage_free(storage->view);
+      }
+      THStorage_weakFree(storage);
+    }
+  }
+}
+
+// Manually retains a weak reference
+void THStorage_weakRetain(THStorage *weak_storage) {
+  weak_storage->weakcount++;
+}
+
+// Releases a weak reference
+void THStorage_weakFree(THStorage *weak_storage) {
+  if (--weak_storage->weakcount == 0) {
+    weak_storage->refcount.~atomic<int>();
+    weak_storage->weakcount.~atomic<int>();
+    THFree(weak_storage);
+  }
+}
+
+// Given a weak reference, returns a strong reference to a storage (which must
+// be freed when done) or null if the storage is already dead.
+THStorage* THStorage_weakLock(THStorage *weak_storage) {
+  for (;;) {
+    int refcount = weak_storage->refcount.load();
+    if (refcount == 0) return nullptr;
+    if (weak_storage->refcount.compare_exchange_strong(refcount, refcount + 1)) break;
+  }
+  return weak_storage;
+}
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
-  return _THSizeDesc(size->data, size->size);
+  return _THSizeDesc(THLongStorage_data(size), size->size);
 }
 
 THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement)
@@ -23,11 +74,11 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   ptrdiff_t dim_infer = -1;
   ptrdiff_t i;
   for (i = 0; i < size->size; i++) {
-    if (size->data[i] == -1) {
+    if (THLongStorage_data(size)[i] == -1) {
       THArgCheck(dim_infer == -1, 1, "only one dimension can be inferred");
       dim_infer = i;
     } else {
-      total_size *= size->data[i];
+      total_size *= THLongStorage_data(size)[i];
     }
   }
   if (dim_infer != -1) {
@@ -42,121 +93,162 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   THLongStorage* copy = THLongStorage_newWithSize(size->size);
   THLongStorage_copy(copy, size);
   if (dim_infer != -1) {
-    copy->data[dim_infer] = nElement / total_size;
+    THLongStorage_data(copy)[dim_infer] = nElement / total_size;
   }
   return copy;
 }
 
-int THLongStorage_inferSize2(THLongStorage *output, int64_t *sizesA, int64_t dimsA, int64_t *sizesB, int64_t dimsB,
-                             char *error_buffer, int buffer_len) {
-  THArgCheck(sizesA != NULL, 1, "sizesA must not be null");
-  THArgCheck(sizesB != NULL, 2, "sizesB must not be null");
-  THArgCheck(dimsA, 1, "Can't expand empty tensor a");
-  THArgCheck(dimsB, 1, "Can't expand empty tensor b");
-  ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
+THStorage* THStorage_new(at::ScalarType scalar_type)
+{
+  return THStorage_newWithSize(scalar_type, 0);
+}
 
-  int64_t *expandedSizes = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
+THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
+{
+  return THStorage_newWithAllocator(scalar_type, size, &THDefaultAllocator, nullptr);
+}
 
-  for (int64_t i = ndim - 1; i >= 0; --i) {
-    int64_t offset = ndim - 1 - i;
-    int64_t dimA = dimsA - 1 - offset;
-    int64_t dimB = dimsB - 1 - offset;
-    int64_t sizeA = (dimA >= 0) ? sizesA[dimA] : 1;
-    int64_t sizeB = (dimB >= 0) ? sizesB[dimB] : 1;
-    if (sizeA == sizeB || sizeA == 1 || sizeB == 1) {
-      expandedSizes[i] = THMax(sizeA, sizeB);
+THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
+                                      THAllocator *allocator,
+                                      void *allocatorContext)
+{
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
+  storage->backend = at::kCPU;
+  storage->scalar_type = scalar_type;
+  storage->data_ptr = allocator->malloc(allocatorContext, at::elementSize(scalar_type)*size);
+  storage->size = size;
+  new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  storage->allocatorVoidPtr = allocator;
+  storage->allocatorContext = allocatorContext;
+  storage->device = INT_MIN;  // device is not meaningful on CPU
+  return storage;
+}
+
+ptrdiff_t THStorage_size(const THStorage *self)
+{
+  return self->size;
+}
+
+size_t THStorage_elementSize(const THStorage *self)
+{
+  return at::elementSize(self->scalar_type);
+}
+
+THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags)
+{
+  THMapAllocatorContext *ctx = THMapAllocatorContext_new(filename, flags);
+
+  THStorage *storage = THStorage_newWithAllocator(scalar_type, size,
+                                                  &THMapAllocator,
+                                                  ctx);
+
+  if (size <= 0) {
+    storage->size = THMapAllocatorContext_size(ctx)/THStorage_elementSize(storage);
+  }
+
+  THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
+
+  return storage;
+}
+
+void THStorage_setFlag(THStorage *storage, const char flag)
+{
+  storage->flag |= flag;
+}
+
+void THStorage_clearFlag(THStorage *storage, const char flag)
+{
+  storage->flag &= ~flag;
+}
+
+void THStorage_retain(THStorage *storage)
+{
+  if (storage && (storage->flag & TH_STORAGE_REFCOUNTED)) {
+    ++storage->refcount;
+  }
+}
+
+THStorage* THStorage_newWithData(at::ScalarType scalar_type, void *data, ptrdiff_t size)
+{
+  return THStorage_newWithDataAndAllocator(scalar_type, data, size,
+                                           &THDefaultAllocator, NULL);
+}
+
+THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
+                                             void* data, ptrdiff_t size,
+                                             THAllocator* allocator,
+                                             void* allocatorContext) {
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
+  storage->backend = at::kCPU;
+  storage->scalar_type = scalar_type;
+  storage->data_ptr = data;
+  storage->size = size;
+  new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  storage->allocatorVoidPtr = allocator;
+  storage->allocatorContext = allocatorContext;
+  storage->device = 0;
+  return storage;
+}
+
+void THStorage_resize(THStorage *storage, ptrdiff_t size)
+{
+  AT_ASSERT(storage->backend == at::kCPU);
+
+  auto* th_allocator = static_cast<THAllocator*>(storage->allocatorVoidPtr);
+
+  if (storage->flag & TH_STORAGE_RESIZABLE)
+  {
+    if (th_allocator->realloc == nullptr) {
+      /* case when the allocator does not have a realloc defined */
+      void *old_data = storage->data_ptr;
+      ptrdiff_t old_size = storage->size;
+      if (size == 0) {
+        storage->data_ptr = nullptr;
+      } else {
+        storage->data_ptr = th_allocator->malloc(
+            storage->allocatorContext,
+            at::elementSize(storage->scalar_type)*size);
+      }
+      storage->size = size;
+      if (old_data != nullptr) {
+        ptrdiff_t copy_size = old_size;
+        if (storage->size < copy_size) {
+          copy_size = storage->size;
+        }
+        if (copy_size > 0) {
+          memcpy(storage->data_ptr, old_data, at::elementSize(storage->scalar_type)*copy_size);
+        }
+        th_allocator->free(storage->allocatorContext, old_data);
+      }
     } else {
-      THFree(expandedSizes);
-      snprintf(error_buffer, buffer_len, "The size of tensor a (%" PRId64 ") must match the size of tensor b (%" PRId64 ") at "
-               "non-singleton dimension %" PRId64 ".", sizeA, sizeB, i);
-      return -1;
+      storage->data_ptr = th_allocator->realloc(
+              storage->allocatorContext,
+              storage->data_ptr,
+              at::elementSize(storage->scalar_type)*size);
+      storage->size = size;
     }
+  } else {
+    THError("Trying to resize storage that is not resizable");
   }
-  THLongStorage_resize(output, ndim);
-  memcpy(THLongStorage_data(output), expandedSizes, sizeof(int64_t)*ndim);
-  THFree(expandedSizes);
-  return 0;
 }
 
-int THLongStorage_inferSizeN(THLongStorage *output, int n, int64_t **sizes, int64_t *dims,
-                             char *error_buffer, int buffer_len) {
-  THArgCheck(n > 0, 2, "n must be greater than 0");
-  THArgCheck(sizes != NULL, 1, "sizes must not be null");
-  THArgCheck(dims != NULL, 1, "dims must not be null");
-
-  ptrdiff_t ndim = 0;
-  for (int j = 0; j < n; ++j) {
-    THArgCheck(sizes[ j ] != NULL, 1, "size %d must not be null", j);
-    THArgCheck(dims[ j ], 1, "Can't expand empty tensor %d", j);
-    ndim = dims[ j ] > ndim ? dims[ j ] : ndim;
-  }
-
-  int64_t *expandedSizes = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
-
-  for (int64_t i = ndim - 1; i >= 0; --i) {
-    expandedSizes[ i ] = 1;
-    int64_t offset = ndim - 1 - i;
-    for (int j  = 0; j < n; ++j) {
-      int64_t dim = dims[ j ] - 1 - offset;
-      int64_t size = (dim >= 0) ? sizes[ j ][ dim ] : 1;
-      if (size == expandedSizes[ i ] || size == 1 || expandedSizes[ i ] == 1) {
-        expandedSizes[ i ] =  THMax(expandedSizes[ i ], size);
-      } else {
-        snprintf(error_buffer, buffer_len, "The size of tensor %i (%" PRId64 ") must match the expanded size"
-                 "of tensor (%" PRId64 ") at non-singleton dimension %" PRId64 ".", j, size, expandedSizes[ i ], i);
-        THFree(expandedSizes);
-        return -1;
-      }
-    }
-  }
-  THLongStorage_resize(output, ndim);
-  memcpy(THLongStorage_data(output), expandedSizes, sizeof(int64_t)*ndim);
-  THFree(expandedSizes);
-  return 0;
-}
-
-int THLongStorage_inferExpandGeometry(int64_t *tensorSizes, int64_t *tensorStrides, int64_t tensorDim,
-                                        THLongStorage *sizes, int64_t **expandedSizes, int64_t **expandedStrides,
-                                        char *error_buffer, int buffer_len) {
-  ptrdiff_t ndim = THLongStorage_size(sizes);
-
-  int64_t *expandedSizesCalc = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
-  int64_t *expandedStridesCalc = static_cast<int64_t*>(THAlloc(sizeof(int64_t)*ndim));
-
-  // create a new geometry for the tensors
-  for (int64_t i = ndim - 1; i >= 0; --i) {
-    int64_t offset = ndim - 1 - i;
-    int64_t dim = tensorDim - 1 - offset;
-    int64_t size = (dim >= 0) ? tensorSizes[dim] : 1;
-    int64_t stride = (dim >= 0) ?
-        tensorStrides[dim] : expandedSizesCalc[i + 1] * expandedStridesCalc[i+1];
-    int64_t targetSize = THLongStorage_data(sizes)[i];
-    if (targetSize == -1) {
-      if (dim < 0) {
-        THFree(expandedSizesCalc);
-        THFree(expandedStridesCalc);
-        snprintf(error_buffer, buffer_len, "The expanded size of the tensor (%" PRId64 ") isn't allowed in a leading, non-existing dimension %" PRId64 ".", targetSize, i);
-        return -1;
-      } else {
-        targetSize = size;
-      }
-    }
-    if (size != targetSize) {
-      if (size == 1) {
-        size = targetSize;
-        stride = 0;
-      } else {
-        THFree(expandedSizesCalc);
-        THFree(expandedStridesCalc);
-        snprintf(error_buffer, buffer_len, "The expanded size of the tensor (%" PRId64 ") must match the existing size (%" PRId64 ") at "
-                 "non-singleton dimension %" PRId64 ".", targetSize, size, i);
-        return -1;
-      }
-    }
-    expandedSizesCalc[i] = size;
-    expandedStridesCalc[i] = stride;
-  }
-  *expandedSizes = expandedSizesCalc;
-  *expandedStrides = expandedStridesCalc;
-  return 0;
+void THStorage_swap(THStorage *storage1, THStorage *storage2)
+{
+#define SWAP(val) { std::swap(storage1->val, storage2->val); }
+    SWAP(data_ptr);
+    SWAP(size);
+    SWAP(flag);
+    // don't swap refcount!
+    SWAP(allocatorVoidPtr);
+    SWAP(allocatorContext);
+    SWAP(finalizer);
+    SWAP(view);
+    SWAP(device);
+#undef SWAP
 }

@@ -1,5 +1,7 @@
 #pragma once
 
+// ${generated_comment}
+
 #include <$header>
 
 #include "ATen/Generator.h"

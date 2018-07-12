@@ -3,23 +3,11 @@
 #include <ATen/ATenGeneral.h> // for AT_API
 #include <ATen/optional.h>
 
-#include <cstdint>
-#include <cstdio>
+#include <cstddef>
 #include <exception>
-#include <functional>
-#include <memory>
+#include <ostream>
 #include <sstream>
-#include <stdexcept>
 #include <string>
-#include <type_traits>
-#include <vector>
-
-#include <stdarg.h>
-
-#if !defined(_WIN32)
-#include <cxxabi.h>
-#include <execinfo.h>
-#endif // !defined(_WIN32)
 
 #if defined(_MSC_VER) && _MSC_VER <= 1900
 #define __func__ __FUNCTION__
@@ -44,20 +32,6 @@ _str(std::ostream& ss, const T& t, const Args&... args) {
 }
 
 } // namespace detail
-
-/// Utility to demangle a C++ symbol name.
-std::string demangle(const char* name);
-
-/// Returns the printable name of the type.
-template <typename T>
-inline const char* demangle_type() {
-#ifdef __GXX_RTTI
-  static const std::string name = demangle(typeid(T).name());
-  return name.c_str();
-#else // __GXX_RTTI
-  return "(RTTI disabled, cannot show name)";
-#endif // __GXX_RTTI
-}
 
 // Convert a list of string-like arguments into a single string.
 template <typename... Args>
@@ -110,6 +84,26 @@ public:
   }
 };
 
+class AT_API Warning {
+  using handler_t = void(*)(const SourceLocation& source_location, const char* msg);
+
+public:
+  /// Issue a warning with a given message. Dispatched to the current
+  /// warning handler.
+  static void warn(SourceLocation source_location, std::string msg);
+
+  /// Sets the global warning handler. This is not thread-safe, so it should
+  /// generally be called once during initialization.
+  static void set_warning_handler(handler_t handler);
+
+  /// The default warning handler. Prints the message to stderr.
+  static void print_warning(const SourceLocation& source_location, const char* msg);
+
+private:
+  static handler_t warning_handler_;
+};
+
+
 } // namespace at
 
 // TODO: variants that print the expression tested and thus don't require strings
@@ -117,6 +111,9 @@ public:
 
 #define AT_ERROR(...) \
   throw at::Error({__func__, __FILE__, __LINE__}, at::str(__VA_ARGS__))
+
+#define AT_WARN(...) \
+  at::Warning::warn({__func__, __FILE__, __LINE__}, at::str(__VA_ARGS__))
 
 #define AT_ASSERT(cond) \
   if (!(cond)) {             \

@@ -1,4 +1,5 @@
 #include "caffe2/operators/layer_norm_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -115,7 +116,6 @@ bool LayerNormGradientOp<CPUContext>::DoRunWithType<float>() {
   // -1.0*(mean / stdev) * dstdev_end
   auto dmean_stdev = stdev_map.unaryExpr(neg_recip)
                          .cwiseProduct(means_map)
-                         .replicate(1, right)
                          .cwiseProduct(dstdev_end);
   // (mean / (D*stdev)) * dstdev
   auto dx_stdev = (1.0f / right) *

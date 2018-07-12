@@ -17,7 +17,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
 {
   THCUNN_assertSameGPU(state, 3, input, output, indices);
 
-  THCUNN_argCheck(state, input->nDimension == 4 || input->nDimension == 5, 2, input,
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
                   "4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   THCIndex_t *indices_data;
@@ -28,7 +28,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
   int64_t istrideD, istrideT, istrideH, istrideW;
   int64_t totalZ;
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     sizeD = input->size[0];
     isizeT = input->size[1];
     isizeH = input->size[2];
@@ -84,7 +84,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
     THCudaCheck(cudaGetLastError());
   }
 
-  if (input->nDimension == 5) {
+  if (input->dim() == 5) {
     // clean
     THCTensor_(free)(state, input);
   }
@@ -112,7 +112,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
   int64_t osizeT, osizeH, osizeW;
   int64_t totalZ;
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     sizeD = input->size[0];
     isizeT = input->size[1];
     isizeH = input->size[2];
@@ -134,7 +134,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
 
   bool atomic = (isizeW%osizeW != 0) || (isizeH%osizeH != 0) || (isizeT%osizeT != 0);
 
-  if (input->nDimension == 4) {
+  if (input->dim() == 4) {
     totalZ = sizeD * osizeT;
   } else {
     int sizeB = input->size[0];

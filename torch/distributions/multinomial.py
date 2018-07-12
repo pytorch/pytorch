@@ -15,7 +15,8 @@ class Multinomial(Distribution):
     Note that `total_count` need not be specified if only :meth:`log_prob` is
     called (see example below)
 
-    .. note:: :attr:`probs` will be normalized to be summing to 1.
+    .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
+    and it will be normalized to sum to 1.
 
     -   :meth:`sample` requires a single shared `total_count` for all
         parameters and samples.
@@ -24,17 +25,12 @@ class Multinomial(Distribution):
 
     Example::
 
-        >>> m = Multinomial(100, torch.tensor([ 1, 1, 1, 1]))
+        >>> m = Multinomial(100, torch.tensor([ 1., 1., 1., 1.]))
         >>> x = m.sample()  # equal probability of 0, 1, 2, 3
-         21
-         24
-         30
-         25
-        [torch.FloatTensor of size 4]]
+        tensor([ 21.,  24.,  30.,  25.])
 
-        >>> Multinomial(probs=torch.tensor([1, 1, 1, 1])).log_prob(x)
-        -4.1338
-        [torch.FloatTensor of size 1]
+        >>> Multinomial(probs=torch.tensor([1., 1., 1., 1.])).log_prob(x)
+        tensor([-4.1338])
 
     Args:
         total_count (int): number of trials

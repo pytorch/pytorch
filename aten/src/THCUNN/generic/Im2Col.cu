@@ -19,8 +19,8 @@ static inline void THNN_(Im2Col_shapeCheck)(
              "stride should be greater than zero, but got sH: %d sW: %d", sH, sW);
 
   int ndim = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
-                  "3D or 4D input tensor expected but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+                "Expected non-empty 3D or 4D input tensor, but got input of shape %s");
 
   int dim_batch = 0;
   if (ndim == 3) {
@@ -31,13 +31,14 @@ static inline void THNN_(Im2Col_shapeCheck)(
   int inputWidth   = THCTensor_(size)(state, input, dim_batch + 3);
   int outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
   int outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
-  int nOutputPlane = nInputPlane * kW * kH;
-  int outputLength = outputHeight * outputWidth;
 
-  if (outputWidth < 1 || outputHeight < 1) {
-    THError("Given input size: (%d x %d x %d). "
-            "Calculated output size: (%d x %d). Output size is too small",
-            nInputPlane, inputHeight, inputWidth, nOutputPlane, outputLength);
+  if (outputHeight < 1 || outputWidth < 1) {
+    THError("Given input with spatial size (%d, %d), kernel_size=(%d, %d), "
+            "dilation=(%d, %d), padding=(%d, %d), calculated "
+            "shape of the array of sliding blocks as (%d, %d), which is "
+            "too small (non-positive).",
+            inputHeight, inputHeight, kH, kW, dH, dW, padH, padW,
+            outputHeight, outputWidth);
   }
 }
 
@@ -56,7 +57,7 @@ void THNN_(Im2Col_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   bool batched_input = true;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     batched_input = false;
     THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
   }

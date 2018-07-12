@@ -24,6 +24,7 @@
 #include "caffe2/core/operator.h"
 #include "caffe2/utils/string_utils.h"
 
+using std::map;
 using std::shared_ptr;
 using std::string;
 using std::vector;
@@ -73,10 +74,15 @@ void setOperatorEngine(caffe2::NetDef*, const string&);
 void loadInput(
     shared_ptr<caffe2::Workspace>,
     const bool,
+    map<string, caffe2::TensorProtos>&,
     const string&,
     const string&,
     const string&,
     const string&);
+void fillInputBlob(
+    shared_ptr<caffe2::Workspace>,
+    map<string, caffe2::TensorProtos>&,
+    int iteration);
 void writeOutput(
     shared_ptr<caffe2::Workspace>,
     const bool,
@@ -86,6 +92,8 @@ void writeOutput(
 void runNetwork(
     shared_ptr<caffe2::Workspace>,
     caffe2::NetDef&,
+    map<string, caffe2::TensorProtos>&,
+    const bool,
     const bool,
     const int,
     const int);

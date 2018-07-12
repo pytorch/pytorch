@@ -1,5 +1,5 @@
-#include "StoreTestCommon.hpp"
 #include "FileStore.hpp"
+#include "StoreTestCommon.hpp"
 
 #include <unistd.h>
 #include <iostream>
@@ -53,13 +53,13 @@ int main(int argc, char** argv) {
   c10d::test::Semaphore sem1, sem2;
   for (auto i = 0; i < numThreads; i++) {
     threads.push_back(std::move(std::thread([&] {
-            c10d::FileStore store(path);
-            sem1.post();
-            sem2.wait();
-            for (auto j = 0; j < numIterations; j++) {
-              store.add("counter", 1);
-            }
-          })));
+      c10d::FileStore store(path);
+      sem1.post();
+      sem2.wait();
+      for (auto j = 0; j < numIterations; j++) {
+        store.add("counter", 1);
+      }
+    })));
   }
   sem1.wait(numThreads);
   sem2.post(numThreads);

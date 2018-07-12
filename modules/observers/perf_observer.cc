@@ -73,17 +73,34 @@ void PerfNetObserver::Stop() {
     return;
   }
   auto currentRunTime = timer_.MilliSeconds();
-  std::map<std::string, double> delays;
-  delays.insert({"NET_DELAY", currentRunTime});
+  std::map<std::string, PerformanceInformation> info;
+  PerformanceInformation net_perf;
+  net_perf.latency = currentRunTime;
   if (logType_ == PerfNetObserver::OPERATOR_DELAY) {
     const auto& operators = subject_->GetOperators();
     for (int idx = 0; idx < operators.size(); ++idx) {
       const auto* op = operators[idx];
       auto name = getObserverName(op, idx);
-      double delay = static_cast<const PerfOperatorObserver*>(observerMap_[op])
-                         ->getMilliseconds();
-      delays.insert({name, delay});
+      PerformanceInformation p;
+
+      p.latency = static_cast<const PerfOperatorObserver*>(observerMap_[op])
+                      ->getMilliseconds();
+
+      p.engine = op->engine();
+      p.type = op->type();
+      p.tensor_shapes =
+          static_cast<const PerfOperatorObserver*>(observerMap_[op])
+              ->getTensorShapes();
+
+      if (op->has_debug_def()) {
+        for (auto arg : op->debug_def().arg()) {
+          p.args.emplace_back(arg);
+        }
+      }
+
+      info.insert({name, p});
     }
+
     /* clear all operator delay after use so that we don't spent time
        collecting the operator delay info in later runs */
     for (auto* op : operators) {
@@ -91,7 +108,8 @@ void PerfNetObserver::Stop() {
     }
     observerMap_.clear();
   }
-  ObserverConfig::getReporter()->reportDelay(subject_, delays, "ms");
+  info.insert({"NET_DELAY", net_perf});
+  ObserverConfig::getReporter()->report(subject_, info);
 }
 
 caffe2::string PerfNetObserver::getObserverName(const OperatorBase* op, int idx)
@@ -132,10 +150,15 @@ void PerfOperatorObserver::Stop() {
   /* Time from the start of the net minus the time spent on all other
      operators is the time spent on this operator */
   milliseconds_ = netObserver_->getTimer().MilliSeconds() - milliseconds_;
+  tensor_shapes_ = subject_->InputTensorShapes();
 }
 
 double PerfOperatorObserver::getMilliseconds() const {
   return milliseconds_;
+}
+
+std::vector<TensorShape> PerfOperatorObserver::getTensorShapes() const {
+  return tensor_shapes_;
 }
 
 } // namespace caffe2

@@ -1,7 +1,10 @@
 #include "caffe2/core/predictor.h"
+#ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
+#endif
 
 #include <unordered_set>
+#include "caffe2/core/init.h"
 
 namespace caffe2 {
 
@@ -89,9 +92,20 @@ Predictor::Predictor(
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   }
+#if CAFFE2_MOBILE
+  GlobalInit();
+#endif
 
   if (optimization) {
-    run_net_ = opt::optimize(run_net_, &ws_, optimization);
+#ifdef CAFFE2_OPTIMIZER
+    try {
+      run_net_ = opt::optimize(run_net_, &ws_, optimization);
+    } catch (const std::exception& e) {
+      LOG(WARNING) << "Optimization pass failed: " << e.what();
+    }
+#else
+    LOG(WARNING) << "Caffe2 is compiled without optimization passes.";
+#endif
   }
 
   // real model inputs can be fed later in run* functions
@@ -109,8 +123,8 @@ Predictor::Predictor(
 }
 
 bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
-  CAFFE_ENFORCE(inputs.size() <= run_net_.external_input_size());
-  for (auto i = 0; i < inputs.size(); ++i) {
+  CAFFE_ENFORCE(inputs.size() <= (unsigned)run_net_.external_input_size());
+  for (size_t i = 0; i < inputs.size(); ++i) {
     shareInputTensor(&ws_, run_net_.external_input(i), inputs[i]);
   }
 
@@ -119,7 +133,7 @@ bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
   }
 
   outputs->resize(run_net_.external_output_size());
-  for (auto i = 0; i < outputs->size(); ++i) {
+  for (size_t i = 0; i < outputs->size(); ++i) {
     (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
   }
   return true;
@@ -145,7 +159,7 @@ bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
   }
 
   outputs->resize(run_net_.external_output_size());
-  for (auto i = 0; i < outputs->size(); ++i) {
+  for (size_t i = 0; i < outputs->size(); ++i) {
     (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
   }
   return true;

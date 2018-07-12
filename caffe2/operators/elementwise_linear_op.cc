@@ -88,18 +88,81 @@ OPERATOR_SCHEMA(ElementwiseLinear)
     .NumInputs(3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-Given inputs X of size (N x D), w of size D and b of size D,
-the op computes Y of size (N X D) where Y_{nd} = X_{nd} * w_d + b_d
+This op computes the elementwise linear combination of a batch of input vectors with a weight vector and bias vector. As input, the op takes an input tensor $X$ of shape $NxD$, a weight vector $w$ of length $D$, and a bias vector $b$ of length $D$. Here, $N$ represents the batch size and $D$ represents the length of the feature vectors. The output, $Y$, is a tensor of shape $NxD$ and is calculated as
+
+$$Y_{ij} = X_{ij}w_j + b_j \ for \ i\in{N}, j\in{D}$$
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_linear_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/elementwise_linear_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ElementwiseLinear",
+    ["X", "w", "b"],
+    ["Y"]
+)
+
+# Create X
+X = np.array([[1,2,3,4,5],[6,8,9,16,10]])
+print("X:\n",X)
+
+# Create w
+w = np.array([1,1/2.,1/3.,1/4.,1/5.])
+print("w:\n",w)
+
+# Create b
+b = np.array([1.,1.,1.,1.,1.])
+print("b:\n",b)
+
+
+# Feed X & w & b into workspace
+workspace.FeedBlob("X", X.astype(np.float32))
+workspace.FeedBlob("w", w.astype(np.float32))
+workspace.FeedBlob("b", b.astype(np.float32))
+
+# Run op
+workspace.RunOperatorOnce(op)
+
+# Collect Output
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[ 1  2  3  4  5]
+ [ 6  8  9 16 10]]
+w:
+ [1.  0.5  0.33333333 0.25  0.2]
+b:
+ [1. 1. 1. 1. 1.]
+Y:
+ [[2. 2. 2. 2. 2.]
+ [7. 5. 4. 5. 3.]]
+
+```
+
+</details>
+
   )DOC")
-    .Input(0, "X", "2D input tensor of size (N X D) data")
-    .Input(1, "w", "1D scaling factors of size D")
-    .Input(2, "b", "1D biases of size D")
-    .Output(0, "Y", "2D output tensor")
-    .Arg(
-        "axis",
-        "default to 1; describes the axis of the inputs; "
-        "defaults to one because the 0th axis most likely describes "
-        "the batch_size");
+    .Input(0, "X", "2D input tensor of size $NxD$. This input represents the input data to be operated on.")
+    .Input(1, "w", "1D scaling factors, or weights, of size $D$. This input contains the weights that will be multiplied by the data.")
+    .Input(2, "b", "1D biases of size $D$. This input contains the biases that will be added to the products of the weights and data.")
+    .Output(0, "Y", "2D output tensor of size $NxD$. Calculated as described above.")
+    .Arg("axis", "*(type: int; default: 1)* Describes the axis of the inputs; defaults to one because the 0th axis most likely describes the batch size.");
 
 OPERATOR_SCHEMA(ElementwiseLinearGradient)
   .NumInputs(3)

@@ -230,27 +230,71 @@ OPERATOR_SCHEMA(LpPool)
     .NumInputs(1)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-LpPool consumes an input blob X and applies L-p pooling across the
-the blob according to kernel sizes, stride sizes, and pad lengths defined by the
-ConvPoolOpBase operator. L-p pooling consisting of taking the L-p norm of a
-subset of the input tensor according to the kernel size and downsampling the
-data into the output blob Y for further processing.
+`LpPool` consumes an input blob and applies max pooling across the the blob according to kernel sizes, stride sizes, pad lengths and dilation. $L_p$ pooling consists of taking the $L_p$ norm of a subset of the input tensor according to the kernel size and downsampling the data into the output blob for further processing.
+
+Pooling layers reduce the spatial dimensionality of the input blob. Each of the output blob's dimensions will reduce according to:
+
+$$dim_{out}=\frac{dim_{in}-kernel+2*pad}{stride}+1$$
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/lp_pool_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "LpPool",
+    ["X"],
+    ["Y"],
+    kernel=2,
+    stride=2,
+    p=2.0
+)
+
+workspace.FeedBlob("X", np.random.randn(1, 1, 6, 6).astype(np.float32)) # NCHW
+print("X:\n", workspace.FetchBlob("X"), "\n")
+workspace.RunOperatorOnce(op)
+print("Y:\n", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+ [[[[-1.1113514  -1.1173418  -0.1504435   0.1327146  -1.2221841  -0.5654315 ]
+   [-1.9209646  -0.04675794  0.8604731   1.2042469   0.28154245   0.38656202]
+   [-0.8772837  -0.03264008  0.26222762  0.28526652  0.321102    -2.5891325 ]
+   [-0.9248281   1.440776   -0.56832    -0.6017927   1.2262512   -2.1443934 ]
+   [ 0.5194415  -1.6858683   0.45221648  0.65029615 -0.8574544    0.8121054 ]
+   [ 0.25902653  0.4934758   0.49870652 -0.48134378 -0.9178449   -0.07626943]]]]
+
+Y:
+ [[[[2.4851248 1.49361   1.4290358]
+   [1.9240153 0.9139378 3.5928857]
+   [1.8500228 1.0525136 1.4976646]]]]
+
+```
+
+</details>
+
 )DOC")
-    .Input(
-        0,
-        "X",
-        "Input data tensor from the previous operator; dimensions "
-        "depend on whether the NCHW or NHWC operators are being used. For example, "
-        "in the former, the input has size (N x C x H x W), where N is the batch "
-        "size, C is the number of channels, and H and W are the height and the width "
-        "of the data. The corresponding permutation of dimensions is used in the "
-        "latter case. ")
-    .Output(
-        0,
-        "Y",
-        "Output data tensor from L-p pooling across the input "
-        "tensor. Dimensions will vary based on various kernel, stride, and pad "
-        "sizes.");
+    .Arg("p","(*float*): type of $L_p$ norm to use (default=2.0)")
+    .Arg("kernel","(*int*): the size of the window to take a max over")
+    .Arg("stride","(*int*): the stride of the window")
+    .Arg("pad","(*int*): implicit zero padding to be added on both sides")
+    .Arg("dilation","(*int*): parameter that controls the stride of elements in the window")
+    .Arg("order","(*string*): order of blob dimensions (default=\"NCHW\")")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
+    .Output(0, "Y", "(*Tensor`<float>`*): output tensor");
 
 OPERATOR_SCHEMA(LpPoolGradient).NumInputs(3).NumOutputs(1);
 

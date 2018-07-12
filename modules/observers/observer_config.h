@@ -2,6 +2,8 @@
 
 #include "observers/net_observer_reporter.h"
 
+#include "caffe2/core/common.h"
+
 namespace caffe2 {
 
 /*
@@ -24,7 +26,7 @@ namespace caffe2 {
       is multiples of o, log operator metrics instead. Then repeat
   skipIters_ == n: skip the first n iterations of the net.
 */
-class ObserverConfig {
+class CAFFE2_OBSERVER_API ObserverConfig {
  public:
   static void initSampleRate(
       int netInitSampleRate,

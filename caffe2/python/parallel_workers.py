@@ -60,15 +60,16 @@ def init_workers(
 
     metrics = Metrics(external_loggers)
 
-    # Create coordinator object
-    coordinator = WorkerCoordinator(
-        worker_name, init_fun, shutdown_fun=shutdown_fun)
-
-    # Launch fetch worker threads
     worker_ids = [
         global_coordinator.get_new_worker_id()
         for i in range(num_worker_threads)
     ]
+
+    # Create coordinator object
+    coordinator = WorkerCoordinator(
+        worker_name, worker_ids, init_fun, shutdown_fun=shutdown_fun)
+
+    # Launch fetch worker threads
     workers = [
         threading.Thread(
             target=run_worker,
@@ -125,11 +126,15 @@ class State():
 
 
 class WorkerCoordinator(object):
-    def __init__(self, worker_name, init_fun, state=None, shutdown_fun=None):
+    def __init__(
+        self, worker_name, worker_ids, init_fun,
+        state=None, shutdown_fun=None
+    ):
         self._active = True
         self._started = False
         self._workers = []
         self._worker_name = worker_name
+        self._worker_ids = worker_ids
         self._init_fun = init_fun
         self._state = state
         self._shutdown_fun = shutdown_fun
@@ -182,6 +187,9 @@ class WorkerCoordinator(object):
 
         print("All workers terminated: {}".format(success))
         return success
+
+    def get_worker_ids(self):
+        return self._worker_ids
 
 
 class GlobalWorkerCoordinator(object):

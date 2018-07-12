@@ -28,7 +28,7 @@ __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
                                        THCTensor *src, int dimension,
                                        real init, BinaryOp binary_op)
 {
-  unsigned ndim = THCTensor_(nDimension)(state, src);
+  unsigned ndim = THCTensor_(_nDimension)(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
   for (int dim = 0; dim < dimension; dim++) {
@@ -57,7 +57,7 @@ __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
                                            THCTensor *src, real init,
                                            BinaryFunction binary_op)
 {
-  unsigned ndim = THCTensor_(nDimension)(state, src);
+  unsigned ndim = THCTensor_(_nDimension)(state, src);
   // Treat all outer dimensions as a single dimension.
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
@@ -79,7 +79,7 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
                          int dimension, real init, BinaryFunction binary_op)
 {
   // "init" must be the identity element for binary_op
-  int ndim = THCTensor_(nDimension)(state, src);
+  int ndim = THCTensor_(_nDimension)(state, src);
   THArgCheck(dimension >= 0 && dimension < ndim, 3, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 

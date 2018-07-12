@@ -19,10 +19,14 @@
 #include "torch/csrc/utils/tensor_new.h"
 #include "torch/csrc/utils/tensor_types.h"
 
+#include <ATen/ATen.h>
+
 #include <sstream>
+#include <string>
+#include <type_traits>
 #include <vector>
 
-namespace torch { namespace tensor {
+namespace torch { namespace tensors {
 
 using namespace at;
 using namespace torch::autograd;
@@ -108,10 +112,10 @@ PyObject *Tensor_is_cuda(PyTensorType* self) {
 }
 
 PyObject *Tensor_is_sparse(PyTensorType *self) {
-  if (!self->layout->is_strided) {
-    Py_RETURN_TRUE;
-  } else {
+  if (self->layout->layout == at::Layout::Strided) {
     Py_RETURN_FALSE;
+  } else {
+    Py_RETURN_TRUE;
   }
 }
 
@@ -344,7 +348,7 @@ void py_set_default_dtype(PyObject* obj) {
   if (THPDtype_Check(obj)) {
     auto &current_default = get_default_tensor_type();
     type = &get_tensor_type((THPDtype*)obj, torch::getLayout(current_default.backend()),
-                            torch::getDeviceType(current_default) == DeviceType::CUDA);
+                            torch::getDeviceType(current_default) == at::Device::Type::CUDA);
   } else {
     throw TypeError("invalid type object");
   }
@@ -359,7 +363,7 @@ void set_default_tensor_type(const at::Type& type) {
   if (!at::isFloatingType(type.scalarType())) {
     throw TypeError("only floating-point types are supported as the default type");
   }
-  if (!type.is_variable_or_undefined()) {
+  if (!type.is_variable() && !type.is_undefined()) {
     throw TypeError("only variable types are supported");
   }
   if (type.is_sparse()) {
@@ -384,4 +388,10 @@ at::Type& get_default_tensor_type() {
   return *default_tensor_type;
 }
 
-}} // namespace torch::tensor
+Device getDevice(const at::Tensor& tensor) {
+  if (tensor.type().is_cuda()) {
+    return at::Device(at::kCUDA, tensor.get_device());
+  }
+  return at::Device(at::kCPU);
+}
+}} // namespace torch::tensors

@@ -1,5 +1,7 @@
 """Adds docstrings to functions defined in the torch._C"""
 
+import re
+
 import torch._C
 from torch._C import _add_docstr as add_docstr
 
@@ -14,20 +16,27 @@ def parse_kwargs(desc):
         'weight (Tensor): a weight tensor\n        Some optional description'
     }
     """
-    # Split by indents. Assumes each arg starts on a new line with 4 spaces.
-    kwargs = [section.strip() for section in desc.split('\n   ')]
+    # Split on exactly 4 spaces after a newline
+    regx = re.compile("\n\s{4}(?!\s)")
+    kwargs = [section.strip() for section in regx.split(desc)]
     kwargs = [section for section in kwargs if len(section) > 0]
     return {desc.split(' ')[0]: desc for desc in kwargs}
 
 
+reduceops_common_args = parse_kwargs("""
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        If specified, the input tensor is casted to :attr:`dtype` before the operation
+        is performed. This is useful for preventing data type overflows. Default: None.
+""")
+
 factory_common_args = parse_kwargs("""
     out (Tensor, optional): the output tensor
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, uses a global default (see :func:`torch.set_default_tensor_type`)
+        Default: if ``None``, uses a global default (see :func:`torch.set_default_tensor_type`).
     layout (:class:`torch.layout`, optional): the desired layout of returned Tensor.
         Default: ``torch.strided``.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
+        Default: if ``None``, uses the current device for the default tensor type
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
@@ -37,11 +46,11 @@ factory_common_args = parse_kwargs("""
 factory_like_common_args = parse_kwargs("""
     input (Tensor): the size of :attr:`input` will determine size of the output tensor
     layout (:class:`torch.layout`, optional): the desired layout of returned tensor.
-        Default: if None, defaults to the layout of :attr:`input`.
+        Default: if ``None``, defaults to the layout of :attr:`input`.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned Tensor.
-        Default: if None, defaults to the dtype of :attr:`input`.
+        Default: if ``None``, defaults to the dtype of :attr:`input`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, defaults to the device of :attr:`input`.
+        Default: if ``None``, defaults to the device of :attr:`input`.
     requires_grad (bool, optional): If autograd should record operations on the
         returned tensor. Default: ``False``.
 """)
@@ -50,9 +59,9 @@ factory_data_common_args = parse_kwargs("""
     data (array_like): Initial data for the tensor. Can be a list, tuple,
         NumPy ``ndarray``, scalar, and other types.
     dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
-        Default: if None, infers data type from :attr:`data`.
+        Default: if ``None``, infers data type from :attr:`data`.
     device (:class:`torch.device`, optional): the desired device of returned tensor.
-        Default: if None, uses the current device for the default tensor type
+        Default: if ``None``, uses the current device for the default tensor type
         (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
         for CPU tensor types and the current CUDA device for CUDA tensor types.
     requires_grad (bool, optional): If autograd should record operations on the
@@ -588,6 +597,42 @@ Example::
             [ 0.,  0.,  0.]])
 """)
 
+add_docstr(torch.bincount,
+           r"""
+bincount(self, weights=None, minlength=0) -> Tensor
+
+Count the frequency of each value in an array of non-negative ints.
+
+The number of bins (size 1) is one larger than the largest value in
+:attr:`input`. If :attr:`minlength` is specified, the number of bins is at least
+:attr:`minlength`. If ``n`` is the value at position ``i``,
+:math:`out[n] += weights[i]` if :attr:`weights` is specified else
+:math:`out[n] += 1`.
+
+Arguments:
+    input (Tensor): 1-d int tensor
+    weights (Tensor): optional, weight for each value in the input tensor.
+        Should be of same size as input tensor.
+    minlength (int): optional, min number of bins. Should be non-negative.
+
+Shape:
+    output (Tensor): ``Size([max(input) + 1])``
+
+Example::
+
+    >>> input = torch.randint(0, 8, (5,), dtype=torch.int64)
+    >>> weights = torch.linspace(0, 1, steps=5)
+    >>> input, weights
+    (tensor([4, 3, 6, 3, 4]),
+     tensor([ 0.0000,  0.2500,  0.5000,  0.7500,  1.0000])
+
+    >>> torch.bincount(input)
+    tensor([0, 0, 0, 2, 2, 0, 1])
+
+    >>> input.bincount(weights)
+    tensor([0.0000, 0.0000, 0.0000, 1.0000, 1.0000, 0.0000, 0.5000])
+""")
+
 add_docstr(torch.bmm,
            r"""
 bmm(batch1, batch2, out=None) -> Tensor
@@ -902,7 +947,7 @@ Example::
 
 add_docstr(torch.cumprod,
            r"""
-cumprod(input, dim, out=None) -> Tensor
+cumprod(input, dim, dtype=None) -> Tensor
 
 Returns the cumulative product of elements of :attr:`input` in the dimension
 :attr:`dim`.
@@ -916,7 +961,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -932,7 +977,7 @@ Example::
     >>> torch.cumprod(a, dim=0)
     tensor([ 0.6001,  0.1241, -0.0238, -0.0233, -0.0157, -0.0000, -0.0000,
              0.0000, -0.0000, -0.0000])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.cumsum,
            r"""
@@ -950,7 +995,7 @@ a vector of size N, with elements.
 Args:
     input (Tensor): the input tensor
     dim  (int): the dimension to do the operation over
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -961,7 +1006,7 @@ Example::
     >>> torch.cumsum(a, dim=0)
     tensor([-0.8286, -1.3175, -0.8020,  0.0423,  0.2289,  0.0537, -2.0058,
             -1.8209, -2.9780, -3.4022])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.diag,
            r"""
@@ -1323,7 +1368,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor. Must be a `ByteTensor` or the same type as `input`.
+    out (Tensor, optional): the output tensor. Must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1546,6 +1591,30 @@ Example::
     array([-1,  2,  3])
 """)
 
+add_docstr(torch.flatten,
+           r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+Flattens a contiguous range of dims in a tensor.
+
+Args:
+    input (Tensor): the input tensor
+    start_dim (int): the first dim to flatten
+    end_dim (int): the last dim to flatten
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+                           [3, 4]],
+                          [[5, 6],
+                           [7, 8]]])
+    >>> torch.flatten(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+    >>> torch.flatten(t, start_dim=1)
+    tensor([[1, 2, 3, 4],
+            [5, 6, 7, 8]])
+""")
+
 add_docstr(torch.gather,
            r"""
 gather(input, dim, index, out=None) -> Tensor
@@ -1590,7 +1659,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1816,7 +1885,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1977,7 +2046,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -2189,7 +2258,8 @@ stabilized.
 
 For summation index :math:`j` given by `dim` and other indices :math:`i`, the result is
 
-           :math:`\text{logsumexp}(x)_{i} = \log \sum_j \exp(x_ij).`
+    .. math::
+        \text{logsumexp}(x)_{i} = \log \sum_j \exp(x_{ij})
 
 If :attr:`keepdim` is ``True``, the output tensor is of the same size
 as :attr:`input` except in the dimension :attr:`dim` where it is of size 1.
@@ -2221,7 +2291,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A `torch.ByteTensor` containing a 1 at each location where comparison is true
@@ -2715,7 +2785,8 @@ of tensor :attr:`input`.
 
 .. note::
     The rows of :attr:`input` do not need to sum to one (in which case we use
-    the values as weights), but must be non-negative and have a non-zero sum.
+    the values as weights), but must be non-negative, finite and have
+    a non-zero sum.
 
 Indices are ordered from left to right according to when each was sampled
 (first samples are placed in first column).
@@ -2785,7 +2856,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as `input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
@@ -3289,12 +3360,13 @@ Example::
 
 add_docstr(torch.prod,
            r"""
-.. function:: prod(input) -> Tensor
+.. function:: prod(input, dtype=None) -> Tensor
 
 Returns the product of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -3304,7 +3376,7 @@ Example::
     >>> torch.prod(a)
     tensor(0.6902)
 
-.. function:: prod(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: prod(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the product of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`.
@@ -3318,7 +3390,7 @@ Args:
     input (Tensor): the input tensor
     dim (int): the dimension to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -3330,7 +3402,7 @@ Example::
             [ 1.1131, -1.0629]])
     >>> torch.prod(a, 1)
     tensor([-0.2018, -0.2962, -0.0821, -1.1831])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.pstrf, r"""
 pstrf(a, upper=True, out=None) -> (Tensor, Tensor)
@@ -3491,9 +3563,9 @@ Example::
     tensor([ 4.,  3.,  4.])
 
 
-    >>> torch.randint(3, 10, (2,2), dtype=torch.long)
-    tensor([[ 8,  3],
-            [ 3,  9]])
+    >>> torch.randint(10, (2,2))
+    tensor([[ 0.,  2.],
+            [ 5.,  5.]])
 
 
     >>> torch.randint(3, 10, (2,2))
@@ -4011,6 +4083,68 @@ Example::
             [ 1,  2,  2,  0]])
 """)
 
+add_docstr(torch.sparse_coo_tensor,
+           r"""
+sparse_coo_tensor(indices, values, size=None, dtype=None, device=None, requires_grad=False) -> Tensor
+
+Constructs a sparse_coo_tensor with non-zero elements at the given :attr:`indices` with the given
+:attr:`values`.
+
+Args:
+    indices (array_like): Initial data for the tensor. Can be a list, tuple,
+        NumPy ``ndarray``, scalar, and other types. Will be cast to a :class:`torch.LongTensor`
+        internally. The indices are the coordinates of the non-zero values in the matrix, and thus
+        should be two-dimensional where the first dimension is the number of tensor dimensions and
+        the second dimension is the number of non-zero values.
+    values (array_like): Initial values for the tensor. Can be a list, tuple,
+        NumPy ``ndarray``, scalar, and other types.
+    size (list, tuple, or :class:`torch.Size`, optional): Size of the sparse tensor. If not
+        provided the size will be inferred as the minimum size big enough to hold all non-zero
+        elements.
+    dtype (:class:`torch.dtype`, optional): the desired data type of returned tensor.
+        Default: if None, infers data type from :attr:`values`.
+    device (:class:`torch.device`, optional): the desired device of returned tensor.
+        Default: if None, uses the current device for the default tensor type
+        (see :func:`torch.set_default_tensor_type`). :attr:`device` will be the CPU
+        for CPU tensor types and the current CUDA device for CUDA tensor types.
+    requires_grad (bool, optional): If autograd should record operations on the
+        returned tensor. Default: ``False``.
+
+
+Example::
+
+    >>> i = torch.LongTensor([[0, 1, 1],
+                              [2, 0, 2]])
+    >>> v = torch.FloatTensor([3, 4, 5])
+    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]))
+    torch.sparse.FloatTensor of size (2,4) with indices:
+    tensor([[ 0,  1,  1],
+            [ 2,  0,  2]])
+    and values:
+    tensor([ 3.,  4.,  5.])
+
+    >>> torch.sparse_coo_tensor(i, v)  # Shape inference
+    torch.sparse.FloatTensor of size (2,3) with indices:
+    tensor([[ 0,  1,  1],
+            [ 2,  0,  2]])
+    and values:
+    tensor([ 3.,  4.,  5.])
+
+    >>> torch.sparse_coo_tensor(i, v, torch.Size([2,4]), dtype=torch.float64,
+                                device=torch.device('cuda:0'))
+    torch.cuda.sparse.DoubleTensor of size (2,4) with indices:
+    tensor([[ 0,  1,  1],
+            [ 2,  0,  2]], device='cuda:0')
+    and values:
+    tensor([ 3.,  4.,  5.], dtype=torch.float64, device='cuda:0')
+
+    >>> torch.sparse_coo_tensor([], [], torch.Size([])) # Create an empty tensor (of size (0,))
+    torch.sparse.FloatTensor of size () with indices:
+    tensor([], dtype=torch.int64)
+    and values:
+    tensor([])
+""")
+
 add_docstr(torch.sqrt,
            r"""
 sqrt(input, out=None) -> Tensor
@@ -4131,12 +4265,13 @@ Example::
 
 add_docstr(torch.sum,
            r"""
-.. function:: sum(input) -> Tensor
+.. function:: sum(input, dtype=None) -> Tensor
 
 Returns the sum of all elements in the :attr:`input` tensor.
 
 Args:
     input (Tensor): the input tensor
+    {dtype}
 
 Example::
 
@@ -4146,7 +4281,7 @@ Example::
     >>> torch.sum(a)
     tensor(-0.5475)
 
-.. function:: sum(input, dim, keepdim=False, out=None) -> Tensor
+.. function:: sum(input, dim, keepdim=False, dtype=None) -> Tensor
 
 Returns the sum of each row of the :attr:`input` tensor in the given
 dimension :attr:`dim`. If :attr::`dim` is a list of dimensions,
@@ -4161,7 +4296,7 @@ Args:
     input (Tensor): the input tensor
     dim (int or tuple of ints): the dimension or dimensions to reduce
     keepdim (bool): whether the output tensor has :attr:`dim` retained or not
-    out (Tensor, optional): the output tensor
+    {dtype}
 
 Example::
 
@@ -4176,7 +4311,7 @@ Example::
     >>> b = torch.arange(4 * 5 * 6).view(4, 5, 6)
     >>> torch.sum(b, (2, 1))
     tensor([  435.,  1335.,  2235.,  3135.])
-""")
+""".format(**reduceops_common_args))
 
 add_docstr(torch.svd,
            r"""
@@ -4297,7 +4432,7 @@ Examples::
 
 add_docstr(torch.t,
            r"""
-t(input, out=None) -> Tensor
+t(input) -> Tensor
 
 Expects :attr:`input` to be a matrix (2-D tensor) and transposes dimensions 0
 and 1.
@@ -4306,7 +4441,6 @@ Can be seen as a short-hand function for :meth:`transpose(input, 0, 1)`
 
 Args:
     input (Tensor): the input tensor
-    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -4318,6 +4452,33 @@ Example::
     tensor([[ 0.4875,  0.3938],
             [ 0.9158, -0.6929],
             [-0.5872,  0.6932]])
+""")
+
+add_docstr(torch.flip,
+           r"""
+flip(input, dims) -> Tensor
+
+Reverse the order of a n-D tensor along given axis in dims.
+
+Args:
+    input (Tensor): the input tensor
+    dims (a list or tuple): axis to flip on
+
+Example::
+
+    >>> x = torch.arange(8).view(2, 2, 2)
+    >>> x
+    tensor([[[ 0,  1],
+             [ 2,  3]],
+
+            [[ 4,  5],
+             [ 6,  7]]])
+    >>> torch.flip(x, [0, 1])
+    tensor([[[ 6,  7],
+             [ 4,  5]],
+
+            [[ 2,  3],
+             [ 0,  1]]])
 """)
 
 add_docstr(torch.take,
@@ -4441,7 +4602,7 @@ Example::
 
 add_docstr(torch.transpose,
            r"""
-transpose(input, dim0, dim1, out=None) -> Tensor
+transpose(input, dim0, dim1) -> Tensor
 
 Returns a tensor that is a transposed version of :attr:`input`.
 The given dimensions :attr:`dim0` and :attr:`dim1` are swapped.
@@ -4454,7 +4615,6 @@ Args:
     input (Tensor): the input tensor
     dim0 (int): the first dimension to be transposed
     dim1 (int): the second dimension to be transposed
-    out (Tensor, optional): the output tensor
 
 Example::
 
@@ -4592,8 +4752,6 @@ and multiple right-hand sides `b`.
 In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
 with the default keyword arguments.
 
-This method is NOT implemented for CUDA tensors.
-
 Args:
     A (Tensor): the input triangular coefficient matrix
     b (Tensor): multiple right-hand sides. Each column of `b` is a
@@ -4662,9 +4820,9 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A negative `dim` value within the range
-[-:attr:`input.dim()`, :attr:`input.dim()`) can be used and
-will correspond to :meth:`unsqueeze` applied at :attr:`dim` = :attr:`dim + input.dim() + 1`
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
+can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
+applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
 Args:
     input (Tensor): the input tensor
@@ -5104,6 +5262,52 @@ Example::
     (tensor(-1.), tensor(1.5731))
 """)
 
+add_docstr(torch.pinverse,
+           r"""
+pinverse(input, rcond=1e-15) -> Tensor
+
+Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
+Please look at `Moore-Penrose inverse`_ for more details
+
+.. note::
+    This method is implemented using the Singular Value Decomposition.
+
+.. note::
+    The pseudo-inverse is not necessarily a continuous function in the elements of the matrix `[1]`_.
+    Therefore, derivatives are not always existent, and exist for a constant rank only `[2]`_.
+    However, this method is backprop-able due to the implementation by using SVD results, and
+    could be unstable. Double-backward will also be unstable due to the usage of SVD internally.
+    See :meth:`~torch.svd` for more details.
+
+Arguments:
+    input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
+    rcond (float): A floating point value to determine the cutoff for small singular values.
+                   Default: 1e-15
+
+Returns:
+    The pseudo-inverse of :attr:`input` of dimensions :math:`n \times m`
+
+Example::
+
+    >>> input = torch.randn(3, 5)
+    >>> input
+    tensor([[ 0.5495,  0.0979, -1.4092, -0.1128,  0.4132],
+            [-1.1143, -0.3662,  0.3042,  1.6374, -0.9294],
+            [-0.3269, -0.5745, -0.0382, -0.5922, -0.6759]])
+    >>> torch.pinverse(input)
+    tensor([[ 0.0600, -0.1933, -0.2090],
+            [-0.0903, -0.0817, -0.4752],
+            [-0.7124, -0.1631, -0.2272],
+            [ 0.1356,  0.3933, -0.5023],
+            [-0.0308, -0.1725, -0.5216]])
+
+.. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
+
+.. _[1]: https://epubs.siam.org/doi/10.1137/0117004
+
+.. _[2]: https://www.jstor.org/stable/2156365
+""")
+
 add_docstr(torch.fft,
            r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
@@ -5134,8 +5338,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.ifft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5223,8 +5438,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.fft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5301,8 +5527,19 @@ of :attr:`input`, but instead the last dimension will be halfed as of size
 
 The inverse of this function is :func:`~torch.irfft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5371,8 +5608,19 @@ The inverse of this function is :func:`~torch.rfft`.
     Jacobian with point perturbations, :func:`~torch.irfft` will almost
     certainly fail the check.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5415,4 +5663,225 @@ Example::
             [-2.0329,  1.1031,  0.6869, -0.5042,  0.9895],
             [-0.1884,  0.2858, -1.5831,  0.9917, -0.8356]])
 
+""")
+
+
+add_docstr(torch.hann_window,
+           """
+hann_window(window_length, periodic=True, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Hann window function.
+
+.. math::
+    w[n] = \frac{1}{2}\ \left[1 - \cos \left( \frac{2 \pi n}{N - 1} \right)\right] =
+            \sin^2 \left( \frac{\pi n}{N - 1} \right),
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.hann_window(L, periodic=True)`` equal to
+``torch.hann_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.hamming_window,
+           """
+hamming_window(window_length, periodic=True, alpha=0.54, beta=0.46, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Hamming window function.
+
+.. math::
+    w[n] = \alpha - \beta\ \cos \left( \frac{2 \pi n}{N - 1} \right),
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.hamming_window(L, periodic=True)`` equal to
+``torch.hamming_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+
+.. note::
+    This is a generalized version of :meth:`torch.hann_window`.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.bartlett_window,
+           """
+bartlett_window(window_length, periodic=True, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Bartlett window function.
+
+.. math::
+    w[n] = 1 - \left| \frac{2n}{N-1} - 1 \right| = \begin{cases}
+        \frac{2n}{N - 1} & \text{if } 0 \leq n \leq \frac{N - 1}{2} \\
+        2 - \frac{2n}{N - 1} & \text{if } \frac{N - 1}{2} < n < N \\
+    \end{cases},
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.bartlett_window(L, periodic=True)`` equal to
+``torch.bartlett_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.blackman_window,
+           """
+blackman_window(window_length, periodic=True, dtype=None, \
+layout=torch.strided, device=None, requires_grad=False) -> Tensor
+""" + r"""
+Blackman window function.
+
+.. math::
+    w[n] = 0.42 - 0.5 \cos \left( \frac{2 \pi n}{N - 1} \right) + 0.08 \cos \left( \frac{4 \pi n}{N - 1} \right)
+
+where :math:`N` is the full window size.
+
+The input :attr:`window_length` is a positive integer controlling the
+returned window size. :attr:`periodic` flag determines whether the returned
+window trims off the last duplicate value from the symmetric window and is
+ready to be used as a periodic window with functions like
+:meth:`torch.stft`. Therefore, if :attr:`periodic` is true, the :math:`N` in
+above formula is in fact :math:`\text{window_length} + 1`. Also, we always have
+``torch.blackman_window(L, periodic=True)`` equal to
+``torch.blackman_window(L + 1, periodic=False)[:-1])``.
+
+.. note::
+    If :attr:`window_length` :math:`=1`, the returned window contains a single value 1.
+""" + r"""
+Arguments:
+    window_length (int): the size of returned window
+    periodic (bool, optional): If True, returns a window to be used as periodic
+        function. If False, return a symmetric window.
+    {dtype} Only floating point types are supported.
+    layout (:class:`torch.layout`, optional): the desired layout of returned window tensor. Only
+          ``torch.strided`` (dense layout) is supported.
+    {device}
+    {requires_grad}
+
+Returns:
+    Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
+
+""".format(**factory_common_args))
+
+
+add_docstr(torch.unbind,
+           r"""
+unbind(tensor, dim=0) -> seq
+
+Removes a tensor dimension.
+
+Returns a tuple of all slices along a given dimension, already without it.
+
+Arguments:
+    tensor (Tensor): the tensor to unbind
+    dim (int): dimension to remove
+
+Example::
+
+    >>> torch.unbind(torch.tensor([[1, 2, 3],
+    >>>                            [4, 5, 6],
+    >>>                            [7, 8, 9]]))
+    (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
+""")
+
+
+add_docstr(torch.meshgrid,
+           r"""
+meshgrid(seq) -> seq
+
+Take a sequence of :math:`N` tensors, each of which can be either scalar or 1-dimensional
+vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
+expanding the :math:`i`th input over dimensions defined by other inputs.
+
+Arguments:
+    seq (sequence of Tensors): sequence of scalars or 1 dimensional tensors. Scalars will be
+        treated as tensors of size :math:`(1,)` automatically.
+
+Returns:
+    seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([4, 5, 6])
+    >>> grid_x, grid_y = torch.meshgrid([x, y])
+    >>> grid_x
+    tensor([[1, 1, 1],
+            [2, 2, 2],
+            [3, 3, 3]])
+    >>> grid_y
+    tensor([[4, 5, 6],
+            [4, 5, 6],
+            [4, 5, 6]])
 """)

@@ -5,7 +5,12 @@ graph {
   node {
     input: "0"
     output: "1"
-    op_type: "Mean"
+    op_type: "ReduceMean"
+    attribute {
+      name: "keepdims"
+      i: 0
+      type: INT
+    }
   }
   name: "torch-jit-export"
   input {

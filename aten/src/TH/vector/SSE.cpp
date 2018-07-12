@@ -266,3 +266,38 @@ static void THFloatVector_divs_SSE(float *y, const float *x, const float c, cons
     y[i] = x[i] / c;
   }
 }
+
+static void THFloatVector_cvtFromInt_SSE(float *y, const int *x, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m128i YMM0, YMM1;
+  __m128 YMM2, YMM3;
+  for (i=0; i<=((n)-8); i+=8) {
+    YMM0 = _mm_loadu_si128((__m128i const*)(x+i));
+    YMM1 = _mm_loadu_si128((__m128i const*)(x+i+4));
+    YMM2 = _mm_cvtepi32_ps(YMM0);
+    YMM3 = _mm_cvtepi32_ps(YMM1);
+    _mm_storeu_ps(y+i, YMM2);
+    _mm_storeu_ps(y+i+4, YMM3);
+  }
+  for (; i<(n); i++) {
+    y[i] = (float)x[i];
+  }
+}
+
+static void THDoubleVector_cvtFromInt_SSE(double *y, const int *x, const ptrdiff_t n) {
+  ptrdiff_t i;
+  __m128i YMM0, YMM1;
+  __m128d YMM2, YMM3;
+  for (i=0; i<=((n)- 4); i+=4) {
+    YMM0 = _mm_loadu_si128((__m128i const*)(x+i));
+    YMM2 = _mm_cvtepi32_pd(YMM0);
+    YMM1 = _mm_srli_si128(YMM0, 8);
+    YMM3 = _mm_cvtepi32_pd(YMM1);
+    _mm_storeu_pd(y+i, YMM2);
+    _mm_storeu_pd(y+i+2, YMM3);
+  }
+  for (; i<(n); i++) {
+    y[i] = (double)x[i];
+  }
+}
+

@@ -121,10 +121,10 @@ Tensor bernoulli(const Tensor& self, double p, Generator* gen) {
   return native::bernoulli_(result, p, gen);
 }
 
-Tensor bernoulli(const Tensor& self, Generator* gen) {
+Tensor bernoulli(const Tensor& self) {
   Tensor result = self.type().tensor();
   result.resize_(self.sizes());
-  return native::bernoulli(result, self, gen);
+  return native::bernoulli(result, self, nullptr);
 }
 
 Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
@@ -145,22 +145,12 @@ Tensor& bernoulli_(Tensor& self, const Tensor& p_, Generator* gen) {
 }
 
 Tensor& bernoulli_(Tensor& self, double p, Generator* gen) {
-  if (!self.is_cuda()) {
-    AT_DISPATCH_ALL_TYPES(self.type(), "bernoulli_", [&] {
-      THGenerator* generator = get_generator(gen);
-      std::lock_guard<std::mutex> lock(generator->mutex);
-      CPU_tensor_apply1<scalar_t>(self, [generator, p](scalar_t& ret_val) {
-        ret_val = (scalar_t)THRandom_bernoulli(generator, p);
-      });
-    });
+    self._bernoulli_(p, gen);
     return self;
-  }
-  Tensor probs = self.type().toScalarType(kDouble).tensor({}).fill_(p);
-  return native::bernoulli_(self, probs, gen);
 }
 
-Tensor& bernoulli_(Tensor& self, Generator* gen) {
-  return native::bernoulli_(self, 0.5, gen);
+Tensor& bernoulli_(Tensor& self) {
+  return native::bernoulli_(self, 0.5, nullptr);
 }
 
 Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
@@ -180,7 +170,7 @@ Tensor _standard_gamma_grad_cpu(const Tensor& self, const Tensor& output) {
  */
 
 Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
-  Tensor ret = at::zeros(lambda.type(), lambda.sizes());
+  Tensor ret = at::zeros(lambda.sizes(), lambda.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "poisson", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);
@@ -194,7 +184,7 @@ Tensor _s_poisson_cpu(const Tensor& lambda, Generator *gen) {
 }
 
 Tensor _s_gamma_cpu(const Tensor& alpha, Generator *gen) {
-  Tensor ret = alpha.type().zeros(alpha.sizes());
+  Tensor ret = at::zeros(alpha.sizes(), alpha.type());
   AT_DISPATCH_FLOATING_TYPES(ret.type(), "gamma", [&] {
     THGenerator* generator = get_generator(gen);
     std::lock_guard<std::mutex> lock(generator->mutex);

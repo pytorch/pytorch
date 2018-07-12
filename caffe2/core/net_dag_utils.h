@@ -31,6 +31,7 @@ struct OperatorNode {
   vector<int> parents_;
   std::atomic<int> runtime_parent_count_;
   bool is_chain_start_ = false;
+  std::atomic_flag scheduled_ = ATOMIC_FLAG_INIT;
 };
 
 struct OpGraphNode {

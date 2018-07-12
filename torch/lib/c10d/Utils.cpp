@@ -1,7 +1,7 @@
 #include "Utils.hpp"
 
-#include <sys/poll.h>
 #include <netdb.h>
+#include <sys/poll.h>
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -10,11 +10,11 @@
 #include <fcntl.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstring>
 #include <memory>
 #include <string>
 #include <thread>
-#include <algorithm>
 
 namespace c10d {
 namespace tcputil {
@@ -33,17 +33,17 @@ PortType getSocketPort(int fd) {
   PortType listenPort;
   struct ::sockaddr_storage addrStorage;
   socklen_t addrLen = sizeof(addrStorage);
-  SYSCHECK(getsockname(fd,
-        reinterpret_cast<struct ::sockaddr*>(&addrStorage), &addrLen));
+  SYSCHECK(getsockname(
+      fd, reinterpret_cast<struct ::sockaddr*>(&addrStorage), &addrLen));
 
   if (addrStorage.ss_family == AF_INET) {
-    struct ::sockaddr_in *addr =
-      reinterpret_cast<struct ::sockaddr_in*>(&addrStorage);
+    struct ::sockaddr_in* addr =
+        reinterpret_cast<struct ::sockaddr_in*>(&addrStorage);
     listenPort = ntohs(addr->sin_port);
 
   } else if (addrStorage.ss_family == AF_INET6) { // AF_INET6
-    struct ::sockaddr_in6 *addr =
-      reinterpret_cast<struct ::sockaddr_in6*>(&addrStorage);
+    struct ::sockaddr_in6* addr =
+        reinterpret_cast<struct ::sockaddr_in6*>(&addrStorage);
     listenPort = ntohs(addr->sin6_port);
 
   } else {
@@ -54,14 +54,14 @@ PortType getSocketPort(int fd) {
 
 } // namespace
 
-std::string sockaddrToString(struct ::sockaddr *addr) {
+std::string sockaddrToString(struct ::sockaddr* addr) {
   char address[INET6_ADDRSTRLEN + 1];
   if (addr->sa_family == AF_INET) {
-    struct ::sockaddr_in *s = reinterpret_cast<struct ::sockaddr_in*>(addr);
+    struct ::sockaddr_in* s = reinterpret_cast<struct ::sockaddr_in*>(addr);
     SYSCHECK(::inet_ntop(AF_INET, &(s->sin_addr), address, INET_ADDRSTRLEN))
     address[INET_ADDRSTRLEN] = '\0';
   } else if (addr->sa_family == AF_INET6) {
-    struct ::sockaddr_in6 *s = reinterpret_cast<struct ::sockaddr_in6*>(addr);
+    struct ::sockaddr_in6* s = reinterpret_cast<struct ::sockaddr_in6*>(addr);
     SYSCHECK(::inet_ntop(AF_INET6, &(s->sin6_addr), address, INET6_ADDRSTRLEN))
     address[INET6_ADDRSTRLEN] = '\0';
   } else {
@@ -83,28 +83,26 @@ std::pair<int, PortType> listen(PortType port) {
   // or protocol preference.
   int err = ::getaddrinfo(nullptr, std::to_string(port).data(), &hints, &res);
   if (err != 0 || !res) {
-    throw std::invalid_argument("cannot find host to listen on: " +
-                                std::string(gai_strerror(err)));
+    throw std::invalid_argument(
+        "cannot find host to listen on: " + std::string(gai_strerror(err)));
   }
 
-  std::shared_ptr<struct ::addrinfo> addresses(res, [](struct ::addrinfo* p) {
-    ::freeaddrinfo(p);
-  });
+  std::shared_ptr<struct ::addrinfo> addresses(
+      res, [](struct ::addrinfo* p) { ::freeaddrinfo(p); });
 
-  struct ::addrinfo *nextAddr = addresses.get();
+  struct ::addrinfo* nextAddr = addresses.get();
   int socket;
   while (true) {
     try {
-      SYSCHECK(socket = ::socket(nextAddr->ai_family,
-                                 nextAddr->ai_socktype,
-                                 nextAddr->ai_protocol))
+      SYSCHECK(
+          socket = ::socket(
+              nextAddr->ai_family,
+              nextAddr->ai_socktype,
+              nextAddr->ai_protocol))
 
       int optval = 1;
-      SYSCHECK(::setsockopt(socket,
-                            SOL_SOCKET,
-                            SO_REUSEADDR,
-                            &optval,
-                            sizeof(int)))
+      SYSCHECK(
+          ::setsockopt(socket, SOL_SOCKET, SO_REUSEADDR, &optval, sizeof(int)))
 
       SYSCHECK(::bind(socket, nextAddr->ai_addr, nextAddr->ai_addrlen))
       SYSCHECK(::listen(socket, LISTEN_QUEUE_SIZE))
@@ -126,10 +124,11 @@ std::pair<int, PortType> listen(PortType port) {
   return {socket, getSocketPort(socket)};
 }
 
-int connect(const std::string& address,
-            PortType port,
-            bool wait,
-            const std::chrono::milliseconds& timeout) {
+int connect(
+    const std::string& address,
+    PortType port,
+    bool wait,
+    const std::chrono::milliseconds& timeout) {
   struct ::addrinfo hints, *res = NULL;
   std::memset(&hints, 0x00, sizeof(hints));
   hints.ai_flags = AI_NUMERICSERV; // specifies that port (service) is numeric
@@ -139,29 +138,28 @@ int connect(const std::string& address,
   // `getaddrinfo` will sort addresses according to RFC 3484 and can be tweeked
   // by editing `/etc/gai.conf`. so there is no need to manual sorting
   // or protcol preference.
-  int err = ::getaddrinfo(address.data(),
-                          std::to_string(port).data(),
-                          &hints,
-                          &res);
+  int err =
+      ::getaddrinfo(address.data(), std::to_string(port).data(), &hints, &res);
   if (err != 0 || !res) {
-    throw std::invalid_argument("host not found: " +
-                                std::string(gai_strerror(err)));
+    throw std::invalid_argument(
+        "host not found: " + std::string(gai_strerror(err)));
   }
 
-  std::shared_ptr<struct ::addrinfo> addresses(res, [](struct ::addrinfo* p) {
-    ::freeaddrinfo(p);
-  });
+  std::shared_ptr<struct ::addrinfo> addresses(
+      res, [](struct ::addrinfo* p) { ::freeaddrinfo(p); });
 
-  struct ::addrinfo *nextAddr = addresses.get();
+  struct ::addrinfo* nextAddr = addresses.get();
   int socket;
   // we'll loop over the addresses only if at least of them gave us ECONNREFUSED
   // Maybe the host was up, but the server wasn't running.
   bool anyRefused = false;
   while (true) {
     try {
-      SYSCHECK(socket = ::socket(nextAddr->ai_family,
-                                 nextAddr->ai_socktype,
-                                 nextAddr->ai_protocol))
+      SYSCHECK(
+          socket = ::socket(
+              nextAddr->ai_family,
+              nextAddr->ai_socktype,
+              nextAddr->ai_protocol))
 
       ResourceGuard socketGuard([socket]() { ::close(socket); });
 
@@ -241,8 +239,9 @@ std::tuple<int, std::string> accept(
   while (true) {
     int res = ::poll(events.get(), 1, timeout.count());
     if (res == 0) {
-      throw std::runtime_error("waiting for processes to "
-                               "connect has timed out");
+      throw std::runtime_error(
+          "waiting for processes to "
+          "connect has timed out");
     } else if (res == -1) {
       if (errno == EINTR) {
         continue;
@@ -261,15 +260,13 @@ std::tuple<int, std::string> accept(
   // Get address of the connecting process
   struct ::sockaddr_storage addr;
   socklen_t addrLen = sizeof(addr);
-  SYSCHECK(::getpeername(socket,
-                         reinterpret_cast<struct ::sockaddr*>(&addr),
-                         &addrLen))
+  SYSCHECK(::getpeername(
+      socket, reinterpret_cast<struct ::sockaddr*>(&addr), &addrLen))
 
   setSocketNoDelay(socket);
 
   return std::make_tuple(
-      socket,
-      sockaddrToString(reinterpret_cast<struct ::sockaddr*>(&addr)));
+      socket, sockaddrToString(reinterpret_cast<struct ::sockaddr*>(&addr)));
 }
 
 } // namespace tcputil

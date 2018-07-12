@@ -1,7 +1,7 @@
 #define CATCH_CONFIG_RUNNER
 #include <catch.hpp>
 
-#include <torch/torch.h>
+#include <torch/cuda.h>
 
 #include <iostream>
 
@@ -16,10 +16,10 @@ int main(int argc, char* argv[]) {
     return return_code;
   }
 
-  if (!torch::hasCuda()) {
+  if (!torch::cuda::is_available()) {
     std::cerr << "CUDA not available. Disabling CUDA tests" << std::endl;
     // ~ disables the [cuda] tag.
-    session.configData().testsOrTags.push_back("~[cuda]");
+    session.configData().testsOrTags.emplace_back("~[cuda]");
   }
 
   return session.run();

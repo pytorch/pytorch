@@ -1,12 +1,11 @@
-#ifndef NO_PYTHON
-#include "torch/csrc/python_headers.h"
-
-#define REQUIRE JIT_ASSERT
-
-#else
+#ifdef USE_CATCH
 
 #define CATCH_CONFIG_MAIN
 #include "catch.hpp"
+
+#else
+
+#define REQUIRE JIT_ASSERT
 
 #endif
 
@@ -18,12 +17,14 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
 #include "torch/csrc/assertions.h"
@@ -35,15 +36,22 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "onnx/onnx_pb.h"
 
-#include <vector>
+
+#include <ATen/ATen.h>
+
+#include <algorithm>
+#include <cstddef>
+#include <functional>
 #include <iostream>
-
-#ifndef NO_PYTHON
-#include "torch/csrc/utils/auto_gil.h"
-#else
-struct AutoNoGIL {};
-#endif
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <unordered_set>
+#include <utility>
+#include <vector>
 
 namespace torch { namespace jit {
 
@@ -131,9 +139,9 @@ static void fusionTests() {
     Var i1 = Var::asNewInput(graph);
     auto o0 = i0 * i1;
     o0.addAsOutput();
-    auto a = at::rand(at::CUDA(at::kFloat), {3,4});
-    auto b = at::rand(at::CUDA(at::kFloat), {4,3}).transpose(0,1);
-    auto o = at::zeros(at::CUDA(at::kFloat), {3,4});
+    auto a = at::rand({3,4}, at::kCUDA);
+    auto b = at::rand({4,3}, at::kCUDA).transpose(0,1);
+    auto o = at::zeros({3,4}, at::kCUDA);
     comp.debugLaunchGraph(graph, 0, {a,b}, {o});
     auto o2 = a*b;
     float max_diff = (o2 - o).abs().max().toCDouble();
@@ -175,12 +183,12 @@ static void fusionTests() {
     for(size_t i = 0; i < graph.inputs().size(); i++) {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[ti],dims[tj]);
-      inputs.push_back(at::rand(at::CUDA(at::kFloat), dims).transpose(ti, tj));
+      inputs.push_back(at::rand(dims, at::kCUDA).transpose(ti, tj));
     }
     for(size_t i = 0; i < graph.outputs().size(); i++) {
       std::vector<int64_t> dims = {128, 128, 32};
       std::swap(dims[toi],dims[toj]);
-      outputs.push_back(at::zeros(at::CUDA(at::kFloat), dims).transpose(toi,toj));
+      outputs.push_back(at::zeros(dims, at::kCUDA).transpose(toi,toj));
     }
 
     auto t22 = inputs[4].sigmoid();
@@ -220,13 +228,13 @@ static void fusionTests() {
     o0.addAsOutput();
     Var::cat({i0, o0}, dim).addAsOutput();
 
-    auto a = at::rand(at::CUDA(at::kFloat), {3,4,5});
-    auto b = at::rand(at::CUDA(at::kFloat), {4,3,5}).transpose(0,1);
-    auto o = at::zeros(at::CUDA(at::kFloat), {3,4,5});
+    auto a = at::rand({3,4,5}, at::kCUDA);
+    auto b = at::rand({4,3,5}, at::kCUDA).transpose(0,1);
+    auto o = at::zeros({3,4,5}, at::kCUDA);
 
     auto o_r = a*b;
     auto o2_r = at::cat({a, o_r}, dim);
-    auto o2 = at::zeros(at::CUDA(at::kFloat), o2_r.sizes());
+    auto o2 = at::zeros(o2_r.sizes(), at::kCUDA);
     comp.debugLaunchGraph(graph, 0, {a,b}, {o, o2});
 
     float max_diff = (o_r - o).abs().max().toCDouble();
@@ -280,7 +288,7 @@ void internedStringsTests () {
   REQUIRE(Symbol::aten("What2") == symstart+2);
   REQUIRE(Symbol::aten("What") == symstart+1);
   REQUIRE(Symbol::aten("What2") == symstart+2);
-  REQUIRE(Symbol(SymbolNamespace::aten, symstart+2).toUnqualString() == std::string("What2"));
+  REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
 
 void fromQualStringTests() {
@@ -289,7 +297,13 @@ void fromQualStringTests() {
   REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
   REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
   REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
-  auto bad_inputs = {"scope", "foo::bar", "prim:Param", "::", ":", ""};
+  REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
+  REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
+
+  auto bad_inputs = {"scope", ":", ""};
   for (auto input : bad_inputs) {
     try {
       Symbol::fromQualString(input);
@@ -436,11 +450,11 @@ void interpTest() {
 
     int hidden_size = 2*input_size;
 
-    auto input = at::randn(at::CUDA(at::kFloat), {seq_len, batch_size, input_size});
-    auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-    auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-    auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
-    auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
+    auto input = at::randn({seq_len, batch_size, input_size}, at::kCUDA);
+    auto hx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+    auto cx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+    auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
+    auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
     auto lstm_g = build_lstm();
     Code lstm_function(lstm_g);
@@ -460,12 +474,12 @@ void interpStageTest() {
     constexpr int seq_len = 32;
 
     int hidden_size = 2*input_size;
-    auto input = at::randn(at::CUDA(at::kFloat), {seq_len, batch_size, input_size});
-    auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-    auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-    auto cx1 = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-    auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
-    auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
+    auto input = at::randn({seq_len, batch_size, input_size}, at::kCUDA);
+    auto hx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+    auto cx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+    auto cx1 = at::randn({batch_size, hidden_size}, at::kCUDA);
+    auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
+    auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
 
     auto lstm_g = build_lstm_stages();
@@ -523,7 +537,7 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
   variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1, true);
+  std::tie(state, trace_vars_in) = tracer::enter(vars_in);
   auto trace_vars_out = test(trace_vars_in);
   tracer::exit(trace_vars_out);
   return state->graph;
@@ -531,13 +545,13 @@ std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_i
 
 variable_list grad(const variable_list& outputs, const variable_list& inputs, const variable_list& grad_outputs) {
   static const auto get_edge = [](const Variable& v) { return v.gradient_edge(); };
-  auto & engine = torch::autograd::Engine::getDefaultEngine();
+  auto & engine = torch::autograd::Engine::get_default_engine();
   return engine.execute(fmap(outputs, get_edge), grad_outputs, true, false, fmap(inputs, get_edge));
 }
 
 void assertAllClose(const tensor_list& a, const tensor_list& b) {
   REQUIRE(a.size() == b.size());
-  for (std::size_t i = 0; i < a.size(); ++i) {
+  for (size_t i = 0; i < a.size(); ++i) {
     REQUIRE(a[i].is_same_size(b[i]));
     REQUIRE(a[i].allclose(b[i]));
   }
@@ -572,13 +586,14 @@ void testADFormulas() {
   using VL = variable_list;
   static const var_meta_list binary_pointwise = {{2, 3, 4, 5}, {2, 3, 4, 5}};
   static const var_meta_list unary_pointwise  = {{2, 3, 4, 5}};
+  static const var_meta_list unary_pointwise_2d  = {{2, 3}};
   static const std::vector<ADTestSpec> ad_tests = {
     {"add",     binary_pointwise, [](const VL& v) -> VL { return {v[0] + v[1]}; }},
     {"sub",     binary_pointwise, [](const VL& v) -> VL { return {v[0] - v[1]}; }},
     {"mul",     binary_pointwise, [](const VL& v) -> VL { return {v[0] * v[1]}; }},
     {"sigmoid", unary_pointwise,  [](const VL& v) -> VL { return {v[0].sigmoid()}; }},
     {"tanh",    unary_pointwise,  [](const VL& v) -> VL { return {v[0].tanh()}; }},
-    {"t",       unary_pointwise,  [](const VL& v) -> VL { return {v[0].t()}; }},
+    {"t",       unary_pointwise_2d,  [](const VL& v) -> VL { return {v[0].t()}; }},
     {"mm",      {{10, 12}, {12, 15}}, [](const VL& v) -> VL { return {v[0].mm(v[1])}; }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(4, 1)); }},
     {"chunk",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].chunk(3, 2)); }},
@@ -586,10 +601,6 @@ void testADFormulas() {
     {"split",   {{10, 12, 15}}, [](const VL& v) -> VL { return fmap<Variable>(v[0].split(3, 2)); }},
   };
 
-  // We have to release the GIL inside this method, because if we happen to
-  // initialize the autograd engine here, the newly spawned worker threads will
-  // try to initialize their PyThreadState*, and they need the GIL for this.
-  AutoNoGIL _no_gil;
   for (const auto & test : ad_tests) {
     // Get reference values form autograd
     auto vars_in        = test.make_vars();
@@ -601,7 +612,7 @@ void testADFormulas() {
     auto graph = trace(test, vars_in);
     EliminateDeadCode(graph); // Tracing of some ops depends on the DCE trick
     auto grad_spec = differentiate(graph, std::vector<bool>(vars_in.size(), true));
-
+    LowerGradOf(*grad_spec.df);
     // Get outputs from the interpreter
     auto tensors_in                = fmap(vars_in, unwrap);
     auto tensor_grads_in           = fmap(var_grads_in, unwrap);
@@ -634,10 +645,10 @@ void testDifferentiate(std::ostream & out) {
   graph->registerOutput(c.value());
 
   auto grad_spec = differentiate(graph, {true, true});
-  std::vector<std::size_t> expected_captured_inputs = {0, 1};
-  std::vector<std::size_t> expected_captured_outputs = {1};
-  std::vector<std::size_t> expected_input_vjps = {0, 1};
-  std::vector<std::size_t> expected_output_vjps = {0, 1};
+  std::vector<size_t> expected_captured_inputs = {0, 1};
+  std::vector<size_t> expected_captured_outputs = {1};
+  std::vector<size_t> expected_input_vjps = {0, 1};
+  std::vector<size_t> expected_output_vjps = {0, 1};
   REQUIRE(grad_spec.f_real_outputs == 1);
   REQUIRE(grad_spec.df_input_captured_inputs == expected_captured_inputs);
   REQUIRE(grad_spec.df_input_captured_outputs == expected_captured_outputs);
@@ -663,11 +674,11 @@ void testDifferentiateWithRequiresGrad(std::ostream & out) {
   graph->registerOutput(e.value());
 
   auto grad_spec = differentiate(graph, {true, false});
-  std::vector<std::size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
-  std::vector<std::size_t> expected_output_vjps = {0};    // only a requires grad
+  std::vector<size_t> expected_input_vjps = {1, 2};  // for e and %4 = (d + a)
+  std::vector<size_t> expected_output_vjps = {0};    // only a requires grad
   REQUIRE(grad_spec.f_real_outputs == 2);              // we need one temporary %4 = (d + a)
-  REQUIRE(grad_spec.df_input_captured_inputs == std::vector<std::size_t>({0}));
-  REQUIRE(grad_spec.df_input_captured_outputs == std::vector<std::size_t>({2}));
+  REQUIRE(grad_spec.df_input_captured_inputs == std::vector<size_t>({0}));
+  REQUIRE(grad_spec.df_input_captured_outputs == std::vector<size_t>({2}));
   REQUIRE(grad_spec.df_input_vjps == expected_input_vjps);
   REQUIRE(grad_spec.df_output_vjps == expected_output_vjps);
   out << "testDifferentiateWithRequiresGrad\n";
@@ -684,7 +695,7 @@ void testCreateAutodiffSubgraphs(std::ostream & out) {
 }
 
 autograd::Variable var(at::Type & t, at::IntList sizes, bool requires_grad) {
-  return autograd::make_variable(at::rand(t, sizes), requires_grad);
+  return autograd::make_variable(at::rand(sizes, t), requires_grad);
 }
 autograd::Variable undef() {
   return autograd::Variable();
@@ -770,11 +781,11 @@ void shapeAnalysisTest() {
 
   auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
 
-  auto input = at::randn(at::CUDA(at::kFloat), {batch_size, input_size});
-  auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-  auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-  auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
-  auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
+  auto input = at::randn({batch_size, input_size}, at::kCUDA);
+  auto hx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+  auto cx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+  auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
+  auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto g = build_lstm();
   ArgumentSpec spec(false, createVarList({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
@@ -796,11 +807,11 @@ void testGraphExecutor() {
 
   auto v = [](at::Tensor t) { return autograd::make_variable(t, false); };
 
-  auto input = at::randn(at::CUDA(at::kFloat), {batch_size, input_size});
-  auto hx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-  auto cx    = at::randn(at::CUDA(at::kFloat), {batch_size, hidden_size});
-  auto w_ih  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, input_size}));
-  auto w_hh  = t_def(at::randn(at::CUDA(at::kFloat), {4 * hidden_size, hidden_size}));
+  auto input = at::randn({batch_size, input_size}, at::kCUDA);
+  auto hx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+  auto cx    = at::randn({batch_size, hidden_size}, at::kCUDA);
+  auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
+  auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   std::vector<at::Tensor> inputs = {v(input), v(hx), v(cx), v(w_ih), v(w_hh) };
   auto g = build_lstm();
@@ -845,7 +856,9 @@ void testBlocks(std::ostream & out) {
 
 const static auto cf_examples = R"JIT(
   def if_test(a, b):
-      c = 0
+      # FIXME: use 0 instead of a.
+      # c = 0
+      c = a
       if a < b:
         c = b
       else:
@@ -885,7 +898,34 @@ void testControlFlow() {
   REQUIRE(256 == run_binary("while_test",2,0));
 }
 
-#ifdef NO_PYTHON
+void testProto() {
+  ::ONNX_NAMESPACE::ModelProto proto;
+  proto.set_producer_name("foo");
+}
+
+std::string runJITCPPTests() {
+  std::stringstream out;
+  testControlFlow();
+  testGraphExecutor();
+  testBlocks(out);
+  testCreateAutodiffSubgraphs(out);
+  testDifferentiate(out);
+  testDifferentiateWithRequiresGrad(out);
+  testADFormulas();
+  interpTest();
+  interpStageTest();
+  codeTemplateTest();
+  fusionTests();
+  attributesTest();
+  internedStringsTests();
+  fromQualStringTests();
+  argumentSpecTest();
+  shapeAnalysisTest();
+  testProto();
+  return out.str();
+}
+
+#ifdef USE_CATCH
 
 TEST_CASE( "jit test CPU", "[cpu]" ) {
 
@@ -927,26 +967,5 @@ TEST_CASE( "jit test CUDA", "[cuda]" ) {
 }
 
 #endif
-
-std::string runJITCPPTests() {
-  std::stringstream out;
-  testControlFlow();
-  testGraphExecutor();
-  testBlocks(out);
-  testCreateAutodiffSubgraphs(out);
-  testDifferentiate(out);
-  testDifferentiateWithRequiresGrad(out);
-  testADFormulas();
-  interpTest();
-  interpStageTest();
-  codeTemplateTest();
-  fusionTests();
-  attributesTest();
-  internedStringsTests();
-  fromQualStringTests();
-  argumentSpecTest();
-  shapeAnalysisTest();
-  return out.str();
-}
 
 }}

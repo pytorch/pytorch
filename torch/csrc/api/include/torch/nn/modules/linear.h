@@ -1,26 +1,38 @@
 #pragma once
 
+#include <torch/nn/cloneable.h>
 #include <torch/nn/module.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
+#include <cstddef>
+#include <vector>
 
-#include <cstdint>
-
-namespace torch { namespace nn {
-
-class Linear : public torch::nn::CloneableModule<Linear> {
- public:
-  Linear(size_t features_in, size_t features_out);
-
-  void reset() override;
-
-  variable_list forward(variable_list) override;
-
-  TORCH_ATTR(int64_t, in);
-  TORCH_ATTR(int64_t, out);
-  TORCH_ATTR(bool, with_bias) = true;
-  TORCH_ATTR(Variable, weight);
-  TORCH_ATTR(Variable, bias);
+namespace torch {
+namespace nn {
+struct LinearOptions {
+  LinearOptions(int64_t in, int64_t out);
+  TORCH_ARG(int64_t, in);
+  TORCH_ARG(int64_t, out);
+  TORCH_ARG(bool, with_bias) = true;
 };
 
-}} // namespace torch::nn
+class LinearImpl : public Cloneable<LinearImpl> {
+ public:
+  template <typename... Ts>
+  explicit LinearImpl(Ts&&... ts)
+      : LinearImpl(LinearOptions(std::forward<Ts>(ts)...)) {}
+  explicit LinearImpl(LinearOptions options);
+
+  void reset() override;
+  Tensor forward(Tensor);
+
+  LinearOptions options;
+  Tensor weight;
+  Tensor bias;
+};
+
+TORCH_MODULE(Linear);
+
+} // namespace nn
+} // namespace torch

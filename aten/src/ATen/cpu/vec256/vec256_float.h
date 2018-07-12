@@ -2,18 +2,21 @@
 
 #include "intrinsics.h"
 #include "vec256_base.h"
+#if defined(__AVX__) && !defined(_MSC_VER)
 #include <sleef.h>
+#endif
 
 namespace at {
 namespace vec256 {
 namespace {
 
-#ifdef __AVX__
+#if defined(__AVX__) && !defined(_MSC_VER)
 
 template <> class Vec256<float> {
+private:
+  __m256 values;
 public:
   static constexpr int64_t size = 8;
-  __m256 values;
   Vec256() {}
   Vec256(__m256 v) : values(v) {}
   Vec256(float val) {
@@ -64,6 +67,8 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
+  const float& operator[](int idx) const  = delete;
+  float& operator[](int idx) = delete;
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[8];
     store(tmp);
@@ -109,8 +114,14 @@ public:
   Vec256<float> sin() const {
     return map(std::sin);
   }
+  Vec256<float> sinh() const {
+    return map(std::sinh);
+  }
   Vec256<float> cos() const {
     return map(std::cos);
+  }
+  Vec256<float> cosh() const {
+    return map(std::cosh);
   }
   Vec256<float> ceil() const {
     return _mm256_ceil_ps(values);
@@ -118,8 +129,14 @@ public:
   Vec256<float> floor() const {
     return _mm256_floor_ps(values);
   }
+  Vec256<float> neg() const {
+    return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
+  }
   Vec256<float> round() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  }
+  Vec256<float> tan() const {
+    return map(std::tan);
   }
   Vec256<float> tanh() const {
     return Vec256<float>(Sleef_tanhf8_u10(values));
@@ -129,6 +146,12 @@ public:
   }
   Vec256<float> sqrt() const {
     return _mm256_sqrt_ps(values);
+  }
+  Vec256<float> reciprocal() const {
+    return _mm256_div_ps(_mm256_set1_ps(1), values);
+  }
+  Vec256<float> rsqrt() const {
+    return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));
   }
 };
 

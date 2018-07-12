@@ -82,7 +82,7 @@ void test_send_recv_scalar(std::shared_ptr<thd::DataChannel> data_channel) {
 }
 
 void test_broadcast(std::shared_ptr<thd::DataChannel> data_channel) {
-  for (std::size_t dest = 0; dest < data_channel->getNumProcesses(); ++dest) {
+  for (size_t dest = 0; dest < data_channel->getNumProcesses(); ++dest) {
     if (data_channel->getRank() == dest) {
       auto float_tensor = buildTensor<float>({1, 2, 3, 4, 5}, 10.123);
       data_channel->broadcast(*float_tensor, dest);
@@ -151,7 +151,7 @@ void test_scatter(std::shared_ptr<thd::DataChannel> data_channel) {
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   if (data_channel->getRank() == 0) {
-    for (std::size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
+    for (size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, i));
       raw_tensors.push_back(tensors.back().get());
     }
@@ -171,13 +171,13 @@ void test_gather(std::shared_ptr<thd::DataChannel> data_channel) {
   std::vector<thpp::Tensor*> raw_tensors;
   auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
   if (data_channel->getRank() == 0) {
-    for (std::size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
+    for (size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
       raw_tensors.push_back(tensors.back().get());
     }
 
     data_channel->gather(raw_tensors, *int_tensor, 0);
-    for (std::size_t i = 0; i < tensors.size(); ++i)
+    for (size_t i = 0; i < tensors.size(); ++i)
       ASSERT_TENSOR_VALUE(int, *(tensors[i]), i)
   } else {
     data_channel->gather(raw_tensors, *int_tensor, 0);
@@ -188,13 +188,13 @@ void test_allGather(std::shared_ptr<thd::DataChannel> data_channel) {
   std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
   std::vector<thpp::Tensor*> raw_tensors;
   auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
-  for (std::size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
+  for (size_t i = 0; i < data_channel->getNumProcesses(); ++i) {
     tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
     raw_tensors.push_back(tensors.back().get());
   }
 
   data_channel->allGather(raw_tensors, *int_tensor, 0);
-  for (std::size_t i = 0; i < tensors.size(); ++i)
+  for (size_t i = 0; i < tensors.size(); ++i)
     ASSERT_TENSOR_VALUE(int, *(tensors[i]), i)
 }
 
@@ -222,7 +222,7 @@ void test_isend(std::shared_ptr<thd::DataChannel> data_channel) {
 
   if (data_channel->getRank() == 0) {
     std::vector<std::shared_ptr<thd::DataChannel::Request>> requests;
-    for (std::size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
+    for (size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       auto tensor = buildTensor<int>({1, 2, 3, 4, 5}, i);
       requests.push_back(std::shared_ptr<thd::DataChannel::Request>(
         data_channel->isend(*tensor, i)
@@ -248,14 +248,14 @@ void test_irecv(std::shared_ptr<thd::DataChannel> data_channel) {
   if (data_channel->getRank() == 0) {
     std::vector<std::shared_ptr<thd::DataChannel::Request>> requests;
     std::vector<std::shared_ptr<thpp::IntTensor>> tensors;
-    for (std::size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
+    for (size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
       requests.push_back(std::shared_ptr<thd::DataChannel::Request>(
         data_channel->ireceive(*tensors.back(), i)
       ));
     }
 
-    for (std::size_t i = 0; i < requests.size(); ++i) {
+    for (size_t i = 0; i < requests.size(); ++i) {
       requests.at(i)->wait();
       assert(requests.at(i)->isCompleted());
       ASSERT_TENSOR_VALUE(int, *tensors.at(i), i + 1)
@@ -274,7 +274,7 @@ void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
 
   if (data_channel->getRank() == 0) {
     std::vector<std::shared_ptr<thd::DataChannel::Request>> requests;
-    for (std::size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
+    for (size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       auto tensor = buildTensor<int>({1, 2, 3, 4, 5}, 10);
       requests.push_back(std::shared_ptr<thd::DataChannel::Request>(
         data_channel->isend(*tensor, i)
@@ -283,7 +283,7 @@ void test_interlaces(std::shared_ptr<thd::DataChannel> data_channel) {
 
     data_channel->barrier();
 
-    for (std::size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
+    for (size_t i = 1; i < data_channel->getNumProcesses(); ++i) {
       auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, 20);
       data_channel->send(*int_tensor, i);
     }
@@ -375,7 +375,7 @@ void test_scatter_group(std::shared_ptr<thd::DataChannel> data_channel,
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
     if (data_channel->getRank() == group_ranks[0]) {
-      for (std::size_t i = 0; i < group_ranks.size(); ++i) {
+      for (size_t i = 0; i < group_ranks.size(); ++i) {
         tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, group_ranks[i]));
         raw_tensors.push_back(tensors.back().get());
       }
@@ -403,13 +403,13 @@ void test_gather_group(std::shared_ptr<thd::DataChannel> data_channel,
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
     if (data_channel->getRank() == group_ranks[0]) {
-      for (std::size_t i = 0; i < group_ranks.size(); ++i) {
+      for (size_t i = 0; i < group_ranks.size(); ++i) {
         tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
         raw_tensors.push_back(tensors.back().get());
       }
 
       data_channel->gather(raw_tensors, *int_tensor, group_ranks[0], group);
-      for (std::size_t i = 0; i < tensors.size(); ++i)
+      for (size_t i = 0; i < tensors.size(); ++i)
         ASSERT_TENSOR_VALUE(int, *(tensors[i]), group_ranks[i])
     } else {
       data_channel->gather(raw_tensors, *int_tensor, group_ranks[0], group);
@@ -427,13 +427,13 @@ void test_allGather_group(std::shared_ptr<thd::DataChannel> data_channel,
   std::vector<thpp::Tensor*> raw_tensors;
   if (contains(group_ranks, data_channel->getRank())) {
     auto int_tensor = buildTensor<int>({1, 2, 3, 4, 5}, data_channel->getRank());
-    for (std::size_t i = 0; i < group_ranks.size(); ++i) {
+    for (size_t i = 0; i < group_ranks.size(); ++i) {
       tensors.push_back(buildTensor<int>({1, 2, 3, 4, 5}, -1));
       raw_tensors.push_back(tensors.back().get());
     }
 
     data_channel->allGather(raw_tensors, *int_tensor, group);
-    for (std::size_t i = 0; i < tensors.size(); ++i)
+    for (size_t i = 0; i < tensors.size(); ++i)
       ASSERT_TENSOR_VALUE(int, *(tensors[i]), group_ranks[i])
   } else {
     auto int_tensor = buildTensor({1, 2, 3, 4, 5}, 1000);

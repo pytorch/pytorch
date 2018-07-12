@@ -98,7 +98,7 @@ struct AT_API Type {
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
   virtual const char * toString() const = 0;
-  virtual std::size_t elementSizeInBytes() const = 0;
+  virtual size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const;
   virtual Type & toScalarType(ScalarType s) const;
   Context& get_context() const { return *context; }
@@ -133,8 +133,8 @@ struct AT_API Type {
   virtual Tensor & ones_like_out(Tensor & result, const Tensor & input) const;
   virtual Tensor ones_like(const Tensor & input) const;
   virtual int64_t numel(const Tensor & self) const;
-  virtual Tensor & set_(Tensor & self, Storage & storage) const;
-  virtual Tensor & set_(Tensor & self, Storage & sourceStorage, int64_t storage_offset, IntList size, IntList stride={}) const;
+  virtual Tensor & set_(Tensor & self, Storage & source) const;
+  virtual Tensor & set_(Tensor & self, Storage & source, int64_t storage_offset, IntList size, IntList stride={}) const;
   virtual Tensor & set_(Tensor & self, const Tensor & source) const;
   virtual Tensor & set_(Tensor & self) const;
   virtual Tensor & fill_(Tensor & self, Scalar value) const;
@@ -747,12 +747,6 @@ struct AT_API Type {
   virtual Tensor glu_forward(const Tensor & self, int64_t dim) const;
   virtual Tensor & glu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, int64_t dim) const;
   virtual Tensor glu_backward(const Tensor & grad_output, const Tensor & self, int64_t dim) const;
-  virtual Tensor & hardshrink_out(Tensor & output, const Tensor & self, Scalar lambd=0.5) const;
-  virtual Tensor hardshrink(const Tensor & self, Scalar lambd=0.5) const;
-  virtual Tensor & hardshrink_forward_out(Tensor & output, const Tensor & self, Scalar lambd) const;
-  virtual Tensor hardshrink_forward(const Tensor & self, Scalar lambd) const;
-  virtual Tensor & hardshrink_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, Scalar lambd) const;
-  virtual Tensor hardshrink_backward(const Tensor & grad_output, const Tensor & self, Scalar lambd) const;
   virtual Tensor & hardtanh_out(Tensor & output, const Tensor & self, Scalar min_val=-1, Scalar max_val=1) const;
   virtual Tensor hardtanh(const Tensor & self, Scalar min_val=-1, Scalar max_val=1) const;
   virtual Tensor & hardtanh_forward_out(Tensor & output, const Tensor & self, Scalar min_val, Scalar max_val) const;

@@ -216,7 +216,7 @@ class device(object):
     """
 
     def __init__(self, idx):
-        self.idx = idx
+        self.idx = int(idx)
         self.prev_idx = -1
 
     def __enter__(self):

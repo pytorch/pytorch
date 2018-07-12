@@ -1,9 +1,6 @@
 if(USE_OPENCV AND OpenCV_FOUND)
         message(STATUS "Including image processing operators")
   # ---[ GPU files
-  # ------[ cuDNN
-  file(GLOB tmp *_cudnn.cc)
-  set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})
   # ------[ general GPU
   file(GLOB tmp *_gpu.cc)
   set(Caffe2_GPU_SRCS ${Caffe2_GPU_SRCS} ${tmp})

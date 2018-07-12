@@ -1,13 +1,11 @@
-#include "StoreTestCommon.hpp"
 #include "TCPStore.hpp"
+#include "StoreTestCommon.hpp"
 
-#include <thread>
-#include <iostream>
 #include <cstdlib>
-
+#include <iostream>
+#include <thread>
 
 int main(int argc, char** argv) {
-
   // server store
   c10d::TCPStore serverStore("127.0.0.1", 29500, true);
 
@@ -28,45 +26,41 @@ int main(int argc, char** argv) {
   // Each thread will have a client store to send/recv data
   std::vector<std::unique_ptr<c10d::TCPStore>> clientStores;
   for (auto i = 0; i < numThreads; i++) {
-    clientStores.push_back(std::unique_ptr<c10d::TCPStore>(new
-      c10d::TCPStore("127.0.0.1", 29500, false)));
+    clientStores.push_back(std::unique_ptr<c10d::TCPStore>(
+        new c10d::TCPStore("127.0.0.1", 29500, false)));
   }
 
   std::string expectedCounterRes = std::to_string(numThreads * numIterations);
 
   for (auto i = 0; i < numThreads; i++) {
-    threads.push_back(std::move(std::thread([&sem1,
-                                             &sem2,
-                                             &clientStores,
-                                             i,
-                                             &expectedCounterRes] {
-            for (auto j = 0; j < numIterations; j++) {
-              clientStores[i]->add("counter", 1);
+    threads.push_back(std::move(
+        std::thread([&sem1, &sem2, &clientStores, i, &expectedCounterRes] {
+          for (auto j = 0; j < numIterations; j++) {
+            clientStores[i]->add("counter", 1);
+          }
+          // Let each thread set and get key on its client store
+          std::string key = "thread_" + std::to_string(i);
+          for (auto j = 0; j < numIterations; j++) {
+            std::string val = "thread_val_" + std::to_string(j);
+            c10d::test::set(*clientStores[i], key, val);
+            c10d::test::check(*clientStores[i], key, val);
+          }
+
+          sem1.post();
+          sem2.wait();
+          // Check the counter results
+          c10d::test::check(*clientStores[i], "counter", expectedCounterRes);
+          // Now check other threads' written data
+          for (auto j = 0; j < numThreads; j++) {
+            if (j == i) {
+              continue;
             }
-            // Let each thread set and get key on its client store
             std::string key = "thread_" + std::to_string(i);
-            for (auto j = 0; j < numIterations; j++) {
-              std::string val = "thread_val_" + std::to_string(j);
-              c10d::test::set(*clientStores[i], key, val);
-              c10d::test::check(*clientStores[i], key, val);
-            }
+            std::string val = "thread_val_" + std::to_string(numIterations - 1);
+            c10d::test::check(*clientStores[i], key, val);
+          }
 
-            sem1.post();
-            sem2.wait();
-            // Check the counter results
-            c10d::test::check(*clientStores[i], "counter", expectedCounterRes);
-            // Now check other threads' written data
-            for (auto j = 0; j < numThreads; j++) {
-              if (j == i) {
-                continue;
-              }
-              std::string key = "thread_" + std::to_string(i);
-              std::string val = "thread_val_" +
-                  std::to_string(numIterations - 1);
-              c10d::test::check(*clientStores[i], key, val);
-            }
-
-          })));
+        })));
   }
 
   sem1.wait(numThreads);
