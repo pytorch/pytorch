@@ -5885,3 +5885,58 @@ Example::
             [4, 5, 6],
             [4, 5, 6]])
 """)
+
+
+add_docstr(torch.cartesian_prod,
+           r"""
+cartesian_prod(tensors) -> seq
+
+Do cartesian product of the given sequence of tensors. The behavior is similar to
+python's `itertools.prod`. The difference is, if the arguments is a sequence of
+size :math:`k`, `itertools.prod` generate :math:`k`-tuples, while `torch.cartesian_prod`
+create :math:`k` output tensors.
+
+Arguments:
+    tensors (sequence of Tensors): sequence of scalars or 1 dimensional tensors.
+        Scalars will be treated as tensors of size :math:`(1,)` automatically.
+
+Returns:
+    seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`N_1 \times N_2 \times \ldots \times N_k`.
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> b = torch.tensor([4, 5])
+    >>> torch.cartesian_prod([a, b])
+    (tensor([1, 1, 2, 2, 3, 3]), tensor([4, 5, 4, 5, 4, 5]))
+""")
+
+
+add_docstr(torch.combinations,
+           r"""
+combinations(tensor, r=2, with_replacement=False) -> seq
+
+Compute combinations of length :math:`r` of the given tensor. The behavior is similar to
+python's `itertools.combinations` when `with_replacement` is set to `False`, and
+`itertools.combinations_with_replacement` when `with_replacement` is set to `True`.
+
+Arguments:
+    tensor (Tensor): the tensor.
+    r (int, optional): number of elements to combine
+    with_replacement (boolean): whether to allow duplication in combination
+
+Returns:
+    seq (sequence of Tensors): :math:`r` tensors.
+
+Example::
+
+    >>> a = torch.tensor([1, 2, 3])
+    >>> torch.combinations(a)
+    (tensor([1, 1, 2]), tensor([2, 3, 3]))
+    >>> torch.combinations(a, r=3)
+    (tensor([1]), tensor([2]), tensor([3]))
+    >>> torch.combinations(a, with_replacement=True)
+    (tensor([1, 1, 1, 2, 2, 3]), tensor([1, 2, 3, 2, 3, 3]))
+""")
