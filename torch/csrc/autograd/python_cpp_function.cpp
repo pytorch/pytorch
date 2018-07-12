@@ -29,10 +29,9 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
 
   int num_inputs = PyTuple_GET_SIZE(args);
   int num_inputs_required = ((THPCppFunction*)self)->cdata->num_inputs();
-  std::string self_name = ((THPCppFunction*)self)->cdata->name();
-  if ((self_name.find("Error") == std::string::npos) && (num_inputs != num_inputs_required)) {
+  if (num_inputs != num_inputs_required) {
     return PyErr_Format(PyExc_TypeError, "expected %d arguments, got %d instead",
-                        num_inputs, num_inputs_required);
+                        num_inputs_required, num_inputs);
   }
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {

@@ -25,12 +25,17 @@ struct Error : public Function {
 
 // Identity in forward, Error in backward. Used to implement @once_differentiable
 struct DelayedError : public Function {
-  DelayedError(std::string msg)
-    : msg(std::move(msg)) {};
+  DelayedError(std::string msg, int num_inputs)
+    : msg(std::move(msg)) {
+      for (int i = 0; i < num_inputs; i++)
+        input_metadata_.emplace_back();
+    }
 
   virtual variable_list apply(const variable_list& inputs) override;
 
   std::string msg;
+
+  uint32_t input_nr;
 };
 
 struct GraphRoot : public Function {
