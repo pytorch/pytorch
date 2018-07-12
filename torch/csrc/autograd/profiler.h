@@ -16,6 +16,7 @@
 #include <tuple>
 #include "ATen/ATen.h"
 #include "torch/csrc/cuda/cuda_check.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #ifdef USE_CUDA
 #include <cuda_runtime.h>
 #endif
@@ -162,13 +163,13 @@ enum class ProfilerState {
     NVTX,  // only emit NVTX markers
 };
 
-extern ProfilerState state;
-extern uint32_t next_thread_id;
-extern std::mutex all_event_lists_mutex;
-extern std::list<std::shared_ptr<RangeEventList>> all_event_lists;
+TORCH_API extern ProfilerState state;
+TORCH_API extern uint32_t next_thread_id;
+TORCH_API extern std::mutex all_event_lists_mutex;
+TORCH_API extern std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 
-extern thread_local std::shared_ptr<RangeEventList> event_list;
-extern thread_local int32_t thread_id;
+TORCH_API extern thread_local std::shared_ptr<RangeEventList> event_list;
+TORCH_API extern thread_local int32_t thread_id;
 
 inline RangeEventList& getEventList() {
   if (!event_list) {

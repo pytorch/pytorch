@@ -53,6 +53,7 @@ endif()
 # Note to developers: if you add an option below, make sure you also add it to
 # cmake/Summary.cmake so that the summary prints out the option values.
 include(CMakeDependentOption)
+option(BUILD_TORCH "Build Torch" OFF)
 option(BUILD_CAFFE2 "Build Caffe2" ON)
 option(BUILD_ATEN "Build ATen" OFF)
 option(BUILD_BINARY "Build C++ binaries" ON)
