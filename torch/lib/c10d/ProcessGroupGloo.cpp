@@ -1,8 +1,10 @@
 #include "ProcessGroupGloo.hpp"
 
 #include <gloo/allreduce_halving_doubling.h>
+#include <gloo/allreduce_ring_chunked.h>
 #include <gloo/broadcast_one_to_all.h>
 #include <gloo/cuda_allreduce_halving_doubling.h>
+#include <gloo/cuda_allreduce_ring_chunked.h>
 #include <gloo/cuda_broadcast_one_to_all.h>
 #include <gloo/rendezvous/context.h>
 #include <gloo/transport/tcp/device.h>
@@ -320,22 +322,40 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
   auto& context = contexts_[0];
 
   if (backend == at::kCPU) {
-    entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-        new ::gloo::AllreduceHalvingDoubling<T>(
-            context,
-            getDataPointers<T>(entry.src),
-            entry.src[0].numel(),
-            reductionFunction<T>(key.reduceOp)));
+    if (getSize() < 16) {
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::AllreduceRingChunked<T>(
+              context,
+              getDataPointers<T>(entry.src),
+              entry.src[0].numel(),
+              reductionFunction<T>(key.reduceOp)));
+    } else {
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::AllreduceHalvingDoubling<T>(
+              context,
+              getDataPointers<T>(entry.src),
+              entry.src[0].numel(),
+              reductionFunction<T>(key.reduceOp)));
+    }
     return;
   }
 
   if (backend == at::kCUDA) {
-    entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
-        new ::gloo::CudaAllreduceHalvingDoubling<T>(
-            context,
-            getDataPointers<T>(entry.src),
-            entry.src[0].numel(),
-            getStreamVector(entry)));
+    if (getSize() < 16) {
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::CudaAllreduceRingChunked<T>(
+              context,
+              getDataPointers<T>(entry.src),
+              entry.src[0].numel(),
+              getStreamVector(entry)));
+    } else {
+      entry.algorithm = std::unique_ptr<::gloo::Algorithm>(
+          new ::gloo::CudaAllreduceHalvingDoubling<T>(
+              context,
+              getDataPointers<T>(entry.src),
+              entry.src[0].numel(),
+              getStreamVector(entry)));
+    }
     return;
   }
 
