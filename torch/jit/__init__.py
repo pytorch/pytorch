@@ -22,6 +22,7 @@ import re
 _flatten = torch._C._jit_flatten
 _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
+BatchTensor = torch._C._jit.BatchTensor
 
 # This global variable is set when we are tracing a *forwards* computation.
 # It is intended to be a cheap way to test if tracing has occurred, before
@@ -385,6 +386,32 @@ def script_method(fn):
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
     return ScriptMethodStub(createResolutionCallback(frames_up=2), get_jit_ast(fn), fn)
+
+
+def batch(batch_size=1, optimize=True, _frames_up=0):
+    def decorator(fn):
+        mod = script(fn, optimize, _frames_up)
+        res_graph = torch.to_batch_graph(mod.graph)
+        res_mod = ScriptModule()
+        res_mod._create_method_from_graph('forward', res_graph)
+
+        def wrapper(*args):
+            new_args = []
+            for arg in args:
+                if isinstance(arg, torch.Tensor):
+                    arg = BatchTensor(arg, batch_size)
+                if isinstance(arg, BatchTensor):
+                    new_args.extend([arg.get_data(), arg.get_mask(), arg.get_dims()])
+                else:
+                    new_args.append(arg)
+            res = res_mod(*new_args)
+            # assert len(res) / 3 == 0
+            # result = [BatchTensor(*res[i * 3: i * 3 + 3]) for i in range(len(res) // 3)]
+            result = BatchTensor(*res)
+            return result
+        wrapper.__doc__ = fn.__doc__
+        return wrapper
+    return decorator
 
 
 # These OrderedDictWrapper classes replace the actual OrderedDicts in
