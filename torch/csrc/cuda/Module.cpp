@@ -241,8 +241,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  auto device_allocator = THCState_getDeviceAllocator(state);
-  THCudaCheck(device_allocator->emptyCache(device_allocator->state));
+  THCCachingAllocator_emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }

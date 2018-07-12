@@ -186,8 +186,7 @@ void callReduceAll(THCState* state,
   dim3 block;
 
   if (isTwoPassReductionSize(totalElements)) {
-    void* scratchSpace;
-    THCudaCheck(THCudaMalloc(state, &scratchSpace, THCState_getCurrentDeviceScratchSpaceSize(state)));
+    void* scratchSpace = THCudaMalloc(state, THCState_getCurrentDeviceScratchSpaceSize(state));
 
     getPass1ReduceBlockGrid<AccT>(state, totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -206,7 +205,7 @@ void callReduceAll(THCState* state,
         numPass1Blocks, init, reduceOp,
         (AccT*) scratchSpace, devOut);
 
-    THCudaCheck(THCudaFree(state, scratchSpace));
+    THCudaFree(state, scratchSpace);
   } else {
     getSinglePassReduceBlockGrid(totalElements, grid, block);
     size_t smemSize = block.x * sizeof(AccT);
@@ -248,7 +247,7 @@ bool THC_reduceAll(THCState* state,
   if (!outOnDevice) {
     // Use the stream-specific scratch space for the reduction kernel
     // to write out its value
-    THCudaCheck(THCudaMalloc(state, (void**)&devOut,
+    devOut = static_cast<AccT*>(THCudaMalloc(state,
         THCState_getCurrentDeviceScratchSpaceSize(state)));
     freeDevOut = true;
   }
@@ -320,7 +319,7 @@ bool THC_reduceAll(THCState* state,
   }
 
   if (freeDevOut) {
-    THCudaCheck(THCudaFree(state, devOut));
+    THCudaFree(state, devOut);
   }
 
   return true;
