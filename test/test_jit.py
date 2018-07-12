@@ -1065,7 +1065,7 @@ class TestBatched(TestCase):
     def rand_batch(self, *dims):
         dims = [dim for dim in dims if dim != ()]
         xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
-        xb = BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
+        xb = BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]).byte())
         return xs, xb
 
     def test_create_batchtensor(self):
@@ -1227,6 +1227,120 @@ class TestBatched(TestCase):
         ybs = LSTMCell_batch(batch, h_batch, c_batch, w_xi, w_xf, w_xo, w_xc,
                              w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
         self.assertEqual(ys, ybs.examples())
+
+    def test_numToTensor(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_numToTensor(a):
+            a = a + 1
+            return a
+
+        def single_numToTensor(a):
+            a = a + 1
+            return a
+
+        a, batch = self.rand_batch(4, ())
+        res_batch = batch_numToTensor(batch)
+        res = [single_numToTensor(a[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_if_else(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > b:
+                a += b
+            else:
+                a -= b
+            return a
+
+        def single_if(a, b):
+            if a > b:
+                a += b
+            else:
+                a -= b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_if_else_with_scalar(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > 0.1:
+                a += b
+            else:
+                a -= b
+            return a
+
+        def single_if(a, b):
+            if a > 0.1:
+                a += b
+            else:
+                a -= b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_if_noelse(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > b:
+                a += b
+            return a
+
+        def single_if(a, b):
+            if a > b:
+                a += b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_if_noelse_with_scalar(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > 0.1:
+                a += b
+            return a
+
+        def single_if(a, b):
+            if a > 0.1:
+                a += b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_while(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_while(a, b):
+            while a > b:
+                a -= b
+            return a
+
+        def single_while(a, b):
+            while a > b:
+                a -= b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b = [torch.abs(torch.rand(1)) for i in range(4)]
+        batch_b = BatchTensor(b, torch.tensor([]).byte())
+        res_batch = batch_while(batch_a, batch_b)
+        res = [single_while(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
 
 
 class TestScript(JitTestCase):
