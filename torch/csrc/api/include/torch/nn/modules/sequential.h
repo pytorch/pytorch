@@ -35,8 +35,18 @@ class SequentialImpl : public Cloneable<SequentialImpl> {
     push_back(std::forward<Modules>(modules)...);
   }
 
-  /// reset() is empty for `Sequential`, since it does not have parameter of its
-  /// own.
+  /// Special cloning function for `Sequential` because it does not use
+  /// `reset()`.
+  std::shared_ptr<Module> clone() const override {
+    auto clone = std::make_shared<SequentialImpl>();
+    for (const auto& module : modules_) {
+      clone->push_back(module.clone());
+    }
+    return clone;
+  }
+
+  /// `reset()` is empty for `Sequential`, since it does not have parameter of
+  /// its own.
   void reset() override {}
 
   /// Feeds the `inputs` to the first module, then chains the output of each
