@@ -250,7 +250,14 @@ class ProcessGroupGloo : public ProcessGroup {
   using WorkType = std::tuple<AlgorithmEntry*, std::shared_ptr<WorkGloo>>;
 
   std::unique_ptr<::gloo::rendezvous::Store> store_;
+
+  // Every Gloo context represents a set of connections to its peers.
+  // In order to use more than one device (or allow for parallelism on
+  // a single device), you need multiple contexts. They are used in a
+  // round robin fashion, assuming that results in reasonable balance.
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
+  size_t contextIndex_;
+
   std::vector<std::thread> threads_;
   bool stop_;
 

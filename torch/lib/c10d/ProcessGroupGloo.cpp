@@ -7,6 +7,7 @@
 #include <gloo/cuda_allreduce_ring_chunked.h>
 #include <gloo/cuda_broadcast_one_to_all.h>
 #include <gloo/rendezvous/context.h>
+#include <gloo/rendezvous/prefix_store.h>
 #include <gloo/transport/tcp/device.h>
 
 #include <THC.h>
@@ -212,6 +213,7 @@ ProcessGroupGloo::ProcessGroupGloo(
     Options options)
     : ProcessGroup(rank, size),
       store_(new GlooStore(store)),
+      contextIndex_(0),
       stop_(false),
       cacheNumAlgorithmEntries_(options.cacheNumAlgorithmEntries) {
   auto& devices = options.devices;
@@ -219,10 +221,24 @@ ProcessGroupGloo::ProcessGroupGloo(
     throw std::runtime_error("No device(s) specified");
   }
 
-  for (auto& device : options.devices) {
+  // Create and connect a context for every device.
+  //
+  // Note that the same device can be specified multiple times, either
+  // the same object, or the same logical device as different objects.
+  // Either mode is fine and only has performance implications.
+  //
+  // Using the same object multiple times means all contexts share a
+  // single I/O thread. If you use different objects for the same
+  // logical device they will have independent I/O threads. The latter
+  // option is needed if you have a fast NIC that cannot be saturated
+  // by a single I/O thread.
+  //
+  contexts_.reserve(options.devices.size());
+  for (size_t i = 0; i < options.devices.size(); i++) {
     auto context = std::make_shared<::gloo::rendezvous::Context>(rank_, size_);
+    auto store = ::gloo::rendezvous::PrefixStore(std::to_string(i), *store_);
     context->setTimeout(options.timeout);
-    context->connectFullMesh(*store_, device);
+    context->connectFullMesh(store, options.devices[i]);
     contexts_.push_back(std::move(context));
   }
 
@@ -318,8 +334,9 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
   const auto& key = entry.key;
   const auto& backend = key.type->backend();
 
-  // Create algorithm against first context
-  auto& context = contexts_[0];
+  // Create algorithm against next context
+  auto& context = contexts_[contextIndex_];
+  contextIndex_ = (contextIndex_ + 1) % contexts_.size();
   at::DeviceGuard guard(entry.src[0].device());
 
   if (backend == at::kCPU) {
@@ -369,8 +386,9 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
   const auto& key = entry.key;
   const auto& backend = key.type->backend();
 
-  // Create algorithm against first context
-  auto& context = contexts_[0];
+  // Create algorithm against next context
+  auto& context = contexts_[contextIndex_];
+  contextIndex_ = (contextIndex_ + 1) % contexts_.size();
   at::DeviceGuard guard(entry.src[0].device());
 
   if (backend == at::kCPU) {

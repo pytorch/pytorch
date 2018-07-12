@@ -195,6 +195,21 @@ class ProcessGroupGlooTest(TestCase):
         for p in self.processes:
             p.join(timeout)
 
+    def test_multi_device_constructor(self):
+        store = c10d.FileStore(self.file.name)
+        opts = c10d.ProcessGroupGloo.Options()
+        opts.timeout = 1.0
+        opts.devices = [
+            c10d.ProcessGroupGloo.create_tcp_device(interface="lo"),
+            c10d.ProcessGroupGloo.create_tcp_device(interface="lo"),
+        ]
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.size, opts)
+
+        # Run ops with different dimension input tensors to trigger
+        # creation of algorithms against all devices.
+        work = [pg.allreduce(torch.ones(i)) for i in range(4)]
+        work.map(lambda w: w.wait())
+
     def opts(self):
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 1.0
