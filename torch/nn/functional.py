@@ -2058,6 +2058,10 @@ def upsample_bilinear(input, size=None, scale_factor=None):
     return interpolate(input, size, scale_factor, mode='bilinear', align_corners=True)
 
 
+GRID_SAMPLE_MODE_ZEROS = 0
+GRID_SAMPLE_MODE_BORDER = 1
+
+
 def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     r"""Given an :attr:`input` and a flow-field :attr:`grid`, computes the
     `output` using input pixel locations from the grid.
@@ -2099,7 +2103,13 @@ def grid_sample(input, grid, mode='bilinear', padding_mode='zeros'):
     """
     if mode != 'bilinear':
         raise NotImplementedError("nn.functional.grid_sample got unsupported mode: '{}'".format(mode))
-    return vision.grid_sampler(input, grid, padding_mode)
+    if padding_mode == 'zeros':
+        padding_mode = GRID_SAMPLE_MODE_ZEROS
+    elif padding_mode == 'border':
+        padding_mode = GRID_SAMPLE_MODE_BORDER
+    else:
+        raise ValueError("padding_mode needs to be 'zeros' or 'border', but got {}".format(padding_mode))
+    return torch.grid_sampler(input, grid, padding_mode)
 
 
 def affine_grid(theta, size):

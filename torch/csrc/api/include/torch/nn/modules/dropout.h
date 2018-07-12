@@ -18,6 +18,9 @@ namespace detail {
 template <typename Derived>
 class DropoutImplBase : public torch::nn::Cloneable<Derived> {
  public:
+  template <typename... Ts>
+  explicit DropoutImplBase(Ts&&... ts)
+      : DropoutImplBase(DropoutOptions(std::forward<Ts>(ts)...)) {}
   explicit DropoutImplBase(DropoutOptions options_);
 
   void reset() override;

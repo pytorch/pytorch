@@ -3,36 +3,38 @@
 Checks: '
   *
   ,modernize-*
-  ,clang-analyzer-*
-  ,-clang-diagnostic-*
-  ,-hicpp-no-array-decay
-  ,-fuchsia-*
-  ,-google-readability-namespace-comments
-  ,-llvm-namespace-comment
-  ,-google-readability-todo
-  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
-  ,-cert-err60-cpp
-  ,-llvm-header-guard
-  ,-cppcoreguidelines-special-member-functions
-  ,-misc-unused-parameters
-  ,-hicpp-braces-around-statements
-  ,-hicpp-special-member-functions
-  ,-readability-braces-around-statements
-  ,-modernize-use-default-member-init
-  ,-google-runtime-references
-  ,-cppcoreguidelines-pro-type-vararg
-  ,-google-readability-braces-around-statements
-  ,-google-build-using-namespace
-  ,-hicpp-vararg
-  ,-hicpp-explicit-conversions
-  ,-performance-unnecessary-value-param
-  ,-google-runtime-references
-  ,-cppcoreguidelines-pro-type-static-cast-downcast
-  ,-cppcoreguidelines-pro-bounds-constant-array-index
   ,-cert-err58-cpp
-  ,-modernize-make-unique
+  ,-cert-err60-cpp
+  ,-clang-diagnostic-*
   ,-cppcoreguidelines-owning-memory
+  ,-cppcoreguidelines-pro-bounds-array-to-pointer-decay
+  ,-cppcoreguidelines-pro-bounds-constant-array-index
+  ,-cppcoreguidelines-pro-type-static-cast-downcast
+  ,-cppcoreguidelines-pro-type-vararg
+  ,-cppcoreguidelines-special-member-functions
+  ,-fuchsia-*
+  ,-google-build-using-namespace
+  ,-google-explicit-constructor
+  ,-google-readability-braces-around-statements
+  ,-google-readability-namespace-comments
+  ,-google-readability-todo
+  ,-google-runtime-references
+  ,-google-runtime-references
+  ,-hicpp-braces-around-statements
+  ,-hicpp-explicit-conversions
+  ,-hicpp-no-array-decay
+  ,-hicpp-special-member-functions
+  ,-hicpp-vararg
+  ,-llvm-header-guard
+  ,-llvm-namespace-comment
+  ,-misc-unused-parameters
+  ,-modernize-make-unique
+  ,-modernize-use-default-member-init
+  ,-performance-unnecessary-value-param
+  ,-readability-braces-around-statements
+  ,-readability-else-after-return
   ,-readability-named-parameter
+  ,clang-analyzer-*
   '
 WarningsAsErrors: ''
 HeaderFilterRegex: 'torch/csrc/'
