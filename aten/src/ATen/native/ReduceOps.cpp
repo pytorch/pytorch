@@ -637,7 +637,7 @@ Tensor var(const Tensor& self, bool unbiased) {
            "var only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "var only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.value_or(at::_th_var(self, unbiased));
+  return trivial_return.has_value() ? trivial_return.value() : at::_th_var(self, unbiased);
 }
 
 Tensor var(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
@@ -662,7 +662,7 @@ Tensor std(const Tensor& self, bool unbiased) {
            "std only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
   AT_CHECK(at::isFloatingType(self.type().scalarType()), "std only supports floating-point dtypes");
   auto trivial_return = _allreduce_return_trivial(self, std::numeric_limits<double>::quiet_NaN());
-  return trivial_return.value_or(at::_th_std(self, unbiased));
+  return trivial_return.has_value() ? trivial_return.value() : at::_th_std(self, unbiased);
 }
 
 Tensor std(const Tensor& self, int64_t dim, bool unbiased, bool keepdim) {
