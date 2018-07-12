@@ -10,11 +10,10 @@
 std::unordered_map<std::string, ClientSocket> managers;
 std::string manager_executable_path;
 
-AllocInfo get_alloc_info(THManagedMapAllocator *ctx) {
+AllocInfo get_alloc_info(const char* filename) {
   AllocInfo info = {0};
   info.pid = getpid();
   info.free = false;
-  const char *filename = ctx->filename();
   size_t len = strlen(filename);
   if (len >= sizeof(info.filename)) {
     throw std::runtime_error("THMapAllocatorContext_filename too long");
@@ -79,7 +78,8 @@ void libshm_init(const char *manager_exec_path) {
   manager_executable_path = std::string(manager_exec_path);
 }
 
-void THManagedMapAllocator::initializeManager() {
+THManagedMapAllocatorInit::THManagedMapAllocatorInit(const char* manager_handle, const char* filename)
+  : manager_handle_(manager_handle ? manager_handle : "") {
   // TODO: unlock GIL when contacting the manager
   try {
     ClientSocket *socket;
@@ -93,7 +93,7 @@ void THManagedMapAllocator::initializeManager() {
       manager_handle_ = manager->first;
       socket = &manager->second;
     }
-    AllocInfo info = get_alloc_info(this);
+    AllocInfo info = get_alloc_info(filename);
     socket->register_allocation(info);
   } catch(std::exception &e) {
     THError(e.what());
@@ -101,16 +101,11 @@ void THManagedMapAllocator::initializeManager() {
 }
 
 THManagedMapAllocator::THManagedMapAllocator(const char *manager_handle, const char *filename, int flags, ptrdiff_t size)
-  : THRefcountedMapAllocator(filename, flags, size)
-  // TODO: Perhaps it should be an at::optional<std::string>?
-  , manager_handle_(manager_handle ? manager_handle : "") {
-
-    initializeManager();
-}
+  : THManagedMapAllocatorInit(manager_handle, filename), THRefcountedMapAllocator(filename, flags, size) {}
 
 void THManagedMapAllocator::close() {
   if (closed_) return;
-  AllocInfo info = get_alloc_info(this);
+  AllocInfo info = get_alloc_info(filename());
   info.free = true;
   ClientSocket &socket = get_manager_socket(manager_handle_);
   THRefcountedMapAllocator::close();
