@@ -342,7 +342,10 @@ def replace_forceinline(input_string):
     return output_string
 
 def replace_math_functions(input_string):
-    """ Replace std:: invocations of match functions with non-std:: versions to prevent linker errors"""
+    """ FIXME: Temporarily replace std:: invocations of math functions with non-std:: versions to prevent linker errors
+        NOTE: This can lead to correctness issues when running tests, since the correct version of the math function (exp/expf) might not get called.
+        Plan is to remove this function once HIP supports std:: math function calls inside device code
+    """
     output_string = input_string
     output_string = re.sub("std::exp\(", "::exp(", output_string)
     output_string = re.sub("std::log\(", "::log(", output_string)
