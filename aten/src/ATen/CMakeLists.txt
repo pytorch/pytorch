@@ -293,12 +293,12 @@ else()
 endif()
 
 if(USE_CUDA OR USE_ROCM)
+  set(ATen_CUDA_SRCS ${all_cuda_cpp})
   if(AT_LINK_STYLE STREQUAL "INTERFACE")
     # Source code can't be added to an interface library, so it is
     # passed back to be compiled into the containing library
     add_library(ATen_cuda INTERFACE)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
-    set(ATen_CUDA_SRCS ${all_cuda_cpp})
   else()
     # A hack to deal with cuda library dependencies and modern CMake: the
     # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
@@ -432,7 +432,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
           ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
       target_include_directories(${test_name} SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-      target_link_libraries(${test_name} ATen_cpu ATen_cuda)
+      target_link_libraries(${test_name} -Wl,--no-as-needed ATen_cpu ATen_cuda)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       install(TARGETS ${test_name} DESTINATION test)
     endforeach()
