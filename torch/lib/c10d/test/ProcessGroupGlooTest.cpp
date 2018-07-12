@@ -18,8 +18,6 @@
 
 using namespace c10d::test;
 
-using c10d::CUDADevice;
-
 class SignalTest {
  public:
   SignalTest(const std::string& path) : path_(path) {}
@@ -202,8 +200,11 @@ void testBroadcast(const std::string& path, const at::Backend b) {
       // Initialize inputs
       for (auto k = 0; k < size; k++) {
         inputs[k].resize(stride);
+        at::DeviceGuard deviceGuard;
         for (auto l = 0; l < stride; l++) {
-          CUDADevice device(type.is_cuda() ? l : -1);
+          if (type.is_cuda()) {
+            deviceGuard.set_index(l);
+          }
           inputs[k][l] = at::ones(type, {16, 16}) * (k * stride + l);
         }
       }

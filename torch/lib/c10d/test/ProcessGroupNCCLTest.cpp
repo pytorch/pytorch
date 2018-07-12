@@ -10,7 +10,6 @@
 
 using namespace c10d::test;
 
-using c10d::CUDADevice;
 using c10d::CUDAStream;
 using c10d::ProcessGroup;
 using c10d::THCStreamGuard;
@@ -50,8 +49,9 @@ class NCCLTest : public NCCLTestBase {
 
     // Each device has a single tensor to perf the NCCL op
     inputs_.resize(numDevices_);
+    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       inputs_[i] = type.tensor({3, 3});
     }
 
@@ -64,7 +64,7 @@ class NCCLTest : public NCCLTestBase {
     //
     streams_.resize(numDevices_);
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       streams_[i] = CUDAStream::create();
     }
   }
@@ -117,14 +117,15 @@ class AllreduceNCCLTest : public NCCLTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every device
+    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       inputs_[i].fill_(pg_->getRank() * numDevices_ + i);
     }
 
@@ -141,14 +142,15 @@ class BroadcastNCCLTest : public NCCLTest {
     auto guards = createStreamGuard();
 
     // Launch sleep on every device
+    at::DeviceGuard deviceGuard;
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       cudaSleep(streams_[i], 2000 * 1000 * 1000);
     }
 
     // Launch value initialization for every tensor
     for (auto i = 0; i < numDevices_; i++) {
-      CUDADevice device(i);
+      deviceGuard.set_index(i);
       inputs_[i].fill_(pg_->getRank() * numDevices_ + i);
     }
 
