@@ -1,5 +1,7 @@
 #pragma once
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 namespace torch { namespace autograd {
 
 struct GradMode {
@@ -10,7 +12,7 @@ struct GradMode {
     _enabled = enabled;
   }
 private:
-  static thread_local bool _enabled;
+  TORCH_API static thread_local bool _enabled;
 };
 
 // A RAII, thread local (!) guard that enables or disables grad mode upon

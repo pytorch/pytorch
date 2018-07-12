@@ -11,6 +11,7 @@
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
 
@@ -309,7 +310,7 @@ struct Function : std::enable_shared_from_this<Function> {
  protected:
   /// Monotonically incrementing (thread local!) counter to supply sequence
   /// numbers.
-  static thread_local uint64_t next_sequence_nr_;
+  TORCH_API static thread_local uint64_t next_sequence_nr_;
 
   /// Performs the `Function`'s actual operation.
   virtual variable_list apply(const variable_list& inputs) = 0;
