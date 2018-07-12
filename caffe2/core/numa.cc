@@ -6,6 +6,7 @@ CAFFE2_DEFINE_bool(
     "Use NUMA whenever possible.");
 
 #if defined(__linux__) && !defined(CAFFE2_DISABLE_NUMA) && CAFFE2_MOBILE == 0
+#include "/usr/include/numa.h"
 #include <numa.h>
 #include <numaif.h>
 #define CAFFE2_NUMA_ENABLED
