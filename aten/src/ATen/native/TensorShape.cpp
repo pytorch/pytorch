@@ -45,10 +45,14 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
   // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
   // a call to split would discard the number of chunks (because we can have an arbitrary number of
   // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
-  // and do this for all cases for consistency.
-  std::vector<int64_t> split_sizes(chunks, split_size);
-  split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
-  return self.split_with_sizes(split_sizes, dim);
+  // eventually we will do this for all cases.
+  if (split_size == 0 && self.size(dim) == 0) {
+    std::vector<int64_t> split_sizes(chunks, split_size);
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    return self.split_with_sizes(split_sizes, dim);
+  } else {
+    return self.split(split_size, dim);
+  }
 }
 
 Tensor diagflat(const Tensor& self, int64_t offset) {
@@ -332,7 +336,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   // if split_size is 0 and dimension size is 0, there is 1 split.
   int64_t num_splits = 1;
   if (split_size != 0) {
-    // ensuring num_splits if at least 1 makes consistent the case where split_size > dim_size
+    // ensuring num_splits is at least 1 makes consistent the case where split_size > dim_size
     // (returns a single split).  We might want to error here, but keep it for BC.
     num_splits = std::max<int64_t>((dim_size + split_size - 1) / split_size, 1);
   }
@@ -365,7 +369,7 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntList split_sizes, in
     splits[i] = self.narrow(dim, start_idx, length);
     start_idx += length;
   }
-  if (i < num_splits || start_idx != dim_size) {
+  if (start_idx != dim_size) {
     std::ostringstream ss;
     ss << "split_with_sizes expects split_sizes to sum exactly to "
        << dim_size << " (input tensor's size at dimension " << dim << "), "
