@@ -320,6 +320,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
+  at::DeviceGuard guard(entry.src[0].device());
 
   if (backend == at::kCPU) {
     if (getSize() < 16) {
@@ -370,6 +371,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
+  at::DeviceGuard guard(entry.src[0].device());
 
   if (backend == at::kCPU) {
     entry.algorithm =
