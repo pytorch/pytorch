@@ -26,10 +26,26 @@ ${Storage}::${Storage}(Context* context, size_t size, Allocator* allocator)
   ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
 }
 
+// TODO: Take in Device as an input to the std::function constructor
+
+#if ${isCUDA}
+static int getPointerDevice(void* ptr) {
+  struct cudaPointerAttributes attr;
+  THCudaCheck(cudaPointerGetAttributes(&attr, ptr));
+  return attr.device;
+}
+#endif
+
 ${Storage}::${Storage}(Context* context,
   void * data, size_t size, const std::function<void(void*)> & deleter)
   : storage(${THStorage}_newWithDataAndAllocator(${state,}
-     makeInefficientStdFunctionSupervisedPtr(data, deleter), size,
+     makeInefficientStdFunctionSupervisedPtr(data, deleter,
+#if ${isCUDA}
+      Device(kCUDA, getPointerDevice(data))
+#else
+      kCPU
+#endif
+       ), size,
      /* allocator */ nullptr
     )),
     context(context) {
@@ -112,7 +128,7 @@ void ${Storage}::clear_flag(char flag) {
 }
 
 int ${Storage}::getDevice() const {
-  ${storage_device} //storage->device;
+  return storage->data_ptr.device_.index();
 }
 
 Type& ${Storage}::type() const {

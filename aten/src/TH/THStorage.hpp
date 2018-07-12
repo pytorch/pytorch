@@ -39,7 +39,6 @@ struct THFinalizer {
 
 typedef struct THStorage
 {
-    at::Backend backend; // kCPU or kCUDA only
     at::ScalarType scalar_type;
     at::SupervisedPtr data_ptr;
     ptrdiff_t size;
@@ -49,7 +48,6 @@ typedef struct THStorage
     at::Allocator *allocator;
     std::unique_ptr<THFinalizer> finalizer;
     struct THStorage *view;
-    int device;
 
     template <typename T>
     inline T * data() const {

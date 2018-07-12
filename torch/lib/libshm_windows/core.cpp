@@ -15,7 +15,7 @@ static void deleteTHManagedMapAllocator(void* ptr) {
 
 at::SupervisedPtr THManagedMapAllocator::makeSupervisedPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size) {
   auto* supervisor = new THManagedMapAllocator(manager_handle, filename, flags, size);
-  return {supervisor->data(), {supervisor, &deleteTHManagedMapAllocator}};
+  return {supervisor->data(), {supervisor, &deleteTHManagedMapAllocator}, at::kCPU};
 }
 
 THManagedMapAllocator* THManagedMapAllocator::fromSupervisedPtr(const at::SupervisedPtr& sptr) {

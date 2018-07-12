@@ -25,21 +25,15 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
                                         ptrdiff_t size,
                                         at::Allocator* allocator)
 {
-  THArgCheck(size >= 0, 2, "invalid size");
-  int device;
-  THCudaCheck(cudaGetDevice(&device));
-
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
   new (&storage->refcount) std::atomic<int>(1);
   new (&storage->weakcount) std::atomic<int>(1);
   new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->backend = at::kCUDA;
   storage->scalar_type = scalar_type;
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
   storage->allocator = allocator;
   storage->size = size;
-  storage->device = device;
 
   at::SupervisedPtr ptr;
   if (size > 0) {
@@ -57,8 +51,6 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
 
 void THCStorage_free(THCState *state, THCStorage *storage)
 {
-  AT_ASSERT(storage->backend == at::kCUDA);
-
   if (storage->flag & TH_STORAGE_REFCOUNTED) {
     if (--storage->refcount == 0) {
       if (storage->finalizer) {
@@ -76,8 +68,6 @@ void THCStorage_free(THCState *state, THCStorage *storage)
 
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 {
-  AT_ASSERT(self->backend == at::kCUDA);
-
   THArgCheck(size >= 0, 2, "invalid size");
   THAssert(self->allocator != nullptr);
   int device;
@@ -90,9 +80,8 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
   if(size == 0)
   {
-    self->data_ptr = nullptr;
+    self->data_ptr = at::SupervisedPtr(nullptr, at::nonOwningSupervisorPtr(), at::Device(at::kCUDA, device));
     self->size = 0;
-    self->device = device;
   }
   else
   {
@@ -101,7 +90,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
     if (self->data_ptr) {
       // Enable p2p access when the memcpy is across devices
-      THCState_getPeerToPeerAccess(state, device, self->device);
+      THCState_getPeerToPeerAccess(state, device, THCStorage_getDevice(state, self));
 
       THCudaCheck(cudaMemcpyAsync(data.get(),
                                   self->data_ptr.get(),
@@ -113,12 +102,11 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
     // Destructively overwrite data_ptr
     self->data_ptr = std::move(data);
     self->size = size;
-    self->device = device;
   }
 }
 
 int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
-  return storage->device;
+  return storage->data_ptr.device_.index();
 }
 
 THCStorage* THCStorage_newWithDataAndAllocator(
@@ -126,7 +114,6 @@ THCStorage* THCStorage_newWithDataAndAllocator(
   at::Allocator *allocator) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
-  storage->backend = at::kCUDA;
   storage->scalar_type = scalar_type;
   new (&storage->data_ptr) at::SupervisedPtr(std::move(data));
   storage->size = size;
@@ -135,14 +122,5 @@ THCStorage* THCStorage_newWithDataAndAllocator(
   new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
   storage->allocator = allocator;
-  int device;
-  if (storage->data_ptr.get()) {
-    struct cudaPointerAttributes attr;
-    THCudaCheck(cudaPointerGetAttributes(&attr, storage->data_ptr.get()));
-    device = attr.device;
-  } else {
-    THCudaCheck(cudaGetDevice(&device));
-  }
-  storage->device = device;
   return storage;
 }

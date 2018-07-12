@@ -190,29 +190,30 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
     offset = 0;
     for (i = 0; i < numInputs; i += CAT_ARRAY_BATCH_SIZE) {
       // Re-allocate stackInputs every iteration to avoid read-after-write hazard
-      auto stackInputs_owner = THCudaHostAlloc(state, tensorMetadataSize);
-      CatArrInputTensor<real, unsigned int>* stackInputs = static_cast<CatArrInputTensor<real, unsigned int>*>(stackInputs_owner.get());
-      cohortMax = 0;
-      for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
-        int64_t dimSize = THCTensor_(size)(state, inputs[i+j], dimension);
+      {
+        auto stackInputs_owner = THCudaHostAlloc(state, tensorMetadataSize);
+        CatArrInputTensor<real, unsigned int>* stackInputs = static_cast<CatArrInputTensor<real, unsigned int>*>(stackInputs_owner.get());
+        cohortMax = 0;
+        for (j = 0; j < CAT_ARRAY_BATCH_SIZE && (i+j) < numInputs; ++j) {
+          int64_t dimSize = THCTensor_(size)(state, inputs[i+j], dimension);
 
-        stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
-        stackInputs[j].offset = offset;
-        stackInputs[j].dimSize = dimSize;
-        stackInputs[j].nElements = THCTensor_(nElement)(state, inputs[i+j]);
-        cohortMax = cohortMax > (int) stackInputs[j].nElements ? cohortMax : (int) stackInputs[j].nElements;
+          stackInputs[j].input = THCTensor_(data)(state, inputs[i+j]);
+          stackInputs[j].offset = offset;
+          stackInputs[j].dimSize = dimSize;
+          stackInputs[j].nElements = THCTensor_(nElement)(state, inputs[i+j]);
+          cohortMax = cohortMax > (int) stackInputs[j].nElements ? cohortMax : (int) stackInputs[j].nElements;
 
-        // update offset
-        offset += dimSize;
+          // update offset
+          offset += dimSize;
+        }
+        THCudaCheck(cudaMemcpyAsync(
+            d_inputs,
+            stackInputs,
+            j * sizeof(CatArrInputTensor<real, unsigned int>),
+            cudaMemcpyHostToDevice,
+            THCStream_stream(stream)));
+        THCudaHostRecord(state, stackInputs);
       }
-      THCudaCheck(cudaMemcpyAsync(
-          d_inputs,
-          stackInputs,
-          j * sizeof(CatArrInputTensor<real, unsigned int>),
-          cudaMemcpyHostToDevice,
-          THCStream_stream(stream)));
-      THCudaHostRecord(state, stackInputs);
-      stackInputs_owner = nullptr; // free the allocation
 
       // Next, let's consider how we set our kernel launch parameters.
       // We borrow from THCApply, which the kernel's internal indexing

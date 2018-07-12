@@ -22,7 +22,7 @@
 struct THDefaultAllocator final : public at::Allocator {
   at::SupervisedPtr allocate(size_t size) const override {
     auto* ptr = THAlloc(size);
-    return {ptr, {ptr, THFree}};
+    return {ptr, {ptr, THFree}, at::kCPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THFree;
@@ -539,25 +539,25 @@ THRefcountedMapAllocator* THRefcountedMapAllocator::fromSupervisedPtr(const at::
 at::SupervisedPtr THMapAllocator::makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size();
-  return {supervisor->data(), {supervisor, &deleteTHMapAllocator}};
+  return {supervisor->data(), {supervisor, &deleteTHMapAllocator}, at::kCPU};
 }
 
 at::SupervisedPtr THMapAllocator::makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size();
-  return {supervisor->data(), {supervisor, &deleteTHMapAllocator}};
+  return {supervisor->data(), {supervisor, &deleteTHMapAllocator}, at::kCPU};
 }
 
 at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THRefcountedMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
-  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}};
+  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}, at::kCPU};
 }
 
 at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
-  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}};
+  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}, at::kCPU};
 }
 
 void* THRefcountedMapAllocator::data() const {

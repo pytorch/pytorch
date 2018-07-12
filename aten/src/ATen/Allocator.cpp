@@ -12,8 +12,8 @@ static void deleteInefficientStdFunctionSupervisor(void* ptr) {
 }
 
 at::SupervisedPtr
-makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter) {
-  return {ptr, SupervisorPtr{new InefficientStdFunctionSupervisor({ptr, deleter}), &deleteInefficientStdFunctionSupervisor}};
+makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter, Device device) {
+  return {ptr, SupervisorPtr{new InefficientStdFunctionSupervisor({ptr, deleter}), &deleteInefficientStdFunctionSupervisor}, device};
 }
 
 } // namespace at

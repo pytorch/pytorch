@@ -16,8 +16,6 @@
 
 // Free a non-weak pointer to THStorage
 void THStorage_free(THStorage *storage) {
-  AT_ASSERT(storage->backend == at::kCPU);
-
   if (!storage) {
     return;
   }
@@ -110,7 +108,6 @@ THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size
                                       at::Allocator *allocator)
 {
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->backend = at::kCPU;
   storage->scalar_type = scalar_type;
   new (&storage->data_ptr) at::SupervisedPtr(allocator->allocate(at::elementSize(scalar_type)*size));
   storage->size = size;
@@ -119,7 +116,6 @@ THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size
   new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
   storage->allocator = allocator;
-  storage->device = INT_MIN;  // device is not meaningful on CPU
   return storage;
 }
 
@@ -184,7 +180,6 @@ THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
                                              at::SupervisedPtr&& data, ptrdiff_t size,
                                              THAllocator* allocator) {
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->backend = at::kCPU;
   storage->scalar_type = scalar_type;
   new (&storage->data_ptr) at::SupervisedPtr(std::move(data));
   storage->size = size;
@@ -193,14 +188,11 @@ THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
   new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
   storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
   storage->allocator = allocator;
-  storage->device = INT_MIN;  // device is not meaningful on CPU
   return storage;
 }
 
 void THStorage_resize(THStorage *storage, ptrdiff_t size)
 {
-  AT_ASSERT(storage->backend == at::kCPU);
-
   if (storage->flag & TH_STORAGE_RESIZABLE)
   {
     /* case when the allocator does not have a realloc defined */
@@ -228,7 +220,6 @@ void THStorage_resize(THStorage *storage, ptrdiff_t size)
 void THStorage_swap(THStorage *storage1, THStorage *storage2)
 {
 #define SWAP(val) { std::swap(storage1->val, storage2->val); }
-    SWAP(backend);
     SWAP(scalar_type);
     SWAP(data_ptr);
     SWAP(size);
@@ -237,6 +228,5 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
     SWAP(allocator);
     SWAP(finalizer);
     SWAP(view);
-    SWAP(device);
 #undef SWAP
 }

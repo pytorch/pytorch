@@ -10,7 +10,7 @@ struct THCudaHostAllocator : public at::Allocator {
     if (size != 0) {
       THCudaCheck(cudaMallocHost(&ptr, size));
     }
-    return {ptr, {ptr, &THCudaHostDeleter}};
+    return {ptr, {ptr, &THCudaHostDeleter}, at::kCPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THCudaHostDeleter;
@@ -34,7 +34,9 @@ struct THCUVAAllocator : public at::Allocator {
     if (size != 0) {
       THCudaCheck(cudaMallocManaged(&ptr, size, cudaMemAttachGlobal));
     }
-    return {ptr, {ptr, &THCUVADeleter}};
+    int device;
+    THCudaCheck(cudaGetDevice(&device));
+    return {ptr, {ptr, &THCUVADeleter}, at::Device(at::kCUDA, device)};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THCUVADeleter;
@@ -62,5 +64,5 @@ void deleteTHCIpcDeleter(void* ptr) {
 at::SupervisedPtr THCIpcDeleter::makeSupervisedPtr(void* data, int device) {
   // The dynamic allocation here is a bit unfortunate
   auto* supervisor = new THCIpcDeleter(data, device);
-  return {data, {supervisor, &deleteTHCIpcDeleter}};
+  return {data, {supervisor, &deleteTHCIpcDeleter}, at::Device(at::kCUDA, device)};
 }

@@ -37,7 +37,7 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
 static PyObject * THPStorage_(newTHView)(THWStorage *base, ptrdiff_t offset, size_t size)
 {
   void *data = (char*)base->data<real>() + offset;
-  THWStoragePtr view(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {data, at::nonOwningSupervisorPtr()}, size, nullptr));
+  THWStoragePtr view(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {data, at::nonOwningSupervisorPtr(), base->data_ptr.device_}, size, nullptr));
   view->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
   view->view = base;
   THWStorage_(retain)(LIBRARY_STATE base);
@@ -225,9 +225,9 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
-  at::DeviceGuard device_guard(storage->device);
+  at::DeviceGuard device_guard(storage->data_ptr.device_.index());
   THPObjectPtr tuple(PyTuple_New(5));
-  THPObjectPtr device(PyLong_FromLong(storage->device));
+  THPObjectPtr device(PyLong_FromLong(storage->data_ptr.device_.index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
   THPObjectPtr size(PyLong_FromLong(storage->size));

@@ -5,6 +5,7 @@
 
 #include <ATen/Error.h>
 #include <ATen/Retainable.h>
+#include <ATen/Device.h>
 
 namespace at {
 
@@ -45,14 +46,17 @@ struct SupervisedPtr {
   // Lifetime tied to supervisor_
   void* data_;
   SupervisorPtr supervisor_;
-  SupervisedPtr() : data_(nullptr), supervisor_(nonOwningSupervisorPtr()) {}
-  SupervisedPtr(void* data, SupervisorPtr&& supervisor)
-    : data_(data), supervisor_(std::move(supervisor)) {}
+  Device device_;
+  SupervisedPtr() : data_(nullptr), supervisor_(nonOwningSupervisorPtr()), device_(kCPU) {}
+  SupervisedPtr(void* data, SupervisorPtr&& supervisor, Device device)
+    : data_(data), supervisor_(std::move(supervisor)), device_(device) {}
   void* operator->() const { return data_; }
   void* get() const { return data_; }
   operator bool() { return data_ || supervisor_; }
-  SupervisedPtr& operator=( std::nullptr_t ) noexcept { data_ = nullptr; supervisor_ = nullptr; return *this; }
 };
+
+// NB: Device is NOT tested for here; a CUDA nullptr is as much a nullptr as a
+// CPU nullptr
 
 inline bool operator==(const at::SupervisedPtr& sp, std::nullptr_t) noexcept {
   return sp.data_ == nullptr && sp.supervisor_ == nullptr;
@@ -119,6 +123,6 @@ struct AT_API InefficientStdFunctionSupervisor {
 };
 
 AT_API at::SupervisedPtr
-makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter);
+makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter, Device device);
 
 }  // namespace at
