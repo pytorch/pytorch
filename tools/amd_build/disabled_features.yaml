@@ -130,7 +130,6 @@
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/THCUNN/RReLU.cu",
     "aten/src/ATen/native/cuda/Distributions.cu"
   ],
   "disabled_functions": [
