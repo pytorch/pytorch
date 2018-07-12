@@ -6,11 +6,6 @@
 #include <ATen/Allocator.h>
 #endif
 
-/* stuff for mapped files */
-#ifdef _WIN32
-#include <windows.h>
-#endif
-
 #define TH_ALLOCATOR_MAPPED_SHARED 1
 #define TH_ALLOCATOR_MAPPED_SHAREDMEM 2
 #define TH_ALLOCATOR_MAPPED_EXCLUSIVE 4
@@ -77,8 +72,8 @@ protected:
   int flags_ = 0;
   ptrdiff_t size_; /* mapped size */
 #ifdef _WIN32
-  HANDLE handle_;
-  HANDLE event_;
+  void* handle_;
+  void* event_;
   std::string eventname_;
 #else
   int fd_ = -1;
