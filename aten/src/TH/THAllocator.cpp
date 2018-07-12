@@ -1,5 +1,10 @@
 #include "THAllocator.h"
 
+/* stuff for mapped files */
+#ifdef _WIN32
+#include <windows.h>
+#endif
+
 #include <atomic>
 #if ATOMIC_INT_LOCK_FREE == 2
 #define TH_ATOMIC_IPC_REFCOUNT 1
