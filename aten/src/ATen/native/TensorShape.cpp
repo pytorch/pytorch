@@ -334,7 +334,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
   if (split_size != 0) {
     // ensuring num_splits if at least 1 makes consistent the case where split_size > dim_size
     // (returns a single split).  We might want to error here, but keep it for BC.
-    num_splits = std::max<int64_t>(dim_size + split_size - 1, 1);
+    num_splits = std::max<int64_t>((dim_size + split_size - 1) / split_size, 1);
   }
   std::vector<Tensor> splits(num_splits);
   int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
