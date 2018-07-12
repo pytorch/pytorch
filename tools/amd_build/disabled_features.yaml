@@ -2,13 +2,6 @@
   "disable_unsupported_hip_calls":
     [
       {
-        "path": "aten/src/THC/generic/THCTensorSort.cu",
-        "functions": {
-            "thrust::copy": ";",
-            "thrust::stable_sort_by_key": ";"
-        }
-      },
-      {
         "path": "aten/src/THC/THCBlas.cu",
         "functions": {
           "cublasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
