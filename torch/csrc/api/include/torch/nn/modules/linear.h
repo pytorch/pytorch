@@ -19,6 +19,9 @@ struct LinearOptions {
 
 class LinearImpl : public Cloneable<LinearImpl> {
  public:
+  template <typename... Ts>
+  explicit LinearImpl(Ts&&... ts)
+      : LinearImpl(LinearOptions(std::forward<Ts>(ts)...)) {}
   explicit LinearImpl(LinearOptions options);
 
   void reset() override;
