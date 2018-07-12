@@ -58,62 +58,62 @@ def _batch_lowrank_mahalanobis(W, D, x, capacitance_tril):
 class LowRankMultivariateNormal(Distribution):
     r"""
     Creates a multivariate normal distribution with covariance matrix having a low-rank form
-    parameterized by `scale_factor` and `scale_diag`::
-        covariance_matrix = scale_factor @ scale_factor.T + scale_diag
+    parameterized by `cov_factor` and `cov_diag`::
+        covariance_matrix = cov_factor @ cov_factor.T + cov_diag
 
     Example:
 
         >>> m = MultivariateNormal(torch.zeros(2), torch.tensor([1, 0]), torch.tensor([1, 1]))
-        >>> m.sample()  # normally distributed with mean=`[0,0]`, scale_factor=`[1,0]`, scale_diag=`[1,1]`
+        >>> m.sample()  # normally distributed with mean=`[0,0]`, cov_factor=`[1,0]`, cov_diag=`[1,1]`
         tensor([-0.2102, -0.5429])
 
     Args:
         loc (Tensor): mean of the distribution with shape `batch_shape + event_shape`
-        scale_factor (Tensor): factor part of low-rank form of covariance matrix with shape
+        cov_factor (Tensor): factor part of low-rank form of covariance matrix with shape
             `batch_shape + event_shape + (rank,)`
-        scale_diag (Tensor): diagonal part of low-rank form of covariance matrix with shape
+        cov_diag (Tensor): diagonal part of low-rank form of covariance matrix with shape
             `batch_shape + event_shape`
 
     Note:
         The computation for determinant and inverse of covariance matrix is avoided when
-        `scale_factor.shape[1] << scale_factor.shape[0]` thanks to `Woodbury matrix identity
+        `cov_factor.shape[1] << cov_factor.shape[0]` thanks to `Woodbury matrix identity
         <https://en.wikipedia.org/wiki/Woodbury_matrix_identity>`_ and
         `matrix determinant lemma <https://en.wikipedia.org/wiki/Matrix_determinant_lemma>`_.
         Thanks to these formulas, we just need to compute the determinant and inverse of
         the small size "capacitance" matrix::
-            capacitance = I + scale_factor.T @ inv(scale_diag) @ scale_factor
+            capacitance = I + cov_factor.T @ inv(cov_diag) @ cov_factor
     """
     arg_constraints = {"loc": constraints.real,
-                       "scale_factor": constraints.real,
-                       "scale_diag": constraints.positive}
+                       "cov_factor": constraints.real,
+                       "cov_diag": constraints.positive}
     support = constraints.real
     has_rsample = True
 
-    def __init__(self, loc, scale_factor, scale_diag, validate_args=None):
+    def __init__(self, loc, cov_factor, cov_diag, validate_args=None):
         if loc.dim() < 1:
             raise ValueError("loc must be at least one-dimensional.")
         event_shape = loc.shape[-1:]
-        if scale_factor.dim() < 2:
-            raise ValueError("scale_factor must be at least two-dimensional, "
+        if cov_factor.dim() < 2:
+            raise ValueError("cov_factor must be at least two-dimensional, "
                              "with optional leading batch dimensions")
-        if scale_factor.shape[-2:-1] != event_shape:
-            raise ValueError("scale_factor must be a batch of matrices with shape {} x m"
+        if cov_factor.shape[-2:-1] != event_shape:
+            raise ValueError("cov_factor must be a batch of matrices with shape {} x m"
                              .format(event_shape[0]))
-        if scale_diag.shape[-1:] != event_shape:
-            raise ValueError("scale_diag must be a batch of vectors with shape {}".format(event_shape))
+        if cov_diag.shape[-1:] != event_shape:
+            raise ValueError("cov_diag must be a batch of vectors with shape {}".format(event_shape))
 
-        scale_batch_shape = _get_batch_shape(scale_factor, scale_diag)
+        scale_batch_shape = _get_batch_shape(cov_factor, cov_diag)
         try:
             batch_shape = torch._C._infer_size(loc.shape[:-1], scale_batch_shape)
         except RuntimeError:
-            raise ValueError("Incompatible batch shapes: loc {}, scale_factor {}, scale_diag {}"
-                             .format(loc.shape, scale_factor.shape, scale_diag.shape))
+            raise ValueError("Incompatible batch shapes: loc {}, cov_factor {}, cov_diag {}"
+                             .format(loc.shape, cov_factor.shape, cov_diag.shape))
 
         loc_shape = batch_shape + event_shape
         self.loc = loc.expand(loc_shape)
-        self.scale_factor = scale_factor.expand(loc_shape + scale_factor.shape[-1:])
-        self.scale_diag = scale_diag.expand(loc_shape)
-        self._capacitance_tril = _batch_capacitance_tril(self.scale_factor, self.scale_diag)
+        self.cov_factor = cov_factor.expand(loc_shape + cov_factor.shape[-1:])
+        self.cov_diag = cov_diag.expand(loc_shape)
+        self._capacitance_tril = _batch_capacitance_tril(self.cov_factor, self.cov_diag)
         super(LowRankMultivariateNormal, self).__init__(batch_shape, event_shape,
                                                         validate_args=validate_args)
 
@@ -123,7 +123,7 @@ class LowRankMultivariateNormal(Distribution):
 
     @property
     def variance(self):
-        return self.scale_factor.pow(2).sum(-1) + self.scale_diag
+        return self.cov_factor.pow(2).sum(-1) + self.cov_diag
 
     @lazy_property
     def scale_tril(self):
@@ -133,45 +133,45 @@ class LowRankMultivariateNormal(Distribution):
         # The matrix "I + D-1/2 @ W @ W.T @ D-1/2" has eigenvalues bounded from below by 1,
         # hence it is well-conditioned and safe to take Cholesky decomposition.
         n = self._event_shape[0]
-        scale_diag_sqrt_unsqueeze = self.scale_diag.sqrt().unsqueeze(-1)
-        Dinvsqrt_W = self.scale_factor / scale_diag_sqrt_unsqueeze
+        cov_diag_sqrt_unsqueeze = self.cov_diag.sqrt().unsqueeze(-1)
+        Dinvsqrt_W = self.cov_factor / cov_diag_sqrt_unsqueeze
         K = torch.matmul(Dinvsqrt_W, Dinvsqrt_W.transpose(-1, -2)).contiguous()
         K.view(-1, n * n)[:, ::n + 1] += 1  # add identity matrix to K
-        return scale_diag_sqrt_unsqueeze * _batch_potrf_lower(K)
+        return cov_diag_sqrt_unsqueeze * _batch_potrf_lower(K)
 
     @lazy_property
     def covariance_matrix(self):
-        return (torch.matmul(self.scale_factor, self.scale_factor.transpose(-1, -2)) +
-                _batch_vector_diag(self.scale_diag))
+        return (torch.matmul(self.cov_factor, self.cov_factor.transpose(-1, -2)) +
+                _batch_vector_diag(self.cov_diag))
 
     @lazy_property
     def precision_matrix(self):
         # We use "Woodbury matrix identity" to take advantage of low rank form::
         #     inv(W @ W.T + D) = inv(D) - inv(D) @ W @ inv(C) @ W.T @ inv(D)
         # where :math:`C` is the capacitance matrix.
-        Wt_Dinv = self.scale_factor.transpose(-1, -2) / self.scale_diag.unsqueeze(-2)
+        Wt_Dinv = self.cov_factor.transpose(-1, -2) / self.cov_diag.unsqueeze(-2)
         A = _batch_trtrs_lower(Wt_Dinv, self._capacitance_tril)
-        return (_batch_vector_diag(self.scale_diag.reciprocal()) -
+        return (_batch_vector_diag(self.cov_diag.reciprocal()) -
                 torch.matmul(A.transpose(-1, -2), A))
 
     def rsample(self, sample_shape=torch.Size()):
         shape = self._extended_shape(sample_shape)
-        eps_W = self.loc.new_empty(shape[:-1] + (self.scale_factor.size(-1),)).normal_()
+        eps_W = self.loc.new_empty(shape[:-1] + (self.cov_factor.size(-1),)).normal_()
         eps_D = self.loc.new_empty(shape).normal_()
-        return self.loc + _batch_mv(self.scale_factor, eps_W) + self.scale_diag * eps_D
+        return self.loc + _batch_mv(self.cov_factor, eps_W) + self.cov_diag * eps_D
 
     def log_prob(self, value):
         if self._validate_args:
             self._validate_sample(value)
         diff = value - self.loc
-        M = _batch_lowrank_mahalanobis(self.scale_factor, self.scale_diag, diff,
+        M = _batch_lowrank_mahalanobis(self.cov_factor, self.cov_diag, diff,
                                        self._capacitance_tril)
-        log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag,
+        log_det = _batch_lowrank_logdet(self.cov_factor, self.cov_diag,
                                         self._capacitance_tril)
         return -0.5 * (self._event_shape[0] * math.log(2 * math.pi) + log_det + M)
 
     def entropy(self):
-        log_det = _batch_lowrank_logdet(self.scale_factor, self.scale_diag,
+        log_det = _batch_lowrank_logdet(self.cov_factor, self.cov_diag,
                                         self._capacitance_tril)
         H = 0.5 * (self._event_shape[0] * (1.0 + math.log(2 * math.pi)) + log_det)
         if len(self._batch_shape) == 0:

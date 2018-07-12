@@ -263,13 +263,13 @@ EXAMPLES = [
     Example(LowRankMultivariateNormal, [
         {
             'loc': torch.randn(5, 2, requires_grad=True),
-            'scale_factor': torch.randn(5, 2, 1, requires_grad=True),
-            'scale_diag': torch.tensor([2.0, 0.25], requires_grad=True),
+            'cov_factor': torch.randn(5, 2, 1, requires_grad=True),
+            'cov_diag': torch.tensor([2.0, 0.25], requires_grad=True),
         },
         {
             'loc': torch.randn(4, 3, requires_grad=True),
-            'scale_factor': torch.randn(3, 2, requires_grad=True),
-            'scale_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
+            'cov_factor': torch.randn(3, 2, requires_grad=True),
+            'cov_diag': torch.tensor([5.0, 1.5, 3.], requires_grad=True),
         }
     ]),
     Example(MultivariateNormal, [
@@ -1462,57 +1462,57 @@ class TestDistributions(TestCase):
         mean_multi_batch = torch.randn(6, 5, 3, requires_grad=True)
 
         # construct PSD covariance
-        scale_factor = torch.randn(3, 1, requires_grad=True)
-        scale_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
+        cov_factor = torch.randn(3, 1, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
 
         # construct batch of PSD covariances
-        scale_factor_batched = torch.randn(6, 5, 3, 2, requires_grad=True)
-        scale_diag_batched = torch.tensor(torch.randn(6, 5, 3).abs(), requires_grad=True)
+        cov_factor_batched = torch.randn(6, 5, 3, 2, requires_grad=True)
+        cov_diag_batched = torch.tensor(torch.randn(6, 5, 3).abs(), requires_grad=True)
 
         # ensure that sample, batch, event shapes all handled correctly
-        self.assertEqual(LowRankMultivariateNormal(mean, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor, cov_diag)
                          .sample().size(), (5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor, cov_diag)
                          .sample().size(), (3,))
-        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor, cov_diag)
                          .sample().size(), (6, 5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor, cov_diag)
                          .sample((2,)).size(), (2, 5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor, cov_diag)
                          .sample((2,)).size(), (2, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor, cov_diag)
                          .sample((2,)).size(), (2, 6, 5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor, cov_diag)
                          .sample((2, 7)).size(), (2, 7, 5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor, cov_diag)
                          .sample((2, 7)).size(), (2, 7, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, scale_factor, scale_diag)
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor, cov_diag)
                          .sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean, scale_factor_batched, scale_diag_batched)
+        self.assertEqual(LowRankMultivariateNormal(mean, cov_factor_batched, cov_diag_batched)
                          .sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, scale_factor_batched, scale_diag_batched)
+        self.assertEqual(LowRankMultivariateNormal(mean_no_batch, cov_factor_batched, cov_diag_batched)
                          .sample((2, 7)).size(), (2, 7, 6, 5, 3))
-        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, scale_factor_batched, scale_diag_batched)
+        self.assertEqual(LowRankMultivariateNormal(mean_multi_batch, cov_factor_batched, cov_diag_batched)
                          .sample((2, 7)).size(), (2, 7, 6, 5, 3))
 
         # check gradients
         self._gradcheck_log_prob(LowRankMultivariateNormal,
-                                 (mean, scale_factor, scale_diag))
+                                 (mean, cov_factor, cov_diag))
         self._gradcheck_log_prob(LowRankMultivariateNormal,
-                                 (mean_multi_batch, scale_factor, scale_diag))
+                                 (mean_multi_batch, cov_factor, cov_diag))
         self._gradcheck_log_prob(LowRankMultivariateNormal,
-                                 (mean_multi_batch, scale_factor_batched, scale_diag_batched))
+                                 (mean_multi_batch, cov_factor_batched, cov_diag_batched))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_lowrank_multivariate_normal_log_prob(self):
         mean = torch.randn(3, requires_grad=True)
-        scale_factor = torch.randn(3, 1, requires_grad=True)
-        scale_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
-        cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
+        cov_factor = torch.randn(3, 1, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(3).abs(), requires_grad=True)
+        cov = cov_factor.matmul(cov_factor.t()) + cov_diag.diag()
 
         # check that logprob values match scipy logpdf,
         # and that covariance and scale_tril parameters are equivalent
-        dist1 = LowRankMultivariateNormal(mean, scale_factor, scale_diag)
+        dist1 = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
         ref_dist = scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy())
 
         x = dist1.sample((10,))
@@ -1522,11 +1522,11 @@ class TestDistributions(TestCase):
 
         # Double-check that batched versions behave the same as unbatched
         mean = torch.randn(5, 3, requires_grad=True)
-        scale_factor = torch.randn(5, 3, 2, requires_grad=True)
-        scale_diag = torch.tensor(torch.randn(5, 3).abs(), requires_grad=True)
+        cov_factor = torch.randn(5, 3, 2, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(5, 3).abs(), requires_grad=True)
 
-        dist_batched = LowRankMultivariateNormal(mean, scale_factor, scale_diag)
-        dist_unbatched = [LowRankMultivariateNormal(mean[i], scale_factor[i], scale_diag[i])
+        dist_batched = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+        dist_unbatched = [LowRankMultivariateNormal(mean[i], cov_factor[i], cov_diag[i])
                           for i in range(mean.size(0))]
 
         x = dist_batched.sample((10,))
@@ -1540,21 +1540,21 @@ class TestDistributions(TestCase):
     def test_lowrank_multivariate_normal_sample(self):
         set_rng_seed(0)  # see Note [Randomized statistical tests]
         mean = torch.randn(5, requires_grad=True)
-        scale_factor = torch.randn(5, 1, requires_grad=True)
-        scale_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
-        cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
+        cov_factor = torch.randn(5, 1, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
+        cov = cov_factor.matmul(cov_factor.t()) + cov_diag.diag()
 
-        self._check_sampler_sampler(LowRankMultivariateNormal(mean, scale_factor, scale_diag),
+        self._check_sampler_sampler(LowRankMultivariateNormal(mean, cov_factor, cov_diag),
                                     scipy.stats.multivariate_normal(mean.detach().numpy(), cov.detach().numpy()),
-                                    'LowRankMultivariateNormal(loc={}, scale_factor={}, scale_diag={})'
-                                    .format(mean, scale_factor, scale_diag), multivariate=True)
+                                    'LowRankMultivariateNormal(loc={}, cov_factor={}, cov_diag={})'
+                                    .format(mean, cov_factor, cov_diag), multivariate=True)
 
     def test_lowrank_multivariate_normal_properties(self):
         loc = torch.randn(5)
-        scale_factor = torch.randn(5, 2, requires_grad=True)
-        scale_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
-        cov = scale_factor.matmul(scale_factor.t()) + scale_diag.diag()
-        m1 = LowRankMultivariateNormal(loc, scale_factor, scale_diag)
+        cov_factor = torch.randn(5, 2, requires_grad=True)
+        cov_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
+        cov = cov_factor.matmul(cov_factor.t()) + cov_diag.diag()
+        m1 = LowRankMultivariateNormal(loc, cov_factor, cov_diag)
         m2 = MultivariateNormal(loc=loc, covariance_matrix=cov)
         self.assertEqual(m1.mean, m2.mean)
         self.assertEqual(m1.variance, m2.variance)
@@ -3081,12 +3081,12 @@ class TestKL(TestCase):
         n = 5  # Number of tests for lowrank_multivariate_normal
         for i in range(0, n):
             loc = [torch.randn(4) for _ in range(0, 2)]
-            scale_factor = [torch.randn(4, 3) for _ in range(0, 2)]
-            scale_diag = [transform_to(constraints.positive)(torch.randn(4)) for _ in range(0, 2)]
-            covariance_matrix = [scale_factor[i].matmul(scale_factor[i].t()) +
-                                 scale_diag[i].diag() for i in range(0, 2)]
-            p = LowRankMultivariateNormal(loc[0], scale_factor[0], scale_diag[0])
-            q = LowRankMultivariateNormal(loc[1], scale_factor[1], scale_diag[1])
+            cov_factor = [torch.randn(4, 3) for _ in range(0, 2)]
+            cov_diag = [transform_to(constraints.positive)(torch.randn(4)) for _ in range(0, 2)]
+            covariance_matrix = [cov_factor[i].matmul(cov_factor[i].t()) +
+                                 cov_diag[i].diag() for i in range(0, 2)]
+            p = LowRankMultivariateNormal(loc[0], cov_factor[0], cov_diag[0])
+            q = LowRankMultivariateNormal(loc[1], cov_factor[1], cov_diag[1])
             p_full = MultivariateNormal(loc[0], covariance_matrix[0])
             q_full = MultivariateNormal(loc[1], covariance_matrix[1])
             expected = kl_divergence(p_full, q_full)
@@ -3119,14 +3119,14 @@ class TestKL(TestCase):
     def test_kl_lowrank_multivariate_normal_batched(self):
         b = 7  # Number of batches
         loc = [torch.randn(b, 3) for _ in range(0, 2)]
-        scale_factor = [torch.randn(b, 3, 2) for _ in range(0, 2)]
-        scale_diag = [transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(0, 2)]
+        cov_factor = [torch.randn(b, 3, 2) for _ in range(0, 2)]
+        cov_diag = [transform_to(constraints.positive)(torch.randn(b, 3)) for _ in range(0, 2)]
         expected_kl = torch.stack([
-            kl_divergence(LowRankMultivariateNormal(loc[0][i], scale_factor[0][i], scale_diag[0][i]),
-                          LowRankMultivariateNormal(loc[1][i], scale_factor[1][i], scale_diag[1][i]))
+            kl_divergence(LowRankMultivariateNormal(loc[0][i], cov_factor[0][i], cov_diag[0][i]),
+                          LowRankMultivariateNormal(loc[1][i], cov_factor[1][i], cov_diag[1][i]))
             for i in range(0, b)])
-        actual_kl = kl_divergence(LowRankMultivariateNormal(loc[0], scale_factor[0], scale_diag[0]),
-                                  LowRankMultivariateNormal(loc[1], scale_factor[1], scale_diag[1]))
+        actual_kl = kl_divergence(LowRankMultivariateNormal(loc[0], cov_factor[0], cov_diag[0]),
+                                  LowRankMultivariateNormal(loc[1], cov_factor[1], cov_diag[1]))
         self.assertEqual(expected_kl, actual_kl)
 
     def test_kl_exponential_family(self):

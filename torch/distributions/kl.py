@@ -299,19 +299,19 @@ def _kl_lowrankmultivariatenormal_lowrankmultivariatenormal(p, q):
         raise ValueError("KL-divergence between two Low Rank Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = (_batch_lowrank_logdet(q.scale_factor, q.scale_diag, q._capacitance_tril) -
-             _batch_lowrank_logdet(p.scale_factor, p.scale_diag, p._capacitance_tril))
-    term3 = _batch_lowrank_mahalanobis(q.scale_factor, q.scale_diag, q.loc - p.loc,
+    term1 = (_batch_lowrank_logdet(q.cov_factor, q.cov_diag, q._capacitance_tril) -
+             _batch_lowrank_logdet(p.cov_factor, p.cov_diag, p._capacitance_tril))
+    term3 = _batch_lowrank_mahalanobis(q.cov_factor, q.cov_diag, q.loc - p.loc,
                                        q._capacitance_tril)
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ (pW @ pW.T + pD)
     #                  = [inv(qD) - A.T @ A] @ (pD + pW @ pW.T)
-    qWt_qDinv = q.scale_factor.transpose(-1, -2) / q.scale_diag.unsqueeze(-2)
+    qWt_qDinv = q.cov_factor.transpose(-1, -2) / q.cov_diag.unsqueeze(-2)
     A = _batch_trtrs_lower(qWt_qDinv, q._capacitance_tril)
-    term21 = (p.scale_diag / q.scale_diag).sum(-1)
-    term22 = _batch_trace_XXT(p.scale_factor * q.scale_diag.rsqrt().unsqueeze(-1))
-    term23 = _batch_trace_XXT(A * p.scale_diag.sqrt().unsqueeze(-2))
-    term24 = _batch_trace_XXT(A.matmul(p.scale_factor))
+    term21 = (p.cov_diag / q.cov_diag).sum(-1)
+    term22 = _batch_trace_XXT(p.cov_factor * q.cov_diag.rsqrt().unsqueeze(-1))
+    term23 = _batch_trace_XXT(A * p.cov_diag.sqrt().unsqueeze(-2))
+    term24 = _batch_trace_XXT(A.matmul(p.cov_factor))
     term2 = term21 + term22 - term23 - term24
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
@@ -322,16 +322,16 @@ def _kl_multivariatenormal_lowrankmultivariatenormal(p, q):
         raise ValueError("KL-divergence between two (Low Rank) Multivariate Normals with\
                           different event shapes cannot be computed")
 
-    term1 = (_batch_lowrank_logdet(q.scale_factor, q.scale_diag, q._capacitance_tril) -
+    term1 = (_batch_lowrank_logdet(q.cov_factor, q.cov_diag, q._capacitance_tril) -
              2 * _batch_diag(p._unbroadcasted_scale_tril).log().sum(-1))
-    term3 = _batch_lowrank_mahalanobis(q.scale_factor, q.scale_diag, q.loc - p.loc,
+    term3 = _batch_lowrank_mahalanobis(q.cov_factor, q.cov_diag, q.loc - p.loc,
                                        q._capacitance_tril)
     # Expands term2 according to
     # inv(qcov) @ pcov = [inv(qD) - inv(qD) @ qW @ inv(qC) @ qW.T @ inv(qD)] @ p_tril @ p_tril.T
     #                  = [inv(qD) - A.T @ A] @ p_tril @ p_tril.T
-    qWt_qDinv = q.scale_factor.transpose(-1, -2) / q.scale_diag.unsqueeze(-2)
+    qWt_qDinv = q.cov_factor.transpose(-1, -2) / q.cov_diag.unsqueeze(-2)
     A = _batch_trtrs_lower(qWt_qDinv, q._capacitance_tril)
-    term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril * q.scale_diag.rsqrt().unsqueeze(-1))
+    term21 = _batch_trace_XXT(p._unbroadcasted_scale_tril * q.cov_diag.rsqrt().unsqueeze(-1))
     term22 = _batch_trace_XXT(A.matmul(p._unbroadcasted_scale_tril))
     term2 = term21 - term22
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
@@ -344,18 +344,18 @@ def _kl_lowrankmultivariatenormal_multivariatenormal(p, q):
                           different event shapes cannot be computed")
 
     term1 = (2 * _batch_diag(q._unbroadcasted_scale_tril).log().sum(-1) -
-             _batch_lowrank_logdet(p.scale_factor, p.scale_diag, p._capacitance_tril))
+             _batch_lowrank_logdet(p.cov_factor, p.cov_diag, p._capacitance_tril))
     term3 = _batch_mahalanobis(q._unbroadcasted_scale_tril, (q.loc - p.loc))
     # Expands term2 according to
     # inv(qcov) @ pcov = inv(q_tril @ q_tril.T) @ (pW @ pW.T + pD)
     combined_batch_shape = torch._C._infer_size(q._unbroadcasted_scale_tril.shape[:-2],
-                                                p.scale_factor.shape[:-2])
+                                                p.cov_factor.shape[:-2])
     n = p.event_shape[0]
     q_scale_tril = q._unbroadcasted_scale_tril.expand(combined_batch_shape + (n, n))
-    p_scale_factor = p.scale_factor.expand(combined_batch_shape + (n, p.scale_factor.size(-1)))
-    p_scale_diag = _batch_vector_diag(p.scale_diag.sqrt()).expand(combined_batch_shape + (n, n))
-    term21 = _batch_trace_XXT(_batch_trtrs_lower(p_scale_factor, q_scale_tril))
-    term22 = _batch_trace_XXT(_batch_trtrs_lower(p_scale_diag, q_scale_tril))
+    p_cov_factor = p.cov_factor.expand(combined_batch_shape + (n, p.cov_factor.size(-1)))
+    p_cov_diag = _batch_vector_diag(p.cov_diag.sqrt()).expand(combined_batch_shape + (n, n))
+    term21 = _batch_trace_XXT(_batch_trtrs_lower(p_cov_factor, q_scale_tril))
+    term22 = _batch_trace_XXT(_batch_trtrs_lower(p_cov_diag, q_scale_tril))
     term2 = term21 + term22
     return 0.5 * (term1 + term2 + term3 - p.event_shape[0])
 
