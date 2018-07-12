@@ -67,7 +67,7 @@ static void THNN_(VolumetricMaxUnpooling_updateOutput_frame)(
 {
   int k;
   int has_error = 0;
-  THIndex_t error_index;
+  THIndex_t error_index = 0;
 #pragma omp parallel for private(k)
   for (k = 0; k < nslices; k++)
   {

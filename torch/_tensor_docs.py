@@ -717,6 +717,13 @@ erf() -> Tensor
 See :func:`torch.erf`
 """)
 
+add_docstr_all('erfc',
+               r"""
+erf() -> Tensor
+
+See :func:`torch.erfc`
+""")
+
 add_docstr_all('erfinv',
                r"""
 erfinv() -> Tensor
@@ -2521,6 +2528,13 @@ add_docstr_all('slogdet',
 slogdet() -> (Tensor, Tensor)
 
 See :func:`torch.slogdet`
+""")
+
+add_docstr_all('unbind',
+               r"""
+unbind(dim=0) -> seq
+
+See :func:`torch.unbind`
 """)
 
 add_docstr_all('pinverse',

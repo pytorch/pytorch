@@ -197,7 +197,7 @@ class TensorFeeder : public BlobFeederBase {
                 PyBytes_AsStringAndSize(input[i], &str, &strSize) != -1,
                 "Had a PyBytes object but cannot convert it to a string.");
           } else if (PyUnicode_Check(input[i])) { // string
-            str = PyUnicode_AsUTF8AndSize(input[i], &strSize);
+            str = const_cast<char*>(PyUnicode_AsUTF8AndSize(input[i], &strSize));
             CAFFE_ENFORCE(
                 str,
                 "Had a PyUnicode object but cannot convert it to a string.");

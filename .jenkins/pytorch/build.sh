@@ -34,11 +34,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
 
-  # TODO: Install pyHIPIFY in the docker image
-  rm -rf pyHIPIFY || true
-  git clone https://github.com/ROCm-Developer-Tools/pyHIPIFY.git
-  chmod a+x pyHIPIFY/*.py
-  sudo cp -p pyHIPIFY/*.py /opt/rocm/bin
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"

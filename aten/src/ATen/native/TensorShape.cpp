@@ -607,6 +607,16 @@ int64_t numel(const Tensor& self) {
   return self.pImpl->numel();
 }
 
+std::vector<Tensor> unbind(const Tensor &self, int64_t dim) {
+  dim = maybe_wrap_dim(dim, self.dim());
+  int64_t size = self.size(dim);
+  std::vector<Tensor> tensors(size);
+  for (int i = 0; i < size; i++) {
+    tensors[i] = self.select(dim, i);
+  }
+  return tensors;
+}
+
 std::vector<Tensor> meshgrid(TensorList tensors) {
   int64_t size = tensors.size();
   AT_CHECK(size > 0, "meshgrid expects a non-empty TensorList");

@@ -1411,6 +1411,25 @@ Example::
     tensor([ 0.0000, -0.8427,  1.0000])
 """)
 
+add_docstr(torch.erfc,
+           r"""
+erfc(tensor, out=None) -> Tensor
+
+Computes the complementary error function of each element. The complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 1.8427,  0.0000])
+""")
+
 add_docstr(torch.erfinv,
            r"""
 erfinv(tensor, out=None) -> Tensor
@@ -4752,8 +4771,6 @@ and multiple right-hand sides `b`.
 In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
 with the default keyword arguments.
 
-This method is NOT implemented for CUDA tensors.
-
 Args:
     A (Tensor): the input triangular coefficient matrix
     b (Tensor): multiple right-hand sides. Each column of `b` is a
@@ -4822,9 +4839,9 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A negative `dim` value within the range
-[-:attr:`input.dim()`, :attr:`input.dim()`) can be used and
-will correspond to :meth:`unsqueeze` applied at :attr:`dim` = :attr:`dim + input.dim() + 1`
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
+can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
+applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
 Args:
     input (Tensor): the input tensor
@@ -5833,6 +5850,27 @@ Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
 
 """.format(**factory_common_args))
+
+
+add_docstr(torch.unbind,
+           r"""
+unbind(tensor, dim=0) -> seq
+
+Removes a tensor dimension.
+
+Returns a tuple of all slices along a given dimension, already without it.
+
+Arguments:
+    tensor (Tensor): the tensor to unbind
+    dim (int): dimension to remove
+
+Example::
+
+    >>> torch.unbind(torch.tensor([[1, 2, 3],
+    >>>                            [4, 5, 6],
+    >>>                            [7, 8, 9]]))
+    (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
+""")
 
 
 add_docstr(torch.meshgrid,

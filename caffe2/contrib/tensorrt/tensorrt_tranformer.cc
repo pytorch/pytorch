@@ -42,21 +42,9 @@ std::unordered_map<std::string, TensorShape> InferShapes(
 
 void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
   std::ofstream ff(fname);
-  for (const auto& t : model.graph().initializer()) {
-    ff << "tensor: " << t.name() << std::endl;
-    ff << "  dims: ";
-    for (auto i : t.dims()) {
-      ff << i << " ";
-    }
-    ff << std::endl;
-    int i = 0;
-    for (auto i : t.float_data()) {
-      ff << "    " << i << std::endl;
-      if (++i > 10) {
-        break;
-      }
-    }
-  }
+  std::string body;
+  ::google::protobuf::TextFormat::PrintToString(model.graph(), &body);
+  ff << body << std::endl;
   ff.close();
 }
 
@@ -390,16 +378,16 @@ NetDef TensorRTTransformer::SubnetToTrtOp(
     onnx_model.mutable_graph()->add_input()->CopyFrom(i);
   }
 
+  // Debug stuff
+  if (debug_builder_) {
+    DumpModel(onnx_model, "debug.onnxtxt");
+  }
+
   // Convert weights to initializing tensors if we are building serializable trt
   // op or defer it to construction time of trt op
   if (build_serializable_op_) {
     BuildInitializationList(
         ws, onnx_model.mutable_graph(), &initialization_list);
-  }
-
-  // Debug stuff
-  if (debug_builder_) {
-    DumpModel(onnx_model, "debug.onnx");
   }
 
   // Onnx model is ready. Call onnx-trt to convert to one trt c2 op

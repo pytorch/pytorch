@@ -1114,24 +1114,10 @@
     - THTensor* self
 ]]
 [[
-  name: sigmoid_
+  name: _th_sigmoid
   types:
     - floating_point
   backends:
-    - CPU
-    - CUDA
-  cname: sigmoid
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: sigmoid
-  types:
-    - floating_point
-  backends:
-    - CPU
     - CUDA
   cname: sigmoid
   variants:
@@ -1479,6 +1465,22 @@
 [[
   name: _erf
   cname: erf
+  types:
+    - floating_point
+  backends:
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
+  name: _erfc
+  cname: erfc
   types:
     - floating_point
   backends:

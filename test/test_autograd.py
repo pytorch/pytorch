@@ -1284,6 +1284,13 @@ class TestAutograd(TestCase):
         self.assertEqual(y.grad.data, grad[1])
         self.assertEqual(z.grad.data, grad[2])
 
+    def test_unbind(self):
+        stacked = torch.randn(3, 10, 10, requires_grad=True)
+        x, y, z = stacked.unbind()
+        grad = torch.randn(3, 10, 10)
+        torch.autograd.backward([x, y, z], grad.unbind())
+        self.assertEqual(stacked.grad.data, grad)
+
     def test_put(self):
         root = torch.randn(4, 5, requires_grad=True)
         values = torch.randn(6, requires_grad=True)
@@ -2633,6 +2640,8 @@ method_tests = [
     ('expm1', (), NO_ARGS, 'scalar'),
     ('erf', torch.rand(S, S, S), NO_ARGS),
     ('erf', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
+    ('erfc', torch.rand(S, S, S), NO_ARGS),
+    ('erfc', uniform_scalar(requires_grad=True), NO_ARGS, 'scalar'),
     ('erfinv', torch.rand(S, S, S).clamp(-0.9, 0.9), NO_ARGS),
     ('erfinv', normal_scalar_clamp(-0.9, 0.9, requires_grad=True), NO_ARGS, 'scalar'),
     ('log', torch.rand(S, S, S) + 1e-2, NO_ARGS),

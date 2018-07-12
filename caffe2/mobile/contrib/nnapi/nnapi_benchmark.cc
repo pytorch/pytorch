@@ -445,7 +445,9 @@ int main(int argc, char** argv) {
             warmup,
             mainrun);
         const double dwise_bandwidth = sizeof(float) * double(channel) *
-            (2 * (space - 2) * (space - 2) + kernel * kernel);
+            (space * space + kernel == 1
+                 ? space * space
+                 : (space - 2) * (space - 2) + kernel * kernel);
         printf(
             "Conv: X: %ix%i  \tC: %i -> %i\tK: %ix%i\t32b"
             "Caffe2 Dwise GB/s: %.2f\t32b"

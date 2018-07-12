@@ -243,6 +243,9 @@
 - name: erf(Tensor self)
   self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
 
+- name: erfc(Tensor self)
+  self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+
 - name: erfinv(Tensor self)
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 
@@ -885,14 +888,14 @@
 - name: upsample_trilinear3d_forward(Tensor self, IntList output_size, bool align_corners)
   self: upsample_trilinear3d_backward(grad, output_size, self.sizes(), align_corners)
 
-- name: upsample_nearest1d_forward(Tensor self, int64_t scale_factor)
-  self: upsample_nearest1d_backward(grad, self, scale_factor)
+- name: upsample_nearest1d_forward(Tensor self, IntList output_size)
+  self: upsample_nearest1d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest2d_forward(Tensor self, int64_t scale_factor)
-  self: upsample_nearest2d_backward(grad, self, scale_factor)
+- name: upsample_nearest2d_forward(Tensor self, IntList output_size)
+  self: upsample_nearest2d_backward(grad, output_size, self.sizes())
 
-- name: upsample_nearest3d_forward(Tensor self, int64_t scale_factor)
-  self: upsample_nearest3d_backward(grad, self, scale_factor)
+- name: upsample_nearest3d_forward(Tensor self, IntList output_size)
+  self: upsample_nearest3d_backward(grad, output_size, self.sizes())
 
 - name: adaptive_avg_pool2d_forward(Tensor self, IntList output_size)
   self: adaptive_avg_pool2d_backward(grad, self)
@@ -977,6 +980,12 @@
 
 - name: thnn_conv_dilated3d_backward(Tensor grad_output, Tensor self, Tensor weight, IntList kernel_size, IntList stride, IntList padding, IntList dilation, Tensor columns, Tensor ones, std::array<bool,3> output_mask)
   grad_output, self, weight: _convolution_double_backward(grads[0], grads[1], grads[2], grad_output, weight, self, stride, padding, dilation, false, {{0, 0, 0}}, 1, false, false, false, grad_input_mask)
+
+- name: thnn_grid_sampler_bilinear2d_forward(Tensor self, Tensor grid, int64_t padding_mode)
+  self, grid: thnn_grid_sampler_bilinear2d_backward(grad, self, grid, padding_mode)
+
+- name: thnn_grid_sampler_bilinear3d_forward(Tensor self, Tensor grid, int64_t padding_mode)
+  self, grid: thnn_grid_sampler_bilinear3d_backward(grad, self, grid, padding_mode)
 
 # NN double backwards support
 
@@ -1125,17 +1134,14 @@
 - name: upsample_trilinear3d_backward(Tensor grad_output, IntList output_size, IntList input_size, bool align_corners)
   grad_output: upsample_trilinear3d(grad, output_size, align_corners)
 
-- name: upsample_nearest1d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
-  grad_output: upsample_nearest1d(grad, scale_factor)
-  self: zeros_like(grad)
+- name: upsample_nearest1d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_nearest1d(grad, output_size)
 
-- name: upsample_nearest2d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
-  grad_output: upsample_nearest2d(grad, scale_factor)
-  self: zeros_like(grad)
+- name: upsample_nearest2d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_nearest2d(grad, output_size)
 
-- name: upsample_nearest3d_backward(Tensor grad_output, Tensor self, int64_t scale_factor)
-  grad_output: upsample_nearest3d(grad, scale_factor)
-  self: zeros_like(grad)
+- name: upsample_nearest3d_backward(Tensor grad_output, IntList output_size, IntList input_size)
+  grad_output: upsample_nearest3d(grad, output_size)
 
 - name: _sigmoid_backward(Tensor grad_output, Tensor output)
   grad_output: _sigmoid_backward(grad, output)
@@ -1209,3 +1215,9 @@
 # fft
 - name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)
   self: fft_backward(self, grad, signal_ndim, complex_input, complex_output, inverse, checked_signal_sizes, normalized, onesided, output_sizes)
+
+- name: unbind(Tensor self, int64_t dim)
+  self: stack(to_tensor_list(grads), dim)
+
+- name: stack(TensorList tensors, int64_t dim)
+  tensors: unbind(grad, dim)

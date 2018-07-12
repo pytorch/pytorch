@@ -86,7 +86,6 @@
 #   LD_LIBRARY_PATH
 #     we will search for libraries in these paths
 
-
 from setuptools import setup, Extension, distutils, Command, find_packages
 import setuptools.command.build_ext
 import setuptools.command.install
@@ -178,6 +177,8 @@ cwd = os.path.dirname(os.path.abspath(__file__))
 lib_path = os.path.join(cwd, "torch", "lib")
 third_party_path = os.path.join(cwd, "third_party")
 tmp_install_path = lib_path + "/tmp_install"
+rel_site_packages = distutils.sysconfig.get_python_lib(prefix='')
+full_site_packages = distutils.sysconfig.get_python_lib()
 
 
 class PytorchCommand(setuptools.Command):
@@ -304,6 +305,7 @@ def build_libs(libs):
         build_libs_cmd = ['bash', 'tools/build_pytorch_libs.sh']
     my_env = os.environ.copy()
     my_env["PYTORCH_PYTHON"] = sys.executable
+    my_env["CMAKE_PREFIX_PATH"] = full_site_packages
     my_env["NUM_JOBS"] = str(NUM_JOBS)
     my_env["ONNX_NAMESPACE"] = ONNX_NAMESPACE
     if not IS_WINDOWS:
@@ -335,7 +337,6 @@ def build_libs(libs):
         build_libs_cmd += ['--use-gloo-ibverbs']
     if USE_DISTRIBUTED_MW:
         build_libs_cmd += ['--use-distributed-mw']
-
     if FULL_CAFFE2:
         build_libs_cmd += ['--full-caffe2']
 
@@ -439,7 +440,7 @@ class develop(setuptools.command.develop.develop):
         def load(filename):
             with open(filename) as f:
                 return json.load(f)
-        ninja_files = glob.glob('build/*_compile_commands.json')
+        ninja_files = glob.glob('build/*compile_commands.json')
         cmake_files = glob.glob('torch/lib/build/*/compile_commands.json')
         all_commands = [entry
                         for f in ninja_files + cmake_files
@@ -476,7 +477,6 @@ build_ext_parent = ninja_build_ext if USE_NINJA \
 class build_ext(build_ext_parent):
 
     def run(self):
-
         # Print build options
         if USE_NUMPY:
             print('-- Building with NumPy bindings')
@@ -535,26 +535,29 @@ class build_ext(build_ext_parent):
             self.copy_file(export_lib, target_lib)
 
     def build_extensions(self):
-        # If also building Caffe2 python, then we need this extra logic copied
-        # from the old setup_caffe2.py
+        # The caffe2 extensions are created in
+        # tmp_install/lib/pythonM.m/site-packages/caffe2/python/
+        # and need to be copied to build/lib.linux.... , which will be a
+        # platform dependent build folder created by the "build" command of
+        # setuptools. Only the contents of this folder are installed in the
+        # "install" command by default.
         if FULL_CAFFE2:
-            pybind_exts = [
+            # We only make this copy for Caffe2's pybind extensions
+            caffe2_pybind_exts = [
                 'caffe2.python.caffe2_pybind11_state',
                 'caffe2.python.caffe2_pybind11_state_gpu',
+                'caffe2.python.caffe2_pybind11_state_hip',
             ]
-            # The cmake of Caffe2 puts these in the site-packages rather than
-            # the build directory like the other torch extensions
-            sp_dir = distutils.sysconfig.get_python_lib(prefix='')
             i = 0
             while i < len(self.extensions):
                 ext = self.extensions[i]
-                if ext.name not in pybind_exts:
+                if ext.name not in caffe2_pybind_exts:
                     i += 1
                     continue
                 fullname = self.get_ext_fullname(ext.name)
                 filename = self.get_ext_filename(fullname)
 
-                src = os.path.join(tmp_install_path, sp_dir, filename)
+                src = os.path.join(tmp_install_path, rel_site_packages, filename)
                 if not os.path.exists(src):
                     print("{} does not exist".format(src))
                     del self.extensions[i]
@@ -566,6 +569,12 @@ class build_ext(build_ext_parent):
                     self.copy_file(src, dst)
                     i += 1
         distutils.command.build_ext.build_ext.build_extensions(self)
+
+    def get_outputs(self):
+        outputs = distutils.command.build_ext.build_ext.get_outputs(self)
+        if FULL_CAFFE2:
+            outputs += [os.path.join(self.build_lib, d) for d in ['caffe', 'caffe2']]
+        return outputs
 
 
 class build(distutils.command.build.build):
@@ -743,10 +752,11 @@ main_sources = [
     "torch/csrc/utils/tensor_conversion_dispatch.cpp",
     "torch/csrc/utils/tensor_flatten.cpp",
     "torch/csrc/utils/variadic.cpp",
-    "torch/csrc/allocators.cpp",
     "torch/csrc/serialization.cpp",
+    "torch/csrc/finalizer.cpp",
     "torch/csrc/jit/init.cpp",
     "torch/csrc/jit/interpreter.cpp",
+    "torch/csrc/jit/register_prim_ops.cpp",
     "torch/csrc/jit/python_interpreter.cpp",
     "torch/csrc/jit/ir.cpp",
     "torch/csrc/jit/fusion_compiler.cpp",
@@ -780,10 +790,11 @@ main_sources = [
     "torch/csrc/jit/passes/specialize_undef.cpp",
     "torch/csrc/jit/passes/erase_number_types.cpp",
     "torch/csrc/jit/passes/loop_unrolling.cpp",
+    "torch/csrc/jit/passes/to_batch.cpp",
     "torch/csrc/jit/passes/onnx/peephole.cpp",
     "torch/csrc/jit/passes/onnx/fixup_onnx_loop.cpp",
-    "torch/csrc/jit/generated/aten_dispatch.cpp",
-    "torch/csrc/jit/generated/aten_schema.cpp",
+    "torch/csrc/jit/generated/register_aten_ops.cpp",
+    "torch/csrc/jit/operator.cpp",
     "torch/csrc/jit/script/lexer.cpp",
     "torch/csrc/jit/script/compiler.cpp",
     "torch/csrc/jit/script/module.cpp",
@@ -817,7 +828,6 @@ main_sources = [
     "torch/csrc/autograd/functions/basic_ops.cpp",
     "torch/csrc/autograd/functions/tensor.cpp",
     "torch/csrc/autograd/functions/accumulate_grad.cpp",
-    "torch/csrc/autograd/functions/special.cpp",
     "torch/csrc/autograd/functions/utils.cpp",
     "torch/csrc/autograd/functions/init.cpp",
     "torch/csrc/nn/THNN.cpp",
@@ -965,7 +975,10 @@ def make_relative_rpath(path):
 ################################################################################
 
 extensions = []
-packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*', 'caffe', 'caffe.*'))
+if FULL_CAFFE2:
+    packages = find_packages(exclude=('tools', 'tools.*'))
+else:
+    packages = find_packages(exclude=('tools', 'tools.*', 'caffe2', 'caffe2.*', 'caffe', 'caffe.*'))
 C = Extension("torch._C",
               libraries=main_libraries,
               sources=main_sources,

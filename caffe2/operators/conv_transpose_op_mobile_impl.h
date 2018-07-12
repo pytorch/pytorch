@@ -15,6 +15,7 @@
 #include "caffe2/operators/conv_op_shared.h"
 #include "caffe2/operators/conv_transpose_op_mobile.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/fixed_divisor.h"
 #include "caffe2/utils/math.h"
 

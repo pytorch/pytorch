@@ -185,7 +185,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
 
     // Template Declarations for dim = 1, 2, 3, 4
 #define HANDLE_CASE(DIMS) \
-  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, stream->stream>>>(data, d_inputs, param, dimension, param.outputStride[dimension]);
+  CatArrayBatchedCopy<real, unsigned int, DIMS><<<catGrid, applyBlock, 0, THCStream_stream(stream)>>>(data, d_inputs, param, dimension, param.outputStride[dimension]);
 
     // Now we loop
     offset = 0;
@@ -210,7 +210,7 @@ void THCTensor_(catArray)(THCState *state, THCTensor *result,
           stackInputs,
           j * sizeof(CatArrInputTensor<real, unsigned int>),
           cudaMemcpyHostToDevice,
-          stream->stream));
+          THCStream_stream(stream)));
       THCudaHostRecord(state, stackInputs);
       THCudaHostFree(state, stackInputs);
 

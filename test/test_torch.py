@@ -482,6 +482,9 @@ class TestTorch(TestCase):
     def test_erf(self):
         self._test_math_by_name('erf')
 
+    def test_erfc(self):
+        self._test_math_by_name('erfc')
+
     def test_erfinv(self):
         def checkType(tensor):
             inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
@@ -3476,9 +3479,12 @@ class TestTorch(TestCase):
         x = torch.rand(2, 3, 4, 5)
         for dim in range(4):
             res = torch.unbind(x, dim)
+            res2 = x.unbind(dim)
             self.assertEqual(x.size(dim), len(res))
+            self.assertEqual(x.size(dim), len(res2))
             for i in range(dim):
                 self.assertEqual(x.select(dim, i), res[i])
+                self.assertEqual(x.select(dim, i), res2[i])
 
     def test_linspace(self):
         _from = random.random()
@@ -7782,7 +7788,7 @@ class TestTorch(TestCase):
         self.assertEqual(double_tensor[2], 0.0, prec=0.0)  # tiny_double to zero
         torch.set_flush_denormal(False)
 
-    def test_unique_cpu(self):
+    def test_unique(self):
         x = torch.LongTensor([1, 2, 3, 2, 8, 5, 2, 3])
         expected_unique = torch.LongTensor([1, 2, 3, 5, 8])
         expected_inverse = torch.LongTensor([0, 1, 2, 1, 4, 3, 1, 2])
@@ -7831,16 +7837,6 @@ class TestTorch(TestCase):
         )
         self.assertEqual(torch.ByteTensor([7, 42, 128, 133]), byte_unique)
         self.assertEqual(torch.LongTensor([3, 0, 0, 0, 1, 2]), byte_inverse)
-
-    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
-    def test_unique_cuda(self):
-        # unique currently does not support CUDA.
-        self.assertRaises(
-            RuntimeError, lambda: torch.cuda.LongTensor([0, 1]).unique())
-        self.assertRaises(
-            RuntimeError,
-            lambda: torch.unique(torch.cuda.FloatTensor([0., 1.])),
-        )
 
     @staticmethod
     def _test_bincount(self, device):

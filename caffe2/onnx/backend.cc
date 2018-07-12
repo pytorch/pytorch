@@ -910,24 +910,26 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) {
   auto& attributes = onnx_node->attributes;
-  auto scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
-  if (scales.size() != 4) {
-    CAFFE_THROW("The scales argument should have size 4");
-  } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
-    CAFFE_THROW("The first two elements in the scales argument must be 1");
-  }
   attributes.remove("mode");
-  attributes.remove("scales");
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
-  auto* op = c2_op.ops.Mutable(0);
-  auto* c2_height = op->add_arg();
-  c2_height->set_name("height_scale");
-  c2_height->set_f(scales.Get(2));
-  auto* c2_width = op->add_arg();
-  c2_width->set_name("width_scale");
-  c2_width->set_f(scales.Get(3));
-
-  return c2_op;
+  if (opset_version >= 7) {
+    const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
+    if (scales.size() != 4) {
+      CAFFE_THROW("The scales argument should have size 4");
+    } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
+      CAFFE_THROW("The first two elements in the scales argument must be 1");
+    }
+    attributes.remove("scales");
+    auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+    auto* op = c2_op.ops.Mutable(0);
+    auto* c2_height = op->add_arg();
+    c2_height->set_name("height_scale");
+    c2_height->set_f(scales.Get(2));
+    auto* c2_width = op->add_arg();
+    c2_width->set_name("width_scale");
+    c2_width->set_f(scales.Get(3));
+    return c2_op;
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
 Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {

@@ -296,8 +296,8 @@ def stack(g, *tensors, **kwargs):
     dim = kwargs.pop('dim')
     if kwargs:
         raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
-    if len(tensors) < 2:
-        raise RuntimeError("Expected at least two arguments to stack node")
+    if len(tensors) < 1:
+        raise RuntimeError("Expected at least one argument to stack node")
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
@@ -487,9 +487,11 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-def upsample_nearest2d(g, input, scale_factor):
-    return g.op("Upsample", input, width_scale_f=scale_factor,
-                height_scale_f=scale_factor, mode_s="nearest")
+def upsample_nearest2d(g, input, output_size):
+    return g.op("Upsample", input,
+                height_scale_f=float(output_size[-2]) / input.type().sizes()[-2],
+                width_scale_f=float(output_size[-1]) / input.type().sizes()[-1],
+                mode_s="nearest")
 
 
 def upsample_bilinear2d(g, input, output_size, align_corners):
@@ -632,6 +634,14 @@ def clamp(g, self, min, max):
     return g.op("Clip", self, min_f=min, max_f=max)
 
 
+def clamp_min(g, self, min):
+    return g.op("Clip", self, min_f=min)
+
+
+def clamp_max(g, self, max):
+    return g.op("Clip", self, max_f=max)
+
+
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 def max(g, self, *args, **kwargs):
@@ -729,6 +739,10 @@ def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
+def hardtanh(g, self, min_val, max_val):
+    return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
 
 def alias(g, self):

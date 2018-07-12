@@ -17,6 +17,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
@@ -287,7 +288,7 @@ void internedStringsTests () {
   REQUIRE(Symbol::aten("What2") == symstart+2);
   REQUIRE(Symbol::aten("What") == symstart+1);
   REQUIRE(Symbol::aten("What2") == symstart+2);
-  REQUIRE(Symbol(SymbolNamespace::aten, symstart+2).toUnqualString() == std::string("What2"));
+  REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
 
 void fromQualStringTests() {
@@ -296,7 +297,13 @@ void fromQualStringTests() {
   REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
   REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
   REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
-  auto bad_inputs = {"scope", "foo::bar", "prim:Param", "::", ":", ""};
+  REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
+  REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
+
+  auto bad_inputs = {"scope", ":", ""};
   for (auto input : bad_inputs) {
     try {
       Symbol::fromQualString(input);
@@ -530,7 +537,7 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
   variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1);
+  std::tie(state, trace_vars_in) = tracer::enter(vars_in);
   auto trace_vars_out = test(trace_vars_in);
   tracer::exit(trace_vars_out);
   return state->graph;

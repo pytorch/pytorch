@@ -1,6 +1,7 @@
 #include "caffe2/operators/listwise_l2r_op.h"
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 

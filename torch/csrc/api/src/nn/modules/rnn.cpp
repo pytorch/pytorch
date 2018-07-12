@@ -52,6 +52,7 @@ RNNImplBase<Derived>::RNNImplBase(
     int64_t number_of_gates,
     bool has_cell_state)
     : options(options_),
+      dropout(nullptr),
       number_of_gates_(number_of_gates),
       has_cell_state_(has_cell_state),
       cudnn_mode_(cudnn_mode) {

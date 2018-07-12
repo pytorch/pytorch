@@ -22,6 +22,9 @@ class StorageRef(object):
     def __init__(self, ptr):
         self.cdata = ptr
 
+    def __del__(self):
+        torch.Storage._free_weak_ref(self.cdata)
+
 
 # mapping from handles to StorageRef objects
 shared_cache = weakref.WeakValueDictionary()
@@ -127,6 +130,10 @@ def reduce_storage(storage):
         metadata = (df, size)
         rebuild = rebuild_storage_fd
 
+    # WARNING!  This call to _weak_ref could lead to O(n) deleter
+    # behavior, if you repeatedly call it on the same Storage (all
+    # other sites are guarded by shared_cache; maybe this site
+    # should be too?)
     shared_cache[cache_key] = storage._weak_ref(StorageRef)
     return (rebuild, (type(storage),) + metadata)
 

@@ -532,6 +532,19 @@
     CPU: _erf_out_cpu
     CUDA: _erf_out_cuda
 
+- func: erfc(Tensor self) -> Tensor
+
+- func: erfc_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _erfc__cpu
+    CUDA: _erfc__cuda
+
+- func: erfc_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _erfc_out_cpu
+    CUDA: _erfc_out_cuda
+
 - func: exp(Tensor self) -> Tensor
 
 - func: exp_(Tensor self) -> Tensor
@@ -620,6 +633,9 @@
 - func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
   variants: function
   deprecated: true
+
+- func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
+  variants: function
 
 - func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
   variants: function
@@ -1145,6 +1161,19 @@
 
 - func: selu_(Tensor self) -> Tensor
   variants: function
+
+- func: sigmoid(Tensor self) -> Tensor
+
+- func: sigmoid_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sigmoid__cpu
+    CUDA: _sigmoid__cuda
+
+- func: sigmoid_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sigmoid_out_cpu
+    CUDA: _sigmoid_out_cuda
 
 - func: sin(Tensor self) -> Tensor
 
@@ -1862,6 +1891,10 @@
     - function
   device_guard: False
 
+- func: unbind(Tensor self, int64_t dim=0) -> TensorList
+  variants:
+    - method
+    - function
 
 - func: native_get_device(Tensor self) -> int64_t
   variants: function
