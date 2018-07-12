@@ -209,6 +209,16 @@ struct IValue {
     return Tag::None == tag;
   }
 
+  // generic v.to<at::Tensor>() implementations
+  // that can be used in special functions like pop/push
+  // that use template meta-programming.
+  // prefer the directly named methods when you can,
+  // since they are simpler to understand
+  template<typename T>
+  T to() && = delete;
+  template<typename T>
+  T to() const & = delete;
+
 private:
   template<typename T>
   Shared<T> moveToRetainable() {
@@ -241,6 +251,23 @@ private:
   bool retainable;
 };
 
+
+#define DEFINE_TO(type, method_name) \
+template<> \
+inline type IValue::to<type>() && { \
+  return std::move(*this).method_name(); \
+} \
+template<> \
+inline type IValue::to<type>() const & { \
+  return this->method_name(); \
+}
+DEFINE_TO(at::Tensor, toTensor)
+DEFINE_TO(Shared<Tuple>, toTuple)
+DEFINE_TO(double, toDouble)
+DEFINE_TO(int64_t, toInt)
+DEFINE_TO(Shared<DoubleList>, toDoubleList)
+DEFINE_TO(Shared<IntList>, toIntList)
+#undef DEFINE_TO
 
 // non-mutable list
 template<typename Elem>

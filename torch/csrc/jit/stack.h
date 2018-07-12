@@ -42,6 +42,31 @@ static inline IValue pop(Stack & stack) {
   return r;
 }
 
+// variadic pop:
+// int64_t a; at::Tensor b;
+// pop(stack, a, b);
+// equivalent to:
+// b = pop(stack).toTensor();
+// a = pop(stack).toInt();
+template<typename... Types>
+static inline void pop(Stack& stack, Types&... args) {
+  size_t i = 0;
+  constexpr size_t N = sizeof...(args);
+  int result[N] = {
+    (args = std::move(peek(stack,i++, N)).template to<Types>(),0)...
+  };
+  (void) result;
+  drop(stack, N);
+}
+template<typename... Types>
+static inline void push(Stack& stack, Types... args) {
+  constexpr size_t N = sizeof...(args);
+  int result[N] = {
+    (stack.push_back(std::forward<Types>(args)), 0)...
+  };
+  (void) result;
+}
+
 // The packer here is carefully written not to make any unnecessary
 // copies.
 

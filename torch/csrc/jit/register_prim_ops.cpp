@@ -121,11 +121,12 @@ RegisterOperators reg({
         onnx::Reshape,
         [](Node* node) {
           return [=](Stack& stack) {
-            auto shape = pop(stack).toTensor().contiguous();
-            auto input = pop(stack).toTensor();
+            at::Tensor input, shape;
+            pop(stack, input, shape);
+            shape = shape.contiguous();
             JIT_ASSERT(shape.ndimension() == 1);
             at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
-            stack.push_back(input.reshape(shape_list));
+            push(stack, input.reshape(shape_list));
             return 0;
           };
         }),
@@ -170,8 +171,8 @@ RegisterOperators reg({
         prim::AutogradAdd,
         [](Node* node) {
           return [=](Stack& stack) {
-            auto a = pop(stack).toTensor();
-            auto b = pop(stack).toTensor();
+            at::Tensor a, b;
+            pop(stack, a, b);
             if (!a.defined())
               stack.push_back(b);
             else if (!b.defined())
