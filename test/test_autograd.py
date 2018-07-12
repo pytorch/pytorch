@@ -2044,8 +2044,12 @@ class TestAutograd(TestCase):
         def run_test(input_size, val):
             input = torch.full(input_size, val).to(torch.double).requires_grad_()
             input.std().backward()
-            input[0] = input[0] + 1e-09
-            self.assertEqual((input.grad == torch.std(input)).all().item(), 1)
+            with torch.no_grad():
+                eps = 1e-09
+                input[0] = input[0] + eps
+                print(torch.std(input) / eps)
+                num_der = torch.std(input) / eps
+                self.assertEqual(input.grad, torch.full(input_size, num_der.item()))
 
         run_test((10,), 0)
         run_test((10,), 0.5)
