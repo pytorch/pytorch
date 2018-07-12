@@ -24,15 +24,9 @@
         }
       },
       {
-        "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
-        "functions": {
-          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
-        }
-      },
-      {
         "path": "aten/src/ATen/native/cuda/SoftMax.cu",
         "functions": {
-          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
+          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "max_active_blocks = 16;"
         }
       },
       {
