@@ -126,7 +126,7 @@ profiler::RecordFunction profiler("${name}");""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
 jit::tracer::PreTraceInfo trace_info;
-if (jit::tracer::isTracing( ${tensor_args} )) {
+if (jit::tracer::isTracing()) {
   trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
   if (!jit::tracer::ArgumentStash::empty()) {
     ${record_positional_attributes}
@@ -138,7 +138,7 @@ if (jit::tracer::isTracing( ${tensor_args} )) {
 """)
 
 POST_RECORD_TRACE = CodeTemplate("""\
-if (trace_info.state != nullptr) {
+if (jit::tracer::isTracing()) {
   jit::tracer::postRecordTrace( trace_info,  ${trace_outputs} );
 }
 """)

@@ -471,8 +471,5 @@ void initPythonIRBindings(PyObject * module_) {
     }
     return std::make_tuple(graph, variables);
   });
-  m.def("_jit_is_tracing", [](const autograd::Variable& var) {
-    return tracer::isTracing(var);
-  });
 }
 }}

@@ -14,7 +14,7 @@ struct THPSize {
 
 PyObject * THPSize_New(const torch::autograd::Variable& var)
 {
-  if (!torch::jit::tracer::isTracing(var)) {
+  if (!torch::jit::tracer::isTracing()) {
     auto sizes = var.sizes();
     return THPSize_NewFromSizes(var.dim(), sizes.data());
   }
@@ -38,22 +38,16 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
   return self.release();
 }
 
-static bool isTracedVar(PyObject *item) {
-  if (!THPVariable_Check(item)) return false;
-  auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
-  return torch::jit::tracer::isTracing(var);
-}
-
 static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kwargs)
 {
   THPObjectPtr self(PyTuple_Type.tp_new(type, args, kwargs));
   if (self) {
     for (Py_ssize_t i = 0; i < PyTuple_Size(self); ++i) {
       PyObject *item = PyTuple_GET_ITEM(self.get(), i);
-      if (isTracedVar(item)) {
+      if (THPUtils_checkLong(item)) {
         continue;
       }
-      if (THPUtils_checkLong(item)) {
+      if (THPVariable_Check(item)) {
         continue;
       }
       // item.__index__() works with 0-dim tensors and tensors with one element
