@@ -6050,8 +6050,8 @@ class TestTorch(TestCase):
             self.assertEqual((0, 1, 0), torch.select(x, 2, 2).shape)
             # unfold
             self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
-            z = torch.randn((0, 1, 3), device=device)
-            self.assertEqual((1, 1, 3, 0), z.unfold(0, 0, 4).shape)
+            y = torch.randn((0, 1, 3), device=device)
+            self.assertEqual((1, 1, 3, 0), y.unfold(0, 0, 4).shape)
 
             # repeat, permute
             self.assertEqual((9, 0, 5, 6, 0), x.repeat(9, 7, 5, 2, 3).shape)
