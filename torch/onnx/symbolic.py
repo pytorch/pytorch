@@ -359,6 +359,10 @@ def leaky_relu(g, input, negative_slope, inplace=False):
     return g.op("LeakyRelu", input, alpha_f=_scalar(negative_slope))
 
 
+def hardtanh(g, self, min_val, max_val, inplace=False):
+    return g.op("Clip", self, min_f=_scalar(min_val), max_f=_scalar(max_val))
+
+
 def glu(g, input, dim):
     assert input.type().sizes()[dim] % 2 == 0
 
