@@ -1,5 +1,6 @@
 from numbers import Number
 import torch
+import torch.nn.functional as F
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
@@ -73,8 +74,8 @@ class NegativeBinomial(Distribution):
         if self._validate_args:
             self._validate_sample(value)
 
-        log_unnormalized_prob = (self.total_count * torch.logsigmoid(-self.logits) +
-                                 value * torch.logsigmoid(self.logits))
+        log_unnormalized_prob = (self.total_count * F.logsigmoid(-self.logits) +
+                                 value * F.logsigmoid(self.logits))
 
         log_normalization = (-torch.lgamma(self.total_count + value) + torch.lgamma(1. + value) +
                              torch.lgamma(self.total_count))
