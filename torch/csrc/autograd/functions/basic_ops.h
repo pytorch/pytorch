@@ -34,8 +34,6 @@ struct DelayedError : public Function {
   virtual variable_list apply(const variable_list& inputs) override;
 
   std::string msg;
-
-  uint32_t input_nr;
 };
 
 struct GraphRoot : public Function {

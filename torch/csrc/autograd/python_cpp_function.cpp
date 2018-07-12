@@ -2,7 +2,6 @@
 
 #include "torch/csrc/python_headers.h"
 #include <memory>
-#include <string>
 #include <stdio.h>
 #include <typeindex>
 #include <unordered_map>
