@@ -1060,7 +1060,7 @@ class TestJit(JitTestCase):
         self.assertEqual(test_fn(ten, mask), traced_test_fn(ten, mask))
 
 
-class TestBatched(TestCase):
+class TestBatched(JitTestCase):
     # generate random examples and create an batchtensor with them
     def rand_batch(self, *dims):
         dims = [dim for dim in dims if dim != ()]
@@ -1812,21 +1812,21 @@ class TestScript(JitTestCase):
 
     def test_script_None(self):
         @torch.jit.script
-        def test_script_None(x):
+        def func(x):
             output = None
             output = x
             return output
 
-        self.assertEqual(test_script_None(torch.rand(1,2)).shape[1], 2)
+        self.assertEqual(func(torch.rand(1,2)).shape[1], 2)
 
-    def test_script_clamp_max(self):
-        @torch.jit.script
-        def test_script_clamp_max(x):
-            # return torch.clamp(x, min=0.5, max=None)
-            return torch.clamp(x, None, 0.5)
-
-        input = torch.tensor([[0.3, 0.4],[0.5, 0.51]])
-        self.assertEqual(test_script_clamp_max(input)[1][1], 0.5)
+    # def test_script_clamp_max(self):
+    #     @torch.jit.script
+    #     def test_script_clamp_max(x):
+    #         # return torch.clamp(x, min=0.5, max=None)
+    #         return torch.clamp(x, None, 0.5)
+    #
+    #     input = torch.tensor([[0.3, 0.4],[0.5, 0.51]])
+    #     self.assertEqual(test_script_clamp_max(input)[1][1], 0.5)
 
     def test_script_bool_constant(self):
         script = '''
@@ -4817,7 +4817,7 @@ def create_script_fn(method_name, is_functional, output_process_fn):
             call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
         script = script_template.format(', '.join(formals), call)
         CU = torch.jit.CompilationUnit(script)
-        print(CU.__getattr__("the_method").graph)
+        # print(CU.__getattr__("the_method").graph)
         return output_process_fn(CU.the_method(*tensors))
     return script_fn
 

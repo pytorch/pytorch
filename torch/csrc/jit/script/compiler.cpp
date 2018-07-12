@@ -508,11 +508,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       if (isTensorSubtype(v.value) && isNumberSubtype(arg.type)) {
         v.value = tensorToNum(loc, graph, v.value, arg.type);
       }
-      std::cout<<"tryEmitBuiltin node kind: " << v.value->node()->kind() <<std::endl;
+
       if (v.value->node()->kind() == prim::None){
-        std::cout<<"detecting None Node" <<std::endl;
+        // std::cout<<"detecting None Node" <<std::endl;
         if (isNumberSubtype(arg.type))
           v.value = createConstant(graph, loc, at::tensor(NAN));
+        else
+          v.value = graph.insertNode(graph.createUndefined())->output();
       }
 
       if(!v.value->type()->isSubtypeOf(*arg.type)) {
@@ -585,7 +587,7 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
     //n->setKind(new_kind);
     //n->removeInput(2);
   //}
-  std::cout<<"tryEmitBuiltin graph: "<< graph->toString()<<std::endl;
+  // std::cout<<"tryEmitBuiltin graph: "<< graph->toString()<<std::endl;
 
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
@@ -619,7 +621,7 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(Symbol::aten(name));
   std::stringstream failure_messages;
   for (const std::shared_ptr<Operator>& op : variants) {
-    std::cout<<"emitBuiltinCall schema: " << op->schema << std::endl;
+    // std::cout<<"emitBuiltinCall op schema: " << op->schema <<std::endl;
     if (auto result = tryEmitBuiltin(
             op->schema, failure_messages, loc, method, name, inputs, attributes)) {
       return result;
@@ -678,7 +680,6 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
     at::ArrayRef<NamedValue> inputs_,
     at::ArrayRef<NamedValue> attributes,
     size_t n_binders) {
-  std::cout<<"built in function calling"<<std::endl;
   std::vector<NamedValue> inputs;
   if (value)
     inputs.push_back(*value);
@@ -700,6 +701,8 @@ struct to_ir {
       , resolver(resolver)
       , environment_stack(nullptr) {
     pushFrame(graph->block());
+
+    std::cout<<"to_ir: " << def.name();
 
     std::vector<Argument> arguments, returns; // for schema
     // inputs
@@ -1214,7 +1217,6 @@ private:
       bool maybe_unpack=false,
       std::function<Value*(const SourceRange&, Value*)> post_process = ensureTensor) {
     std::vector<NamedValue> values;
-    std::cout<<"getNamedValues tree: " <<std::endl;
     size_t next_arg = 0;
     for (const auto& tree : trees) {
       if(maybe_unpack && tree->kind() == TK_STARRED) {
@@ -1274,12 +1276,6 @@ private:
   }
 
   std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
-    std::cout<<"emitApplyExpr: " << callee << std::endl;
-
-    for(auto& input: inputs) {
-      std::cout<<"emitApplyExpr input: " << input.value->uniqueName() << " type: " << input.value->type()->str()<< std::endl;
-    }
-
     // otherwise we evaluate the callee and then desugar it
     auto sv = emitSugaredExpr(callee, 1);
     return sv->call(callee.range(), method, inputs, attributes, n_binders);
@@ -1472,21 +1468,16 @@ private:
   // any expression that can produce a SugaredValue is handled here
   // expressions that only return a single Value* are handled in emitSimpleExpr
   std::shared_ptr<SugaredValue> emitSugaredExpr(Expr tree, size_t n_binders) {
-    std::cout<<"emitSugaredExpr tree: "<< tree <<std::endl;
     switch(tree.kind()) {
       case TK_VAR:
-        std::cout<<"emitSugaredExpr TK_VAR" << tree << std::endl;
         return environment_stack->getSugaredVar(Var(tree).name());
       case '.': {
         auto select = Select(tree);
-        std::cout<<"emitSugaredExpr select value: " <<select.value() << " kind: " << select.value().kind()<<std::endl;
         auto sv = emitSugaredExpr(select.value(), 1);
         return sv->attr(select.range(), method, select.selector().name());
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        std::cout<<"emitSugaredExpr TK_APPLY inputs: " << apply.inputs() <<std::endl;
-        std::cout<<"emitSugaredExpr TK_APPLY attributes: " << apply.attributes() <<std::endl;
         auto inputs = getNamedValues(apply.inputs(), true, identity);
         auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
           return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value(), identity));
@@ -1612,7 +1603,7 @@ private:
   Value* emitNone(SourceRange range) {
     //return createConstant(*graph, range, at::tensor(NAN));
     auto n = emitNode(prim::None, range, {}, 1);
-    std::cout <<"emitNone node: " << n->output()->uniqueName() <<std::endl;
+    // std::cout <<"emitNone node: " << n->output()->uniqueName() <<std::endl;
     return n->output();
   }
 
