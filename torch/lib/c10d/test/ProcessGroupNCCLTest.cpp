@@ -1,12 +1,11 @@
-#include "ProcessGroupNCCL.hpp"
-#include "CUDAUtils.hpp"
-#include "FileStore.hpp"
-#include "private/CUDAUtils.hpp"
-
-#include "test/CUDATest.hpp"
-#include "test/TestUtils.hpp"
-
 #include <iostream>
+
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/FileStore.hpp>
+#include <c10d/ProcessGroupNCCL.hpp>
+#include <c10d/private/CUDAUtils.hpp>
+#include <c10d/test/CUDATest.hpp>
+#include <c10d/test/TestUtils.hpp>
 
 using namespace c10d::test;
 

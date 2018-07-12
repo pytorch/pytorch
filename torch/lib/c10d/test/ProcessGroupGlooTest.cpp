@@ -11,10 +11,10 @@
 
 #include <gloo/transport/tcp/device.h>
 
-#include "CUDAUtils.hpp"
-#include "FileStore.hpp"
-#include "ProcessGroupGloo.hpp"
-#include "test/TestUtils.hpp"
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/FileStore.hpp>
+#include <c10d/ProcessGroupGloo.hpp>
+#include <c10d/test/TestUtils.hpp>
 
 using namespace c10d::test;
 
