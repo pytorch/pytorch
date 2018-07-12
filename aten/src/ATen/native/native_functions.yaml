@@ -1898,5 +1898,5 @@
 - func: cartesian_prod(TensorList tensors) -> TensorList
   variants: function
 
-- func: combinations(Tensor tensor, int64_t r=2, bool with_replacement=false) -> TensorList
+- func: combinations(Tensor self, int64_t r=2, bool with_replacement=false) -> TensorList
   variants: function

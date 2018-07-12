@@ -4,11 +4,37 @@
 #include "ATen/Dispatch.h"
 
 #include <vector>
+#include <iostream>
+
+namespace {
+
+using namespace at;
+
+Tensor _triu_mask(int64_t n, int64_t dims, bool diagonal, const TensorOptions &options) {
+  // get a mask that has value 1 whose indices satisfies i < j < k < ...
+  // or i <= j <= k <= ... (depending on diagonal)
+  TensorOptions opt = std::move(options);
+  Tensor range = at::arange(n, opt.dtype(kLong));
+  std::vector<Tensor> index_grids = at::meshgrid(std::vector<Tensor>(dims, range));
+  Tensor mask = at::ones(index_grids[0].sizes(), opt.dtype(kByte));
+  if(diagonal) {
+    for(int64_t i = 0; i < dims - 1; i++) {
+      mask *= index_grids[i] <= index_grids[i+1];
+    }
+  } else {
+    for(int64_t i = 0; i < dims - 1; i++) {
+      mask *= index_grids[i] < index_grids[i+1];
+    }
+  }
+  return mask;
+}
+
+}  // namespace
 
 namespace at {
 namespace native{
 
-std::vector<Tensor> cartesian_prod(const TensorList& tensors) {
+std::vector<Tensor> cartesian_prod(TensorList tensors) {
   std::vector<Tensor> grids = at::meshgrid(tensors);
   for(Tensor &t : grids) {
     t = t.flatten();
@@ -17,23 +43,13 @@ std::vector<Tensor> cartesian_prod(const TensorList& tensors) {
 }
 
 std::vector<Tensor> combinations(const Tensor& self, int64_t r, bool with_replacement) {
-  AT_CHECK(self.dim() == 1, "Expect a 1D vector, but got", tensor);
+  AT_CHECK(self.dim() == 1, "Expect a 1D vector, but got", self);
   AT_CHECK(r > 0, "Expect a positive number, but got", r);
   int64_t num_elements = self.numel();
-  auto grids = at::meshgrid(std::vector<Tensor>(r, self));
-
-  // get a mask that has value 1 whose indices satisfies i + j + k + ... <= n
-  // or i + j + k + ... < n (depending on with_replacement)
-  auto range = at::arange(self.type().toScalarType(kLong), num_elements);
-  auto index_grids = at::meshgrid(std::vector<Tensor>(r, range));
-  auto sum_index_grids = index_grids[0];
-  std::for_each(index_grids.begin() + 1, index_grids.end(), [&](const Tensor &t){
-    sum_index_grids += t;
-  });
-  auto mask = with_replacement ? sum_index_grids <= num_elements : sum_index_grids < num_elements;
-
+  std::vector<Tensor> grids = at::meshgrid(std::vector<Tensor>(r, self));
+  Tensor mask = _triu_mask(num_elements, r, with_replacement, self.options());
   for(Tensor &t : grids) {
-    t = t[mask];
+    t = t.masked_select(mask);
   }
   return grids;
 }

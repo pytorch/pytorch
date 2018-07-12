@@ -7923,6 +7923,34 @@ class TestTorch(TestCase):
         self.assertTrue(grid_b.equal(expected_grid_b))
         self.assertTrue(grid_c.equal(expected_grid_c))
 
+    def test_cartesian_prod(self):
+        a = torch.tensor(1)
+        b = torch.tensor([1, 2, 3])
+        c = torch.tensor([1, 2])
+        a_, b_, c_ = torch.cartesian_prod([a, b, c])
+        expected_b = torch.tensor([1, 1, 2, 2, 3, 3])
+        expected_c = torch.tensor([1, 2, 1, 2, 1, 2])
+        self.assertEqual((a - a_).abs().max().item(), 0)
+        self.assertEqual(b_, expected_b)
+        self.assertEqual(c_, expected_c)
+
+    def test_combinations(self):
+        a = torch.tensor([1, 2, 3])
+        a1, a2 = torch.combinations(a)
+        expected_a1 = torch.tensor([1, 1, 2])
+        expected_a2 = torch.tensor([2, 3, 3])
+        self.assertEqual(a1, expected_a1)
+        self.assertEqual(a2, expected_a2)
+        a1, a2 = torch.combinations(a, with_replacement=True)
+        expected_a1 = torch.tensor([1, 1, 1, 2, 2, 3])
+        expected_a2 = torch.tensor([1, 2, 3, 2, 3, 3])
+        self.assertEqual(a1, expected_a1)
+        self.assertEqual(a2, expected_a2)
+        a1, a2, a3 = torch.combinations(a, r=3)
+        self.assertEqual(a1.item(), 1)
+        self.assertEqual(a2.item(), 2)
+        self.assertEqual(a3.item(), 3)
+
 
 # Functions to test negative dimension wrapping
 METHOD = 1
