@@ -578,7 +578,10 @@ Tensor var_backward(Tensor grad, const Tensor & self, int64_t dim, bool unbiased
 Tensor std_backward(const Tensor & grad, const Tensor & self, Tensor result, bool unbiased) {
   Tensor result_zero_mask = (result == 0.);
   if (result_zero_mask.any().toCByte()) {
-    return var_backward(grad / (2 * result), self, unbiased).masked_fill_(result_zero_mask, INFINITY);
+    auto N = self.numel();
+    double grad_zero_squared = unbiased ? 1 / N : (N - 1) / (N * N);
+    Scalar grad_zero = Scalar(grad_zero_squared).sqrt();
+    return var_backward(grad / (2 * result), self, unbiased).masked_fill_(result_zero_mask, grad_zero);
   }
   return var_backward(grad / (2 * result), self, unbiased);
 }
@@ -586,7 +589,10 @@ Tensor std_backward(const Tensor & grad, const Tensor & self, Tensor result, boo
 Tensor std_backward(Tensor grad, const Tensor & self, Tensor result, int64_t dim, bool unbiased, bool keepdim) {
   Tensor result_zero_mask = (result == 0.);
   if (result_zero_mask.any().toCByte()) {
-    return var_backward(grad / (2 * result), self, dim, unbiased, keepdim).masked_fill_(result == 0., INFINITY);
+    auto N = self.size(dim);
+    double grad_zero_squared = unbiased ? 1 / N : (N - 1) / (N * N);
+    Scalar grad_zero = Scalar(grad_zero_squared).sqrt();
+    return var_backward(grad / (2 * result), self, dim, unbiased, keepdim).masked_fill_(result == 0., grad_zero);
   }
   return var_backward(grad / (2 * result), self, dim, unbiased, keepdim);
 }
