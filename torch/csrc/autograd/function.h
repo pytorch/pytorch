@@ -114,9 +114,9 @@ struct Function : std::enable_shared_from_this<Function> {
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
-  variable_list operator()(const variable_list& inputs) {
+  variable_list operator()(variable_list&& inputs) {
     profiler::RecordFunction rec(this);
-    return apply(inputs);
+    return apply(std::move(inputs));
   }
 
   // Graph Connectivity API
@@ -312,7 +312,7 @@ struct Function : std::enable_shared_from_this<Function> {
   static thread_local uint64_t next_sequence_nr_;
 
   /// Performs the `Function`'s actual operation.
-  virtual variable_list apply(const variable_list& inputs) = 0;
+  virtual variable_list apply(variable_list&& inputs) = 0;
 
   /// Calls `apply()`, but instruments it with tracing machinery.
   variable_list traced_apply(variable_list inputs);
