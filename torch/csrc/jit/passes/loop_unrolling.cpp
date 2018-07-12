@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/constants.h"
 
 namespace torch { namespace jit {
 
@@ -136,9 +137,12 @@ void repeatBody(Block *body, int64_t times) {
 void replaceLoopCounter(Node *loop) {
   Graph *graph = loop->owningGraph();
   Block *body = loop->blocks().at(0);
-  Node *init_counter_node = graph->createConstant(at::CPU(at::kLong).scalarTensor(0))
-                                 ->insertBefore(loop);
-  loop->insertInput(2, init_counter_node->output());
+  Value* init_counter;
+  {
+    WithInsertPoint guard(loop);
+    init_counter = createConstant(*graph, at::CPU(at::kLong).scalarTensor(0));
+  }
+  loop->insertInput(2, init_counter);
   loop->insertOutput(0);
 
   Value * internal_counter = body->insertInput(1);

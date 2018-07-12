@@ -973,13 +973,7 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
-  Node * createConstant(const at::Tensor& ref) {
-    JIT_ASSERT(ref.defined());
-    auto n = create(prim::Constant);
-    n->t_(attr::value, ref.clone());
-    n->output()->inferTypeFrom(ref);
-    return n;
-  }
+
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));

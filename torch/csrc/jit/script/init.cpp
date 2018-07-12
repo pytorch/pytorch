@@ -7,7 +7,7 @@
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/pybind_utils.h"
-#include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/constants.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -39,12 +39,8 @@ static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val, TypePtr typ=nullptr) {
-  auto n = m.graph()->createConstant(val);
-  if(typ)
-    n->output()->setType(typ);
-  n->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return std::make_shared<SimpleValue>(m.graph()->insertNode(n)->output());
+inline std::shared_ptr<SugaredValue> toSimple(Value* v) {
+  return std::make_shared<SimpleValue>(v);
 }
 
 struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
@@ -190,24 +186,25 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     // f = python_constant
     // while ...
     //   f = f + 1
+    auto& g = *m.graph();
     if(py::isinstance<py::int_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(py::cast<int64_t>(self)));
+      return toSimple(createConstant(g, at::CPU(at::kLong).scalarTensor(py::cast<int64_t>(self)), loc));
     } else if(py::isinstance<py::float_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)));
+      return toSimple(createConstant(g, at::CPU(at::kFloat).scalarTensor(py::cast<float>(self)), loc));
     } else if(py::isinstance<py::bool_>(self)) {
-      return createConstant(loc, m, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)));
+      return toSimple(createConstant(g, at::CPU(at::kByte).scalarTensor(py::cast<bool>(self)), loc));
     } else if(THPDevice_Check(self.ptr())) {
       auto device = (THPDevice*) self.ptr();
-      auto t = as_tensor({static_cast<int64_t>(device->device.type()), device->device.index()});
-      return createConstant(loc, m, t, ListType::ofInts());
+      std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()), device->device.index()};
+      return toSimple(createConstant(g, std::move(v)));
     } else if(THPLayout_Check(self.ptr())) {
       auto layout = (THPLayout*) self.ptr();
       const auto v = static_cast<int64_t>(layout->layout);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v), IntType::get());
+      return toSimple(createConstant(g, v, loc));
     } else if(THPDtype_Check(self.ptr())) {
       auto dtype = (THPDtype*)(self.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v), IntType::get());
+      return toSimple(createConstant(g, v, loc));
     }
     return std::make_shared<ConstantPythonValue>(self);
   }

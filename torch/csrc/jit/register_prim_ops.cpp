@@ -51,17 +51,6 @@ RegisterOperators reg({
             return 0;
           };
         }),
-
-    Operator(
-        prim::Constant,
-        [](Node* node) {
-          auto t = autograd::make_variable(node->t(attr::value));
-          return [t](Stack& stack) {
-            stack.push_back(t);
-            return 0;
-          };
-        }),
-
     Operator(prim::NumToTensor, noop),
     Operator(prim::TensorToNum, noop),
     Operator(

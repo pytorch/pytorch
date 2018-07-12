@@ -7,6 +7,7 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/constants.h"
 
 #include "ATen/optional.h"
 
@@ -247,15 +248,9 @@ std::shared_ptr<SugaredValue> packOutputs(Graph& g, at::ArrayRef<Value*> values)
   return std::make_shared<SimpleValue>(g.insertNode(g.createTuple(values))->output());
 }
 
-Value* createConstant(Graph& g, const SourceRange& loc, const at::Tensor& val) {
-  auto n = g.createConstant(val);
-  n->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return g.insertNode(n)->output();
-}
-
 Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   JIT_ASSERT(val.numel() == 1);
-  auto* output = createConstant(g, loc, val);
+  auto* output = createConstant(g, val, loc);
   if (val.type().scalarType() == at::kLong) {
     output->setType(IntType::get());
   } else if (val.type().scalarType() == at::kFloat) {
@@ -277,7 +272,7 @@ Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs
     auto values = fmap(inputs, [&](Value* v) {
       return v->node()->t(attr::value);
     });
-    return createConstant(g, loc, at::stack(values));
+    return createConstant(g, at::stack(values), loc);
   }
   return g.insertNode(g.create(aten::stack, inputs)
                       ->i_(attr::dim, 0)
@@ -469,7 +464,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       positional_inputs[i] = NamedValue(
           loc,
           i,
-          createConstant(graph, loc, *default_value)
+          createConstant(graph, *default_value, loc)
               ->setType(schema.arguments[i].type));
     }
 
@@ -1566,13 +1561,13 @@ private:
     return emitNode(
                Symbol::aten("type_as"),
                input.range(),
-               {emitExpr(input), createConstant(*graph, input.range(), at::ones({1}, t))},
+               {emitExpr(input), createConstant(*graph, at::ones({1}, t), input.range())},
                1)
         ->output();
   }
 
   Value* emitBooleanConst(SourceRange range, bool val) {
-    return createConstant(*graph, range, at::CPU(at::kByte).scalarTensor(val));
+    return createConstant(*graph, at::CPU(at::kByte).scalarTensor(val), range);
   }
 
   Value* emitConst(const Const& c) {
@@ -1615,9 +1610,9 @@ private:
     NamedValue begin = input_values[1];
     NamedValue end = input_values[2];
     NamedValue dim = NamedValue(loc, "dim",
-        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0)));
+        createConstant(*graph, at::CPU(at::kLong).scalarTensor(0), loc));
     NamedValue step = NamedValue(loc, "step",
-        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(1)));
+        createConstant(*graph, at::CPU(at::kLong).scalarTensor(1), loc));
 
     return emitBuiltinCall(
                loc, method, "slice", {tensor, dim, begin, end, step}, {}, true)
@@ -1637,7 +1632,7 @@ private:
     NamedValue dim = NamedValue(
         loc,
         "dim",
-        createConstant(*graph, loc, at::CPU(at::kLong).scalarTensor(0)));
+        createConstant(*graph, at::CPU(at::kLong).scalarTensor(0), loc));
     NamedValue idx = input_values[1];
 
     return emitBuiltinCall(loc, method, "select", {tensor, dim, idx}, {}, true)

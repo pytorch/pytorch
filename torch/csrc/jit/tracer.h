@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/assertions.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/variadic.h"
@@ -119,7 +120,7 @@ inline Value* getValueTrace(const Variable& var) {
   auto & value_map = getTracingState()->value_map;
   auto it = value_map.find(var);
   if (it == value_map.end()) {
-    Value *constant = state->graph->appendNode(state->graph->createConstant(var.data()))->output();
+    Value *constant = createConstant(*state->graph, var.data());
     constant->inferTypeFrom(var.data());
     it = value_map.emplace_hint(it, var, constant);
   }

@@ -10,6 +10,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/variable_tensor_functions.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
@@ -93,9 +94,7 @@ void desugarTripCounts(Block * b) {
       {
         WithInsertPoint guard(n);
         // int i = 0
-        Value* initial_trip_count =
-            g->insertNode(g->createConstant(at::zeros({1}, at::kLong)))
-                ->output();
+        Value* initial_trip_count = createConstant(*g, at::zeros({1}, at::kLong));
         // Set up initial iteration number value for loop-carried dependency
         n->removeInput(0);
         // Input 0 is now initial termination condition, insert this after that.
@@ -113,9 +112,7 @@ void desugarTripCounts(Block * b) {
         // increment the trip count at the end of the body. Then, emit the same
         // conjunctive stopping condition as above.
 
-        Value* const_one =
-            g->insertNode(g->createConstant(at::ones({1}, at::kLong)))
-                ->output();
+        Value* const_one = createConstant(*g, at::ones({1}, at::kLong));
 
         Value* inc_trip_count =
             g->insertNode(g->create(
