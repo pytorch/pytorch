@@ -5925,7 +5925,7 @@ python's `itertools.combinations` when `with_replacement` is set to `False`, and
 Arguments:
     tensor (Tensor): the tensor.
     r (int, optional): number of elements to combine
-    with_replacement (boolean): whether to allow duplication in combination
+    with_replacement (boolean, optional): whether to allow duplication in combination
 
 Returns:
     seq (sequence of Tensors): :math:`r` tensors.
