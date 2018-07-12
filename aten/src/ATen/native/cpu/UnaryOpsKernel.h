@@ -25,6 +25,7 @@ extern DispatchStub<unary_fn> log1pImpl;
 extern DispatchStub<unary_fn> log2Impl;
 extern DispatchStub<unary_fn> roundImpl;
 extern DispatchStub<unary_fn> rsqrtImpl;
+extern DispatchStub<unary_fn> sigmoidImpl;
 extern DispatchStub<unary_fn> sinImpl;
 // extern DispatchStub<unary_fn> sinhImpl;
 extern DispatchStub<unary_fn> sqrtImpl;

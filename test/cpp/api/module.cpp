@@ -202,7 +202,7 @@ TEST_CASE("module/clone") {
         buffer = register_buffer("buf", torch::ones({2, 2}));
       }
 
-      Linear l1, l2, l3;
+      Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
       torch::Tensor buffer;
     };
 

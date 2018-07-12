@@ -1,4 +1,8 @@
 graph(%x : Double(1, 1, 1, 1, 4)) {
-  %1 : Double(1, 1, 1, 1) = aten::sum[dim=[4], keepdim=0](%x)
-  return (%1);
+  %1 : Long() = prim::Constant[value={4}]()
+  %2 : Long() = prim::Constant[value={0}]()
+  %3 : Long() = prim::NumToTensor(%1)
+  %4 : Dynamic = aten::stack[dim=0](%3)
+  %5 : Dynamic = aten::sum(%x, %4, %2)
+  return (%5);
 }

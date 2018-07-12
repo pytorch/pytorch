@@ -36,7 +36,7 @@ class AnyModule {
   /// Constructs an `AnyModule` from a concrete module object.
   template <
       typename ModuleType,
-      typename = torch::detail::disable_if_module_holder_t<ModuleType>>
+      typename = torch::detail::enable_if_module_t<ModuleType>>
   explicit AnyModule(ModuleType&& module);
 
   /// Constructs an `AnyModule` from a module holder.
@@ -48,9 +48,9 @@ class AnyModule {
   AnyModule(AnyModule&&) = default;
   AnyModule& operator=(AnyModule&&) = default;
 
-  /// Copy is disallowed.
-  AnyModule(const AnyModule& other) = delete;
-  AnyModule& operator=(const AnyModule& other) = delete;
+  /// Creates a copy of an `AnyModule`.
+  AnyModule(const AnyModule& other);
+  AnyModule& operator=(const AnyModule& other);
 
   /// Assigns a module to the `AnyModule` (to circumvent the explicit
   /// constructor).
@@ -237,6 +237,9 @@ struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
 
   /// Returns std::shared_ptr<Module> pointing to the erased module.
   virtual std::shared_ptr<Module> ptr() = 0;
+
+  /// Returns a `Placeholder` with a copy of this `AnyModule`.
+  virtual std::unique_ptr<Placeholder> clone() const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Holder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -294,6 +297,10 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
     return module;
   }
 
+  std::unique_ptr<Placeholder> clone() const override {
+    return torch::make_unique<Holder>(*this);
+  }
+
   /// The actual concrete module instance.
   std::shared_ptr<ModuleType> module;
 };
@@ -314,6 +321,16 @@ AnyModule::AnyModule(ModuleType&& module)
 template <typename ModuleType>
 AnyModule::AnyModule(const ModuleHolder<ModuleType>& module_holder)
     : AnyModule(module_holder.ptr()) {}
+
+inline AnyModule::AnyModule(const AnyModule& other)
+    : content_(other.content_ ? other.content_->clone() : nullptr) {}
+
+inline AnyModule& AnyModule::operator=(const AnyModule& other) {
+  if (this != &other) {
+    content_ = other.content_ ? other.content_->clone() : nullptr;
+  }
+  return *this;
+}
 
 template <typename ModuleType>
 AnyModule& AnyModule::operator=(std::shared_ptr<ModuleType> module) {

@@ -51,10 +51,6 @@ inline bool isElemActive(const ValueTracingStateElem& vts) {
   return state && state->active;
 }
 
-inline std::vector<VariableFlags> getVarFlags(const variable_list& vars) {
-  return fmap(vars, &VariableFlags::of);
-}
-
 } // namespace detail
 
 
@@ -214,8 +210,8 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
 // reference to at::Tensor buffer to call unsafeGetTH, but you can't get this
 // out of a const vector (silly std::vector...)
 inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
-    variable_list inputs, size_t num_stages) {
-  auto state = std::make_shared<TracingState>(num_stages);
+    variable_list inputs) {
+  auto state = std::make_shared<TracingState>();
   for (auto& input : inputs) {
     auto * value_state = detail::getValueState(state, input, false);
     if (value_state) {
@@ -226,45 +222,21 @@ inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
     setValueTrace(state, input, input_node);
     input_node->inferTypeFrom(input.data());
   }
-  state->var_flags[0].first = detail::getVarFlags(inputs);
-  state->active = true;
-  state->inputs = inputs;
   return std::make_pair(state, inputs);
 }
-
-namespace detail {
-
-// Exit code shared between exit and TraceExitHook::run
-inline void _exit(const std::shared_ptr<TracingState>& state, const variable_list& outputs) {
-  size_t i = 0;
-  for (auto& output : outputs) {
-    state->graph->registerOutput(getOutputTrace(state, output, i));
-    i++;
-  }
-  state->active = false;
-  state->var_flags[state->graph->stage()].second = detail::getVarFlags(outputs);
-}
-
-// Marks a backwards subgraph that should be traced as the next stage.
-// Mutates some of the outputs.
-void traceBackward(const std::shared_ptr<TracingState>& state, const variable_list& inputs,
-                   const variable_list& outputs);
-
-} // namespace detail
 
 // Exit a trace, treating 'outputs' as the outputs of the trace.  These
 // are the variables whose values will be computed upon subsequent
 // invocations of the trace.
 inline void exit(const variable_list& outputs) {
   auto state = getTracingState(outputs);
-  detail::_exit(state, outputs);
-  detail::traceBackward(state, state->inputs, outputs);
-  state->inputs.clear();
+  size_t i = 0;
+  for (auto& output : outputs) {
+    state->graph->registerOutput(getOutputTrace(state, output, i));
+    i++;
+  }
+  state->active = false;
 }
-
-// Marks part of the backward graph as non-traceable (i.e. one that should be replaced
-// with an Eval in the trace).
-void nontraceableBackwardSubgraph(const variable_list& inputs, const variable_list& outputs);
 
 // Pre-recorded information about the trace before we actually carry
 // out the trace

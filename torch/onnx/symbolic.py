@@ -296,8 +296,8 @@ def stack(g, *tensors, **kwargs):
     dim = kwargs.pop('dim')
     if kwargs:
         raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
-    if len(tensors) < 2:
-        raise RuntimeError("Expected at least two arguments to stack node")
+    if len(tensors) < 1:
+        raise RuntimeError("Expected at least one argument to stack node")
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
@@ -739,6 +739,10 @@ def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
+def hardtanh(g, self, min_val, max_val):
+    return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
 
 def alias(g, self):

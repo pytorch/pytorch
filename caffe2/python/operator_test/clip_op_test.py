@@ -14,8 +14,8 @@ import caffe2.python.hypothesis_test_util as hu
 
 class TestClip(hu.HypothesisTestCase):
     @given(X=hu.tensor(),
-           min_=st.floats(min_value=-1, max_value=0),
-           max_=st.floats(min_value=0, max_value=1),
+           min_=st.floats(min_value=-2, max_value=0),
+           max_=st.floats(min_value=0, max_value=2),
            inplace=st.booleans(),
            **hu.gcs)
     def test_clip(self, X, min_, max_, inplace, gc, dc):
@@ -38,6 +38,23 @@ class TestClip(hu.HypothesisTestCase):
         self.assertDeviceChecks(dc, op, [X], [0])
         # Gradient check wrt X
         self.assertGradientChecks(gc, op, [X], 0, [0])
+
+    @given(X=hu.tensor(),
+           inplace=st.booleans(),
+           **hu.gcs)
+    def test_clip_default(self, X, inplace, gc, dc):
+        # go away from the origin point to avoid kink problems
+        X += 0.04 * np.sign(X)
+
+        def clip_ref(X):
+            return (X,)
+
+        op = core.CreateOperator(
+            "Clip",
+            ["X"], ["Y" if not inplace else "X"])
+        self.assertReferenceChecks(gc, op, [X], clip_ref)
+        # Check over multiple devices
+        self.assertDeviceChecks(dc, op, [X], [0])
 
 
 if __name__ == "__main__":

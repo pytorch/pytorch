@@ -27,6 +27,8 @@ from copy import deepcopy
 import random
 
 from torch.jit.frontend import NotSupportedError
+from torch.jit import BatchTensor
+import torch.jit.batchop
 
 try:
     import torchvision
@@ -72,11 +74,11 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
     ingate = torch.sigmoid(ingate)
     forgetgate = torch.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
+    cellgate = torch.tanh(cellgate)
     outgate = torch.sigmoid(outgate)
 
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+    hy = outgate * torch.tanh(cy)
     return hy, cy
 
 
@@ -297,7 +299,7 @@ class TestJit(JitTestCase):
                 out = torch.sigmoid(out)
             return out
 
-        trace, z = torch.jit.get_trace_graph(f, (x, y), nderivs=0)
+        trace, z = torch.jit.get_trace_graph(f, (x, y))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
@@ -541,7 +543,7 @@ class TestJit(JitTestCase):
             z = (x + y) * (x + y) * (x + y) + t
             return z
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
         self.run_pass('cse', trace)
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
@@ -553,7 +555,7 @@ class TestJit(JitTestCase):
 
         def fn(x, y):
             return x - y
-        trace, _ = torch.jit.get_trace_graph(fn, (x, y), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x, y))
 
     def test_shape_analysis_broadcast(self):
         def broadcast(a, b):
@@ -578,27 +580,6 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(doit, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))
-
-    def test_assign_traces(self):
-        """Check that output Variables are assigned traces before they are saved."""
-        @traceable
-        class MyFn(Function):
-            @staticmethod
-            def forward(ctx, a):
-                out = a * 2
-                ctx.save_for_backward(out)
-                return out
-
-            @staticmethod
-            def backward(ctx, grad_a):
-                a, = ctx.saved_tensors
-                return a * grad_a
-
-        x = torch.randn(10, 10, requires_grad=True)
-        trace, out = torch.jit.get_trace_graph(MyFn.apply, x, nderivs=1)
-        out.sum().backward()
-        self.run_pass('dce', trace)
-        self.assertExpectedGraph(trace)
 
     # TODO: update verify to work with GraphExecutors
     @unittest.skip("verify needs to be updated to work with GraphExecutors")
@@ -632,7 +613,7 @@ class TestJit(JitTestCase):
 
         x = torch.tensor([0.], requires_grad=True)
         with self.assertRaisesRegex(RuntimeError, "MyLegacyFn"):
-            torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,), nderivs=0)
+            torch.jit.get_trace_graph(lambda x: MyLegacyFn()(x), (x,))
 
     def test_inplace_transplant(self):
         x = torch.tensor([0.], requires_grad=True)
@@ -643,7 +624,7 @@ class TestJit(JitTestCase):
             y.add_(3)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x,))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
 
@@ -676,7 +657,7 @@ class TestJit(JitTestCase):
             y = RegularFn.apply(y)
             return y
 
-        trace, _ = torch.jit.get_trace_graph(fn, (x,), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(fn, (x,))
         self.run_pass('dce', trace)
         ops = [n for n in trace.graph().nodes()]
         for op in ops:
@@ -864,7 +845,7 @@ class TestJit(JitTestCase):
             out.copy_(x)
             return out
 
-        trace, z = torch.jit.get_trace_graph(f, (x, ), nderivs=0)
+        trace, z = torch.jit.get_trace_graph(f, (x, ))
         self.run_pass('dce', trace)
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
@@ -880,13 +861,13 @@ class TestJit(JitTestCase):
                 return x * self.a + self.b
 
         m = MyModule()
-        trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(m, (torch.randn(2, 2),))
         self.assertEqual(len(list(trace.graph().inputs())), 2)
         self.assertExpectedGraph(trace)
 
     def test_nested_inplace(self):
         x = torch.randn(2, 2)
-        trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,), nderivs=0)
+        trace, _ = torch.jit.get_trace_graph(lambda x: F.threshold(x, 0, 0, inplace=True), (x,))
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x,))
 
@@ -1084,18 +1065,171 @@ class TestBatched(TestCase):
     def rand_batch(self, *dims):
         dims = [dim for dim in dims if dim != ()]
         xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
-        xb = torch.BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
+        xb = BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]))
         return xs, xb
 
     def test_create_batchtensor(self):
+        # create from tensorlist
         xs, batch = self.rand_batch(4, (True, 3), (False, 2), (True, 5))
         self.assertEqual(xs, batch.examples())
-        batch2 = torch.BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
+        # create from data, mask, dims
+        batch2 = BatchTensor(batch.get_data(), batch.get_mask(), batch.get_dims())
         self.assertEqual(xs, batch2.examples())
+        # expand a tensor to a batchtensor given batch_size
+        xs = torch.rand(3, 4, 5)
+        batch3 = BatchTensor(xs, 2)
+        xs = xs.unsqueeze(0)
+        self.assertEqual([xs, xs], batch3.examples())
+
+    def test_batch_elementwise_unary(self):
+        @torch.jit.batch(batch_size=4)
+        def tanh(a):
+            return torch.tanh(a)
+
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        res_batch = tanh(batch)
+        res = [torch.tanh(xs[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_elementwise_binary(self):
+        @torch.jit.batch(batch_size=4)
+        def add(a, b):
+            return a + b
+
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = xs, batch
+        res_batch = add(batch, batch2)
+        res = [torch.add(xs[j], xs2[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        # test broadcast
+        xs, batch = self.rand_batch(4, (False, 3), (False, 2))
+        b = torch.rand(3, 2)
+        res_batch = add(batch, b)
+        res = [torch.add(xs[j], b) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_mm(self):
+        @torch.jit.batch(batch_size=4)
+        def mm(a, b):
+            return torch.mm(a, b)
+
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
+        res_batch = mm(batch, batch2)
+        res = [torch.mm(xs[j].squeeze(0), xs2[j].squeeze(0)).unsqueeze(0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        # test broadcast
+        b = torch.rand(2, 4)
+        res_batch = mm(batch, b)
+        res = [torch.mm(xs[j].squeeze(0), b).unsqueeze(0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_matmul(self):
+        @torch.jit.batch(batch_size=4)
+        def matmul(a, b):
+            return torch.matmul(a, b)
+
+        def matmul_test(xs, batch, xs2, batch2):
+            ys = [torch.matmul(xs[j].squeeze(0), xs2[j].squeeze(0)).unsqueeze(0) for j in range(4)]
+            ybs = matmul(batch, batch2)
+            self.assertEqual(ys, ybs.examples())
+
+        # 1 dimension * 1 dimension
+        xs, batch = self.rand_batch(4, (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2))
+        matmul_test(xs, batch, xs2, batch2)
+        # 1 dimension * 2 dimension
+        xs, batch = self.rand_batch(4, (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
+        matmul_test(xs, batch, xs2, batch2)
+        # 2 dimension * 1 dimensions
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2))
+        matmul_test(xs, batch, xs2, batch2)
+        # 2 dimension * 2 dimension
+        xs, batch = self.rand_batch(4, (True, 3), (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
+        matmul_test(xs, batch, xs2, batch2)
+
+    def test_batch_where(self):
+        @torch.jit.batch(batch_size=4)
+        def where(c, a, b):
+            return torch.where(c, a, b)
+
+        xs, batch = self.rand_batch(4, (False, 3), (False, 2))
+        xs2, batch2 = self.rand_batch(4, (False, 3), (False, 2))
+
+        dims = [4, (False, 3), (False, 2)]
+        xs_cond = [torch.rand(1, 3, 2).byte() for i in range(dims[0])]
+        batch_cond = BatchTensor(xs_cond, torch.tensor([b for b, d in dims[1:]]))
+
+        res_batch = where(batch_cond, batch, batch2)
+        res = [torch.where(xs_cond[j], xs[j], xs2[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_lstm_cell(self):
+        def LSTMCell(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
+            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+            # activations
+            i_t = torch.sigmoid(i_t)
+            f_t = torch.sigmoid(f_t)
+            o_t = torch.sigmoid(o_t)
+            # cell computations
+            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+            c_t = torch.tanh(c_t)
+            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+            h_t = torch.mul(o_t, torch.tanh(c_t))
+            return h_t
+
+        @torch.jit.batch(batch_size=4)
+        def LSTMCell_batch(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
+            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+            # activations
+            i_t = torch.sigmoid(i_t)
+            f_t = torch.sigmoid(f_t)
+            o_t = torch.sigmoid(o_t)
+            # cell computations
+            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+            c_t = torch.tanh(c_t)
+            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+            h_t = torch.mul(o_t, torch.tanh(c_t))
+            return h_t
+
+        batch_size, input_size, hidden_size = 4, 3, 2
+        xs, batch = self.rand_batch(batch_size, (False, input_size))
+        hx, h_batch = self.rand_batch(batch_size, (False, hidden_size))
+        cx, c_batch = self.rand_batch(batch_size, (False, hidden_size))
+
+        # input to hidden weights
+        w_xi = torch.rand(input_size, hidden_size)
+        w_xf = torch.rand(input_size, hidden_size)
+        w_xo = torch.rand(input_size, hidden_size)
+        w_xc = torch.rand(input_size, hidden_size)
+        # hidden to hidden weights
+        w_hi = torch.rand(hidden_size, hidden_size)
+        w_hf = torch.rand(hidden_size, hidden_size)
+        w_ho = torch.rand(hidden_size, hidden_size)
+        w_hc = torch.rand(hidden_size, hidden_size)
+        # bias terms
+        b_i = torch.rand(hidden_size)
+        b_f = torch.rand(hidden_size)
+        b_o = torch.rand(hidden_size)
+        b_c = torch.rand(hidden_size)
+
+        ys = [LSTMCell(xs[j].squeeze(0), hx[j], cx[j], w_xi, w_xf, w_xo, w_xc,
+                       w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c) for j in range(batch_size)]
+        ybs = LSTMCell_batch(batch, h_batch, c_batch, w_xi, w_xf, w_xo, w_xc,
+                             w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
+        self.assertEqual(ys, ybs.examples())
 
 
 class TestScript(JitTestCase):
-
     @contextmanager
     def capture_stdout(self):
         # No idea how to capture stdout from C++ on Windows
@@ -3160,7 +3294,7 @@ def func(t):
             def f5(a):
                 torch.cat([[a]])
 
-        with self.assertRaisesRegex(RuntimeError, 'a value of type Tensor for argument \'size\' but found'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a value of type int\\[\\] for argument \'size\''):
             @torch.jit.script
             def f6(a):
                 a.expand(size=[3, [4]])
@@ -4564,7 +4698,7 @@ EXCLUDE_SCRIPT = {
     # Right now, the following is happening:
     # - Shorter schemas come before longer schemas
     # - bool, int are treated as IntType rather than DynamicType like before
-    # So the schemas look like the following in aten_schema:
+    # So the schemas look like the following in operator:
     # (2) var(DynamicType, IntType)
     # (1) var(DynamicType, IntType, IntType, DynamicType)
     # Now, when one calls torch.var(tensor, dim=1), the compiler mistakingly
