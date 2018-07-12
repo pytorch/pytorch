@@ -145,11 +145,10 @@ std::vector<at::Tensor> scatter(
   }
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int32_t>(devices[chunk]);
-    at::CUDAStreamGuard stream_guard;
+    at::CUDAGuard cuda_guard;
     if (streams) {
-      // Increase the ref-count before converting from THCStream to CUDAStream.
-      at::detail::CUDAStream_retain((*streams)[chunk]);
-      stream_guard.set_stream(device_index, (*streams)[chunk]);
+      AT_ASSERT(THCStream_device((*streams)[chunk]) == device_index);
+      cuda_guard.set_stream(CUDAStream((*streams)[chunk], /*retain=*/true));
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::kCUDA, device_index}, /*non_blocking=*/true);

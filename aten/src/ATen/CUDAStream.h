@@ -62,10 +62,15 @@ struct CUDAStream {
 
   // Constructors
   CUDAStream() = default;
-  CUDAStream(CUDAStreamInternals* internals) : internals_{internals} { }
+  /* implicit */ CUDAStream(CUDAStreamInternals* internals, bool retain = false)
+      : internals_{internals} {
+    if (retain) {
+      detail::CUDAStream_retain(internals_);
+    }
+  }
 
   // Destructor
-  ~CUDAStream() { detail::CUDAStream_free(internals_); }
+  ~CUDAStream() { detail::CUDAStream_uncheckedFree(internals_); }
 
   // Copy constructor
   CUDAStream(const CUDAStream& other);
@@ -79,11 +84,13 @@ struct CUDAStream {
     return *this;
   }
 
+  // Returns true if the CUDAStream is null.
+  explicit operator bool() const noexcept {
+    return internals_ != nullptr;
+  }
+
   // Implicit conversion to cudaStream_t
   operator cudaStream_t() const { return detail::CUDAStream_stream(internals_); }
-
-  // Returns true if the CUDAStream is null.
-  explicit operator bool() const noexcept { return internals_ != nullptr; }
 
   // Less than operator (to allow use in sets)
   friend bool operator<(const CUDAStream& left, const CUDAStream& right) {

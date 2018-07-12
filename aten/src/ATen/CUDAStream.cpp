@@ -68,7 +68,7 @@ namespace detail {
 
   // Helper to verify the GPU index is valid
   static inline void check_gpu(int64_t device) {
-    AT_CHECK(device >= 0 && device < num_gpus);
+    AT_ASSERT(device >= 0 && device < num_gpus);
   }
 
   CUDAStreamInternals* CUDAStream_getDefaultStreamOnDevice(int64_t device) {
@@ -98,7 +98,7 @@ namespace detail {
     initCUDAStreamsOnce();
     check_gpu(device);
     auto cur = current_streams[device];
-    AT_CHECK(CUDAStream_retain(cur));
+    AT_ASSERT(CUDAStream_retain(cur));
     return cur;
   }
   CUDAStreamInternals* CUDAStream_getAndRetainCurrentStream() {
@@ -120,9 +120,9 @@ namespace detail {
   void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* ptr) {
     initCUDAStreamsOnce();
     check_gpu(device);
-    AT_CHECK(ptr);
-    AT_CHECK(ptr->device == device);
-    AT_CHECK(CUDAStream_retain(ptr));
+    AT_ASSERT(ptr);
+    AT_ASSERT(ptr->device == device);
+    AT_ASSERT(CUDAStream_retain(ptr));
 
     CUDAStream_free(current_streams[device]);
     current_streams[device] = ptr;
@@ -140,26 +140,26 @@ namespace detail {
 
   // Getters
   cudaStream_t CUDAStream_stream(CUDAStreamInternals* ptr) {
-    AT_CHECK(ptr);
+    AT_ASSERT(ptr);
     return ptr->stream;
   }
 
   int64_t CUDAStream_device(CUDAStreamInternals* ptr) {
-    AT_CHECK(ptr);
+    AT_ASSERT(ptr);
     return ptr->device;
   }
 
   // Memory management
   // Note: only destructible (non-default) streams are ref counted
   bool CUDAStream_retain(CUDAStreamInternals* ptr) {
-    AT_CHECK(ptr);
+    AT_ASSERT(ptr);
     if (ptr->is_destructible) return(++ptr->refcount > 1);
     return true;
   }
 
   void CUDAStream_free(CUDAStreamInternals*& ptr) {
     if (ptr && ptr->stream && ptr->is_destructible && --ptr->refcount <= 0) {
-      AT_CHECK(ptr->refcount == 0);
+      AT_ASSERT(ptr->refcount == 0);
       DynamicCUDAInterface::cuda_stream_destroy(ptr->stream);
       free(ptr);
       ptr = nullptr;
@@ -181,15 +181,15 @@ namespace detail {
 
    // Copy constructor
   CUDAStream::CUDAStream(const CUDAStream& other) {
-    AT_CHECK(other.internals_);
-    AT_CHECK(detail::CUDAStream_retain(other.internals_));
+    AT_ASSERT(other.internals_);
+    AT_ASSERT(detail::CUDAStream_retain(other.internals_));
 
     internals_ = other.internals_;
   }
 
   // Move constructor
   CUDAStream::CUDAStream(CUDAStream&& other) {
-    AT_CHECK(other.internals_);
+    AT_ASSERT(other.internals_);
 
     std::swap(internals_, other.internals_);
   }

@@ -28,7 +28,7 @@ struct DeviceGuard {
     }
   }
 
-  /// Calls `set_device` with the given index.
+  /// Calls `set_index` with the given index.
   explicit DeviceGuard(int32_t index) {
     set_index(index);
   }
@@ -75,7 +75,7 @@ struct DeviceGuard {
     last_index_ = index;
   }
 
-  /// Calls `set_index` with the `Tensor`'s current device, if it is a CUDA
+  /// Calls `set_index` with the `Tensor`'s AT_ASSERT device, if it is a CUDA
   /// tensor. Does nothing if the `tensor` is not defined.
   void set_index_from(const Tensor& tensor) {
     if (tensor.defined() && tensor.is_cuda()) {
@@ -88,7 +88,7 @@ struct DeviceGuard {
     return original_index_;
   }
 
-  // /// Returns the last device that was set via `set_device`, if any.
+  /// Returns the last device that was set via `set_index`, if any.
   int32_t last_index() const noexcept {
     return last_index_;
   }
@@ -96,7 +96,7 @@ struct DeviceGuard {
  private:
   /// The original device that was active at construction of this object.
   int32_t original_index_ = -1;
-  /// The last index that was set via `set_device`.
+  /// The last index that was set via `set_index`.
   int32_t last_index_ = -1;
 };
 } // namespace at
