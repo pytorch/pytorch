@@ -432,7 +432,7 @@ BAD_EXAMPLES = [
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
          'total_count': 10},
     ]),
-Example(NegativeBinomial, [
+    Example(NegativeBinomial, [
         {'probs': torch.tensor([[-0.0000001, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True),
          'total_count': 10},
         {'probs': torch.tensor([[1.0, 0.0], [0.0, 2.0]], requires_grad=True),
