@@ -105,7 +105,7 @@ std::vector<cudaStream_t> getStreamVector(AlgorithmEntry& entry) {
 // synchronizeStreams ensures that the private streams associated with
 // an algorithm entry wait for the public streams to complete.
 void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
-  CUDADevice deviceGuard;
+  at::DeviceGuard deviceGuard;
   const auto& key = entry->key;
   for (size_t i = 0; i < key.devices.size(); i++) {
     const auto& device = key.devices[i];
@@ -119,7 +119,7 @@ void synchronizeStreams(THCState* thcState, AlgorithmEntry* entry) {
     // stream is stream 0 and cudaEventRecord relies on the current
     // device to find the right one.
     //
-    deviceGuard.setDevice(device);
+    deviceGuard.set_index(key.devices[i]);
     C10D_CUDA_CHECK(cudaEventRecord(event, publicStream));
     C10D_CUDA_CHECK(cudaStreamWaitEvent(privateStream, event, 0));
   }
@@ -175,11 +175,11 @@ void ProcessGroupGloo::WorkGloo::finish(const AlgorithmEntry& entry) {
     // Populate devices and events so that we can later synchronize
     // with the operation associated with this work finishing.
     if (cuda_) {
-      CUDADevice deviceGuard;
+      at::DeviceGuard deviceGuard;
       devices_ = entry.key.devices;
       events_.resize(devices_.size());
       for (size_t i = 0; i < devices_.size(); i++) {
-        deviceGuard.setDevice(devices_[i]);
+        deviceGuard.set_index(devices_[i]);
         events_[i] = CUDAEvent::create();
         const auto& event = events_[i].getEvent();
         const auto& stream = entry.streams[i].getStream();
@@ -320,7 +320,7 @@ void ProcessGroupGloo::createAllreduce(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  at::DeviceGuard guard(entry.src[0].device());
+  at::DeviceGuard guard(entry.src[0]);
 
   if (backend == at::kCPU) {
     if (getSize() < 16) {
@@ -371,7 +371,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 
   // Create algorithm against first context
   auto& context = contexts_[0];
-  at::DeviceGuard guard(entry.src[0].device());
+  at::DeviceGuard guard(entry.src[0]);
 
   if (backend == at::kCPU) {
     entry.algorithm =
@@ -411,7 +411,7 @@ void ProcessGroupGloo::createBroadcast(AlgorithmEntry& entry) {
 // failure must be signaled through the Work future.
 //
 EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
-  CUDADevice deviceGuard;
+  at::DeviceGuard deviceGuard;
   auto entry = std::unique_ptr<AlgorithmEntry>(new AlgorithmEntry);
   entry->key = key;
 
@@ -419,7 +419,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
   auto& srcSizes = key.srcSizes;
   entry->src.resize(srcSizes.size());
   for (size_t i = 0; i < srcSizes.size(); i++) {
-    deviceGuard.setDevice(key.type->is_cuda() ? key.devices[i] : -1);
+    deviceGuard.set_index(key.type->is_cuda() ? key.devices[i] : -1);
     entry->src[i] = key.type->tensor(srcSizes[i]);
   }
 
@@ -428,7 +428,7 @@ EntryType ProcessGroupGloo::construct(const AlgorithmKey& key) {
     entry->streams.resize(key.devices.size());
     entry->events.resize(key.devices.size());
     for (size_t i = 0; i < key.devices.size(); i++) {
-      deviceGuard.setDevice(key.devices[i]);
+      deviceGuard.set_index(key.devices[i]);
       entry->streams[i] = CUDAStream::create();
       entry->events[i] = CUDAEvent::create();
     }
