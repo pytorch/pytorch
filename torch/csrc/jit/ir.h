@@ -198,6 +198,7 @@ public:
   bool hasUniqueName() const {
     return unique_name_ != "";
   }
+  std::vector<std::string> getNameBaseSuffix(const std::string& name);
   Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
     if (hasUniqueName())

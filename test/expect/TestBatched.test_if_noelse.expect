@@ -1,0 +1,40 @@
+graph(%a_data.1 : Dynamic
+      %a_mask.1 : Dynamic
+      %a_dims.1 : Dynamic
+      %b_data : Dynamic
+      %b_mask : Dynamic
+      %b_dims : Dynamic) {
+  %6 : Dynamic = aten::gt(%a_data.1, %b_data)
+  %7 : Dynamic = aten::mul(%a_mask.1, %b_mask)
+  %8 : Dynamic = aten::__or__(%a_dims.1, %b_dims)
+  %9 : Dynamic = aten::mul(%6, %7)
+  %10 : Dynamic = aten::sum(%9)
+  %11 : Dynamic = aten::gt[other={0}](%10)
+  %a.1 : Dynamic, %17 : Dynamic, %18 : Dynamic = prim::If(%11)
+    block0() {
+      %data.1 : Dynamic = aten::add[alpha={1}](%a_data.1, %b_data)
+      %mask : Dynamic = aten::mul(%a_mask.1, %b_mask)
+      %dims : Dynamic = aten::__or__(%a_dims.1, %b_dims)
+      %data.2 : Dynamic = aten::where(%mask, %data.1, %a_data.1)
+      -> (%data.2, %mask, %dims)
+    }
+    block1() {
+      -> (%a_data.1, %a_mask.1, %a_dims.1)
+    }
+  %19 : Dynamic = aten::zeros_like(%6)
+  %data : Dynamic = aten::eq(%6, %19)
+  %21 : Dynamic = aten::mul(%data, %7)
+  %22 : Dynamic = aten::sum(%21)
+  %23 : Dynamic = aten::gt[other={0}](%22)
+  %a : Dynamic, %25 : Dynamic, %26 : Dynamic = prim::If(%23)
+    block0() {
+      -> (%a_data.1, %a_mask.1, %a_dims.1)
+    }
+    block1() {
+      -> (%a_data.1, %a_mask.1, %a_dims.1)
+    }
+  %res_data : Dynamic = aten::where(%6, %a.1, %a)
+  %res_mask : Dynamic = aten::where(%6, %17, %25)
+  %res_dims : Dynamic = aten::__or__(%18, %26)
+  return (%res_data, %res_mask, %res_dims);
+}

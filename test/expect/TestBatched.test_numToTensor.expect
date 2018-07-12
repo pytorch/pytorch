@@ -1,0 +1,27 @@
+graph(%a_data.1 : Dynamic
+      %a_mask.1 : Dynamic
+      %a_dims.1 : Dynamic) {
+  %3 : int = prim::Constant[value={1}]()
+  %4 : Dynamic = prim::NumToTensor(%3)
+  %data.1 : Dynamic = aten::unsqueeze[dim=0](%4)
+  %6 : int = prim::Constant[value={1}]()
+  %7 : int = prim::Constant[value={0}]()
+  %8 : int = prim::Constant[value={0}]()
+  %9 : int[] = prim::Constant[value= 0 -1 [ CPULongTensor{2} ]]()
+  %10 : Dynamic = prim::NumToTensor(%6)
+  %11 : int[] = aten::stack[dim=0](%10)
+  %mask.1 : Dynamic = aten::ones(%11, %7, %8, %9)
+  %13 : int = prim::Constant[value={0}]()
+  %14 : int = prim::Constant[value={0}]()
+  %15 : int = prim::Constant[value={0}]()
+  %16 : int[] = prim::Constant[value= 0 -1 [ CPULongTensor{2} ]]()
+  %17 : Dynamic = prim::NumToTensor(%13)
+  %18 : int[] = aten::stack[dim=0](%17)
+  %dims.1 : Dynamic = aten::zeros(%18, %14, %15, %16)
+  %20 : Dynamic = aten::type_as(%data.1, %a_data.1)
+  %data.2 : Dynamic = aten::add[alpha={1}](%a_data.1, %20)
+  %mask : Dynamic = aten::mul(%a_mask.1, %mask.1)
+  %dims : Dynamic = aten::__or__(%a_dims.1, %dims.1)
+  %data : Dynamic = aten::where(%mask, %data.2, %a_data.1)
+  return (%data, %mask, %dims);
+}

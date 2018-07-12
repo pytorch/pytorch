@@ -7,6 +7,9 @@ namespace torch { namespace jit {
 
 class ToBatch {
 private:
+  // number of tensors to represent a expanded BatchTensor. {data, mask, dims} for now.
+  const size_t EXP_BTENSOR_SIZE = 3;
+  const std::vector<std::string> EXP_BTENSOR_NAME = {"data", "mask", "dims"};
   // mapping from tensor in original graph to {data, mask, dims} in new graph
   std::unordered_map<Value*, std::vector<Value*>> batch_map;
   // mapping from input in original graph to new input in new graph - used in createClone
@@ -14,7 +17,6 @@ private:
   std::function<Value*(Value*)> rn_fn = [this](Value* v) { return rn_env.at(v); };
 
 private:
-  std::vector<std::string> get_name(std::string name);
   void visitAten(Node* n, Block* block, Block* res_block, std::unordered_map<std::string, Value*>& var_map);
   void visitConstant(Node* n, Block* block, Block* res_block);
   void visitNumToTensor(Node* n, Block* block, Block* res_block);

@@ -1,0 +1,32 @@
+graph(%a_data.1 : Dynamic
+      %a_mask.1 : Dynamic
+      %a_dims.1 : Dynamic
+      %b_data : Dynamic
+      %b_mask : Dynamic
+      %b_dims : Dynamic) {
+  %6 : int = prim::Constant[value={2147483647}]()
+  %7 : Dynamic = aten::gt(%a_data.1, %b_data)
+  %8 : Dynamic = aten::mul(%a_mask.1, %b_mask)
+  %9 : Dynamic = aten::__or__(%a_dims.1, %b_dims)
+  %10 : Dynamic = aten::mul(%7, %8)
+  %11 : Dynamic = aten::sum(%10)
+  %12 : Dynamic = aten::gt[other={0}](%11)
+  %38 : Dynamic, %39 : Dynamic, %40 : Dynamic, %a : Dynamic, %36 : Dynamic, %37 : Dynamic = prim::Loop(%6, %12, %7, %8, %9, %a_data.1, %a_mask.1, %a_dims.1)
+    block0(%4_data : Dynamic, %cond_dims : Dynamic, %cond_mask : Dynamic, %cond_data : Dynamic, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
+      %data.1 : Dynamic = aten::sub[alpha={1}](%5_data, %b_data)
+      %mask : Dynamic = aten::mul(%5_mask, %b_mask)
+      %dims : Dynamic = aten::__or__(%5_dims, %b_dims)
+      %data : Dynamic = aten::where(%mask, %data.1, %a_data.1)
+      %24 : Dynamic = aten::gt(%data, %b_data)
+      %25 : Dynamic = aten::mul(%mask, %b_mask)
+      %26 : Dynamic = aten::__or__(%dims, %b_dims)
+      %res_data : Dynamic = aten::where(%cond_dims, %data, %5_data)
+      %res_mask : Dynamic = aten::where(%cond_dims, %mask, %5_mask)
+      %res_dims : Dynamic = aten::__or__(%dims, %5_dims)
+      %33 : Dynamic = aten::mul(%24, %25)
+      %34 : Dynamic = aten::sum(%33)
+      %35 : Dynamic = aten::gt[other={0}](%34)
+      -> (%35, %24, %25, %26, %res_data, %res_mask, %res_dims)
+    }
+  return (%a, %36, %37);
+}

@@ -1243,6 +1243,14 @@ class TestBatched(TestCase):
         res = [single_numToTensor(a[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+        @torch.jit.script
+        def batch_numToTensor(a):
+            a = a + 1
+            return a
+
+        graph = torch.to_batch_graph(batch_numToTensor.graph)
+        self.assertExpected(str(graph))
+
     def test_if_else(self):
         @torch.jit.batch(batch_size=4)
         def batch_if(a, b):
@@ -1264,6 +1272,17 @@ class TestBatched(TestCase):
         res_batch = batch_if(batch_a, batch_b)
         res = [single_if(a[j], b[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > b:
+                a += b
+            else:
+                a -= b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
 
     def test_if_else_with_scalar(self):
         @torch.jit.batch(batch_size=4)
@@ -1287,6 +1306,17 @@ class TestBatched(TestCase):
         res = [single_if(a[j], b[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > 0.1:
+                a += b
+            else:
+                a -= b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
+
     def test_if_noelse(self):
         @torch.jit.batch(batch_size=4)
         def batch_if(a, b):
@@ -1304,6 +1334,15 @@ class TestBatched(TestCase):
         res_batch = batch_if(batch_a, batch_b)
         res = [single_if(a[j], b[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > b:
+                a += b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
 
     def test_if_noelse_with_scalar(self):
         @torch.jit.batch(batch_size=4)
@@ -1323,6 +1362,15 @@ class TestBatched(TestCase):
         res = [single_if(a[j], b[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > 0.1:
+                a += b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
+
     def test_while(self):
         @torch.jit.batch(batch_size=4)
         def batch_while(a, b):
@@ -1341,6 +1389,15 @@ class TestBatched(TestCase):
         res_batch = batch_while(batch_a, batch_b)
         res = [single_while(a[j], b[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_while(a, b):
+            while a > b:
+                a -= b
+            return a
+
+        graph = torch.to_batch_graph(batch_while.graph)
+        self.assertExpected(str(graph))
 
 
 class TestScript(JitTestCase):

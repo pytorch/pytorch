@@ -1,0 +1,62 @@
+graph(%a_data.1 : Dynamic
+      %a_mask.1 : Dynamic
+      %a_dims.1 : Dynamic
+      %b_data : Dynamic
+      %b_mask : Dynamic
+      %b_dims : Dynamic) {
+  %6 : float = prim::Constant[value={0.1}]()
+  %7 : Dynamic = prim::NumToTensor(%6)
+  %data.1 : Dynamic = aten::unsqueeze[dim=0](%7)
+  %9 : int = prim::Constant[value={1}]()
+  %10 : int = prim::Constant[value={0}]()
+  %11 : int = prim::Constant[value={0}]()
+  %12 : int[] = prim::Constant[value= 0 -1 [ CPULongTensor{2} ]]()
+  %13 : Dynamic = prim::NumToTensor(%9)
+  %14 : int[] = aten::stack[dim=0](%13)
+  %mask.1 : Dynamic = aten::ones(%14, %10, %11, %12)
+  %16 : int = prim::Constant[value={0}]()
+  %17 : int = prim::Constant[value={0}]()
+  %18 : int = prim::Constant[value={0}]()
+  %19 : int[] = prim::Constant[value= 0 -1 [ CPULongTensor{2} ]]()
+  %20 : Dynamic = prim::NumToTensor(%16)
+  %21 : int[] = aten::stack[dim=0](%20)
+  %dims.1 : Dynamic = aten::zeros(%21, %17, %18, %19)
+  %23 : Dynamic = aten::type_as(%data.1, %a_data.1)
+  %24 : Dynamic = aten::gt(%a_data.1, %23)
+  %25 : Dynamic = aten::mul(%a_mask.1, %mask.1)
+  %26 : Dynamic = aten::__or__(%a_dims.1, %dims.1)
+  %27 : Dynamic = aten::mul(%24, %25)
+  %28 : Dynamic = aten::sum(%27)
+  %29 : Dynamic = aten::gt[other={0}](%28)
+  %a.1 : Dynamic, %35 : Dynamic, %36 : Dynamic = prim::If(%29)
+    block0() {
+      %data.2 : Dynamic = aten::add[alpha={1}](%a_data.1, %b_data)
+      %mask.2 : Dynamic = aten::mul(%a_mask.1, %b_mask)
+      %dims.2 : Dynamic = aten::__or__(%a_dims.1, %b_dims)
+      %data.3 : Dynamic = aten::where(%mask.2, %data.2, %a_data.1)
+      -> (%data.3, %mask.2, %dims.2)
+    }
+    block1() {
+      -> (%a_data.1, %a_mask.1, %a_dims.1)
+    }
+  %37 : Dynamic = aten::zeros_like(%24)
+  %data.4 : Dynamic = aten::eq(%24, %37)
+  %39 : Dynamic = aten::mul(%data.4, %25)
+  %40 : Dynamic = aten::sum(%39)
+  %41 : Dynamic = aten::gt[other={0}](%40)
+  %a : Dynamic, %47 : Dynamic, %48 : Dynamic = prim::If(%41)
+    block0() {
+      %data.5 : Dynamic = aten::sub[alpha={1}](%a_data.1, %b_data)
+      %mask : Dynamic = aten::mul(%a_mask.1, %b_mask)
+      %dims : Dynamic = aten::__or__(%a_dims.1, %b_dims)
+      %data : Dynamic = aten::where(%mask, %data.5, %a_data.1)
+      -> (%data, %mask, %dims)
+    }
+    block1() {
+      -> (%a_data.1, %a_mask.1, %a_dims.1)
+    }
+  %res_data : Dynamic = aten::where(%24, %a.1, %a)
+  %res_mask : Dynamic = aten::where(%24, %35, %47)
+  %res_dims : Dynamic = aten::__or__(%36, %48)
+  return (%res_data, %res_mask, %res_dims);
+}
