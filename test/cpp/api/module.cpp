@@ -194,6 +194,9 @@ TEST_CASE("module/clone") {
 
   SECTION("Cloning creates distinct parameters") {
     struct TestModule : public Cloneable<TestModule> {
+      TestModule() {
+        reset();
+      }
       void reset() override {
         l1 = register_module("l1", Linear(10, 3));
         l2 = register_module("l2", Linear(3, 5));
@@ -237,6 +240,9 @@ TEST_CASE("module/clone") {
 
   SECTION("Cloning preserves external references") {
     struct TestModule : public Cloneable<TestModule> {
+      TestModule() {
+        reset();
+      }
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
@@ -258,6 +264,9 @@ TEST_CASE("module/clone") {
 
   SECTION("Cloning copies the values of variables of submodules") {
     struct TestModule : public Cloneable<TestModule> {
+      TestModule() {
+        reset();
+      }
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
@@ -266,6 +275,9 @@ TEST_CASE("module/clone") {
       int value = 0;
     };
     struct NestedModule : public Cloneable<NestedModule> {
+      NestedModule() {
+        reset();
+      }
       void reset() override {
         module = register_module("module", std::make_shared<TestModule>());
       }
