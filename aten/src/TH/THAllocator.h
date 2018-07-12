@@ -45,7 +45,6 @@ public:
   THMapAllocator& operator=(const THMapAllocator&) = delete;
   THMapAllocator(THMapAllocator&&) = delete;
   THMapAllocator& operator=(THMapAllocator&&) = delete;
-  virtual ~THMapAllocator();
 
   const char* filename() const { return filename_.c_str(); }
   int fd() const {
@@ -67,6 +66,10 @@ public:
 
   // Closes the data.  Helps us avoid destructor shenanigans
   virtual void close();
+
+  // This is very dangerous.  You have to redefine this destructor for each
+  // subclass
+  virtual ~THMapAllocator() { close(); }
 
 protected:
   bool closed_ = false;
@@ -102,6 +105,9 @@ public:
   void incref();
   int decref();
   void close() override;
+
+  virtual ~THRefcountedMapAllocator() { close(); }
+
 protected:
   void checkFlags();
   void initializeAlloc();

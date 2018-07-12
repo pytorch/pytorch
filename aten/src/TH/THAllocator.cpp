@@ -383,10 +383,6 @@ void THMapAllocator::close() {
 #endif /* _WIN32 */
 }
 
-THMapAllocator::~THMapAllocator() {
-  close();
-}
-
 #else /* defined(_WIN32) || defined(HAVE_MMAP) */
 
 THMapAllocator::THMapAllocator(const char *filename, int flags, size_t size) {
