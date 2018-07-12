@@ -1672,18 +1672,19 @@ void RandUniform<float, CPUContext>(
   }
 }
 
-template <>
-void RandUniform<int, CPUContext>(
-    const size_t n,
-    const int a,
-    const int b,
-    int* r,
-    CPUContext* context) {
-  std::uniform_int_distribution<int> distribution(a, b);
-  for (size_t i = 0; i < n; ++i) {
-    r[i] = distribution(context->RandGenerator());
+#define CAFFE2_RAND_UNIFORM_INT(T)                                       \
+  template <>                                                            \
+  void RandUniform<T, CPUContext>(                                       \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    std::uniform_int_distribution<T> distribution(a, b);                 \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = distribution(context->RandGenerator());                     \
+    }                                                                    \
   }
-}
+
+CAFFE2_RAND_UNIFORM_INT(int32_t);
+CAFFE2_RAND_UNIFORM_INT(int64_t);
+#undef CAFFE2_RAND_UNIFORM_INT
 
 #define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                      \
   template <>                                                          \
