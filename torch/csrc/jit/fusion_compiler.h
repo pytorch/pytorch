@@ -5,7 +5,6 @@
 #include <torch/csrc/jit/assertions.h>
 
 #include "ATen/ATen.h"
-
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -119,6 +118,7 @@ protected:
   // an output is actually a concatenation of
   // many subtensors that the fusion group produces
   std::vector<ConcatDesc> concat_desc;
+
 };
 
 struct FusionCompilerConfig {

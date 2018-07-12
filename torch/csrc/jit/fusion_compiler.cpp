@@ -15,6 +15,7 @@
 #ifdef USE_CUDA
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
+#include <THC/THCGenerator.hpp>
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>
@@ -29,6 +30,8 @@
 #include <iostream>
 #include <dlfcn.h>
 #include <unistd.h>
+
+THCGenerator* THCRandom_getGenerator(THCState* state);
 
 namespace torch { namespace jit {
 
@@ -78,6 +81,7 @@ typedef signed char int8_t;
 typedef short int  int16_t;
 typedef long long int int64_t;
 ${HalfHeader}
+${RandHeader}
 #endif
 typedef ${IndexType} IndexType;
 template<typename T, size_t N>
@@ -87,6 +91,83 @@ struct TensorInfo {
   IndexType strides[N];
 };
 )");
+constexpr auto rand_support_literal = R"(
+struct mtgp32_kernel_params {
+    unsigned int pos_tbl[200];
+    unsigned int param_tbl[200][16];
+    unsigned int temper_tbl[200][16];
+    unsigned int single_temper_tbl[200][16];
+    unsigned int sh1_tbl[200];
+    unsigned int sh2_tbl[200];
+    unsigned int mask[1];
+};
+struct curandStateMtgp32 {
+    unsigned int s[1024];
+    int offset;
+    int pIdx;
+    mtgp32_kernel_params_t * k;
+    int precise_double_flag;
+};
+typedef struct curandStateMtgp32 curandStateMtgp32_t;
+static __inline__ __attribute__((always_inline)) __attribute__((device)) __attribute__((host)) unsigned int para_rec(mtgp32_kernel_params_t * k,unsigned int X1, unsigned int X2, unsigned int Y, int bid) {
+    unsigned int X = (X1 & k->mask[0]) ^ X2;
+    unsigned int MAT;
+
+    X ^= X << k->sh1_tbl[bid];
+    Y = X ^ (Y >> k->sh2_tbl[bid]);
+    MAT = k->param_tbl[bid][Y & 0x0f];
+    return Y ^ MAT;
+}
+static __inline__ __attribute__((always_inline)) __attribute__((device)) __attribute__((host)) unsigned int temper(mtgp32_kernel_params_t * k,unsigned int V, unsigned int T, int bid) {
+    unsigned int MAT;
+
+    T ^= T >> 16;
+    T ^= T >> 8;
+    MAT = k->temper_tbl[bid][T & 0x0f];
+    return V ^ MAT;
+}
+static __inline__ __attribute__((always_inline)) __attribute__((device)) __attribute__((host)) unsigned int curand(curandStateMtgp32_t *state)
+{
+    unsigned int t;
+    unsigned int d;
+    int pos = state->k->pos_tbl[state->pIdx];
+    unsigned int r;
+    unsigned int o;
+
+    d = blockDim.z * blockDim.y * blockDim.x;
+
+    t = (blockDim.z * blockDim.y * threadIdx.z) + (blockDim.x * threadIdx.y) + threadIdx.x;
+    r = para_rec(state->k, state->s[(t + state->offset) & 1023],
+             state->s[(t + state->offset + 1) & 1023],
+             state->s[(t + state->offset + pos) & 1023],
+             state->pIdx);
+
+    state->s[(t + state->offset + 351) & 1023] = r;
+    o = temper(state->k, r,
+           state->s[(t + state->offset + pos -1) & 1023],
+           state->pIdx);
+
+    __syncthreads();
+
+    if (t == 0)
+    {
+        state->offset = (state->offset + d) & 1023;
+    }
+
+    __syncthreads();
+
+    return o;
+
+}
+static __inline__ __attribute__((always_inline)) __attribute__((device)) float _curand_uniform(unsigned int x)
+{
+    return x * (2.3283064e-10f) + ((2.3283064e-10f)/2.0f);
+}
+static __inline__ __attribute__((always_inline)) __attribute__((device)) float curand_uniform(curandStateMtgp32_t *state)
+{
+    return _curand_uniform(curand(state));
+}
+)";
 
 auto cuda_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
@@ -111,7 +192,7 @@ auto cpu_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 
 #define OMP_THRESHOLD 100000
-static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
+static void ${kernelName}_kernel(curandStateMtgp32_t states, IndexType totalElements, ${formals}) {
   #pragma omp parallel for if(totalElements > OMP_THRESHOLD)
   for (IndexType linearIndex = 0;
         linearIndex < totalElements;
@@ -283,6 +364,7 @@ std::string encodeRHS(Node * n) {
     // binary with alpha
     {aten::add, "${0} + ${2}*${1}"},
     {aten::sub, "(${0} - ${2}*${1})"},
+    {aten::rand, "curand_uniform(&states[blockIdx.x])"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
@@ -310,6 +392,7 @@ std::string encodeRHS(Node * n) {
 }
 
 std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
+                                            bool& has_random,
                                             const std::string & name,
                                             AnnotatedGraph & agraph,
                                             bool use_cuda) {
@@ -385,6 +468,11 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat)
       continue;
+    if(n->kind() == aten::rand) {
+      has_random = true;
+      if(!use_cuda)
+        throw std::runtime_error("Fusion doesn't support rand on CPU");
+    }
     env.s("node",valueName(n->output()));
     env.s("rhs", encodeRHS(n));
     body << format("auto ${node} = ${rhs};\n",env);
@@ -410,6 +498,12 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     env.s("HalfHeader", half_support_literal);
   } else {
     env.s("HalfHeader", "");
+  }
+
+  if (has_random) {
+    env.s("RandHeader", rand_support_literal);
+  } else {
+    env.s("RandHeader", "");
   }
 
   env.s("tensorOffsets",tensorOffsets.str());
@@ -518,9 +612,10 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
   char * buffer_next = buffer.data();
   // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
   std::vector<void*> arguments;
-  arguments.reserve(1 + inputs.size() + flat_outputs_size);
+  arguments.reserve(2 + inputs.size() + flat_outputs_size);
   // Asserts that t's dims can be compressed in the same way as in desc
   // (that's what the kernel assumes), and appends it to the arguments vector.
+  arguments.push_back(nullptr);
   auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
     size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
     JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
@@ -555,6 +650,9 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
       }
     }
   }
+  auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
+  std::lock_guard<std::mutex> lock(gen_->mutex);
+  arguments[0] = gen_->state.gen_states;
   launch_raw(numel, arguments.data());
 }
 
@@ -590,7 +688,9 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     checkCUDAVersion(prop);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, name, agraph, true);
+    bool has_random = false;
+    concat_desc = codegen::emitCompilationUnit(cu, has_random, name, agraph, true);
+    if(has_random) maxBlocks = std::min(200, maxBlocks);
     compilation_unit = cu.str();
     nvrtcProgram program;
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
@@ -786,7 +886,9 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, name, agraph, false);
+    bool has_random = false;
+    concat_desc = codegen::emitCompilationUnit(cu, has_random, name, agraph, false);
+    JIT_ASSERT(!has_random);
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
     cpp_file.sync();
