@@ -333,6 +333,8 @@ class ExprBuilder(Builder):
             return TrueLiteral(r)
         elif expr.id == "False":
             return FalseLiteral(r)
+        elif expr.id == "None":
+            return NoneLiteral(r)
         return Var(Ident(r, expr.id))
 
     @staticmethod

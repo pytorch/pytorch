@@ -504,7 +504,6 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       }
 
       if (v.value->node()->kind() == prim::None){
-        std::cout<<"tryMatchSchema detecting None node, output value type" << v.value->type()->str() <<std::endl;
         if (isNumberSubtype(arg.type))
           v.value = createConstant(graph, loc, at::tensor(NAN));
         else
@@ -533,7 +532,6 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       }
     }
 
-    std::cout<<"tryMatchSchema graph: " << graph <<std::endl;
     return flat_inputs;
 }
 
@@ -577,18 +575,7 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   for(size_t i = 0; i < num_outputs; ++i)
     n->addOutput();
 
-  //for(auto& arg: schema.arguments) {
-    //std::cout<<"tryEmitBuiltin schema args: " << arg <<std::endl;
-  //}
   liftConstantAttributes(schema, n);
-
-  //if(n->kind() == aten::clamp) {
-    //std::cout<<"tryEmitBuiltin find clamp" <<std::endl;
-    //NodeKind new_kind(Symbol::aten("clamp_min"));
-    //n->setKind(new_kind);
-    //n->removeInput(2);
-  //}
-  // std::cout<<"tryEmitBuiltin graph: "<< graph->toString()<<std::endl;
 
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
@@ -622,7 +609,6 @@ std::shared_ptr<SugaredValue> emitBuiltinCall(
   const auto& variants = getAllOperatorsFor(Symbol::aten(name));
   std::stringstream failure_messages;
   for (const std::shared_ptr<Operator>& op : variants) {
-    // std::cout<<"emitBuiltinCall op schema: " << op->schema <<std::endl;
     if (auto result = tryEmitBuiltin(
             op->schema, failure_messages, loc, method, name, inputs, attributes)) {
       return result;
@@ -664,7 +650,7 @@ static Value* ensureTensorOrNumber(const SourceRange& range, Value* v) {
 }
 
 
-void  ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values) {
+void ensureTensors(const SourceRange& range, at::ArrayRef<Value*> values) {
   for(auto value : values) {
     ensureTensor(range, value);
   }
@@ -1602,7 +1588,6 @@ private:
   Value* emitNone(SourceRange range) {
     //return createConstant(*graph, range, at::tensor(NAN));
     auto n = emitNode(prim::None, range, {}, 1);
-    // std::cout <<"emitNone node: " << n->output()->uniqueName() <<std::endl;
     return n->output();
   }
 
