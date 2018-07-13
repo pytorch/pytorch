@@ -16,6 +16,7 @@ extern DispatchStub<unary_fn> ceilImpl;
 extern DispatchStub<unary_fn> cosImpl;
 // extern DispatchStub<unary_fn> coshImpl;
 extern DispatchStub<unary_fn> erfImpl;
+extern DispatchStub<unary_fn> erfcImpl;
 extern DispatchStub<unary_fn> expImpl;
 extern DispatchStub<unary_fn> expm1Impl;
 extern DispatchStub<unary_fn> floorImpl;
