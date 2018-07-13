@@ -16,7 +16,7 @@ class Multinomial(Distribution):
     called (see example below)
 
     .. note:: :attr:`probs` must be non-negative, finite and have a non-zero sum,
-    and it will be normalized to sum to 1.
+              and it will be normalized to sum to 1.
 
     -   :meth:`sample` requires a single shared `total_count` for all
         parameters and samples.
