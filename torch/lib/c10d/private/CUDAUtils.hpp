@@ -9,7 +9,7 @@
 #include <ATen/ATen.h>
 #include <THC/THCStream.h>
 
-#include "../CUDAUtils.hpp"
+#include <c10d/CUDAUtils.hpp>
 
 #define C10D_CUDA_CHECK(condition)        \
   do {                                    \

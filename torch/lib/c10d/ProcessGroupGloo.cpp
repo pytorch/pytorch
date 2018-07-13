@@ -11,7 +11,7 @@
 
 #include <THC.h>
 
-#include "private/CUDAUtils.hpp"
+#include <c10d/private/CUDAUtils.hpp>
 
 #define GENERATE_ALL_TYPES(type, func, args...)        \
   switch (type) {                                      \
