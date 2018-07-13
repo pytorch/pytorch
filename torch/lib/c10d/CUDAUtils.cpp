@@ -18,7 +18,9 @@ CUDAEvent::~CUDAEvent() {
 
 CUDAStream CUDAStream::create() {
   CUDAStream stream;
-  stream.stream_ = THCStream_new(cudaStreamNonBlocking);
+  int loPri, hiPri;
+  C10D_CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&loPri, &hiPri));
+  stream.stream_ = THCStream_newWithPriority(cudaStreamNonBlocking, hiPri);
   return stream;
 }
 
