@@ -29,7 +29,7 @@ def split(tensor, split_size_or_sections, dim=0):
     Arguments:
         tensor (Tensor): tensor to split.
         split_size_or_sections (int) or (list(int)): size of a single chunk or
-        list of sizes for each chunk
+            list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
     """
     # Overwriting reason:
