@@ -1411,6 +1411,25 @@ Example::
     tensor([ 0.0000, -0.8427,  1.0000])
 """)
 
+add_docstr(torch.erfc,
+           r"""
+erfc(tensor, out=None) -> Tensor
+
+Computes the complementary error function of each element. The complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 1.8427,  0.0000])
+""")
+
 add_docstr(torch.erfinv,
            r"""
 erfinv(tensor, out=None) -> Tensor
@@ -3763,10 +3782,11 @@ Args:
     end (Number): the ending value for the set of points
     step (Number): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}  If `dtype` is not given, infer the data type from the other input arguments.
-             If any of `start`, `end`, or `stop` are floating-point,
-             the `dtype` is inferred to be the default dtype, see :meth:`~torch.get_default_dtype`.
-             Otherwise, the `dtype` is inferred to be `torch.int64`.
+    {dtype}
+        If `dtype` is not given, infer the data type from the other input arguments.
+        If any of `start`, `end`, or `stop` are floating-point,
+        the `dtype` is inferred to be the default dtype, see :meth:`~torch.get_default_dtype`.
+        Otherwise, the `dtype` is inferred to be `torch.int64`.
     {layout}
     {device}
     {requires_grad}

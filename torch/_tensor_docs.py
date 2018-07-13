@@ -717,6 +717,13 @@ erf() -> Tensor
 See :func:`torch.erf`
 """)
 
+add_docstr_all('erfc',
+               r"""
+erf() -> Tensor
+
+See :func:`torch.erfc`
+""")
+
 add_docstr_all('erfinv',
                r"""
 erfinv() -> Tensor
