@@ -39,6 +39,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export LC_ALL=C.UTF-8
 
   # This environment variable enabled HCC Optimizations that speed up the linking stage.
+  # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
 
   sudo chown -R jenkins:jenkins /usr/local
