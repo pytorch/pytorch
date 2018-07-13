@@ -772,7 +772,9 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                             kernel_name_with_template = KernelTemplateParams[kernel_name]["kernel_with_template"]
                             argument_types = KernelTemplateParams[kernel_name]["arg_types"]
 
-                            old_kernel_launch = input_source[arguments[0]["start"]:arguments[-1]["end"]]
+                            old_kernel_launch = input_source[arguments[5]["start"]:arguments[-1]["end"]]
+                            full_old_kernel_launch = input_source[arguments[0]["start"]:arguments[-1]["end"]]
+                            full_new_kernel_launch = full_old_kernel_launch
                             new_kernel_launch = old_kernel_launch
 
                             kernel_params = argument_strings[5:]
@@ -788,14 +790,17 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                                         # Update to static_cast, account for cases where argument is at start/end of string
                                         new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(re.escape(the_arg)), replace_arg, new_kernel_launch)
  
+                            # replace kernel arguments in full kernel launch arguments w/ static_cast ones
+                            full_new_kernel_launch = full_new_kernel_launch.replace(old_kernel_launch, new_kernel_launch)
+
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
-                                                       lambda x: kernel_name_with_template, new_kernel_launch)
+                            full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
+                                                       lambda x: kernel_name_with_template, full_new_kernel_launch)
 
                             # Replace Launch
-                            new_output_source = new_output_source.replace(old_kernel_launch, new_kernel_launch)
+                            new_output_source = new_output_source.replace(full_old_kernel_launch, full_new_kernel_launch)
 
                     # Overwrite file contents
                     fileobj.seek(0)
