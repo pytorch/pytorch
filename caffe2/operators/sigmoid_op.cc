@@ -8,8 +8,8 @@ template <>
 template <typename T>
 bool SigmoidFunctor<CPUContext>::
 operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
-  ConstEigenVectorArrayMap<T> X_arr(X, N);
-  EigenVectorArrayMap<T>(Y, N) = 1. / (1. + (-X_arr).exp());
+  EigenVectorArrayMap<T>(Y, N) =
+      T(1) / (T(1) + (-ConstEigenVectorArrayMap<T>(X, N)).exp());
   return true;
 }
 
