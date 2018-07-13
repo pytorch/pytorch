@@ -75,30 +75,37 @@ class TestActivations(hu.HypothesisTestCase):
             grad_reference=relu_grad_ref)
 
     @given(X=hu.tensor(elements=st.floats(-3.0, 3.0)),
-           n=st.floats(min_value=0.5, max_value=2.0),
+           n=st.floats(min_value=1.0, max_value=2.0),
            in_place=st.booleans(), **hu.gcs)
     def test_relu_n(self, X, n, in_place, gc, dc):
+        def relu_n_ref(X):
+            Y = np.minimum(np.maximum(X, 0), n)
+            return [Y]
+
+        def relu_n_grad_ref(g_out, outputs, fwd_inputs):
+            dY = g_out
+            [Y] = outputs
+            dX = dY
+            dX[Y == 0] = 0
+            dX[Y == n] = 0
+            return [dX]
+
         op = core.CreateOperator(
             "ReluN",
             ["X"],
             ["X"] if in_place else ["Y"],
             n=n,
+            engine="CUDNN",
         )
-
-        def relu_n_ref(X):
-            return [np.minimum(np.maximum(X, 0.0), n)]
-
-        # go away from 0 and n to avoid kink problems
-        X += 0.04 * np.sign(X)
-        X[X == 0.0] += 0.04
-        X -= n
-        X += 0.02 * np.sign(X)
-        X[X == 0.0] -= 0.02
-        X += n
-
-        self.assertReferenceChecks(gc, op, [X], relu_n_ref)
+        self.assertReferenceChecks(
+            gc,
+            op,
+            [X],
+            relu_n_ref,
+            output_to_grad="X" if in_place else "Y",
+            grad_reference=relu_n_grad_ref,
+        )
         self.assertDeviceChecks(dc, op, [X], [0])
-        self.assertGradientChecks(gc, op, [X], 0, [0], stepsize=0.005)
 
     @given(X=hu.tensor(),
            alpha=st.floats(min_value=0.1, max_value=2.0),
