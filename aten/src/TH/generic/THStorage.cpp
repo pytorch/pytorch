@@ -99,13 +99,6 @@ void THStorage_(free)(THStorage *storage)
   THStorage_free(storage);
 }
 
-/*
-THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
-{
-  return THStorage_newWithData(at::CTypeToScalarType<th::from_type<real>>::to(), data, size);
-}
-*/
-
 THStorage* THStorage_(newWithDataAndAllocator)(at::DevicePtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
   return THStorage_newWithDataAndAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), std::move(data), size, allocator);
