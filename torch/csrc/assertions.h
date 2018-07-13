@@ -9,7 +9,7 @@ namespace torch {
 struct assert_error final : public std::exception {
   const std::string msg;
   explicit assert_error(const std::string& msg) : msg(msg) {}
-  virtual const char* what() const noexcept { return msg.c_str(); }
+  const char* what() const noexcept override { return msg.c_str(); }
 };
 
 [[noreturn]]
