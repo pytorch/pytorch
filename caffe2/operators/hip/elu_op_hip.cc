@@ -1,106 +1,75 @@
-/**
- * Copyright (c) 2016-present, Facebook, Inc.
- *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
- *
- *     http://www.apache.org/licenses/LICENSE-2.0
- *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
- */
-
 #include "caffe2/operators/elu_op.h"
-#include "hip/hip_runtime.h"
+
+#include <algorithm>
+#include <functional>
+
 #include "caffe2/core/hip/context_hip.h"
 
 namespace caffe2 {
 
 namespace {
-__global__ void elu_kernel(const int N, const float alpha, const float* x, float* y)
-{
-    HIP_1D_KERNEL_LOOP(i, N)
-    {
-        if(x[i] > 0)
-        {
-            y[i] = x[i];
-        }
-        else
-        {
-            y[i] = alpha * (expf(x[i]) - 1);
-        }
-    }
+
+template <typename T>
+__global__ void EluHIPKernel(const int N, const T alpha, const T* X, T* Y);
+
+template <>
+__global__ void
+EluHIPKernel<float>(const int N, const float alpha, const float* X, float* Y) {
+  HIP_1D_KERNEL_LOOP(i, N) {
+    Y[i] =
+        __ldg(X + i) < 0 ? alpha * (expf(__ldg(X + i)) - 1.0f) : __ldg(X + i);
+  }
 }
 
-__global__ void
-elu_gradient_kernel(const int N, const float alpha, const float* y, const float* dy, float* dx)
-{
-    HIP_1D_KERNEL_LOOP(i, N)
-    {
-        if(y[i] > 0)
-        {
-            dx[i] = dy[i];
-        }
-        else
-        {
-            dx[i] = dy[i] * (y[i] + alpha);
-        }
-    }
+template <typename T>
+__global__ void EluGradientHIPKernel(
+    const int N,
+    const T alpha,
+    const T* dY,
+    const T* Y,
+    T* dX) {
+  HIP_1D_KERNEL_LOOP(i, N) {
+    dX[i] = __ldg(Y + i) < 0 ? __ldg(dY + i) * (__ldg(Y + i) + alpha)
+                             : __ldg(dY + i);
+  }
 }
+
 } // namespace
 
 template <>
-bool EluOp<float, HIPContext>::RunOnDevice()
-{
-    auto& X = Input(0);
-    auto* Y = Output(0);
-    // Otherwise inplace gradient and Elu dosen't make sense.
-    CAFFE_ENFORCE_GE(alpha_, 0);
-    Y->ResizeLike(X);
-    const auto* Xdata = X.data<float>();
-    auto* Ydata       = Y->mutable_data<float>();
-    hipLaunchKernelGGL((elu_kernel),
-                       dim3(CAFFE_GET_BLOCKS(X.size())),
-                       dim3(CAFFE_HIP_NUM_THREADS),
-                       0,
-                       context_.hip_stream(),
-                       static_cast<const int>(X.size()),
-                       alpha_,
-                       Xdata,
-                       Ydata);
-    return true;
+template <typename T>
+bool EluFunctor<HIPContext>::
+operator()(const int N, const T* X, T* Y, HIPContext* context) const {
+  hipLaunchKernelGGL(EluHIPKernel<T>, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N))), dim3(CAFFE_HIP_NUM_THREADS), 0, context->hip_stream(), static_cast<const int>(N), alpha, X, Y);
+  return true;
 }
 
 template <>
-bool EluGradientOp<float, HIPContext>::RunOnDevice()
-{
-    auto& Y  = Input(0);
-    auto& dY = Input(1);
-    auto* dX = Output(0);
-    DCHECK_GT(Y.size(), 0);
-    DCHECK_EQ(dY.size(), Y.size());
-    dX->ResizeLike(Y);
-
-    const float* Ydata  = Y.data<float>();
-    const float* dYdata = dY.data<float>();
-    float* dXdata       = dX->mutable_data<float>();
-    hipLaunchKernelGGL((elu_gradient_kernel),
-                       dim3(CAFFE_GET_BLOCKS(Y.size())),
-                       dim3(CAFFE_HIP_NUM_THREADS),
-                       0,
-                       context_.hip_stream(),
-                       static_cast<const int>(Y.size()),
-                       alpha_,
-                       Ydata,
-                       dYdata,
-                       dXdata);
-    return true;
+template <typename T>
+bool EluGradientFunctor<HIPContext>::Forward(
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& /* dY_dims */,
+    const T* Y,
+    const T* dY,
+    T* dX,
+    HIPContext* context) const {
+  const int size = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  hipLaunchKernelGGL(EluGradientHIPKernel<T>, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(size))), dim3(CAFFE_HIP_NUM_THREADS), 0, context->hip_stream(), static_cast<const int>(size), alpha, dY, Y, dX);
+  return true;
 }
 
-REGISTER_HIP_OPERATOR(Elu, EluOp<float, HIPContext>);
-REGISTER_HIP_OPERATOR(EluGradient, EluGradientOp<float, HIPContext>);
-}
+REGISTER_HIP_OPERATOR(
+    Elu,
+    UnaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        HIPContext,
+        EluFunctor<HIPContext>>);
+REGISTER_HIP_OPERATOR(
+    EluGradient,
+    BinaryElementwiseWithArgsOp<
+        TensorTypes<float>,
+        HIPContext,
+        EluGradientFunctor<HIPContext>>);
+
+} // namespace caffe2
