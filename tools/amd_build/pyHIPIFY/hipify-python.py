@@ -930,14 +930,9 @@ def main():
         sys.exit(1)
 
     # If no output directory, provide a default one.
-    if args.output_directory is "":
+    if not args.output_directory:
         args.project_directory.rstrip("/")
         args.output_directory = args.project_directory + "_amd"
-
-    # Make sure output directory does not exist.
-    if os.path.exists(args.output_directory):
-        print("The output folder already exists.")
-        sys.exit(2)
 
     # Copy from project directory to output directory if not done already.
     if not os.path.exists(args.output_directory):
