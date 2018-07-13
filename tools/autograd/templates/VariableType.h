@@ -4,7 +4,7 @@
 
 #include <ATen/ATen.h>
 
-#include "torch/csrc/WindowsTorchApiMacro.h"
+#include <torch/csrc/WindowsTorchApiMacro.h>
 
 #include <cstdint> // for size_t
 #include <functional> // for function

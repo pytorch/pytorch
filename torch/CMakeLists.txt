@@ -219,13 +219,6 @@ else()
     -Wno-write-strings
 #    -Wno-zero-length-array
     -Wno-unknown-pragmas
-    # This is required for Python 2 declarations that are deprecated
-    # in 3.
-    -Wno-deprecated-declarations
-    # Python 2.6 requires -fno-strict-aliasing see
-    # http://legacy.python.org/dev/peps/pep-3123/ We also depend on it
-    # in our code (even Python 3).
-    -fno-strict-aliasing
     # Clang has an unfixed bug leading to spurious missing braces
     # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
     -Wno-missing-braces
@@ -357,11 +350,11 @@ if (NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api/include)
 
   if (NOT MSVC)
-    target_compile_options(torch PRIVATE -Wno-error=maybe-uninitialized)
+    target_compile_options(torch PRIVATE -Wno-maybe-uninitialized)
   endif()
 
   if (APPLE)
-    target_compile_options(torch PRIVATE -Wno-error=unknown-warning-option)
+    target_compile_options(torch PRIVATE -Wno-unknown-warning-option)
   endif()
 endif()
 
@@ -397,16 +390,16 @@ if (NOT NO_API AND NOT USE_ROCM)
 
   if (APPLE)
     target_compile_options(test_api PRIVATE
-      -Wno-error=unknown-warning-option
-      -Wno-error=missing-braces
-      -Wno-error=maybe-uninitialized
-      -Wno-error=reorder
+      -Wno-unknown-warning-option
+      -Wno-missing-braces
+      -Wno-maybe-uninitialized
+      -Wno-reorder
       )
   elseif (MSVC)
   else()
     target_compile_options(test_api PRIVATE
-      -Wno-error=unused-but-set-parameter
-      -Wno-error=reorder
+      -Wno-unused-but-set-parameter
+      -Wno-reorder
       )
   endif()
 endif()
