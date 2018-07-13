@@ -2,6 +2,7 @@
 
 #include <torch/detail/ordered_dict.h>
 #include <torch/expanding_array.h>
+#include <torch/nn/init.h>
 #include <torch/nn/modules/linear.h>
 #include <torch/tensor.h>
 #include <torch/utils.h>
@@ -47,6 +48,15 @@ TEST_CASE("autograd") {
     REQUIRE(x.grad().allclose(y * 2));
   }
   // Assume everything else is safe from PyTorch tests.
+}
+
+TEST_CASE("nn::init") {
+  auto tensor = torch::empty({3, 4}, torch::requires_grad());
+  REQUIRE_THROWS_WITH(
+      tensor.fill_(1),
+      StartsWith("a leaf Variable that requires grad "
+                 "has been used in an in-place operation"));
+  REQUIRE(torch::nn::init::ones_(tensor).sum().toCInt() == 12);
 }
 
 TEST_CASE("expanding-array") {
