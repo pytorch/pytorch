@@ -207,7 +207,7 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-struct Module : public std::enable_shared_from_this<Module> {
+struct Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
   : modules("Module")

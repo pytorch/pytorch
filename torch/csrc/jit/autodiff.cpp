@@ -33,6 +33,12 @@ bool isDifferentiable(Node * n) {
     if (!hasOneValuedInput(n, attr::alpha) || !hasOneValuedInput(n, attr::beta))
       return false;
   }
+  auto isTensor = [](Value* v) { return v->type()->isSubtypeOf(*DynamicType::get()); };
+
+  if(!std::all_of(n->inputs().begin(), n->inputs().end(), isTensor)
+    || !std::all_of(n->outputs().begin(), n->outputs().end(), isTensor))
+    return false;
+
   if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
     return false;
   }

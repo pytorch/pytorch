@@ -73,15 +73,6 @@ static inline void push(Stack& stack, Types... args) {
 // pack takes the return values of aten functions pushes them onto the stack
 template<typename T>
 inline void pack(Stack & stack, T&& v) {
-  stack.push_back(IValue(as_variable(std::move(v))));
-}
-template<>
-inline void pack(Stack & stack, at::Tensor&& v) {
-  stack.push_back(IValue(std::move(v)));
-}
-
-template<>
-inline void pack(Stack & stack, autograd::Variable&& v) {
   stack.push_back(IValue(std::move(v)));
 }
 

@@ -42,6 +42,7 @@ _(prim, Undefined) \
 _(prim, Starred) \
 _(prim, TupleConstruct) \
 _(prim, TupleUnpack) \
+_(prim, ListConstruct) \
 _(prim, NumToTensor) \
 _(prim, TensorToNum) \
 _(prim, AutogradAdd) \

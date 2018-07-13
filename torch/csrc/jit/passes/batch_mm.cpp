@@ -181,7 +181,8 @@ void BatchMMBlock(Block* block) {
     if (!root || root.tree_size < min_fusion_size)
       continue;
     auto matmuls = root.gatherMatMuls();
-    auto type = root.node->output()->type()->expect<TensorType>();
+    auto type_ = root.node->output()->type();
+    auto type = type_->expect<TensorType>();
 
     auto batch_inputs = [&](Side s, std::array<int64_t, 2> cat_sizes) -> Value* {
       int inputs_off = s == Side::LHS ? 0 : 1;
@@ -199,7 +200,7 @@ void BatchMMBlock(Block* block) {
     auto lhs_batch = batch_inputs(Side::LHS, root.lhs_sizes);
     auto rhs_batch = batch_inputs(Side::RHS, root.rhs_sizes);
     Node *batch_mm = graph->create(aten::mm, {lhs_batch, rhs_batch});
-    batch_mm->output()->setType(type->asShared());
+    batch_mm->output()->setType(type_);
     batch_mm->insertBefore(root.node);
     root.node->output()->replaceAllUsesWith(batch_mm->output());
     // NB: don't bother with cleaning up after yourself. We'll use DCE for that.

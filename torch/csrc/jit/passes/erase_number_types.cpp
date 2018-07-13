@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/passes/erase_number_types.h"
+#include "torch/csrc/jit/constants.h"
 
 namespace torch { namespace jit {
 
@@ -18,7 +19,13 @@ static void EraseNumberTypesOnBlock(Block* block) {
     }
     switch (it->kind()) {
       case prim::Constant: {
-        it->output()->inferTypeFrom(it->t(attr::value));
+        // remove primitive constants, replacing with tensor equivalent
+        if(it->output()->type()->isSubtypeOf(*NumberType::get())) {
+          auto s = *constant_as<at::Scalar>(it->output());
+          WithInsertPoint guard(*it);
+          Value* r = createConstant(*block->owningGraph(), s.toTensor());
+          it->output()->replaceAllUsesWith(r);
+        }
       } break;
       case prim::TensorToNum: {
         it->output()->replaceAllUsesWith(it->inputs()[0]);

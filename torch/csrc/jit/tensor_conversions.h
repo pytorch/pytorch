@@ -83,67 +83,9 @@ inline T tensor_as(at::Tensor t) {
   return detail::tensor_as_impl<T>()(std::move(t));
 }
 
-//////////////////////////////////////////////////////////////////////////////////
-// T -> Tensor conversion
-//////////////////////////////////////////////////////////////////////////////////
-
-inline at::Tensor as_tensor(int64_t v) {
-  return at::Scalar(v).toTensor();
-}
-
-inline at::Tensor as_tensor(double v) {
-  return at::Scalar(v).toTensor();
-}
-
-inline at::Tensor as_tensor(bool v) {
-  return at::Scalar(v).toTensor();
-}
-
-inline at::Tensor as_tensor(at::IntList l) {
-  void* data = const_cast<void*>(reinterpret_cast<const void*>(l.data()));
-  auto sizes = {static_cast<int64_t>(l.size())};
-  return at::from_blob(data, sizes, at::kLong).clone();
-}
-
-inline at::Tensor as_tensor(const at::Scalar& s) {
-  return s.toTensor();
-}
-
-inline at::Tensor as_tensor(at::Tensor t) {
-  return t;
-}
-
-template<size_t N>
-inline at::Tensor as_tensor(std::array<bool, N>&& bools) {
-  auto r = at::empty({N}, at::kByte);
-  auto accessor = r.accessor<uint8_t, 1>();
-  for(size_t i = 0; i < N; ++i) {
-    accessor[i] = bools[i];
-  }
-  return r;
-}
-
 template<typename T>
 inline at::Tensor as_variable(const T& t) {
   return autograd::make_variable(as_tensor(t));
-}
-
-//////////////////////////////////////////////////////////////////////////////////
-// Helper for retrieving constants
-//////////////////////////////////////////////////////////////////////////////////
-
-// if a value is a constant then try to turn into type T using the
-// same rules as the interpreter
-template<typename T>
-at::optional<T> constant_as(Value* v) {
-  if(v->node()->kind() != prim::Constant)
-    return at::nullopt;
-  auto tensor = v->node()->t(attr::value);
-  try {
-    return tensor_as<T>(std::move(tensor));
-  } catch (tensor_conversion_error& err) {
-    return at::nullopt;
-  }
 }
 
 }} // namespace torch::jit

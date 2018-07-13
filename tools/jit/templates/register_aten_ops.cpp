@@ -56,6 +56,10 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   return res;
 }
 
+at::Device as_device(const std::vector<int64_t>& elements) {
+  return at::Device(static_cast<at::Device::Type>(elements[0]), elements[1]);
+}
+
 RegisterOperators reg({
 ${constructors}
 });

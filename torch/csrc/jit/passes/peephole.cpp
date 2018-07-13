@@ -69,6 +69,11 @@ void PeepholeOptimize(Block * block) {
           }
         }
       }
+    } else if(node->kind() == prim::TensorToNum) {
+      Node* input_node = n->input()->node();
+      if (input_node->kind() == prim::NumToTensor) {
+        n->output()->replaceAllUsesWith(input_node->input());
+      }
     }
   }
 }

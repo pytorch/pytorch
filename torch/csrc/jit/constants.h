@@ -16,4 +16,22 @@ Value* createConstant(
     at::optional<script::SourceRange> loc = at::nullopt);
 
 
+//////////////////////////////////////////////////////////////////////////////////
+// Helper for retrieving constants
+//////////////////////////////////////////////////////////////////////////////////
+
+// attempt to convert a (possibly constant) Value* into an intepreter value (IValue).
+// returns at::nullopt if the Value* was not constant
+at::optional<IValue> toIValue(Value* v);
+
+// if a value is a constant then try to turn into type T using the
+// same rules as the interpreter
+template<typename T>
+at::optional<T> constant_as(Value* v) {
+  if(auto ivalue = toIValue(v)) {
+    return ivalue->to<T>();
+  }
+  return at::nullopt;
+}
+
 }}

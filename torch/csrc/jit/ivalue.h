@@ -183,6 +183,7 @@ struct IValue {
   : IValue(static_cast<int64_t>(b)) {}
 
   bool isInt() const { return Tag::Int == tag; }
+
   int64_t toInt() const {
     JIT_ASSERT(isInt());
     return as_int;
@@ -312,6 +313,9 @@ DEFINE_TO(double, toDouble)
 DEFINE_TO(int64_t, toInt)
 DEFINE_TO(Shared<DoubleList>, toDoubleList)
 DEFINE_TO(Shared<IntList>, toIntList)
+DEFINE_TO(at::Scalar, toScalar)
+DEFINE_TO(bool, toInt)
+
 #undef DEFINE_TO
 
 // non-mutable list

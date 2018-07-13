@@ -75,23 +75,21 @@ static void setposattr(jit::Node* n, size_t idx, const char *name, SparseTensorR
 static void setposattr(jit::Node* n, size_t idx, const char *name, const at::IntList& v)  {
   using ArgumentStash = jit::tracer::ArgumentStash;
   if (ArgumentStash::hasIntList(name)) {
-    jit::TensorType expected_type {at::kLong, -1, {}};
     auto info = ArgumentStash::popIntList(name);
     for (size_t i = 0; i < info.size(); ++i) {
       if (info[i] != nullptr) continue;
       info[i] = createConstant(n, v[i]);
-      info[i]->inferTypeFrom(info[i]->node()->t(jit::attr::value));
     }
     for (jit::Value* v : info) {
-      if (*v->type() != expected_type) {
+      if (*v->type() != *jit::IntType::get()) {
         throw std::runtime_error(
           "Type mismatch in setposattr for IntList. Check that your program "
           "is valid without tracing, and please file a bug report if it is.");
       }
     }
     jit::WithInsertPoint insert_point{n};
-    auto symbolic_info = fmap<jit::SymbolicVariable>(info);
-    auto size = jit::SymbolicVariable::stack(symbolic_info, 0);
+    auto& g = *n->owningGraph();
+    auto size = g.insertNode(g.createList(jit::IntType::get(), info))->output();
     n->insertInput(idx, size);
   } else {
     return genericInsertInput(n, idx, v);

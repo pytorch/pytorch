@@ -995,6 +995,23 @@ public:
     }
     return n;
   }
+  Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+    auto n = create(prim::ListConstruct, values);
+    for(const auto & v : values) {
+      JIT_ASSERT(v->type()->isSubtypeOf(*elem_type));
+    }
+    n->outputs()[0]->setType(std::make_shared<ListType>(elem_type));
+    return n;
+  }
+  Node* createNumToTensor(Value* value) {
+    JIT_ASSERT(value->type()->isSubtypeOf(*NumberType::get()));
+    return create(prim::NumToTensor, {value});
+  }
+  Node* createTensorToNum(const TypePtr& type, Value* value) {
+    auto* result = create(prim::TensorToNum, {value});
+    result->output()->setType(type);
+    return result;
+  }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
       const std::string& cconv,

@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
 
@@ -29,7 +30,7 @@ struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
 
-struct Type : std::enable_shared_from_this<Type> {
+struct Type {
 
 private:
   TypeKind kind_;
@@ -77,9 +78,6 @@ public:
   const T* expect() const {
     JIT_ASSERT(T::Kind == kind());
     return static_cast<const T*>(this);
-  }
-  std::shared_ptr<Type> asShared() {
-    return shared_from_this();
   }
   virtual ~Type() {}
 };
@@ -167,6 +165,13 @@ struct TensorType : public Type {
     // str is used for user-facing error messages, where we
     // don't want to reveal underlying size information.
     return "Tensor";
+  }
+  bool numel() const {
+    size_t prod = 1;
+    for(auto s : sizes()) {
+      prod *= s;
+    }
+    return prod;
   }
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
@@ -317,6 +322,22 @@ struct IntType : public Type {
   // global singleton
   static TypePtr get();
 };
+
+
+// what is the type, ignoring extra size/shape information?
+// e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
+
+inline TypePtr unshapedType(const TypePtr& type) {
+  if(TupleType* t = type->cast<TupleType>()) {
+    return std::make_shared<TupleType>(fmap(t->elements(), unshapedType));
+  } else if(ListType* t = type->cast<ListType>()) {
+    return std::make_shared<ListType>(unshapedType(t->getElementType()));
+  } else if(type->kind() == TypeKind::TensorType) {
+    return DynamicType::get();
+  } else {
+    return type;
+  }
+}
 
 
 std::ostream& operator<<(std::ostream & out, const Type & t);

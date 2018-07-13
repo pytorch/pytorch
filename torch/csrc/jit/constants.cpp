@@ -3,49 +3,84 @@
 
 namespace torch { namespace jit {
 
+// IValue -> Constant node
 Value* createConstant(
     Graph& g,
     IValue val,
     at::optional<script::SourceRange> loc) {
-
-  TypePtr typ = nullptr;
-  Node * n;
-  at::Tensor ref;
+  Node * n = g.create(prim::Constant);
   if(val.isTensor()) {
-    ref = std::move(val).toTensor();
+    at::Tensor ref = std::move(val).toTensor();
     JIT_ASSERT(ref.defined());
-  } else if(val.isInt()) { // eventually we will keep these as non-tensors
-    typ = IntType::get();
-    ref = at::full({}, val.toInt(), at::kLong);
+    n->output()->inferTypeFrom(ref); // note: before t_ because of std::move(ref)
+    n->t_(attr::value, std::move(ref));
+  } else if(val.isInt()) {
+    n->i_(attr::value, val.toInt());
+    n->output()->setType(IntType::get());
   } else if(val.isDouble()) {
-    typ = FloatType::get();
-    ref = at::full({}, val.toDouble(), at::kFloat);
+    n->f_(attr::value, val.toDouble());
+    n->output()->setType(FloatType::get());
   } else if(val.isIntList()) {
-    typ = ListType::ofInts();
-    ref = as_tensor(val.toIntList()->elements());
+    n->is_(attr::value, val.toIntList()->elements());
+    n->output()->setType(ListType::ofInts());
   } else {
     throw std::runtime_error("Unsupported value kind: " + val.tagKind());
   }
-  n = g.create(prim::Constant);
-  n->t_(attr::value, ref.clone());
-  n->output()->inferTypeFrom(ref);
   if(loc)
     n->setSourceLocation(std::make_shared<script::SourceRange>(*loc));
-  if(typ)
-    n->output()->setType(typ);
   return g.insertNode(n)->output();
 }
 
 RegisterOperators reg({
+  // Implementation of constant node, computes and IValue
   Operator(
       prim::Constant,
-      [](Node* node) {
-        auto t = autograd::make_variable(node->t(attr::value));
-        return [t](Stack& stack) {
-          stack.push_back(t);
-          return 0;
-        };
+      [](Node* node) -> Operation {
+        TypePtr type = node->output()->type();
+        if(type->isSubtypeOf(*DynamicType::get())) {
+          auto t = autograd::make_variable(node->t(attr::value));
+          return [t](Stack& stack) {
+            stack.push_back(t);
+            return 0;
+          };
+        } else if (
+            type->isSubtypeOf(*NumberType::get()) &&
+            node->kindOf(attr::value) == AttributeKind::i) {
+          auto i = node->i(attr::value);
+          return [i](Stack& stack) {
+            push(stack, i);
+            return 0;
+          };
+        } else if (
+            type->isSubtypeOf(*NumberType::get()) &&
+            node->kindOf(attr::value) == AttributeKind::f) {
+          auto f = node->f(attr::value);
+          return [f](Stack& stack) {
+            push(stack, f);
+            return 0;
+          };
+        } else if(type->isSubtypeOf(*ListType::ofInts())) {
+          auto is = node->is(attr::value);
+          return [is](Stack& stack) {
+            push(stack, is);
+            return 0;
+          };
+        } else {
+          std::stringstream ss;
+          ss << "constant literal not supported for: " << type->str();
+          throw std::runtime_error(ss.str());
+        }
       }),
 });
+
+at::optional<IValue> toIValue(Value* v) {
+  if(v->node()->kind() != prim::Constant)
+    return at::nullopt;
+  // use implemenation of prim::Constant to compute the output IValue
+  auto op = getOperation(v->node());
+  Stack stack;
+  op(stack);
+  return stack.back();
+}
 
 }}

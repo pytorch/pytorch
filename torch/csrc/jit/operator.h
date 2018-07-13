@@ -45,6 +45,9 @@ struct Operator {
       return op(n);
     }
   }
+  bool hasAttributedVersion() const {
+    return op_const_attributes != nullptr;
+  }
 private:
   OperationCreator op;
   OperationCreator op_const_attributes;
