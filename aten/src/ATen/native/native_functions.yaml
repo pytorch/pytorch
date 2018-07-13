@@ -583,6 +583,12 @@
 - func: eye(int64_t n, int64_t m, TensorOptions options={}) -> Tensor
   variants: function
 
+- func: eye_like(Tensor self) -> Tensor
+  variants: function
+
+- func: eye_like(Tensor self, *, TensorOptions options) -> Tensor
+  variants: function
+
 - func: eye_out(Tensor result, int64_t n) -> Tensor
   variants: function
   dispatch:

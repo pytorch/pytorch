@@ -169,20 +169,30 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
   return result;
 }
 
+Tensor eye_like(const Tensor& self) {
+  AT_CHECK(!self.is_sparse(), "eye_like is not implemented for sparse layout");
+  AT_CHECK(self.dim() == 2, "Expected input to be two-dimensional, instead got ",
+           self.dim(), " dimensions");
+  return native::eye(self.size(0), self.size(1), self.options());
+}
+
+Tensor eye_like(const Tensor& self, const TensorOptions& options) {
+  AT_CHECK(!self.is_sparse(), "eye_like is not implemented for sparse layout");
+  AT_CHECK(self.dim() == 2, "Expected input to be two-dimensional, instead got ",
+           self.dim(), " dimensions");
+  return native::eye(self.size(0), self.size(1), options);
+}
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
-  if (options.layout() == kSparse) {
-    AT_ERROR("full(...) is not implemented for sparse layout");
-  }
+  AT_CHECK(options.layout() != kSparse, "full(...) is not implemented for sparse layout");
   auto result = options.type().tensor(size);
   return result.fill_(fill_value);
 }
 
 Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
-  if (result.is_sparse()) {
-    AT_ERROR("full(...) is not implemented for sparse layout");
-  }
+  AT_CHECK(!result.is_sparse(), "full(...) is not implemented for sparse layout");
   result.resize_(size);
   return result.fill_(fill_value);
 }
