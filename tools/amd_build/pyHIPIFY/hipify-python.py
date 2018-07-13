@@ -59,15 +59,123 @@ class bcolors:
 
 class disablefuncmode(Enum):
     """ How to disable functions
-    0 - Remove the function entirely (includes the signature).
-    1 - Stub the function and return an empty object based off the type.
-    2 - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
+    REMOVE - Remove the function entirely (includes the signature).
+        e.g.
+        FROM:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ...
+                ...
+                ...
+            }```
+
+        TO:
+            ```
+            ```
+
+    STUB - Stub the function and return an empty object based off the type.
+        e.g.
+        FROM:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ...
+                ...
+                ...
+            }```
+
+        TO:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ret_type obj;
+                return obj;
+            }```
+
+
+    HCC_MACRO - Add !defined(__HIP_PLATFORM_HCC__) preprocessors around the function.
         This macro is defined by HIP if the compiler used is hcc.
-    3 - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
+        e.g.
+        FROM:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ...
+                ...
+                ...
+            }```
+
+        TO:
+            ```#if !defined(__HIP_PLATFORM_HCC__)
+                    ret_type function(arg_type1 arg1, ..., ){
+                    ...
+                    ...
+                    ...
+                }
+               #endif
+            ```
+
+
+    DEVICE_MACRO - Add !defined(__HIP_DEVICE_COMPILE__) preprocessors around the function.
         This macro is defined by HIP if either hcc or nvcc are used in the device path.
-    4 - Stub the function and throw an exception at runtime.
-    5 - Stub the function and throw an assert(0).
-    6 - Stub the function and keep an empty body.
+        e.g.
+        FROM:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ...
+                ...
+                ...
+            }```
+
+        TO:
+            ```#if !defined(__HIP_DEVICE_COMPILE__)
+                    ret_type function(arg_type1 arg1, ..., ){
+                    ...
+                    ...
+                    ...
+                }
+               #endif
+            ```
+
+
+    EXCEPTION - Stub the function and throw an exception at runtime.
+        e.g.
+        FROM:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ...
+                ...
+                ...
+            }```
+
+        TO:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                throw std::runtime_error("The function function is not implemented.")
+            }```
+
+
+    ASSERT - Stub the function and throw an assert(0).
+        e.g.
+        FROM:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ...
+                ...
+                ...
+            }```
+
+        TO:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                assert(0);
+            }```
+
+
+    EMPTYBODY - Stub the function and keep an empty body.
+        e.g.
+        FROM:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ...
+                ...
+                ...
+            }```
+
+        TO:
+            ```ret_type function(arg_type1 arg1, ..., ){
+                ;
+            }```
+
+
+
     """
     REMOVE = 0
     STUB = 1
@@ -102,15 +210,23 @@ def update_progress_bar(total, progress):
 
 def filename_ends_with_extension(filename, extensions):
     """Helper method to see if filename ends with certain extension"""
-    return reduce(lambda result, ext: filename.endswith("." + ext) or result, extensions, False)
+    for ext in extensions:
+        if filename.endswith("." + ext):
+            return True
+
+    return False
 
 
 def inside_included_directories(dirpath, rootpath, include_dirs):
     """Helper method to see if filename within included directories"""
-    return reduce(lambda result, included_directory: re.match(r'{0}\b'.format(os.path.join(rootpath, included_directory)), dirpath) or result, include_dirs, None)
+    for included_directory in include_dirs:
+        if re.match(r'{0}\b'.format(os.path.join(rootpath, included_directory)), dirpath):
+            return True
+
+    return False
 
 
-def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=None):
+def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=None, show_progress=True):
     """
     Recursively walk over directory and call preprocessor on selected files.
 
@@ -153,8 +269,9 @@ def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=
                 preprocessor(filepath, stats)
 
                 # Update the progress
-                print(os.path.join(dirpath, filename))
-                update_progress_bar(total_files, current_file)
+                if show_progress:
+                    print(os.path.join(dirpath, filename))
+                    update_progress_bar(total_files, current_file)
 
                 current_file += 1
 
@@ -262,6 +379,7 @@ def processKernelLaunches(string, stats):
                                      "group": string[kernel_start: kernel_end]})
 
         return kernel_positions
+
 
     # Grab positional ranges of all kernel launchces
     get_kernel_positions = [k for k in find_kernel_bounds(string)]
@@ -455,7 +573,7 @@ def disable_function(input_string, function, replace_style):
         stub = "{0}{{\n{1};\n}}".format(
             function_string,
             'throw std::runtime_error("The function {0} is not implemented.")'.format(
-            function_string.replace("\n", " ")))
+                function_string.replace("\n", " ")))
         output_string = input_string.replace(function_body, stub)
 
     elif replace_style == disablefuncmode.ASSERT:
@@ -464,7 +582,7 @@ def disable_function(input_string, function, replace_style):
             'assert(0)')
         output_string = input_string.replace(function_body, stub)
 
-    elif replace_style == disablefuncmode.EMPTY:
+    elif replace_style == disablefuncmode.EMPTYBODY:
         stub = "{0}{{\n;\n}}".format(function_string)
         output_string = input_string.replace(function_body, stub)
     return output_string
@@ -536,7 +654,7 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-def get_kernel_template_params(the_file, KernelDictionary):
+def get_kernel_template_params(the_file, KernelDictionary, templateParam_to_value = {}):
     """Scan for __global__ kernel definitions then extract its argument types, and static cast as necessary"""
     # Read the kernel file.
     with openf(the_file, "r") as f:
@@ -592,9 +710,12 @@ def get_kernel_template_params(the_file, KernelDictionary):
                     if arg[i] == "*" or arg[i] == " ":
                         argument_types[arg_idx] = re.sub(' +', ' ', arg[0:i + 1].replace("\n", "").strip())
                         break
-            if len(template_arguments) == 1 and template_arguments[0].strip() in ["Dtype", "T"]:
+
+            # Here we'll use the template_param_to_value dictionary to replace the PyTorch / Caffe2.
+            if len(template_arguments) == 1 and template_arguments[0].strip() in template_param_to_value.keys():
                 # Updates kernel
-                kernel_with_template = "{0}<real>".format(kernel_name)
+                kernel_with_template = "{0}<{1}>".format(
+                    kernel_name, template_param_to_value[template_arguments[0].strip()])
             else:
                 kernel_with_template = kernel_name
             formatted_args = {}
@@ -717,10 +838,10 @@ def extract_arguments(start, string):
 def add_static_casts(directory, extensions, KernelTemplateParams):
     """Added necessary static casts to kernel launches to match kernel argument type to corresponding kernel definition
        Eg.
-       old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state), 
+       old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
           (const real**)d_result, THCTensor_(data)(state, ra__),
           ra__->stride[0], num_batches'
-       new_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state), 
+       new_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
           (const real**)d_result, THCTensor_(data)(state, ra__),
           static_cast<int64_t>(ra__->stride[0]), static_cast<int64_t>(num_batches)'
     """
@@ -761,7 +882,7 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                                           return match.group(1) + static_argument + match.group(3)
                                         # Update to static_cast, account for cases where argument is at start/end of string
                                         new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(re.escape(the_arg)), replace_arg, new_kernel_launch)
- 
+
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
@@ -839,6 +960,13 @@ def main():
         help="Whether to automatically add static_casts to kernel arguments.",
         required=False)
 
+    parser.add_argument(
+        '--show-progress',
+        type=bool,
+        default=True,
+        help="Whether to show the progress bar during the transpilation proecss.",
+        required=False)
+
     args = parser.parse_args()
 
     # Verify the project directory exists.
@@ -868,8 +996,15 @@ def main():
                 if filename_ends_with_extension(filename, args.extensions) and inside_included_directories(dirpath, args.output_directory, args.include_dirs):
                     the_file = os.sep.join([dirpath, filename])
 
+
+                    # Create the PyTorch template map
+                    pytorch_template_map = {"Dtype": "real", "T": "real"}
+
                     # Store param information inside KernelTemplateParams
-                    get_kernel_template_params(the_file, KernelTemplateParams)
+                    get_kernel_template_params(
+                        the_file,
+                        KernelTemplateParams,
+                        pytorch_template_map)
 
     # Open YAML file with disable information.
     if args.yaml_settings != "":
@@ -964,7 +1099,8 @@ def main():
         args.output_directory,
         extensions=args.extensions,
         show_detailed=args.show_detailed,
-        include_dirs=args.include_dirs)
+        include_dirs=args.include_dirs,
+        show_progress=args.show_progress)
 
     if args.add_static_casts:
         # Execute the Clang Tool to Automatically add static casts
