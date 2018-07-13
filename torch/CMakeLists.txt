@@ -219,13 +219,6 @@ else()
     -Wno-write-strings
 #    -Wno-zero-length-array
     -Wno-unknown-pragmas
-    # This is required for Python 2 declarations that are deprecated
-    # in 3.
-    -Wno-deprecated-declarations
-    # Python 2.6 requires -fno-strict-aliasing see
-    # http://legacy.python.org/dev/peps/pep-3123/ We also depend on it
-    # in our code (even Python 3).
-    -fno-strict-aliasing
     # Clang has an unfixed bug leading to spurious missing braces
     # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
     -Wno-missing-braces
