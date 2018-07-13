@@ -167,13 +167,6 @@
       ]
     },
     {
-      "path": "aten/src/THCUNN/generic/RReLU.cu",
-      "functions": [
-        "THNN_(RReLU_updateOutput)",
-        "THNN_(RReLU_updateGradInput)"
-      ]
-    },
-    {
       "path": "aten/src/THCUNN/generic/LookupTable.cu",
       "functions": [
         "THNN_(LookupTable_accGradParameters)",
