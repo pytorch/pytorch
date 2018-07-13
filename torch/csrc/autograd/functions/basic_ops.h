@@ -28,7 +28,7 @@ struct DelayedError : public Function {
   DelayedError(std::string msg, int num_inputs)
     : msg(std::move(msg)) {
       for (int i = 0; i < num_inputs; i++)
-        input_metadata_.emplace_back();
+        add_input_metadata(Function::undefined_input());
     }
 
   virtual variable_list apply(const variable_list& inputs) override;
