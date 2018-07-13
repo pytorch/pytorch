@@ -27,18 +27,14 @@ class CUDAEvent {
   // Must be move constructable.
   CUDAEvent(CUDAEvent&& other) {
     std::swap(event_, other.event_);
-    device_ = other.device_;
+    std::swap(device_, other.device_);
   }
 
   // Must be move assignable.
   CUDAEvent& operator=(CUDAEvent&& other) {
     std::swap(event_, other.event_);
-    device_ = other.device_;
+    std::swap(device_, other.device_);
     return *this;
-  }
-
-  void setDevice(int device) {
-    device_ = device;
   }
 
   cudaEvent_t getEvent() const {
