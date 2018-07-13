@@ -1,12 +1,12 @@
 #pragma once
 
-#include "CUDAUtils.hpp"
-#include "NCCLUtils.hpp"
-#include "ProcessGroup.hpp"
-#include "Store.hpp"
-
 #include <mutex>
 #include <unordered_map>
+
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/NCCLUtils.hpp>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
 
 // forward declaration
 struct THCState;

@@ -3,7 +3,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-#include "../CUDAUtils.hpp"
+#include <c10d/CUDAUtils.hpp>
 
 namespace c10d {
 namespace test {
