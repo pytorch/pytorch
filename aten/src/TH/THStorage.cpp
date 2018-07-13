@@ -26,7 +26,7 @@ void THStorage_free(THStorage *storage) {
         (*storage->finalizer)();
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~SupervisedPtr();
+      storage->data_ptr.~DevicePtr();
       if (storage->flag & TH_STORAGE_VIEW) {
         THStorage_free(storage->view);
       }
@@ -109,7 +109,7 @@ THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size
 {
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::SupervisedPtr(allocator->allocate(at::elementSize(scalar_type)*size));
+  new (&storage->data_ptr) at::DevicePtr(allocator->allocate(at::elementSize(scalar_type)*size));
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
@@ -133,7 +133,7 @@ THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *file
 {
   size_t actual_size = -1;
   THStorage *storage = THStorage_newWithDataAndAllocator(scalar_type,
-                                                         THMapAllocator::makeSupervisedPtr(
+                                                         THMapAllocator::makeDevicePtr(
                                                             filename,
                                                             flags,
                                                             size * at::elementSize(scalar_type),
@@ -177,11 +177,11 @@ THStorage* THStorage_newWithData(at::ScalarType scalar_type, std::unique_ptr<at:
 */
 
 THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
-                                             at::SupervisedPtr&& data, ptrdiff_t size,
+                                             at::DevicePtr&& data, ptrdiff_t size,
                                              THAllocator* allocator) {
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
   storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::SupervisedPtr(std::move(data));
+  new (&storage->data_ptr) at::DevicePtr(std::move(data));
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
@@ -196,7 +196,7 @@ void THStorage_resize(THStorage *storage, ptrdiff_t size)
   if (storage->flag & TH_STORAGE_RESIZABLE)
   {
     /* case when the allocator does not have a realloc defined */
-    at::SupervisedPtr old_data;
+    at::DevicePtr old_data;
     std::swap(old_data, storage->data_ptr);
     ptrdiff_t old_size = storage->size;
     if (size != 0) {

@@ -5,7 +5,7 @@ static void THCudaHostDeleter(void* ptr) {
 }
 
 struct THCudaHostAllocator : public at::Allocator {
-  at::SupervisedPtr allocate(size_t size) const override {
+  at::DevicePtr allocate(size_t size) const override {
     void* ptr = nullptr;
     if (size != 0) {
       THCudaCheck(cudaMallocHost(&ptr, size));
@@ -27,7 +27,7 @@ static void THCUVADeleter(void* ptr) {
 }
 
 struct THCUVAAllocator : public at::Allocator {
-  at::SupervisedPtr allocate(size_t size) const override {
+  at::DevicePtr allocate(size_t size) const override {
     // See J.1.1 of the CUDA_C_Programming_Guide.pdf for UVA and coherence rules
     // on various compute capabilities.
     void* ptr = nullptr;
@@ -59,7 +59,7 @@ void deleteTHCIpcDeleter(void* ptr) {
   delete static_cast<THCIpcDeleter*>(ptr);
 }
 
-at::SupervisedPtr THCIpcDeleter::makeSupervisedPtr(void* data, int device) {
+at::DevicePtr THCIpcDeleter::makeDevicePtr(void* data, int device) {
   // The dynamic allocation here is a bit unfortunate
   int cur_device;
   THCudaCheck(cudaGetDevice(&cur_device));

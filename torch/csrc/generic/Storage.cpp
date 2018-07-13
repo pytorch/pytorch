@@ -119,7 +119,7 @@ static PyObject * THPStorage_(pynew)(PyTypeObject *type, PyObject *args, PyObjec
 
     real *data_ptr = THWStorage_(data)(LIBRARY_STATE storage_arg->cdata) + offset;
     // TODO: Hmmmm
-    THWStoragePtr storage(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {data_ptr, at::nonOwningSupervisorPtr(), storage_arg->cdata->data_ptr.device_}, size, nullptr));
+    THWStoragePtr storage(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {data_ptr, at::nonOwningSupervisorPtr(), storage_arg->cdata->data_ptr.device()}, size, nullptr));
     storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     storage->view = storage_arg->cdata;
     THWStorage_(retain)(LIBRARY_STATE storage_arg->cdata);
@@ -214,7 +214,7 @@ static PyObject * THPStorage_(get)(THPStorage *self, PyObject *index)
     }
 
     real *data = THWStorage_(data)(LIBRARY_STATE self->cdata);
-    THWStoragePtr new_storage(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {static_cast<void*>(data + start), at::nonOwningSupervisorPtr(), self->cdata->data_ptr.device_}, slicelength, nullptr));
+    THWStoragePtr new_storage(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {static_cast<void*>(data + start), at::nonOwningSupervisorPtr(), self->cdata->data_ptr.device()}, slicelength, nullptr));
     new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
     new_storage->view = self->cdata;
     THWStorage_(retain)(LIBRARY_STATE self->cdata);

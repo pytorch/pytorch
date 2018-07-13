@@ -55,9 +55,9 @@ public:
   // from the base pointer.)
   virtual void* data() const { return base_ptr_; }
 
-  static THMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
-  static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
-  static at::SupervisedPtr makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
+  static THMapAllocator* fromDevicePtr(const at::DevicePtr&);
+  static at::DevicePtr makeDevicePtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
+  static at::DevicePtr makeDevicePtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
   // Closes the data.  Helps us avoid destructor shenanigans
   virtual void close();
@@ -91,9 +91,9 @@ public:
   THRefcountedMapAllocator(const char *filename, int flags, size_t size);
   THRefcountedMapAllocator(WithFd, const char *filename, int fd, int flags, size_t size);
 
-  static THRefcountedMapAllocator* fromSupervisedPtr(const at::SupervisedPtr&);
-  static at::SupervisedPtr makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
-  static at::SupervisedPtr makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
+  static THRefcountedMapAllocator* fromDevicePtr(const at::DevicePtr&);
+  static at::DevicePtr makeDevicePtr(const char *filename, int flags, size_t size, size_t* actual_size_out);
+  static at::DevicePtr makeDevicePtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out);
 
   void* data() const override;
 

@@ -35,14 +35,14 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   storage->allocator = allocator;
   storage->size = size;
 
-  at::SupervisedPtr ptr;
+  at::DevicePtr ptr;
   try {
     ptr = allocator->allocate(size * at::elementSize(scalar_type));
   } catch(...) {
     free(storage);
     throw;
   }
-  new (&storage->data_ptr) at::SupervisedPtr(std::move(ptr));
+  new (&storage->data_ptr) at::DevicePtr(std::move(ptr));
   return storage;
 }
 
@@ -54,7 +54,7 @@ void THCStorage_free(THCState *state, THCStorage *storage)
         (*storage->finalizer)();
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~SupervisedPtr();
+      storage->data_ptr.~DevicePtr();
       if (storage->flag & TH_STORAGE_VIEW) {
         THCStorage_free(state, storage->view);
       }
@@ -77,12 +77,12 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
   if(size == 0)
   {
-    self->data_ptr = at::SupervisedPtr(nullptr, at::nonOwningSupervisorPtr(), at::Device(at::kCUDA, device));
+    self->data_ptr = at::DevicePtr(nullptr, at::nonOwningSupervisorPtr(), at::Device(at::kCUDA, device));
     self->size = 0;
   }
   else
   {
-    at::SupervisedPtr data =
+    at::DevicePtr data =
       self->allocator->allocate(size * elementSize);
 
     if (self->data_ptr) {
@@ -103,16 +103,16 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 }
 
 int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
-  return storage->data_ptr.device_.index();
+  return storage->data_ptr.device().index();
 }
 
 THCStorage* THCStorage_newWithDataAndAllocator(
-  THCState *state, at::ScalarType scalar_type, at::SupervisedPtr&& data, ptrdiff_t size,
+  THCState *state, at::ScalarType scalar_type, at::DevicePtr&& data, ptrdiff_t size,
   at::Allocator *allocator) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
   storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::SupervisedPtr(std::move(data));
+  new (&storage->data_ptr) at::DevicePtr(std::move(data));
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   new (&storage->weakcount) std::atomic<int>(1);

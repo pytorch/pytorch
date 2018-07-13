@@ -11,8 +11,8 @@ static void deleteInefficientStdFunctionSupervisor(void* ptr) {
   delete static_cast<InefficientStdFunctionSupervisor*>(ptr);
 }
 
-at::SupervisedPtr
-makeInefficientStdFunctionSupervisedPtr(void* ptr, const std::function<void(void*)>& deleter, Device device) {
+at::DevicePtr
+InefficientStdFunctionSupervisor::makeDevicePtr(void* ptr, const std::function<void(void*)>& deleter, Device device) {
   return {ptr, SupervisorPtr{new InefficientStdFunctionSupervisor({ptr, deleter}), &deleteInefficientStdFunctionSupervisor}, device};
 }
 

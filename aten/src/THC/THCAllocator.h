@@ -12,7 +12,7 @@ class AT_API THCIpcDeleter {
 public:
   THCIpcDeleter(void* data, int device) : data_(data), device_(device) {};
   ~THCIpcDeleter();
-  static at::SupervisedPtr makeSupervisedPtr(void* data, int device);
+  static at::DevicePtr makeDevicePtr(void* data, int device);
 private:
   void* data_;
   int device_;

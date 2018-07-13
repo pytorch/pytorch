@@ -20,7 +20,7 @@
 /* end of stuff for mapped files */
 
 struct THDefaultAllocator final : public at::Allocator {
-  at::SupervisedPtr allocate(size_t size) const override {
+  at::DevicePtr allocate(size_t size) const override {
     auto* ptr = THAlloc(size);
     return {ptr, {ptr, THFree}, at::kCPU};
   }
@@ -526,35 +526,33 @@ static void deleteTHRefcountedMapAllocator(void* ptr) {
   delete static_cast<THRefcountedMapAllocator*>(ptr);
 }
 
-THMapAllocator* THMapAllocator::fromSupervisedPtr(const at::SupervisedPtr& sptr) {
-  if (sptr.supervisor_.get_deleter() != &deleteTHMapAllocator) return nullptr;
-  return static_cast<THMapAllocator*>(sptr.supervisor_.get());
+THMapAllocator* THMapAllocator::fromDevicePtr(const at::DevicePtr& dptr) {
+  return dptr.cast_supervisor<THMapAllocator>(&deleteTHMapAllocator);
 }
 
-THRefcountedMapAllocator* THRefcountedMapAllocator::fromSupervisedPtr(const at::SupervisedPtr& sptr) {
-  if (sptr.supervisor_.get_deleter() != &deleteTHRefcountedMapAllocator) return nullptr;
-  return static_cast<THRefcountedMapAllocator*>(sptr.supervisor_.get());
+THRefcountedMapAllocator* THRefcountedMapAllocator::fromDevicePtr(const at::DevicePtr& dptr) {
+  return dptr.cast_supervisor<THRefcountedMapAllocator>(&deleteTHRefcountedMapAllocator);
 }
 
-at::SupervisedPtr THMapAllocator::makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+at::DevicePtr THMapAllocator::makeDevicePtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size();
   return {supervisor->data(), {supervisor, &deleteTHMapAllocator}, at::kCPU};
 }
 
-at::SupervisedPtr THMapAllocator::makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DevicePtr THMapAllocator::makeDevicePtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size();
   return {supervisor->data(), {supervisor, &deleteTHMapAllocator}, at::kCPU};
 }
 
-at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+at::DevicePtr THRefcountedMapAllocator::makeDevicePtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THRefcountedMapAllocator(filename, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
   return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}, at::kCPU};
 }
 
-at::SupervisedPtr THRefcountedMapAllocator::makeSupervisedPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+at::DevicePtr THRefcountedMapAllocator::makeDevicePtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
   auto* supervisor = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
   if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
   return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}, at::kCPU};
