@@ -217,7 +217,7 @@ else()
     -Wno-unused-parameter
     -Wno-missing-field-initializers
     -Wno-write-strings
-#    -Wno-zero-length-array
+    -Wno-zero-length-array
     -Wno-unknown-pragmas
     # Clang has an unfixed bug leading to spurious missing braces
     # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
