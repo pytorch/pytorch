@@ -1,0 +1,19 @@
+graph(%x_data.1 : Dynamic
+      %x_mask.1 : Dynamic
+      %x_dims.1 : Dynamic
+      %y_data : Dynamic
+      %y_mask : Dynamic
+      %y_dims : Dynamic) {
+  %6 : int = prim::Constant[value={10}]()
+  %7 : Byte() = prim::Constant[value={1}]()
+  %x : Dynamic, %20 : Dynamic, %21 : Dynamic = prim::Loop(%6, %7, %x_data.1, %x_mask.1, %x_dims.1)
+    block0(%_i_data : Dynamic, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
+      %data.1 : Dynamic = aten::add[alpha={1}](%5_data, %y_data)
+      %mask : Dynamic = aten::mul(%5_mask, %y_mask)
+      %dims : Dynamic = aten::__or__(%5_dims, %y_dims)
+      %data : Dynamic = aten::where(%mask, %data.1, %x_data.1)
+      %19 : Byte() = prim::Constant[value={1}]()
+      -> (%19, %data, %mask, %dims)
+    }
+  return (%x, %20, %21);
+}

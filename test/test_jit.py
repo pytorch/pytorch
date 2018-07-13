@@ -1399,6 +1399,33 @@ class TestBatched(TestCase):
         graph = torch.to_batch_graph(batch_while.graph)
         self.assertExpected(str(graph))
 
+    def test_for(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_for(x, y):
+            for _i in range(10):
+                x += y
+            return x
+
+        def single_for(x, y):
+            for _i in range(10):
+                x += y
+            return x
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_for(batch_a, batch_b)
+        res = [single_for(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_for(x, y):
+            for _i in range(10):
+                x += y
+            return x
+
+        graph = torch.to_batch_graph(batch_for.graph)
+        self.assertExpected(str(graph))
+
 
 class TestScript(JitTestCase):
     @contextmanager

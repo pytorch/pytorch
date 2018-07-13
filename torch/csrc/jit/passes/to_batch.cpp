@@ -48,7 +48,7 @@ void ToBatch::visitConstant(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
   auto* r_node = res_graph->createClone(n, rn_fn);
   r_node->setStage(n->stage());
-  res_graph->appendNode(r_node);
+  res_block->appendNode(r_node);
   rn_env[n->output()] = r_node->output();
 }
 
@@ -247,14 +247,18 @@ void ToBatch::visitIf(Node* n, Block* block, Block* res_block, std::unordered_ma
 // }
 void ToBatch::visitLoop(Node* n, Block* block, Block* res_block, std::unordered_map<std::string, Value*>& var_map){
   auto res_graph = res_block->owningGraph();
-
-  if(n->inputs()[1]->type()->str() != "Tensor"){
-    throw std::runtime_error("NYI: Loop with non-tensor condition is not supported yet");
-  }
+  // bool cond_is_tensor indicates whether cond is tensor
+  // cond_is_tensor = false, eg: for loop, n->inputs()[1] = byte()
+  // cond_is_tenspr = true, eg: in some while loop, cond is a batched tensor,
+  //                            we need to add expanded cond to the inputs of loop node and block,
+  //                            and compute cond_any as cond for while loop
+  bool cond_is_tensor = (batch_map.find(n->inputs()[1]) != batch_map.end());
   // create prim::Loop node for res_block
-  auto cond = batch_map.at(n->inputs()[1]);
-  auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("any"), cond);
-  rn_env[n->inputs()[1]] = cond_any[0];
+  if(cond_is_tensor){
+    auto cond = batch_map.at(n->inputs()[1]);
+    auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("any"), cond);
+    rn_env[n->inputs()[1]] = cond_any[0];
+  }
   for(size_t i = 2; i < n->inputs().size(); i++){
     auto input = n->inputs()[i];
     rn_env[input] = batch_map.at(input)[0];
@@ -262,19 +266,23 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block, std::unordered_
   auto* r_node = res_graph->createClone(n, rn_fn, /*copy_blocks=*/false);
 
   // change inputs of prim::Loop
-  for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
-    r_node->insertInput(i + 2, cond[i]);
+  if(cond_is_tensor){
+    for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
+      auto cond = batch_map.at(n->inputs()[1]);
+      r_node->insertInput(i + 2, cond[i]);
+    }
   }
   for(size_t i = 2; i < n->inputs().size(); i++){
     for(size_t j = 1; j < EXP_BTENSOR_SIZE; j++){
-      r_node->insertInput((i - 2) * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE + 2 + j, batch_map.at(n->inputs()[i])[j]);
+      r_node->insertInput((i - 2) * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE * cond_is_tensor + 2 + j, batch_map.at(n->inputs()[i])[j]);
     }
   }
   r_node->setStage(n->stage());
   res_graph->appendNode(r_node);
 
   // create block for Loop node in res_block
-  // first 4 inputs of block: first cond_any, cond_data, cond_mask, cond_dims
+  // if cond is tensor:    first 4 inputs of block: cond_any, cond_data, cond_mask, cond_dims
+  // if cond is not tensor: first 1 input of block: cond
   auto loop_block = r_node->addBlock();
   toBatch(n->blocks()[0], loop_block, var_map);
 
@@ -282,36 +290,55 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block, std::unordered_
   for(size_t i = EXP_BTENSOR_SIZE - 1; i > 0; i--){
     loop_block->eraseInput(i);
   }
-  for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
-    loop_block->insertInput(1, "cond_" + EXP_BTENSOR_NAME[i]);
+  if(cond_is_tensor){
+    for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
+      loop_block->insertInput(i + 1, "cond_" + EXP_BTENSOR_NAME[i]);
+    }
   }
 
   WithInsertPoint guard(loop_block);
 
-  // use where operator to update variables
-  for(size_t i = 0; i < n->outputs().size(); i++){
-    std::vector<Value*> inputs;
-    for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
-      inputs.push_back(loop_block->inputs()[j + 1]);
+  // use where operator to update variables and add to outputs
+  if(cond_is_tensor){
+    for(size_t i = 0; i < n->outputs().size(); i++){
+      std::vector<Value*> inputs;
+      for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
+        inputs.push_back(loop_block->inputs()[j + 1]);
+      }
+      auto data = batch_map.at(n->blocks()[0]->outputs()[i + 1]);
+      inputs.insert(inputs.end(), data.begin(), data.end());
+      for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
+        inputs.push_back(loop_block->inputs()[i * EXP_BTENSOR_SIZE + j + EXP_BTENSOR_SIZE + 1]);
+      }
+      auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("where"), inputs);
+      batch_map[n->outputs()[i]] = outputs;
+      for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
+        loop_block->registerOutput(outputs[j]);
+      }
     }
-    auto data = batch_map.at(n->blocks()[0]->outputs()[i + 1]);
-    inputs.insert(inputs.end(), data.begin(), data.end());
-    for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
-      inputs.push_back(loop_block->inputs()[i * EXP_BTENSOR_SIZE + j + EXP_BTENSOR_SIZE + 1]);
-    }
-    auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("where"), inputs);
-    batch_map[n->outputs()[i]] = outputs;
-    for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
-      loop_block->registerOutput(outputs[j]);
+  }
+  // add outputs
+  else{
+    for(size_t i = 0; i < n->outputs().size(); i++){
+      auto outputs = batch_map.at(n->blocks()[0]->outputs()[i + 1]);
+      for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
+        loop_block->registerOutput(outputs[j]);
+      }
     }
   }
 
   // update loop conditions
-  cond = batch_map.at(n->blocks()[0]->outputs()[0]);
-  cond_any = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("any"), cond);
-  loop_block->insertOutput(0, cond_any[0]);
-  for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
-    loop_block->insertOutput(i + 1, cond[i]);
+  if(cond_is_tensor){
+    auto cond = batch_map.at(n->blocks()[0]->outputs()[0]);
+    auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("any"), cond);
+    loop_block->insertOutput(0, cond_any[0]);
+    for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
+      loop_block->insertOutput(i + 1, cond[i]);
+    }
+  }
+  else{
+    auto cond = rn_env.at(n->blocks()[0]->outputs()[0]);
+    loop_block->insertOutput(0, cond);
   }
 
   // change outputs of prim::Loop
@@ -322,8 +349,11 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block, std::unordered_
     }
     batch_map[n->outputs()[i]] = r_node->outputs().slice(i * EXP_BTENSOR_SIZE, EXP_BTENSOR_SIZE);
   }
-  for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
-    r_node->insertOutput(i);
+  // add cond to outputs of loop node
+  if(cond_is_tensor){
+    for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
+      r_node->insertOutput(i);
+    }
   }
 }
 
