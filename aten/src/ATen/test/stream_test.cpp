@@ -134,6 +134,17 @@ TEST_CASE("CUDAGuard") {
 
   // -- end setup
 
+  // Test that all original streams are recorded.
+  {
+    at::CUDAGuard guard;
+    REQUIRE(guard.original_streams().empty());
+    guard.set_stream(streams0[0]);
+    REQUIRE(
+        guard.original_streams().size() == at::globalContext().getNumGPUs());
+    REQUIRE(guard.original_streams()[0] == streams0[0]);
+    REQUIRE(guard.original_streams()[1] == streams1[0]);
+  }
+
   // Setting a stream changes the current device and the stream on that device
   {
     at::CUDAGuard guard(streams1[1]);
