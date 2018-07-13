@@ -53,6 +53,11 @@ if(BUILD_ATEN)
   ENDIF(USE_ROCM)
 endif()
 
+# ---[ Torch build
+if(BUILD_TORCH)
+  add_subdirectory(../torch torch)
+endif()
+
 # ---[ Caffe2 build
 if(BUILD_CAFFE2)
   # Note: the folders that are being commented out have not been properly

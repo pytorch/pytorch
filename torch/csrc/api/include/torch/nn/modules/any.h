@@ -182,7 +182,7 @@ class AnyModule::Value {
 
  private:
   friend class AnyModule;
-  friend class TestValue;
+  friend struct TestValue;
 
   /// Constructs the `Value` from value type.
   template <
