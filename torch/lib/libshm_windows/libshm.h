@@ -17,8 +17,8 @@ public:
   THManagedMapAllocator(const char* manager_handle, const char* filename, int flags, ptrdiff_t size)
     : THRefcountedMapAllocator(filename, flags, size) {}
 
-  static at::DevicePtr makeDevicePtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
-  static THManagedMapAllocator* fromDevicePtr(const at::DevicePtr&);
+  static at::DataPtr makeDataPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
+  static THManagedMapAllocator* fromDataPtr(const at::DataPtr&);
 
   const char* manager_handle() const { return "no_manager"; }
 };

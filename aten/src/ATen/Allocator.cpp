@@ -2,18 +2,13 @@
 
 namespace at {
 
-void deleteNothing(void*) {}
-SupervisorPtr nonOwningSupervisorPtr() {
-  return {nullptr, &deleteNothing};
+static void deleteInefficientStdFunctionContext(void* ptr) {
+  delete static_cast<InefficientStdFunctionContext*>(ptr);
 }
 
-static void deleteInefficientStdFunctionSupervisor(void* ptr) {
-  delete static_cast<InefficientStdFunctionSupervisor*>(ptr);
-}
-
-at::DevicePtr
-InefficientStdFunctionSupervisor::makeDevicePtr(void* ptr, const std::function<void(void*)>& deleter, Device device) {
-  return {ptr, SupervisorPtr{new InefficientStdFunctionSupervisor({ptr, deleter}), &deleteInefficientStdFunctionSupervisor}, device};
+at::DataPtr
+InefficientStdFunctionContext::makeDataPtr(void* ptr, const std::function<void(void*)>& deleter, Device device) {
+  return {ptr, new InefficientStdFunctionContext({ptr, deleter}), &deleteInefficientStdFunctionContext, device};
 }
 
 } // namespace at

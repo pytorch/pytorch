@@ -5,12 +5,12 @@ static void THCudaHostDeleter(void* ptr) {
 }
 
 struct THCudaHostAllocator : public at::Allocator {
-  at::DevicePtr allocate(size_t size) const override {
+  at::DataPtr allocate(size_t size) const override {
     void* ptr = nullptr;
     if (size != 0) {
       THCudaCheck(cudaMallocHost(&ptr, size));
     }
-    return {ptr, {ptr, &THCudaHostDeleter}, at::kCPU};
+    return {ptr, ptr, &THCudaHostDeleter, at::kCPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THCudaHostDeleter;
@@ -27,14 +27,14 @@ static void THCUVADeleter(void* ptr) {
 }
 
 struct THCUVAAllocator : public at::Allocator {
-  at::DevicePtr allocate(size_t size) const override {
+  at::DataPtr allocate(size_t size) const override {
     // See J.1.1 of the CUDA_C_Programming_Guide.pdf for UVA and coherence rules
     // on various compute capabilities.
     void* ptr = nullptr;
     if (size != 0) {
       THCudaCheck(cudaMallocManaged(&ptr, size, cudaMemAttachGlobal));
     }
-    return {ptr, {ptr, &THCUVADeleter}, at::kCPU};
+    return {ptr, ptr, &THCUVADeleter, at::kCPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THCUVADeleter;
@@ -59,10 +59,10 @@ void deleteTHCIpcDeleter(void* ptr) {
   delete static_cast<THCIpcDeleter*>(ptr);
 }
 
-at::DevicePtr THCIpcDeleter::makeDevicePtr(void* data, int device) {
+at::DataPtr THCIpcDeleter::makeDataPtr(void* data, int device) {
   // The dynamic allocation here is a bit unfortunate
   int cur_device;
   THCudaCheck(cudaGetDevice(&cur_device));
-  auto* supervisor = new THCIpcDeleter(data, device);
-  return {data, {supervisor, &deleteTHCIpcDeleter}, at::Device(at::kCUDA, cur_device)};
+  auto* context = new THCIpcDeleter(data, device);
+  return {data, context, &deleteTHCIpcDeleter, at::Device(at::kCUDA, cur_device)};
 }

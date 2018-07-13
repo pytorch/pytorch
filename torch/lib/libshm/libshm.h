@@ -24,8 +24,8 @@ public:
 
   ~THManagedMapAllocator() { close(); }
 
-  static at::DevicePtr makeDevicePtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
-  static THManagedMapAllocator* fromDevicePtr(const at::DevicePtr&);
+  static at::DataPtr makeDataPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size);
+  static THManagedMapAllocator* fromDataPtr(const at::DataPtr&);
 
   const char* manager_handle() const { return manager_handle_.c_str(); }
 };

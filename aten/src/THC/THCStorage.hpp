@@ -35,5 +35,5 @@ THC_API int THCStorage_getDevice(THCState* state, const THCStorage* storage);
 
 THC_API THCStorage* THCStorage_newWithDataAndAllocator(
   THCState *state, at::ScalarType scalar_type,
-  at::DevicePtr&& data, ptrdiff_t size,
+  at::DataPtr&& data, ptrdiff_t size,
   at::Allocator* allocator);

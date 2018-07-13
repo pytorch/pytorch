@@ -39,7 +39,7 @@ static int getPointerDevice(void* ptr) {
 ${Storage}::${Storage}(Context* context,
   void * data, size_t size, const std::function<void(void*)> & deleter)
   : storage(${THStorage}_newWithDataAndAllocator(${state,}
-      InefficientStdFunctionSupervisor::makeDevicePtr(data, deleter,
+      InefficientStdFunctionContext::makeDataPtr(data, deleter,
 #if ${isCUDA}
       Device(kCUDA, getPointerDevice(data))
 #else

@@ -20,9 +20,9 @@
 /* end of stuff for mapped files */
 
 struct THDefaultAllocator final : public at::Allocator {
-  at::DevicePtr allocate(size_t size) const override {
+  at::DataPtr allocate(size_t size) const override {
     auto* ptr = THAlloc(size);
-    return {ptr, {ptr, THFree}, at::kCPU};
+    return {ptr, ptr, &THFree, at::kCPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THFree;
@@ -526,36 +526,36 @@ static void deleteTHRefcountedMapAllocator(void* ptr) {
   delete static_cast<THRefcountedMapAllocator*>(ptr);
 }
 
-THMapAllocator* THMapAllocator::fromDevicePtr(const at::DevicePtr& dptr) {
-  return dptr.cast_supervisor<THMapAllocator>(&deleteTHMapAllocator);
+THMapAllocator* THMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+  return dptr.cast_context<THMapAllocator>(&deleteTHMapAllocator);
 }
 
-THRefcountedMapAllocator* THRefcountedMapAllocator::fromDevicePtr(const at::DevicePtr& dptr) {
-  return dptr.cast_supervisor<THRefcountedMapAllocator>(&deleteTHRefcountedMapAllocator);
+THRefcountedMapAllocator* THRefcountedMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+  return dptr.cast_context<THRefcountedMapAllocator>(&deleteTHRefcountedMapAllocator);
 }
 
-at::DevicePtr THMapAllocator::makeDevicePtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
-  auto* supervisor = new THMapAllocator(filename, flags, size);
-  if (actual_size_out) *actual_size_out = supervisor->size();
-  return {supervisor->data(), {supervisor, &deleteTHMapAllocator}, at::kCPU};
+at::DataPtr THMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THMapAllocator(filename, flags, size);
+  if (actual_size_out) *actual_size_out = context->size();
+  return {context->data(), context, &deleteTHMapAllocator, at::kCPU};
 }
 
-at::DevicePtr THMapAllocator::makeDevicePtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
-  auto* supervisor = new THMapAllocator(WITH_FD, filename, fd, flags, size);
-  if (actual_size_out) *actual_size_out = supervisor->size();
-  return {supervisor->data(), {supervisor, &deleteTHMapAllocator}, at::kCPU};
+at::DataPtr THMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THMapAllocator(WITH_FD, filename, fd, flags, size);
+  if (actual_size_out) *actual_size_out = context->size();
+  return {context->data(), context, &deleteTHMapAllocator, at::kCPU};
 }
 
-at::DevicePtr THRefcountedMapAllocator::makeDevicePtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
-  auto* supervisor = new THRefcountedMapAllocator(filename, flags, size);
-  if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
-  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}, at::kCPU};
+at::DataPtr THRefcountedMapAllocator::makeDataPtr(const char *filename, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THRefcountedMapAllocator(filename, flags, size);
+  if (actual_size_out) *actual_size_out = context->size() - TH_ALLOC_ALIGNMENT;
+  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::kCPU};
 }
 
-at::DevicePtr THRefcountedMapAllocator::makeDevicePtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
-  auto* supervisor = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
-  if (actual_size_out) *actual_size_out = supervisor->size() - TH_ALLOC_ALIGNMENT;
-  return {supervisor->data(), {supervisor, &deleteTHRefcountedMapAllocator}, at::kCPU};
+at::DataPtr THRefcountedMapAllocator::makeDataPtr(WithFd, const char *filename, int fd, int flags, size_t size, size_t* actual_size_out) {
+  auto* context = new THRefcountedMapAllocator(WITH_FD, filename, fd, flags, size);
+  if (actual_size_out) *actual_size_out = context->size() - TH_ALLOC_ALIGNMENT;
+  return {context->data(), context, &deleteTHRefcountedMapAllocator, at::kCPU};
 }
 
 void* THRefcountedMapAllocator::data() const {

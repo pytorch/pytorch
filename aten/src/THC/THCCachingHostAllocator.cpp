@@ -265,11 +265,11 @@ static void THCCachingHostDeleter(void* ptr) {
 }
 
 struct THCCachingHostAllocator final : public at::Allocator {
-  at::DevicePtr allocate(size_t size) const override {
+  at::DataPtr allocate(size_t size) const override {
     THAssert(size >= 0);
     void *ptr;
     THCudaCheck(allocator.malloc(&ptr, size));
-    return {ptr, {ptr, &THCCachingHostDeleter}, at::kCPU};
+    return {ptr, ptr, &THCCachingHostDeleter, at::kCPU};
   }
   at::DeleterFnPtr raw_deleter() const override {
     return &THCCachingHostDeleter;

@@ -35,14 +35,14 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   storage->allocator = allocator;
   storage->size = size;
 
-  at::DevicePtr ptr;
+  at::DataPtr ptr;
   try {
     ptr = allocator->allocate(size * at::elementSize(scalar_type));
   } catch(...) {
     free(storage);
     throw;
   }
-  new (&storage->data_ptr) at::DevicePtr(std::move(ptr));
+  new (&storage->data_ptr) at::DataPtr(std::move(ptr));
   return storage;
 }
 
@@ -54,7 +54,7 @@ void THCStorage_free(THCState *state, THCStorage *storage)
         (*storage->finalizer)();
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~DevicePtr();
+      storage->data_ptr.~DataPtr();
       if (storage->flag & TH_STORAGE_VIEW) {
         THCStorage_free(state, storage->view);
       }
@@ -77,12 +77,12 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
   if(size == 0)
   {
-    self->data_ptr = at::DevicePtr(nullptr, at::nonOwningSupervisorPtr(), at::Device(at::kCUDA, device));
+    self->data_ptr = at::DataPtr(nullptr, at::Device(at::kCUDA, device));
     self->size = 0;
   }
   else
   {
-    at::DevicePtr data =
+    at::DataPtr data =
       self->allocator->allocate(size * elementSize);
 
     if (self->data_ptr) {
@@ -107,12 +107,12 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
 }
 
 THCStorage* THCStorage_newWithDataAndAllocator(
-  THCState *state, at::ScalarType scalar_type, at::DevicePtr&& data, ptrdiff_t size,
+  THCState *state, at::ScalarType scalar_type, at::DataPtr&& data, ptrdiff_t size,
   at::Allocator *allocator) {
   THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
   memset(storage, 0, sizeof(THCStorage));
   storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::DevicePtr(std::move(data));
+  new (&storage->data_ptr) at::DataPtr(std::move(data));
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
   new (&storage->weakcount) std::atomic<int>(1);

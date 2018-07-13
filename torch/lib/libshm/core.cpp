@@ -116,11 +116,11 @@ static void deleteTHManagedMapAllocator(void* ptr) {
   delete static_cast<THManagedMapAllocator*>(ptr);
 }
 
-at::DevicePtr THManagedMapAllocator::makeDevicePtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size) {
-  auto* supervisor = new THManagedMapAllocator(manager_handle, filename, flags, size);
-  return {supervisor->data(), {supervisor, &deleteTHManagedMapAllocator}, at::kCPU};
+at::DataPtr THManagedMapAllocator::makeDataPtr(const char* manager_handle, const char* filename, int flags, ptrdiff_t size) {
+  auto* context = new THManagedMapAllocator(manager_handle, filename, flags, size);
+  return {context->data(), context, &deleteTHManagedMapAllocator, at::kCPU};
 }
 
-THManagedMapAllocator* THManagedMapAllocator::fromDevicePtr(const at::DevicePtr& dptr) {
-  return dptr.cast_supervisor<THManagedMapAllocator>(&deleteTHManagedMapAllocator);
+THManagedMapAllocator* THManagedMapAllocator::fromDataPtr(const at::DataPtr& dptr) {
+  return dptr.cast_context<THManagedMapAllocator>(&deleteTHManagedMapAllocator);
 }
