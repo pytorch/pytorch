@@ -196,7 +196,7 @@ fi
 
 
 ########## Caffe2 HIP OP GENERATOR
-${PYTHON} /pytorch/tools/amd_build/build_caffe2_amd.py
+${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
 ###############################################################################
 # Configure and make
 ###############################################################################
