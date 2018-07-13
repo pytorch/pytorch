@@ -19,10 +19,53 @@ OPERATOR_SCHEMA(Sqrt)
     .AllowInplace({{0, 0}})
     .IdenticalTypeAndShape()
     .SetDoc(R"DOC(
-Computes the element-wise sqrt of the input.
+Performs element-wise square-root ($\sqrt{x}$) of input tensor $X$.
+
+Github Link:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/sqrt_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Sqrt",
+    ["X"],
+    ["Y"],
+)
+
+workspace.FeedBlob("X", (np.random.randint(10, size=(3,3))).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[8. 3. 3.]
+ [4. 0. 0.]
+ [1. 2. 5.]]
+Y:
+[[2.8284268  1.7320508  1.7320508 ]
+ [1.9999999  0.         0.        ]
+ [0.99999994 1.4142134  2.236068  ]]
+
+```
+
+</details>
 )DOC")
-    .Input(0, "X", "ND input tensor")
-    .Output(0, "Y", "ND input tensor");
+.Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
+.Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.");
 
 namespace {
 

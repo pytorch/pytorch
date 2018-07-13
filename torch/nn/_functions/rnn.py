@@ -2,6 +2,7 @@ import warnings
 from torch.autograd import NestedIOFunction
 import torch.backends.cudnn as cudnn
 from .. import functional as F
+import torch
 from .thnn import rnnFusedPointwise as fusedBackend
 import itertools
 from functools import partial
@@ -18,7 +19,7 @@ def RNNReLUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
 
 def RNNTanhCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
-    hy = F.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
+    hy = torch.tanh(F.linear(input, w_ih, b_ih) + F.linear(hidden, w_hh, b_hh))
     return hy
 
 
@@ -34,13 +35,13 @@ def LSTMCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
 
     ingate, forgetgate, cellgate, outgate = gates.chunk(4, 1)
 
-    ingate = F.sigmoid(ingate)
-    forgetgate = F.sigmoid(forgetgate)
-    cellgate = F.tanh(cellgate)
-    outgate = F.sigmoid(outgate)
+    ingate = torch.sigmoid(ingate)
+    forgetgate = torch.sigmoid(forgetgate)
+    cellgate = torch.tanh(cellgate)
+    outgate = torch.sigmoid(outgate)
 
     cy = (forgetgate * cx) + (ingate * cellgate)
-    hy = outgate * F.tanh(cy)
+    hy = outgate * torch.tanh(cy)
 
     return hy, cy
 
@@ -58,9 +59,9 @@ def GRUCell(input, hidden, w_ih, w_hh, b_ih=None, b_hh=None):
     i_r, i_i, i_n = gi.chunk(3, 1)
     h_r, h_i, h_n = gh.chunk(3, 1)
 
-    resetgate = F.sigmoid(i_r + h_r)
-    inputgate = F.sigmoid(i_i + h_i)
-    newgate = F.tanh(i_n + resetgate * h_n)
+    resetgate = torch.sigmoid(i_r + h_r)
+    inputgate = torch.sigmoid(i_i + h_i)
+    newgate = torch.tanh(i_n + resetgate * h_n)
     hy = newgate + inputgate * (hidden - newgate)
 
     return hy
@@ -272,8 +273,7 @@ def CudnnRNN(mode, input_size, hidden_size, num_layers=1,
 
         handle = cudnn.get_handle()
         with torch.cuda.device(input.get_device()):
-            dropout_ts = cudnn.rnn.init_dropout_state(torch.uint8, torch.device('cuda'), dropout,
-                                                      train, dropout_seed, dropout_state)
+            dropout_ts = cudnn.rnn.init_dropout_state(dropout, train, dropout_seed, dropout_state)
 
         weight_arr = list(itertools.chain.from_iterable(weight))
         weight_stride0 = len(weight[0])

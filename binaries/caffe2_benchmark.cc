@@ -5,6 +5,7 @@
 #include "binaries/benchmark_helper.h"
 
 using std::make_shared;
+using std::map;
 using std::string;
 using std::vector;
 
@@ -96,9 +97,12 @@ int main(int argc, char** argv) {
   setDeviceType(&net_def, run_dev);
   setOperatorEngine(&net_def, caffe2::FLAGS_backend);
 
+  map<string, caffe2::TensorProtos> tensor_protos_map;
+
   loadInput(
       workspace,
       run_on_gpu,
+      tensor_protos_map,
       caffe2::FLAGS_input,
       caffe2::FLAGS_input_file,
       caffe2::FLAGS_input_dims,
@@ -107,6 +111,7 @@ int main(int argc, char** argv) {
   runNetwork(
       workspace,
       net_def,
+      tensor_protos_map,
       caffe2::FLAGS_wipe_cache,
       caffe2::FLAGS_run_individual,
       caffe2::FLAGS_warmup,

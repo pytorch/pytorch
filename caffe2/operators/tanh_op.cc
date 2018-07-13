@@ -1,7 +1,10 @@
 #include "caffe2/operators/tanh_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
+
 namespace caffe2 {
 
+#ifdef CAFFE2_USE_ACCELERATE
 template <>
 template <>
 bool TanhFunctor<CPUContext>::operator()<float>(
@@ -9,14 +12,10 @@ bool TanhFunctor<CPUContext>::operator()<float>(
     const float* X,
     float* Y,
     CPUContext* /* context */) const {
-#ifdef CAFFE2_USE_ACCELERATE
   vvtanhf(Y, X, &N);
-#else
-  ConstEigenVectorArrayMap<float> X_arr(X, N);
-  EigenVectorMap<float>(Y, N) = 1 - 2 * ((X_arr * 2).exp() + 1).inverse();
-#endif
   return true;
 }
+#endif // CAFFE2_USE_ACCELERATE
 
 REGISTER_CPU_OPERATOR(
     Tanh,
@@ -91,6 +90,6 @@ X:
         "element-wise")
     .InheritOnnxSchema("Tanh");
 
-OPERATOR_SCHEMA(TanhGradient).NumInputs(2).NumOutputs(1).AllowInplace({{0, 0}});
+OPERATOR_SCHEMA(TanhGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
 
 } // namespace caffe2

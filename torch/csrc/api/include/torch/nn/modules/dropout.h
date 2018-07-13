@@ -1,47 +1,49 @@
 #pragma once
 
-#include <torch/nn/module.h>
+#include <torch/nn/cloneable.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
-
-#include <cstdint>
+#include <cstddef>
+#include <vector>
 
 namespace torch {
-namespace detail {
-template <typename T>
-class DropoutBase : public torch::nn::CloneableModule<T> {
- public:
-  using nn::Module::is_training;
+namespace nn {
+struct DropoutOptions {
+  DropoutOptions(double rate);
+  TORCH_ARG(double, rate) = 0.5;
+};
 
-  explicit DropoutBase(double rate);
+namespace detail {
+template <typename Derived>
+class DropoutImplBase : public torch::nn::Cloneable<Derived> {
+ public:
+  template <typename... Ts>
+  explicit DropoutImplBase(Ts&&... ts)
+      : DropoutImplBase(DropoutOptions(std::forward<Ts>(ts)...)) {}
+  explicit DropoutImplBase(DropoutOptions options_);
 
   void reset() override;
+  Tensor forward(Tensor input);
+  virtual Tensor noise_mask(Tensor input) const = 0;
 
-  std::vector<Variable> forward(std::vector<Variable> input);
-
-  TORCH_ATTR(double, rate) = 0.5;
-
- protected:
-  virtual Variable noise_mask(Variable input) const = 0;
+  DropoutOptions options;
 };
 } // namespace detail
 
-namespace nn {
-class Dropout : public detail::DropoutBase<Dropout> {
+class DropoutImpl : public detail::DropoutImplBase<DropoutImpl> {
  public:
-  using detail::DropoutBase<Dropout>::DropoutBase;
-
- private:
-  Variable noise_mask(Variable input) const override;
+  using detail::DropoutImplBase<DropoutImpl>::DropoutImplBase;
+  Tensor noise_mask(Tensor input) const override;
 };
 
-class Dropout2d : public detail::DropoutBase<Dropout2d> {
+class Dropout2dImpl : public detail::DropoutImplBase<Dropout2dImpl> {
  public:
-  using detail::DropoutBase<Dropout2d>::DropoutBase;
-
- private:
-  Variable noise_mask(Variable input) const override;
+  using detail::DropoutImplBase<Dropout2dImpl>::DropoutImplBase;
+  Tensor noise_mask(Tensor input) const override;
 };
 
+TORCH_MODULE(Dropout);
+TORCH_MODULE(Dropout2d);
 } // namespace nn
 } // namespace torch

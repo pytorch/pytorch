@@ -1368,7 +1368,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor. Must be a `ByteTensor` or the same type as `input`.
+    out (Tensor, optional): the output tensor. Must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1409,6 +1409,25 @@ Example::
 
     >>> torch.erf(torch.tensor([0, -1., 10.]))
     tensor([ 0.0000, -0.8427,  1.0000])
+""")
+
+add_docstr(torch.erfc,
+           r"""
+erfc(tensor, out=None) -> Tensor
+
+Computes the complementary error function of each element. The complementary error function is defined as follows:
+
+.. math::
+    \mathrm{erfc}(x) = 1 - \frac{2}{\sqrt{\pi}} \int_{0}^{x} e^{-t^2} dt
+
+Args:
+    tensor (Tensor): the input tensor
+    out (Tensor, optional): the output tensor
+
+Example::
+
+    >>> torch.erfc(torch.tensor([0, -1., 10.]))
+    tensor([ 1.0000, 1.8427,  0.0000])
 """)
 
 add_docstr(torch.erfinv,
@@ -1591,6 +1610,30 @@ Example::
     array([-1,  2,  3])
 """)
 
+add_docstr(torch.flatten,
+           r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+Flattens a contiguous range of dims in a tensor.
+
+Args:
+    input (Tensor): the input tensor
+    start_dim (int): the first dim to flatten
+    end_dim (int): the last dim to flatten
+
+Example::
+
+    >>> t = torch.tensor([[[1, 2],
+                           [3, 4]],
+                          [[5, 6],
+                           [7, 8]]])
+    >>> torch.flatten(t)
+    tensor([1, 2, 3, 4, 5, 6, 7, 8])
+    >>> torch.flatten(t, start_dim=1)
+    tensor([[1, 2, 3, 4],
+            [5, 6, 7, 8]])
+""")
+
 add_docstr(torch.gather,
            r"""
 gather(input, dim, index, out=None) -> Tensor
@@ -1635,7 +1678,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -1861,7 +1904,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -2022,7 +2065,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true
@@ -2267,7 +2310,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as :attr:`input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A `torch.ByteTensor` containing a 1 at each location where comparison is true
@@ -2832,7 +2875,7 @@ The second argument can be a number or a tensor whose shape is
 Args:
     input (Tensor): the tensor to compare
     other (Tensor or float): the tensor or value to compare
-    out (Tensor, optional): the output tensor that must be a `ByteTensor` or the same type as `input`
+    out (Tensor, optional): the output tensor that must be a `ByteTensor`
 
 Returns:
     Tensor: A ``torch.ByteTensor`` containing a 1 at each location where comparison is true.
@@ -3739,10 +3782,11 @@ Args:
     end (Number): the ending value for the set of points
     step (Number): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}  If `dtype` is not given, infer the data type from the other input arguments.
-             If any of `start`, `end`, or `stop` are floating-point,
-             the `dtype` is inferred to be the default dtype, see :meth:`~torch.get_default_dtype`.
-             Otherwise, the `dtype` is inferred to be `torch.int64`.
+    {dtype}
+        If `dtype` is not given, infer the data type from the other input arguments.
+        If any of `start`, `end`, or `stop` are floating-point,
+        the `dtype` is inferred to be the default dtype, see :meth:`~torch.get_default_dtype`.
+        Otherwise, the `dtype` is inferred to be `torch.int64`.
     {layout}
     {device}
     {requires_grad}
@@ -4430,6 +4474,33 @@ Example::
             [-0.5872,  0.6932]])
 """)
 
+add_docstr(torch.flip,
+           r"""
+flip(input, dims) -> Tensor
+
+Reverse the order of a n-D tensor along given axis in dims.
+
+Args:
+    input (Tensor): the input tensor
+    dims (a list or tuple): axis to flip on
+
+Example::
+
+    >>> x = torch.arange(8).view(2, 2, 2)
+    >>> x
+    tensor([[[ 0,  1],
+             [ 2,  3]],
+
+            [[ 4,  5],
+             [ 6,  7]]])
+    >>> torch.flip(x, [0, 1])
+    tensor([[[ 6,  7],
+             [ 4,  5]],
+
+            [[ 2,  3],
+             [ 0,  1]]])
+""")
+
 add_docstr(torch.take,
            r"""
 take(input, indices) -> Tensor
@@ -4701,8 +4772,6 @@ and multiple right-hand sides `b`.
 In particular, solves :math:`AX = b` and assumes `A` is upper-triangular
 with the default keyword arguments.
 
-This method is NOT implemented for CUDA tensors.
-
 Args:
     A (Tensor): the input triangular coefficient matrix
     b (Tensor): multiple right-hand sides. Each column of `b` is a
@@ -4771,9 +4840,9 @@ specified position.
 
 The returned tensor shares the same underlying data with this tensor.
 
-A negative `dim` value within the range
-[-:attr:`input.dim()`, :attr:`input.dim()`) can be used and
-will correspond to :meth:`unsqueeze` applied at :attr:`dim` = :attr:`dim + input.dim() + 1`
+A :attr:`dim` value within the range ``[-input.dim() - 1, input.dim() + 1)``
+can be used. Negative :attr:`dim` will correspond to :meth:`unsqueeze`
+applied at :attr:`dim` = ``dim + input.dim() + 1``.
 
 Args:
     input (Tensor): the input tensor
@@ -5213,6 +5282,52 @@ Example::
     (tensor(-1.), tensor(1.5731))
 """)
 
+add_docstr(torch.pinverse,
+           r"""
+pinverse(input, rcond=1e-15) -> Tensor
+
+Calculates the pseudo-inverse (also known as the Moore-Penrose inverse) of a 2D tensor.
+Please look at `Moore-Penrose inverse`_ for more details
+
+.. note::
+    This method is implemented using the Singular Value Decomposition.
+
+.. note::
+    The pseudo-inverse is not necessarily a continuous function in the elements of the matrix `[1]`_.
+    Therefore, derivatives are not always existent, and exist for a constant rank only `[2]`_.
+    However, this method is backprop-able due to the implementation by using SVD results, and
+    could be unstable. Double-backward will also be unstable due to the usage of SVD internally.
+    See :meth:`~torch.svd` for more details.
+
+Arguments:
+    input (Tensor): The input 2D tensor of dimensions :math:`m \times n`
+    rcond (float): A floating point value to determine the cutoff for small singular values.
+                   Default: 1e-15
+
+Returns:
+    The pseudo-inverse of :attr:`input` of dimensions :math:`n \times m`
+
+Example::
+
+    >>> input = torch.randn(3, 5)
+    >>> input
+    tensor([[ 0.5495,  0.0979, -1.4092, -0.1128,  0.4132],
+            [-1.1143, -0.3662,  0.3042,  1.6374, -0.9294],
+            [-0.3269, -0.5745, -0.0382, -0.5922, -0.6759]])
+    >>> torch.pinverse(input)
+    tensor([[ 0.0600, -0.1933, -0.2090],
+            [-0.0903, -0.0817, -0.4752],
+            [-0.7124, -0.1631, -0.2272],
+            [ 0.1356,  0.3933, -0.5023],
+            [-0.0308, -0.1725, -0.5216]])
+
+.. _Moore-Penrose inverse: https://en.wikipedia.org/wiki/Moore%E2%80%93Penrose_inverse
+
+.. _[1]: https://epubs.siam.org/doi/10.1137/0117004
+
+.. _[2]: https://www.jstor.org/stable/2156365
+""")
+
 add_docstr(torch.fft,
            r"""
 fft(input, signal_ndim, normalized=False) -> Tensor
@@ -5243,8 +5358,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.ifft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5332,8 +5458,19 @@ shape of :attr:`input`.
 
 The inverse of this function is :func:`~torch.fft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5410,8 +5547,19 @@ of :attr:`input`, but instead the last dimension will be halfed as of size
 
 The inverse of this function is :func:`~torch.irfft`.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5480,8 +5628,19 @@ The inverse of this function is :func:`~torch.rfft`.
     Jacobian with point perturbations, :func:`~torch.irfft` will almost
     certainly fail the check.
 
+.. note::
+    For CUDA tensors, an LRU cache is used for cuFFT plans to speed up
+    repeatedly running FFT methods on tensors of same geometry with same
+    same configuration.
+
+    Changing ``torch.backends.cuda.cufft_plan_cache.max_size`` (default 1023)
+    controls the capacity of this cache. Some cuFFT plans may allocate GPU
+    memory. You may use ``torch.backends.cuda.cufft_plan_cache.size`` to query
+    the number of plans currently in cache, and
+    ``torch.backends.cuda.cufft_plan_cache.clear()`` to clear the cache.
+
 .. warning::
-    For CPU tensors, this method is currently only available with MKL. Check
+    For CPU tensors, this method is currently only available with MKL. Use
     :func:`torch.backends.mkl.is_available` to check if MKL is installed.
 
 Arguments:
@@ -5692,3 +5851,57 @@ Returns:
     Tensor: A 1-D tensor of size :math:`(\text{{window_length}},)` containing the window
 
 """.format(**factory_common_args))
+
+
+add_docstr(torch.unbind,
+           r"""
+unbind(tensor, dim=0) -> seq
+
+Removes a tensor dimension.
+
+Returns a tuple of all slices along a given dimension, already without it.
+
+Arguments:
+    tensor (Tensor): the tensor to unbind
+    dim (int): dimension to remove
+
+Example::
+
+    >>> torch.unbind(torch.tensor([[1, 2, 3],
+    >>>                            [4, 5, 6],
+    >>>                            [7, 8, 9]]))
+    (tensor([1, 2, 3]), tensor([4, 5, 6]), tensor([7, 8, 9]))
+""")
+
+
+add_docstr(torch.meshgrid,
+           r"""
+meshgrid(seq) -> seq
+
+Take a sequence of :math:`N` tensors, each of which can be either scalar or 1-dimensional
+vector, and create :math:`N` N-dimensional grids, where the :math:`i`th grid is defined by
+expanding the :math:`i`th input over dimensions defined by other inputs.
+
+Arguments:
+    seq (sequence of Tensors): sequence of scalars or 1 dimensional tensors. Scalars will be
+        treated as tensors of size :math:`(1,)` automatically.
+
+Returns:
+    seq (sequence of Tensors): If the input has :math:`k` tensors of size
+        :math:`(N_1,), (N_2,), \ldots , (N_k,)`, then the output would also has :math:`k` tensors,
+        where all tensors are of size :math:`(N_1, N_2, \ldots , N_k)`.
+
+Example::
+
+    >>> x = torch.tensor([1, 2, 3])
+    >>> y = torch.tensor([4, 5, 6])
+    >>> grid_x, grid_y = torch.meshgrid([x, y])
+    >>> grid_x
+    tensor([[1, 1, 1],
+            [2, 2, 2],
+            [3, 3, 3]])
+    >>> grid_y
+    tensor([[4, 5, 6],
+            [4, 5, 6],
+            [4, 5, 6]])
+""")

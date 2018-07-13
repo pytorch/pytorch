@@ -211,6 +211,9 @@ void initPythonIRBindings(PyObject * module_) {
       return py::make_iterator(g.nodes().begin(), g.nodes().end());
     })
     .def("addInput",[](Graph &g) { return g.addInput(); })
+    .def("copy",[](Graph &g) {
+      return g.copy();
+    })
     .GS(advanceStage)
     .GS(stage)
     .GS(eraseInput)
@@ -267,7 +270,6 @@ void initPythonIRBindings(PyObject * module_) {
     .VS(stage)
     .VS(offset)
     .VS(uses)
-    .VS(isHandle)
     .VS(replaceAllUsesWith)
     .def("node",[](Value &v) { return v.node(); })
     .def("setTypeAs", [](Value * node, Value * other) {
@@ -419,13 +421,11 @@ void initPythonIRBindings(PyObject * module_) {
 
   py::class_<Type,std::shared_ptr<Type>>(m,"Type")
     .def("__repr__",[](Type & t) {
-      return t.name();
+      return t.str();
     })
     .def("kind",[](Type& t_) {
       Type * t = &t_;
       switch(t->kind()) {
-        case TypeKind::HandleType:
-          return "HandleType";
         case TypeKind::DynamicType:
           return "DynamicType";
         case TypeKind::TensorType:

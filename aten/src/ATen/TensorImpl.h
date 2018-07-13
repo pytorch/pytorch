@@ -26,10 +26,22 @@ struct TensorImpl : public Retainable {
   virtual IntList sizes() const = 0;
   virtual IntList strides() const = 0;
   virtual int64_t dim() const = 0;
+  /**
+   * Perform a conversion of this tensor to a scalar, if numel() == 1.
+   * Otherwise, raise an error.
+   */
   virtual Scalar localScalar() = 0;
   virtual void * unsafeGetTH(bool retain) = 0;
   virtual std::unique_ptr<Storage> storage() = 0;
   friend struct Type;
+
+  int64_t numel() {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    return n;
+  }
 
   // 0-dim patchup of TH requires us to have a flag marking
   // if a Tensor should be treated as 0-dim.

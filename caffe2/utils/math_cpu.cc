@@ -11,12 +11,14 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -551,14 +553,22 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, vsTan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tan, vdTan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, vsAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, vdAtan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sinh, vsSinh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sinh, vdSinh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cosh, vsCosh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cosh, vdCosh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tanh, vsTanh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tanh, vdTanh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, vsInvSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, InvSqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, vdSqr)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -612,9 +622,10 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, tan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, atan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, rsqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
+
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T)                                     \
@@ -628,13 +639,54 @@ DELEGATE_SINCOS_FUNCTION(float)
 DELEGATE_SINCOS_FUNCTION(double)
 #undef DELEGATE_SINCOS_FUNCTION
 
-#define DELEGATE_POWX_FUNCTION(T)                                             \
+#define DELEGATE_TANH_FUNCTION(T)                                             \
   template <>                                                                 \
-  void Powx<T, CPUContext>(const int N, const T* a, T b, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b);       \
+  void Tanh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) {      \
+    EigenVectorMap<T>(Y, N) = T(1) -                                          \
+        ((ConstEigenVectorArrayMap<T>(X, N) * T(2)).exp() + T(1)).inverse() * \
+            T(2);                                                             \
+  }
+DELEGATE_TANH_FUNCTION(float)
+DELEGATE_TANH_FUNCTION(double)
+#undef DELEGATE_TANH_FUNCTION
+
+#define DELEGATE_CBRT_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cbrt<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    std::transform(X, X + N, Y, [](const T x) { return cbrt(x); });      \
+  }
+DELEGATE_CBRT_FUNCTION(float)
+DELEGATE_CBRT_FUNCTION(double)
+#undef DELEGATE_CBRT_FUNCTION
+
+#define DELEGATE_POWX_FUNCTION(T)                                       \
+  template <>                                                           \
+  void Powx<T, CPUContext>(                                             \
+      const int N, const T* a, const T b, T* y, CPUContext*) {          \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b); \
   }
 DELEGATE_POWX_FUNCTION(float)
 #undef DELEGATE_POWX_FUNCTION
+
+#define DELEGATE_SINH_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Sinh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    ConstEigenVectorArrayMap<T> X_arr(X, N);                             \
+    EigenVectorMap<T>(Y, N) = (X_arr.exp() - (-X_arr).exp()) / 2;        \
+  }
+DELEGATE_SINH_FUNCTION(float)
+DELEGATE_SINH_FUNCTION(double)
+#undef DELEGATE_SINH_FUNCTION
+
+#define DELEGATE_COSH_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cosh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    ConstEigenVectorArrayMap<T> X_arr(X, N);                             \
+    EigenVectorMap<T>(Y, N) = (X_arr.exp() + (-X_arr).exp()) / 2;        \
+  }
+DELEGATE_COSH_FUNCTION(float)
+DELEGATE_COSH_FUNCTION(double)
+#undef DELEGATE_COSH_FUNCTION
 
 #endif // CAFFE2_USE_MKL
 
@@ -659,6 +711,17 @@ DELEGATE_SIGN_FUNCTION(double)
 DELEGATE_SIGN_FUNCTION(std::int32_t)
 DELEGATE_SIGN_FUNCTION(std::int64_t)
 #undef DELEGATE_SIGN_FUNCTION
+
+#define DELEGATE_CUBE_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cube<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    EigenVectorMap<T>(Y, N) = ConstEigenVectorArrayMap<T>(X, N).cube();  \
+  }
+DELEGATE_CUBE_FUNCTION(float)
+DELEGATE_CUBE_FUNCTION(double)
+DELEGATE_CUBE_FUNCTION(std::int32_t)
+DELEGATE_CUBE_FUNCTION(std::int64_t)
+#undef DELEGATE_CUBE_FUNCTION
 
 #define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
   template <>                                                   \
@@ -741,6 +804,9 @@ void ReduceTensor(
     T* Y,
     CPUContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
+  if (X == Y) {
+    return;
+  }
   std::vector<int> Y_dims(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
     Y_dims[axes[i]] = 1;

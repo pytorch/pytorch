@@ -77,22 +77,85 @@ OPERATOR_SCHEMA(Dropout)
       return out;
     })
     .SetDoc(R"DOC(
-Dropout takes one input data (Tensor<float>) and produces two Tensor outputs,
-output (Tensor<float>) and mask (Tensor<bool>). Depending on whether it is in
-test mode or not, the output Y will either be a random dropout, or a simple
-copy of the input. Note that our implementation of Dropout does scaling in
-the training phase, so during testing nothing needs to be done.
+
+`Dropout` takes one input data tensor (`X`) and produces two tensor outputs, `Y` and
+`mask`. If the `is_test` argument is zero (default=0), the output `Y` will be the input
+with random elements zeroed. The probability that a given element is zeroed is
+determined by the `ratio` argument.
+
+If the `is_test` argument is set to non-zero, the output `Y` is exactly the same as the
+input `X`. Note that outputs are scaled by a factor of $\frac{1}{1-ratio}$ during
+training, so that during test time, we can simply compute an identity function. This
+scaling is important because we want the output at test time to equal the expected value
+at training time. Dropout has been proven to be an effective regularization technique to
+prevent overfitting during training.
+
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dropout_op.h
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/dropout_op.cc
+
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Dropout",
+    ["X"],
+    ["Y"] + ["mask"],
+    ratio=0.5,
+    is_test=0
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(5, 5)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+print("mask:", workspace.FetchBlob("mask"))
+```
+
+**Result**
+
+```
+X: [[5. 4. 3. 6. 9.]
+ [2. 1. 8. 0. 9.]
+ [7. 3. 0. 6. 3.]
+ [1. 8. 2. 6. 4.]
+ [6. 2. 6. 4. 0.]]
+Y: [[ 0.  0.  0. 12. 18.]
+ [ 0.  0. 16.  0.  0.]
+ [ 0.  0.  0. 12.  6.]
+ [ 0.  0.  4.  0.  0.]
+ [12.  0.  0.  0.  0.]]
+mask: [[False False False  True  True]
+ [False False  True  True False]
+ [False False  True  True  True]
+ [False False  True False False]
+ [ True False False False False]]
+```
+
+</details>
+
 )DOC")
-    .Arg("ratio", "(float, default 0.5) the ratio of random dropout")
+    .Arg("ratio", "*(type: float; default: 0.5)* Probability of an element to be zeroed.")
     .ArgIsTest(
-        "(int) if nonzero, run dropout in test mode where "
-        "the output is simply Y = X.")
-    .Input(0, "data", "The input data as Tensor.")
-    .Output(0, "output", "The output.")
+        "*(type: int; default: 0)* If zero (train mode), perform dropout. If non-zero"
+        "(test mode), Y = X.")
+    .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
+    .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.")
     .Output(
         1,
         "mask",
-        "The output mask. If is_test is nonzero, this output is not filled.")
+        "*(type: Tensor`<bool>`)* The output mask containing boolean values for"
+        "each element, signifying which elements are dropped out. If `is_test` is" 
+        "nonzero, this output is not filled.")
     .InheritOnnxSchema("Dropout");
 
 OPERATOR_SCHEMA(DropoutGrad)

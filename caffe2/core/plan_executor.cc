@@ -124,7 +124,7 @@ struct WorkspaceIdInjector {
   void InjectWorkspaceId(Workspace* workspace) {
     if (workspace->HasBlob(NODE_ID)) {
       Blob* node_id_blob = workspace->GetBlob(NODE_ID);
-      TensorCPU node_id_tensor = node_id_blob->template Get<TensorCPU>();
+      const TensorCPU& node_id_tensor = node_id_blob->template Get<TensorCPU>();
       int node_id = node_id_tensor.template data<int32_t>()[0];
       CAFFE_ENFORCE(
           seq_ < (1 << 16),
@@ -512,15 +512,7 @@ bool RunPlanOnWorkspace(
     LOG(INFO) << "Step " << step.name() << " took " << step_timer.Seconds()
               << " seconds.";
   }
-  float exec_time = plan_timer.Seconds();
-
-#ifndef CAFFE2_MOBILE
-  PlanExecutionTime plan_stat(plan.name());
-  CAFFE_EVENT(
-      plan_stat, plan_execution_time_ns, (long)(exec_time * 1000000000));
-#endif // CAFFE2_MOBILE
-
-  LOG(INFO) << "Total plan took " << exec_time << " seconds.";
+  LOG(INFO) << "Total plan took " << plan_timer.Seconds() << " seconds.";
   LOG(INFO) << "Plan executed successfully.";
   return true;
 }

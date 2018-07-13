@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THNN.h"
 #else
 
+#include "Reduction.h"
+
 TH_API void THNN_(Abs_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
@@ -17,67 +19,60 @@ TH_API void THNN_(AbsCriterion_updateOutput)(
           THTensor *input,             // input tensor
           THTensor *target,            // tensor with target values
           THTensor *output,            // [OUT] a one-element tensor with loss
-          bool sizeAverage,            // if true, the loss will be divided by batch size
-          bool reduce);
+          int64_t reduction);
 TH_API void THNN_(AbsCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
           THTensor *target,            // tensor with target values
           THTensor *gradOutput,
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          bool sizeAverage,            // if true, the gradient will be normalized by batch size
-          bool reduce);
+          int64_t reduction);
 
 TH_API void THNN_(BCECriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          bool sizeAverage,
-          THTensor *weights,           // [OPTIONAL]
-          bool reduce);
+          int64_t reduction,
+          THTensor *weights);          // [OPTIONAL]
 TH_API void THNN_(BCECriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
-          THTensor *weights,           // [OPTIONAL]
-          bool reduce);
+          int64_t reduction,
+          THTensor *weights);          // [OPTIONAL]
 
 TH_API void THNN_(ClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (1D/2D)
           THIndexTensor *target,       // tensor containing indexes of target classes
           THTensor *output,            // [OUT] a one-element tensor with loss
-          bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
+          int64_t reduction,
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index,        // target index to ignore (loss = 0, gradInput = 0)
-          bool reduce);
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 TH_API void THNN_(ClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (1D/2D)
           THIndexTensor *target,       // tensor containing indexes of target classes
           THTensor *gradOutput,
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
+          int64_t reduction,
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index,        // target index to ignore (loss = 0, gradInput = 0)
-          bool reduce);
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
 TH_API void THNN_(SpatialClassNLLCriterion_updateOutput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor (4D)
           THIndexTensor *target,       // tensor containing indexes of target classes (3D)
           THTensor *output,            // [OUT] a one-element tensor with loss
-          bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
+          int64_t reduction,
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index,        // target index to ignore (loss = 0, gradInput = 0)
-          bool reduce);
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
 TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THNNState *state,            // library's state
@@ -85,11 +80,10 @@ TH_API void THNN_(SpatialClassNLLCriterion_updateGradInput)(
           THIndexTensor *target,       // tensor containing indexes of target classes (3D)
           THTensor *gradOutput,
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          bool sizeAverage,            // if true, the loss will be normalized by batch size and class weights
+          int64_t reduction,
           THTensor *weights,           // [OPTIONAL] class weights
           THTensor *total_weight,      // [BUFFER]
-          int64_t ignore_index,        // target index to ignore (loss = 0, gradInput = 0)
-          bool reduce);
+          int64_t ignore_index);       // target index to ignore (loss = 0, gradInput = 0)
 
 TH_API void THNN_(ELU_updateOutput)(
           THNNState *state,            // library's state
@@ -113,16 +107,14 @@ TH_API void THNN_(DistKLDivCriterion_updateOutput)(
           THTensor *input,             // input tensor
           THTensor *target,            // target tensor
           THTensor *output,            // [OUT] a one-element tensor containing the loss
-          bool sizeAverage,            // if true, the loss will be normalized **by total number of elements**
-          bool reduce);                // if true, returns summed or averaged loss. if false, returns a loss per element.
+          int64_t reduction);
 TH_API void THNN_(DistKLDivCriterion_updateGradInput)(
           THNNState *state,            // library's state
           THTensor *input,             // input tensor
           THTensor *target,            // target tensor
           THTensor *gradOutput,        // grad output tensor
           THTensor *gradInput,         // [OUT] gradient w.r.t. input
-          bool sizeAverage,            // if true, the loss will be normalized **by total number of elements**
-          bool reduce);                // if true, returns summed or averaged loss. if false, returns a loss per element.
+          int64_t reduction);
 
 TH_API void THNN_(GatedLinear_updateOutput)(
           THNNState *state,            // library's state
@@ -303,8 +295,7 @@ TH_API void THNN_(SoftMarginCriterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 
 TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
           THNNState *state,
@@ -312,24 +303,21 @@ TH_API void THNN_(SoftMarginCriterion_updateGradInput)(
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 
 TH_API void THNN_(MSECriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 TH_API void THNN_(MSECriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 
 TH_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THNNState *state,
@@ -337,8 +325,7 @@ TH_API void THNN_(MultiLabelMarginCriterion_updateOutput)(
           THIndexTensor *target,
           THTensor *output,
           THTensor *isTarget,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
@@ -346,30 +333,27 @@ TH_API void THNN_(MultiLabelMarginCriterion_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *isTarget,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 
 TH_API void THNN_(MultiMarginCriterion_updateOutput)(
           THNNState *state,
           THTensor *input,
           THIndexTensor *target,
           THTensor *output,
-          bool sizeAverage,
+          int64_t reduction,
           int p,
           THTensor* weights,      // [OPTIONAL]
-          accreal margin,
-          bool reduce);
+          accreal margin);
 TH_API void THNN_(MultiMarginCriterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THIndexTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
+          int64_t reduction,
           int p,
           THTensor *weights,      // [OPTIONAL]
-          accreal margin,
-          bool reduce);
+          accreal margin);
 
 TH_API void THNN_(PReLU_updateOutput)(
           THNNState *state,
@@ -452,16 +436,14 @@ TH_API void THNN_(SmoothL1Criterion_updateOutput)(
           THTensor *input,
           THTensor *target,
           THTensor *output,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 TH_API void THNN_(SmoothL1Criterion_updateGradInput)(
           THNNState *state,
           THTensor *input,
           THTensor *target,
           THTensor *gradOutput,
           THTensor *gradInput,
-          bool sizeAverage,
-          bool reduce);
+          int64_t reduction);
 
 TH_API void THNN_(SoftPlus_updateOutput)(
           THNNState *state,
@@ -502,7 +484,7 @@ TH_API void THNN_(IndexLinear_updateOutput)(
           THTensor *weight,
           THTensor *bias,
           THTensor *normalizedValues,
-          int   train);
+          int train);
 TH_API void THNN_(IndexLinear_accGradParameters)(
           THNNState *state,
           THIndexTensor *keys,
@@ -752,13 +734,15 @@ TH_API void THNN_(TemporalUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int scale_factor);
+          int osizeW);
 TH_API void THNN_(TemporalUpSamplingNearest_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int scale_factor);
+          int isizeB,
+          int isizeC,
+          int isizeW,
+          int osizeW);
 
 TH_API void THNN_(TemporalUpSamplingLinear_updateOutput)(
           THNNState *state,
@@ -1212,13 +1196,19 @@ TH_API void THNN_(SpatialUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int scale_factor);
+          int osizeH,
+          int osizeW);
+
 TH_API void THNN_(SpatialUpSamplingNearest_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int scale_factor);
+          int isizeB,
+          int isizeC,
+          int isizeH,
+          int isizeW,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(SpatialUpSamplingBilinear_updateOutput)(
           THNNState *state,
@@ -1664,14 +1654,22 @@ TH_API void THNN_(VolumetricUpSamplingNearest_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int scale_factor);
+          int osizeT,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
           THNNState *state,
-          THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int scale_factor);
+          int isizeB,
+          int isizeC,
+          int isizeT,
+          int isizeH,
+          int isizeW,
+          int osizeT,
+          int osizeH,
+          int osizeW);
 
 TH_API void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
           THNNState *state,

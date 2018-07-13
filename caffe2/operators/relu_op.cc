@@ -1,57 +1,56 @@
 #include "caffe2/operators/relu_op.h"
 
-#include "caffe2/utils/math.h"
+#include <algorithm>
+#include <functional>
+#include <string>
+
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
 template <>
-bool ReluOp<float, CPUContext>::RunOnDevice() {
-  auto& X = Input(0);
-  auto* Y = Output(0);
-  Y->ResizeLike(X);
-
-#ifdef CAFFE2_USE_ACCELERATE
-  const float zero = 0.0f;
-  vDSP_vthres(X.data<float>(), 1, &zero, Y->mutable_data<float>(), 1, X.size());
-#else
-  EigenVectorMap<float>(Y->mutable_data<float>(), X.size()) =
-      ConstEigenVectorMap<float>(X.data<float>(), X.size()).cwiseMax(0.f);
-#endif
-  /* Naive implementation
-  const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
-  for (int i = 0; i < X.size(); ++i) {
-    Ydata[i] = std::max(Xdata[i], 0.f);
-  }
-  */
+template <typename T>
+bool ReluFunctor<CPUContext>::
+operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
+  EigenVectorMap<T>(Y, N) = ConstEigenVectorMap<float>(X, N).cwiseMax(T(0));
   return true;
 }
 
-template <>
-bool ReluGradientOp<float, CPUContext>::RunOnDevice() {
-  auto& Y = Input(0);
-  auto& dY = Input(1);
-  auto* dX = Output(0);
-  CAFFE_ENFORCE_EQ(dY.size(), Y.size());
-  dX->ResizeLike(Y);
+#ifdef CAFFE2_USE_ACCELERATE
 
-  const float* Ydata = Y.data<float>();
-  const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  // TODO: proper vectorization with Eigen
-  EigenVectorArrayMap<float> dXvec(dXdata, dX->size());
-  ConstEigenVectorArrayMap<float> Yvec(Ydata, Y.size());
-  ConstEigenVectorArrayMap<float> dYvec(dYdata, dY.size());
-  dXvec = dYvec * Yvec.cwiseSign();
-  /* Previous implementation
-  for (int i = 0; i < Y.size(); ++i) {
-    dXdata[i] = Ydata[i] > 0 ? dYdata[i] : 0;
-  }
-  */
+template <>
+template <>
+bool ReluFunctor<CPUContext>::operator()<float>(
+    const int N,
+    const float* X,
+    float* Y,
+    CPUContext* /* context */) const {
+  const float zero = 0.0f;
+  vDSP_vthres(X, 1, &zero, Y, 1, N);
+  return true;
+}
+
+#endif // CAFFE2_USE_ACCELERATE
+
+template <>
+template <typename T>
+bool ReluGradientFunctor<CPUContext>::Forward(
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& /* dY_dims */,
+    const T* Y,
+    const T* dY,
+    T* dX,
+    CPUContext* /* context */) const {
+  const int size = std::accumulate(
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
+  EigenVectorArrayMap<T>(dX, size) =
+      (ConstEigenVectorArrayMap<T>(Y, size) > T(0))
+          .select(ConstEigenVectorArrayMap<T>(dY, size), T(0));
   return true;
 }
 
 namespace {
+
 OpSchema::Cost CostInferenceForRelu(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
@@ -59,10 +58,21 @@ OpSchema::Cost CostInferenceForRelu(
   cost.params_bytes = 0;
   return cost;
 }
+
 } // namespace
 
-REGISTER_CPU_OPERATOR(Relu, ReluOp<float, CPUContext>);
-REGISTER_CPU_OPERATOR(ReluGradient, ReluGradientOp<float, CPUContext>);
+REGISTER_CPU_OPERATOR(
+    Relu,
+    UnaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        ReluFunctor<CPUContext>>);
+REGISTER_CPU_OPERATOR(
+    ReluGradient,
+    BinaryElementwiseOp<
+        TensorTypes<float>,
+        CPUContext,
+        ReluGradientFunctor<CPUContext>>);
 
 // Input: X, output: Y
 OPERATOR_SCHEMA(Relu)
@@ -139,17 +149,21 @@ ReluGradient takes both Y and dY and uses this to update dX according to the
 chain rule and derivatives of the rectified linear function.
 )DOC");
 
+namespace {
+
 class GetReluGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;
-  vector<OperatorDef> GetGradientDefs() override {
+  std::vector<OperatorDef> GetGradientDefs() override {
     return SingleGradientDef(
         def_.type() + "Gradient",
         "",
-        vector<string>{O(0), GO(0)},
-        vector<string>{GI(0)});
+        std::vector<std::string>{O(0), GO(0)},
+        std::vector<std::string>{GI(0)});
   }
 };
-REGISTER_GRADIENT(Relu, GetReluGradient);
-REGISTER_GRADIENT(ReluFp16, GetReluGradient);
 
-}  // namespace caffe2
+} // namespace
+
+REGISTER_GRADIENT(Relu, GetReluGradient);
+
+} // namespace caffe2

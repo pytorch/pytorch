@@ -1,4 +1,5 @@
 import torch
+from torch.nn.functional import _Reduction
 from .Criterion import Criterion
 
 
@@ -25,11 +26,10 @@ class MultiMarginCriterion(Criterion):
             input,
             target,
             self.output_tensor,
-            self.sizeAverage,
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
             self.p,
             self.weights,
             self.margin,
-            True,  # reduce
         )
         self.output = self.output_tensor[0].item()
         return self.output
@@ -43,10 +43,9 @@ class MultiMarginCriterion(Criterion):
             target,
             implicit_gradOutput,
             self.gradInput,
-            self.sizeAverage,
+            _Reduction.legacy_get_enum(self.sizeAverage, True, emit_warning=False),
             self.p,
             self.weights,
             self.margin,
-            True,  # reduce
         )
         return self.gradInput

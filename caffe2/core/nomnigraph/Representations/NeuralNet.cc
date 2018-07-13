@@ -92,7 +92,7 @@ std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
 }
 
 // Get all nodes tracked by CF graph
-std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
+static std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
     repr::NNCFGraph& cf) {
   std::unordered_set<repr::NNGraph::NodeRef> cfTrackedNodes;
   for (const auto& bbNode : cf.getMutableNodes()) {
@@ -104,7 +104,7 @@ std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
   return cfTrackedNodes;
 }
 
-size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
+static size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
   auto cfTrackedNodes = getTrackedNodes(m->controlFlow);
 
   for (auto& bbNode : m->controlFlow.getMutableNodes()) {

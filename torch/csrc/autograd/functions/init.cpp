@@ -2,7 +2,6 @@
 #include "accumulate_grad.h"
 #include "basic_ops.h"
 #include "tensor.h"
-#include "special.h"
 #include "torch/csrc/autograd/functions/pybind.h"
 #include "torch/csrc/autograd/python_cpp_function.h"
 #include "torch/csrc/autograd/generated/python_functions.h"
@@ -94,9 +93,6 @@ void THPAutograd_initFunctions()
 
   static PyTypeObject DelayedErrorClass;
   addClass<DelayedError, DelayedErrorCtor>(module, DelayedErrorClass, "DelayedError");
-
-  static PyTypeObject EvalClass;
-  addClass<Eval, NoCtor>(module, EvalClass, "Eval");
 
   static PyTypeObject CopyBackwardsClass;
   addClass<CopyBackwards, NoCtor>(module, CopyBackwardsClass, "CopyBackwards");

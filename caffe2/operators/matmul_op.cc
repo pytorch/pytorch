@@ -34,28 +34,84 @@ OPERATOR_SCHEMA(MatMul)
       return out;
     })
     .SetDoc(R"DOC(
-Matrix multiplication Y = A * B, where A has size (M x K), B has size (K x N),
-and Y will have a size (M x N).
+Matrix multiplication $Y = A * B$, where `A` has size (M x K), `B` has size
+(K x N), and `Y` will have a size (M x N). To transpose `A` or `B` before
+multiplication, pass 1 to the `trans_a` and/or `trans_b` arguments, which
+separate the first and second dimensions of the respective matrices using
+`axis_a` and `axis_b`.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/matmul_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "MatMul",
+    ["A", "B"],
+    ["Y"],
+)
+
+workspace.FeedBlob("A", np.random.randint(10, size=(3,3)).astype(np.float32))
+workspace.FeedBlob("B", np.random.randint(10, size=(3,3)).astype(np.float32))
+print("A:", workspace.FetchBlob("A"))
+print("B:", workspace.FetchBlob("B"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+```
+
+**Result**
+
+```
+A: [[1. 8. 3.]
+ [6. 4. 4.]
+ [5. 4. 7.]]
+B: [[4. 0. 3.]
+ [3. 1. 1.]
+ [8. 5. 8.]]
+Y: [[52. 23. 35.]
+ [68. 24. 54.]
+ [88. 39. 75.]]
+```
+
+</details>
+
 )DOC")
-    .Input(0, "A", "2D matrix of size (M x K)")
-    .Input(1, "B", "2D matrix of size (K x N)")
-    .Output(0, "Y", "2D matrix of size (M x N)")
+    .Input(
+        0,
+        "A",
+        "*(type: Tensor`<float>`)* 2D matrix of size (M x K).")
+    .Input(
+        1,
+        "B",
+        "*(type: Tensor`<float>`)* 2D matrix of size (K x N).")
+    .Output(
+        0,
+        "Y",
+        "*(type: Tensor`<float>`)* 2D matrix of size (M x N).")
     .Arg(
         "axis_a",
-        "Exclusive axis that divides the first and second dimension \
-of matrix A, default to 1")
+        "*(type: int; default: 1)* Exclusive axis that divides the first and "
+        "second dimension of matrix `A`.")
     .Arg(
         "axis_b",
-        "Exclusive axis that divides the first and second dimension \
-of matrix B, default to 1")
+        "*(type: int; default: 1)* Exclusive axis that divides the first and "
+        "second dimension of matrix `B`.")
     .Arg(
         "trans_a",
-        "Pass 1 to transpose A before multiplication and after the \
-dimension adjustment using axis_a")
+        "*(type: int; default: 0)* Pass 1 to transpose `A` before multiplication and "
+        "after the dimension adjustment using `axis_a`.")
     .Arg(
         "trans_b",
-        "Pass 1 to transpose B before multiplication and after the \
-dimension adjustment using axis_b");
+        "*(type: int; default: 0)* Pass 1 to transpose `B` before multiplication and "
+        "after the dimension adjustment using `axis_b`.");
 
 class GetMatMulGradient : public GradientMakerBase {
   using GradientMakerBase::GradientMakerBase;

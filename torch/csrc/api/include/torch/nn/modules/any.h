@@ -2,8 +2,9 @@
 
 #include <torch/detail/static.h>
 #include <torch/nn/module.h>
+#include <torch/nn/pimpl.h>
+#include <torch/tensor.h>
 
-#include <torch/csrc/autograd/variable.h>
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
@@ -16,7 +17,7 @@
 namespace torch {
 namespace nn {
 
-/// A class to store a type erasd module, whose `forward()` method can be
+/// A class to store a type erased module, whose `forward()` method can be
 /// invoked, with dynamic type checking. An `AnyModule` has an empty state, into
 /// which it is default constructed. `is_empty()` can be used to query whether
 /// the `AnyModule` is empty.
@@ -33,17 +34,23 @@ class AnyModule {
   explicit AnyModule(std::shared_ptr<ModuleType> module);
 
   /// Constructs an `AnyModule` from a concrete module object.
-  template <typename ModuleType>
+  template <
+      typename ModuleType,
+      typename = torch::detail::enable_if_module_t<ModuleType>>
   explicit AnyModule(ModuleType&& module);
+
+  /// Constructs an `AnyModule` from a module holder.
+  template <typename ModuleType>
+  explicit AnyModule(const ModuleHolder<ModuleType>& module_holder);
 
   /// Move construction and assignment is allowed, and follows the default
   /// behavior of move for `std::unique_ptr`.
   AnyModule(AnyModule&&) = default;
   AnyModule& operator=(AnyModule&&) = default;
 
-  /// Copy is disallowed.
-  AnyModule(const AnyModule& other) = delete;
-  AnyModule& operator=(const AnyModule& other) = delete;
+  /// Creates a copy of an `AnyModule`.
+  AnyModule(const AnyModule& other);
+  AnyModule& operator=(const AnyModule& other);
 
   /// Assigns a module to the `AnyModule` (to circumvent the explicit
   /// constructor).
@@ -65,6 +72,11 @@ class AnyModule {
   /// exception if the types do not match.
   template <typename T, typename = torch::detail::enable_if_module_t<T>>
   const T& get() const;
+
+  /// Returns the contained module in a `nn::ModuleHolder` subclass if possible
+  /// (i.e. if `T` has a constructor for the underlying module type).
+  template <typename T, typename ContainedType = typename T::ContainedType>
+  T get() const;
 
   /// Returns a `std::shared_ptr` whose dynamic type is that of the underlying
   /// module.
@@ -173,10 +185,22 @@ class AnyModule::Value {
   friend class TestValue;
 
   /// Constructs the `Value` from value type.
-  template <typename T>
+  template <
+      typename T,
+      typename = torch::disable_if_t<std::is_same<at::Tensor, T>::value>>
   explicit Value(T&& value)
       : content_(
             torch::make_unique<Holder<decay_t<T>>>(std::forward<T>(value))) {}
+
+  /// Constructs the `Value`, but converts an `at::Tensor` to a `torch::Tensor`
+  /// implicitly if the `at::Tensor` is really a `torch::Tensor` (a variable).
+  explicit Value(at::Tensor tensor) {
+    if (tensor.is_variable()) {
+      content_ = torch::make_unique<Holder<torch::Tensor>>(std::move(tensor));
+    } else {
+      content_ = torch::make_unique<Holder<at::Tensor>>(std::move(tensor));
+    }
+  }
 
   /// The static type of the object we store in the `Value`, which erases the
   /// actual object's type, allowing us only to check the `type_info` of the
@@ -213,6 +237,9 @@ struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
 
   /// Returns std::shared_ptr<Module> pointing to the erased module.
   virtual std::shared_ptr<Module> ptr() = 0;
+
+  /// Returns a `Placeholder` with a copy of this `AnyModule`.
+  virtual std::unique_ptr<Placeholder> clone() const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Holder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -270,6 +297,10 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
     return module;
   }
 
+  std::unique_ptr<Placeholder> clone() const override {
+    return torch::make_unique<Holder>(*this);
+  }
+
   /// The actual concrete module instance.
   std::shared_ptr<ModuleType> module;
 };
@@ -282,10 +313,24 @@ AnyModule::AnyModule(std::shared_ptr<ModuleType> module)
           std::move(module),
           &std::remove_reference<ModuleType>::type::forward)) {}
 
-template <typename ModuleType>
+template <typename ModuleType, typename>
 AnyModule::AnyModule(ModuleType&& module)
     : AnyModule(
           std::make_shared<ModuleType>(std::forward<ModuleType>(module))) {}
+
+template <typename ModuleType>
+AnyModule::AnyModule(const ModuleHolder<ModuleType>& module_holder)
+    : AnyModule(module_holder.ptr()) {}
+
+inline AnyModule::AnyModule(const AnyModule& other)
+    : content_(other.content_ ? other.content_->clone() : nullptr) {}
+
+inline AnyModule& AnyModule::operator=(const AnyModule& other) {
+  if (this != &other) {
+    content_ = other.content_ ? other.content_->clone() : nullptr;
+  }
+  return *this;
+}
 
 template <typename ModuleType>
 AnyModule& AnyModule::operator=(std::shared_ptr<ModuleType> module) {
@@ -313,6 +358,11 @@ template <typename T, typename>
 const T& AnyModule::get() const {
   AT_CHECK(!is_empty(), "Cannot call get() on an empty AnyModule");
   return get_<T>();
+}
+
+template <typename T, typename ContainedType>
+T AnyModule::get() const {
+  return T(ptr<ContainedType>());
 }
 
 inline std::shared_ptr<Module> AnyModule::ptr() const {

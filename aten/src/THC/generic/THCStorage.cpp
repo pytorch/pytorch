@@ -9,7 +9,7 @@ real* THCStorage_(data)(THCState *state, const THCStorage *self)
 
 ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage *self)
 {
-  return self->size;
+  return THStorage_size(self);
 }
 
 int THCStorage_(elementSize)(THCState *state)
@@ -40,19 +40,19 @@ real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
-  return THCStorage_new(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to());
+  return THCStorage_new(state, at::CTypeToScalarType<real>::to());
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
-  return THCStorage_newWithSize(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to(), size);
+  return THCStorage_newWithSize(state, at::CTypeToScalarType<real>::to(), size);
 }
 
 THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           THCDeviceAllocator* allocator,
                                           void* allocatorContext)
 {
-  return THCStorage_newWithAllocator(state, at::CTypeToScalarType<at::cuda::from_type<real>>::to(),
+  return THCStorage_newWithAllocator(state, at::CTypeToScalarType<real>::to(),
                                      size, allocator, allocatorContext);
 }
 
@@ -98,61 +98,28 @@ THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, p
 
 THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size)
 {
-  return THCStorage_(newWithDataAndAllocator)(state, data, size,
-                                              state->cudaDeviceAllocator,
-                                              state->cudaDeviceAllocator->state);
+  return THCStorage_newWithData(state, at::CTypeToScalarType<real>::to(), data, size);
 }
 
 THCStorage* THCStorage_(newWithDataAndAllocator)(
   THCState *state, real *data, ptrdiff_t size,
   THCDeviceAllocator *allocator, void *allocatorContext) {
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  memset(storage, 0, sizeof(THCStorage));
-  storage->scalar_type = at::CTypeToScalarType<at::cuda::from_type<real>>::to();
-  storage->data_ptr = data;
-  storage->size = size;
-  storage->refcount = 1;
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocator = allocator;
-  storage->allocatorContext = allocatorContext;
-  int device;
-  if (data) {
-    struct cudaPointerAttributes attr;
-    THCudaCheck(cudaPointerGetAttributes(&attr, data));
-    device = attr.device;
-  } else {
-    THCudaCheck(cudaGetDevice(&device));
-  }
-  storage->device = device;
-  return storage;
+  return THCStorage_newWithDataAndAllocator(state, at::CTypeToScalarType<real>::to(), data, size, allocator, allocatorContext);
 }
 
 void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag)
 {
-  storage->flag |= flag;
+  THStorage_setFlag(storage, flag);
 }
 
 void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag)
 {
-  storage->flag &= ~flag;
+  THStorage_clearFlag(storage, flag);
 }
 
 void THCStorage_(retain)(THCState *state, THCStorage *self)
 {
-  THCStorage_retain(state, self);
-}
-
-int THCStorage_(retainIfLive)(THCState *state, THCStorage *storage)
-{
-  // TODO: Check if THC_STORAGE_REFCOUNTED?
-  int refcount = storage->refcount.load();
-  while (refcount > 0) {
-    if (storage->refcount.compare_exchange_strong(refcount, refcount + 1)) {
-      return 1;
-    }
-    refcount = storage->refcount.load();
-  }
-  return 0;
+  THStorage_retain(self);
 }
 
 void THCStorage_(free)(THCState *state, THCStorage *self)

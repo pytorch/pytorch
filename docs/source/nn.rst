@@ -80,6 +80,18 @@ Convolution layers
 .. autoclass:: ConvTranspose3d
     :members:
 
+:hidden:`Unfold`
+~~~~~~~~~~~~~~~~
+
+.. autoclass:: Unfold
+    :members:
+
+:hidden:`Fold`
+~~~~~~~~~~~~~~
+
+.. autoclass:: Fold
+    :members:
+
 
 Pooling layers
 ----------------------------------
@@ -422,7 +434,7 @@ Normalization layers
 .. autoclass:: GroupNorm
     :members:
 
-    :hidden:`InstanceNorm1d`
+:hidden:`InstanceNorm1d`
 ~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: InstanceNorm1d
@@ -729,12 +741,12 @@ Utilities
 .. autofunction:: torch.nn.utils.clip_grad_value_
 
 :hidden:`parameters_to_vector`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.parameters_to_vector
 
 :hidden:`vector_to_parameters`
-~~~~~~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.vector_to_parameters
 
@@ -828,6 +840,16 @@ Convolution functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: conv_transpose3d
+
+:hidden:`unfold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: unfold
+
+:hidden:`fold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fold
 
 Pooling functions
 ----------------------------------
@@ -1024,7 +1046,7 @@ Non-linear activation functions
 .. autofunction:: softshrink
 
 :hidden:`gumbel_softmax`
-~~~~~~~~~~~~~~~~~~~~~
+~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: gumbel_softmax
 
@@ -1229,6 +1251,11 @@ Vision functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: pad
+
+:hidden:`interpolate`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: interpolate
 
 :hidden:`upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~

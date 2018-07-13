@@ -10,6 +10,7 @@
 
 #include <array>
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {
@@ -132,8 +133,8 @@ bool GroupNormOp<T, Context>::RunOnDeviceImpl(
       4, dims.data(), 2, axes.data(), X_data, mu_data, rsig_data, &context_);
 
   // Uses rsqrt to computes 1 / std which is much faster than computes std.
-  EigenArrayMap<T> rsig_array(rsig_data, G, N);
-  rsig_array = (rsig_array += epsilon_).rsqrt();
+  EigenArrayMap<T>(rsig_data, G, N) += epsilon_;
+  math::Rsqrt<T, CPUContext>(N * G, rsig_data, rsig_data, &context_);
 
   // Computes Y = gamma * (X - mu) * rsig + beta.
   if (order_ == StorageOrder::NCHW) {

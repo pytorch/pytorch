@@ -26,10 +26,12 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
     : TensorImpl(VariableType::getType(data)),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
-      requires_grad_(requires_grad),
+      requires_grad_(false),
       is_view_(false),
       output_nr_(gradient_edge.input_nr),
       pyobj_(nullptr) {
+  // set_requires_grad also checks error conditions.
+  set_requires_grad(requires_grad);
   TORCH_ASSERTM(
       !grad_fn_ || !requires_grad_,
       "requires_grad should be false if grad_fn is set");

@@ -43,9 +43,9 @@ std::string ShowNode(NodeRef node) {
     return MakeString("Tensor: ", nn_tensor->getName());
   } else if (nn::is<NeuralNetOperator>(node)) {
     const auto* nn_op = nn::get<NeuralNetOperator>(node);
-    const auto* op_def = dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-    CAFFE_ENFORCE(op_def);
-    return MakeString("Op: ", op_def->type());
+    const auto& op_def =
+        dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
+    return MakeString("Op: ", op_def.type());
   } else {
     CAFFE_THROW("Known node");
   }
@@ -106,8 +106,9 @@ void Explore(
     if (nn::is<NeuralNetOperator>(node)) {
       const auto* nn_op =
         nn::get<NeuralNetOperator>(node);
-      const auto* op_def = dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-      bool wanted = context->predicate(*op_def);
+      const auto& op_def =
+          dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
+      bool wanted = context->predicate(op_def);
       wanted = context->find_supported ? wanted : (!wanted);
       if (!wanted) {
         context->frontier.emplace(node);
@@ -190,8 +191,9 @@ caffe2::NetDef ConvertToC2Net(
     if (nn::is<NeuralNetOperator>(node)) {
       const auto* nn_op = nn::get<NeuralNetOperator>(node);
       assert(isa<Caffe2Annotation>(nn_op->getAnnotation()) && "Cannot get caffe2 op from NNOp");
-      const auto* op_def = dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
-      net.add_op()->CopyFrom(*op_def);
+      const auto& op_def =
+          dyn_cast<Caffe2Annotation>(nn_op->getAnnotation())->getOperatorDef();
+      net.add_op()->CopyFrom(op_def);
     }
   }
   for (const auto kv : sub.external_input_refs) {
@@ -282,19 +284,7 @@ void ReplaceSubgraph(
       g->createEdge(op_node, tensor_node);
     }
 
-    op_node->resetData(convertToOperatorDef(op));
-    auto op_ref = dyn_cast<NeuralNetOperator>(op_node->data().get());
-    CAFFE_ENFORCE(op_node->data());
-
-    auto annotation = nom::util::make_unique<Caffe2Annotation>();
-    annotation->setOperatorDef(&op);
-
-    auto device_name = op.device_option().node_name();
-    if (device_name != "") {
-      annotation->setDevice(device_name);
-    }
-
-    op_ref->setAnnotation(std::move(annotation));
+    op_node->resetData(convertToNeuralNetOperator(op));
   }
 }
 

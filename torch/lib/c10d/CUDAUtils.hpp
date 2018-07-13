@@ -1,29 +1,13 @@
 #pragma once
 
+typedef struct CUDAStreamInternals THCStream;
+
 #include <algorithm>
 
 #include <cuda.h>
 #include <cuda_runtime.h>
 
-// Forward declaration
-struct THCStream;
-
 namespace c10d {
-
-// RAII wrapper for current CUDA device.
-class CUDADevice {
- public:
-  CUDADevice(int device);
-
-  CUDADevice() {}
-
-  ~CUDADevice();
-
-  void setDevice(int device);
-
- protected:
-  int originalDevice_ = -1;
-};
 
 // RAII wrapper for CUDA events.
 class CUDAEvent {

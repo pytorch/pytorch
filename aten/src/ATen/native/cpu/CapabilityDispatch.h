@@ -48,7 +48,8 @@ struct DispatchStub {
 #ifndef __powerpc__
     if (cpuinfo_initialize()) {
       int avx2 = static_cast<int>(CPUCapability::AVX2);
-      if (!std::getenv("ATEN_DISABLE_AVX2") && cpuinfo_has_x86_avx2() && table[avx2]) {
+      if (!std::getenv("ATEN_DISABLE_AVX2") && cpuinfo_has_x86_avx2() &&
+          cpuinfo_has_x86_fma3() && table[avx2]) {
         return table[avx2];
       }
       int avx = static_cast<int>(CPUCapability::AVX);
