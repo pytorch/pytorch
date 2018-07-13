@@ -28,7 +28,6 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
-import torch.jit.batchop
 
 try:
     import torchvision
@@ -1817,16 +1816,19 @@ class TestScript(JitTestCase):
             output = x
             return output
 
+        print(func.graph)
         self.assertEqual(func(torch.rand(1,2)).shape[1], 2)
 
-    # def test_script_clamp_max(self):
-    #     @torch.jit.script
-    #     def test_script_clamp_max(x):
-    #         # return torch.clamp(x, min=0.5, max=None)
-    #         return torch.clamp(x, None, 0.5)
-    #
-    #     input = torch.tensor([[0.3, 0.4],[0.5, 0.51]])
-    #     self.assertEqual(test_script_clamp_max(input)[1][1], 0.5)
+    def test_script_clamp_max(self):
+        @torch.jit.script
+        def test_script_clamp_max(x):
+            # return torch.clamp(x, min=0.5, max=None)
+            return torch.clamp(x, min=None, max=0.5)
+
+        print(test_script_clamp_max.graph)
+
+        input = torch.tensor([[0.3, 0.4],[0.5, 0.51]])
+        self.assertEqual(test_script_clamp_max(input)[1][1], 0.5)
 
     def test_script_bool_constant(self):
         script = '''

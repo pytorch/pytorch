@@ -330,7 +330,7 @@ struct NoneType : public Type {
     return "None";
   }
   virtual bool isSubtypeOf(const Type& rhs) const override {
-    return *this == rhs || rhs.kind() == TypeKind::NumberType;
+    return *this == rhs;
   }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton

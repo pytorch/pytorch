@@ -503,18 +503,18 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         v.value = createStack(graph, loc, unpacked_t)->setType(ListType::ofInts());
       }
 
-      // implicit conversion from Tensor to Python Number
-      // FIXME: remove this when we support passing numbers into script fns
-      if (isTensorSubtype(v.value) && isNumberSubtype(arg.type)) {
-        v.value = tensorToNum(loc, graph, v.value, arg.type);
-      }
-
       if (v.value->node()->kind() == prim::None){
-        // std::cout<<"detecting None Node" <<std::endl;
+        std::cout<<"tryMatchSchema detecting None node, output value type" << v.value->type()->str() <<std::endl;
         if (isNumberSubtype(arg.type))
           v.value = createConstant(graph, loc, at::tensor(NAN));
         else
           v.value = graph.insertNode(graph.createUndefined())->output();
+      }
+
+      // implicit conversion from Tensor to Python Number
+      // FIXME: remove this when we support passing numbers into script fns
+      if (isTensorSubtype(v.value) && isNumberSubtype(arg.type)) {
+        v.value = tensorToNum(loc, graph, v.value, arg.type);
       }
 
       if(!v.value->type()->isSubtypeOf(*arg.type)) {
@@ -533,6 +533,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       }
     }
 
+    std::cout<<"tryMatchSchema graph: " << graph <<std::endl;
     return flat_inputs;
 }
 
@@ -701,8 +702,6 @@ struct to_ir {
       , resolver(resolver)
       , environment_stack(nullptr) {
     pushFrame(graph->block());
-
-    std::cout<<"to_ir: " << def.name();
 
     std::vector<Argument> arguments, returns; // for schema
     // inputs
