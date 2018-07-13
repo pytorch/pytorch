@@ -30,7 +30,7 @@ using at::optional;
 
 void register_variable_type_for(at::Type* baseType);
 
-struct VariableType final : public at::Type {
+struct TORCH_API VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
@@ -51,7 +51,7 @@ struct VariableType final : public at::Type {
   virtual std::unique_ptr<at::Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const override;
   virtual at::Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const override;
 
-  TORCH_API static at::Type* getType(const at::Type& baseType);
+  static at::Type* getType(const at::Type& baseType);
   static at::Type* getType(const at::Tensor& tensor);
   static bool isVariableType(const at::Type& type);
   static std::vector<at::Type*> allCUDATypes();
