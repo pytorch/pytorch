@@ -9,21 +9,6 @@ typedef struct CUDAStreamInternals THCStream;
 
 namespace c10d {
 
-// RAII wrapper for current CUDA device.
-class CUDADevice {
- public:
-  CUDADevice(int device);
-
-  CUDADevice() {}
-
-  ~CUDADevice();
-
-  void setDevice(int device);
-
- protected:
-  int originalDevice_ = -1;
-};
-
 // RAII wrapper for CUDA events.
 class CUDAEvent {
  public:

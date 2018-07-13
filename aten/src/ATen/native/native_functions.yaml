@@ -532,6 +532,19 @@
     CPU: _erf_out_cpu
     CUDA: _erf_out_cuda
 
+- func: erfc(Tensor self) -> Tensor
+
+- func: erfc_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _erfc__cpu
+    CUDA: _erfc__cuda
+
+- func: erfc_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _erfc_out_cpu
+    CUDA: _erfc_out_cuda
+
 - func: exp(Tensor self) -> Tensor
 
 - func: exp_(Tensor self) -> Tensor
@@ -1292,6 +1305,8 @@
     CPU: _sqrt_out_cpu
     CUDA: _sqrt_out_cuda
 
+- func: std(Tensor self, bool unbiased=true) -> Tensor
+
 - func: std(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
 
 - func: std_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
@@ -1405,6 +1420,8 @@
 
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
   variants: method
+
+- func: var(Tensor self, bool unbiased=true) -> Tensor
 
 - func: var(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
 

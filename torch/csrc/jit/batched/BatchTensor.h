@@ -9,6 +9,8 @@ namespace torch { namespace jit {
 struct BatchTensor {
 public:
   BatchTensor(at::Tensor data, at::Tensor mask, at::Tensor dims);
+  // expand a tensor to a batchtensor given batch_size
+  BatchTensor(at::Tensor data, int64_t batch_size);
   BatchTensor(const std::vector<at::Tensor> datalist, at::Tensor dims);
   ~BatchTensor(){};
   const char * toString() const {
