@@ -158,7 +158,7 @@ class LowRankMultivariateNormal(Distribution):
         shape = self._extended_shape(sample_shape)
         eps_W = self.loc.new_empty(shape[:-1] + (self.cov_factor.size(-1),)).normal_()
         eps_D = self.loc.new_empty(shape).normal_()
-        return self.loc + _batch_mv(self.cov_factor, eps_W) + self.cov_diag * eps_D
+        return self.loc + _batch_mv(self.cov_factor, eps_W) + self.cov_diag.sqrt() * eps_D
 
     def log_prob(self, value):
         if self._validate_args:
