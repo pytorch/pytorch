@@ -1,7 +1,9 @@
 #pragma once
 
 #ifdef _WIN32
-# if defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
+# if defined(torch_EXPORTS)
+#  define AT_API __declspec(dllimport)
+# elif defined(ATen_cpu_EXPORTS) || defined(caffe2_EXPORTS)
 #  define AT_API __declspec(dllexport)
 # else
 #  define AT_API __declspec(dllimport)
