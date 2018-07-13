@@ -269,8 +269,6 @@ struct THCCachingHostAllocator final : public at::Allocator {
     THAssert(size >= 0);
     void *ptr;
     THCudaCheck(allocator.malloc(&ptr, size));
-    int device;
-    THCudaCheck(cudaGetDevice(&device));
     return {ptr, {ptr, &THCCachingHostDeleter}, at::kCPU};
   }
   at::DeleterFnPtr raw_deleter() const override {

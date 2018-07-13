@@ -36,14 +36,11 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   storage->size = size;
 
   at::SupervisedPtr ptr;
-  if (size > 0) {
-    // update heap *before* attempting malloc, to free space for the malloc
-    try {
-      ptr = allocator->allocate(size * at::elementSize(scalar_type));
-    } catch(...) {
-      free(storage);
-      throw;
-    }
+  try {
+    ptr = allocator->allocate(size * at::elementSize(scalar_type));
+  } catch(...) {
+    free(storage);
+    throw;
   }
   new (&storage->data_ptr) at::SupervisedPtr(std::move(ptr));
   return storage;
