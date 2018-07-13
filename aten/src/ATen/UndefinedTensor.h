@@ -9,14 +9,13 @@ public:
   static inline UndefinedTensor * singleton() {
     return &_singleton;
   }
-  virtual ~UndefinedTensor() {}
-  virtual const char * toString() const override;
-  virtual IntList sizes() const override;
-  virtual IntList strides() const override;
-  virtual int64_t dim() const override;
-  virtual Scalar localScalar() override;
-  virtual void * unsafeGetTH(bool retain) override;
-  virtual std::unique_ptr<Storage> storage() override;
+  const char * toString() const override;
+  IntList sizes() const override;
+  IntList strides() const override;
+  int64_t dim() const override;
+  Scalar localScalar() override;
+  void * unsafeGetTH(bool retain) override;
+  std::unique_ptr<Storage> storage() override;
   static const char * typeString();
 private:
   UndefinedTensor();
