@@ -12,7 +12,7 @@ from .utils import IDENT_REGEX
 FUNCTION_DECLARATION = CodeTemplate("""\
 struct ${op} : public ${superclass} {
   using ${superclass}::${superclass};
-  variable_list apply(const variable_list& grads) override;
+  variable_list apply(variable_list&& grads) override;
   std::string name() const override { return "${op}"; }
   void release_variables() override {
     ${release_variables}
@@ -31,7 +31,7 @@ virtual void will_release_variables() override {
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
-variable_list ${op}::apply(const variable_list& grads) {
+variable_list ${op}::apply(variable_list&& grads) {
   IndexRangeGenerator gen;
   ${compute_index_ranges}
   variable_list grad_inputs(gen.size());

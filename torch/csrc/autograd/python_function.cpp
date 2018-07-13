@@ -104,7 +104,7 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
 // C++'s Function::apply to a Python method "apply".
-auto PyFunction::apply(const variable_list& inputs) -> variable_list {
+auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
   at::DeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;

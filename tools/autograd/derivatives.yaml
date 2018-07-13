@@ -243,6 +243,9 @@
 - name: erf(Tensor self)
   self: 2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
 
+- name: erfc(Tensor self)
+  self: -2.0 / sqrt(M_PI) * exp(-(self.pow(2))) * grad
+
 - name: erfinv(Tensor self)
   self: 0.5 * sqrt(M_PI) * exp(self.erfinv().pow(2)) * grad
 

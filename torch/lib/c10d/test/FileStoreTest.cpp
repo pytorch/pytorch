@@ -1,9 +1,11 @@
-#include "FileStore.hpp"
 #include "StoreTestCommon.hpp"
 
 #include <unistd.h>
+
 #include <iostream>
 #include <thread>
+
+#include <c10d/FileStore.hpp>
 
 std::string tmppath() {
   const char* tmpdir = getenv("TMPDIR");

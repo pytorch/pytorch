@@ -345,14 +345,28 @@ static variable_list call_function(FunctionTask& task) {
   if(!task.base->keep_graph) {
     fn.will_release_variables();
   }
-  auto outputs = fn(inputs);
+
+  const auto has_post_hooks = !fn.post_hooks().empty();
+  variable_list outputs;
+
+  if(has_post_hooks){
+    auto inputs_copy = inputs;
+    outputs = fn(std::move(inputs_copy));
+  }else{
+    outputs = fn(std::move(inputs));
+  }
+
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
     ss << "Function "  << fn.name() << " returned an " << msg;
     return ss.str();
   });
   checkpoint_valid = prev_checkpoint_valid_state;
-  return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+
+  if(has_post_hooks){
+    return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+  }
+  return outputs;
 }
 
 auto Engine::evaluate_function(FunctionTask& task) -> void {
