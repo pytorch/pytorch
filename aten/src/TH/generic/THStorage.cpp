@@ -30,10 +30,9 @@ THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 }
 
 THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
-                                        THAllocator *allocator,
-                                        void *allocatorContext)
+                                        at::Allocator *allocator)
 {
-  return THStorage_newWithAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), size, allocator, allocatorContext);
+  return THStorage_newWithAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), size, allocator);
 }
 
 
@@ -100,15 +99,16 @@ void THStorage_(free)(THStorage *storage)
   THStorage_free(storage);
 }
 
+/*
 THStorage* THStorage_(newWithData)(real *data, ptrdiff_t size)
 {
   return THStorage_newWithData(at::CTypeToScalarType<th::from_type<real>>::to(), data, size);
 }
+*/
 
-THStorage* THStorage_(newWithDataAndAllocator)(real* data, ptrdiff_t size,
-                                               THAllocator* allocator,
-                                               void* allocatorContext) {
-  return THStorage_newWithDataAndAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), data, size, allocator, allocatorContext);
+THStorage* THStorage_(newWithDataAndAllocator)(at::SupervisedPtr&& data, ptrdiff_t size,
+                                               at::Allocator* allocator) {
+  return THStorage_newWithDataAndAllocator(at::CTypeToScalarType<th::from_type<real>>::to(), std::move(data), size, allocator);
 }
 
 void THStorage_(resize)(THStorage *storage, ptrdiff_t size)

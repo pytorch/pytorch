@@ -349,7 +349,7 @@ BenchmarkCache<cudnnConvolutionBwdFilterAlgo_t> bwd_filter_algos;
 // tensor instead.
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    AT_CUDA_CHECK(THCudaMalloc(globalContext().lazyInitCUDA(), &data, size));
+    data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
@@ -692,11 +692,10 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
   }
   cache.insert(args.params, *algo);
 
-  // These two lines frees the cached blocks in our caching allocator. They are
+  // Free the cached blocks in our caching allocator. They are
   // needed here because the above benchmarking uses a huge amount of memory,
   // e.g. a few GBs.
-  THCDeviceAllocator* allocator = THCCachingAllocator_get();
-  AT_CUDA_CHECK(allocator->emptyCache(allocator->state));
+  THCCachingAllocator_emptyCache();
 }
 
 template<typename algo_t>
