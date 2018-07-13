@@ -343,8 +343,8 @@ if(BUILD_PYTHON)
     execute_process(
       COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
     if(${_exitcode} EQUAL 0)
-      message(STATUS "Setting Python to ${_py_exe}")
       string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
     endif()
   endif()
 
@@ -361,15 +361,30 @@ if(BUILD_PYTHON)
   # Seed PYTHON_INCLUDE_DIR and PYTHON_LIBRARY to be consistent with the
   # executable that we already found (if we didn't actually find an executable
   # then these will just use "python", but at least they'll be consistent with
-  # each other)
+  # each other).
   if(NOT DEFINED PYTHON_INCLUDE_DIR)
-    pycmd(PYTHON_INCLUDE_DIR
-        "from sysconfig import get_paths; print(get_paths()['include'])")
-  endif()
+    # distutils.sysconfig, if it's installed, is more accurate than sysconfig,
+    # which sometimes outputs directories that do not exist
+    pycmd_no_exit(_py_inc _exitcode "from distutils import sysconfig; print(sysconfig.get_python_inc())")
+    if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+      SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+      message(STATUS "Setting Python's include dir to ${_py_inc} from distutils.sysconfig")
+    else()
+      pycmd_no_exit(_py_inc _exitcode "from sysconfig import get_paths; print(get_paths()['include'])")
+      if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+        SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+        message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
+      endif()
+    endif()
+  endif(NOT DEFINED PYTHON_INCLUDE_DIR)
+
   if(NOT DEFINED PYTHON_LIBRARY)
-    pycmd(PYTHON_LIBRARY
-        "from sysconfig import get_paths; print(get_paths()['stdlib'])")
-  endif()
+    pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
+    if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
+      SET(PYTHON_LIBRARY "${_py_lib}")
+      message(STATUS "Setting Python's library to ${_py_lib}")
+    endif()
+  endif(NOT DEFINED PYTHON_LIBRARY)
 
   # These should fill in the rest of the variables, like versions, but resepct
   # the variables we set above
