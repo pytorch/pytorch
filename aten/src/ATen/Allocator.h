@@ -82,18 +82,14 @@ inline bool operator!=(std::nullptr_t, const at::SupervisedPtr& sp) noexcept {
 //  };
 //
 // This is not good for our unique_ptr based allocator interface, as
-// there is no way to get the deleter from our allocator to the
-// deletion site in Thrust.  Indeed, if every pointer is getting a
-// *fresh* deleter, we truly would have no choice except to maintain
-// a map from pointers to deleters.  This is bad.
+// there is no way to get to the supervisor when we free.
 //
-// So, we observe that not *all* deleters actually have lots of
-// different deleters; some of them actually always return the same
-// deleter every time.  In this case, we can support the "raw"
+// However, in some cases the supervisor is exactly the same as
+// the data pointer.  In this case, we can support the "raw"
 // allocate and deallocate interface.  This is what
-// maybeGlobalBoundDeleter signifies.  By default, it returns the
-// default (empty) BoundDeleter, which means that the raw interface
-// is not implemented.  Be sure to implement it whenever possible.
+// raw_deleter signifies.  By default, it returns a nullptr, which means that
+// the raw interface is not implemented.  Be sure to implement it whenever
+// possible.
 
 struct Allocator {
   virtual ~Allocator() {}
