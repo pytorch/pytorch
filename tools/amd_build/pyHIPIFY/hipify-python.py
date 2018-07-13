@@ -36,6 +36,8 @@ from functools import reduce
 from enum import Enum
 from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 
+# Hardcode the PyTorch template map
+PYTORCH_TEMPLATE_MAP = {"Dtype": "real", "T": "real"}
 
 def openf(filename, mode):
     if sys.version_info[0] == 3:
@@ -187,9 +189,7 @@ class disablefuncmode(Enum):
 
 
 def update_progress_bar(total, progress):
-    """
-    Displays and updates a console progress bar.
-    """
+    """Displays and updates a console progress bar."""
     barLength, status = 20, ""
     progress = float(progress) / float(total)
     if progress >= 1.:
@@ -228,7 +228,7 @@ def inside_included_directories(dirpath, rootpath, include_dirs):
 
 def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=None, show_progress=True):
     """
-    Recursively walk over directory and call preprocessor on selected files.
+    Recursively walk over the directory and call preprocessor on selected files.
 
     Arguments)
         extensions - A plist of file extensions ['cu', 'cuh', ..]
@@ -400,8 +400,8 @@ def processKernelLaunches(string, stats):
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
 
         # Transform cuda kernel to hip kernel
-        hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel[0:-1].replace(">>>",
-                                                                       ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(">>>", ", ")
+        hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel[0:-1].replace(
+            ">>>", ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(">>>", ", ")
 
         # Replace cuda kernel with hip kernel
         output_string = output_string.replace(cuda_kernel, hip_kernel)
@@ -496,7 +496,8 @@ def disable_function(input_string, function, replace_style):
         info["function_start"] = input_string.find(function_string)
     else:
         # Automatically detect signature.
-        the_match = re.search(r"(((.*) (\*)?)({0})(\([^{{)]*\)))\s*{{".format(function.replace("(", "\(").replace(")", "\)")), input_string)
+        the_match = re.search(r"(((.*) (\*)?)({0})(\([^{{)]*\)))\s*{{".format(
+            function.replace("(", "\(").replace(")", "\)")), input_string)
         if the_match is None:
             return input_string
 
@@ -654,7 +655,7 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-def get_kernel_template_params(the_file, KernelDictionary, templateParam_to_value = {}):
+def get_kernel_template_params(the_file, KernelDictionary, templateParam_to_value):
     """Scan for __global__ kernel definitions then extract its argument types, and static cast as necessary"""
     # Read the kernel file.
     with openf(the_file, "r") as f:
@@ -833,8 +834,8 @@ def extract_arguments(start, string):
 
     return arguments
 
-# Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
 
+# Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
 def add_static_casts(directory, extensions, KernelTemplateParams):
     """Added necessary static casts to kernel launches to match kernel argument type to corresponding kernel definition
        Eg.
@@ -875,15 +876,17 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                                 if arg_idx in argument_types:
                                     the_type = argument_types[arg_idx]
                                     the_arg = arg.replace("\n", "").replace("\\", "").strip()
+                                    # Not all types have issues with the hipLaunchKernelGGL. However, these types below do.
                                     if the_type in ["int", "const int", "int64_t", "THCIndex_t *", "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]:
                                         static_argument = "static_cast<{0}>({1})".format(the_type, the_arg)
 
                                         def replace_arg(match):
-                                          return match.group(1) + static_argument + match.group(3)
+                                            return match.group(1) + static_argument + match.group(3)
                                         # Update to static_cast, account for cases where argument is at start/end of string
                                         new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(re.escape(the_arg)), replace_arg, new_kernel_launch)
 
-                            # Add template type
+                            # PyTorch Specific: Add template type
+                            # Here the template value will be resolved from <real> to <Dtype>.
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
                             new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
@@ -996,15 +999,11 @@ def main():
                 if filename_ends_with_extension(filename, args.extensions) and inside_included_directories(dirpath, args.output_directory, args.include_dirs):
                     the_file = os.sep.join([dirpath, filename])
 
-
-                    # Create the PyTorch template map
-                    pytorch_template_map = {"Dtype": "real", "T": "real"}
-
                     # Store param information inside KernelTemplateParams
                     get_kernel_template_params(
                         the_file,
                         KernelTemplateParams,
-                        pytorch_template_map)
+                        PYTORCH_TEMPLATE_MAP)
 
     # Open YAML file with disable information.
     if args.yaml_settings != "":
