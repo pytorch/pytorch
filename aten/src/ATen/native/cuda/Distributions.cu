@@ -46,7 +46,7 @@ void poisson_cuda_kernel(
             blockIdx.x * blockDim.x + threadIdx.x,
             seeds.second,
             &state);
-        ret_val = scalar_cast<scalar_t>(curand_poisson(&state, scalar_cast<float>(lambda)));
+        ret_val = static_cast<scalar_t>(curand_poisson(&state, lambda));
       });
 }
 
