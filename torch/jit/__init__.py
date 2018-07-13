@@ -390,6 +390,7 @@ def script_method(fn):
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
     def decorator(fn):
+        import torch.jit.batchop
         mod = script(fn, optimize, _frames_up)
         res_graph = torch.to_batch_graph(mod.graph)
         res_mod = ScriptModule()
