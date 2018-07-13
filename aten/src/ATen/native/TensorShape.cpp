@@ -41,8 +41,18 @@ std::vector<Tensor> chunk(const Tensor& self, int64_t chunks, int64_t dim) {
     AT_ERROR("chunk expects `chunks` to be greater than 0, got: ", chunks);
   }
   int64_t split_size = (self.size(dim) + chunks - 1) / chunks;
-  // ensure this is dispatched through Tensor/Type, rather than the native function directly.
-  return self.split(split_size, dim);
+
+  // We need to call split_with_sizes in the case where split_size and dimension size are 0, because
+  // a call to split would discard the number of chunks (because we can have an arbitrary number of
+  // 0-sized chunks adding up to 0).  So, call split_with_sizes with the correct number of chunks,
+  // eventually we will do this for all cases.
+  if (split_size == 0 && self.size(dim) == 0) {
+    std::vector<int64_t> split_sizes(chunks, split_size);
+    split_sizes[chunks - 1] = split_size - (split_size * chunks - self.size(dim));
+    return self.split_with_sizes(split_sizes, dim);
+  } else {
+    return self.split(split_size, dim);
+  }
 }
 
 Tensor diagflat(const Tensor& self, int64_t offset) {
@@ -64,13 +74,24 @@ Tensor diagonal(const Tensor& self, int64_t offset, int64_t dim1_, int64_t dim2_
   // Note that we invert +/- in the second to absorb the negative
   // sign in the offset.
   if (offset >= 0) {
-    diag_size = std::min(self.size(dim1), self.size(dim2)-offset);
+    diag_size = std::max<int64_t>(std::min(self.size(dim1), self.size(dim2)-offset), 0);
+  } else {
+    diag_size = std::max<int64_t>(std::min(self.size(dim1)+offset, self.size(dim2)), 0);
+  }
+#ifndef USE_TH_SIZE_ZERO_DIM
+  AT_CHECK(diag_size > 0, "invalid diagonal offset ", offset); // the diagonal offset was too large in magnitude
+#endif
+
+  // NumPy allows you to specify offsets "off the end"; let's just be careful not to
+  // set a ridiculous storage_offset in that case (technically it shouldn't matter
+  // because there are no elements in the tensor, but let's be kosher).
+  if (diag_size == 0) {
+    // skip
+  } else if (offset >= 0) {
     storage_offset += offset * self.stride(dim2);
   } else {
-    diag_size = std::min(self.size(dim1)+offset, self.size(dim2));
     storage_offset -= offset * self.stride(dim1);
   }
-  AT_CHECK(diag_size > 0, "invalid diagonal offset ", offset); // the diagonal offset was too large in magnitude
 
   // construct new size and stride: we drop dim1 and dim2 (maximum first for not changing the index of the minumum)
   // the new ("joint") dimension is appended to the end of the shape / stride to match numpy semantics
@@ -181,7 +202,9 @@ Tensor repeat(const Tensor& self, IntList repeats) {
   Tensor result = self.type().tensor(target_size);
   Tensor urtensor = result.type().alias(result);
   for (int64_t i = 0; i < xtensor.dim(); ++i) {
-    urtensor = urtensor.unfold(i, xtensor.size(i), xtensor.size(i));
+    // can't unfold with step 0, so make sure step is at least 1
+    // (it doesn't matter what it is in that case, because the size is 0).
+    urtensor = urtensor.unfold(i, xtensor.size(i), std::max<int64_t>(xtensor.size(i), 1));
   }
 
   urtensor.copy_(xtensor.expand_as(urtensor));
@@ -210,6 +233,9 @@ static std::vector<int64_t> infer_size(IntList shape, int64_t numel) {
 
   if (numel == newsize || (infer_dim && newsize > 0 && numel % newsize == 0)) {
     if (infer_dim) {
+      // we have a degree of freedom here to select the dimension size; follow NumPy semantics
+      // and just bail.
+      AT_CHECK(newsize != 0, "cannot reshape tensor of 0 elements into shape ", shape);
       res[*infer_dim] = numel / newsize;
     }
 #ifndef USE_TH_SIZE_ZERO_DIM
@@ -301,17 +327,19 @@ Tensor slice(const Tensor& self, int64_t dim, int64_t start, int64_t end, int64_
 }
 
 std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
-  if (self.dim() == 0) {
-    throw std::runtime_error("split expects at least a 1-dimensional tensor");
-  }
-  if (split_size < 0) {
-    std::ostringstream ss;
-    ss << "split expects split_size be non-negative, but got split_size="
-       << split_size;
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
+  AT_CHECK(split_size >= 0,  "split expects split_size be non-negative, but got split_size=", split_size);
   int64_t dim_size = self.size(dim);
-  int64_t num_splits = (dim_size + split_size - 1) / split_size;
+  AT_CHECK(split_size > 0 || self.size(dim) == 0,
+           "split_size can only be 0 if dimension size is 0, "
+           "but got dimension size of ", dim_size);
+  // if split_size is 0 and dimension size is 0, there is 1 split.
+  int64_t num_splits = 1;
+  if (split_size != 0) {
+    // ensuring num_splits is at least 1 makes consistent the case where split_size > dim_size
+    // (returns a single split).  We might want to error here, but keep it for BC.
+    num_splits = std::max<int64_t>((dim_size + split_size - 1) / split_size, 1);
+  }
   std::vector<Tensor> splits(num_splits);
   int64_t last_split_size = split_size - (split_size * num_splits - dim_size);
 
@@ -323,9 +351,7 @@ std::vector<Tensor> split(const Tensor& self, int64_t split_size, int64_t dim) {
 }
 
 std::vector<Tensor> split_with_sizes(const Tensor& self, IntList split_sizes, int64_t dim) {
-  if (self.dim() == 0) {
-    throw std::runtime_error("split_with_sizes expects at least a 1-dimensional tensor");
-  }
+  AT_CHECK(self.dim() != 0, "split expects at least a 1-dimensional tensor");
   int64_t dim_size = self.size(dim);
   int64_t num_splits = split_sizes.size();
   std::vector<Tensor> splits(num_splits);
@@ -340,13 +366,10 @@ std::vector<Tensor> split_with_sizes(const Tensor& self, IntList split_sizes, in
          << "entries, but got split_sizes=" << split_sizes;
       throw std::runtime_error(ss.str());
     }
-    if (start_idx >= dim_size) {
-      break;
-    }
     splits[i] = self.narrow(dim, start_idx, length);
     start_idx += length;
   }
-  if (i < num_splits || start_idx != dim_size) {
+  if (start_idx != dim_size) {
     std::ostringstream ss;
     ss << "split_with_sizes expects split_sizes to sum exactly to "
        << dim_size << " (input tensor's size at dimension " << dim << "), "
@@ -504,10 +527,11 @@ inferSqueezeGeometry(const Tensor& tensor, int64_t dim) {
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> >
 inferUnsqueezeGeometry(const Tensor& tensor, int64_t dim) {
+#ifndef USE_TH_SIZE_ZERO_DIM
   if (tensor.numel() == 0) {
     throw std::runtime_error("cannot unsqueeze empty tensor");
   }
-
+#endif
   std::vector<int64_t> sizes(tensor.sizes());
   std::vector<int64_t> strides(tensor.strides());
   int64_t new_stride = dim >= tensor.dim() ? 1 : sizes[dim] * strides[dim];
@@ -586,12 +610,17 @@ Tensor flatten(const Tensor& self, int64_t start_dim, int64_t end_dim) {
     return self;
   }
 
+  // We don't want to infer_size on the entire shape, because that can give us an extra degree
+  // of freedom we don't want; for example, consider shape [0, 1, 3, 0], with start_dim=1, end_dim=2.
+  // It's clear we want result shape [0, 3, 0] but passing [0, -1, 0] to infer_size means the -1
+  // can take on any value and satisfy the constraints.
+  auto slice_numel = prod_intlist(self.sizes().slice(start_dim, end_dim - start_dim + 1));
   std::vector<int64_t> shape;
   shape.reserve(self.dim() - end_dim + start_dim);
   for (int64_t i = 0; i < start_dim; i++) {
     shape.push_back(self.size(i));
   }
-  shape.push_back(-1);
+  shape.push_back(slice_numel);
   for (int64_t i = end_dim + 1; i < self.dim(); i++) {
     shape.push_back(self.size(i));
   }

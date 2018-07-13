@@ -1,11 +1,12 @@
 #include "ProcessGroupNCCL.hpp"
-#include "private/CUDAUtils.hpp"
+
+#include <map>
+#include <unordered_set>
 
 #include <THC.h>
 #include <THC/THCGeneral.hpp>
 
-#include <map>
-#include <unordered_set>
+#include <c10d/private/CUDAUtils.hpp>
 
 namespace c10d {
 
