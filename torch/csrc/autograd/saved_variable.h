@@ -2,6 +2,7 @@
 
 #include "torch/csrc/autograd/variable_version.h"
 #include "torch/csrc/jit/tracer_state.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
 
@@ -14,7 +15,7 @@ namespace torch { namespace autograd {
 struct Variable;
 struct Function;
 
-extern const char* ERR_BACKWARD_TWICE;
+TORCH_API extern const char* ERR_BACKWARD_TWICE;
 
 /// A snapshot of a variable at a certain version. A `SavedVariable` stores
 /// enough information to reconstruct a variable from a certain point in time.
