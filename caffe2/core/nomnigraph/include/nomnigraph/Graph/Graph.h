@@ -208,7 +208,8 @@ template <typename T, typename... U>
 class Graph {
  public:
   using SubgraphType = Subgraph<T, U...>;
-  using NodeRef = Node<T, U...>*;
+  using NodeObj = Node<T, U...>;
+  using NodeRef = NodeObj*;
   using EdgeRef = Edge<T, U...>*;
 
   Graph() {
