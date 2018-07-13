@@ -688,6 +688,16 @@ def exp(g, self):
     return g.op("Exp", self)
 
 
+def norm(g, self, p, dim, keepdim):
+    if p == 1:
+        f = _reduce_op_symbolic("ReduceL1")
+    elif p == 2:
+        f = _reduce_op_symbolic("ReduceL2")
+    else:
+        raise RuntimeError("ONNX export only p-norms with p of 1 or 2")
+    return f(g, self, dim=dim, keepdim=keepdim)
+
+
 def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 

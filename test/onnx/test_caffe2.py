@@ -615,6 +615,13 @@ class TestCaffe2Backend(unittest.TestCase):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
 
+    def test_weight_norm(self):
+        model = nn.utils.weight_norm(nn.Conv1d(1, 1, 3))
+        input = Variable(torch.randn(1, 1, 5), requires_grad=True)
+        self.run_model_test(
+            model, train=True, batch_size=0, input=input, use_gpu=False
+        )
+
     def test_mnist(self):
         model = MNIST()
         input = Variable(torch.randn(BATCH_SIZE, 1, 28, 28))
