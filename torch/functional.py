@@ -163,16 +163,17 @@ def stft(input, n_fft, hop_length=None, win_length=None, window='hann',
       :attr:`n_fft`. :attr:`win_length` must be less than or equal to
       :attr:`n_fft`.
 
-    * :attr:`window` can be a string, a 1-D window tensor, or ``None`` (default).
+    * :attr:`window` can be a string, a 1-D window tensor, or ``None``. Default
+      is ``"hann"``.
 
         * If :attr:`window` is a string, it is the name of the window function
           used and must be one of ``"bartlett"``, ``"blackman"``, ``"hamming"``,
-          and ``"hann"``. The window will be created with length
+          and ``"hann"``. (default) The window will be created with length
           :attr:`win_length`.
 
         * If :attr:`window` is a tensor, it must have length :attr:`win_length`.
 
-        * If :attr:`window` is ``None`` (default), no window is applied, i.e.,
+        * If :attr:`window` is ``None``, no window is applied in STFT, i.e.,
           it is equivalent with having :math:`1` everywhere in the window.
 
       If size of :attr:`window` is less than :attr:`n_fft`, :attr:`window`
@@ -214,7 +215,7 @@ def stft(input, n_fft, hop_length=None, win_length=None, window='hann',
         win_length (int): the size of window frame and STFT filter.
             Default: ``None``  (treated as equal to :attr:`n_fft`)
         window (string or Tensor, optional): the optional window function.
-            Default: ``None`` (treated as window of all :math:`1`s)
+            Default: ``"hann"``
         center (bool, optional): whether to pad :attr:`input` on both sides so
             that the :math:`t`-th frame is centered at time :math:`t \times \text{hop_length}`.
             Default: ``True``
