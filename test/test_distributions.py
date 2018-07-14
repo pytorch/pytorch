@@ -1551,8 +1551,8 @@ class TestDistributions(TestCase):
 
     def test_lowrank_multivariate_normal_properties(self):
         loc = torch.randn(5)
-        cov_factor = torch.randn(5, 2, requires_grad=True)
-        cov_diag = torch.tensor(torch.randn(5).abs(), requires_grad=True)
+        cov_factor = torch.randn(5, 2)
+        cov_diag = torch.tensor(torch.randn(5).abs())
         cov = cov_factor.matmul(cov_factor.t()) + cov_diag.diag()
         m1 = LowRankMultivariateNormal(loc, cov_factor, cov_diag)
         m2 = MultivariateNormal(loc=loc, covariance_matrix=cov)
@@ -1562,6 +1562,18 @@ class TestDistributions(TestCase):
         self.assertEqual(m1.scale_tril, m2.scale_tril)
         self.assertEqual(m1.precision_matrix, m2.precision_matrix)
         self.assertEqual(m1.entropy(), m2.entropy())
+
+    def test_lowrank_multivariate_normal_moments(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = torch.randn(5)
+        cov_factor = torch.randn(5, 2)
+        cov_diag = torch.tensor(torch.randn(5).abs())
+        d = LowRankMultivariateNormal(mean, cov_factor, cov_diag)
+        samples = d.rsample((100000,))
+        empirical_mean = samples.mean(0)
+        self.assertEqual(d.mean, empirical_mean, prec=0.01)
+        empirical_var = samples.var(0)
+        self.assertEqual(d.variance, empirical_var, prec=0.02)
 
     def test_multivariate_normal_shape(self):
         mean = torch.randn(5, 3, requires_grad=True)
@@ -1675,6 +1687,17 @@ class TestDistributions(TestCase):
         self.assertEqual(m.covariance_matrix, m.scale_tril.mm(m.scale_tril.t()))
         self.assertEqual(m.covariance_matrix.mm(m.precision_matrix), torch.eye(m.event_shape[0]))
         self.assertEqual(m.scale_tril, torch.potrf(m.covariance_matrix, upper=False))
+
+    def test_multivariate_normal_moments(self):
+        set_rng_seed(0)  # see Note [Randomized statistical tests]
+        mean = torch.randn(5)
+        scale_tril = transform_to(constraints.lower_cholesky)(torch.randn(5, 5))
+        d = MultivariateNormal(mean, scale_tril=scale_tril)
+        samples = d.rsample((100000,))
+        empirical_mean = samples.mean(0)
+        self.assertEqual(d.mean, empirical_mean, prec=0.01)
+        empirical_var = samples.var(0)
+        self.assertEqual(d.variance, empirical_var, prec=0.05)
 
     def test_exponential(self):
         rate = torch.tensor(torch.randn(5, 5).abs(), requires_grad=True)
