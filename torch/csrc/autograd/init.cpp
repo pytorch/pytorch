@@ -26,7 +26,9 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
 
   py::class_<torch::autograd::profiler::Event>(m,"ProfilerEvent")
   .def("kind",&torch::autograd::profiler::Event::kind)
-  .def("name",&torch::autograd::profiler::Event::name)
+    .def("name",[](const torch::autograd::profiler::Event& e) {
+        return e.name();
+      })
   .def("thread_id",&torch::autograd::profiler::Event::thread_id)
   .def("device",&torch::autograd::profiler::Event::device)
   .def("cpu_elapsed_us",&torch::autograd::profiler::Event::cpu_elapsed_us)
@@ -42,14 +44,10 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   m.def("_disable_profiler", torch::autograd::profiler::disableProfiler);
 
   m.def("_push_range", [](const char *name) {
-    using namespace torch::autograd::profiler;
-    if (state  == ProfilerState::Disabled) return;
-    pushRange(name);
+      torch::autograd::profiler::pushRange(name);
   });
   m.def("_pop_range", []() {
-    using namespace torch::autograd::profiler;
-    if (state  == ProfilerState::Disabled) return;
-    popRange();
+    torch::autograd::profiler::popRange();
   });
 
   Py_RETURN_TRUE;
