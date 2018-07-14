@@ -936,6 +936,61 @@ CAFFE2_SPECIALIZED_REDUCE_SUM(double)
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
 #undef CAFFE2_SPECIALIZED_REDUCE_MEAN
 
+#define CAFFE2_SPECIALIZED_REDUCE_L1(T)                         \
+  template <>                                                   \
+  void ReduceL1<T, CPUContext>(                                 \
+      const int num_dims,                                       \
+      const int* dims,                                          \
+      const int num_axes,                                       \
+      const int* axes,                                          \
+      const T* X,                                               \
+      T* Y,                                                     \
+      CPUContext* context) {                                    \
+    ReduceTensor(                                               \
+        num_dims,                                               \
+        dims,                                                   \
+        num_axes,                                               \
+        axes,                                                   \
+        [](const T& a, const T& b) { return a + std::abs(b); }, \
+        T(0),                                                   \
+        X,                                                      \
+        Y,                                                      \
+        context);                                               \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L1(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L1
+
+#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                             \
+  template <>                                                       \
+  void ReduceL2<T, CPUContext>(                                     \
+      const int num_dims,                                           \
+      const int* dims,                                              \
+      const int num_axes,                                           \
+      const int* axes,                                              \
+      const T* X,                                                   \
+      T* Y,                                                         \
+      CPUContext* context) {                                        \
+    ReduceTensor(                                                   \
+        num_dims,                                                   \
+        dims,                                                       \
+        num_axes,                                                   \
+        axes,                                                       \
+        [](const T& a, const T& b) { return a + b * b; },           \
+        T(0),                                                       \
+        X,                                                          \
+        Y,                                                          \
+        context);                                                   \
+    std::vector<int> Y_dims(dims, dims + num_dims);                 \
+    for (int i = 0; i < num_axes; ++i) {                            \
+      Y_dims[axes[i]] = 1;                                          \
+    }                                                               \
+    const int Y_size = std::accumulate(                             \
+        Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>()); \
+    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                     \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L2(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L2
+
 namespace {
 
 template <typename T>
