@@ -32,6 +32,28 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   return self._fill_(value);
 }
 
+Tensor mvlgamma(const Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p cannot be negative");
+  Tensor args = native::arange(-p + 1, 1, self.options()).div_(2.);
+  args = args.add(self.unsqueeze(-1));
+  return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+}
+
+Tensor& mvlgamma_(Tensor& self, int64_t p) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()),
+           "mvlgamma is not implemented for ", self.type());
+  AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
+           "Condition for computing multivariate log-gamma not met");
+  AT_CHECK(p >= 1, "p cannot be negative");
+  Tensor args = native::arange(-p + 1, 1, self.options()).div_(2.);
+  args = args.add(self.unsqueeze(-1));
+  return self.fill_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
+}
+
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 

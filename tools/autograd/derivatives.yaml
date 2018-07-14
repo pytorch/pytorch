@@ -477,6 +477,9 @@
   self: grad.ger(vec)
   vec: self.t().mv(grad)
 
+- name: mvlgamma(Tensor self, int64_t p)
+  self: mvlgamma_backward(grad, self, p)
+
 - name: ne_(Tensor self, Scalar other)
   self: zeros_like(self)
 

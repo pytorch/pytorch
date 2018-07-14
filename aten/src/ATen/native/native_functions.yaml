@@ -940,6 +940,11 @@
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
   variants: function
 
+- func: mvlgamma(Tensor self, int64_t p) -> Tensor
+
+- func: mvlgamma_(Tensor self, int64_t p) -> Tensor
+  variants: method
+
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
