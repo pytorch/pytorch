@@ -100,7 +100,7 @@ static size_t THPDevice_hash(THPDevice *self)
 {
   HANDLE_TH_ERRORS
   return std::hash<at::Device>{}(self->device);
-  END_HANDLE_TH_ERRORS
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
