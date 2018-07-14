@@ -17,6 +17,14 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
+struct DefAndTypes {
+  DefAndTypes(Def def, std::vector<TypePtr> arg_types, TypePtr return_type)
+    : def(std::move(def)), arg_types(arg_types), return_type(return_type) {}
+  Def def;
+  std::vector<TypePtr> arg_types;
+  TypePtr return_type;
+};
+
 static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [](const NamedValue& v) {
     return v.value;
@@ -123,14 +131,15 @@ struct BuiltinFunction : public SugaredValue {
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
 void defineMethodsInModule(
   Module & m,
-  const std::vector<Def>& definitions,
+  const std::vector<DefAndTypes>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
-  std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
+  std::shared_ptr<SugaredValue> self, /* if non-null, the first argument to each def, is bound to this value */
+  bool pure_func=false /* If true, expect a single def which will become the 'forward' method on the module */
 );
 
 // same as above but parse the definitions from source
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+void compileFunction(Module & m, DefAndTypes def, const Resolver& resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.

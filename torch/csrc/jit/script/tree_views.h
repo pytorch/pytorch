@@ -111,9 +111,9 @@ protected:
   TreeRef tree_;
 };
 
-template<typename T>
+template<typename T, typename ItrType>
 struct ListIterator {
-  ListIterator(TreeList::const_iterator it) : it(it) {}
+  ListIterator(ItrType it) : it(it) {}
   bool operator!=(const ListIterator& rhs) const { return it != rhs.it; }
   bool operator==(const ListIterator& rhs) const { return it == rhs.it; }
   T operator*() const { return T(*it); }
@@ -122,13 +122,14 @@ struct ListIterator {
   ListIterator& operator--() { --it; return *this; }
 
 private:
-  TreeList::const_iterator it;
+  ItrType it;
 };
 
 template <typename T>
 struct List : public TreeView {
-  using iterator = ListIterator<T>;
-  using const_iterator = ListIterator<T>;
+  using iterator = ListIterator<T, TreeList::const_iterator>;
+  using const_iterator = ListIterator<T, TreeList::const_iterator>;
+  using reverse_iterator = ListIterator<T, TreeList::const_reverse_iterator>;
 
   List(const TreeRef& tree) : TreeView(tree) {
     tree->match(TK_LIST);
@@ -142,6 +143,12 @@ struct List : public TreeView {
   }
   iterator end() const {
     return iterator(tree_->trees().end());
+  }
+  reverse_iterator rbegin() const {
+    return reverse_iterator(tree_->trees().rbegin());
+  }
+  reverse_iterator rend() const {
+    return reverse_iterator(tree_->trees().rend());
   }
   bool empty() const {
     return tree_->trees().begin() == tree_->trees().end();
@@ -747,7 +754,7 @@ struct Starred : public Expr {
 namespace std {
 
 template<typename T>
-struct iterator_traits<torch::jit::script::ListIterator<T>>
+struct iterator_traits<torch::jit::script::ListIterator<T, torch::jit::script::TreeList::const_iterator>>
   : std::iterator_traits<torch::jit::script::TreeList::const_iterator> {};
 
 } // namespace std

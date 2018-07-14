@@ -112,7 +112,10 @@ void initTreeViewBindings(PyObject *module) {
                          name,
                          wrap_list(r, std::move(params)),
                          wrap_list(r, std::move(body)));
-    }));
+    }))
+    .def("num_params", [](Def& self) {
+      return self.params().size();
+    });
 
 
   py::class_<Assign, Stmt>(m, "Assign")
