@@ -5,7 +5,7 @@ IntList ${Tensor}::strides() const {
 }
 Scalar ${Tensor}::localScalar() {
   int64_t numel = ${THTensor}_nElement(${state,}tensor);
-  AT_CHECK(numel == 1,"localScalar() called on Tensor with ", numel, " elements");
+  AT_CHECK(numel == 1,"a Tensor with ", numel, " elements cannot be converted to Scalar");
   return Scalar(${to_at_type}(${THStorage}_get(${state,}tensor->storage, tensor->storageOffset)));
 }
 std::unique_ptr<Storage> ${Tensor}::storage() {
