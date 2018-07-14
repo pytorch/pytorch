@@ -96,11 +96,10 @@ PyObject *THPDevice_index(THPDevice *self)
   END_HANDLE_TH_ERRORS
 }
 
-PyObject *THPDevice_hash(THPDevice *self)
+static size_t THPDevice_hash(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  return THPUtils_packUInt64(static_cast<uint64_t>(std::hash<at::Device>{}(self->device)));
-  Py_RETURN_NONE;
+  return std::hash<at::Device>{}(self->device);
   END_HANDLE_TH_ERRORS
 }
 

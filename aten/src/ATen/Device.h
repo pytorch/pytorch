@@ -118,7 +118,7 @@ namespace std {
   template<> struct hash<at::Device>
   {
     size_t operator()(const at::Device& device) const noexcept {
-      size_t hash_val = static_cast<size_t>(device.index());
+      size_t hash_val = static_cast<size_t>(device.index() + 1);
       if (device.is_cuda()) {
         hash_val += 2;
       }
