@@ -42,7 +42,6 @@ void NormalizeGradientOp<T, Context>::DoNormalize(
       Eigen::Map<Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
   using ConstStridedVec =
       Eigen::Map<const Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
-
   for (int i = 0; i < n; ++i) {
     auto base = (i / sf) * sf * m + (i % sf);
     ConstStridedVec xVec(xData + base, 1, m, InnerStride(sf));
@@ -51,9 +50,11 @@ void NormalizeGradientOp<T, Context>::DoNormalize(
     auto row_sum = xVec.dot(gOutVec);
     auto row_norm = xVec.template lpNorm<2>();
     auto row_norm_3 = pow(row_norm, 3);
+    StridedVec gInVec(gInData + base, 1, m, InnerStride(sf));
     if (row_norm != 0) {
-      StridedVec gInVec(gInData + base, 1, m, InnerStride(sf));
       gInVec = (gOutVec / row_norm) - ((xVec / row_norm_3) * row_sum);
+    } else {
+      gInVec = gOutVec * 0.0;
     }
   }
 };
