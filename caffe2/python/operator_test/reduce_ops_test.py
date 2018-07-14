@@ -90,6 +90,34 @@ class TestReduceOps(hu.HypothesisTestCase):
         self.run_reduce_op_test(
             "ReduceMean", X, keepdims, num_axes, np.mean, gc, dc)
 
+    @given(n=st.integers(1, 3), m=st.integers(1, 3), k=st.integers(1, 3),
+           keepdims=st.booleans(), num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
+    def test_reduce_l1(self, n, m, k, keepdims, num_axes, gc, dc):
+        X = np.arange(n * m * k, dtype=np.float32) - 0.5
+        np.random.shuffle(X)
+        X = X.reshape((m, n, k))
+        self.run_reduce_op_test(
+            "ReduceL1", X, keepdims, num_axes, getNorm(1), gc, dc)
+
+    @given(n=st.integers(1, 5), m=st.integers(1, 5), k=st.integers(1, 5),
+           keepdims=st.booleans(), num_axes=st.integers(1, 3), **hu.gcs_cpu_only)
+    def test_reduce_l2(self, n, m, k, keepdims, num_axes, gc, dc):
+        X = np.random.randn(n, m, k).astype(np.float32)
+        self.run_reduce_op_test(
+            "ReduceL2", X, keepdims, num_axes, getNorm(2), gc, dc)
+
+
+def getNorm(p):
+    if p == 1:
+        def norm(X, axis, keepdims):
+            return np.sum(np.abs(X), axis=axis, keepdims=keepdims)
+    elif p == 2:
+        def norm(X, axis, keepdims):
+            return np.sqrt(np.sum(np.power(X, 2), axis=axis, keepdims=keepdims))
+    else:
+        raise RuntimeError("Only L1 and L2 norms supported")
+    return norm
+
 
 class TestReduceFrontReductions(hu.HypothesisTestCase):
     def grad_variant_input_test(self, grad_op_name, X, ref, num_reduce_dim):
