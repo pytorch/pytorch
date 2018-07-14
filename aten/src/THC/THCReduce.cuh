@@ -524,14 +524,8 @@ bool THC_reduceDim(THCState* state,
                                                                              \
         if(grid.y > 1)                                                       \
         {                                                                    \
-          THCudaCheck(THCudaMalloc                                           \
-            (state,                                                          \
-             &stagingData,                                                   \
-             sizeof(AccT)*outElements*grid.y));                              \
-          THCudaCheck(THCudaMalloc                                           \
-            (state,                                                          \
-             &semaphores,                                                    \
-             sizeof(int)*grid.x));                                           \
+          stagingData = THCudaMalloc(state, sizeof(AccT)*outElements*grid.y);\
+          semaphores = THCudaMalloc(state, sizeof(int)*grid.x);              \
           THCudaCheck(cudaMemsetAsync                                        \
             (semaphores,                                                     \
              0,                                                              \
@@ -556,8 +550,8 @@ bool THC_reduceDim(THCState* state,
                                                                              \
         if(grid.y > 1)                                                       \
         {                                                                    \
-          THCudaCheck(THCudaFree(state, stagingData));                       \
-          THCudaCheck(THCudaFree(state, semaphores));                        \
+          THCudaFree(state, stagingData);                                    \
+          THCudaFree(state, semaphores);                                     \
         }                                                                    \
     }                                                                        \
   }                                                                    
