@@ -14,6 +14,7 @@ THC_API void THCTensor_(topk)(THCState* state,
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
   int numDims = THCTensor_(_nDimension)(state, input);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(isContiguous)(state, input), 4, "input tensor mus be contiguous");
 
   THArgCheck(dim >= 0 && dim < numDims, 6, "dim not in range");
 
