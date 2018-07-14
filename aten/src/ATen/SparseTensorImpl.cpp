@@ -43,7 +43,7 @@ int64_t SparseTensorImpl::dim() const {
 }
 Scalar SparseTensorImpl::localScalar() {
   int64_t n = numel();
-  AT_CHECK(n == 1, "localScalar() called on a Tensor with ", n, " elements");
+  AT_CHECK(n == 1, "a Tensor with ", n, " elements cannot be converted to Scalar");
   if (nnz_ == 0) return Scalar(0);
   if (coalesced_) return values_.pImpl->localScalar();
   // You have a non-coalesced scalar sparse tensor?!  Wow!  Have
