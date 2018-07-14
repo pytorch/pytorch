@@ -67,7 +67,8 @@ inline bool operator!=(std::nullptr_t, const at::DataPtr& dp) noexcept { return 
 // allocate and deallocate interface.  This is what
 // raw_deleter signifies.  By default, it returns a nullptr, which means that
 // the raw interface is not implemented.  Be sure to implement it whenever
-// possible.
+// possible, or the raw interface will incorrectly reported as unsupported,
+// when it is actually possible.
 
 struct Allocator {
   virtual ~Allocator() {}

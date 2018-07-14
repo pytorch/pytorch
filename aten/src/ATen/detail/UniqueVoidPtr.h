@@ -19,7 +19,12 @@ AT_API void deleteNothing(void*);
 //    2) It is specialized for a function pointer deleter
 //       void(void* ctx); i.e., the deleter doesn't take a
 //       reference to the data, just to a context pointer
-//       (erased as void*)
+//       (erased as void*).  In fact, internally, this pointer
+//       is implemented as having an owning reference to
+//       context, and a non-owning reference to data; this is why
+//       you release_context(), not release() (the conventional
+//       API for release() wouldn't give you enough information
+//       to properly dispose of the object later.)
 //
 //    3) The deleter is guaranteed to be called when the unique
 //       pointer is destructed and the context is non-null; this is different
