@@ -260,7 +260,7 @@ class Tensor(torch._C._TensorBase):
         else:
             return super(Tensor, self).btrifact(pivot=pivot)
 
-    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
+    def stft(self, n_fft, hop_length=None, win_length=None, window='hann',
              center=True, pad_mode='reflect', normalized=False, onesided=True):
         r"""See :func:`torch.stft`
 

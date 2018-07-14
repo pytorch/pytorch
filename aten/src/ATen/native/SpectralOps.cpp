@@ -215,8 +215,7 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
   int64_t len = input.size(1);
   if (n_fft <= 0 || n_fft > len) {
     std::ostringstream ss;
-    REPR(ss) << ": expected 0 < n_fft < " << len
-             << ", but got n_fft=" << win_length;
+    REPR(ss) << ": expected 0 < n_fft < " << len << ", but got n_fft=" << n_fft;
     AT_ERROR(ss.str());
   }
   if (hop_length <= 0) {
@@ -224,16 +223,16 @@ Tensor stft(const Tensor& self, const int64_t n_fft, const int64_t hop_length,
     REPR(ss) << ": expected hop_length > 0, but got hop_length=" << hop_length;
     throw std::runtime_error(ss.str());
   }
-  if (win_length <= 0 || win_length > n_fft) {
-    std::ostringstream ss;
-    REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
-             << win_length;
-    AT_ERROR(ss.str());
-  }
   if (window.defined() && (window.dim() != 1 || window.size(0) != win_length)) {
     std::ostringstream ss;
     REPR(ss) << ": expected a 1D window tensor of size equal to win_length="
              << win_length << ", but got window with size " << window.sizes();
+    AT_ERROR(ss.str());
+  }
+  if (win_length <= 0 || win_length > n_fft) {
+    std::ostringstream ss;
+    REPR(ss) << ": expected 0 < win_length <= n_fft, but got win_length="
+             << win_length;
     AT_ERROR(ss.str());
   }
   #undef REPR

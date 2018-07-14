@@ -4453,58 +4453,63 @@ class TestTorch(TestCase):
         if not TEST_LIBROSA:
             raise unittest.SkipTest('librosa not found')
 
-        def librosa_stft(x, n_fft, hop_length, win_length, window, center):
-            if window is None:
-                window = np.ones(n_fft if win_length is None else win_length)
-            else:
-                window = window.cpu().numpy()
+        def librosa_stft(x, n_fft, **kwargs):
+            if 'window' in kwargs:
+                window = kwargs['window']
+                if window is None:
+                    window = np.ones(n_fft if win_length is None else win_length)
+                elif isinstance(window, torch.Tensor):
+                    window = window.cpu().numpy()
+                kwargs['window'] = window
             input_1d = x.dim() == 1
             if input_1d:
                 x = x.view(1, -1)
             result = []
             for xi in x:
-                ri = librosa.stft(xi.cpu().numpy(), n_fft, hop_length, win_length, window, center=center)
+                ri = librosa.stft(xi.cpu().numpy(), n_fft=n_fft, **kwargs)
                 result.append(torch.from_numpy(np.stack([ri.real, ri.imag], -1)))
             result = torch.stack(result, 0)
             if input_1d:
                 result = result[0]
             return result
 
-        def _test(sizes, n_fft, hop_length=None, win_length=None, win_sizes=None,
-                  center=True, expected_error=None):
+        def _test(sizes, **kwargs):
             x = torch.randn(*sizes, device=device)
-            if win_sizes is not None:
-                window = torch.randn(*win_sizes, device=device)
-            else:
-                window = None
-            if expected_error is None:
-                result = x.stft(n_fft, hop_length, win_length, window, center=center)
-                ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
-                self.assertEqual(result, ref_result, 7e-6, 'stft comparison against librosa')
-            else:
-                self.assertRaises(expected_error,
-                                  lambda: x.stft(n_fft, hop_length, win_length, window, center=center))
+            result = x.stft(**kwargs)
+            ref_result = librosa_stft(x, **kwargs)
+            self.assertEqual(result, ref_result, 7e-6, 'stft comparison against librosa')
 
         for center in [True, False]:
-            _test((10,), 7, center=center)
-            _test((10, 4000), 1024, center=center)
+            _test((10,), n_fft=7, center=center)
+            _test((10, 4000), n_fft=1024, center=center)
 
-            _test((10,), 7, 2, center=center)
-            _test((10, 4000), 1024, 512, center=center)
+            _test((10,), n_fft=7, hop_length=2, center=center)
+            _test((10, 4000), n_fft=1024, hop_length=512, center=center)
 
-            _test((10,), 7, 2, win_sizes=(7,), center=center)
-            _test((10, 4000), 1024, 512, win_sizes=(1024,), center=center)
+            _test((10,), n_fft=7, hop_length=2, win_length=7, window=torch.randn(7, device=device), center=center)
+            _test((10, 4000), n_fft=1024, hop_length=512, win_length=1024,
+                  window=torch.randn(1024, device=device), center=center)
 
             # spectral oversample
-            _test((10,), 7, 2, win_length=5, center=center)
-            _test((10, 4000), 1024, 512, win_length=100, center=center)
+            _test((10,), n_fft=7, hop_length=2, win_length=5, center=center)
+            _test((10, 4000), n_fft=1024, hop_length=512, win_length=100, center=center)
+            for window in {'bartlett', 'blackman', 'hamming', 'hann'}:
+                _test((10,), n_fft=7, hop_length=2, win_length=5, window=window, center=center)
+                _test((10, 4000), n_fft=1024, hop_length=512, win_length=100, window=window, center=center)
 
-        _test((10, 4, 2), 1, 1, expected_error=RuntimeError)
-        _test((10,), 11, 1, center=False, expected_error=RuntimeError)
-        _test((10,), -1, 1, expected_error=RuntimeError)
-        _test((10,), 3, win_length=5, expected_error=RuntimeError)
-        _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
-        _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
+        def _test_raises(expected_error, sizes, *args, **kwargs):
+            x = torch.empty(*sizes, device=device)
+            self.assertRaises(expected_error, lambda: x.stft(*args, **kwargs))
+
+        _test_raises(RuntimeError, (10, 4, 2), n_fft=1, hop_length=1)
+        _test_raises(RuntimeError, (10,), n_fft=11, hop_length=1, center=False)
+        _test_raises(RuntimeError, (10,), n_fft=-1, hop_length=1)
+        _test_raises(RuntimeError, (10,), n_fft=3, win_length=5)
+        _test_raises(RuntimeError, (10,), n_fft=3, win_length=5, window=torch.randn(7, device=device))
+        _test_raises(RuntimeError, (10,), n_fft=3, win_length=5, window='new_window')
+        _test_raises(RuntimeError, (10,), n_fft=3, win_length=5, window=3)
+        _test_raises(RuntimeError, (10,), n_fft=5, hop_length=4, win_length=11, window=torch.randn(11, device=device))
+        _test_raises(RuntimeError, (10,), n_fft=5, hop_length=4, win_length=1, window=torch.randn(1, 1, device=device))
 
     def test_stft(self):
         self._test_stft(self)
