@@ -181,7 +181,42 @@ def compute_stats(stats):
     print("\nTotal number of replaced kernel launches: {0:d}".format(len(stats["kernel_launches"])))
 
 
-def processKernelLaunches(string, stats):
+def add_dim3(kernel_string, cuda_kernel):
+    '''adds dim3() to the second and third arguments in the kernel launch'''
+    count = 0
+    closure = 0
+    kernel_string = kernel_string.replace("<<<", "")
+    arg_locs = [{} for _ in range(2)]
+    arg_locs[count]['start'] = 0
+    for ind, c in enumerate(kernel_string):
+        if count > 1:
+            break
+        if c == "(":
+            closure += 1
+        elif c == ")":
+            closure -= 1
+        elif c == "," and closure == 0:
+            arg_locs[count]['end'] = ind
+            count += 1
+            if count < 2:
+                arg_locs[count]['start'] = ind + 1
+
+    first_arg_raw = kernel_string[arg_locs[0]['start']:arg_locs[0]['end'] + 1]
+    second_arg_raw = kernel_string[arg_locs[1]['start']:arg_locs[1]['end']]
+
+    first_arg_clean = kernel_string[arg_locs[0]['start']:arg_locs[0]['end']].replace("\n", "").strip(" ")
+    second_arg_clean = kernel_string[arg_locs[1]['start']:arg_locs[1]['end']].replace("\n", "").strip(" ")
+
+    first_arg_dim3 = "dim3({})".format(first_arg_clean)
+    second_arg_dim3 = "dim3({})".format(second_arg_clean)
+
+    first_arg_raw_dim3 = first_arg_raw.replace(first_arg_clean, first_arg_dim3)
+    second_arg_raw_dim3 = second_arg_raw.replace(second_arg_clean, second_arg_dim3)
+    cuda_kernel = cuda_kernel.replace(first_arg_raw + second_arg_raw, first_arg_raw_dim3 + second_arg_raw_dim3)
+    return cuda_kernel
+
+
+def processKernelLaunches(string, stats, hipify_caffe2):
     """ Replace the CUDA style Kernel launches with the HIP style kernel launches."""
     # Concat the namespace with the kernel names. (Find cleaner way of doing this later).
     string = re.sub(r'([ ]+)(detail?)::[ ]+\\\n[ ]+', lambda inp: "{0}{1}::".format(inp.group(1), inp.group(2)), string)
@@ -280,13 +315,17 @@ def processKernelLaunches(string, stats):
 
         # Extract cuda kernel
         cuda_kernel = string[params[0]["start"]:parenthesis + 1]
+        cuda_kernel_dim3 = cuda_kernel
 
+        if hipify_caffe2:
+            kernel_string = string[kernel['start']:kernel['end']]
+            cuda_kernel_dim3 = add_dim3(kernel_string, cuda_kernel_dim3)
         # Keep number of kernel launch params consistent (grid dims, group dims, stream, dynamic shared size)
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
 
         # Transform cuda kernel to hip kernel
-        hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel[0:-1].replace(">>>",
-                                                                       ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(">>>", ", ")
+        hip_kernel = "hipLaunchKernelGGL(" + cuda_kernel_dim3[0:-1].replace(">>>",
+                                                                            ", 0" * (4 - num_klp) + ">>>").replace("<<<", ", ").replace(">>>", ", ")
 
         # Replace cuda kernel with hip kernel
         output_string = output_string.replace(cuda_kernel, hip_kernel)
@@ -296,22 +335,6 @@ def processKernelLaunches(string, stats):
 
     return output_string
 
-def processCaffe2KernelLaunches(output_source):
-    """ 
-    Replace CUDA style kernel launches with hip style 
-    kernel launches for caffe2 cuda kernels
-    """
-
-    # Handle the <<numBlocks, blockDim, sharedSize, stream>>> syntax:
-    output_source = re.sub(r"(\w+)\s*((?:<.*>)?)\s*<<<\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*>>>([\s*\\]*)\(", r"hipLaunchKernelGGL(\1\2, dim3(\3), dim3(\4), \5, \6, ", output_source)
-
-    # Handle the <<numBlocks, blockDim, sharedSize>>> syntax:
-    output_source = re.sub(r"(\w+)\s*(<.*>)?\s*<<<\s*(.+)\s*,\s*(.+)\s*,\s*(.+)\s*>>>([\s*\\]*)\(", r"hipLaunchKernelGGL((\g<1>\g<2>), dim3(\g<3>), dim3(\g<4>), \g<5>, 0, ",output_source)
-    
-    # Handle the <<numBlocks, blockDim>>> syntax:
-    output_source = re.sub(r"(\w+)\s*(<.*>)?\s*<<<\s*(.+)\s*,\s*(.+)\s*>>>([\s\\]*)\(", r"hipLaunchKernelGGL((\g<1>\g<2>), dim3(\g<3>), dim3(\g<4>), 0, 0, ", output_source)
-    
-    return output_source
 
 def find_parenthesis_end(input_string, start):
     inside_parenthesis = False
@@ -397,7 +420,8 @@ def disable_function(input_string, function, replace_style):
         info["function_start"] = input_string.find(function_string)
     else:
         # Automatically detect signature.
-        the_match = re.search(r"(((.*) (\*)?)({0})(\([^{{)]*\)))\s*{{".format(function.replace("(", "\(").replace(")", "\)")), input_string)
+        the_match = re.search(
+            r"(((.*) (\*)?)({0})(\([^{{)]*\)))\s*{{".format(function.replace("(", "\(").replace(")", "\)")), input_string)
         if the_match is None:
             return input_string
 
@@ -474,7 +498,7 @@ def disable_function(input_string, function, replace_style):
         stub = "{0}{{\n{1};\n}}".format(
             function_string,
             'throw std::runtime_error("The function {0} is not implemented.")'.format(
-            function_string.replace("\n", " ")))
+                function_string.replace("\n", " ")))
         output_string = input_string.replace(function_body, stub)
 
     elif replace_style == disablefuncmode.ASSERT:
@@ -488,12 +512,13 @@ def disable_function(input_string, function, replace_style):
         output_string = input_string.replace(function_body, stub)
     return output_string
 
+
 def get_hip_file_path(filepath):
     """ Returns the new name of the hipified file """
     dirpath, filename = os.path.split(filepath)
     filename_without_ext, ext = os.path.splitext(filename)
     if "gpu" in filename_without_ext:
-        hip_name = re.sub(r'gpu','hip',filename_without_ext)
+        hip_name = re.sub(r'gpu', 'hip', filename_without_ext)
         if ext == ".h":
             hip_name = hip_name + ext
         else:
@@ -503,8 +528,9 @@ def get_hip_file_path(filepath):
             return filepath
         hip_name = filename_without_ext + "_hip.cc"
 
-    hip_file_path = os.path.join(dirpath,hip_name)
+    hip_file_path = os.path.join(dirpath, hip_name)
     return hip_file_path
+
 
 def preprocessor(filepath, stats, hipify_caffe2):
     """ Executes the CUDA -> HIP conversion on the specified file. """
@@ -522,7 +548,7 @@ def preprocessor(filepath, stats, hipify_caffe2):
                     # Check if supported
                     if constants.HIP_UNSUPPORTED in meta_data:
                         stats["unsupported_calls"].append((cuda_type, filepath))
-                
+
                 if cuda_type in output_source:
                     if hipify_caffe2:
                         if constants.API_RAND not in meta_data:
@@ -531,10 +557,7 @@ def preprocessor(filepath, stats, hipify_caffe2):
                         output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
 
         # Perform Kernel Launch Replacements
-        if hipify_caffe2:
-            output_source = processCaffe2KernelLaunches(output_source)
-        else:
-            output_source = processKernelLaunches(output_source, stats)
+        output_source = processKernelLaunches(output_source, stats, hipify_caffe2)
 
         # Disable asserts
         if not filepath.endswith("THCGeneral.h.in"):
@@ -551,7 +574,8 @@ def preprocessor(filepath, stats, hipify_caffe2):
 
     if hipify_caffe2:
         hip_file_path = get_hip_file_path(filepath)
-        os.rename(filepath,hip_file_path)
+        os.rename(filepath, hip_file_path)
+
 
 def file_specific_replacement(filepath, search_string, replace_string, strict=False):
     with openf(filepath, "r+") as f:
@@ -716,6 +740,7 @@ def disable_module(input_file):
         f.write(disabled)
         f.truncate()
 
+
 def extract_arguments(start, string):
     """ Return the list of arguments in the upcoming function parameter closure
         This function needs a string that contains function arguments fully encapsulated within opening and closing parantheses.
@@ -759,6 +784,8 @@ def extract_arguments(start, string):
     return arguments
 
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
+
+
 def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=False):
     """Added necessary static casts to kernel launches to match kernel argument type to corresponding kernel definition
        Eg.
@@ -774,7 +801,7 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
         # substitute CUDA with HIP in KernelTemplateParams to align with hipified names
         KernelTemplateParams = re.sub(r'CUDA', r'HIP', str(KernelTemplateParams))
         KernelTemplateParams = ast.literal_eval(KernelTemplateParams)
-        
+
     for (dirpath, _dirnames, filenames) in os.walk(directory):
         for filename in filenames:
             if filename_ends_with_extension(filename, extensions):
@@ -808,10 +835,11 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
                                         static_argument = "static_cast<{0}>({1})".format(the_type, the_arg)
 
                                         def replace_arg(match):
-                                          return match.group(1) + static_argument + match.group(3)
+                                            return match.group(1) + static_argument + match.group(3)
                                         # Update to static_cast, account for cases where argument is at start/end of string
-                                        new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(re.escape(the_arg)), replace_arg, new_kernel_launch)
- 
+                                        new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(
+                                            re.escape(the_arg)), replace_arg, new_kernel_launch)
+
                             # Add template type
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
@@ -831,6 +859,7 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
                     # Flush to disk
                     os.fsync(fileobj)
 
+
 def copy_files_to_hip_dirs(output_directory, project_directory, include_dirs):
     """
     Copies hipified files to hip directory under corresponding
@@ -838,17 +867,18 @@ def copy_files_to_hip_dirs(output_directory, project_directory, include_dirs):
     """
     for dirpath, _dir, filenames in os.walk(output_directory):
         if inside_included_directories(dirpath, output_directory, include_dirs) and os.path.basename(dirpath) != "hip":
-            for file in filenames: 
-                rel_path = os.path.relpath(dirpath,output_directory)
-                dest_dir = os.path.join(project_directory,rel_path,"hip")
+            for file in filenames:
+                rel_path = os.path.relpath(dirpath, output_directory)
+                dest_dir = os.path.join(project_directory, rel_path, "hip")
                 if not os.path.exists(dest_dir):
                     os.makedirs(dest_dir)
                 if file.endswith("hip.cc") or file.endswith("hip.h"):
-                    dest_filepath = os.path.join(dest_dir,file)
+                    dest_filepath = os.path.join(dest_dir, file)
                     if not os.path.exists(dest_filepath):
-                        shutil.copyfile(os.path.join(dirpath,file),dest_filepath)
+                        shutil.copyfile(os.path.join(dirpath, file), dest_filepath)
 
     shutil.rmtree(output_directory)
+
 
 def main():
     """Example invocation
