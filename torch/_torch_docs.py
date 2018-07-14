@@ -2870,7 +2870,7 @@ mvlgamma(input, p) -> Tensor
 Computes the multivariate log-gamma function with dimension :math:`p` element-wise, given by
 
 .. math::
-    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log(\Gamma\left(a - \frac{i - 1}{2}\right))
+    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
 
 where :math:`C = \log(\pi) \times \frac{p (p - 1)}{2}` and :math:`\Gamma(.)` is the Gamma function.
 
@@ -2883,7 +2883,13 @@ Args:
 
 Example::
 
-    >>> torch.mvlgamma(torch.rand(2, 3), 2)
+    >>> a = torch.empty(2, 3).uniform_(1, 2)
+    >>> a
+    tensor([[1.6835, 1.8474, 1.1929],
+            [1.0475, 1.7162, 1.4180]])
+    >>> torch.mvlgamma(a, 2)
+    tensor([[0.3928, 0.4007, 0.7586],
+            [1.0311, 0.3901, 0.5049]])
 """)
 
 add_docstr(torch.ne,
