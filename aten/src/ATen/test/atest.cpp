@@ -103,7 +103,8 @@ TEST_CASE( "atest", "[]" ) {
   if(at::hasCUDA()) {
     int isgone = 0;
     {
-      auto f2 = CUDA(kFloat).tensorFromBlob(nullptr, {1,2,3}, [&](void*) {
+      auto base = CUDA(kFloat).tensor({1,2,3});
+      auto f2 = CUDA(kFloat).tensorFromBlob(base.data_ptr(), {1,2,3}, [&](void*) {
         isgone++;
       });
     }

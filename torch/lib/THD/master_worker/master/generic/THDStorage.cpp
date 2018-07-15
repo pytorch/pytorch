@@ -12,7 +12,7 @@ static THDStorage* THDStorage_(_alloc)() {
   new (&new_storage->refcount) std::atomic<int>(1);
   new_storage->storage_id = THDState::s_nextId++;
   new_storage->node_id = THDState::s_current_worker;
-  new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
+  new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
   return new_storage;
 }
 

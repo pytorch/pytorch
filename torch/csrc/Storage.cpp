@@ -34,10 +34,10 @@
 template<>
 void THPPointer<THStorage>::free() {
   if (ptr) {
-    if (ptr->backend == at::kCPU) {
+    if (ptr->data_ptr.device().is_cpu()) {
       THStorage_free(ptr);
     } else {
-      AT_ASSERT(ptr->backend == at::kCUDA);
+      AT_ASSERT(ptr->data_ptr.device().is_cuda());
 #ifdef USE_CUDA
       THCStorage_free(at::globalContext().lazyInitCUDA(), ptr);
 #else
