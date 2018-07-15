@@ -1,7 +1,9 @@
 import torch
+import torch.nn.functional as F
 from operator import mul
 from functools import reduce
 import math
+from ._six import string_classes as _string_classes
 
 __all__ = [
     'argmax',
@@ -10,6 +12,7 @@ __all__ = [
     'btriunpack',
     'isnan',
     'split',
+    'stft',
     'unique',
 ]
 
@@ -133,6 +136,127 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         P = None
 
     return P, L, U
+
+
+def stft(input, n_fft, hop_length=None, win_length=None, window='hann',
+         center=True, pad_mode='reflect', normalized=False, onesided=True):
+    r"""Short-time Fourier transform (STFT).
+
+    Ignoring the optional batch dimension, this method computes the following
+    expression:
+
+    .. math::
+        X[m, \omega] = \sum_{k = 0}^{\text{win_length}}%
+                            window[k]\ input[m \times hop_length + k]\ %
+                            e^{- j \frac{2 \pi \cdot \omega k}{\text{win_length}}},
+
+    where :math:`m` is the index of the sliding window, and :math:`\omega` is a
+    frequency satisfying :math:`0 \leq \omega < \text{n_fft}`.
+
+    * :attr:`input` must be either a 1-D time sequenceor 2-D a batch of time
+      sequences.
+
+    * If :attr:`hop_length` is ``None`` (default), it is treated as equal to
+      ``floor(n_fft / 4)``.
+
+    * If :attr:`win_length` is ``None`` (default), it is treated as equal to
+      :attr:`n_fft`. :attr:`win_length` must be less than or equal to
+      :attr:`n_fft`.
+
+    * :attr:`window` can be a string, a 1-D window tensor, or ``None``. Default
+      is ``"hann"``.
+
+        * If :attr:`window` is a string, it is the name of the window function
+          used and must be one of ``"bartlett"``, ``"blackman"``, ``"hamming"``,
+          and ``"hann"``. (default) The window will be created with length
+          :attr:`win_length`.
+
+        * If :attr:`window` is a tensor, it must have length :attr:`win_length`.
+
+        * If :attr:`window` is ``None``, no window is applied in STFT, i.e.,
+          it is equivalent with having :math:`1` everywhere in the window.
+
+      If size of :attr:`window` is less than :attr:`n_fft`, :attr:`window`
+      will be padded on both sides to length :attr:`n_fft` before being applied.
+
+    * If :attr:`center` is ``True`` (default), :attr:`input` will be padded on
+      both sides so that the :math:`t`-th frame is centered at time
+      :math:`t \times \text{hop_length}`. Otherwise, the :math:`t`-th frame
+      begins at time  :math:`t \times \text{hop_length}`.
+
+    * :attr:`pad_mode` determines the padding method used on :attr:`input` when
+      :attr:`center` is ``True``. See :meth:`torch.nn.functional.pad` for
+      all available options. Default is ``"reflect"``.
+
+    * If :attr:`onesided` is ``True`` (default), only values for :math:`\omega`
+      in :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{n_fft}}{2} \right\rfloor + 1\right]`
+      are returned because the real-to-complex Fourier transform satisfies the
+      conjugate symmetry, i.e., :math:`X[m, \omega] = X[m, \text{n_fft} - \omega]^*`.
+
+    * If :attr:`normalized` is ``True`` (default is ``False``), the function
+      returns the normalized STFT results, i.e., multiplied by :math:`(\text{frame_length})^{-0.5}`.
+
+    Returns the real and the imaginary parts together as one tensor of size
+    :math:`(* \times N \times T \times 2)`, where :math:`*` is the optional
+    batch size of :attr:`input`, :math:`N` is the number of frequencies where
+    STFT is applied, :math:`T` is the total number of frames used, and each pair
+    in the last dimension represents a complex number as the real part and the
+    imaginary part.
+
+    .. warning::
+      This function changed signature at version 0.4.1. Calling with the
+      previous signature may cause error or return incorrect result.
+
+    Arguments:
+        input (Tensor): the input tensor
+        n_fft (int, optional): size of Fourier transform
+        hop_length (int): the distance between neighboring sliding window
+            frames. Default: ``None`` (treated as equal to ``floor(n_fft / 4)``)
+        win_length (int): the size of window frame and STFT filter.
+            Default: ``None``  (treated as equal to :attr:`n_fft`)
+        window (string or Tensor, optional): the optional window function.
+            Default: ``"hann"``
+        center (bool, optional): whether to pad :attr:`input` on both sides so
+            that the :math:`t`-th frame is centered at time :math:`t \times \text{hop_length}`.
+            Default: ``True``
+        pad_mode (string, optional): controls the padding method used when
+            :attr:`center` is ``True``. Default: ``"reflect"``
+        normalized (bool, optional): controls whether to return the normalized STFT results
+             Default: ``False``
+        onesided (bool, optional): controls whether to return half of results to
+            avoid redundancy Default: ``True``
+
+    Returns:
+        Tensor: A tensor containing the STFT result with shape described above
+
+    """
+    # TODO: after having proper ways to map Python strings to ATen Enum, move
+    #       this and F.pad to ATen.
+    if win_length is None:
+        win_length = n_fft
+    if isinstance(window, _string_classes):
+        if window == 'bartlett':
+            window = torch.bartlett_window(win_length, device=input.device, dtype=input.dtype)
+        elif window == 'blackman':
+            window = torch.blackman_window(win_length, device=input.device, dtype=input.dtype)
+        elif window == 'hamming':
+            window = torch.hamming_window(win_length, device=input.device, dtype=input.dtype)
+        elif window == 'hann':
+            window = torch.hann_window(win_length, device=input.device, dtype=input.dtype)
+        else:
+            raise RuntimeError(
+                "stft: unsupported window type {}".format(repr(window)))
+    elif not isinstance(window, torch.Tensor):
+        raise RuntimeError(
+            "stft: expects window to be one of allowed strings or a tensor, "
+            "but got window={}".format(window))
+    if center:
+        signal_dim = input.dim()
+        extended_shape = [1] * (3 - signal_dim) + list(input.size())
+        pad = int(n_fft // 2)
+        input = F.pad(input.view(extended_shape), (pad, pad), pad_mode)
+        input = input.view(input.shape[-signal_dim:])
+    return torch._C._VariableFunctions.stft(input, n_fft, hop_length, win_length, window, normalized, onesided)
 
 
 def isnan(tensor):
