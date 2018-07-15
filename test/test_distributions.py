@@ -43,7 +43,7 @@ from torch.distributions import (Bernoulli, Beta, Binomial, Categorical,
                                  Normal, OneHotCategorical, Pareto, Poisson,
                                  RelaxedBernoulli, RelaxedOneHotCategorical,
                                  StudentT, TransformedDistribution, Uniform,
-                                 constraints, kl_divergence)
+                                 Weibull, constraints, kl_divergence)
 from torch.distributions.constraint_registry import biject_to, transform_to
 from torch.distributions.constraints import Constraint, is_dependent
 from torch.distributions.dirichlet import _Dirichlet_backward
@@ -389,6 +389,12 @@ EXAMPLES = [
             'high': torch.tensor([2.0, 3.0], requires_grad=True),
         },
     ]),
+    Example(Weibull, [
+        {
+            'scale': torch.tensor(torch.randn(5, 5).abs(), requires_grad=True),
+            'concentration': torch.tensor(torch.randn(1).abs(), requires_grad=True)
+        }
+    ])
 ]
 
 BAD_EXAMPLES = [
@@ -585,6 +591,16 @@ BAD_EXAMPLES = [
         {
             'low': torch.tensor([1.0], requires_grad=True),
             'high': torch.tensor([0.0], requires_grad=True),
+        }
+    ]),
+    Example(Weibull, [
+        {
+            'scale': torch.tensor([0.0], requires_grad=True),
+            'concentration': torch.tensor([0.0], requires_grad=True)
+        },
+        {
+            'scale': torch.tensor([1.0], requires_grad=True),
+            'concentration': torch.tensor([-1.0], requires_grad=True)
         }
     ])
 ]
@@ -2654,6 +2670,15 @@ class TestDistributionShapes(TestCase):
         self.assertEqual(gumbel.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
         self.assertEqual(gumbel.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
 
+    def test_weibull_scale_scalar_params(self):
+        weibull = Weibull(1, 1)
+        self.assertEqual(weibull._batch_shape, torch.Size())
+        self.assertEqual(weibull._event_shape, torch.Size())
+        self.assertEqual(weibull.sample().size(), torch.Size())
+        self.assertEqual(weibull.sample((3, 2)).size(), torch.Size((3, 2)))
+        self.assertEqual(weibull.log_prob(self.tensor_sample_1).size(), torch.Size((3, 2)))
+        self.assertEqual(weibull.log_prob(self.tensor_sample_2).size(), torch.Size((3, 2, 3)))
+
     def test_normal_shape_scalar_params(self):
         normal = Normal(0, 1)
         self.assertEqual(normal._batch_shape, torch.Size())
@@ -3319,6 +3344,10 @@ class TestAgainstScipy(TestCase):
             (
                 Uniform(random_var, random_var + positive_var),
                 scipy.stats.uniform(random_var, positive_var)
+            ),
+            (
+                Weibull(positive_var[0], positive_var2[0]),  # scipy var for Weibull only supports scalars
+                scipy.stats.weibull_min(c=positive_var2[0], scale=positive_var[0])
             )
         ]
 

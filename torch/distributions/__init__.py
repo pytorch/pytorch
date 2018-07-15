@@ -105,6 +105,7 @@ from .studentT import StudentT
 from .transformed_distribution import TransformedDistribution
 from .transforms import *
 from .uniform import Uniform
+from .weibull import Weibull
 
 __all__ = [
     'Bernoulli',
@@ -135,6 +136,7 @@ __all__ = [
     'StudentT',
     'Poisson',
     'Uniform',
+    'Weibull',
     'TransformedDistribution',
     'biject_to',
     'kl_divergence',
