@@ -1666,6 +1666,18 @@ Args:
 See :func:`torch.reshape`
 """)
 
+add_docstr_all('reshape_as',
+               r"""
+reshape_as(other) -> Tensor
+
+Returns this tensor as the same shape as :attr:`other`.
+``self.reshape_as(other)`` is equivalent to ``self.reshape(other.shape)``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same shape
+        as :attr:`other`.
+""")
+
 add_docstr_all('resize_',
                r"""
 resize_(*sizes) -> Tensor
@@ -2405,6 +2417,18 @@ Example::
     >>> z.size()
     torch.Size([2, 8])
 
+""")
+
+add_docstr_all('view_as',
+               r"""
+view_as(other) -> Tensor
+
+View this tensor as the same size as :attr:`other`.
+``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
 """)
 
 add_docstr_all('expand',

@@ -6027,6 +6027,11 @@ class TestTorch(TestCase):
             self.assertEqual(empty.reshape([1, -1]).shape, (0,))
         self.assertRaises(RuntimeError, lambda: empty.reshape(1))
 
+        x = torch.randn(3, 3)
+        self.assertEqual(x.data_ptr(), x.reshape_as(torch.rand(9)).data_ptr())
+        self.assertEqual(x.data_ptr(), x.reshape_as(torch.rand(1, 9, 1)).data_ptr())
+        self.assertRaises(RuntimeError, lambda: x.reshape_as(torch.rand(10)))
+
     @skipIfNoZeroSize
     def test_empty_reshape(self):
         x = torch.randn(0, 6)
