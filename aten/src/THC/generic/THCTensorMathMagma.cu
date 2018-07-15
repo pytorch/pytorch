@@ -440,20 +440,17 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
   real *matrices2[1] = { THCTensor_(data)(state, ra_) };
 
   // Copy pointers to device.
-  real **d_matrices1, **d_matrices2;
-  THCudaCheck(THCudaMalloc(state, (void**)&d_matrices1, sizeof(real*)));
-  THCudaCheck(THCudaMalloc(state, (void**)&d_matrices2, sizeof(real*)));
+  auto d_matrices1 = static_cast<real**>(THCudaMalloc(state, sizeof(real*)));
+  auto d_matrices2 = static_cast<real**>(THCudaMalloc(state, sizeof(real*)));
 
   THCudaCheck(cudaMemcpyAsync(d_matrices1, matrices1, sizeof(real*),
                               cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
   THCudaCheck(cudaMemcpyAsync(d_matrices2, matrices2, sizeof(real*),
                               cudaMemcpyHostToDevice, THCState_getCurrentStream(state)));
   int info;
-  int *info_gpu;
-  THCudaCheck(THCudaMalloc(state, (void**)&info_gpu, sizeof(int)));
+  auto info_gpu = static_cast<int*>(THCudaMalloc(state, sizeof(int)));
 
-  int *ipiv_gpu;
-  THCudaCheck(THCudaMalloc(state, (void**)&ipiv_gpu, n * sizeof(int)));
+  auto ipiv_gpu = static_cast<int*>(THCudaMalloc(state, n * sizeof(int)));
 
   // Run LU
 #if defined(THC_REAL_IS_FLOAT)
@@ -483,11 +480,11 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
   else if (info < 0)
     THError("CUBLAS getri : Argument %d : illegal value", -info);
 
-  THCudaCheck(THCudaFree(state, ipiv_gpu));
-  THCudaCheck(THCudaFree(state, info_gpu));
+  THCudaFree(state, ipiv_gpu);
+  THCudaFree(state, info_gpu);
 
-  THCudaCheck(THCudaFree(state, d_matrices1));
-  THCudaCheck(THCudaFree(state, d_matrices2));
+  THCudaFree(state, d_matrices1);
+  THCudaFree(state, d_matrices2);
 
   THCTensor_(free)(state, input);
 #endif

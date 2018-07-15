@@ -9,13 +9,11 @@ static PyObject * THPStorage_(sharedDecref)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
 #ifndef THC_GENERIC_FILE
-  libshm_context *ctx = NULL;
   THWStorage *storage = self->cdata;
-  if (storage->allocatorVoidPtr == &THManagedSharedAllocator) {
-    ctx = (libshm_context*)storage->allocatorContext;
+  THManagedMapAllocator *ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr);
+  if (ctx) {
+    ctx->decref();
   }
-  if (ctx)
-    THRefcountedMapAllocator_decref(ctx->th_context, THWStorage_(data)(storage));
 #endif
   Py_INCREF(self);
   return (PyObject *)self;
@@ -26,13 +24,11 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
 #ifndef THC_GENERIC_FILE
-  libshm_context *ctx = NULL;
   THWStorage *storage = self->cdata;
-  if (storage->allocatorVoidPtr == &THManagedSharedAllocator) {
-    ctx = (libshm_context*)storage->allocatorContext;
+  THManagedMapAllocator *ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr);
+  if (ctx) {
+    ctx->incref();
   }
-  if (ctx)
-    THRefcountedMapAllocator_incref(ctx->th_context, THWStorage_(data)(storage));
 #endif
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
@@ -41,7 +37,7 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
 static PyObject * THPStorage_(newTHView)(THWStorage *base, ptrdiff_t offset, size_t size)
 {
   void *data = (char*)base->data<real>() + offset;
-  THWStoragePtr view(THWStorage_(newWithData)(LIBRARY_STATE (real*)data, size));
+  THWStoragePtr view(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {data, base->data_ptr.device()} /* non-owning */, size, nullptr));
   view->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
   view->view = base;
   THWStorage_(retain)(LIBRARY_STATE base);
@@ -67,8 +63,8 @@ static THWStorage* THPStorage_(newFilenameStorage)(ptrdiff_t size)
 {
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM | TH_ALLOCATOR_MAPPED_EXCLUSIVE;
   std::string handle = THPStorage_(__newHandle)();
-  auto ctx = libshm_context_new(NULL, handle.c_str(), flags);
-  return THWStorage_(newWithAllocator)(size, &THManagedSharedAllocator, (void*)ctx);
+  return THWStorage_(newWithDataAndAllocator)(
+      THManagedMapAllocator::makeDataPtr("", handle.c_str(), flags, size * sizeof(real)), size, /* allocator */ nullptr);
 }
 
 static PyObject * THPStorage_(pyNewFilenameStorage)(PyObject *_unused, PyObject *args)
@@ -86,23 +82,23 @@ static PyObject * THPStorage_(shareFilename)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
-  libshm_context *ctx;
+  THManagedMapAllocator *ctx;
   // Storage is already in shared memory, just return a handle
-  if (storage->allocatorVoidPtr == &THManagedSharedAllocator) {
-    ctx = (libshm_context*)storage->allocatorContext;
+  if ((ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr))) {
+    // done
   } else {
     // TODO: retry on collision
     // TODO: free GIL - but remember to reacquire it when an exception is thrown
     THWStoragePtr new_storage(THPStorage_(newFilenameStorage)(storage->size));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
-    ctx = (libshm_context*)storage->allocatorContext;
+    ctx = THManagedMapAllocator::fromDataPtr(storage->data_ptr);
+    AT_ASSERT(ctx);
   }
 
-  THPObjectPtr manager_handle(PyBytes_FromString(ctx->manager_handle));
+  THPObjectPtr manager_handle(PyBytes_FromString(ctx->manager_handle()));
   if (!manager_handle) return NULL;
-  THPObjectPtr storage_handle(
-    PyBytes_FromString(THMapAllocatorContext_filename(ctx->th_context)));
+  THPObjectPtr storage_handle(PyBytes_FromString(ctx->filename()));
   if (!storage_handle) return NULL;
   THPObjectPtr size(PyLong_FromLong(storage->size));
   if (!size) return NULL;
@@ -133,9 +129,11 @@ static PyObject * THPStorage_(newSharedFilename)(PyObject *_unused, PyObject *ar
   int64_t size = THPUtils_unpackLong(_size);
   int flags = TH_ALLOCATOR_MAPPED_SHAREDMEM |
               TH_ALLOCATOR_MAPPED_NOCREATE;
-  libshm_context *ctx = libshm_context_new(manager_handle, object_handle, flags);
-  return THPStorage_(New)(THWStorage_(newWithAllocator)(size,
-      &THManagedSharedAllocator, (void*)ctx));
+  return THPStorage_(New)(
+          THWStorage_(newWithDataAndAllocator)(
+            THManagedMapAllocator::makeDataPtr(manager_handle, object_handle, flags, size * sizeof(real)),
+            size,
+            /* allocator */ nullptr));
   END_HANDLE_TH_ERRORS
 }
 
@@ -146,8 +144,8 @@ static THWStorage* THPStorage_(newFdStorage)(ptrdiff_t size)
               TH_ALLOCATOR_MAPPED_KEEPFD |
               TH_ALLOCATOR_MAPPED_UNLINK;
   std::string handle = THPStorage_(__newHandle)();
-  auto ctx = THMapAllocatorContext_new(handle.c_str(), flags);
-  return THWStorage_(newWithAllocator)(size, &THMapAllocator, (void*)ctx);
+  auto sptr = THMapAllocator::makeDataPtr(handle.c_str(), flags, size * sizeof(real), nullptr);
+  return THWStorage_(newWithDataAndAllocator)(std::move(sptr), size, /* allocator */ nullptr);
 }
 
 static PyObject * THPStorage_(pyNewFdStorage)(PyObject *_unused, PyObject *args)
@@ -165,18 +163,19 @@ static PyObject * THPStorage_(shareFd)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
-  THMapAllocatorContext *ctx;
+  THMapAllocator *ctx;
   // Storage is already in shared memory, just return a handle
-  if (storage->allocatorVoidPtr == &THMapAllocator) {
-    ctx = (THMapAllocatorContext*)storage->allocatorContext;
+  if ((ctx = THMapAllocator::fromDataPtr(storage->data_ptr))) {
+    // done
   } else {
     THWStoragePtr new_storage(THPStorage_(newFdStorage)(storage->size));
     THWStorage_(copy)(new_storage, storage);
     THWStorage_(swap)(storage, new_storage);
-    ctx = (THMapAllocatorContext*)storage->allocatorContext;
+    ctx = THMapAllocator::fromDataPtr(storage->data_ptr);
+    AT_ASSERT(ctx);
   }
 
-  THPObjectPtr storage_handle(PyLong_FromLong(THMapAllocatorContext_fd(ctx)));
+  THPObjectPtr storage_handle(PyLong_FromLong(ctx->fd()));
   if (!storage_handle) return NULL;
   THPObjectPtr size(PyLong_FromLong(storage->size));
   if (!size) return NULL;
@@ -212,9 +211,11 @@ static PyObject * THPStorage_(newSharedFd)(PyObject *_unused, PyObject *args)
               TH_ALLOCATOR_MAPPED_NOCREATE |
               TH_ALLOCATOR_MAPPED_KEEPFD |
               TH_ALLOCATOR_MAPPED_FROMFD;
-  THMapAllocatorContext *ctx = THMapAllocatorContext_newWithFd(NULL, fd, flags);
-  return THPStorage_(New)(THWStorage_(newWithAllocator)(size, &THMapAllocator,
-      (void*)ctx));
+  return THPStorage_(New)(
+          THWStorage_(newWithDataAndAllocator)(
+            // TODO: Maybe we should read out the real size and use it for size
+            THMapAllocator::makeDataPtr(WITH_FD, nullptr, fd, flags, size * sizeof(real), nullptr),
+            size, /* allocator */ nullptr));
   END_HANDLE_TH_ERRORS
 }
 
@@ -224,9 +225,9 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
-  at::DeviceGuard device_guard(storage->device);
+  at::DeviceGuard device_guard(storage->data_ptr.device().index());
   THPObjectPtr tuple(PyTuple_New(5));
-  THPObjectPtr device(PyLong_FromLong(storage->device));
+  THPObjectPtr device(PyLong_FromLong(storage->data_ptr.device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
   THPObjectPtr size(PyLong_FromLong(storage->size));
@@ -292,8 +293,10 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
   THCudaCheck(cudaIpcOpenMemHandle(&devPtr, handle, cudaIpcMemLazyEnablePeerAccess));
 
   THWStoragePtr base(THWStorage_(newWithDataAndAllocator)(
-      LIBRARY_STATE (real*)devPtr, storage_size, &THCIpcAllocator, (void*)device));
-  base->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_FREEMEM;
+      LIBRARY_STATE
+      THCIpcDeleter::makeDataPtr(devPtr, device),
+      storage_size, /* allocator */ nullptr));
+  base->flag = TH_STORAGE_REFCOUNTED;
 
   if (offset != 0 || view_size != storage_size) {
     return THPStorage_(newTHView)(base.get(), offset, view_size);
@@ -373,16 +376,14 @@ PyObject * THPStorage_(freeWeakRef)(PyObject *_unused, PyObject *arg)
 PyObject * THPStorage_(sharedFd)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  THMapAllocatorContext *ctx = NULL;
+  THMapAllocator *ctx = nullptr;
 #ifndef THC_GENERIC_FILE
   THWStorage *storage = self->cdata;
-  if (storage->allocatorVoidPtr == &THMapAllocator) {
-    ctx = (THMapAllocatorContext*)storage->allocatorContext;
-  }
+  ctx = THMapAllocator::fromDataPtr(storage->data_ptr);
 #endif
 
   THPUtils_assert(ctx, "couldn't retrieve a shared file descriptor");
-  return PyLong_FromLong(THMapAllocatorContext_fd(ctx));
+  return PyLong_FromLong(ctx->fd());
   END_HANDLE_TH_ERRORS
 }
 
@@ -405,9 +406,8 @@ PyObject * THPStorage_(isShared)(THPStorage *self)
 #ifdef THC_GENERIC_FILE
   Py_RETURN_TRUE;
 #else
-  void *allocator = self->cdata->allocatorVoidPtr;
-  if (allocator == &THMapAllocator ||
-      allocator == &THManagedSharedAllocator) {
+  if (THMapAllocator::fromDataPtr(self->cdata->data_ptr) ||
+      THManagedMapAllocator::fromDataPtr(self->cdata->data_ptr)) {
     Py_RETURN_TRUE;
   } else {
     Py_RETURN_FALSE;
