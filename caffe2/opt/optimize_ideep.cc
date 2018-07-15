@@ -22,12 +22,12 @@ USE_IDEEP_DEF_ALIASES();
 
 Blob *getBlob(repr::NNGraph::NodeRef node, caffe2::Workspace *ws) {
   auto tensor = repr::nn::get<repr::Tensor>(node);
-  assert(ws->HasBlob(tensor->getName()) && "Blob not in workspace");
+  CAFFE_ENFORCE(ws->HasBlob(tensor->getName()), "Blob not in workspace");
   return ws->GetBlob(tensor->getName());
 }
 
 template <class T> T *getTensor(Blob *blob) {
-  assert(blob && "Blob is invalid");
+  CAFFE_ENFORCE(blob, "Blob is invalid");
   if (blob && blob->template IsType<T>()) {
     return blob->template GetMutable<T>();
   }
@@ -77,11 +77,11 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
   }
 
   if (op->type() == "ConvFusion") {
-    assert(fusion_type == 1 && "Invalid nest fusion");
+    CAFFE_ENFORCE(fusion_type == 1, "Invalid nest fusion");
     for (auto &arg : *op->mutable_arg()) {
       if (arg.name() == "fusion_type") {
         // Only from FUSION_CONV_SUM to FUSION_CONV_SUM_RELU
-        assert(arg.i() == 2 && "Invalid nest fusion");
+        CAFFE_ENFORCE(arg.i() == 2, "Invalid nest fusion");
         arg.set_i(3);
         return;
       }
@@ -89,7 +89,7 @@ void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {
     return;
   }
 
-  assert(fusion_type < 3 && "Invalid fusion type");
+  CAFFE_ENFORCE(fusion_type < 3, "Invalid fusion type");
   op->set_type("ConvFusion");
   auto *arg = op->add_arg();
   arg->set_name("fusion_type");
@@ -155,7 +155,7 @@ bool fuseConvBNHelperForIdeep(repr::NNModule *nn, caffe2::Workspace *ws) {
   }                                                                            \
   itensor name##Tensor({name->get_dims(), name->get_data_type()});             \
   name##Tensor.reorder_from(*name);                                            \
-  assert(name##Tensor.is_public_format() && #name " not with public format");  \
+  CAFFE_ENFORCE(name##Tensor.is_public_format(), #name " not with public format");  \
   auto *name##Data = static_cast<float *>(name##Tensor.get_data_handle());
 
     EXPOSE_TENSOR_DATA(filter, 1, convInputs);
@@ -270,7 +270,7 @@ void fuseConvSumForIdeep(repr::NNModule *nn, caffe2::Workspace *ws) {
     auto convOutput = repr::nn::getOutputs(convNode).front();
     repr::NNGraph::NodeRef sumInputX =
         (sumInputs[0] == convOutput ? sumInputs[1] : sumInputs[0]);
-    assert(sumInputX != nullptr && "Invalid sum inputs");
+    CAFFE_ENFORCE(sumInputX != nullptr, "Invalid sum inputs");
 
     auto preNode = repr::nn::getProducer(sumInputX);
     if (preNode == nullptr || !repr::nn::is<repr::NeuralNetOperator>(preNode)) {
