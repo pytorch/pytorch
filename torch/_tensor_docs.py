@@ -1671,7 +1671,9 @@ add_docstr_all('reshape_as',
 reshape_as(other) -> Tensor
 
 Returns this tensor as the same shape as :attr:`other`.
-``self.reshape_as(other)`` is equivalent to ``self.reshape(other.shape)``.
+``self.reshape_as(other)`` is equivalent to ``self.reshape(other.sizes())``.
+
+Please see :meth:`~Tensor.reshape` for more information about ``reshape``.
 
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same shape
@@ -2425,6 +2427,8 @@ view_as(other) -> Tensor
 
 View this tensor as the same size as :attr:`other`.
 ``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
+
+Please see :meth:`~Tensor.view` for more information about ``view``.
 
 Args:
     other (:class:`torch.Tensor`): The result tensor has the same size
