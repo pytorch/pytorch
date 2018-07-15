@@ -4711,6 +4711,10 @@ class TestTorch(TestCase):
         x = torch.Tensor([1, float('nan'), 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
+    def test_isinf(self):
+        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')])
+        self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
+
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
