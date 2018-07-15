@@ -329,6 +329,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: repeat
    .. automethod:: requires_grad_
    .. automethod:: reshape
+   .. automethod:: reshape_as
    .. automethod:: resize_
    .. automethod:: resize_as_
    .. automethod:: round

@@ -2473,6 +2473,20 @@ Example::
             [ 3,  3,  3,  3]])
 """)
 
+add_docstr_all('expand_as',
+               r"""
+expand_as(other) -> Tensor
+
+Expand this tensor to the same size as :attr:`other`.
+``self.expand_as(other)`` is equivalent to ``self.expand(other.size())``.
+
+Please see :meth:`~Tensor.expand` for more information about ``expand``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
+""")
+
 add_docstr_all('zero_',
                r"""
 zero_() -> Tensor

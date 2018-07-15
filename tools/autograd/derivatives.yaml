@@ -579,7 +579,7 @@
   self: repeat_backward(grad, self.dim(), repeats)
 
 # DO NOT define a backward for reshape!
-# reshape is special in that it sometimes returns a view, and somtimes not.
+# reshape is special in that it sometimes returns a view, and sometimes not.
 # Defining a backward will make codegen spit out the forward call as
 #     as_variable(baseType->reshape(self)),
 # making it impossible (hard) to detect when it is actually a view.
