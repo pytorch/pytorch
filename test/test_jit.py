@@ -28,7 +28,6 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
-import torch.jit.batchop
 
 try:
     import torchvision
