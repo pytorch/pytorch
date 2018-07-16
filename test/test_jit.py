@@ -256,6 +256,48 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
+    def test_peephole(self):
+        a = torch.tensor([0.4], requires_grad=True)
+        b = torch.tensor([0.7], requires_grad=True)
+        c = torch.tensor([0], dtype=torch.int32)
+
+        def f(x, y):
+            return x.type_as(y)
+
+        trace, z = torch.jit.get_trace_graph(f, (a, b))
+        self.run_pass('peephole', trace)
+        self.assertExpectedGraph(trace)
+        trace, z = torch.jit.get_trace_graph(f, (a, c))
+        s = str(trace)
+        self.run_pass('peephole', trace)
+        self.assertEqual(s, str(trace))
+
+    def test_peephole_dynamic(self):
+        def f(x, y):
+            return x.type_as(y)
+
+        fn = torch.jit.script(f)
+        s = str(fn.graph)
+        torch._C._jit_pass_peephole(fn.graph)
+        self.assertEqual(s, str(fn.graph))
+
+    @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    def test_peephole_cuda(self):
+        a = torch.tensor([0.4], requires_grad=True, device='cpu')
+        b = torch.tensor([0.7], requires_grad=True, device='cuda')
+        c = torch.tensor([0.7], requires_grad=True, device='cuda')
+
+        def f(x, y):
+            return x.type_as(y)
+
+        trace, z = torch.jit.get_trace_graph(f, (a, c))
+        s = str(trace)
+        self.run_pass('peephole', trace)
+        self.assertEqual(s, str(trace))
+        trace, z = torch.jit.get_trace_graph(f, (b, c))
+        self.run_pass('peephole', trace)
+        self.assertExpectedGraph(trace, subname="same_device")
+
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0], dtype=torch.int64)
