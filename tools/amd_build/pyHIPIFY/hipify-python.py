@@ -655,7 +655,7 @@ def fix_static_global_kernels(in_txt):
     return in_txt
 
 
-def get_kernel_template_params(the_file, KernelDictionary, templateParam_to_value):
+def get_kernel_template_params(the_file, KernelDictionary, template_param_to_value):
     """Scan for __global__ kernel definitions then extract its argument types, and static cast as necessary"""
     # Read the kernel file.
     with openf(the_file, "r") as f:
