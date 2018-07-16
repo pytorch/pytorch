@@ -96,10 +96,10 @@ PyObject *THPDevice_index(THPDevice *self)
   END_HANDLE_TH_ERRORS
 }
 
-static size_t THPDevice_hash(THPDevice *self)
+static Py_ssize_t THPDevice_hash(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  return std::hash<at::Device>{}(self->device);
+  return static_cast<Py_ssize_t>(std::hash<at::Device>{}(self->device));
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
