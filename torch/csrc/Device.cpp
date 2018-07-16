@@ -11,6 +11,7 @@
 #include <ATen/Error.h>
 
 #include <cstring>
+#include <limits>
 #include <structmember.h>
 #include <sstream>
 
@@ -99,7 +100,7 @@ PyObject *THPDevice_index(THPDevice *self)
 static Py_ssize_t THPDevice_hash(THPDevice *self)
 {
   HANDLE_TH_ERRORS
-  return static_cast<Py_ssize_t>(std::hash<at::Device>{}(self->device));
+  return static_cast<Py_ssize_t>(std::hash<at::Device>{}(self->device) % std::numeric_limits<Py_ssize_t>::max());
   END_HANDLE_TH_ERRORS_RET(-1)
 }
 
