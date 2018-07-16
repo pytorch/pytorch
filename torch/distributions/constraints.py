@@ -196,6 +196,18 @@ class _Interval(Constraint):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
 
 
+class _OpenInterval(Constraint):
+    """
+    Constrain to a real interval `(lower_bound, upper_bound)`.
+    """
+    def __init__(self, lower_bound, upper_bound):
+        self.lower_bound = lower_bound
+        self.upper_bound = upper_bound
+
+    def check(self, value):
+        return (self.lower_bound < value) & (value < self.upper_bound)
+
+
 class _Simplex(Constraint):
     """
     Constrain to the unit simplex in the innermost (rightmost) dimension.
@@ -267,6 +279,7 @@ less_than = _LessThan
 less_than_eq = _LessThanEq
 unit_interval = _Interval(0., 1.)
 interval = _Interval
+open_interval = _OpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
