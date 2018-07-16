@@ -371,7 +371,12 @@ int THPVariable_setitem(PyObject* self, PyObject* index, PyObject* py_value) {
   }
 
   IntList slicedValueSizes = slicePrefix1sSize(value.sizes());
-  auto valuesSliced = value.view(slicedValueSizes);
+  torch::autograd::Variable valuesSliced;
+  if (!value.sizes().equals(slicedValueSizes)) {
+    valuesSliced = value.view(slicedValueSizes);
+  } else {
+    valuesSliced = value;
+  }
   dispatch_index_put_(sliced, variableIndices, valuesSliced);
   return 0;
   END_HANDLE_TH_ERRORS_RET(-1)

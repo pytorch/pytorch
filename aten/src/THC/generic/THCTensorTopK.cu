@@ -5,20 +5,22 @@
 THC_API void THCTensor_(topk)(THCState* state,
                                THCTensor *topK,
                                THCudaLongTensor *indices,
-                               THCTensor *input,
+                               THCTensor *input_,
                                int64_t k, int dim, int dir, int sorted) {
-  THAssert(topK != NULL && indices != NULL && input != NULL);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input));
+  THAssert(topK != NULL && indices != NULL && input_ != NULL);
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
   THArgCheck(THCTensor_(_nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   int64_t dims = THCudaLongTensor__nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  int numDims = THCTensor_(_nDimension)(state, input);
+  int numDims = THCTensor_(_nDimension)(state, input_);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
   THArgCheck(dim >= 0 && dim < numDims, 6, "dim not in range");
 
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
+  int64_t sliceSize = THCTensor_(size)(state, input_, dim);
   THArgCheck(k > 0 && k <= sliceSize, 5, "k not in range for dimension");
+
+  THCTensor *input = THCTensor_(newContiguous)(state, input_);
 
   // Build the output size, which is the dim being selected set to
   // size k
@@ -154,6 +156,8 @@ THC_API void THCTensor_(topk)(THCState* state,
       THCudaLongTensor_free(state, sortedIndices);
     }
   }
+
+  THCudaLongTensor_free(state, input);
 
   THCudaCheck(cudaGetLastError());
 }

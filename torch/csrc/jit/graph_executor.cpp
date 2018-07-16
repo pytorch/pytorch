@@ -21,6 +21,7 @@
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/ivalue.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
@@ -72,6 +73,16 @@ private:
 };
 
 
+// helper to run interpreter on variables until we switch
+// everything to IValue
+inline variable_tensor_list runOneStage(const Code & code, variable_tensor_list inputs) {
+  std::vector<IValue> stack(inputs.begin(), inputs.end());
+  InterpreterState(code).runOneStage(stack);
+  return variable_tensor_list(fmap(stack, [](IValue& v) {
+    return std::move(v).toTensor();
+  }));
+}
+
 // an optimized way of executing the subgraph computed directly on
 // tensors rather than Variables.
 // This will unwrap Variables, run the plan, and re-wrap them.
@@ -90,8 +101,7 @@ struct ExecutionPlan {
     if(grad) {
       return runWithGrad(std::move(stack));
     }
-    InterpreterState(f).runOneStage(stack);
-    return stack;
+    return runOneStage(f, std::move(stack));
   }
   std::shared_ptr<Graph> get_graph() const {
     return graph;
@@ -113,14 +123,15 @@ struct ExecutionPlan {
   }
 
 private:
-  // inplace to avoid allocations
-  variable_tensor_list unwrapVariables(variable_tensor_list && list) const {
-    for(auto & v : list) {
-      v = v.defined() ? autograd::as_variable_ref(v).detach() : at::Tensor();
-    }
-    return std::move(list);
+  // note: should be inplace to avoid allocations, but we have to switch from
+  // a list of tensor to a list of ivalues
+  std::vector<IValue> unwrapVariables(variable_tensor_list && list) const {
+    return fmap(list, [](const Variable& v) -> IValue {
+      return v.defined() ? autograd::as_variable_ref(v).detach() : at::Tensor();
+    });
   }
-  // inplace to avoid allocations
+  // note: should be inplace to avoid allocations, but we have to switch from
+  // a list of tensor to a list of ivalues
   variable_tensor_list wrapTensors(tensor_list && list) const {
     for(auto & v : list) {
       v = autograd::make_variable(v, /*requires_grad=*/false);
@@ -152,7 +163,8 @@ private:
 
     auto stack = unwrapVariables(std::move(inputs));
     InterpreterState(f).runOneStage(stack);
-    variable_tensor_list outputs = std::move(stack);
+    variable_tensor_list outputs(
+        fmap(stack, [](IValue& v) { return std::move(v).toTensor(); }));
 
     // hookup the gradients for the output tensors that require gradients
     // to the inputs to our gradient function df
@@ -311,11 +323,7 @@ private:
 
   variable_tensor_list runFallback(variable_tensor_list inputs) {
     auto & fb = getOrCreateAutogradFallback();
-    InterpreterState state(fb);
-    auto stack = std::move(inputs);
-    state.runOneStage(stack);
-    // note: we never unwrapped inputs, because we want autograd to record the trace
-    return stack;
+    return runOneStage(fb, std::move(inputs));
   }
 
   static bool calcMayIntroduceGradient(Block* b) {

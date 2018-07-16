@@ -136,6 +136,14 @@ void Variable::Impl::set_data(Tensor new_data) {
   data_ = std::move(new_data);
 }
 
+void Variable::Impl::release_resources() {
+  data_.reset();
+  grad_.reset();
+  grad_fn_.reset();
+  hooks_.clear();
+  tracing_state_.reset();
+}
+
 Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
     : Variable::Impl(std::move(data), false, std::move(gradient_edge)),
       base_(std::move(base)) {
@@ -182,6 +190,11 @@ void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
   get_grad_fn(); // trigger an update to the view's grad_fn
 }
 
+void Variable::ViewImpl::release_resources() {
+  Variable::Impl::release_resources();
+  base_.reset();
+}
+
 void Variable::rebase_history(Edge gradient_edge) {
   TORCH_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
@@ -200,4 +213,5 @@ void Variable::set_tracing_state(
 jit::tracer::ValueTracingState& Variable::tracing_state() const noexcept {
   return *get()->tracing_state_;
 }
+
 }} // namespace torch::autograd

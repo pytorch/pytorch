@@ -49,11 +49,10 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 }
 
 THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
-                                          THCDeviceAllocator* allocator,
-                                          void* allocatorContext)
+                                          at::Allocator* allocator)
 {
   return THCStorage_newWithAllocator(state, at::CTypeToScalarType<real>::to(),
-                                     size, allocator, allocatorContext);
+                                     size, allocator);
 }
 
 THCStorage* THCStorage_(newWithSize1)(THCState *state, real data0)
@@ -96,15 +95,10 @@ THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, p
   return NULL;
 }
 
-THCStorage* THCStorage_(newWithData)(THCState *state, real *data, ptrdiff_t size)
-{
-  return THCStorage_newWithData(state, at::CTypeToScalarType<real>::to(), data, size);
-}
-
 THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, real *data, ptrdiff_t size,
-  THCDeviceAllocator *allocator, void *allocatorContext) {
-  return THCStorage_newWithDataAndAllocator(state, at::CTypeToScalarType<real>::to(), data, size, allocator, allocatorContext);
+  THCState *state, at::DataPtr&& data, ptrdiff_t size,
+  at::Allocator *allocator) {
+  return THCStorage_newWithDataAndAllocator(state, at::CTypeToScalarType<real>::to(), std::move(data), size, allocator);
 }
 
 void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag)

@@ -1283,8 +1283,8 @@ struct PythonOp : public Node {
   std::vector<THPObjectPtr> scalar_args;
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;
-  virtual void cloneFrom(Node * other_) override = 0;
-  virtual Node * allocNewInstance(Graph * g) override = 0;
+  void cloneFrom(Node * other_) override = 0;
+  Node * allocNewInstance(Graph * g) override = 0;
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
@@ -1305,7 +1305,6 @@ inline Node* Graph::createPythonOp(
       cconv,
       std::move(scalar_args));
 }
-
 
 inline graph_node_list_iterator Node::iterator() {
   return graph_node_list_iterator(this, 0);
