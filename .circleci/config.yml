@@ -8,6 +8,9 @@ jobs:
           username: circleci
           password: $CIRCLECI_IAM_PASSWORD
     resource_class: large
+    branches:
+      only:
+        - circleci
     steps:
     - run:
         name: Hello World
