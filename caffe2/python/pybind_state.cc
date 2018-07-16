@@ -17,6 +17,7 @@
 #include "caffe2/observers/time_observer.h"
 #include "caffe2/onnx/backend.h"
 #include "caffe2/onnx/helper.h"
+#include "caffe2/onnx/onnxifi_transformer.h"
 #include "caffe2/onnx/onnx_exporter.h"
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
@@ -1509,6 +1510,27 @@ void addGlobalMethods(py::module& m) {
     new_proto.SerializeToString(&out);
     return py::bytes(out);
   });
+  m.def(
+      "transform_onnxifi",
+      [](const py::bytes& pred_net_str,
+         const std::unordered_map<std::string, std::vector<int>>& shapes,
+         bool debug_builder) -> py::bytes {
+        caffe2::NetDef pred_net;
+        if (!ParseProtoFromLargeString(
+                pred_net_str.cast<std::string>(), &pred_net)) {
+          LOG(ERROR) << "broken pred_net protobuf";
+        }
+        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        for (const auto& it : shapes) {
+          tensor_shapes.emplace(
+              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+        }
+        OnnxifiTransformer ts(debug_builder);
+        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
+        std::string pred_net_str2;
+        pred_net.SerializeToString(&pred_net_str2);
+        return py::bytes(pred_net_str2);
+      });
   m.def(
       "run_workspace_transform",
       [](const std::string& transform_name, py::bytes def) {
