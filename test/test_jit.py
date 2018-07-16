@@ -830,8 +830,8 @@ class TestJit(JitTestCase):
         self.assertTrue(torch.equal(torch.ones(2, 2), t_node.t("a")))
         self.assertExpected(str(g2))
 
-    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
-    @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    # @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    # @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
     def test_cpp(self):
         # rather than rebuild assertExpected in cpp,
         # just glob all the cpp outputs into one file for now

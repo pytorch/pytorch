@@ -15,6 +15,7 @@ import torch
 from torch.utils import cpp_extension
 
 TESTS = [
+    'jit',
     'autograd',
     'cpp_extensions',
     'c10d',
@@ -23,7 +24,6 @@ TESTS = [
     'distributed',
     'distributions',
     'indexing',
-    'jit',
     'legacy_nn',
     'multiprocessing',
     'nccl',
