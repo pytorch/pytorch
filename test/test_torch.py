@@ -6743,8 +6743,10 @@ class TestTorch(TestCase):
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
+        # I have to do it in this roundabout fashion, because there's no
+        # way to slice storages
         for i in range(4):
-            self.assertEqual(c[4][i+1], c[5][i])
+            self.assertEqual(c[4][i + 1], c[5][i])
 
         # check that serializing the same storage view object unpickles
         # it as one object not two (and vice versa)

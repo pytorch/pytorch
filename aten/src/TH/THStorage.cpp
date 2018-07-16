@@ -224,6 +224,5 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
     SWAP(flag);
     SWAP(allocator);
     SWAP(finalizer);
-    SWAP(view);
 #undef SWAP
 }
