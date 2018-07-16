@@ -8,9 +8,7 @@
 #include "caffe2/operators/flatten_op.h"
 #include "caffe2/operators/utility_ops.h"
 #include "caffe2/utils/math.h"
-#include "caffe2/operators/flatten_op.h"
 #include "caffe2/operators/minmax_ops.h"
-#include "caffe2/operators/utility_ops.h"
 
 #include <thrust/device_vector.h>
 #include <thrust/sequence.h>
