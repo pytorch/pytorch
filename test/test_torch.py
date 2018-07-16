@@ -6456,17 +6456,6 @@ class TestTorch(TestCase):
         self.assertEqual(v.storage()[0], v.data[0][0])
         self.assertEqual(v.storage()[14], v.data[2][4])
 
-    def test_storageview(self):
-        s1 = torch.LongStorage((3, 4, 5))
-        s2 = torch.LongStorage(s1, 1)
-
-        self.assertEqual(s2.size(), 2)
-        self.assertEqual(s2[0], s1[1])
-        self.assertEqual(s2[1], s1[2])
-
-        s2[1] = 13
-        self.assertEqual(13, s1[2])
-
     def test_nonzero(self):
         num_src = 12
 
@@ -6732,14 +6721,14 @@ class TestTorch(TestCase):
 
     def _test_serialization_data(self):
         a = [torch.randn(5, 5).float() for i in range(2)]
-        b = [a[i % 2] for i in range(4)]
-        b += [a[0].storage()]
-        b += [a[0].storage()[1:4]]
-        b += [torch.arange(1, 11).int()]
-        t1 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
-        t2 = torch.FloatTensor().set_(a[0].storage()[1:4], 0, (3,), (1,))
-        b += [(t1.storage(), t1.storage(), t2.storage())]
-        b += [a[0].storage()[0:2]]
+        b = [a[i % 2] for i in range(4)]  # 0-3
+        b += [a[0].storage()]  # 4
+        b += [a[0].reshape(-1)[1:4].storage()]  # 5
+        b += [torch.arange(1, 11).int()]  # 6
+        t1 = torch.FloatTensor().set_(a[0].reshape(-1)[1:4].clone().storage(), 0, (3,), (1,))
+        t2 = torch.FloatTensor().set_(a[0].reshape(-1)[1:4].clone().storage(), 0, (3,), (1,))
+        b += [(t1.storage(), t1.storage(), t2.storage())]  # 7
+        b += [a[0].reshape(-1)[0:2].storage()]  # 8
         return b
 
     def _test_serialization_assert(self, b, c):
@@ -6754,7 +6743,8 @@ class TestTorch(TestCase):
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
-        self.assertEqual(c[4][1:4], c[5], 0)
+        for i in range(4):
+            self.assertEqual(c[4][i+1], c[5][i])
 
         # check that serializing the same storage view object unpickles
         # it as one object not two (and vice versa)
@@ -6914,7 +6904,7 @@ class TestTorch(TestCase):
         a = [torch.arange(1 + i, 26 + i).view(5, 5).float() for i in range(2)]
         b = [a[i % 2] for i in range(4)]
         b += [a[0].storage()]
-        b += [a[0].storage()[1:4]]
+        b += [a[0].reshape(-1)[1:4].clone().storage()]
         path = download_file('https://download.pytorch.org/test_data/legacy_serialized.pt')
         c = torch.load(path)
         self.assertEqual(b, c, 0)
@@ -6928,7 +6918,6 @@ class TestTorch(TestCase):
         self.assertEqual(c[4], torch.FloatStorage(25).fill_(10), 0)
         c[1].fill_(20)
         self.assertEqual(c[1], c[3], 0)
-        self.assertEqual(c[4][1:4], c[5], 0)
 
         # test some old tensor serialization mechanism
         class OldTensorBase(object):
