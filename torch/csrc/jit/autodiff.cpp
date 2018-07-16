@@ -17,7 +17,7 @@ bool hasOneValuedAttribute(Node *n, torch::jit::Symbol name) {
 
 bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
-    aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
+    aten::add, aten::sub, aten::mul, prim::Constant,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
     aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as,
     aten::relu, aten::exp, prim::AutogradAdd
@@ -99,8 +99,6 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
       case prim::Constant:
         return {};
-      case prim::ReplaceIfUndef:
-        return {grads.at(0), grads.at(0)};
       case aten::sigmoid:
         return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
       case aten::tanh:
