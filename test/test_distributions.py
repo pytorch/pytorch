@@ -912,7 +912,7 @@ class TestDistributions(TestCase):
 
             def ref_log_prob(idx, x, log_prob):
                 p = probs.view(-1)[idx].item()
-                expected = scipy.stats.nbinom(total_count, p).logpmf(x)
+                expected = scipy.stats.nbinom(total_count, 1-p).logpmf(x)
                 self.assertAlmostEqual(log_prob, expected, places=3)
 
             self._check_log_prob(NegativeBinomial(total_count, probs), ref_log_prob)
@@ -925,7 +925,7 @@ class TestDistributions(TestCase):
         for total_count, sample in [(torch.tensor([10]), torch.tensor([7., 3., 9.])),
                                     (torch.tensor([1, 2, 10]), torch.tensor([0., 1., 9.]))]:
             log_prob = NegativeBinomial(total_count, probs).log_prob(sample)
-            expected = scipy.stats.nbinom(total_count.cpu().numpy(), probs.cpu().numpy()).logpmf(sample)
+            expected = scipy.stats.nbinom(total_count.cpu().numpy(), 1-probs.cpu().numpy()).logpmf(sample)
             self.assertAlmostEqual(log_prob, expected, places=4)
 
     def test_multinomial_1d(self):
