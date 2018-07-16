@@ -78,7 +78,6 @@ private:
 inline variable_tensor_list runOneStage(const Code & code, variable_tensor_list inputs) {
   std::vector<IValue> stack(inputs.begin(), inputs.end());
   InterpreterState(code).runOneStage(stack);
-  // note: we never unwrapped inputs, because we want autograd to record the trace
   return variable_tensor_list(fmap(stack, [](IValue& v) {
     return std::move(v).toTensor();
   }));
@@ -124,13 +123,15 @@ struct ExecutionPlan {
   }
 
 private:
-  // inplace to avoid allocations
+  // note: should be inplace to avoid allocations, but we have to switch from
+  // a list of tensor to a list of ivalues
   std::vector<IValue> unwrapVariables(variable_tensor_list && list) const {
     return fmap(list, [](const Variable& v) -> IValue {
       return v.defined() ? autograd::as_variable_ref(v).detach() : at::Tensor();
     });
   }
-  // inplace to avoid allocations
+  // note: should be inplace to avoid allocations, but we have to switch from
+  // a list of tensor to a list of ivalues
   variable_tensor_list wrapTensors(tensor_list && list) const {
     for(auto & v : list) {
       v = autograd::make_variable(v, /*requires_grad=*/false);

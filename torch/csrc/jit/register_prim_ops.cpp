@@ -78,8 +78,8 @@ RegisterOperators reg({
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
             bool first = true;
-            for (IValue i_ : last(stack, num_inputs)) {
-              auto i = std::move(i_).toTensor();
+            for (const IValue& i_ : last(stack, num_inputs)) {
+              auto i = i_.toTensor();
               if (!first)
                 std::cout << " ";
               first = false;
@@ -103,7 +103,7 @@ RegisterOperators reg({
     // and inst.outputs
     Operator(prim::Load, noop),
     // x, y = Store
-    // stores values from stack into registers, the actual callback does
+    // stores vales from stack into registers, the actual callback does
     // nothing since the stack manipulation is already encoded in inst.inputs
     // and inst.outputs
     Operator(prim::Store, noop),

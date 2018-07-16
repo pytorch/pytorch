@@ -914,7 +914,7 @@ void testIValue() {
   auto foo2 = std::move(bar);
   JIT_ASSERT(foo->use_count() == 3);
   JIT_ASSERT(foo2.isIntList());
-  JIT_ASSERT(bar.isInt());
+  JIT_ASSERT(bar.isNone());
   foo2 = IValue(4.0);
   JIT_ASSERT(foo2.isDouble());
   JIT_ASSERT(foo2.toDouble() == 4.0);
@@ -923,14 +923,14 @@ void testIValue() {
 
   auto move_it = std::move(baz).toIntList();
   JIT_ASSERT(foo->use_count() == 2);
-  JIT_ASSERT(baz.isInt());
+  JIT_ASSERT(baz.isNone());
   IValue i(4);
   JIT_ASSERT(i.isInt() && i.toInt() == 4);
   IValue dlist(DoubleList::create({3.5}));
   JIT_ASSERT(
       dlist.isDoubleList() &&
       std::move(dlist).toDoubleList()->elements().equals({3.5}));
-  JIT_ASSERT(dlist.isInt());
+  JIT_ASSERT(dlist.isNone());
   dlist = IValue(DoubleList::create({3.4}));
   JIT_ASSERT(dlist.toDoubleList()->elements().equals({3.4}));
   IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));

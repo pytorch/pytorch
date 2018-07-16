@@ -89,16 +89,17 @@ using DoubleList = ConstantList<double>;
 // retain/release calls.
 struct IValue {
   IValue()
-  : IValue(static_cast<int64_t>(0)) {}
+  : payload(0)
+  , tag(Tag::None)
+  , retainable(false) {}
   IValue(const IValue& rhs)
-      : as_int(rhs.as_int),
+      : payload(rhs.payload),
         tag(rhs.tag),
         retainable(rhs.retainable) {
     if (retainable)
       as_retainable->retain();
   }
-  IValue(IValue && rhs) noexcept
-  : IValue() {
+  IValue(IValue&& rhs) noexcept : IValue() {
     swap(rhs);
   }
   ~IValue() {
@@ -115,7 +116,7 @@ struct IValue {
       return *this;
   }
   void swap(IValue & rhs) {
-    std::swap(as_int, rhs.as_int);
+    std::swap(payload, rhs.payload);
     std::swap(retainable, rhs.retainable);
     std::swap(tag, rhs.tag);
   }
@@ -134,7 +135,7 @@ struct IValue {
   at::Tensor toTensor() && {
     JIT_ASSERT(isTensor());
     at::Tensor t(as_tensor_impl, /*retain=*/false);
-    clearToZero();
+    clearToNone();
     return t;
   }
   at::Tensor toTensor() const & {
@@ -204,30 +205,37 @@ struct IValue {
     return toRetainable<DoubleList>();
   }
 
+  bool isNone() {
+    return Tag::None == tag;
+  }
+
 private:
   template<typename T>
   Shared<T> moveToRetainable() {
     Shared<T> t(static_cast<T*>(as_retainable), false);
-    clearToZero();
+    clearToNone();
     return t;
   }
   template<typename T>
   Shared<T> toRetainable() const {
     return Shared<T>(static_cast<T*>(as_retainable), true);
   }
-  void clearToZero() {
-    as_int = 0;
-    tag = Tag::Int;
+  void clearToNone() {
+    payload = 0;
+    tag = Tag::None;
     retainable = false;
   }
   enum class Tag : uint32_t {
-    Tensor, Double, Int, Tuple, IntList, DoubleList
+    None, Tensor, Double, Int, Tuple, IntList, DoubleList
   };
   union {
     at::TensorImpl* as_tensor_impl;
     at::Retainable* as_retainable;
     double as_double;
     int64_t as_int;
+    // this type should be as big as all the other types because it will
+    // be used to copy the union's value in certain cases
+    int64_t payload;
   };
   Tag tag;
   bool retainable;
