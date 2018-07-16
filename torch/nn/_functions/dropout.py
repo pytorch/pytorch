@@ -103,8 +103,9 @@ class AlphaDropout(Dropout):
             b = ctx.noise
         else:
             ctx.noise.bernoulli_(1 - ctx.p)
-            a = ((3.09091329228798008 * ctx.p + 1) * (1 - ctx.p)) ** (-0.5)
-            b = ctx.noise.add(-1).mul_(1.7580993408473766 * a).add_(1.7580993408473766 * a * ctx.p)
+            alpha = 1.7580993408473766
+            a = ((alpha ** 2 * ctx.p + 1) * (1 - ctx.p)) ** (-0.5)
+            b = ctx.noise.add(-1).mul_(alpha * a).add_(alpha * a * ctx.p)
         ctx.noise = ctx.noise.mul_(a).expand_as(input)
         b = b.expand_as(input)
         output.mul_(ctx.noise).add_(b)
