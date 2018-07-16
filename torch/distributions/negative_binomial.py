@@ -17,7 +17,6 @@ class NegativeBinomial(Distribution):
         probs (Tensor): Event probabilities of success
         logits (Tensor): Event log-odds for probabilities of success
     """
-
     arg_constraints = {'total_count': constraints.greater_than_eq(0),
                        'probs': constraints.unit_interval}
     support = constraints.nonnegative_integer
