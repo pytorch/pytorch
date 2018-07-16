@@ -35,7 +35,6 @@ _(prim, PadPacked) /* onnx */ \
 _(prim, Placeholder) /* debug */ \
 _(prim, Print) \
 _(prim, PythonOp) \
-_(prim, ReplaceIfUndef) \
 _(prim, Reverse) \
 _(prim, Return) \
 _(prim, Store) \

@@ -292,26 +292,6 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
   END_HANDLE_TH_ERRORS
 }
 
-#ifndef THD_GENERIC_FILE
-PyObject * THPStorage_(_rootStorage)(THPStorage *self)
-{
-  HANDLE_TH_ERRORS
-  if (!(self->cdata->flag & TH_STORAGE_VIEW)) {
-    return Py_BuildValue("(ON)", self, PyLong_FromLong(0));
-  }
-  THWStorage *root = self->cdata;
-  while (root->flag & TH_STORAGE_VIEW)
-    root = root->view;
-  size_t offset = THWStorage_(data)(LIBRARY_STATE self->cdata) - THWStorage_(data)(LIBRARY_STATE root);
-  THWStorage_(retain)(LIBRARY_STATE root);
-  THPObjectPtr storage(THPStorage_(New)(root));
-  PyObject *result = Py_BuildValue("(NN)", storage.get(), PyLong_FromLong(offset));
-  storage.release();
-  return result;
-  END_HANDLE_TH_ERRORS
-}
-#endif
-
 static PyMethodDef THPStorage_(methods)[] = {
   {"copy_", (PyCFunction)THPStorage_(copy_), METH_VARARGS | METH_KEYWORDS, NULL},
   {"element_size", (PyCFunction)THPStorage_(elementSize), METH_NOARGS, NULL},
@@ -335,7 +315,6 @@ static PyMethodDef THPStorage_(methods)[] = {
 #endif
   {"_set_cdata", (PyCFunction)THPStorage_(_setCdata), METH_O, NULL},
 #ifndef THD_GENERIC_FILE
-  {"_root_storage", (PyCFunction)THPStorage_(_rootStorage), METH_NOARGS, NULL},
 #endif
   {NULL}
 };
