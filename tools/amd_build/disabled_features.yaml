@@ -24,12 +24,6 @@
         }
       },
       {
-        "path": "aten/src/ATen/native/cuda/SoftMax.cu",
-        "functions": {
-          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "max_active_blocks = 16;"
-        }
-      },
-      {
         "path": "aten/src/THC/THCStream.cpp",
         "functions": {
           "cudaStreamCreateWithFlags": "hipSuccess",
