@@ -227,6 +227,24 @@ class TestFillerOperator(hu.HypothesisTestCase):
             assert np.count_nonzero(blob_out) > 0, "All generated elements are "
             "zeros. Is the random generator functioning correctly?"
 
+    @given(**hu.gcs_cpu_only)
+    def test_sparse_lengths_fill(self, gc, dc):
+        op = core.CreateOperator(
+            "SparseLengthsFill",
+            [],
+            ["values", "lengths"],
+            average_len=50,
+            max_value=10,
+            batch_size=20
+        )
+
+        workspace.RunOperatorOnce(op)
+        values = workspace.FetchBlob("values")
+        lengths = workspace.FetchBlob("lengths")
+        self.assertLess(max(values), 10)
+        self.assertGreaterEqual(min(values), 0)
+        self.assertEqual(sum(lengths), len(values))
+        self.assertEqual(20, len(lengths))
 
 if __name__ == "__main__":
     import unittest

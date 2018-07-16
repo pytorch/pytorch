@@ -507,6 +507,55 @@ class LengthsRangeFillOp : public Operator<Context> {
   }
 };
 
+template <class Context>
+class SparseLengthsFillOp : public Operator<Context> {
+ public:
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+  SparseLengthsFillOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<Context>(operator_def, ws),
+        average_len_(
+            OperatorBase::template GetSingleArgument<int>("average_len", 27)),
+        max_value_(
+            OperatorBase::template GetSingleArgument<int>("max_value", 100000)),
+        batch_size_(
+            OperatorBase::template GetSingleArgument<int>("batch_size", 20)) {
+    CAFFE_ENFORCE_EQ(2, OutputSize());
+  }
+
+  bool RunOnDevice() override {
+    auto* values_output = Output(0);
+    auto* lengths_output = Output(1);
+
+    lengths_output->Resize(batch_size_);
+    auto* lengths = lengths_output->template mutable_data<int32_t>();
+    math::RandUniform<int32_t, Context>(
+        lengths_output->size(),
+        static_cast<int32_t>(average_len_ * 0.75),
+        static_cast<int32_t>(average_len_ * 1.25),
+        lengths,
+        &context_);
+
+    int64_t len_sum = 0;
+    for (size_t i = 0; i < batch_size_; ++i) {
+      len_sum += lengths[i];
+    }
+
+    values_output->Resize(len_sum);
+    math::RandUniform<int64_t, Context>(
+        values_output->size(),
+        0,
+        max_value_ - 1,
+        values_output->template mutable_data<int64_t>(),
+        &context_);
+    return true;
+  }
+
+ private:
+  int average_len_;
+  int max_value_;
+  int batch_size_;
+};
+
 template <int VALUE_TYPE = TensorProto_DataType_FLOAT>
 inline std::vector<TensorShape> FillerTensorInference(
     const OperatorDef& def,

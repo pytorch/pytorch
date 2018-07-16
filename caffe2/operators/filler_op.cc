@@ -39,6 +39,7 @@ REGISTER_CPU_OPERATOR(XavierFill, XavierFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(MSRAFill, MSRAFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(RangeFill, RangeFillOp<float, CPUContext>);
 REGISTER_CPU_OPERATOR(LengthsRangeFill, LengthsRangeFillOp<CPUContext>);
+REGISTER_CPU_OPERATOR(SparseLengthsFill, SparseLengthsFillOp<CPUContext>);
 
 OPERATOR_SCHEMA(ConstantFill)
     .NumInputs(0, 1)
@@ -690,5 +691,72 @@ range_sequence:
         "range_sequence",
         "1D tensor whose size is the sum of *lengths*");
 NO_GRADIENT(LengthsRangeFill);
+
+OPERATOR_SCHEMA(SparseLengthsFill)
+    .NumInputs(0)
+    .NumOutputs(2)
+    .SetDoc(R"DOC(
+The *SparseLengthsFill* op takes no input and outputs two tensors
+*values* and *lengths* that represent a sparse tensor.
+The output *lengths* is a scalar with
+the size specified by argument `batch_size`
+to denote the sparse feature lengths.
+Each value of *lengths* is a uniform distribution between 3/4 and 5/4
+of argument `average_len`.
+he output *values* is a scalar with the size to be the sum of *lengths*.
+Each value of *values* is a uniform distribution between 0 and
+argument `max_value` - 1.
+
+
+
+Github Links:
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.h
+- https://github.com/caffe2/caffe2/blob/master/caffe2/operators/filler_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "SparseLengthsFill",
+    [],
+    ["values", "lengths"],
+    average_len=5,
+    max_value=10,
+    batch_size=5
+)
+
+workspace.RunOperatorOnce(op)
+print("values: \n", workspace.FetchBlob("values"))
+print("lengths: \n", workspace.FetchBlob("lengths"))
+
+```
+
+**Result**
+
+```
+
+values:
+ [0 2 7 5 5 6 0 1 4 3 7 6 3 5 1 5 2 6 5 0 0]
+lengths:
+ [4 5 4 3 5]
+
+```
+
+</details>
+
+)DOC")
+    .Arg("average_len", "The average length of the sparse feature.")
+    .Arg("max_value", "The max (exclusive) value of the feature.")
+    .Arg("batch_size", "The number of features.")
+    .Output(0, "values", "The values of the sparse feature")
+    .Output(1, "lengths", "The cooresponding lengths of the sparse feature");
+NO_GRADIENT(SparseLengthsFill);
 
 }  // namespace caffe2
