@@ -1,7 +1,7 @@
 import torch
 from torch.distributions import constraints
 from torch.distributions.categorical import Categorical
-from torch.distributions.utils import clamp_probs, broadcast_all, _log_sum_exp
+from torch.distributions.utils import clamp_probs, broadcast_all
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
 from torch.distributions.transforms import ExpTransform
@@ -60,7 +60,7 @@ class ExpRelaxedCategorical(Distribution):
         uniforms = clamp_probs(self.logits.new(self._extended_shape(sample_shape)).uniform_())
         gumbels = -((-(uniforms.log())).log())
         scores = (self.logits + gumbels) / self.temperature
-        return scores - _log_sum_exp(scores)
+        return scores - scores.logsumexp(dim=-1, keepdim=True)
 
     def log_prob(self, value):
         K = self._categorical._num_events
@@ -70,7 +70,7 @@ class ExpRelaxedCategorical(Distribution):
         log_scale = (self.temperature.new(self.temperature.shape).fill_(K).lgamma() -
                      self.temperature.log().mul(-(K - 1)))
         score = logits - value.mul(self.temperature)
-        score = (score - _log_sum_exp(score)).sum(-1)
+        score = (score - score.logsumexp(dim=-1, keepdim=True)).sum(-1)
         return score + log_scale
 
 

@@ -25,7 +25,7 @@ struct ${op} : public ${superclass} {
 
 WILL_RELEASE_VARIABLES = CodeTemplate("""\
 bool retain_variables = true;
-virtual void will_release_variables() override {
+void will_release_variables() override {
   retain_variables = false;
 }
 """)
