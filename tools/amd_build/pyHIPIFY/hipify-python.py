@@ -37,7 +37,10 @@ from enum import Enum
 from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 
 # Hardcode the PyTorch template map
+"""This dictionary provides the mapping from PyTorch kernel template types
+to their actual types."""
 PYTORCH_TEMPLATE_MAP = {"Dtype": "real", "T": "real"}
+
 
 def openf(filename, mode):
     if sys.version_info[0] == 3:
@@ -45,9 +48,8 @@ def openf(filename, mode):
     else:
         return open(filename, mode)
 
+
 # Color coding for printing
-
-
 class bcolors:
     HEADER = '\033[95m'
     OKBLUE = '\033[94m'
@@ -283,7 +285,7 @@ def walk_over_directory(rootpath, extensions, show_detailed=False, include_dirs=
 
 
 def compute_stats(stats):
-    unsupported_calls = set(cuda_call for (cuda_call, _filepath) in stats["unsupported_calls"])
+    unsupported_calls = {cuda_call for (cuda_call, _filepath) in stats["unsupported_calls"]}
 
     # Print the number of unsupported calls
     print("Total number of unsupported CUDA function calls: {0:d}".format(len(unsupported_calls)))
@@ -379,7 +381,6 @@ def processKernelLaunches(string, stats):
                                      "group": string[kernel_start: kernel_end]})
 
         return kernel_positions
-
 
     # Grab positional ranges of all kernel launchces
     get_kernel_positions = [k for k in find_kernel_bounds(string)]
@@ -792,12 +793,16 @@ def disable_module(input_file):
         f.write(disabled)
         f.truncate()
 
+
 def extract_arguments(start, string):
-    """ Return the list of arguments in the upcoming function parameter closure
-        This function needs a string that contains function arguments fully encapsulated within opening and closing parantheses.
-        Eg:
+    """ Return the list of arguments in the upcoming function parameter closure.
+        Example:
         string (input): '(blocks, threads, 0, THCState_getCurrentStream(state))'
-        arguments (output): '[{'start': 1, 'end': 7}, {'start': 8, 'end': 16}, {'start': 17, 'end': 19}, {'start': 20, 'end': 53}]'
+        arguments (output):
+            '[{'start': 1, 'end': 7},
+            {'start': 8, 'end': 16},
+            {'start': 17, 'end': 19},
+            {'start': 20, 'end': 53}]'
     """
 
     arguments = []
@@ -837,15 +842,22 @@ def extract_arguments(start, string):
 
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
 def add_static_casts(directory, extensions, KernelTemplateParams):
-    """Added necessary static casts to kernel launches to match kernel argument type to corresponding kernel definition
-       Eg.
-       old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
-          (const real**)d_result, THCTensor_(data)(state, ra__),
-          ra__->stride[0], num_batches'
-       new_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
-          (const real**)d_result, THCTensor_(data)(state, ra__),
-          static_cast<int64_t>(ra__->stride[0]), static_cast<int64_t>(num_batches)'
+    """Add static casts to kernel launches in order to keep launch argument types and kernel definition types matching.
+
+       Example:
+           old_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
+              (const real**)d_result, THCTensor_(data)(state, ra__),
+              ra__->stride[0], num_batches'
+
+           new_kernel_launch: ' createBatchGemmBuffer, grid, block, 0, THCState_getCurrentStream(state),
+              (const real**)d_result, THCTensor_(data)(state, ra__),
+              static_cast<int64_t>(ra__->stride[0]), static_cast<int64_t>(num_batches)'
     """
+
+    # These are the types that generally have issues with hipKernelLaunch.
+    static_cast_types = ["int", "const int", "int64_t", "THCIndex_t *",
+                         "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]
+
     # Add static_casts<> to all kernel launches.
     for (dirpath, _dirnames, filenames) in os.walk(directory):
         for filename in filenames:
@@ -876,14 +888,16 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                                 if arg_idx in argument_types:
                                     the_type = argument_types[arg_idx]
                                     the_arg = arg.replace("\n", "").replace("\\", "").strip()
-                                    # Not all types have issues with the hipLaunchKernelGGL. However, these types below do.
-                                    if the_type in ["int", "const int", "int64_t", "THCIndex_t *", "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]:
+                                    # Not all types have issues with the hipLaunchKernelGGL.
+                                    if the_type in static_cast_types:
                                         static_argument = "static_cast<{0}>({1})".format(the_type, the_arg)
 
                                         def replace_arg(match):
                                             return match.group(1) + static_argument + match.group(3)
-                                        # Update to static_cast, account for cases where argument is at start/end of string
-                                        new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(re.escape(the_arg)), replace_arg, new_kernel_launch)
+
+                                        # Account for case where argument is at start/end of string
+                                        new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(
+                                            re.escape(the_arg)), replace_arg, new_kernel_launch)
 
                             # PyTorch Specific: Add template type
                             # Here the template value will be resolved from <real> to <Dtype>.
