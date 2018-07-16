@@ -14,7 +14,7 @@ from caffe2.python import core, workspace
 from caffe2.python.onnx.tests.test_utils import TestCase
 
 class OnnxifiTest(TestCase):
-    @unittest.skipIf(not workspace.C.use_trt, "No TensortRT support")
+    @unittest.skip("Need ONNXIFI backednd support")
     def test_relu_graph(self):
         batch_size = 1
         X = np.random.randn(batch_size, 1, 3, 2).astype(np.float32)
@@ -36,3 +36,47 @@ class OnnxifiTest(TestCase):
         workspace.RunOperatorOnce(op)
         Y = workspace.FetchBlob("Y")
         np.testing.assert_almost_equal(Y, np.maximum(X, 0))
+
+    @unittest.skip("Need ONNXIFI backednd support")
+    def test_conv_graph(self):
+        X = np.array([[[[0., 1., 2., 3., 4.],  # (1, 1, 5, 5) input tensor
+                        [5., 6., 7., 8., 9.],
+                        [10., 11., 12., 13., 14.],
+                        [15., 16., 17., 18., 19.],
+                        [20., 21., 22., 23., 24.]]]]).astype(np.float32)
+        W = np.array([[[[1., 1., 1.],  # (1, 1, 3, 3) tensor for convolution weights
+                        [1., 1., 1.],
+                        [1., 1., 1.]]]]).astype(np.float32)
+        Y_without_padding = np.array([[[[54., 63., 72.],  # (1, 1, 3, 3) output tensor
+                                        [99., 108., 117.],
+                                        [144., 153., 162.]]]]).astype(np.float32)
+        graph_def = make_graph(
+            [make_node(
+                'Conv',
+                inputs=['X', 'W'],
+                outputs=['Y'],
+                kernel_shape=[3, 3],
+                # Default values for other attributes: strides=[1, 1], dilations=[1, 1], groups=1
+                pads=[0, 0, 0, 0],
+            )],
+            name="test",
+            inputs=[make_tensor_value_info("X", onnx.TensorProto.FLOAT, [1, 1, 5, 5]),
+                make_tensor_value_info("W", onnx.TensorProto.FLOAT, [1, 1, 3, 3]),
+            ],
+            outputs=[make_tensor_value_info("Y", onnx.TensorProto.FLOAT,
+                [1, 1, 3, 3])])
+        model_def = make_model(graph_def, producer_name='conv-test')
+        op = core.CreateOperator(
+            "Onnxifi",
+            ["X", "W"],
+            ["Y"],
+            onnx_model=model_def.SerializeToString(),
+            initializers=["W", "W"],
+            output_size_hint_0=[1, 1, 3, 3])
+        workspace.FeedBlob("X", X)
+        workspace.FeedBlob("W", W)
+        workspace.RunOperatorOnce(op)
+        Y = workspace.FetchBlob("Y")
+        np.testing.assert_almost_equal(Y, Y_without_padding)
+
+
