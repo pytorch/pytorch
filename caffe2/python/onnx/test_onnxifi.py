@@ -14,7 +14,7 @@ from caffe2.python import core, workspace
 from caffe2.python.onnx.tests.test_utils import TestCase
 
 class OnnxifiTest(TestCase):
-    @unittest.skip("Need ONNXIFI backednd support")
+    @unittest.skip("Need ONNXIFI backend support")
     def test_relu_graph(self):
         batch_size = 1
         X = np.random.randn(batch_size, 1, 3, 2).astype(np.float32)
@@ -37,7 +37,7 @@ class OnnxifiTest(TestCase):
         Y = workspace.FetchBlob("Y")
         np.testing.assert_almost_equal(Y, np.maximum(X, 0))
 
-    @unittest.skip("Need ONNXIFI backednd support")
+    @unittest.skip("Need ONNXIFI backend support")
     def test_conv_graph(self):
         X = np.array([[[[0., 1., 2., 3., 4.],  # (1, 1, 5, 5) input tensor
                         [5., 6., 7., 8., 9.],
