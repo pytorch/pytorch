@@ -92,10 +92,10 @@ inline bool operator!=(const Type & lhs, const Type & rhs) {
 struct DynamicType : public Type {
   DynamicType()
   : Type(TypeKind::DynamicType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "Tensor";
   }
   static const TypeKind Kind = TypeKind::DynamicType;
@@ -151,7 +151,7 @@ struct TensorType : public Type {
     return t;
   }
 
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
       return false;
     auto rt = rhs.expect<TensorType>();
@@ -160,10 +160,10 @@ struct TensorType : public Type {
            strides() == rt->strides() &&
            device() == rt->device();
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     return *this == rhs || rhs.kind() == TypeKind::DynamicType;
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     // str is used for user-facing error messages, where we
     // don't want to reveal underlying size information.
     return "Tensor";
@@ -190,13 +190,13 @@ struct ListType : public Type {
   static const TypeKind Kind = TypeKind::ListType;
   ListType(TypePtr elem)
   : Type(TypeKind::ListType), elem(elem) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<ListType>()) {
       return *getElementType() == *rhs_->getElementType();
     }
     return false;
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
     return ss.str();
@@ -220,12 +220,12 @@ struct TupleType : public Type {
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return compare(rhs, [](const Type& a, const Type& b) {
       return a == b;
     });
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     // e.g. (Tensor, Tensor, Tensor) <: List[Tensor]
     if(auto lt = rhs.cast<ListType>()) {
       for(auto e : elements()) {
@@ -239,7 +239,7 @@ struct TupleType : public Type {
       return a.isSubtypeOf(b);
     });
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     std::stringstream ss;
     ss << "(";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -271,10 +271,10 @@ private:
 struct NumberType : public Type {
   NumberType()
   : Type(TypeKind::NumberType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "Scalar"; // match what PythonArgParser says for clarity
   }
   static const TypeKind Kind = TypeKind::NumberType;
@@ -286,13 +286,13 @@ struct NumberType : public Type {
 struct FloatType : public Type {
   FloatType()
   : Type(TypeKind::FloatType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "float";
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     return *this == rhs || rhs.kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::FloatType;
@@ -304,13 +304,13 @@ struct FloatType : public Type {
 struct IntType : public Type {
   IntType()
   : Type(TypeKind::IntType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "int";
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     return *this == rhs || rhs.kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::IntType;

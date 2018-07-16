@@ -219,6 +219,26 @@ void ReduceMean(
     T* Y,
     Context* context);
 
+template <typename T, class Context>
+void ReduceL1(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceL2(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
 // Broadcasts X with X_dims to Y with Y_dims.
 template <typename T, class Context>
 void Broadcast(
