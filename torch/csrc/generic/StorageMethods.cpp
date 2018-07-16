@@ -296,18 +296,7 @@ PyObject * THPStorage_(_setCdata)(THPStorage *self, PyObject *new_cdata)
 PyObject * THPStorage_(_rootStorage)(THPStorage *self)
 {
   HANDLE_TH_ERRORS
-  if (!(self->cdata->flag & TH_STORAGE_VIEW)) {
-    return Py_BuildValue("(ON)", self, PyLong_FromLong(0));
-  }
-  THWStorage *root = self->cdata;
-  while (root->flag & TH_STORAGE_VIEW)
-    root = root->view;
-  size_t offset = THWStorage_(data)(LIBRARY_STATE self->cdata) - THWStorage_(data)(LIBRARY_STATE root);
-  THWStorage_(retain)(LIBRARY_STATE root);
-  THPObjectPtr storage(THPStorage_(New)(root));
-  PyObject *result = Py_BuildValue("(NN)", storage.get(), PyLong_FromLong(offset));
-  storage.release();
-  return result;
+  return Py_BuildValue("(ON)", self, PyLong_FromLong(0));
   END_HANDLE_TH_ERRORS
 }
 #endif

@@ -27,9 +27,6 @@ void THStorage_free(THStorage *storage) {
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
       storage->data_ptr.~DataPtr();
-      if (storage->flag & TH_STORAGE_VIEW) {
-        THStorage_free(storage->view);
-      }
       THStorage_weakFree(storage);
     }
   }
