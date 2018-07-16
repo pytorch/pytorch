@@ -33,6 +33,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export HCC_AMDGPU_TARGET=gfx900
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
+  export PYTORCH_BUILT_WITH_ROCM=1
 
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
