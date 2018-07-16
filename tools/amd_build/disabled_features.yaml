@@ -24,18 +24,6 @@
         }
       },
       {
-        "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
-        "functions": {
-          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
-        }
-      },
-      {
-        "path": "aten/src/ATen/native/cuda/SoftMax.cu",
-        "functions": {
-          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
-        }
-      },
-      {
         "path": "aten/src/THC/THCStream.cpp",
         "functions": {
           "cudaStreamCreateWithFlags": "hipSuccess",
