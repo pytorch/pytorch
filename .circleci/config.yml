@@ -1,6 +1,6 @@
 version: 2
 jobs:
-  linux-trusty-py3.6-gcc7:
+  linux-trusty-py3.6-gcc7-build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/linux-trusty-py3.6-gcc7:220
         user: jenkins
@@ -16,3 +16,8 @@ jobs:
         name: Hello World
         command: |
           whoami
+workflows:
+  version: 2.0
+  linux-trusty-py3.6-gcc7:
+    jobs:
+      - linux-trusty-py3.6-gcc7-build
