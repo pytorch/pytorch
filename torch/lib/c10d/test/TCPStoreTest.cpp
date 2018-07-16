@@ -1,9 +1,10 @@
-#include "TCPStore.hpp"
 #include "StoreTestCommon.hpp"
 
 #include <cstdlib>
 #include <iostream>
 #include <thread>
+
+#include <c10d/TCPStore.hpp>
 
 int main(int argc, char** argv) {
   // server store
@@ -59,7 +60,6 @@ int main(int argc, char** argv) {
             std::string val = "thread_val_" + std::to_string(numIterations - 1);
             c10d::test::check(*clientStores[i], key, val);
           }
-
         })));
   }
 

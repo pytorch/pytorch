@@ -2,13 +2,6 @@
   "disable_unsupported_hip_calls":
     [
       {
-        "path": "aten/src/THC/generic/THCTensorSort.cu",
-        "functions": {
-            "thrust::copy": ";",
-            "thrust::stable_sort_by_key": ";"
-        }
-      },
-      {
         "path": "aten/src/THC/THCBlas.cu",
         "functions": {
           "cublasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
@@ -130,7 +123,6 @@
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/THCUNN/RReLU.cu",
     "aten/src/ATen/native/cuda/Distributions.cu"
   ],
   "disabled_functions": [
@@ -172,13 +164,6 @@
       "functions": [
         "THNN_(SparseLinear_updateOutput)",
         "THNN_(SparseLinear_accGradParameters)"
-      ]
-    },
-    {
-      "path": "aten/src/THCUNN/generic/RReLU.cu",
-      "functions": [
-        "THNN_(RReLU_updateOutput)",
-        "THNN_(RReLU_updateGradInput)"
       ]
     },
     {

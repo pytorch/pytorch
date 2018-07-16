@@ -37,7 +37,7 @@ struct VariableInfo {
 struct PyFunction : public Function {
   PyFunction(PyObject* obj) : obj(obj) {}
 
-  virtual variable_list apply(const variable_list& inputs) override;
+  virtual variable_list apply(variable_list&& inputs) override;
   variable_list legacy_apply(const variable_list& inputs);
 
   virtual void release_variables() override;

@@ -450,6 +450,26 @@ def disable_asserts(input_string):
         output_string = output_string.replace(input_string[start:p_end + 1], "")
     return output_string
 
+def replace_forceinline(input_string):
+    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP. 
+    Adding 'static' to all such methods leads to compilation errors, so
+    replacing '__forceinline__' with 'inline' as a workaround
+    https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
+    """
+    output_string = input_string
+    output_string = re.sub("__forceinline__", "inline", output_string)
+    return output_string
+
+def replace_math_functions(input_string):
+    """ FIXME: Temporarily replace std:: invocations of math functions with non-std:: versions to prevent linker errors
+        NOTE: This can lead to correctness issues when running tests, since the correct version of the math function (exp/expf) might not get called.
+        Plan is to remove this function once HIP supports std:: math function calls inside device code
+    """
+    output_string = input_string
+    output_string = re.sub("std::exp\(", "::exp(", output_string)
+    output_string = re.sub("std::log\(", "::log(", output_string)
+    output_string = re.sub("std::pow\(", "::pow(", output_string)
+    return output_string
 
 def disable_function(input_string, function, replace_style):
     """ Finds and disables a function in a particular file.
@@ -616,6 +636,12 @@ def preprocessor(filepath, stats):
         # Disable asserts
         if not filepath.endswith("THCGeneral.h.in"):
             output_source = disable_asserts(output_source)
+
+        # Replace std:: with non-std:: versions
+        output_source = replace_math_functions(output_source)
+
+        # Replace __forceinline__ with inline
+        output_source = replace_forceinline(output_source)
 
         # Overwrite file contents
         fileobj.seek(0)
@@ -879,9 +905,15 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                             # Add static_casts to relevant arguments
                             kernel_name_with_template = KernelTemplateParams[kernel_name]["kernel_with_template"]
                             argument_types = KernelTemplateParams[kernel_name]["arg_types"]
-
-                            old_kernel_launch = input_source[arguments[0]["start"]:arguments[-1]["end"]]
-                            new_kernel_launch = old_kernel_launch
+                            
+                            # The first 5 arguments are simply (function, number blocks, dimension blocks, shared memory, stream)
+                            # old_kernel_launch_parameters - will contain the actual arguments to the function itself.
+                            old_kernel_launch_parameters = input_source[arguments[5]["start"]:arguments[-1]["end"]]
+                            new_kernel_launch_parameters = old_kernel_launch_parameters
+            
+                            # full_old_kernel_launch - will contain the entire kernel launch closure.
+                            full_old_kernel_launch = input_source[arguments[0]["start"]:arguments[-1]["end"]]
+                            full_new_kernel_launch = full_old_kernel_launch
 
                             kernel_params = argument_strings[5:]
                             for arg_idx, arg in enumerate(kernel_params):
@@ -893,21 +925,23 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                                         static_argument = "static_cast<{0}>({1})".format(the_type, the_arg)
 
                                         def replace_arg(match):
-                                            return match.group(1) + static_argument + match.group(3)
-
-                                        # Account for case where argument is at start/end of string
-                                        new_kernel_launch = re.sub(r'(^|\W)({0})(\W|$)'.format(
-                                            re.escape(the_arg)), replace_arg, new_kernel_launch)
+                                          return match.group(1) + static_argument + match.group(3)
+                                        # Update to static_cast, account for cases where argument is at start/end of string
+                                        new_kernel_launch_parameters = re.sub(r'(^|\W)({0})(\W|$)'.format(
+                                            re.escape(the_arg)), replace_arg, new_kernel_launch_parameters)
+ 
+                            # replace kernel arguments in full kernel launch arguments w/ static_cast ones
+                            full_new_kernel_launch = full_new_kernel_launch.replace(old_kernel_launch_parameters, new_kernel_launch_parameters)
 
                             # PyTorch Specific: Add template type
                             # Here the template value will be resolved from <real> to <Dtype>.
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
-                                                       lambda x: kernel_name_with_template, new_kernel_launch)
+                            full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
+                                                       lambda x: kernel_name_with_template, full_new_kernel_launch)
 
                             # Replace Launch
-                            new_output_source = new_output_source.replace(old_kernel_launch, new_kernel_launch)
+                            new_output_source = new_output_source.replace(full_old_kernel_launch, full_new_kernel_launch)
 
                     # Overwrite file contents
                     fileobj.seek(0)

@@ -1479,6 +1479,22 @@
     - THTensor* self
 ]]
 [[
+  name: _erfc
+  cname: erfc
+  types:
+    - floating_point
+  backends:
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
   name: erfinv_
   types:
     - floating_point
@@ -1633,7 +1649,7 @@
     - THTensor* self
 ]]
 [[
-  name: var
+  name: _th_var
   types:
     - floating_point
   backends:
@@ -1651,18 +1667,6 @@
           if_true: 0
           if_false: 1
           default: 0
-]]
-[[
-  name: _th_var
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  options:
     - cname: var
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -1680,7 +1684,7 @@
           default: "false"
 ]]
 [[
-  name: std
+  name: _th_std
   types:
     - floating_point
   backends:
@@ -1698,18 +1702,6 @@
           if_true: 0
           if_false: 1
           default: 0
-]]
-[[
-  name: _th_std
-  types:
-    - floating_point
-  backends:
-    - CPU
-    - CUDA
-  variants:
-    - method
-    - function
-  options:
     - cname: std
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)

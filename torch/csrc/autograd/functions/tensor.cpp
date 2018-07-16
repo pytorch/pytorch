@@ -15,7 +15,7 @@
 
 namespace torch { namespace autograd {
 
-auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
+auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1);
   auto& grad = grads[0];
   variable_list grad_inputs(2);
@@ -52,7 +52,7 @@ CopySlices::CopySlices(
   }
 }
 
-auto CopySlices::apply(const variable_list& inputs) -> variable_list {
+auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
 

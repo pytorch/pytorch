@@ -145,6 +145,8 @@ static inline Tensor & tanh_out(Tensor & result, const Tensor & self);
 static inline Tensor tanh(const Tensor & self);
 static inline Tensor & erf_out(Tensor & result, const Tensor & self);
 static inline Tensor erf(const Tensor & self);
+static inline Tensor & erfc_out(Tensor & result, const Tensor & self);
+static inline Tensor erfc(const Tensor & self);
 static inline Tensor & erfinv_out(Tensor & result, const Tensor & self);
 static inline Tensor erfinv(const Tensor & self);
 static inline Tensor & sqrt_out(Tensor & result, const Tensor & self);
@@ -1203,6 +1205,12 @@ static inline Tensor & erf_out(Tensor & result, const Tensor & self) {
 }
 static inline Tensor erf(const Tensor & self) {
     return infer_type(self).erf(self);
+}
+static inline Tensor & erfc_out(Tensor & result, const Tensor & self) {
+    return infer_type(self).erfc_out(result, self);
+}
+static inline Tensor erfc(const Tensor & self) {
+    return infer_type(self).erfc(self);
 }
 static inline Tensor & erfinv_out(Tensor & result, const Tensor & self) {
     return infer_type(self).erfinv_out(result, self);
