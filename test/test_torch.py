@@ -3194,6 +3194,14 @@ class TestTorch(TestCase):
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_topk_noncontiguous_gpu(self):
+        t = torch.randn(20, device="cuda")[::2]
+        top1, idx1 = t.topk(5)
+        top2, idx2 = t.contiguous().topk(5)
+        self.assertEqual(top1, top2)
+        self.assertEqual(idx1, idx2)
+
     def test_kthvalue(self):
         SIZE = 50
         x = torch.rand(SIZE, SIZE, SIZE)
@@ -4702,6 +4710,10 @@ class TestTorch(TestCase):
     def test_isnan(self):
         x = torch.Tensor([1, float('nan'), 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
+
+    def test_isinf(self):
+        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')])
+        self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
 
     def test_RNGState(self):
         state = torch.get_rng_state()

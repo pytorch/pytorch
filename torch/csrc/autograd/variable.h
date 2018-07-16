@@ -285,7 +285,7 @@ struct Variable::Impl : public at::TensorImpl {
       bool requires_grad = false,
       Edge edge = Edge());
 
-  virtual ~Impl();
+  ~Impl() override;
 
   const char* toString() const override;
   at::IntList sizes() const override;
@@ -394,7 +394,7 @@ struct Variable::ViewImpl : public Variable::Impl {
   /// Gets the up-to-date grad_fn. If the shared data or base was modified, we
   /// re-create the grad_fn to express the up-to-date view relationship between
   /// this and the base Variable.
-  virtual std::shared_ptr<Function>& get_grad_fn() override;
+  std::shared_ptr<Function>& get_grad_fn() override;
 
   const Variable& base() const override {
     return base_;

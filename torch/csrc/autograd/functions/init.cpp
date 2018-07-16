@@ -15,11 +15,13 @@ using torch::TupleParser;
 struct DelayedErrorCtor {
   DelayedError* operator()(PyObject* args) {
     std::string msg;
+    int num_inputs;
 
-    TupleParser parser(args, 1);
+    TupleParser parser(args, 2);
     parser.parse(msg, "msg");
+    parser.parse(num_inputs, "num_inputs");
 
-    return new DelayedError(msg);
+    return new DelayedError(msg, num_inputs);
   }
 };
 
