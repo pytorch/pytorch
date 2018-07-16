@@ -49,7 +49,7 @@ void * ${Tensor}::unsafeGetTH(bool retain) {
   return tensor;
 }
 
-void ${Tensor}::releaseResources() {
+void ${Tensor}::release_resources() {
   ${THTensor}_free(${state,} tensor);
   tensor = nullptr;
 }

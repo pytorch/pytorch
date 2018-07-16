@@ -14,24 +14,24 @@ struct Retainable {
   void release() {
     if(--refcount == 0) {
       // If we know that this is the last reference then we can skip
-      // all the decrements and releaseResources().
+      // all the decrements and release_resources().
       if (weak_refcount == 1) {
         delete this;
       } else {
-        releaseResources();
-        weakRelease();
+        release_resources();
+        weak_release();
       }
     }
   }
-  void weakRetain() {
+  void weak_retain() {
     ++weak_refcount;
   }
-  void weakRelease() {
+  void weak_release() {
     if (--weak_refcount == 0) {
       delete this;
     }
   }
-  bool weakLock() {
+  bool weak_lock() {
     for (;;) {
       auto current_refcount = refcount.load();
       if (current_refcount == 0) return false;
@@ -46,7 +46,7 @@ struct Retainable {
     return weak_refcount.load();
   }
 
-  virtual void releaseResources() {};
+  virtual void release_resources() {};
   virtual ~Retainable() {}
 private:
   // INVARIANT: once refcount reaches 0 it can never go up

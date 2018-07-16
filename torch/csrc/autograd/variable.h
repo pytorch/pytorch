@@ -347,7 +347,7 @@ struct Variable::Impl : public at::TensorImpl {
       bool create_graph) override;
 
   /// Reset all expensive fields to free up resources
-  void releaseResources() override;
+  void release_resources() override;
 
   // Make this field public so we can access it from `Variable`.
   using at::TensorImpl::type_;
@@ -404,7 +404,7 @@ struct Variable::ViewImpl : public Variable::Impl {
   }
 
   /// Reset all expensive fields to free up resources
-  void releaseResources() override;
+  void release_resources() override;
 
   /// Called after in-place modifications. Modifies the grad_fn of the base
   /// Variable.

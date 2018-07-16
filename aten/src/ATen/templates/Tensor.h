@@ -212,7 +212,7 @@ struct WeakTensor : public detail::WeakTensorBase {
   WeakTensor(WeakTensor && rhs) noexcept = default;
   WeakTensor(const Tensor& t) : WeakTensorBase(t.pImpl, true) {}
 
-  // reimplemented from TensorBase so the return type is Tensor rather than TensorBase
+  // reimplemented from TensorBase so the return type is WeakTensor rather than TensorBase
   WeakTensor & operator=(WeakTensor && rhs) & {
     rhs.swap(*this);
     return *this;
@@ -237,8 +237,8 @@ struct WeakTensor : public detail::WeakTensorBase {
 
   // XXX: this can return undefined tensors
   // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
-  Tensor lock() {
-    return pImpl->weakLock() ? Tensor(pImpl, false) : Tensor();
+  Tensor lock() const {
+    return pImpl->weak_lock() ? Tensor(pImpl, false) : Tensor();
   }
 };
 

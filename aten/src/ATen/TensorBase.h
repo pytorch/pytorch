@@ -5,46 +5,23 @@
 
 namespace at { namespace detail {
 
-template<bool is_strong>
-struct retainable_traits {};
-
-template<>
-struct retainable_traits<true> {
-  static void retain(Retainable* r) {
-    r->retain();
-  }
-  static void release(Retainable* r) {
-    r->release();
-  }
-};
-
-template<>
-struct retainable_traits<false> {
-  static void retain(Retainable* r) {
-    r->weakRetain();
-  }
-  static void release(Retainable* r) {
-    r->weakRelease();
-  }
-};
-
 // TensorBaseImpl is the base class for Tensor which handles the reference counting
 template<bool is_strong>
 struct TensorBaseImpl {
   TensorBaseImpl(): TensorBaseImpl(UndefinedTensor::singleton(), false) {}
-  TensorBaseImpl(TensorImpl * self, bool retain)
+  TensorBaseImpl(TensorImpl * self, bool should_retain)
   : pImpl(self) {
     if (pImpl == nullptr) {
       throw std::runtime_error("TensorBaseImpl with nullptr not supported");
     }
-    if(retain && pImpl != UndefinedTensor::singleton()) {
-      retainable_traits<is_strong>::retain(pImpl);
+    if(should_retain && pImpl != UndefinedTensor::singleton()) {
+      retain();
     }
   }
   TensorBaseImpl(const TensorBaseImpl & rhs)
   : pImpl(rhs.pImpl) {
     if (pImpl != UndefinedTensor::singleton()) {
-      retainable_traits<is_strong>::retain(pImpl);
+      retain();
     }
   }
   TensorBaseImpl(TensorBaseImpl && rhs) noexcept
@@ -53,7 +30,7 @@ struct TensorBaseImpl {
   }
   ~TensorBaseImpl() {
     if (pImpl != UndefinedTensor::singleton()) {
-      retainable_traits<is_strong>::release(pImpl);
+      release();
     }
   }
   TensorBaseImpl & operator=(TensorBaseImpl && rhs) & {
@@ -80,8 +57,8 @@ struct TensorBaseImpl {
   void reset(TensorImpl * rhs) {
     TensorBaseImpl(rhs, true).swap(*this);
   }
-  void reset(TensorImpl * rhs, bool retain) {
-    TensorBaseImpl(rhs, retain).swap(*this );
+  void reset(TensorImpl * rhs, bool should_retain) {
+    TensorBaseImpl(rhs, should_retain).swap(*this );
   }
   void swap(TensorBaseImpl & rhs) {
     TensorImpl * tmp = pImpl;
@@ -106,6 +83,23 @@ struct TensorBaseImpl {
   //TODO(zach): sort out friend structes
 public:
   TensorImpl * pImpl;
+
+private:
+  void retain() {
+    if (is_strong) {
+      pImpl->retain();
+    } else {
+      pImpl->weak_retain();
+    }
+  }
+
+  void release() {
+    if (is_strong) {
+      pImpl->release();
+    } else {
+      pImpl->weak_release();
+    }
+  }
 };
 
 using TensorBase = TensorBaseImpl<true>;

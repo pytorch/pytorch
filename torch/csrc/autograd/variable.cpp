@@ -136,7 +136,7 @@ void Variable::Impl::set_data(Tensor new_data) {
   data_ = std::move(new_data);
 }
 
-void Variable::Impl::releaseResources() {
+void Variable::Impl::release_resources() {
   data_.reset();
   grad_.reset();
   grad_fn_.reset();
@@ -190,8 +190,8 @@ void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
   get_grad_fn(); // trigger an update to the view's grad_fn
 }
 
-void Variable::ViewImpl::releaseResources() {
-  Variable::Impl::releaseResources();
+void Variable::ViewImpl::release_resources() {
+  Variable::Impl::release_resources();
   base_.reset();
 }
 
