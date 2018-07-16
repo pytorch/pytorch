@@ -117,12 +117,6 @@ def batch_any(data, mask, dims):
 
 
 @torch.jit.script
-def batch_any_false(data, mask, dims):
-    data = torch.eq(data, torch.zeros_like(data))
-    return batch_any(data, mask, dims)
-
-
-@torch.jit.script
 def batch_type_as(data, mask, dims, data1, mask1, dims1):
     return data.type_as(data1), mask, dims
 
@@ -149,7 +143,6 @@ torch.register_batch_operator("mm", batch_mm.graph)
 torch.register_batch_operator("select", batch_select.graph)
 torch.register_batch_operator("where", batch_where.graph)
 torch.register_batch_operator("any", batch_any.graph)
-torch.register_batch_operator("any_false", batch_any_false.graph)
 torch.register_batch_operator("type_as", batch_type_as.graph)
 torch.register_batch_operator("gt", batch_gt.graph)
 torch.register_batch_operator("batch_from_scalar_tensor", batch_from_scalar_tensor.graph)
