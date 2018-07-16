@@ -905,6 +905,17 @@ def add_static_casts(directory, extensions, KernelTemplateParams):
                     os.fsync(fileobj)
 
 
+def str2bool(v):
+    """ArgumentParser doesn't support type=bool. Thus, this helper method will convert
+    from possible string types to True / False."""
+    if v.lower() in ('yes', 'true', 't', 'y', '1'):
+        return True
+    elif v.lower() in ('no', 'false', 'f', 'n', '0'):
+        return False
+    else:
+        raise argparse.ArgumentTypeError('Boolean value expected.')
+
+
 def main():
     """Example invocation
 
@@ -923,7 +934,7 @@ def main():
 
     parser.add_argument(
         '--show-detailed',
-        type=bool,
+        type=str2bool,
         default=False,
         help="Show detailed summary of the hipification process.",
         required=False)
@@ -958,14 +969,14 @@ def main():
 
     parser.add_argument(
         '--add-static-casts',
-        type=bool,
+        type=str2bool,
         default=False,
         help="Whether to automatically add static_casts to kernel arguments.",
         required=False)
 
     parser.add_argument(
         '--show-progress',
-        type=bool,
+        type=str2bool,
         default=True,
         help="Whether to show the progress bar during the transpilation proecss.",
         required=False)
