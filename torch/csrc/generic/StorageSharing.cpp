@@ -34,16 +34,6 @@ static PyObject * THPStorage_(sharedIncref)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(newTHView)(THWStorage *base, ptrdiff_t offset, size_t size)
-{
-  void *data = (char*)base->data<real>() + offset;
-  THWStoragePtr view(THWStorage_(newWithDataAndAllocator)(LIBRARY_STATE {data, base->data_ptr.device()} /* non-owning */, size, nullptr));
-  view->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_VIEW;
-  view->view = base;
-  THWStorage_(retain)(LIBRARY_STATE base);
-  return THPStorage_(New)(view.release());
-}
-
 #ifndef THC_GENERIC_FILE
 // TODO: move this somewhere - we only need one version
 static std::string THPStorage_(__newHandle)() {
@@ -226,13 +216,12 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
   HANDLE_TH_ERRORS
   THWStorage *storage = self->cdata;
   at::DeviceGuard device_guard(storage->data_ptr.device().index());
-  THPObjectPtr tuple(PyTuple_New(5));
+  THPObjectPtr tuple(PyTuple_New(4));
   THPObjectPtr device(PyLong_FromLong(storage->data_ptr.device().index()));
   THPObjectPtr _handle(Py_None);
   Py_INCREF(Py_None);
   THPObjectPtr size(PyLong_FromLong(storage->size));
   THPObjectPtr _offset(PyLong_FromLong(0));
-  THPObjectPtr view_size(PyLong_FromLong(storage->size));
   if (THWStorage_(data)(LIBRARY_STATE storage)) {
     size_t base_size;
     void *base_ptr = THCCachingAllocator_getBaseAllocation(THWStorage_(data)(LIBRARY_STATE storage), &base_size);
@@ -242,17 +231,16 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
     THCudaCheck(cudaIpcGetMemHandle(&handle, base_ptr));
 
     _handle = PyBytes_FromStringAndSize((char *)&handle, CUDA_IPC_HANDLE_SIZE);
-    _offset = PyLong_FromSsize_t((Py_ssize_t)offset);
+    _offset = PyLong_FromSsize_t((Py_ssize_t)offset / sizeof(real));
     size = PyLong_FromSize_t(base_size / sizeof(real));
   }
-  if (!tuple || !device || !_handle || !size || !_offset || !view_size) {
+  if (!tuple || !device || !_handle || !size || !_offset) {
     return NULL;
   }
   PyTuple_SET_ITEM(tuple.get(), 0, device.release());
   PyTuple_SET_ITEM(tuple.get(), 1, _handle.release());
   PyTuple_SET_ITEM(tuple.get(), 2, size.release());
   PyTuple_SET_ITEM(tuple.get(), 3, _offset.release());
-  PyTuple_SET_ITEM(tuple.get(), 4, view_size.release());
   return tuple.release();
   END_HANDLE_TH_ERRORS
 }
@@ -260,23 +248,18 @@ static PyObject * THPStorage_(shareCuda)(THPStorage *self)
 static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 {
   HANDLE_TH_ERRORS
-  THPUtils_assert(PyTuple_GET_SIZE(args) == 5, "tuple of 5 items expected");
+  THPUtils_assert(PyTuple_GET_SIZE(args) == 3, "tuple of 3 items expected");
   PyObject *_device = PyTuple_GET_ITEM(args, 0);
   PyObject *_handle = PyTuple_GET_ITEM(args, 1);
   PyObject *_size = PyTuple_GET_ITEM(args, 2);
-  PyObject *_offset = PyTuple_GET_ITEM(args, 3);
-  PyObject *_view_size = PyTuple_GET_ITEM(args, 4);
   if (!(THPUtils_checkLong(_device) && THPUtils_checkLong(_size)
-      && (_handle == Py_None || PyBytes_Check(_handle))
-      && THPUtils_checkLong(_offset) && THPUtils_checkLong(_view_size))) {
+      && (_handle == Py_None || PyBytes_Check(_handle)))) {
     THPUtils_invalidArguments(args, NULL, "_new_shared in CUDA mode", 1,
-        "(int device, bytes handle, int storage_size, int offset, int view_size");
+        "(int device, bytes handle, int storage_size)");
     return NULL;
   }
 
   size_t storage_size = (size_t)THPUtils_unpackLong(_size);
-  ptrdiff_t offset = (ptrdiff_t)THPUtils_unpackLong(_offset);
-  size_t view_size =  (size_t)THPUtils_unpackLong(_view_size);
 
   int64_t device = THPUtils_unpackLong(_device);
   at::DeviceGuard device_guard(device);
@@ -296,11 +279,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
       LIBRARY_STATE
       THCIpcDeleter::makeDataPtr(devPtr, device),
       storage_size, /* allocator */ nullptr));
-  base->flag = TH_STORAGE_REFCOUNTED;
-
-  if (offset != 0 || view_size != storage_size) {
-    return THPStorage_(newTHView)(base.get(), offset, view_size);
-  }
+  base->flag = TH_STORAGE_REFCOUNTED;  // NB: Not resizable
 
   return THPStorage_(New)(base.release());
   END_HANDLE_TH_ERRORS
@@ -315,9 +294,6 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
 static PyObject * THPStorage_(weakRef)(THPStorage *self, PyObject *weak_ref_class) {
   HANDLE_TH_ERRORS
   THStorage* storage = self->cdata;
-  while (storage->flag & TH_STORAGE_VIEW) {
-    storage = storage->view;
-  }
 
   THStorage_weakRetain(storage);
 
@@ -387,20 +363,6 @@ PyObject * THPStorage_(sharedFd)(THPStorage *self)
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject * THPStorage_(newView)(THPStorage *self, PyObject *args)
-{
-  HANDLE_TH_ERRORS
-  if (PyTuple_Size(args) != 2 || !THPUtils_checkLong(PyTuple_GET_ITEM(args, 0))
-      || ! THPUtils_checkLong(PyTuple_GET_ITEM(args, 1))) {
-    THPUtils_invalidArguments(args, NULL, "_new_view", 1, "(int offset, int size)");
-    return NULL;
-  }
-  int64_t offset = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 0));
-  int64_t size = THPUtils_unpackLong(PyTuple_GET_ITEM(args, 1));
-  return THPStorage_(newTHView)(self->cdata, offset, size);
-  END_HANDLE_TH_ERRORS
-}
-
 PyObject * THPStorage_(isShared)(THPStorage *self)
 {
 #ifdef THC_GENERIC_FILE
@@ -430,7 +392,6 @@ static PyMethodDef THPStorage_(sharingMethods)[] = {
 #endif
   {"_weak_ref", (PyCFunction)THPStorage_(weakRef), METH_O, NULL},
   {"_free_weak_ref", (PyCFunction)THPStorage_(freeWeakRef), METH_O | METH_STATIC, NULL},
-  {"_new_view", (PyCFunction)THPStorage_(newView), METH_VARARGS, NULL},
   {"_shared_decref", (PyCFunction)THPStorage_(sharedDecref), METH_NOARGS, NULL},
   {"_shared_incref", (PyCFunction)THPStorage_(sharedIncref), METH_NOARGS, NULL},
   {"_get_shared_fd", (PyCFunction)THPStorage_(sharedFd), METH_NOARGS, NULL},
