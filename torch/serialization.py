@@ -243,14 +243,13 @@ def _save(obj, f, pickle_module, pickle_protocol):
             return ('module', obj, source_file, source)
         elif torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            root = obj.storage()
             # Offset is always 0, but we keep it for backwards compatibility
             # with the old serialization format (which supported storage views)
             offset = 0
-            root_key = str(root._cdata)
+            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            serialized_storages[root_key] = root
-            is_view = obj._cdata != root._cdata
+            serialized_storages[obj_key] = obj
+            is_view = obj._cdata != obj._cdata
             if is_view:
                 view_metadata = (str(obj._cdata), offset, obj.size())
             else:
@@ -258,9 +257,9 @@ def _save(obj, f, pickle_module, pickle_protocol):
 
             return ('storage',
                     storage_type,
-                    root_key,
+                    obj_key,
                     location,
-                    root.size(),
+                    obj.size(),
                     view_metadata)
 
         return None
