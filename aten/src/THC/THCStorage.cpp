@@ -55,9 +55,6 @@ void THCStorage_free(THCState *state, THCStorage *storage)
       }
       storage->finalizer.~unique_ptr<THFinalizer>();
       storage->data_ptr.~DataPtr();
-      if (storage->flag & TH_STORAGE_VIEW) {
-        THCStorage_free(state, storage->view);
-      }
       THStorage_weakFree(storage);
     }
   }

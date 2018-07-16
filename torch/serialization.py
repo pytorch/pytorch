@@ -243,11 +243,13 @@ def _save(obj, f, pickle_module, pickle_protocol):
             return ('module', obj, source_file, source)
         elif torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            root, offset = obj._root_storage()
-            root_key = str(root._cdata)
+            # Offset is always 0, but we keep it for backwards compatibility
+            # with the old serialization format (which supported storage views)
+            offset = 0
+            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            serialized_storages[root_key] = root
-            is_view = obj._cdata != root._cdata
+            serialized_storages[obj_key] = obj
+            is_view = obj._cdata != obj._cdata
             if is_view:
                 view_metadata = (str(obj._cdata), offset, obj.size())
             else:
@@ -255,9 +257,9 @@ def _save(obj, f, pickle_module, pickle_protocol):
 
             return ('storage',
                     storage_type,
-                    root_key,
+                    obj_key,
                     location,
-                    root.size(),
+                    obj.size(),
                     view_metadata)
 
         return None
@@ -449,7 +451,20 @@ def _load(f, map_location, pickle_module):
                 storage_views = pickle_module.load(f)
                 for target_cdata, root_cdata, offset, size in storage_views:
                     root = deserialized_objects[root_cdata]
-                    deserialized_objects[target_cdata] = root[offset:offset + size]
+                    if offset != 0 or size != root.size():
+                        warnings.warn("Detected storage view in legacy serialized data: "
+                                      "storage views are no longer natively supported, so we are making "
+                                      "a copy of the data instead.  THIS IS A SEMANTIC CHANGE! "
+                                      "If you need aliasing, reserialize your model using "
+                                      "tensors that share storage.")
+
+                        tensor = torch._utils._rebuild_tensor(root, offset, (size,), (1,))
+                        obj = tensor.clone().storage()
+                    else:
+                        # NB: This line does not appear to be exercised by the
+                        # test suite.
+                        obj = root
+                    deserialized_objects[target_cdata] = obj
 
             tar.extract('tensors', path=tmpdir)
             with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:
