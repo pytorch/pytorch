@@ -629,6 +629,12 @@ class TestBottleneck(TestCase):
 from torch.utils.collect_env import get_pretty_env_info
 
 
+class TestCollectEnv(TestCase):
+    def test_smoke(self):
+        info_output = get_pretty_env_info()
+        self.assertTrue(info_output.count('\n') >= 17)
+
+
 class TestONNXUtils(TestCase):
     def test_prepare_onnx_paddings(self):
         sizes = [2, 3, 4]
