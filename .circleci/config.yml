@@ -17,7 +17,7 @@ jobs:
         command: |
           whoami
 workflows:
-  version: 2.0
+  version: 2
   linux-trusty-py3.6-gcc7:
     jobs:
       - linux-trusty-py3.6-gcc7-build
