@@ -523,19 +523,6 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
-// eg: "a.1" -> {"a", "1"}; "a" -> {"a"}
-std::vector<std::string> Value::getNameBaseSuffix(const std::string& name) {
-  auto last_dot_pos = name.find_last_of('.');
-  if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
-    if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
-      std::string suffix = name.substr(last_dot_pos + 1);
-      std::string name_base = name.substr(0, last_dot_pos);
-      return {name_base, suffix};
-    }
-  }
-  return {name};
-}
-
 Value* Value::setUniqueName(const std::string & name) {
   if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
@@ -557,10 +544,13 @@ Value* Value::setUniqueName(const std::string & name) {
   auto old_owner_of_name = names.find(name);
   if(old_owner_of_name != names.end()) {
     size_t suffix = 1;
-    auto name_base_suffix = getNameBaseSuffix(name);
-    std::string name_base = name_base_suffix[0];
-    if(name_base_suffix.size() > 1){
-      suffix = std::stoll(name_base_suffix[1]);
+    std::string name_base = name;
+    auto last_dot_pos = name.find_last_of('.');
+    if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+      if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        name_base = name.substr(0, last_dot_pos);
+      }
     }
     std::string replacement_name;
     do {

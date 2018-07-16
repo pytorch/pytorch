@@ -1,19 +1,20 @@
-graph(%x_data.1 : Dynamic
-      %x_mask.1 : Dynamic
-      %x_dims.1 : Dynamic
+graph(%x.1_data : Dynamic
+      %x.1_mask : Dynamic
+      %x.1_dims : Dynamic
       %y_data : Dynamic
       %y_mask : Dynamic
       %y_dims : Dynamic) {
   %6 : int = prim::Constant[value={10}]()
   %7 : Byte() = prim::Constant[value={1}]()
-  %x : Dynamic, %20 : Dynamic, %21 : Dynamic = prim::Loop(%6, %7, %x_data.1, %x_mask.1, %x_dims.1)
+  %x : Dynamic, %21 : Dynamic, %22 : Dynamic = prim::Loop(%6, %7, %x.1_data, %x.1_mask, %x.1_dims)
     block0(%_i_data : Dynamic, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
-      %data.1 : Dynamic = aten::add[alpha={1}](%5_data, %y_data)
+      %15 : Long() = prim::Constant[value={1}]()
+      %16 : Number = prim::TensorToNum(%15)
+      %data : Dynamic = aten::add(%5_data, %y_data, %16)
       %mask : Dynamic = aten::mul(%5_mask, %y_mask)
       %dims : Dynamic = aten::__or__(%5_dims, %y_dims)
-      %data : Dynamic = aten::where(%mask, %data.1, %x_data.1)
-      %19 : Byte() = prim::Constant[value={1}]()
-      -> (%19, %data, %mask, %dims)
+      %20 : Byte() = prim::Constant[value={1}]()
+      -> (%20, %data, %mask, %dims)
     }
-  return (%x, %20, %21);
+  return (%x, %21, %22);
 }

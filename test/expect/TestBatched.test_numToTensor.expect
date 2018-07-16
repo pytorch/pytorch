@@ -1,6 +1,6 @@
-graph(%a_data.1 : Dynamic
-      %a_mask.1 : Dynamic
-      %a_dims.1 : Dynamic) {
+graph(%a.1_data : Dynamic
+      %a.1_mask : Dynamic
+      %a.1_dims : Dynamic) {
   %3 : int = prim::Constant[value={1}]()
   %4 : Dynamic = prim::NumToTensor(%3)
   %data.1 : Dynamic = aten::unsqueeze[dim=0](%4)
@@ -18,10 +18,11 @@ graph(%a_data.1 : Dynamic
   %17 : Dynamic = prim::NumToTensor(%13)
   %18 : int[] = aten::stack[dim=0](%17)
   %dims.1 : Dynamic = aten::zeros(%18, %14, %15, %16)
-  %20 : Dynamic = aten::type_as(%data.1, %a_data.1)
-  %data.2 : Dynamic = aten::add[alpha={1}](%a_data.1, %20)
-  %mask : Dynamic = aten::mul(%a_mask.1, %mask.1)
-  %dims : Dynamic = aten::__or__(%a_dims.1, %dims.1)
-  %data : Dynamic = aten::where(%mask, %data.2, %a_data.1)
+  %20 : Dynamic = aten::type_as(%data.1, %a.1_data)
+  %21 : Long() = prim::Constant[value={1}]()
+  %22 : Number = prim::TensorToNum(%21)
+  %data : Dynamic = aten::add(%a.1_data, %20, %22)
+  %mask : Dynamic = aten::mul(%a.1_mask, %mask.1)
+  %dims : Dynamic = aten::__or__(%a.1_dims, %dims.1)
   return (%data, %mask, %dims);
 }

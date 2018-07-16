@@ -1153,6 +1153,21 @@ class TestBatched(TestCase):
         xs2, batch2 = self.rand_batch(4, (False, 2), (True, 3))
         matmul_test(xs, batch, xs2, batch2)
 
+    def test_batch_select(self):
+        @torch.jit.batch(batch_size=4)
+        def select(x):
+            return torch.select(x, 1, 0)
+
+        xs, batch = self.rand_batch(4, (True, 3), (True, 2))
+        res_batch = select(batch)
+        res = [torch.select(xs[j], 1, 0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        xs, batch = self.rand_batch(4, (False, 3), (True, 2))
+        res_batch = select(batch)
+        res = [torch.select(xs[j], 1, 0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
     def test_batch_where(self):
         @torch.jit.batch(batch_size=4)
         def where(c, a, b):
@@ -1169,40 +1184,44 @@ class TestBatched(TestCase):
         res = [torch.where(xs_cond[j], xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
-    def test_lstm_cell(self):
-        def LSTMCell(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
-            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
-            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
-            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
-            # activations
-            i_t = torch.sigmoid(i_t)
-            f_t = torch.sigmoid(f_t)
-            o_t = torch.sigmoid(o_t)
-            # cell computations
-            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
-            c_t = torch.tanh(c_t)
-            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
-            h_t = torch.mul(o_t, torch.tanh(c_t))
-            return h_t
+    def test_lstm(self):
+        def LSTM(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
+            for i in range(x_all.size(1)):
+                x = x_all.select(1, i)
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+            return h
 
         @torch.jit.batch(batch_size=4)
-        def LSTMCell_batch(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
-            i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
-            f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
-            o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
-            # activations
-            i_t = torch.sigmoid(i_t)
-            f_t = torch.sigmoid(f_t)
-            o_t = torch.sigmoid(o_t)
-            # cell computations
-            c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
-            c_t = torch.tanh(c_t)
-            c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
-            h_t = torch.mul(o_t, torch.tanh(c_t))
-            return h_t
+        def LSTM_batch(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
+            for i in range(x_all.size(1)):
+                x = x_all.select(1, i)
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+            return h
 
         batch_size, input_size, hidden_size = 4, 3, 2
-        xs, batch = self.rand_batch(batch_size, (False, input_size))
+        xs, batch = self.rand_batch(batch_size, (True, 4), (False, input_size))
         hx, h_batch = self.rand_batch(batch_size, (False, hidden_size))
         cx, c_batch = self.rand_batch(batch_size, (False, hidden_size))
 
@@ -1222,10 +1241,10 @@ class TestBatched(TestCase):
         b_o = torch.rand(hidden_size)
         b_c = torch.rand(hidden_size)
 
-        ys = [LSTMCell(xs[j].squeeze(0), hx[j], cx[j], w_xi, w_xf, w_xo, w_xc,
-                       w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c) for j in range(batch_size)]
-        ybs = LSTMCell_batch(batch, h_batch, c_batch, w_xi, w_xf, w_xo, w_xc,
-                             w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
+        ys = [LSTM(xs[j], hx[j], cx[j], w_xi, w_xf, w_xo, w_xc,
+                   w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c) for j in range(batch_size)]
+        ybs = LSTM_batch(batch, h_batch, c_batch, w_xi, w_xf, w_xo, w_xc,
+                         w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
         self.assertEqual(ys, ybs.examples())
 
     def test_numToTensor(self):

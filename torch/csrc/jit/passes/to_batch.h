@@ -17,15 +17,15 @@ private:
   std::function<Value*(Value*)> rn_fn = [this](Value* v) { return rn_env.at(v); };
 
 private:
-  void visitAten(Node* n, Block* block, Block* res_block, std::unordered_map<std::string, Value*>& var_map);
+  void visitAten(Node* n, Block* block, Block* res_block);
   void visitConstant(Node* n, Block* block, Block* res_block);
   void visitNumToTensor(Node* n, Block* block, Block* res_block);
-  void visitIf(Node* n, Block* block, Block* res_block, std::unordered_map<std::string, Value*>& var_map);
-  void visitLoop(Node* n, Block* block, Block* res_block, std::unordered_map<std::string, Value*>& var_map);
+  void visitIf(Node* n, Block* block, Block* res_block);
+  void visitLoop(Node* n, Block* block, Block* res_block);
 
 public:
   static std::unordered_map<std::string, std::shared_ptr<Graph>> batch_operator_table;
-  void toBatch(Block* block, Block* res_block, std::unordered_map<std::string, Value*>& upper_var_map);
+  void toBatch(Block* block, Block* res_block);
 };
 
 std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph);

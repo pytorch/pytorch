@@ -1,6 +1,6 @@
-graph(%a_data.1 : Dynamic
-      %a_mask.1 : Dynamic
-      %a_dims.1 : Dynamic
+graph(%a.1_data : Dynamic
+      %a.1_mask : Dynamic
+      %a.1_dims : Dynamic
       %b_data : Dynamic
       %b_mask : Dynamic
       %b_dims : Dynamic) {
@@ -21,38 +21,20 @@ graph(%a_data.1 : Dynamic
   %20 : Dynamic = prim::NumToTensor(%16)
   %21 : int[] = aten::stack[dim=0](%20)
   %dims.1 : Dynamic = aten::zeros(%21, %17, %18, %19)
-  %23 : Dynamic = aten::type_as(%data.1, %a_data.1)
-  %24 : Dynamic = aten::gt(%a_data.1, %23)
-  %25 : Dynamic = aten::mul(%a_mask.1, %mask.1)
-  %26 : Dynamic = aten::__or__(%a_dims.1, %dims.1)
+  %23 : Dynamic = aten::type_as(%data.1, %a.1_data)
+  %24 : Dynamic = aten::gt(%a.1_data, %23)
+  %25 : Dynamic = aten::mul(%a.1_mask, %mask.1)
+  %26 : Dynamic = aten::__or__(%a.1_dims, %dims.1)
   %27 : Dynamic = aten::mul(%24, %25)
   %28 : Dynamic = aten::sum(%27)
   %29 : Dynamic = aten::gt[other={0}](%28)
-  %a.1 : Dynamic, %35 : Dynamic, %36 : Dynamic = prim::If(%29)
-    block0() {
-      %data.2 : Dynamic = aten::add[alpha={1}](%a_data.1, %b_data)
-      %mask : Dynamic = aten::mul(%a_mask.1, %b_mask)
-      %dims : Dynamic = aten::__or__(%a_dims.1, %b_dims)
-      %data.3 : Dynamic = aten::where(%mask, %data.2, %a_data.1)
-      -> (%data.3, %mask, %dims)
-    }
-    block1() {
-      -> (%a_data.1, %a_mask.1, %a_dims.1)
-    }
-  %37 : Dynamic = aten::zeros_like(%24)
-  %data : Dynamic = aten::eq(%24, %37)
-  %39 : Dynamic = aten::mul(%data, %25)
-  %40 : Dynamic = aten::sum(%39)
-  %41 : Dynamic = aten::gt[other={0}](%40)
-  %a : Dynamic, %43 : Dynamic, %44 : Dynamic = prim::If(%41)
-    block0() {
-      -> (%a_data.1, %a_mask.1, %a_dims.1)
-    }
-    block1() {
-      -> (%a_data.1, %a_mask.1, %a_dims.1)
-    }
-  %res_data : Dynamic = aten::where(%24, %a.1, %a)
-  %res_mask : Dynamic = aten::where(%24, %35, %43)
-  %res_dims : Dynamic = aten::__or__(%36, %44)
+  %30 : Long() = prim::Constant[value={1}]()
+  %31 : Number = prim::TensorToNum(%30)
+  %data : Dynamic = aten::add(%a.1_data, %b_data, %31)
+  %mask : Dynamic = aten::mul(%a.1_mask, %b_mask)
+  %dims : Dynamic = aten::__or__(%a.1_dims, %b_dims)
+  %res_data : Dynamic = aten::where(%24, %data, %a.1_data)
+  %res_mask : Dynamic = aten::where(%24, %mask, %a.1_mask)
+  %res_dims : Dynamic = aten::__or__(%dims, %a.1_dims)
   return (%res_data, %res_mask, %res_dims);
 }
