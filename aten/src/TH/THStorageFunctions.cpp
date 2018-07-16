@@ -1,6 +1,6 @@
 #include <climits>
 
-#include "THStorage.hpp"
+#include "THStorageFunctions.hpp"
 
 #include "generic/THStorage.cpp"
 #include "THGenerateAllTypes.h"

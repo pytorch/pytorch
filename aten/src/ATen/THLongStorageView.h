@@ -1,7 +1,7 @@
 #pragma once
 
 #include "TH/TH.h"
-#include "TH/THStorage.hpp"
+#include "TH/THStorageFunctions.hpp"
 #include "TH/THTypeConversion.hpp"
 
 namespace at {

@@ -12,7 +12,7 @@
 #include <TH/TH.h>
 // See Note [TH abstraction violation]
 //  - Used to get at the allocator associated with a storage
-#include <TH/THStorage.hpp>
+#include <TH/THStorageFunctions.hpp>
 #include <torch/csrc/finalizer.h>
 #include <libshm.h>
 #include "THP.h"

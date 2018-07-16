@@ -4,7 +4,8 @@
 // read Note [TH abstraction violation]
 
 #include "THCStorage.h"
-#include <TH/THStorage.hpp>
+// Should work with THStorageClass
+#include <TH/THStorageFunctions.hpp>
 
 #include "ATen/ScalarType.h"
 #include "ATen/ScalarTypeUtils.h"

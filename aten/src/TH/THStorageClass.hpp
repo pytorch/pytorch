@@ -3,7 +3,7 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THStorage.h"
+#include "THAllocator.h"
 
 #include <ATen/ScalarType.h>
 #include <ATen/ScalarTypeUtils.h>
@@ -47,6 +47,7 @@ typedef struct THStorage
     char flag;
     at::Allocator *allocator;
     std::unique_ptr<THFinalizer> finalizer;
+    struct THStorage *view;
 
     template <typename T>
     inline T * data() const {
@@ -63,24 +64,3 @@ typedef struct THStorage
       return static_cast<T*>(this->data_ptr.get());
     }
 } THStorage;
-
-TH_API THStorage* THStorage_new(at::ScalarType scalar_type);
-TH_API THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size);
-TH_API THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
-                                             at::Allocator *allocator);
-
-ptrdiff_t THStorage_size(const THStorage *self);
-size_t THStorage_elementSize();
-THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags);
-void THStorage_setFlag(THStorage *storage, const char flag);
-void THStorage_clearFlag(THStorage *storage, const char flag);
-void THStorage_retain(THStorage *storage);
-THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
-                                             at::DataPtr&& data, ptrdiff_t size,
-                                             at::Allocator* allocator);
-void THStorage_resize(THStorage *storage, ptrdiff_t size);
-void THStorage_swap(THStorage *storage1, THStorage *storage2);
-
-void THStorage_weakRetain(THStorage *weak_storage);
-void THStorage_weakFree(THStorage *weak_storage);
-THStorage* THStorage_weakLock(THStorage *weak_storage);
