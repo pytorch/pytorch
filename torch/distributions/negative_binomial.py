@@ -13,32 +13,27 @@ class NegativeBinomial(Distribution):
         occur until we observe `total_count` number of failures.
 
     Args:
-        total_count (int or Tensor): number of negative Bernoulli trials to stop
+        total_count (float or Tensor): non-negative number of negative Bernoulli trials to stop
         probs (Tensor): Event probabilities of success
         logits (Tensor): Event log-odds for probabilities of success
     """
 
-    arg_constraints = {'total_count': constraints.nonnegative_integer,
+    arg_constraints = {'total_count': constraints.greater_than_eq(0),
                        'probs': constraints.unit_interval}
     support = constraints.nonnegative_integer
 
-    def __init__(self, total_count=1, probs=None, logits=None, validate_args=None):
+    def __init__(self, total_count, probs=None, logits=None, validate_args=None):
         if (probs is None) == (logits is None):
             raise ValueError("Either `probs` or `logits` must be specified, but not both.")
         if probs is not None:
             self.total_count, self.probs, = broadcast_all(total_count, probs)
-            self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.probs, Number)
+            self.total_count = self.total_count.type_as(self.probs)
         else:
             self.total_count, self.logits, = broadcast_all(total_count, logits)
             self.total_count = self.total_count.type_as(self.logits)
-            is_scalar = isinstance(self.logits, Number)
 
         self._param = self.probs if probs is not None else self.logits
-        if is_scalar:
-            batch_shape = torch.Size()
-        else:
-            batch_shape = self._param.size()
+        batch_shape = self._param.size()
         super(NegativeBinomial, self).__init__(batch_shape, validate_args=validate_args)
 
     def _new(self, *args, **kwargs):
