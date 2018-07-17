@@ -84,7 +84,9 @@ class GenerateProposalsOp final : public Operator<Context> {
         angle_bound_lo_(
             OperatorBase::GetSingleArgument<int>("angle_bound_lo", -90)),
         angle_bound_hi_(
-            OperatorBase::GetSingleArgument<int>("angle_bound_hi", 90)) {}
+            OperatorBase::GetSingleArgument<int>("angle_bound_hi", 90)),
+        clip_angle_thresh_(
+            OperatorBase::GetSingleArgument<float>("clip_angle_thresh", 1.0)) {}
 
   ~GenerateProposalsOp() {}
 
@@ -127,6 +129,10 @@ class GenerateProposalsOp final : public Operator<Context> {
   bool angle_bound_on_{true};
   int angle_bound_lo_{-90};
   int angle_bound_hi_{90};
+  // For RRPN, clip almost horizontal boxes within this threshold of
+  // tolerance for backward compatibility. Set to negative value for
+  // no clipping.
+  float clip_angle_thresh_{1.0};
 };
 
 } // namespace caffe2

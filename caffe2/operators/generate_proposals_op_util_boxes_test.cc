@@ -105,4 +105,33 @@ TEST(UtilsBoxesTest, TestBboxTransformRotatedNormalized) {
   EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-2);
 }
 
+TEST(UtilsBoxesTest, ClipRotatedBoxes) {
+  // Test utils::clip_boxes_rotated()
+  using EMatXf = Eigen::MatrixXf;
+
+  int height = 800;
+  int width = 600;
+  EMatXf bbox(5, 5);
+  bbox << 20, 20, 200, 150, 0, // Horizontal
+      20, 20, 200, 150, 0.5, // Almost horizontal
+      20, 20, 200, 150, 30, // Rotated
+      300, 300, 200, 150, 30, // Rotated
+      579, 779, 200, 150, -0.5; // Almost horizontal
+
+  // Test with no clipping
+  float angle_thresh = -1.0;
+  auto result = utils::clip_boxes(bbox.array(), height, width, angle_thresh);
+  EXPECT_NEAR((result.matrix() - bbox).norm(), 0.0, 1e-4);
+
+  EMatXf result_gt(5, 5);
+  result_gt << 59.75, 47.25, 120.5, 95.5, 0, 59.75, 47.25, 120.5, 95.5, 0.5, 20,
+      20, 200, 150, 30, 300, 300, 200, 150, 30, 539.25, 751.75, 120.5, 95.5,
+      -0.5;
+
+  // Test clipping with tolerance
+  angle_thresh = 1.0;
+  result = utils::clip_boxes(bbox.array(), height, width, angle_thresh);
+  EXPECT_NEAR((result.matrix() - result_gt).norm(), 0.0, 1e-4);
+}
+
 } // namespace caffe2
