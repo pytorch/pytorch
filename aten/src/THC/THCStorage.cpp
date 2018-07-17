@@ -46,11 +46,6 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
   return storage;
 }
 
-void THCStorage_free(THCState *state, THCStorage *storage)
-{
-  THStorage_free(storage);
-}
-
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
