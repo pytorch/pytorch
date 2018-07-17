@@ -1,9 +1,3 @@
-#include <math.h>
-#include <cfloat>
-// TODO(jamesreed): I would use <cmath> here but std::isnan
-// and std::isinf are declared constexpr there and the nvidia
-// compiler throws an error because of it
-
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/flatten_op.h"
 #include "caffe2/operators/minmax_ops.h"
