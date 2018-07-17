@@ -53,16 +53,6 @@ real *THCTensor_(data)(THCState *state, const THCTensor *self)
     return NULL;
 }
 
-void THCTensor_(setFlag)(THCState *state, THCTensor *self, const char flag)
-{
-  self->flag |= flag;
-}
-
-void THCTensor_(clearFlag)(THCState *state, THCTensor *self, const char flag)
-{
-  self->flag &= ~flag;
-}
-
 /**** creation methods ****/
 
 static void THCTensor_(rawInit)(THCState *state, THCTensor *self);
