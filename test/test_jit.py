@@ -615,7 +615,7 @@ class TestJit(JitTestCase):
         x = torch.randn(3, 1, 5, requires_grad=True)
         y = torch.randn(4, 1, 8, 5, requires_grad=True)
 
-        graph = torch.jit._script_graph(broadcast)
+        graph = torch.jit.script(broadcast).graph
         torch._C._jit_pass_shape_analysis(graph, (x, y), False)
         self.assertExpectedGraph(graph)
 
@@ -1770,7 +1770,7 @@ class TestScript(JitTestCase):
         def fn(x, y):
             return x + y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.assertExpectedGraph(graph)
 
     def test_math_tensor_number(self):
@@ -1779,7 +1779,7 @@ class TestScript(JitTestCase):
         def fn(x):
             return x + 7
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.assertExpectedGraph(graph)
 
     def test_math_numbers(self):
@@ -1795,9 +1795,9 @@ class TestScript(JitTestCase):
             # FIXME: return number instead of tensor
             return torch.full([1], c)
 
-        graph1 = torch.jit._script_graph(fn1)
+        graph1 = torch.jit.script(fn1).graph
         self.assertExpectedGraph(graph1, subname="int")
-        graph2 = torch.jit._script_graph(fn2)
+        graph2 = torch.jit.script(fn2).graph
         self.assertExpectedGraph(graph2, subname="float")
 
     def test_if_nest_while(self):
@@ -3473,7 +3473,7 @@ def func(t):
             c += b
             return c
 
-        graph = torch.jit._script_graph(func)
+        graph = torch.jit.script(func).graph
         self.run_pass('erase_number_types', graph)
         self.assertExpectedGraph(graph)
 
@@ -3484,7 +3484,7 @@ def func(t):
                 y += i
             return y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
         self.assertExpectedGraph(graph)
         self.checkScript(fn, (torch.tensor(10),))
@@ -3503,7 +3503,7 @@ def func(t):
             return y
 
         def check(fn, name):
-            graph = torch.jit._script_graph(fn)
+            graph = torch.jit.script(fn).graph
             self.run_pass('loop_unrolling', graph)
             self.assertExpectedGraph(graph, subname=name)
             self.checkScript(fn, ())
@@ -3519,7 +3519,7 @@ def func(t):
                     y += j
             return y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
         self.assertExpectedGraph(graph)
         self.checkScript(fn, (torch.tensor(10),))
@@ -3531,7 +3531,7 @@ def func(t):
                 y += 1
             return y
 
-        graph = torch.jit._script_graph(fn)
+        graph = torch.jit.script(fn).graph
         self.run_pass('loop_unrolling', graph)
         self.assertExpectedGraph(graph)
 
@@ -4277,6 +4277,25 @@ def func(t):
             return target
 
         self.assertExpected(str(test_index_put.graph))
+
+    def test_annotated_script_fn(self):
+        @torch.jit.script
+        def foo(x, y, z):
+            # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
+            return x
+
+        # self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
+
+    def test_annotated_script_method(self):
+        class SM(torch.jit.ScriptModule):
+            @torch.jit.script_method
+            def forward(self, x, y):
+                # type: (Tuple[Tensor, Tensor], Tensor) -> Tuple[Tensor, Tensor, Tensor]
+                return y, y, y
+
+        sm = SM()
+
+        # self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

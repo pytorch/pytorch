@@ -80,6 +80,16 @@ def get_signature(fn, _n_arguments=None, _n_binders=None):
     return parse_type_line(type_line)
 
 
+def flatten_return_type(type):
+    if isinstance(type, TupleType):
+        return_types = []
+        for elem_type in type.elements():
+            return_types.append(elem_type)
+        return return_types
+    else:
+        return [type]
+
+
 def parse_type_line(type_line):
     """Parses a type annotation specified as a comment.
 
@@ -102,7 +112,7 @@ def parse_type_line(type_line):
     except SyntaxError:
         raise RuntimeError("Failed to parse the return type of a type annotation")
 
-    return [ann_to_type(ann) for ann in arg_ann], ann_to_type(ret_ann)
+    return [ann_to_type(ann) for ann in arg_ann], flatten_return_type(ann_to_type(ret_ann))
 
 
 def default_signature(fn, source, _n_arguments, _n_binders):
@@ -120,7 +130,6 @@ def default_signature(fn, source, _n_arguments, _n_binders):
     if source is None and _n_arguments is None:
         raise RuntimeError("default_signature needs either the source or the number of arguments")
 
-    ret_type = TupleType([DynamicType() for _ in range(_n_binders)])
     if source is not None:
         py_ast = ast.parse(source)
         if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
@@ -137,7 +146,7 @@ def default_signature(fn, source, _n_arguments, _n_binders):
     else:
         arg_types = [DynamicType()] * _n_arguments
 
-    return arg_types, ret_type
+    return arg_types, [DynamicType() for _ in range(_n_binders)]
 
 
 _def_end_regex = re.compile(r'.*\)\s*:.*')
@@ -178,7 +187,6 @@ def split_type_line(type_line):
         raise RuntimeError("Syntax error in type annotation (cound't find `->`)")
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2:].strip()
 
-
 def try_real_annotations(fn):
     """Tries to use the Py3.5+ annotation syntax to get the type."""
     try:
@@ -196,7 +204,7 @@ def try_real_annotations(fn):
 
     param_types = [ann_to_type(as_ann(p.annotation))
                    for p in sig.parameters.values()]
-    return_type = ann_to_type(as_ann(sig.return_annotation))
+    return_type = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
     return param_types, return_type
 
 

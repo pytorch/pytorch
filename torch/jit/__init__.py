@@ -3,6 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
+import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -341,6 +342,7 @@ class CompilationUnit(object):
 def _script_graph(fn, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn)
+    arg_types, ret_types = annotations.get_signature(fn, 0, 0)
     return _jit_script_compile(ast, rcb)
 
 

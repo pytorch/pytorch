@@ -47,17 +47,16 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
 
-  std::pair<std::vector<TypePtr>, TypePtr> getFunctionType(size_t n_args, size_t n_binders) {
+  std::pair<std::vector<TypePtr>, std::vector<TypePtr>> getFunctionType(size_t n_args, size_t n_binders) {
     auto annotations = py::module::import("torch.jit.annotations");
-    return py::cast<std::pair<std::vector<TypePtr>, TypePtr>>(annotations.attr("get_signature")(self, n_args, n_binders));
+    return py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(annotations.attr("get_signature")(self, n_args, n_binders));
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     auto inputs = toValues(inputs_);
-    std::vector<TypePtr> arg_types;
-    TypePtr ret_type;
-    std::tie(arg_types, ret_type) = getFunctionType(inputs.size(), n_binders);
+    std::vector<TypePtr> arg_types, ret_types;
+    std::tie(arg_types, ret_types) = getFunctionType(inputs.size(), n_binders);
 
     if (arg_types.size() != inputs.size())
       throw ErrorReport(loc) << "calling a Python function with an incorrect number "
@@ -112,20 +111,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
     // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
     // to do it.
-    std::shared_ptr<TupleType> ret_tuple_type;
-    if (ret_type->kind() != TypeKind::TupleType) {
-      ret_tuple_type = std::make_shared<TupleType>(std::vector<TypePtr>{ret_type});
-    } else {
-      ret_tuple_type = std::static_pointer_cast<TupleType>(ret_type);
-    }
-    for (auto & ret_type_elem : ret_tuple_type->elements()) {
+    for (auto & ret_type_elem : ret_types) {
       if (!ret_type_elem->isSubtypeOf(*DynamicType::get())) {
         throw ErrorReport(loc) << "Python functions can currently only return Tensors";
       }
     }
 
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < ret_tuple_type->elements().size(); ++i)
+    for(size_t i = 0; i < ret_types.size(); ++i)
       outputs.push_back(new_node->addOutput());
     return packOutputs(*m.graph(), outputs);
   }
