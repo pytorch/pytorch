@@ -5,6 +5,7 @@
 
 #include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
@@ -1432,6 +1433,12 @@ void addGlobalMethods(py::module& m) {
     const void* raw_data = tensor.raw_data();
     CAFFE_ENFORCE(raw_data);
     return GetNUMANode(raw_data);
+  });
+  m.def("get_blob_size_bytes", [](const std::string& blob_name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* blob = gWorkspace->GetBlob(blob_name);
+    CAFFE_ENFORCE(blob);
+    return BlobStat::sizeBytes(*blob);
   });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
