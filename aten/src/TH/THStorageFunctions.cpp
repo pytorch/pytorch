@@ -101,18 +101,15 @@ THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
   return THStorage_newWithAllocator(scalar_type, size, getTHDefaultAllocator());
 }
 
-THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
-                                      at::Allocator *allocator)
-{
-  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::DataPtr(allocator->allocate(at::elementSize(scalar_type)*size));
-  storage->size = size;
-  new (&storage->refcount) std::atomic<int>(1);
-  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
-  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
-  storage->allocator = allocator;
+THStorage* THStorage_newWithAllocator(
+    at::ScalarType scalar_type,
+    ptrdiff_t size,
+    at::Allocator* allocator) {
+  THStorage* storage = new THStorage(
+      scalar_type,
+      size,
+      allocator,
+      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
   return storage;
 }
 
