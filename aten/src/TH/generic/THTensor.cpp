@@ -61,16 +61,6 @@ real *THTensor_(data)(const THTensor *self)
     return NULL;
 }
 
-void THTensor_(setFlag)(THTensor *self, const char flag)
-{
-  self->flag |= flag;
-}
-
-void THTensor_(clearFlag)(THTensor *self, const char flag)
-{
-  self->flag &= ~flag;
-}
-
 /**** creation methods ****/
 
 static void THTensor_(rawInit)(THTensor *self);
@@ -697,8 +687,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
 
 void THTensor_(retain)(THTensor *self)
 {
-  if(self->flag & TH_TENSOR_REFCOUNTED)
-    ++self->refcount;
+  ++self->refcount;
 }
 
 void THTensor_(free)(THTensor *self)
@@ -726,7 +715,6 @@ static void THTensor_(rawInit)(THTensor *self)
   self->size[0] = 0;
   self->stride[0] = 1;
   self->dim_ = 1;
-  self->flag = TH_TENSOR_REFCOUNTED;
 }
 
 void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
