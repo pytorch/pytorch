@@ -16,16 +16,14 @@ struct THTensor
       , storage(storage)
       , storageOffset(0)
       // TODO: Naughty naughty!
-      , size(static_cast<int64_t *>(THAlloc(sizeof(int64_t))))
+      , size{0}
       , stride(static_cast<int64_t *>(THAlloc(sizeof(int64_t))))
       , dim_(1)
       {
-        size[0] = 0;
         stride[0] = 1;
       }
 
     ~THTensor() {
-      THFree(size);
       THFree(stride);
       if (storage) {
         THStorage_free(storage);
@@ -39,7 +37,7 @@ struct THTensor
     THStorage *storage;
     ptrdiff_t storageOffset;
 
-    int64_t *size;
+    std::vector<int64_t> size;
     int64_t *stride;
     int64_t dim_;
 
@@ -68,19 +66,31 @@ struct THTensor
     inline bool is_empty() const {
       for (int64_t i = 0; i < dim_; ++i) {
         if (size[i] == 0) {
-          return true;  
+          return true;
         }
       }
       return false;
     }
 
     inline at::IntList sizes() {
-      return at::IntList(size, dim_);
+      return size;
     }
 };
 
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
+
+inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
+  return tensor->size.data();
+}
+
+inline void THTensor_resizeSize(THTensor* tensor, int64_t new_size) {
+  tensor->size.resize(new_size);
+}
+
+inline void THTensor_setSize(THTensor* tensor, std::vector<int64_t>&& new_size) {
+  tensor->size = std::move(new_size);
+}
 
 TH_API void THTensor_free(THTensor *self);
 at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
