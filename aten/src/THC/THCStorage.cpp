@@ -48,16 +48,7 @@ THCStorage* THCStorage_newWithAllocator(THCState *state,
 
 void THCStorage_free(THCState *state, THCStorage *storage)
 {
-  if (storage->flag & TH_STORAGE_REFCOUNTED) {
-    if (--storage->refcount == 0) {
-      if (storage->finalizer) {
-        (*storage->finalizer)();
-      }
-      storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~DataPtr();
-      THStorage_weakFree(storage);
-    }
-  }
+  THStorage_free(storage);
 }
 
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)

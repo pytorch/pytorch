@@ -4,6 +4,8 @@
 
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
+#define THCTensor THTensor
+
 // Struct definition moved to THTensor.hpp
 typedef struct THTensor THTensor;
 
