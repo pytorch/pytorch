@@ -323,7 +323,7 @@ def _kl_pareto_pareto(p, q):
     t1 = q.alpha * scale_ratio.log()
     t2 = -alpha_ratio.log()
     result = t1 + t2 + alpha_ratio - 1
-    result[p.support.lower_bound < q.support.lower_bound] = math.inf
+    result[p.support.lower_bound < q.support.lower_bound] = inf
     return result
 
 
@@ -347,7 +347,7 @@ def _kl_transformed_transformed(p, q):
 @register_kl(Uniform, Uniform)
 def _kl_uniform_uniform(p, q):
     result = ((q.high - q.low) / (p.high - p.low)).log()
-    result[(q.low > p.low) | (q.high < p.high)] = math.inf
+    result[(q.low > p.low) | (q.high < p.high)] = inf
     return result
 
 
@@ -393,7 +393,7 @@ def _kl_beta_normal(p, q):
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
-    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = math.inf
+    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
     return result
 
 
@@ -544,7 +544,7 @@ def _kl_pareto_exponential(p, q):
     t2 = p.alpha.reciprocal()
     t3 = p.alpha * scale_rate_prod / (p.alpha - 1)
     result = t1 - t2 + t3 - 1
-    result[p.alpha <= 1] = math.inf
+    result[p.alpha <= 1] = inf
     return result
 
 
@@ -556,7 +556,7 @@ def _kl_pareto_gamma(p, q):
     t3 = (1 - q.concentration) * common_term
     t4 = q.rate * p.alpha * p.scale / (p.alpha - 1)
     result = t1 + t2 + t3 + t4 - 1
-    result[p.alpha <= 1] = math.inf
+    result[p.alpha <= 1] = inf
     return result
 
 # TODO: Add Pareto-Laplace KL Divergence
@@ -608,7 +608,7 @@ def _kl_uniform_gamma(p, q):
     t3 = (1 - q.concentration) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
     t4 = q.rate * (p.high + p.low) / 2
     result = -t1 + t2 + t3 + t4
-    result[p.low < q.support.lower_bound] = math.inf
+    result[p.low < q.support.lower_bound] = inf
     return result
 
 
