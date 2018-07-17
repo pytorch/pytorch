@@ -110,7 +110,7 @@ class _IntegerInterval(Constraint):
         return (value % 1 == 0) & (self.lower_bound <= value) & (value <= self.upper_bound)
 
 
-class _IntegerLessThanEq(Constraint):
+class _IntegerLessThan(Constraint):
     """
     Constrain to an integer interval `(-inf, upper_bound]`.
     """
@@ -121,7 +121,7 @@ class _IntegerLessThanEq(Constraint):
         return (value % 1 == 0) & (value <= self.upper_bound)
 
 
-class _IntegerGreaterThanEq(Constraint):
+class _IntegerGreaterThan(Constraint):
     """
     Constrain to an integer interval `[lower_bound, inf)`.
     """
@@ -134,7 +134,7 @@ class _IntegerGreaterThanEq(Constraint):
 
 class _Real(Constraint):
     """
-    Trivially constrain to the extended real line `(-inf, inf)`.
+    Trivially constrain to the extended real line `[-inf, inf]`.
     """
     def check(self, value):
         return value == value  # False for NANs.
@@ -151,37 +151,15 @@ class _GreaterThan(Constraint):
         return self.lower_bound < value
 
 
-class _GreaterThanEq(Constraint):
-    """
-    Constrain to a real half line `[lower_bound, inf)`.
-    """
-    def __init__(self, lower_bound):
-        self.lower_bound = lower_bound
-
-    def check(self, value):
-        return self.lower_bound <= value
-
-
 class _LessThan(Constraint):
     """
-    Constrain to a real half line `(-inf, upper_bound)`.
+    Constrain to a real half line `[-inf, upper_bound)`.
     """
     def __init__(self, upper_bound):
         self.upper_bound = upper_bound
 
     def check(self, value):
         return value < self.upper_bound
-
-
-class _LessThanEq(Constraint):
-    """
-    Constrain to a real half line `(-inf, upper_bound]`.
-    """
-    def __init__(self, upper_bound):
-        self.upper_bound = upper_bound
-
-    def check(self, value):
-        return value <= self.upper_bound
 
 
 class _Interval(Constraint):
@@ -194,18 +172,6 @@ class _Interval(Constraint):
 
     def check(self, value):
         return (self.lower_bound <= value) & (value <= self.upper_bound)
-
-
-class _OpenInterval(Constraint):
-    """
-    Constrain to a real interval `(lower_bound, upper_bound)`.
-    """
-    def __init__(self, lower_bound, upper_bound):
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-
-    def check(self, value):
-        return (self.lower_bound < value) & (value < self.upper_bound)
 
 
 class _Simplex(Constraint):
@@ -267,19 +233,16 @@ class _RealVector(Constraint):
 dependent = _Dependent()
 dependent_property = _DependentProperty
 boolean = _Boolean()
-nonnegative_integer = _IntegerGreaterThanEq(0)
-positive_integer = _IntegerGreaterThanEq(1)
+nonnegative_integer = _IntegerGreaterThan(0)
+positive_integer = _IntegerGreaterThan(1)
 integer_interval = _IntegerInterval
 real = _Real()
 real_vector = _RealVector()
 positive = _GreaterThan(0.)
 greater_than = _GreaterThan
-greater_than_eq = _GreaterThanEq
 less_than = _LessThan
-less_than_eq = _LessThanEq
 unit_interval = _Interval(0., 1.)
 interval = _Interval
-open_interval = _OpenInterval
 simplex = _Simplex()
 lower_triangular = _LowerTriangular()
 lower_cholesky = _LowerCholesky()
