@@ -16,6 +16,7 @@ import gzip
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
+from torch._six import inf, nan
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
@@ -241,12 +242,12 @@ class TestTorch(TestCase):
         self.assertTrue(torch.allclose(x, y, rtol=0.01, atol=0.0))
         self.assertFalse(torch.allclose(x, y))
         self.assertTrue(torch.allclose(torch.tensor([0.0]), torch.tensor([1e-8])))
-        x = torch.tensor([2.0, 3.0, float('nan')])
-        y = torch.tensor([2.01, 3.01, float('nan')])
+        x = torch.tensor([2.0, 3.0, nan])
+        y = torch.tensor([2.01, 3.01, nan])
         self.assertFalse(torch.allclose(x, y, rtol=1e-2))
         self.assertTrue(torch.allclose(x, y, rtol=1e-2, equal_nan=True))
         self.assertFalse(torch.allclose(x, y, rtol=1e-3, equal_nan=True))
-        inf = torch.tensor([float('inf')])
+        inf = torch.tensor([inf])
         self.assertTrue(torch.allclose(inf, inf))
         self.assertTrue(torch.allclose(-inf, -inf))
         self.assertFalse(torch.allclose(inf, -inf))
@@ -359,13 +360,13 @@ class TestTorch(TestCase):
             try:
                 return math.sinh(x)
             except OverflowError:
-                return float('inf') if x > 0 else float('-inf')
+                return inf if x > 0 else -inf
         self._test_math(torch.sinh, sinh)
 
     def test_lgamma(self):
         def lgamma(x):
             if x <= 0 and x == int(x):
-                return float('inf')
+                return inf
             return math.lgamma(x)
         self._test_math(torch.lgamma, lgamma)
 
@@ -392,14 +393,14 @@ class TestTorch(TestCase):
         # scipy 1.1.0 changed when it returns +/-inf vs. NaN
         def torch_digamma_without_inf(inp):
             res = torch.digamma(inp)
-            res[(res == float('-inf')) | (res == float('inf'))] = float('nan')
+            res[(res == -inf) | (res == inf)] = nan
             return res
 
         def scipy_digamma_without_inf(inp):
             res = digamma(inp)
             if np.isscalar(res):
-                return res if np.isfinite(res) else float('nan')
-            res[np.isinf(res)] = float('nan')
+                return res if np.isfinite(res) else nan
+            res[np.isinf(res)] = nan
             return res
 
         self._test_math(torch_digamma_without_inf, scipy_digamma_without_inf, self._digamma_input())
@@ -413,7 +414,7 @@ class TestTorch(TestCase):
                             self._digamma_input(test_poles=False))
 
     def test_asin(self):
-        self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
+        self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else nan)
 
     def test_cos(self):
         self._test_math_by_name('cos')
@@ -425,11 +426,11 @@ class TestTorch(TestCase):
             except OverflowError:
                 # Return inf on overflow.
                 # See http://en.cppreference.com/w/cpp/numeric/math/cosh
-                return float('inf')
+                return inf
         self._test_math(torch.cosh, cosh)
 
     def test_acos(self):
-        self._test_math(torch.acos, lambda x: math.acos(x) if abs(x) <= 1 else float('nan'))
+        self._test_math(torch.acos, lambda x: math.acos(x) if abs(x) <= 1 else nan)
 
     def test_tan(self):
         self._test_math_by_name('tan')
@@ -443,36 +444,36 @@ class TestTorch(TestCase):
     def test_log(self):
         def log(x):
             if x == 0:
-                return float('-inf')
+                return -inf
             elif x < 0:
-                return float('nan')
+                return nan
             return math.log(x)
         self._test_math(torch.log, log)
 
     def test_log10(self):
         def log10(x):
             if x == 0:
-                return float('-inf')
+                return -inf
             elif x < 0:
-                return float('nan')
+                return nan
             return math.log10(x)
         self._test_math(torch.log10, log10)
 
     def test_log1p(self):
         def log1p(x):
             if x == -1:
-                return float('-inf')
+                return -inf
             elif x < -1:
-                return float('nan')
+                return nan
             return math.log1p(x)
         self._test_math(torch.log1p, log1p)
 
     def test_log2(self):
         def log2(x):
             if x == 0:
-                return float('-inf')
+                return -inf
             elif x < 0:
-                return float('nan')
+                return nan
             try:
                 return math.log2(x)
             except AttributeError:
@@ -480,7 +481,7 @@ class TestTorch(TestCase):
         self._test_math(torch.log2, log2)
 
     def test_sqrt(self):
-        self._test_math(torch.sqrt, lambda x: math.sqrt(x) if x >= 0 else float('nan'))
+        self._test_math(torch.sqrt, lambda x: math.sqrt(x) if x >= 0 else nan)
 
     def test_erf(self):
         self._test_math_by_name('erf')
@@ -493,9 +494,9 @@ class TestTorch(TestCase):
             inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
             self.assertEqual(tensor(inputValues).erf().erfinv(), tensor(inputValues))
             # test inf
-            self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([float('-inf'), float('inf')])))
+            self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([-inf, inf])))
             # test nan
-            self.assertEqual(tensor([-2, 2]).erfinv(), tensor([float('nan'), float('nan')]))
+            self.assertEqual(tensor([-2, 2]).erfinv(), tensor([nan, nan]))
 
         checkType(torch.FloatTensor)
         checkType(torch.DoubleTensor)
@@ -505,7 +506,7 @@ class TestTorch(TestCase):
             try:
                 return math.exp(x)
             except OverflowError:
-                return float('inf')
+                return inf
         self._test_math(torch.exp, exp)
 
     def test_expm1(self):
@@ -513,7 +514,7 @@ class TestTorch(TestCase):
             try:
                 return math.expm1(x)
             except OverflowError:
-                return float('inf')
+                return inf
         self._test_math(torch.expm1, expm1)
 
     def test_floor(self):
@@ -525,9 +526,9 @@ class TestTorch(TestCase):
     def test_rsqrt(self):
         def rsqrt(x):
             if x == 0:
-                return float('inf')
+                return inf
             elif x < 0:
-                return float('nan')
+                return nan
             return 1.0 / math.sqrt(x)
 
         self._test_math(torch.rsqrt, rsqrt)
@@ -615,7 +616,7 @@ class TestTorch(TestCase):
         # NaNs
         for index in (0, 4, 99):
             m1 = torch.randn(100)
-            m1[index] = float('nan')
+            m1[index] = nan
             res1val, res1ind = torch.max(m1, 0)
             self.assertTrue(math.isnan(res1val))
             self.assertEqual(res1ind, index)
@@ -633,14 +634,14 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, float('inf')]:
+        for p in [0, 1, 2, 3, 4, inf]:
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, float('inf')]:
+        for p in [0, 1, 2, 3, 4, inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
             self.assertEqual(res.shape, expected.shape)
@@ -808,10 +809,10 @@ class TestTorch(TestCase):
             ('prod', lambda *args, **kwargs: torch.prod(*args, **kwargs), 1),
             ('sum', lambda *args, **kwargs: torch.sum(*args, **kwargs), 0),
             ('norm', lambda *args, **kwargs: torch.norm(*args, p=2, **kwargs), 0),
-            ('mean', lambda *args, **kwargs: torch.mean(*args, **kwargs), float('nan')),
-            ('var', lambda *args, **kwargs: torch.var(*args, **kwargs), float('nan')),
-            ('std', lambda *args, **kwargs: torch.std(*args, **kwargs), float('nan')),
-            ('logsumexp', lambda *args, **kwargs: torch.logsumexp(*args, **kwargs), float('-inf')),
+            ('mean', lambda *args, **kwargs: torch.mean(*args, **kwargs), nan),
+            ('var', lambda *args, **kwargs: torch.var(*args, **kwargs), nan),
+            ('std', lambda *args, **kwargs: torch.std(*args, **kwargs), nan),
+            ('logsumexp', lambda *args, **kwargs: torch.logsumexp(*args, **kwargs), -inf),
         ]
 
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
@@ -878,8 +879,8 @@ class TestTorch(TestCase):
     def test_logsumexp(self):
         from scipy.special import logsumexp
         a = torch.randn(5, 4)
-        a[0, 0] = float('inf')
-        a[1, :] = float('-inf')
+        a[0, 0] = inf
+        a[1, :] = -inf
         actual = a.logsumexp(1)
         expected = logsumexp(a.numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
@@ -1540,7 +1541,7 @@ class TestTorch(TestCase):
         self._test_cop(torch.mul, lambda x, y: x * y)
 
     def test_cpow(self):
-        self._test_cop(torch.pow, lambda x, y: float('nan') if x < 0 else math.pow(x, y))
+        self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_einsum(self):
@@ -2416,7 +2417,7 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, 5)
         xn = x.numpy()
-        for p in [1, 2, 3, 4, float('inf')]:
+        for p in [1, 2, 3, 4, inf]:
             res = x.renorm(p, 1, 1)
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
             self.assertEqual(res.numpy(), expected.numpy(), "renorm failed for {}-norm".format(p))
@@ -2532,9 +2533,9 @@ class TestTorch(TestCase):
     def test_multinomial_invalid_probs(self):
         test_method = TestTorch._test_multinomial_invalid_probs
         self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
+        self._spawn_method(test_method, torch.Tensor([0, inf]))
+        self._spawn_method(test_method, torch.Tensor([0, -inf]))
+        self._spawn_method(test_method, torch.Tensor([0, nan]))
 
     @suppress_warnings
     def test_range(self):
@@ -4672,15 +4673,15 @@ class TestTorch(TestCase):
         self.assertEqual(x.nelement(), all.long().sum())
 
     def test_isfinite(self):
-        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan'), -10])
+        x = torch.Tensor([1, inf, 2, -inf, nan, -10])
         self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
 
     def test_isinf(self):
-        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')])
+        x = torch.Tensor([1, inf, 2, -inf, nan])
         self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
 
     def test_isnan(self):
-        x = torch.Tensor([1, float('nan'), 2])
+        x = torch.Tensor([1, nan, 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
     def test_RNGState(self):
@@ -7418,7 +7419,7 @@ class TestTorch(TestCase):
         self.assertExpected(str(x), subname='negint')
 
         # test inf and nan
-        x = torch.tensor([4, float('inf'), 1.5, float('-inf'), 0, float('nan'), 1])
+        x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpected(str(x), subname='nonfinite')
 

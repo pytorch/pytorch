@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from torch._six import inf
 from operator import mul
 from functools import reduce
 import math
@@ -155,7 +156,7 @@ def isfinite(tensor):
     """
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
-    return (tensor == tensor) & (tensor.abs() != float('inf'))
+    return (tensor == tensor) & (tensor.abs() != inf)
 
 
 def isinf(tensor):
@@ -174,7 +175,7 @@ def isinf(tensor):
     """
     if not isinstance(tensor, torch.Tensor):
         raise ValueError("The argument is not a tensor", str(tensor))
-    return tensor.abs() == float('inf')
+    return tensor.abs() == inf
 
 
 def stft(input, n_fft, hop_length=None, win_length=None, window=None,
