@@ -3,6 +3,8 @@
 #include <cstdint>
 #include <utility>
 
+#include <ATen/ATenGeneral.h>
+
 /*
 * A CUDA stream interface with no CUDA build dependency.
 * 
@@ -25,33 +27,33 @@ namespace detail {
 
 // Pointer-based API (for internal use)
 // Note: ATen/Context is preferred to work with streams safely
-CUDAStreamInternals* CUDAStream_getDefaultStreamOnDevice(int64_t device);
-CUDAStreamInternals* CUDAStream_getDefaultStream();
+AT_API CUDAStreamInternals* CUDAStream_getDefaultStreamOnDevice(int64_t device);
+AT_API CUDAStreamInternals* CUDAStream_getDefaultStream();
 
-CUDAStreamInternals* CUDAStream_createAndRetainWithOptions(int32_t flags, int32_t priority);
+AT_API CUDAStreamInternals* CUDAStream_createAndRetainWithOptions(int32_t flags, int32_t priority);
 
-CUDAStreamInternals* CUDAStream_getAndRetainCurrentStreamOnDevice(int64_t device);
-CUDAStreamInternals* CUDAStream_getAndRetainCurrentStream();
+AT_API CUDAStreamInternals* CUDAStream_getAndRetainCurrentStreamOnDevice(int64_t device);
+AT_API CUDAStreamInternals* CUDAStream_getAndRetainCurrentStream();
 
 // Note: these Unsafe gets should NEVER be used and are only here for legacy
 // purposes. Once those uses are gone they should be removed.
-CUDAStreamInternals* CUDAStream_getCurrentStreamOnDeviceUnsafe(int64_t device);
-CUDAStreamInternals* CUDAStream_getCurrentStreamUnsafe();
+AT_API CUDAStreamInternals* CUDAStream_getCurrentStreamOnDeviceUnsafe(int64_t device);
+AT_API CUDAStreamInternals* CUDAStream_getCurrentStreamUnsafe();
 
-void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* internals);
-void CUDAStream_setStream(CUDAStreamInternals* internals);
+AT_API void CUDAStream_setStreamOnDevice(int64_t device, CUDAStreamInternals* internals);
+AT_API void CUDAStream_setStream(CUDAStreamInternals* internals);
 
-cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
-int64_t CUDAStream_device(CUDAStreamInternals*);
+AT_API cudaStream_t CUDAStream_stream(CUDAStreamInternals*);
+AT_API int64_t CUDAStream_device(CUDAStreamInternals*);
 
-bool CUDAStream_retain(CUDAStreamInternals*);
-void CUDAStream_free(CUDAStreamInternals*&);
+AT_API bool CUDAStream_retain(CUDAStreamInternals*);
+AT_API void CUDAStream_free(CUDAStreamInternals*&);
 
 } // namespace detail
 
 // RAII for a CUDA stream
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
-struct CUDAStream {
+struct AT_API CUDAStream {
   // Constants
   static constexpr int32_t DEFAULT_FLAGS = 1; // = cudaStreamNonBlocking;
   static constexpr int32_t DEFAULT_PRIORITY = 0;
