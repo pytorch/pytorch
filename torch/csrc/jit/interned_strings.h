@@ -90,7 +90,9 @@ _(attr, sizes) \
 _(attr, starts) \
 _(attr, transA) \
 _(attr, transB) \
-_(attr, name)
+_(attr, name) \
+_(attr, string)
+
 
 // 'prim' symbols are synthetic operators that occur only in the IR
 // and don't have corresponding implementations in ATen.

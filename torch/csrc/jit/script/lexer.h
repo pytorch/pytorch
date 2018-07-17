@@ -189,8 +189,8 @@ struct SharedParserData {
   }
 
   bool isCharCount(char c, const std::string& str, size_t start, int len) {
-    //count checks from [start, start + len) 
-    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len; 
+    //count checks from [start, start + len)
+    return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
   }
 
   // python conconcatenates all adjacent strings "a" "b" == "ab"
@@ -201,30 +201,20 @@ struct SharedParserData {
     char quote = str[start];
     if (quote != '\"' && quote != '\'')
       return false;
-    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1; 
-    size_t end = start + quote_len; 
+    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
+    size_t end = start + quote_len;
     while(end < str.size() && !isCharCount(quote, str, end, quote_len)) {
       if (str[end] == '\n' && quote_len != 3) {
         return false;
       }
+      //handle escaped characters
       if (str[end] == '\\') {
         end++;
       }
       end++;
     }
-    *len = end - start + quote_len; 
-    if (end == str.size()) {
-      return false;
-    }
-    int kind;
-    size_t next_start = end + 1;
-    size_t next_len;
-    //finding adjacent strings
-    match(str, end + 1, true, false, &kind, &next_start, &next_len);
-    if (kind == TK_STRINGLITERAL) {
-      *len = (next_start + next_len - start);
-    }
-    return true;
+    *len = end - start + quote_len;
+    return end < str.size();
   }
 
   bool isblank(int n) {
@@ -284,7 +274,7 @@ struct SharedParserData {
       *kind = TK_NUMBER;
       return true;
     }
-    // check for string 
+    // check for string
     if (isString(str, pos, len)) {
       *kind = TK_STRINGLITERAL;
       return true;

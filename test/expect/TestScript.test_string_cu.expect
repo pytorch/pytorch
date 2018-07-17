@@ -1,4 +1,8 @@
 graph(%a : Dynamic) {
-   = prim::Print[string_indices=[1], strings=[abc]](%a)
+  %1 : string = prim::StringLiteral[string=a
+	b
+]()
+  %2 : int = prim::Constant[value={2}]()
+   = prim::Print[string=tst](%a, %1, %2)
   return (%a);
 }

@@ -254,6 +254,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
+    case prim::StringLiteral:
     case prim::PythonOp:
     case prim::Print:
     case prim::Undefined: {

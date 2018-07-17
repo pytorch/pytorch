@@ -1438,15 +1438,32 @@ class TestScript(JitTestCase):
         a = Variable(torch.rand(1))
         self.assertEqual(a, cu.foo(a))
 
+    # because the compilation unit ingests python strings
+    # to use an escape sequence escape the backslash (\\n = \n)
     def test_string_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):
-                print(a, "a" "b" \
-                'c')
+                print(a, """a\\n\tb\\n""", 2)
                 return a
         ''')
-        a = Variable(torch.rand(1))
         self.assertExpected(str(cu.foo.graph))
+
+    def test_string_new_line(self):
+        with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
+            torch.jit.CompilationUnit('''
+            def test_while(a):
+                print("
+                    a")
+                return a
+            ''')
+
+    def test_string_single_escape(self):
+        with self.assertRaisesRegex(RuntimeError, "expected a valid token*"):
+            torch.jit.CompilationUnit('''
+            def test_while(a):
+                print("\\")
+                return a
+            ''')
 
     def test_script_annotation(self):
         @torch.jit.script
@@ -1740,7 +1757,7 @@ class TestScript(JitTestCase):
         def func(a):
             print(a, "a" 'b' '''c''' """d""", "a\
             b" "c"  # ignored
-                    "d")
+                    "d", a)
             return a
         inputs = self._make_scalar_vars([1], torch.int64)
         self.checkScript(func, inputs, capture_output=True)

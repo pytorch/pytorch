@@ -188,49 +188,56 @@ struct Parser {
     return start + len <= str.size() && std::count(str.begin() + start, str.begin() + start + len, c) == len;
   }
 
-  std::string parseLexedString(const std::string &str, size_t start) {
-    //invariants: input consists of a valid adjacent python strings and start is the index at beginning
-    //of a string
-    char quote = str[start];
-    int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
-    size_t end = start + quote_len;
-    while(!isCharCount(quote, str, end, quote_len)) {
-      if (str[end] == '\\') {
-        end++;
-      }
-      end++;
-    }
-    std::string ret_str = str.substr(start + quote_len, /*len*/ end - (start + quote_len));
-    //erase line continuations
-    std::string sub = "\\\n";
-    size_t pos = ret_str.find(sub);
+  std::string parseString(const SourceRange& range, const std::string &str) {
+    int quote_len = isCharCount(str[0], str, 0, 3) ? 3 : 1;
+    auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
+    size_t pos = ret_str.find('\\');
     while(pos != std::string::npos) {
-        ret_str.erase(pos, sub.size());
-        pos = ret_str.find(sub);
-    }
-    size_t next_start = end + quote_len;
-    //find start of next string
-    while(next_start < str.size() && str[next_start] != '\'' && str[next_start] != '\"') {
-      if (str[next_start] == '#') {
-        next_start = str.find('\n', next_start);
+      //invariant: backslash cannot be the last character
+      char c = ret_str[pos + 1];
+      switch (ret_str[pos + 1]) {
+        case '\\':
+        case '\'':
+        case '\"':
+        case '\n':
+          break;
+        case 'a':
+          c = '\a';
+          break;
+        case 'b':
+          c = '\b';
+          break;
+        case 'f':
+          c = '\f';
+          break;
+        case 'n':
+          c = '\n';
+          break;
+        case 'v':
+          c = '\v';
+          break;
+        default:
+          throw ErrorReport(range) << " octal and hex escaped sequences are not supported";
       }
-      next_start++;
-    }
-    if (next_start < str.size()) {
-      ret_str.append(parseLexedString(str, next_start));
+      ret_str.erase(pos, 2);
+      ret_str.insert(pos, 1, c);
+      pos = ret_str.find('\\', pos + 1);
     }
     return ret_str;
   }
 
   StringLiteral parseStringLiteral() {
     auto range = L.cur().range;
-    auto t = L.expect(TK_STRINGLITERAL);
-    return StringLiteral::create(t.range, parseLexedString(t.text(), 0));
+    std::stringstream ss;
+    while(L.cur().kind == TK_STRINGLITERAL)
+      ss << parseString(L.cur().range, L.next().text());
+    return StringLiteral::create(range, ss.str());
   }
 
   Expr parseAttributeValue() {
     return parseExp();
   }
+
   void parseOperatorArguments(TreeList& inputs, TreeList& attributes) {
     L.expect('(');
     if (L.cur().kind != ')') {

@@ -351,6 +351,33 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
   return output;
 }
 
+Value* createStringLiteral(Graph& g, const SourceRange& loc, const std::string& str) {
+  auto n = g.createString(str);
+  n->setSourceLocation(std::make_shared<SourceRange>(loc));
+  return g.insertNode(n)->output();
+}
+
+Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs) {
+  // bake in constant propagation for the all-constant case because it is
+  // common to see constant lists like [1, 2] passed to attributes
+  bool all_constant = std::all_of(inputs.begin(), inputs.end(), [&](Value* v) {
+    return v->node()->kind() == prim::Constant;
+  });
+  if(all_constant) {
+    auto values = fmap(inputs, [&](Value* v) {
+      return v->node()->t(attr::value);
+    });
+    return insertConstant(g, at::stack(values), loc);
+  }
+  return g.insertNode(g.create(aten::stack, inputs)
+                      ->i_(attr::dim, 0)
+                      ->setSourceLocation(std::make_shared<SourceRange>(loc)))->output();
+}
+
+static bool isTensorSubtype(Value* v) {
+  return v->type()->isSubtypeOf(DynamicType::get());
+}
+
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
@@ -1249,23 +1276,25 @@ private:
     return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
   }
 
+
   std::shared_ptr<SugaredValue> emitPrint(Ident ident, const List<torch::jit::script::Expr> inputs) {
-    std::vector<std::int64_t> string_indices;
-    std::vector<std::string> strings; 
-    TreeList trees_;
+    std::string format;
+    std::vector<Value*> values;
     for(size_t i = 0; i < inputs.size(); i++) {
       if (inputs[i].kind() == TK_STRINGLITERAL) {
-        strings.push_back(StringLiteral(inputs[i]).text());
-        string_indices.push_back(i);
+        values.push_back(emitStringLiteral(StringLiteral(inputs[i])));
+        format += "s";
       } else {
-        trees_.push_back(inputs[i]);
+        TreeList single_;
+        single_.push_back(inputs[i]);
+        auto filtered_inputs = getNamedValues(single_, true, identity);
+        auto v = toValues(filtered_inputs)[0];
+        values.push_back(v);
+        format += "t";
       }
     }
-    auto filtered_inputs = getNamedValues(trees_, true, identity);
-    ensureTensors(ident.range(), toValues(filtered_inputs));
-    Node* n = emitNode(prim::Print, ident.range(), toValues(filtered_inputs), 0);
-    n->is_(Symbol::attr("string_indices"), string_indices);
-    n->ss_(Symbol::attr("strings"), strings);
+    Node* n = emitNode(prim::Print, ident.range(), values, 0);
+    n->s_(attr::string, format);
     return std::make_shared<NoneValue>();
   }
 
@@ -1306,9 +1335,8 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        Ident ident = Var(apply.callee()).name();
-        if(apply.callee().kind() == TK_VAR && ident.name() == "print") {
-          return emitPrint(ident, apply.inputs());
+        if (apply.callee().kind() == TK_VAR && Var(apply.callee()).name().name() == "print") {
+          return emitPrint(Var(apply.callee()).name(), apply.inputs());
         }
         auto inputs = getNamedValues(apply.inputs(), true, identity);
         auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
@@ -1385,9 +1413,9 @@ private:
       case TK_IF_EXPR: {
         return emitTernaryIf(TernaryIf(tree));
       } break;
-      case TK_STRINGLITERAL: {  
-        throw std::runtime_error("NYI: string literals are only supported as an argument to print\n");
-        } break;
+      case TK_STRINGLITERAL: {
+        return emitStringLiteral(StringLiteral(tree));
+      } break;
       case TK_LIST_LITERAL: {
         auto ll = ListLiteral(tree);
         auto values = getValues(ll.inputs(), /*maybe_unpack=*/true, identity);
