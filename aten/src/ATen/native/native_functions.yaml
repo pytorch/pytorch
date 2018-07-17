@@ -1096,6 +1096,9 @@
 
 - func: reshape(Tensor self, IntList shape) -> Tensor
 
+- func: reshape_as(Tensor self, Tensor other) -> Tensor
+  variants: method
+
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
   dispatch:
