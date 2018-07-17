@@ -14,6 +14,7 @@
 #include <test/cpp/api/util.h>
 
 using namespace torch::nn;
+using namespace torch::test;
 
 #include <cmath>
 #include <iostream>
@@ -236,7 +237,7 @@ TEST_CASE("integration/cartpole") {
   torch::manual_seed(0);
   std::cerr << "Training episodic policy gradient with a critic for up to 3000"
                " episodes, rest your eyes for a bit!\n";
-  auto model = std::make_shared<torch::SimpleContainer>();
+  auto model = std::make_shared<SimpleContainer>();
   auto linear = model->add(Linear(4, 128), "linear");
   auto policyHead = model->add(Linear(128, 2), "policy");
   auto valueHead = model->add(Linear(128, 1), "action");
@@ -333,7 +334,7 @@ TEST_CASE("integration/cartpole") {
 
 TEST_CASE("integration/mnist", "[cuda]") {
   torch::manual_seed(0);
-  auto model = std::make_shared<torch::SimpleContainer>();
+  auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto conv2 = model->add(Conv2d(10, 20, 5), "conv2");
   auto drop = Dropout(0.3);
@@ -369,7 +370,7 @@ TEST_CASE("integration/mnist", "[cuda]") {
 
 TEST_CASE("integration/mnist/batchnorm", "[cuda]") {
   torch::manual_seed(0);
-  auto model = std::make_shared<torch::SimpleContainer>();
+  auto model = std::make_shared<SimpleContainer>();
   auto conv1 = model->add(Conv2d(1, 10, 5), "conv1");
   auto batchnorm2d =
       model->add(BatchNorm(BatchNormOptions(10).stateful(true)), "batchnorm2d");
