@@ -622,7 +622,6 @@ static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
   self->size[0] = 0;
   self->stride[0] = 1;
   self->dim_ = 1;
-  self->flag = TH_TENSOR_REFCOUNTED;
 }
 
 void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
