@@ -420,7 +420,7 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
 
 #ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(src->_dim() > 1, 1, "cannot select on a vector");
-else
+#else
 #ifndef USE_TH_SCALAR
   THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
 #endif
