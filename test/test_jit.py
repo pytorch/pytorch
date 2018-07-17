@@ -482,7 +482,6 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(self.fn_test_relu, (x, y))
 
-
     @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
     @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
     def test_small_constant(self):
