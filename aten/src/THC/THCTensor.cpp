@@ -28,7 +28,7 @@ int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim) {
 }
 THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self) {
   THLongStorage *size = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(size, self->size);
+  THLongStorage_rawCopy(size, THTensor_getSizePtr(self));
   return size;
 }
 
@@ -82,7 +82,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
   }
 
   if(!isSame)
-    THCTensor_resizeNd(state, self, src->dim(), src->size, NULL);
+    THCTensor_resizeNd(state, self, src->dim(), THTensor_getSizePtr(src), NULL);
 }
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
@@ -128,7 +128,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
 
   if(nDimension != self->dim())
   {
-    self->size = (int64_t*)THRealloc(self->size, sizeof(int64_t)*nDimension);
+    THTensor_resizeSize(self, nDimension);
     self->stride = (int64_t*)THRealloc(self->stride, sizeof(int64_t)*nDimension);
     self->dim_ = nDimension;
   }
@@ -169,7 +169,7 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
                            src->storage,
                            src->storageOffset,
                            src->dim(),
-                           src->size,
+                           THTensor_getSizePtr(src),
                            src->stride);
 }
 
@@ -242,7 +242,7 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
 
   THCTensor_set(state, self, src);
 
-  self->size = (int64_t*)THRealloc(self->size, sizeof(int64_t)*(self->dim()+1));
+  THTensor_resizeSize(self, self->dim() + 1);
   self->stride = (int64_t*)THRealloc(self->stride, sizeof(int64_t)*(self->dim()+1));
   self->dim_++;
   for (d = self->dim()-1; d > dimension; d--) {

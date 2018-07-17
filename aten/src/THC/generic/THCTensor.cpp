@@ -70,7 +70,7 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
                            tensor->storage,
                            tensor->storageOffset,
                            tensor->dim(),
-                           tensor->size,
+                           THTensor_getSizePtr(tensor),
                            tensor->stride);
   return self;
 }
@@ -218,7 +218,7 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage
   ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
   THCTensor *self = THCTensor_(new)(state);
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
-  auto stride = THTensor_compute_stride(at::IntList(tensor->size, tensor->dim()),
+  auto stride = THTensor_compute_stride(tensor->sizes(),
                                         at::IntList(tensor->stride, tensor->dim()),
                                         at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
   THArgCheck(stride.has_value(), 2, "view size is "
@@ -434,8 +434,6 @@ void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int
 
 void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int dimension, int64_t size, int64_t step)
 {
-  int64_t *newSize;
-  int64_t *newStride;
   int d;
 
   if(!src)
@@ -450,7 +448,9 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
 
   THCTensor_(set)(state, self, src);
 
-  newSize = (int64_t*)THAlloc(sizeof(int64_t)*(self->dim()+1));
+  std::vector<int64_t> newSize(/* size */ self->dim() + 1);
+
+  int64_t *newStride;
   newStride = (int64_t*)THAlloc(sizeof(int64_t)*(self->dim()+1));
 
   newSize[self->dim()] = size;
@@ -469,10 +469,9 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
     }
   }
 
-  THFree(self->size);
   THFree(self->stride);
 
-  self->size = newSize;
+  THTensor_setSize(self, std::move(newSize));
   self->stride = newStride;
   self->dim_++;
 }
