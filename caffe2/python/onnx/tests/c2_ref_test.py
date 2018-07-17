@@ -379,9 +379,9 @@ class TestCaffe2End2End(TestCase):
 
     @unittest.skipIf(
         os.environ.get('JENKINS_URL'),
-        'Running vgg19 on Travis with Python 2 keeps getting OOM!')
-    def test_vgg19(self):
-        self._test_net('vgg19')
+        'Taking too long to download!')
+    def test_zfnet(self):
+        self._test_net('zfnet')
 
     def test_inception_v1(self):
         self._test_net('inception_v1', decimal=2)
