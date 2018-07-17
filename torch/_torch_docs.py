@@ -4219,6 +4219,12 @@ Returns the standard-deviation of all elements in the :attr:`input` tensor.
 If :attr:`unbiased` is ``False``, then the standard-deviation will be calculated
 via the biased estimator. Otherwise, Bessel's correction will be used.
 
+.. note::
+    If the standard deviation is zero, then the derivative for the standard deviation with
+    respect to the elements of the tensor is considered to be
+    :math:`\displaystyle \sqrt{\frac{n-1}{nN}}` where :math:`n` is the number of elements and
+    :math:`N = n - 1` if :attr:`unbiased` is ``True`` and :math:`N = n` otherwise.
+
 Args:
     input (Tensor): the input tensor
     unbiased (bool): whether to use the unbiased estimation or not
