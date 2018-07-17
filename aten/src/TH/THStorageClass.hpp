@@ -41,6 +41,7 @@ struct THFinalizer {
 struct THStorage
 {
   THStorage() = delete;
+  THStorage(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, char);
   THStorage(at::ScalarType, ptrdiff_t, at::Allocator*, char);
   at::ScalarType scalar_type;
   at::DataPtr data_ptr;

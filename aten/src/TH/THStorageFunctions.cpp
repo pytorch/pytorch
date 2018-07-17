@@ -87,28 +87,6 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   return copy;
 }
 
-THStorage* THStorage_new(at::ScalarType scalar_type)
-{
-  return THStorage_newWithSize(scalar_type, 0);
-}
-
-THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
-{
-  return THStorage_newWithAllocator(scalar_type, size, getTHDefaultAllocator());
-}
-
-THStorage* THStorage_newWithAllocator(
-    at::ScalarType scalar_type,
-    ptrdiff_t size,
-    at::Allocator* allocator) {
-  THStorage* storage = new THStorage(
-      scalar_type,
-      size,
-      allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
-  return storage;
-}
-
 ptrdiff_t THStorage_size(const THStorage *self)
 {
   return self->size;
@@ -117,27 +95,6 @@ ptrdiff_t THStorage_size(const THStorage *self)
 size_t THStorage_elementSize(const THStorage *self)
 {
   return at::elementSize(self->scalar_type);
-}
-
-THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags)
-{
-  size_t actual_size = -1;
-  THStorage *storage = THStorage_newWithDataAndAllocator(scalar_type,
-                                                         THMapAllocator::makeDataPtr(
-                                                            filename,
-                                                            flags,
-                                                            size * at::elementSize(scalar_type),
-                                                            &actual_size),
-                                                         size,
-                                                         /* allocator */ nullptr);
-
-  if (size <= 0) {
-    storage->size = actual_size/THStorage_elementSize(storage);
-  }
-
-  THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
-
-  return storage;
 }
 
 void THStorage_setFlag(THStorage *storage, const char flag)
@@ -165,21 +122,6 @@ THStorage* THStorage_newWithData(at::ScalarType scalar_type, std::unique_ptr<at:
                                            getTHDefaultAllocator());
 }
 */
-
-THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
-                                             at::DataPtr&& data, ptrdiff_t size,
-                                             THAllocator* allocator) {
-  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::DataPtr(std::move(data));
-  storage->size = size;
-  new (&storage->refcount) std::atomic<int>(1);
-  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
-  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
-  storage->allocator = allocator;
-  return storage;
-}
 
 void THStorage_resize(THStorage *storage, ptrdiff_t size)
 {
