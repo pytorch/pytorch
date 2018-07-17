@@ -494,7 +494,6 @@ class TestJit(JitTestCase):
 
         ge = self.checkTrace(self.fn_test_small_constant, (x, y))
 
-
     @staticmethod
     def fn_test_exp(x, y):
         return (x + .5 * y).exp()
