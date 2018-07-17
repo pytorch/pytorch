@@ -219,18 +219,6 @@ class Tensor(torch._C._TensorBase):
         self.storage().share_memory_()
         return self
 
-    def view_as(self, tensor):
-        r"""view_as(other) -> Tensor
-
-        View this tensor as the same size as :attr:`other`.
-        ``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
-
-        Args:
-            other (:class:`torch.Tensor`): The result tensor has the same size
-                as :attr:`other.size()`.
-        """
-        return self.view(tensor.size())
-
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""
         if self.dim() == 0:

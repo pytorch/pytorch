@@ -1666,6 +1666,20 @@ Args:
 See :func:`torch.reshape`
 """)
 
+add_docstr_all('reshape_as',
+               r"""
+reshape_as(other) -> Tensor
+
+Returns this tensor as the same shape as :attr:`other`.
+``self.reshape_as(other)`` is equivalent to ``self.reshape(other.sizes())``.
+
+Please see :meth:`~Tensor.reshape` for more information about ``reshape``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same shape
+        as :attr:`other`.
+""")
+
 add_docstr_all('resize_',
                r"""
 resize_(*sizes) -> Tensor
@@ -2407,6 +2421,20 @@ Example::
 
 """)
 
+add_docstr_all('view_as',
+               r"""
+view_as(other) -> Tensor
+
+View this tensor as the same size as :attr:`other`.
+``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
+
+Please see :meth:`~Tensor.view` for more information about ``view``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
+""")
+
 add_docstr_all('expand',
                r"""
 expand(*sizes) -> Tensor
@@ -2443,6 +2471,20 @@ Example::
     tensor([[ 1,  1,  1,  1],
             [ 2,  2,  2,  2],
             [ 3,  3,  3,  3]])
+""")
+
+add_docstr_all('expand_as',
+               r"""
+expand_as(other) -> Tensor
+
+Expand this tensor to the same size as :attr:`other`.
+``self.expand_as(other)`` is equivalent to ``self.expand(other.size())``.
+
+Please see :meth:`~Tensor.expand` for more information about ``expand``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
 """)
 
 add_docstr_all('zero_',
