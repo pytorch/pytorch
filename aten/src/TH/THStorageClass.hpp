@@ -40,6 +40,7 @@ struct THFinalizer {
 struct THStorage
 {
   THStorage(at::ScalarType, ptrdiff_t, at::Allocator*, char);
+  ~THStorage();
   at::ScalarType scalar_type;
   at::DataPtr data_ptr;
   ptrdiff_t size;

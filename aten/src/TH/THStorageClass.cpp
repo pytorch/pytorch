@@ -10,5 +10,8 @@ THStorage::THStorage(
       size(size),
       refcount(1),
       weakcount(1), // from the strong reference
+      flag(flag),
       allocator(allocator),
       finalizer(nullptr) {}
+
+THStorage::~THStorage() {}

@@ -42,7 +42,7 @@ void THStorage_weakFree(THStorage *weak_storage) {
   if (--weak_storage->weakcount == 0) {
     weak_storage->refcount.~atomic<int>();
     weak_storage->weakcount.~atomic<int>();
-    THFree(weak_storage);
+    delete weak_storage;
   }
 }
 
