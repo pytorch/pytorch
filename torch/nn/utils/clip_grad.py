@@ -2,6 +2,7 @@ import warnings
 import torch
 from torch._six import inf
 
+
 def clip_grad_norm_(parameters, max_norm, norm_type=2):
     r"""Clips gradient norm of an iterable of parameters.
 

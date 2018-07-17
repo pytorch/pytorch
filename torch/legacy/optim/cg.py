@@ -3,6 +3,7 @@ import math
 INFINITY = float('inf')
 NAN = float('nan')
 
+
 def sqrt_nothrow(x):
     return math.sqrt(x) if x >= 0 else NAN
 

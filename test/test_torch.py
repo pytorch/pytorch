@@ -247,12 +247,12 @@ class TestTorch(TestCase):
         self.assertFalse(torch.allclose(x, y, rtol=1e-2))
         self.assertTrue(torch.allclose(x, y, rtol=1e-2, equal_nan=True))
         self.assertFalse(torch.allclose(x, y, rtol=1e-3, equal_nan=True))
-        inf = torch.tensor([inf])
-        self.assertTrue(torch.allclose(inf, inf))
-        self.assertTrue(torch.allclose(-inf, -inf))
-        self.assertFalse(torch.allclose(inf, -inf))
-        self.assertFalse(torch.allclose(inf, torch.tensor([1e20])))
-        self.assertFalse(torch.allclose(-inf, torch.tensor([-1e20])))
+        inf_t = torch.tensor([inf])
+        self.assertTrue(torch.allclose(inf_t, inf_t))
+        self.assertTrue(torch.allclose(-inf_t, -inf_t))
+        self.assertFalse(torch.allclose(inf_t, -inf_t))
+        self.assertFalse(torch.allclose(inf_t, torch.tensor([1e20])))
+        self.assertFalse(torch.allclose(-inf_t, torch.tensor([-1e20])))
 
     def test_linear_algebra_scalar_raises(self):
         m = torch.randn(5, 5)
