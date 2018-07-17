@@ -44,7 +44,7 @@ Operation createPythonOperation(Node* op_) {
         py_inputs[i] = py::reinterpret_borrow<py::object>(
             op->scalar_args[next_scalar++].get());
       } else if (arg_type == 't') {
-        auto var = peek(stack, next_tensor, num_inputs);
+        auto var = std::move(peek(stack, next_tensor, num_inputs)).toTensor();
         py_inputs[i] =
             py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
         next_tensor++;
