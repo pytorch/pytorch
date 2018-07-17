@@ -53,16 +53,6 @@ real *THCTensor_(data)(THCState *state, const THCTensor *self)
     return NULL;
 }
 
-void THCTensor_(setFlag)(THCState *state, THCTensor *self, const char flag)
-{
-  self->flag |= flag;
-}
-
-void THCTensor_(clearFlag)(THCState *state, THCTensor *self, const char flag)
-{
-  self->flag &= ~flag;
-}
-
 /**** creation methods ****/
 
 static void THCTensor_(rawInit)(THCState *state, THCTensor *self);
@@ -622,7 +612,6 @@ static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
   self->size[0] = 0;
   self->stride[0] = 1;
   self->dim_ = 1;
-  self->flag = TH_TENSOR_REFCOUNTED;
 }
 
 void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
