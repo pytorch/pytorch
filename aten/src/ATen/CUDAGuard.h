@@ -1,5 +1,6 @@
 #pragma once
 
+#include <ATen/ArrayRef.h>
 #include <ATen/CUDAStream.h>
 #include <ATen/Context.h>
 #include <ATen/DeviceGuard.h>
@@ -31,13 +32,25 @@ struct CUDAGuard {
     set_device(device);
   }
 
-  /// Copy is disallowed.
   CUDAGuard(const CUDAGuard&) = delete;
   CUDAGuard& operator=(const CUDAGuard&) = delete;
 
-  /// Move is disallowed.
-  CUDAGuard(CUDAGuard&&) = delete;
-  CUDAGuard& operator=(CUDAGuard&&) = delete;
+  /// Move-constructs this `CUDAGuard` from another `CUDAGuard`. The
+  /// moved-from `CUDAGuard` is modified such that its destruction has no
+  /// effect (does not reset the stream or device).
+  CUDAGuard(CUDAGuard&& other) noexcept
+      : device_guard_(std::move(other.device_guard_)),
+        original_streams_(std::move(other.original_streams_)) {}
+
+  /// Move-assigns this `CUDAGuard` from another `CUDAGuard`. The
+  /// moved-from `CUDAGuard` is modified such that its destruction has no
+  /// effect (does not reset the stream or device).
+  CUDAGuard& operator=(CUDAGuard&& other) {
+    device_guard_ = std::move(other.device_guard_);
+    original_streams_ = std::move(other.original_streams_);
+    other.original_streams_.clear();
+    return *this;
+  }
 
   /// Resets the CUDA stream on each device to the one that was active upon
   /// construction.
@@ -72,8 +85,10 @@ struct CUDAGuard {
     device_guard_.set_index(device);
   }
 
-  /// Returns the CUDA stream that was set upon construction of the guard.
-  const std::vector<CUDAStream>& original_streams() const noexcept {
+  /// Returns the CUDA streams that were active in the first call to
+  /// `set_stream`. If there was no such call, the returned container is
+  /// empty.
+  ArrayRef<CUDAStream> original_streams() const noexcept {
     return original_streams_;
   }
 

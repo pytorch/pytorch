@@ -79,12 +79,12 @@ struct CUDAStream {
   CUDAStream(CUDAStream&& other);
 
   // Assignment operator
-  CUDAStream& operator=(CUDAStream other) {
+  CUDAStream& operator=(CUDAStream other) noexcept {
     std::swap(internals_, other.internals_);
     return *this;
   }
 
-  // Returns true if the CUDAStream is null.
+  // Returns true if the CUDAStream is not null.
   explicit operator bool() const noexcept {
     return internals_ != nullptr;
   }

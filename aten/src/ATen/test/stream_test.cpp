@@ -168,8 +168,6 @@ TEST_CASE("CUDAGuard") {
   REQUIRE(at::current_device() == 0);
   REQUIRE(at::globalContext().getCurrentCUDAStreamOnDevice(0) == streams0[0]);
 
-  at::globalContext().setCurrentCUDAStreamOnDevice(1, streams1[1]);
-
   // Setting the stream first, and then the device, first changes the devices
   // back, and then resets the stream on the initial device.
 
@@ -180,5 +178,24 @@ TEST_CASE("CUDAGuard") {
 
   REQUIRE(at::current_device() == 0);
   REQUIRE(at::globalContext().getCurrentCUDAStreamOnDevice(0) == streams0[0]);
-  REQUIRE(at::globalContext().getCurrentCUDAStreamOnDevice(1) == streams1[1]);
+  REQUIRE(at::globalContext().getCurrentCUDAStreamOnDevice(1) == streams1[0]);
+}
+
+TEST_CASE("CUDAGuardIsMovable") {
+  if (at::globalContext().getNumGPUs() < 2) {
+    return;
+  }
+  const auto stream = at::globalContext().createCUDAStream();
+  const auto device_count = at::globalContext().getNumGPUs();
+  at::CUDAGuard first(stream);
+  first.set_device(1);
+  at::CUDAGuard second(std::move(first));
+  REQUIRE(second.original_streams().size() == device_count);
+  REQUIRE(second.original_device() == 0);
+  REQUIRE(second.last_device() == 1);
+  at::CUDAGuard third;
+  third = std::move(second);
+  REQUIRE(third.original_streams().size() == device_count);
+  REQUIRE(third.original_device() == 0);
+  REQUIRE(third.last_device() == 1);
 }

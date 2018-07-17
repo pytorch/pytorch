@@ -46,6 +46,29 @@ struct DeviceGuard {
     }
   }
 
+  /// Copy is disallowed.
+  DeviceGuard(const DeviceGuard&) = delete;
+  DeviceGuard& operator=(const DeviceGuard&) = delete;
+
+  /// Move-constructs this `DeviceGuard` from another `DeviceGuard`. The
+  /// moved-from `DeviceGuard` is modified such that its destruction has no
+  /// effect (does not reset the device).
+  DeviceGuard(DeviceGuard&& other) noexcept {
+    *this = std::move(other);
+  }
+
+  /// Move-assigns this `DeviceGuard` from another `DeviceGuard`. The
+  /// moved-from `DeviceGuard` is modified such that its destruction has no
+  /// effect (does not reset the device).
+  DeviceGuard& operator=(DeviceGuard&& other) noexcept {
+    this->original_index_ = other.original_index_;
+    this->last_index_ = other.last_index_;
+    // Set other's original index to the unspecified/default state, so that it
+    // doesn't also reset the device in its constructor.
+    other.original_index_ = -1;
+    return *this;
+  }
+
   /// Resets the device to the index that was active at construction of the
   /// guard.
   ~DeviceGuard() {
@@ -75,7 +98,7 @@ struct DeviceGuard {
     last_index_ = index;
   }
 
-  /// Calls `set_index` with the `Tensor`'s AT_ASSERT device, if it is a CUDA
+  /// Calls `set_index` with the `Tensor`'s current device, if it is a CUDA
   /// tensor. Does nothing if the `tensor` is not defined.
   void set_index_from(const Tensor& tensor) {
     if (tensor.defined() && tensor.is_cuda()) {

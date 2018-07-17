@@ -143,11 +143,16 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
+  at::CUDAGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int32_t>(devices[chunk]);
-    at::CUDAGuard cuda_guard;
     if (streams) {
-      AT_ASSERT(THCStream_device((*streams)[chunk]) == device_index);
+      AT_CHECK(
+          THCStream_device((*streams)[chunk]) == device_index,
+          "Expected the device associated with the stream at index ",
+          chunk, " (was ", THCStream_device((*streams)[chunk]), ") ",
+          "to match the device supplied at that index ",
+          "(expected ", device_index, ")");
       cuda_guard.set_stream(CUDAStream((*streams)[chunk], /*retain=*/true));
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
@@ -160,7 +165,7 @@ at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
     at::optional<int32_t> destination_index) {
-  AT_ASSERT(!tensors.empty());
+  AT_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   at::Tensor result;
   int64_t total_size = 0;
   auto& first = tensors.front();
