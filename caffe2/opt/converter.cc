@@ -42,6 +42,14 @@ std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
   return dilations;
 }
 
+int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
+  if (argMap.count("group")) {
+    CAFFE_ENFORCE(argMap["group"].has_i() && "Invalid group argument");
+    return static_cast<int>(argMap["group"].i());
+  }
+  return 1;
+}
+
 } // namespace
 
 namespace caffe2 {
@@ -115,6 +123,8 @@ class ConvConverter : public Converter {
     c->setStrides(getStrides(argMap));
     c->setPads(getPads(argMap));
     c->setDilations(getDilations(argMap));
+    c->setGroup(getGroup(argMap));
+
     return nnOp;
   }
   // Does not override default converter to OperatorDef
