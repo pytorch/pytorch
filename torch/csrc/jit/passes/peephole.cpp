@@ -56,35 +56,35 @@ void PeepholeOptimize(Block * block) {
            }
         }
       } break;
-      // Fuse mm + add into addmm
       case aten::add: {
-        // Must have two inputs
-        if (n->inputs().size() != 2) {
-          continue;
+        // mm + add == addmm
+        if (n->inputs().size() == 2 &&
+            at::Scalar(n->t(attr::alpha)).to<double>() == 1. &&
+            n->input(1)->node()->kind() == aten::mm) {
+          auto input_node = n->input(1)->node();
+
+          WithInsertPoint guard(n);
+
+          SymbolicVariable mat(n->input(0));
+          SymbolicVariable mat1(input_node->input(0));
+          SymbolicVariable mat2(input_node->input(1));
+          SymbolicVariable addmm_value = mat.addmm(mat1, mat2);
+
+          // Copy shape information from output node
+          ((Value*)addmm_value)->copyMetadata(n->output());
+          n->output()->replaceAllUsesWith(addmm_value);
         }
-        // Alpha parameter must be 1.0
-        auto alpha = at::Scalar(it->t(attr::alpha));
-        if (alpha.to<double>() != 1.0) {
-          continue;
-        }
-
-        auto input_node = n->input(1)->node();
-        // Input must be an mm node
-        if (input_node->kind() != aten::mm) {
-          continue;
-        }
-
-        WithInsertPoint guard(n);
-
-        SymbolicVariable mat(n->input(0));
-        SymbolicVariable mat1(input_node->input(0));
-        SymbolicVariable mat2(input_node->input(1));
-        SymbolicVariable addmm_value = mat.addmm(mat1, mat2);
-
-        // Copy shape information from output node
-        ((Value*)addmm_value)->copyMetadata(n->output());
-        n->output()->replaceAllUsesWith(addmm_value);
-        // Let DCE clean up any unused nodes at this point
+        // x + 0 == 0 + x == x
+        //if (n->get<double>(attr::alpha) == 1.) {
+          //if (n->get<double>(attr::other) == 0.) {
+            //n->output()->replaceAllUsesWith(n->input(0));
+            //continue;
+          //}
+          //if (n->get<double>(attr::self) == 0.) {
+            //n->output()->replaceAllUsesWith(n->input(1));
+            //continue;
+          //}
+        //}
       } break;
     }
   }

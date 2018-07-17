@@ -1,5 +1,7 @@
 #include "ir.h"
 
+#include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
 
 #include <iostream>
@@ -564,6 +566,101 @@ Value* Value::setUniqueName(const std::string & name) {
   names[name] = this;
   unique_name_ = name;
   return this;
+}
+
+namespace {
+
+template<typename T>
+T getattr(Node *n, Symbol name) = delete;
+
+template<>
+int64_t getattr<int64_t>(Node *n, Symbol name) { return n->i(name); }
+
+template<>
+double getattr<double>(Node *n, Symbol name) { return n->f(name); }
+
+template<>
+std::string getattr<std::string>(Node *n, Symbol name) { return n->s(name); }
+
+template<>
+at::Tensor getattr<at::Tensor>(Node *n, Symbol name) { return n->t(name); }
+
+template<>
+std::vector<int64_t> getattr<std::vector<int64_t>>(Node *n, Symbol name) { return n->is(name); }
+
+template<>
+std::vector<double> getattr<std::vector<double>>(Node *n, Symbol name) { return n->fs(name); }
+
+template<>
+std::vector<std::string> getattr<std::vector<std::string>>(Node *n, Symbol name) { return n->ss(name); }
+
+template<>
+std::vector<at::Tensor> getattr<std::vector<at::Tensor>>(Node *n, Symbol name) { return n->ts(name); }
+
+} // anonymous namespace
+
+template<typename T>
+at::optional<T> Node::get(Symbol name) {
+  // TODO (apaszke): remove. this is in here for now just so that we can ensure
+  // we always use this in places where the node has a valid schema already
+  // (will make next commits easier).
+  if (!schema_) findSchema();
+  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
+  if (hasAttributes()) {
+    // If it has an attribute, then it is a constant. If it's missing, it means we're
+    // doing an invalid lookup and it should throw anyway.
+    return getattr<T>(this, name);
+  }
+  auto inp = findConstInput(name);
+  if (!inp) return at::nullopt;
+  auto value = inp->first->node()->t(attr::value);
+  return tensor_as<T>(std::move(value));
+}
+
+template at::optional<int64_t> Node::get(Symbol name);
+template at::optional<double> Node::get(Symbol name);
+template at::optional<at::Tensor> Node::get(Symbol name);
+template at::optional<std::vector<int64_t>> Node::get(Symbol name);
+
+at::optional<IValue> Node::get(Symbol name) {
+  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
+  if (hasAttributes()) {
+    throw std::runtime_error("IValue Node::get() not implemented for the attribute case");
+  }
+  auto inp = findConstInput(name);
+  if (!inp) return at::nullopt;
+  auto value = inp->first->node()->t(attr::value);
+  const Argument & arg = inp->second;
+  if (arg.type->isSubtypeOf(*DynamicType::get())) {
+    return IValue{std::move(value)};
+  } else if (arg.type->isSubtypeOf(*IntType::get())) {
+    return IValue{tensor_as<int64_t>(std::move(value))};
+  } else if (arg.type->isSubtypeOf(*FloatType::get())) {
+    return IValue{tensor_as<double>(std::move(value))};
+  }
+  throw std::runtime_error("Unsupported case in Node::get! File a bug report.");
+}
+
+at::optional<std::pair<Value*, const Argument&>> Node::findConstInput(Symbol name) {
+  if (!schema_) {
+    findSchema();
+  }
+  auto name_str = name.toUnqualString();
+  for (size_t i = 0; i < schema_->arguments.size(); ++i) {
+    const auto & arg = schema_->arguments[i];
+    if (arg.name != name_str) continue;
+    Node *producer = input(i)->node();
+    if (producer->kind() == prim::Constant) {
+      return at::make_optional(std::pair<Value*, const Argument&>(input(i), arg));
+    } else {
+      return at::nullopt;
+    }
+  }
+  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+}
+
+void Node::findSchema() {
+  schema_ = &getOperatorFor(this).schema;
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {
