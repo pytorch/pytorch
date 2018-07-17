@@ -721,9 +721,15 @@ struct to_ir {
           results = createTupleUnpack(result);
         }
       }
-      ensureTensors(return_stmt.range(), results);
-      for(auto r : results) {
-        graph->registerOutput(r);
+      for (size_t i = 0; i < results.size(); i++) {
+        auto r = results[i];
+        if(isNumberSubtype(r)) {
+          auto ten = numToTensor(return_stmt.range(), *graph, r);
+          graph->registerOutput(ten);
+        } else {
+          ensureTensor(return_stmt.range(), r);
+          graph->registerOutput(r);
+        }
         returns.push_back({"", DynamicType::get()});
       }
     }

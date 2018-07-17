@@ -1674,20 +1674,18 @@ class TestScript(JitTestCase):
 
             st = second + third
             fs = first + second
-            zero = FIXME_zerol()
-            return third + zero, st + zero, fs + zero
+            return third, st, fs
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
         def func(a, b):
-            zero = FIXME_zerol()
             d = 3
             if a > 10:
-                a = zero + 3 + d
+                a = 3 + d
             else:
-                b = zero + 3 + d
+                b = 3 + d
                 d = 4
             c = a + b
             return c
@@ -1697,13 +1695,13 @@ class TestScript(JitTestCase):
 
     def test_if_for_in_range(self):
         def func(a, b):
-            d = FIXME_zerol() + 3
+            d = 3
             for _ in range(20):
                 if a > 10:
                     a = 3 + d
                 else:
                     b = 3 + d
-                    d = FIXME_zerol() + 4
+                    d = 4
                 c = a + b
             return d
         inputs = self._make_scalar_vars([1, -1], torch.int64)
@@ -1751,7 +1749,7 @@ class TestScript(JitTestCase):
 
     def test_while_nest_if(self):
         def func(a, b):
-            c = FIXME_zerol()
+            c = 0
             while a < 10:
                 a = a + 1
                 b = b + 1
@@ -1802,7 +1800,7 @@ class TestScript(JitTestCase):
 
     def test_if_nest_while(self):
         def func(a, b):
-            c = FIXME_zerol()
+            c = 0
             if a > b:
                 while a > b:
                     b = b + 1
@@ -1814,7 +1812,7 @@ class TestScript(JitTestCase):
 
     def test_script_for_in_range(self):
         def fn():
-            c = FIXME_zerol()
+            c = 0
             for i in range(100):
                 c += i
             return c
@@ -3005,14 +3003,14 @@ def func(t):
                 b = 1
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo2(a):
             b = 0
             if a == 0:
                 b = 1
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo3(a):
@@ -3021,7 +3019,7 @@ def func(t):
                 c = 4
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         a = torch.ones(1, dtype=torch.long)
         b = torch.zeros(1, dtype=torch.long)
