@@ -163,7 +163,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
         std::cerr << "NaN idxs:" << std::endl;
         auto* cpu_X_data = cpu_X.data<float>();
         for (size_t i = 0; i < cpu_X.size(); ++i) {
-          if (isnan(cpu_X_data[i]) || isinf(cpu_X_data[i])) {
+          if (std::isnan(cpu_X_data[i]) || std::isinf(cpu_X_data[i])) {
             std::cerr << i << " ";
           }
         }
