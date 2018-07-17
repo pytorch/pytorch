@@ -2,6 +2,11 @@
 
 #include <gtest/gtest.h>
 #include "caffe2/core/flags.h"
+#include "caffe2/core/macros.h"
+
+#ifdef CAFFE2_USE_OPENCV
+#include <opencv2/opencv.hpp>
+#endif // CAFFE2_USE_OPENCV
 
 namespace caffe2 {
 
