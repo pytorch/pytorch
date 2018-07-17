@@ -2105,8 +2105,10 @@ class TestAutograd(TestCase):
             self.assertTrue(hasattr(x, key))
 
     def test_as_strided(self):
+        # The test cases in this function should **not** resize storage because
+        # it may include nan in input and cause numerical Jacobian to have NaN.
 
-        def test(x, repro_fn, *args):
+        def test(x, repro_fn, size, strides, offset=None):
             def closure(x):
                 if repro_fn is not None:
                     x = repro_fn(x)
@@ -2120,7 +2122,7 @@ class TestAutograd(TestCase):
         test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
 
         # test crazy stride at dim with size 1 case
-        test(torch.randn(10), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
+        test(torch.randn(12), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
 
         # test expand case
         test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
