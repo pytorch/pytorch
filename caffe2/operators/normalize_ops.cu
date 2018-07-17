@@ -70,11 +70,16 @@ __global__ void NormalizeGradientKernel(
       row_norm_3 = pow(row_norm, 3);
     }
     __syncthreads();
+
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
       int index = base + j * SF;
       const float x_ij = in_mat[index];
       const float dy_ij = grad_out_mat[index];
-      grad_mat[index] = (dy_ij / row_norm) - ((x_ij / row_norm_3) * row_sum);
+      if (row_norm != 0) {
+        grad_mat[index] = (dy_ij / row_norm) - ((x_ij / row_norm_3) * row_sum);
+      } else {
+        grad_mat[index] = 0.0;
+      }
     }
   }
 }
