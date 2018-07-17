@@ -6,7 +6,10 @@
 #include <torch/tensor.h>
 #include <torch/utils.h>
 
+#include <test/cpp/api/util.h>
+
 using namespace torch::nn;
+using namespace torch::test;
 
 using Catch::StartsWith;
 
@@ -18,10 +21,6 @@ struct AGIUnit2 : torch::nn::Module {
   AGIUnit2() : torch::nn::Module("Foo") {}
 };
 } // namespace test
-
-bool pointer_equal(torch::Tensor first, torch::Tensor second) {
-  return first.data().data<float>() == second.data().data<float>();
-}
 
 TEST_CASE("module/training-mode") {
   torch::manual_seed(0);
@@ -195,6 +194,9 @@ TEST_CASE("module/clone") {
 
   SECTION("Cloning creates distinct parameters") {
     struct TestModule : public Cloneable<TestModule> {
+      TestModule() {
+        reset();
+      }
       void reset() override {
         l1 = register_module("l1", Linear(10, 3));
         l2 = register_module("l2", Linear(3, 5));
@@ -206,7 +208,7 @@ TEST_CASE("module/clone") {
       torch::Tensor buffer;
     };
 
-    auto module = TestModule().build();
+    auto module = std::make_shared<TestModule>();
 
     auto module2 = module->clone();
     auto params1 = module->parameters();
@@ -216,7 +218,7 @@ TEST_CASE("module/clone") {
     for (auto& param : params1) {
       REQUIRE(!pointer_equal(param.value, params2[param.key]));
       REQUIRE(param->allclose(params2[param.key]));
-      param->data().mul_(2);
+      param->data().add_(2);
     }
     for (auto& param : params1) {
       REQUIRE(!param->allclose(params2[param.key]));
@@ -229,7 +231,7 @@ TEST_CASE("module/clone") {
     for (auto& buffer : buffers1) {
       REQUIRE(!pointer_equal(buffer.value, buffers2[buffer.key]));
       REQUIRE(buffer->allclose(buffers2[buffer.key]));
-      buffer->data().mul_(2);
+      buffer->data().add_(2);
     }
     for (auto& buffer : buffers1) {
       REQUIRE(!buffer->allclose(buffers2[buffer.key]));
@@ -238,12 +240,15 @@ TEST_CASE("module/clone") {
 
   SECTION("Cloning preserves external references") {
     struct TestModule : public Cloneable<TestModule> {
+      TestModule() {
+        reset();
+      }
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
       torch::Tensor weight;
     };
-    auto module = TestModule().build();
+    auto module = std::make_shared<TestModule>();
     module->weight.data() += 1;
     REQUIRE(pointer_equal(module->weight, module->parameters()["weight"]));
     REQUIRE(module->weight.allclose(module->parameters()["weight"]));
@@ -259,6 +264,9 @@ TEST_CASE("module/clone") {
 
   SECTION("Cloning copies the values of variables of submodules") {
     struct TestModule : public Cloneable<TestModule> {
+      TestModule() {
+        reset();
+      }
       void reset() override {
         weight = register_parameter("weight", torch::ones({4, 4}));
       }
@@ -267,13 +275,16 @@ TEST_CASE("module/clone") {
       int value = 0;
     };
     struct NestedModule : public Cloneable<NestedModule> {
+      NestedModule() {
+        reset();
+      }
       void reset() override {
-        module = register_module("module", TestModule().build());
+        module = register_module("module", std::make_shared<TestModule>());
       }
       std::shared_ptr<TestModule> module;
     };
 
-    auto a = NestedModule().build();
+    auto a = std::make_shared<NestedModule>();
     a->module->weight.data() += 1;
     a->module->value = 123;
 
