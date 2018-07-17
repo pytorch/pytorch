@@ -118,7 +118,7 @@ from tools.setup_helpers.env import check_env_flag, check_negative_env_flag
 
 # Before we run the setup_helpers, let's look for NO_* and WITH_*
 # variables and hotpatch the environment with the USE_* equivalent
-config_env_vars = ['CUDA', 'CUDNN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED', 'DISTRIBUTED_MW',
+config_env_vars = ['CUDA', 'CUDNN', 'MIOPEN', 'MKLDNN', 'NNPACK', 'DISTRIBUTED', 'DISTRIBUTED_MW',
                    'SYSTEM_NCCL', 'GLOO_IBVERBS']
 
 
@@ -501,7 +501,7 @@ class build_ext(build_ext_parent):
         if USE_MIOPEN:
             print('-- Detected MIOpen at ' + MIOPEN_LIBRARY + ', ' + MIOPEN_INCLUDE_DIR)
         else:
-            print('== Not using MIOpen')
+            print('-- Not using MIOpen')
         if USE_CUDA:
             print('-- Detected CUDA at ' + CUDA_HOME)
         else:
@@ -961,8 +961,9 @@ if USE_CUDNN:
     extra_compile_args += ['-DUSE_CUDNN']
 
 if USE_MIOPEN:
-    #main_libraries += [MIOPEN_LIBRARY]
+    main_libraries += [MIOPEN_LIBRARY]
     include_dirs.insert(0, MIOPEN_INCLUDE_DIR)
+    extra_link_args.append('-L' + MIOPEN_LIB_DIR)
     if not IS_WINDOWS:
         extra_link_args.insert(0, '-Wl,-rpath,' + MIOPEN_LIB_DIR)
     extra_compile_args += ['-DWITH_MIOPEN']

@@ -79,21 +79,11 @@ IF(USE_CUDA OR USE_ROCM)
   set(all_cuda_cpp ${native_sparse_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   IF(USE_CUDA)
     SET(all_cuda_cpp ${native_cudnn_cpp} ${all_cuda_cpp})
+    IF(CUDNN_FOUND)
+      SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
+    ENDIF()
   ELSEIF(USE_ROCM)
-    SET(all_cuda_cpp ${native_miopen_cpp} ${all_cuda_cpp})
-  ENDIF()
-  IF(CUDNN_FOUND)
-    SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
-  ENDIF()
-endif()
-
-#FIXME: merge this into block above once MIOPEN_FOUND is available
-IF(USE_ROCM)
-  set(all_cuda_cpp ${all_cuda_cpp} ${miopen_cpp})
-  IF(MIOPEN_FOUND)
-    message("ATen/CMakeLists.txt: MIOPEN_FOUND is set, remove this message")
-  ELSE()
-    message("FIXME: ATen/CMakeLists.txt doesn't find MIOPEN_FOUND")
+    SET(all_cuda_cpp ${native_miopen_cpp} ${miopen_cpp} ${all_cuda_cpp})
   ENDIF()
 endif()
 
@@ -278,9 +268,6 @@ IF(USE_ROCM)
 
  list(APPEND ATen_CUDA_DEPENDENCY_LIBS ${HIPBLAS_LIBRARY} ${HIPRNG_LIBRARY})
 
-  if(MIOPEN_FOUND)
-    message("FIXME: Need MIOPEN_LIBRARIES in ATen_CUDA_DEPENDENCY_LIBS?")
-  endif(MIOPEN_FOUND)
 ENDIF()
 
 # Include CPU paths for CUDA as well

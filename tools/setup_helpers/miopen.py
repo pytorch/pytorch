@@ -15,4 +15,3 @@ if USE_ROCM and not check_env_flag('NO_MIOPEN'):
     MIOPEN_INCLUDE_DIR = ROCM_HOME + "/miopen/include/miopen"
     MIOPEN_LIBRARY = "MIOpen"
     MIOPEN_FOUND = "True"
-print("FIXME: FindMIOpen.cmake")
