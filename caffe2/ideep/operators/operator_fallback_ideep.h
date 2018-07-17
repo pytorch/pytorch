@@ -81,6 +81,18 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         } else {
           input.reorder_to(dtensor->template mutable_data<float>());
         }
+      } else if (
+          InputIsType<itensor>(i) &&
+          Input(i).get_data_type() == itensor::data_type::s32) {
+        auto& input = Input(i);
+        auto dtensor = local_input_blobs_[i]->template GetMutable<TensorCPU>();
+        dtensor->Resize(input.get_dims());
+        if (input.is_public_format()) {
+          dtensor->ShareExternalPointer(
+              static_cast<long*>(input.get_data_handle()));
+        } else {
+          input.reorder_to(dtensor->template mutable_data<long>());
+        }
       } else {
         VLOG(1) << "Input " << i << " is not ideep::tensor. Skipping copy.";
         // Note(jiayq): This removes a const but conceptually
@@ -120,6 +132,19 @@ class IDEEPFallbackOp final : public IDEEPOperator {
         auto dtensor = dst->template GetMutable<itensor>();
         if (dtensor->get_dims() != dst_dims) {
           dtensor->resize(dst_dims, itensor::data_type::f32);
+        }
+        dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
+      } else if (src.template IsType<long>()) {
+        Blob* dst = OperatorBase::OutputBlob(i);
+        if (!dst->template IsType<itensor>()) {
+          dst->Reset(new itensor());
+        }
+
+        auto src_dims = src.dims();
+        itensor::dims dst_dims(src_dims.begin(), src_dims.end());
+        auto dtensor = dst->template GetMutable<itensor>();
+        if (dtensor->get_dims() != dst_dims) {
+          dtensor->resize(dst_dims, itensor::data_type::s32);
         }
         dtensor->set_data_handle(const_cast<void*>(src.raw_data()));
       } else {
