@@ -47,7 +47,6 @@ typedef struct THStorage
     char flag;
     at::Allocator *allocator;
     std::unique_ptr<THFinalizer> finalizer;
-    struct THStorage *view;
 
     template <typename T>
     inline T * data() const {
