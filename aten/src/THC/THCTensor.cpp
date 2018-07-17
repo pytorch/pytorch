@@ -303,18 +303,7 @@ void THCTensor_retain(THCState *state, THCTensor *self) {
 
 
 void THCTensor_free(THCState *state, THCTensor *self) {
-  if(!self)
-    return;
-
-  if(--self->refcount == 0)
-  {
-    THFree(self->size);
-    THFree(self->stride);
-    if(self->storage)
-      THCStorage_free(state, self->storage);
-    self->refcount.~atomic<int>();
-    THFree(self);
-  }
+  THTensor_free(self);
 }
 
 int THCTensor_getDevice(THCState* state, const THCTensor* tensor) {
