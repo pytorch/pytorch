@@ -45,6 +45,10 @@ public:
   UniqueVoidPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter)
     : data_(data), ctx_(ctx, ctx_deleter ? ctx_deleter : &deleteNothing) {}
   void* operator->() const { return data_; }
+  void release() {
+    ctx_ = nullptr;
+    data_ = nullptr;
+  }
   void* get() const { return data_; }
   void* get_context() const { return ctx_.get(); }
   void* release_context() { return ctx_.release(); }

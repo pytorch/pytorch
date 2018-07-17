@@ -25,8 +25,8 @@ void THStorage_free(THStorage *storage) {
       if (storage->finalizer) {
         (*storage->finalizer)();
       }
-      storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~DataPtr();
+      storage->finalizer.release();
+      storage->data_ptr.release();
       THStorage_weakFree(storage);
     }
   }
