@@ -37,10 +37,6 @@ class TestCaffe2Basic(TestCase):
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
 
     def test_check_arguments(self):
-        X = np.random.randn(3, 2).astype(np.float32)
-        Y = np.random.randn(3, 2).astype(np.float32)
-        Z = np.zeros((3, 2)).astype(np.float32)
-
         b2 = C.Caffe2Backend()
 
         node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"])
@@ -50,7 +46,7 @@ class TestCaffe2Basic(TestCase):
         with self.assertRaisesRegexp(
             RuntimeError,
             ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
-            output = b2.convert_node(bad_node_def.SerializeToString(), 6)
+            b2.convert_node(bad_node_def.SerializeToString(), 6)
 
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
