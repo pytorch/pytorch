@@ -687,15 +687,18 @@ def Parallelize_BMUF(
     ]
     _AddBarrierToModelNets(model_helper_obj, barrier_net_timeout_sec)
 
+def CreateNet(model, overwrite=False):
+    for net_iters in model._data_parallel_model_nets:
+        if isinstance(net_iters, tuple):
+            workspace.CreateNet(net_iters[0], overwrite=overwrite)
+        else:
+            workspace.CreateNet(net_iters, overwrite=overwrite)
+
 
 def RunInitNet(model):
     for init_net in model._data_parallel_model_init_nets:
         workspace.RunNetOnce(init_net)
-    for net_iters in model._data_parallel_model_nets:
-        if isinstance(net_iters, tuple):
-            workspace.CreateNet(net_iters[0])
-        else:
-            workspace.CreateNet(net_iters)
+    CreateNet(model)
 
 
 def RunWarmup(model):
