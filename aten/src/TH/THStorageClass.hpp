@@ -3,7 +3,6 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-// #include "THAllocator.h"
 #include <ATen/Allocator.h>
 
 #include <ATen/ScalarType.h>
