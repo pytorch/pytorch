@@ -9,7 +9,10 @@
 #include <memory>
 #include <vector>
 
+#include <test/cpp/api/util.h>
+
 using namespace torch::nn;
+using namespace torch::test;
 
 using Catch::StartsWith;
 
@@ -271,5 +274,32 @@ TEST_CASE("sequential") {
         [](const AnyModule& first, const AnyModule& second) {
           return &first == &second;
         }));
+  }
+  SECTION("Is cloneable") {
+    Sequential sequential(Linear(3, 4), Functional(torch::relu), BatchNorm(3));
+    Sequential clone =
+        std::static_pointer_cast<SequentialImpl>(sequential->clone());
+    REQUIRE(sequential->size() == clone->size());
+
+    for (size_t i = 0; i < sequential->size(); ++i) {
+      // The modules should be the same kind (type).
+      REQUIRE(sequential[i]->name() == clone[i]->name());
+      // But not pointer-equal (distinct objects).
+      REQUIRE(sequential[i] != clone[i]);
+    }
+
+    // Verify that the clone is deep, i.e. parameters of modules are cloned too.
+
+    auto params1 = sequential->parameters();
+    auto params2 = clone->parameters();
+    REQUIRE(params1.size() == params2.size());
+    for (auto& param : params1) {
+      REQUIRE(!pointer_equal(param.value, params2[param.key]));
+      REQUIRE(param->allclose(params2[param.key]));
+      param->data().add_(2);
+    }
+    for (auto& param : params1) {
+      REQUIRE(!param->allclose(params2[param.key]));
+    }
   }
 }

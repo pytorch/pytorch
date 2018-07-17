@@ -13,6 +13,7 @@
 #include <test/cpp/api/util.h>
 
 using namespace torch::nn;
+using namespace torch::test;
 
 class TestModel : public torch::nn::Module {
  public:
@@ -122,7 +123,7 @@ TEST_CASE("modules") {
   }
 
   SECTION("simple") {
-    auto model = std::make_shared<torch::SimpleContainer>();
+    auto model = std::make_shared<SimpleContainer>();
     auto l1 = model->add(Linear(10, 3), "l1");
     auto l2 = model->add(Linear(3, 5), "l2");
     auto l3 = model->add(Linear(5, 100), "l3");
