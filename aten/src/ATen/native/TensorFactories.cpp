@@ -46,11 +46,11 @@ void window_function_checks(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ arange ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor arange(Scalar start, Scalar end, const TensorOptions& options) {
+AT_API Tensor arange(Scalar start, Scalar end, const TensorOptions& options) {
   return native::arange(start, end, /*step=*/1, options);
 }
 
-Tensor arange(
+AT_API Tensor arange(
     Scalar start,
     Scalar end,
     Scalar step,
@@ -58,33 +58,33 @@ Tensor arange(
   return options.type()._arange(start, end, step);
 }
 
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
+AT_API Tensor& arange_out(Tensor& result, Scalar start, Scalar end) {
   return native::arange_out(result, start, end, /*step=*/1);
 }
 
-Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+AT_API Tensor& arange_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return at::_arange_out(result, start, end, step);
 }
 
-Tensor arange(Scalar end, const TensorOptions& options) {
+AT_API Tensor arange(Scalar end, const TensorOptions& options) {
   return options.type()._arange(end);
 }
 
-Tensor& arange_out(Tensor& result, Scalar end) {
+AT_API Tensor& arange_out(Tensor& result, Scalar end) {
   return at::_arange_out(result, end);
 }
 
-Tensor _dim_arange(const Tensor& like, int64_t dim) {
+AT_API Tensor _dim_arange(const Tensor& like, int64_t dim) {
   return like.type().toScalarType(at::kLong)._arange(like.size(dim));
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor empty(IntList size, const TensorOptions& options) {
+AT_API Tensor empty(IntList size, const TensorOptions& options) {
   return options.type().tensor(size);
 }
 
-Tensor& empty_out(Tensor& result, IntList size) {
+AT_API Tensor& empty_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
     result.sparse_raw_resize_(size, size.size(), 0);
   } else {
@@ -110,11 +110,11 @@ AT_FORALL_SCALAR_TYPES(DEFINE_CAST_OP)
 
 #undef DEFINE_CAST_OP
 
-Tensor empty_like(const Tensor& self) {
+AT_API Tensor empty_like(const Tensor& self) {
   return native::empty_like(self, self.options());
 }
 
-Tensor empty_like(const Tensor& self, const TensorOptions& options) {
+AT_API Tensor empty_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = options.type().tensor({});
     // resize_as_ requires the same exact type.
@@ -127,20 +127,20 @@ Tensor empty_like(const Tensor& self, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ eye ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor eye(int64_t n, const TensorOptions& options) {
+AT_API Tensor eye(int64_t n, const TensorOptions& options) {
   return native::eye(n, -1, options);
 }
 
-Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
+AT_API Tensor eye(int64_t n, int64_t m, const TensorOptions& options) {
   auto tensor = options.type().tensor({});
   return at::eye_out(tensor, n, m);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n) {
+AT_API Tensor& eye_out_cpu(Tensor& result, int64_t n) {
   return native::eye_out_cpu(result, n, -1);
 }
 
-Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
+AT_API Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 #ifndef USE_TH_SIZE_ZERO_DIM
   AT_CHECK(n > 0, "n must be greater than 0, got ", n);
 #else
@@ -171,7 +171,7 @@ Tensor& eye_out_cpu(Tensor& result, int64_t n, int64_t m) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ full ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
+AT_API Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
   if (options.layout() == kSparse) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
@@ -179,7 +179,7 @@ Tensor full(IntList size, Scalar fill_value, const TensorOptions& options) {
   return result.fill_(fill_value);
 }
 
-Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
+AT_API Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
   if (result.is_sparse()) {
     AT_ERROR("full(...) is not implemented for sparse layout");
   }
@@ -187,21 +187,21 @@ Tensor& full_out(Tensor& result, IntList size, Scalar fill_value) {
   return result.fill_(fill_value);
 }
 
-Tensor full_like(const Tensor& self, Scalar fill_value) {
+AT_API Tensor full_like(const Tensor& self, Scalar fill_value) {
   return native::full_like(self, fill_value, self.options());
 }
 
-Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
+AT_API Tensor full_like(const Tensor& self, Scalar fill_value, const TensorOptions& options) {
   return native::full(self.sizes(), fill_value, options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ linspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor linspace(Scalar start, Scalar end, const TensorOptions& options) {
+AT_API Tensor linspace(Scalar start, Scalar end, const TensorOptions& options) {
   return native::linspace(start, end, /*steps=*/100, options);
 }
 
-Tensor linspace(
+AT_API Tensor linspace(
     Scalar start,
     Scalar end,
     int64_t steps,
@@ -209,21 +209,21 @@ Tensor linspace(
   return options.type()._linspace(start, end, steps);
 }
 
-Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
+AT_API Tensor& linspace_out(Tensor& result, Scalar start, Scalar end) {
   return native::linspace_out(result, start, end, /*steps=*/100);
 }
 
-Tensor& linspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+AT_API Tensor& linspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
   return at::_linspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ logspace ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor logspace(Scalar start, Scalar end, const TensorOptions& options) {
+AT_API Tensor logspace(Scalar start, Scalar end, const TensorOptions& options) {
   return native::logspace(start, end, /*steps=*/100, options);
 }
 
-Tensor logspace(
+AT_API Tensor logspace(
     Scalar start,
     Scalar end,
     int64_t steps,
@@ -231,67 +231,67 @@ Tensor logspace(
   return options.type()._logspace(start, end, steps);
 }
 
-Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
+AT_API Tensor& logspace_out(Tensor& result, Scalar start, Scalar end) {
   return native::logspace_out(result, start, end, /*steps=*/100);
 }
 
-Tensor& logspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
+AT_API Tensor& logspace_out(Tensor& result, Scalar start, Scalar end, int64_t steps) {
   return at::_logspace_out(result, start, end, steps);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ ones ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor ones(IntList size, const TensorOptions& options) {
+AT_API Tensor ones(IntList size, const TensorOptions& options) {
   return native::full(size, /*fill_value=*/1, options);
 }
 
-Tensor& ones_out(Tensor& result, IntList size) {
+AT_API Tensor& ones_out(Tensor& result, IntList size) {
   return native::full_out(result, size, /*fill_value=*/1);
 }
 
-Tensor ones_like(const Tensor& self) {
+AT_API Tensor ones_like(const Tensor& self) {
   return native::ones(self.sizes(), self.options());
 }
 
-Tensor ones_like(const Tensor& self, const TensorOptions& options) {
+AT_API Tensor ones_like(const Tensor& self, const TensorOptions& options) {
   return native::ones(self.sizes(), options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ rand ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor rand(IntList size, const TensorOptions& options) {
+AT_API Tensor rand(IntList size, const TensorOptions& options) {
   return native::rand(size, nullptr, options);
 }
 
-Tensor rand(IntList size, Generator* generator, const TensorOptions& options) {
+AT_API Tensor rand(IntList size, Generator* generator, const TensorOptions& options) {
   auto result = options.type().tensor(size);
   return result.uniform_(0, 1, generator);
 }
 
-Tensor& rand_out(Tensor& result, IntList size) {
+AT_API Tensor& rand_out(Tensor& result, IntList size) {
   return native::rand_out(result, size, nullptr);
 }
 
-Tensor& rand_out(Tensor& result, IntList size, Generator* generator) {
+AT_API Tensor& rand_out(Tensor& result, IntList size, Generator* generator) {
   result.resize_(size);
   return result.uniform_(0, 1, generator);
 }
 
-Tensor rand_like(const Tensor& self) {
+AT_API Tensor rand_like(const Tensor& self) {
   return native::rand_like(self, self.options());
 }
 
-Tensor rand_like(const Tensor& self, const TensorOptions& options) {
+AT_API Tensor rand_like(const Tensor& self, const TensorOptions& options) {
   return native::rand(self.sizes(), options);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randint ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor randint(int64_t high, IntList size, const TensorOptions& options) {
+AT_API Tensor randint(int64_t high, IntList size, const TensorOptions& options) {
   return native::randint(high, size, nullptr, options);
 }
 
-Tensor randint(
+AT_API Tensor randint(
     int64_t high,
     IntList size,
     Generator* generator,
@@ -299,7 +299,7 @@ Tensor randint(
   return native::randint(0, high, size, generator, options);
 }
 
-Tensor randint(
+AT_API Tensor randint(
     int64_t low,
     int64_t high,
     IntList size,
@@ -307,7 +307,7 @@ Tensor randint(
   return native::randint(low, high, size, nullptr, options);
 }
 
-Tensor randint(
+AT_API Tensor randint(
     int64_t low,
     int64_t high,
     IntList size,
@@ -317,11 +317,11 @@ Tensor randint(
   return result.random_(low, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t high, IntList size) {
+AT_API Tensor& randint_out(Tensor& result, int64_t high, IntList size) {
   return native::randint_out(result, high, size, nullptr);
 }
 
-Tensor& randint_out(
+AT_API Tensor& randint_out(
     Tensor& result,
     int64_t high,
     IntList size,
@@ -330,11 +330,11 @@ Tensor& randint_out(
   return result.random_(0, high, generator);
 }
 
-Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size) {
+AT_API Tensor& randint_out(Tensor& result, int64_t low, int64_t high, IntList size) {
   return native::randint_out(result, low, high, size, nullptr);
 }
 
-Tensor& randint_out(
+AT_API Tensor& randint_out(
     Tensor& result,
     int64_t low,
     int64_t high,
@@ -344,22 +344,22 @@ Tensor& randint_out(
   return result.random_(low, high, generator);
 }
 
-Tensor randint_like(const Tensor& self, int64_t high) {
+AT_API Tensor randint_like(const Tensor& self, int64_t high) {
   return native::randint_like(self, high, self.options());
 }
 
-Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
+AT_API Tensor randint_like(const Tensor& self, int64_t low, int64_t high) {
   return native::randint_like(self, low, high, self.options());
 }
 
-Tensor randint_like(
+AT_API Tensor randint_like(
     const Tensor& self,
     int64_t high,
     const TensorOptions& options) {
   return native::randint(high, self.sizes(), nullptr, options);
 }
 
-Tensor randint_like(
+AT_API Tensor randint_like(
     const Tensor& self,
     int64_t low,
     int64_t high,
@@ -369,29 +369,29 @@ Tensor randint_like(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ randn ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor randn(IntList size, const TensorOptions& options) {
+AT_API Tensor randn(IntList size, const TensorOptions& options) {
   return native::randn(size, nullptr, options);
 }
 
-Tensor randn(IntList size, Generator* generator, const TensorOptions& options) {
+AT_API Tensor randn(IntList size, Generator* generator, const TensorOptions& options) {
   auto result = options.type().tensor(size);
   return result.normal_(0, 1, generator);
 }
 
-Tensor& randn_out(Tensor& result, IntList size) {
+AT_API Tensor& randn_out(Tensor& result, IntList size) {
   return native::randn_out(result, size, nullptr);
 }
 
-Tensor& randn_out(Tensor& result, IntList size, Generator* generator) {
+AT_API Tensor& randn_out(Tensor& result, IntList size, Generator* generator) {
   result.resize_(size);
   return result.normal_(0, 1, generator);
 }
 
-Tensor randn_like(const Tensor& self) {
+AT_API Tensor randn_like(const Tensor& self) {
   return native::randn_like(self, self.options());
 }
 
-Tensor randn_like(const Tensor& self, const TensorOptions& options) {
+AT_API Tensor randn_like(const Tensor& self, const TensorOptions& options) {
   return native::randn(self.sizes(), nullptr, options);
 }
 
@@ -420,26 +420,26 @@ void randperm_cpu(Tensor& result, int64_t n, THGenerator* generator) {
 } // namespace
 
 
-THGenerator* get_generator(at::Generator* gen) {
+AT_API THGenerator* get_generator(at::Generator* gen) {
   auto default_gen = &at::globalContext().defaultGenerator(at::Backend::CPU);
   auto gen_ = at::check_generator<at::CPUGenerator>(gen, default_gen);
   return gen_->generator;
 }
 
-Tensor randperm(int64_t n, const TensorOptions& options) {
+AT_API Tensor randperm(int64_t n, const TensorOptions& options) {
   return native::randperm(n, nullptr, options);
 }
 
-Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
+AT_API Tensor randperm(int64_t n, Generator* generator, const TensorOptions& options) {
   auto tensor = options.type().tensor(n);
   return at::randperm_out(tensor, n, generator);
 }
 
-Tensor& randperm_out(Tensor& result, int64_t n) {
+AT_API Tensor& randperm_out(Tensor& result, int64_t n) {
   return at::randperm_out(result, n, nullptr);
 }
 
-Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
+AT_API Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
   AT_CHECK(n >= 0, "n must be non-negative, got", n);
   result.resize_({n});
   auto gen = get_generator(generator);
@@ -452,11 +452,11 @@ Tensor& randperm_out_cpu(Tensor& result, int64_t n, Generator* generator) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ range ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor range(Scalar start, Scalar end, const TensorOptions& options) {
+AT_API Tensor range(Scalar start, Scalar end, const TensorOptions& options) {
   return native::range(start, end, /*step=*/1, options);
 }
 
-Tensor range(
+AT_API Tensor range(
     Scalar start,
     Scalar end,
     Scalar step,
@@ -464,22 +464,22 @@ Tensor range(
   return options.type()._range(start, end, step);
 }
 
-Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
+AT_API Tensor& range_out(Tensor& result, Scalar start, Scalar end) {
   return native::range_out(result, start, end, 1);
 }
 
-Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
+AT_API Tensor& range_out(Tensor& result, Scalar start, Scalar end, Scalar step) {
   return at::_range_out(result, start, end, step);
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ zeros ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor zeros(IntList size, const TensorOptions& options) {
+AT_API Tensor zeros(IntList size, const TensorOptions& options) {
   auto result = options.type().tensor(size);
   return result.zero_();
 }
 
-Tensor& zeros_out(Tensor& result, IntList size) {
+AT_API Tensor& zeros_out(Tensor& result, IntList size) {
   if (result.is_sparse()) {
     result.sparse_raw_resize_(size, size.size(), 0);
   } else {
@@ -488,11 +488,11 @@ Tensor& zeros_out(Tensor& result, IntList size) {
   return result.zero_();
 }
 
-Tensor zeros_like(const Tensor& self) {
+AT_API Tensor zeros_like(const Tensor& self) {
   return native::zeros_like(self, self.options());
 }
 
-Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
+AT_API Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
   if (options.layout() == kSparse && self.type().is_sparse()) {
     auto res = options.type().tensor({});
     // resize_as_ requires the same exact type.
@@ -504,11 +504,11 @@ Tensor zeros_like(const Tensor& self, const TensorOptions& options) {
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ bartlett_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
+AT_API Tensor bartlett_window(int64_t window_length, const TensorOptions& options) {
   return native::bartlett_window(window_length, /*periodic=*/true, options);
 }
 
-Tensor bartlett_window(
+AT_API Tensor bartlett_window(
     int64_t window_length,
     bool periodic,
     const TensorOptions& options) {
@@ -527,11 +527,11 @@ Tensor bartlett_window(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~ blackman_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor blackman_window(int64_t window_length, const TensorOptions& options) {
+AT_API Tensor blackman_window(int64_t window_length, const TensorOptions& options) {
   return native::blackman_window(window_length, /*periodic=*/true, options);
 }
 
-Tensor blackman_window(
+AT_API Tensor blackman_window(
     int64_t window_length,
     bool periodic,
     const TensorOptions& options) {
@@ -550,11 +550,11 @@ Tensor blackman_window(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hamming_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor hamming_window(int64_t window_length, const TensorOptions& options) {
+AT_API Tensor hamming_window(int64_t window_length, const TensorOptions& options) {
   return native::hamming_window(window_length, /*periodic=*/true, options);
 }
 
-Tensor hamming_window(
+AT_API Tensor hamming_window(
     int64_t window_length,
     bool periodic,
     const TensorOptions& options) {
@@ -562,7 +562,7 @@ Tensor hamming_window(
       window_length, periodic, /*alpha=*/0.54, options);
 }
 
-Tensor hamming_window(
+AT_API Tensor hamming_window(
     int64_t window_length,
     bool periodic,
     double alpha,
@@ -571,7 +571,7 @@ Tensor hamming_window(
       window_length, periodic, alpha, /*beta=*/0.46, options);
 }
 
-Tensor hamming_window(
+AT_API Tensor hamming_window(
     int64_t window_length,
     bool periodic,
     double alpha,
@@ -591,11 +591,11 @@ Tensor hamming_window(
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ hann_window ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Tensor hann_window(int64_t window_length, const TensorOptions& options) {
+AT_API Tensor hann_window(int64_t window_length, const TensorOptions& options) {
   return native::hann_window(window_length, /*periodic=*/true, options);
 }
 
-Tensor hann_window(
+AT_API Tensor hann_window(
     int64_t window_length,
     bool periodic,
     const TensorOptions& options) {
