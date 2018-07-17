@@ -642,6 +642,7 @@ def threshold(input, threshold, value, inplace=False):
 
     See :class:`~torch.nn.Threshold` for more details.
     """
+
     if inplace:
         return torch._C._nn.threshold_(input, threshold, value)
     return torch._C._nn.threshold(input, threshold, value)
@@ -794,7 +795,6 @@ def leaky_relu(input, negative_slope=0.01, inplace=False):
     if inplace:
         return torch._C._nn.leaky_relu_(input, negative_slope)
     return torch._C._nn.leaky_relu(input, negative_slope)
-
 
 leaky_relu_ = _add_docstr(torch._C._nn.leaky_relu_, r"""
 leaky_relu_(input, negative_slope=0.01) -> Tensor

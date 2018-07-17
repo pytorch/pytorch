@@ -3649,6 +3649,13 @@ def func(t):
         with self.assertRaisesRegex(RuntimeError, "cannot be used as a tuple"):
             M()
 
+    def test_script_nn_module(self):
+        from torch.nn.script import Threshold, RReLU
+
+        # self.checkTrace(nnscript.Tanh(), (torch.rand(3, 4),))
+        self.checkTrace(RReLU(lower=0.1, upper=0.3), (torch.rand(3, 4),))
+        self.checkTrace(Threshold(threshold=0.5, value=0.1), (torch.rand(3, 4),))
+
     def test_script_sequential_for(self):
         class Sub(torch.jit.ScriptModule):
             def __init__(self):
@@ -6393,7 +6400,7 @@ class TestEndToEndHybridFrontendModels(JitTestCase):
                     outputs = torch.cat((outputs, output), 1)
                 return outputs
 
-        self.checkTrace(Sequence(), (torch.rand(3, 4),))
+        self.checkTrace(Sequence(), (torch.rand(3, 4),), verbose=True)
 
     def test_vae(self):
         class VAE(nn.Module):
