@@ -13,5 +13,3 @@ THStorage::THStorage(
       flag(flag),
       allocator(allocator),
       finalizer(nullptr) {}
-
-THStorage::~THStorage() {}
