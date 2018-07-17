@@ -3194,6 +3194,14 @@ class TestTorch(TestCase):
         # Make sure True isn't mistakenly taken as the 2nd dimension (interpreted as 1)
         self.assertRaises(TypeError, lambda: q.topk(4, True))
 
+    @unittest.skipIf(not torch.cuda.is_available(), 'no CUDA')
+    def test_topk_noncontiguous_gpu(self):
+        t = torch.randn(20, device="cuda")[::2]
+        top1, idx1 = t.topk(5)
+        top2, idx2 = t.contiguous().topk(5)
+        self.assertEqual(top1, top2)
+        self.assertEqual(idx1, idx2)
+
     def test_kthvalue(self):
         SIZE = 50
         x = torch.rand(SIZE, SIZE, SIZE)
@@ -4703,6 +4711,10 @@ class TestTorch(TestCase):
         x = torch.Tensor([1, float('nan'), 2])
         self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
+    def test_isinf(self):
+        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')])
+        self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
+
     def test_RNGState(self):
         state = torch.get_rng_state()
         stateCloned = state.clone()
@@ -6025,6 +6037,74 @@ class TestTorch(TestCase):
         self.assertEqual((1, 0, 6, 1, 1), x.reshape(1, 0, 6, 1, 1).shape)
         # should be viewable -- i.e. data_ptr is the same.
         self.assertEqual(x.data_ptr(), x.reshape(1, 0, 6, 1, 1).data_ptr())
+
+        # match NumPy semantics -- don't infer the size of dimension with a degree of freedom
+        self.assertRaises(RuntimeError, lambda: x.reshape(0, -1))
+
+    @skipIfNoZeroSize
+    def test_tensor_shape_empty(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            x = torch.randn((0, 1, 3, 0), device=device)
+            # flatten
+            self.assertEqual((0,), torch.flatten(x, 0, 3).shape)
+            self.assertEqual((0, 0), torch.flatten(x, 0, 2).shape)
+            self.assertEqual((0, 3, 0), torch.flatten(x, 1, 2).shape)
+
+            # squeeze, unsqueeze
+            self.assertEqual((0, 1, 1, 3, 0), torch.unsqueeze(x, 1).shape)
+            self.assertEqual((0, 3, 0), torch.squeeze(x, 1).shape)
+            self.assertEqual((0, 3, 0), torch.squeeze(x).shape)
+
+            # transpose, t
+            self.assertEqual((0, 0, 3, 1), torch.transpose(x, 1, 3).shape)
+            y = torch.randn((5, 0), device=device)
+            self.assertEqual((0, 5), y.t().shape)
+
+            # select
+            self.assertEqual((0, 1, 0), torch.select(x, 2, 2).shape)
+            # unfold
+            self.assertEqual((0, 1, 1, 0, 3), x.unfold(2, 3, 2).shape)
+            y = torch.randn((0, 1, 3), device=device)
+            self.assertEqual((1, 1, 3, 0), y.unfold(0, 0, 4).shape)
+
+            # repeat, permute
+            self.assertEqual((9, 0, 5, 6, 0), x.repeat(9, 7, 5, 2, 3).shape)
+            self.assertEqual((3, 0, 0, 1), x.permute(2, 3, 0, 1).shape)
+
+            # diagonal, diagflat
+            self.assertEqual((0,), torch.diagonal(torch.randn((5, 0), device=device)).shape)
+            self.assertEqual((0,), torch.diagonal(torch.randn((0, 5), device=device)).shape)
+            # off the end offsets are valid
+            self.assertEqual((0,), torch.diagonal(torch.randn((5, 0), device=device), offset=1).shape)
+            self.assertEqual((0,), torch.diagonal(torch.randn((0, 5), device=device), offset=1).shape)
+            # check non-zero sized offsets off the end
+            self.assertEqual((5, 6, 0), torch.diagonal(torch.randn((3, 4, 5, 6), device=device), offset=45252).shape)
+            self.assertEqual((5, 6, 0), torch.diagonal(torch.randn((3, 4, 5, 6), device=device), offset=-45252).shape)
+
+            self.assertEqual((0, 0), torch.diagflat(torch.tensor([], device=device)).shape)
+            self.assertEqual(torch.zeros(1, 1), torch.diagflat(torch.tensor([], device=device), offset=1))
+            self.assertEqual((0, 0), torch.diagflat(torch.tensor([[]], device=device)).shape)
+            self.assertEqual(torch.zeros(1, 1), torch.diagflat(torch.tensor([[]], device=device), offset=1))
+
+            # stack, split, chunk
+            self.assertEqual((4, 0, 1, 3, 0), torch.stack((x, x, x, x)).shape)
+            self.assertEqual([(0, 1, 3, 0)],
+                             [z.shape for z in torch.chunk(x, 1, dim=0)])
+
+            self.assertEqual([(0, 1, 3, 0), ] * 3, [z.shape for z in torch.chunk(x, 3, dim=0)])
+            self.assertEqual([(0, 1, 1, 0), ] * 3, [z.shape for z in torch.chunk(x, 3, dim=2)])
+
+            # NOTE: split_with_sizes behaves differently than NumPy in that it
+            # takes sizes rather than offsets
+            self.assertEqual([(0, 1, 0, 0), (0, 1, 1, 0), (0, 1, 2, 0)],
+                             [z.shape for z in torch.split(x, (0, 1, 2), dim=2)])
+
+            self.assertRaises(RuntimeError, lambda: torch.split(x, 0, dim=1))
+            # This is strange because the split size is larger than the dim size, but consistent with
+            # how split handles that case generally (when no 0s are involved).
+            self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 1, dim=0)])
+            self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
 
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)
