@@ -38,7 +38,7 @@ PyObject * THPSize_NewFromSizes(int dim, const int64_t *sizes)
   return self.release();
 }
 
-static bool isTracedVar(PyObject *item) {
+static bool isTracedZeroDimVar(PyObject *item) {
   if (!THPVariable_Check(item)) return false;
   auto & var = reinterpret_cast<THPVariable*>(item)->cdata;
   return var.dim() == 0 && torch::jit::tracer::getValueTrace(var);
@@ -53,7 +53,7 @@ static PyObject * THPSize_pynew(PyTypeObject *type, PyObject *args, PyObject *kw
       if (THPUtils_checkLong(item)) {
         continue;
       }
-      if (torch::jit::tracer::isTracing() && isTracedVar(item)) {
+      if (torch::jit::tracer::isTracing() && isTracedZeroDimVar(item)) {
         continue;
       }
       // item.__index__() works with 0-dim tensors and tensors with one element
