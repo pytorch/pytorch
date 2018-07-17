@@ -3,7 +3,7 @@ import sys
 import ast
 import inspect
 import torch
-from torch._C import DynamicType, TupleType, FunctionSchema, Argument
+from torch._C import DynamicType, TupleType
 from textwrap import dedent
 
 
@@ -75,7 +75,8 @@ def get_signature(fn, _n_arguments=None, _n_binders=None):
     # This might happen both because we failed to get the source of fn, or
     # because it didn't have any annotations.
     if type_line is None:
-        return default_signature(fn, source, _n_arguments, _n_binders)
+        # return default_signature(fn, source, _n_arguments, _n_binders)
+        return None
 
     return parse_type_line(type_line)
 
@@ -88,20 +89,6 @@ def flatten_return_type(type):
         return return_types
     else:
         return [type]
-
-
-def _pack_types_into_args(types):
-    argument_objects = []
-    for type in types:
-        # TODO: name?
-        argument_objects.append(torch._C.Argument('', type, None, None))
-    return argument_objects
-
-
-def _types_to_function_schema(arg_types, ret_types):
-    # TODO: get function name
-    return torch._C.FunctionSchema('', _pack_types_into_args(arg_types),
-                                   _pack_types_into_args(ret_types), False, False)
 
 
 def parse_type_line(type_line):
@@ -129,42 +116,7 @@ def parse_type_line(type_line):
     arg_types = [ann_to_type(ann) for ann in arg_ann]
     ret_types = flatten_return_type(ann_to_type(ret_ann))
 
-    return _types_to_function_schema(arg_types, ret_types)
-
-
-def default_signature(fn, source, _n_arguments, _n_binders):
-    """Returns the default signature for fn.
-
-    The current formula is to use the source (if available) to determine the
-    number of inputs and outputs, and set all their types as tensors.
-    If the source is missing, we fall back to the numbers provided by the compiler,
-    to make sure we don't cause an error there (although type mismatches can still happen).
-
-    This method also accounts for the self argument if fn is a method.
-    """
-    if _n_binders is None:
-        raise RuntimeError("default_signature needs to know the number of binders")
-    if source is None and _n_arguments is None:
-        raise RuntimeError("default_signature needs either the source or the number of arguments")
-
-    if source is not None:
-        py_ast = ast.parse(source)
-        if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
-            raise RuntimeError("expected a single top-level function")
-        py_def = py_ast.body[0]
-        # TODO: ideally we'd ignore the type of varargs entirely, but we currently don't
-        # allow passing in anything else than tensors anyway.
-        if py_def.args.vararg is not None:
-            arg_types = [DynamicType()] * _n_arguments
-        else:
-            arg_types = [DynamicType() for _ in py_def.args.args]
-            if inspect.ismethod(fn):
-                arg_types = arg_types[1:]
-    else:
-        arg_types = [DynamicType()] * _n_arguments
-
-    return _types_to_function_schema(arg_types, [DynamicType() for _ in range(_n_binders)])
-
+    return arg_types, ret_types
 
 _def_end_regex = re.compile(r'.*\)\s*:.*')
 
@@ -222,7 +174,7 @@ def try_real_annotations(fn):
     arg_types = [ann_to_type(as_ann(p.annotation))
                    for p in sig.parameters.values()]
     return_types = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
-    return _types_to_function_schema(arg_types, return_types)
+    return arg_types, return_types
 
 
 def ann_to_type(ann):

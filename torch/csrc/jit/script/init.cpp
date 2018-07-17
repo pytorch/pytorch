@@ -49,26 +49,31 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
 
-  FunctionSchema getFunctionSchema(size_t n_args, size_t n_binders) {
+  std::tuple<std::vector<TypePtr>, std::vector<TypePtr>> getArgumentTypes(size_t n_args, size_t n_binders) {
     auto annotations = py::module::import("torch.jit.annotations");
-    return py::cast<FunctionSchema>(annotations.attr("get_signature")(self, n_args, n_binders));
+    auto signature = annotations.attr("get_signature")(self, n_args, n_binders);
+    if (!signature.is_none()) {
+      return py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(signature);
+    } else {
+      // Default signature
+      return std::make_pair(std::vector<TypePtr>(n_args, DynamicType::get()), std::vector<TypePtr>(n_binders, DynamicType::get()));
+    }
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     auto inputs = toValues(inputs_);
-    FunctionSchema schema = getFunctionSchema(inputs.size(), n_binders);
-    const std::vector<Argument> &arg_types = schema.arguments;
-    const std::vector<Argument> &ret_types = schema.returns;
+    std::vector<TypePtr> arguments, returns;
+    std::tie(arguments, returns) = getArgumentTypes(inputs.size(), n_binders);
 
-    if (arg_types.size() != inputs.size())
+    if (arguments.size() != inputs.size())
       throw ErrorReport(loc) << "calling a Python function with an incorrect number "
-                             << "of arguments: expected " << arg_types.size() << ", but got "
+                             << "of arguments: expected " << arguments.size() << ", but got "
                              << inputs.size();
-    for (size_t i = 0; i < arg_types.size(); ++i) {
-      if (!inputs[i]->type()->isSubtypeOf(*arg_types[i].type))
+    for (size_t i = 0; i < arguments.size(); ++i) {
+      if (!inputs[i]->type()->isSubtypeOf(*arguments[i]))
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
-                               << arg_types[i].type->str() << ", but got " << inputs[i]->type()->str();
+                               << arguments[i]->str() << ", but got " << inputs[i]->type()->str();
     }
     // We have to do this check here, because implementation of this function is tightly
     // coupled with the impl for PythonOp in the interpreter. Right now it assumes that
@@ -114,14 +119,14 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // Note that this effectively makes the return type of Tuple[Tensor] and Tensor
     // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
     // to do it.
-    for (auto & ret_type_elem : ret_types) {
-      if (!ret_type_elem.type->isSubtypeOf(*DynamicType::get())) {
+    for (auto & ret_type_elem : returns) {
+      if (!ret_type_elem->isSubtypeOf(*DynamicType::get())) {
         throw ErrorReport(loc) << "Python functions can currently only return Tensors";
       }
     }
 
     std::vector<Value*> outputs;
-    for(size_t i = 0; i < ret_types.size(); ++i)
+    for(size_t i = 0; i < returns.size(); ++i)
       outputs.push_back(new_node->addOutput());
     return packOutputs(*m.graph(), outputs);
   }
@@ -358,6 +363,29 @@ py::object runMethodFromPython(Method& m, py::args args) {
 
 void initJitScriptBindings(PyObject* module) {
   auto m = py::handle(module).cast<py::module>();
+
+  py::class_<TypedDef>(m, "TypedDef")
+    .def(py::init<Def>());
+
+  m.def("_pack_typed_def", [](Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types) {
+    std::vector<Argument> arguments, returns;
+    for (auto arg_type : arg_types) {
+      arguments.push_back(Argument("", arg_type));
+    }
+    for (auto ret_type : return_types) {
+      returns.push_back(Argument("", ret_type));
+    }
+    // if (auto *tuple_return_type = return_type->cast<TupleType>()) {
+    //   for (auto elmt : tuple_return_type->elements()) {
+    //     returns.push_back(Argument("", elmt));
+    //   }
+    // } else {
+    //   returns.push_back(Argument("", return_type));
+    // }
+
+    return TypedDef(def, FunctionSchema("", arguments, returns));
+  });
+
   // torch.jit.ScriptModule is a subclass of this C++ object.
   // Methods here are prefixed with _ since they should not be
   // public.
@@ -372,7 +400,7 @@ void initJitScriptBindings(PyObject* module) {
             auto self = has_self ? std::make_shared<ModuleValue>(m) : nullptr;
             return defineMethodsInModule(*m, script, pythonResolver(rcb), self);
           })
-      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<Def>& defs, const std::vector<ResolutionCallback>& rcbs) {
+      .def("_create_methods", [](std::shared_ptr<Module> m, const std::vector<TypedDef>& defs, const std::vector<ResolutionCallback>& rcbs) {
         std::vector<Resolver> resolvers;
         for(auto & callback : rcbs) {
           resolvers.push_back(pythonResolver(callback));
@@ -496,8 +524,8 @@ void initJitScriptBindings(PyObject* module) {
       return self.graph_for(createVariableTensorList(args));
     });
 
-  m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
-    return compileFunction(def, pythonResolver(rcb));
+  m.def("_jit_script_compile", [](const TypedDef &typed_def, ResolutionCallback rcb) {
+    return compileFunction(typed_def, pythonResolver(rcb));
   });
 
 }

@@ -342,8 +342,12 @@ class CompilationUnit(object):
 def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn)
-    schema = annotations.get_signature(fn, 0, 0)
-    graph = _jit_script_compile(ast, rcb)
+    schema = annotations.get_signature(fn)
+    if schema:
+        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1])
+    else:
+        typed_def = torch._C.TypedDef(ast)
+    graph = _jit_script_compile(typed_def, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # Forward docstrings
@@ -351,7 +355,7 @@ def script(fn, optimize=True, _frames_up=0):
     return mod
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'typed_def', 'original_method'))
 
 
 def script_method(fn):
@@ -367,7 +371,13 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    return ScriptMethodStub(createResolutionCallback(frames_up=2), get_jit_ast(fn), fn)
+    schema = annotations.get_signature(fn)
+    ast = get_jit_ast(fn)
+    if schema:
+        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1])
+    else:
+        typed_def = torch._C.TypedDef(ast)
+    return ScriptMethodStub(createResolutionCallback(frames_up=2), typed_def, fn)
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -571,9 +581,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            asts = [m.ast for m in methods]
+            typed_defs = [m.typed_def for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(asts, rcbs)
+            self._create_methods(typed_defs, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)

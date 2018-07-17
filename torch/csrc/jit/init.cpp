@@ -204,12 +204,6 @@ void initJITBindings(PyObject *module) {
         }
       });
 
-  py::class_<FunctionSchema>(m, "FunctionSchema")
-    .def(py::init<std::string, std::vector<Argument>, std::vector<Argument>, bool, bool>());
-
-  py::class_<Argument>(m, "Argument")
-    .def(py::init<std::string, TypePtr, at::optional<int32_t>, at::optional<at::Tensor>>());
-
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);

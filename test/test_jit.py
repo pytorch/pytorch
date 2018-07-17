@@ -4281,7 +4281,7 @@ def func(t):
     def test_annotated_script_fn(self):
         @torch.jit.script
         def foo(x, y, z):
-            # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tuple[Tensor, Tensor]
+            # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
             return x
 
         # self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
