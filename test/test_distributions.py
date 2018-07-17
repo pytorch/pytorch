@@ -123,12 +123,12 @@ EXAMPLES = [
     ]),
     Example(NegativeBinomial, [
         {'probs': torch.tensor([[0.1, 0.2, 0.3], [0.5, 0.3, 0.2]], requires_grad=True), 'total_count': 10},
-        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': 10},
-        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10])},
-        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
-        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': 10},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True), 'total_count': torch.tensor([10, 8])},
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
          'total_count': torch.tensor([[10., 8.], [5., 3.]])},
-        {'probs': torch.tensor([[1.0, 0.0], [0.0, 1.0]], requires_grad=True),
+        {'probs': torch.tensor([[0.9, 0.0], [0.0, 0.9]], requires_grad=True),
          'total_count': torch.tensor(0.)},
     ]),
     Example(Multinomial, [

@@ -17,16 +17,16 @@ class _GreaterThanEq(Constraint):
         return self.lower_bound <= value
 
 
-class _OpenInterval(Constraint):
+class _HalfOpenInterval(Constraint):
     """
-    Constrain to a real interval `(lower_bound, upper_bound)`.
+    Constrain to a real interval `[lower_bound, upper_bound)`.
     """
     def __init__(self, lower_bound, upper_bound):
         self.lower_bound = lower_bound
         self.upper_bound = upper_bound
 
     def check(self, value):
-        return (self.lower_bound < value) & (value < self.upper_bound)
+        return (self.lower_bound <= value) & (value < self.upper_bound)
 
 
 class NegativeBinomial(Distribution):
@@ -44,7 +44,7 @@ class NegativeBinomial(Distribution):
         logits (Tensor): Event log-odds for probabilities of success
     """
     arg_constraints = {'total_count': _GreaterThanEq(0),
-                       'probs': _OpenInterval(0., 1.)}
+                       'probs': _HalfOpenInterval(0., 1.)}
     support = constraints.nonnegative_integer
 
     def __init__(self, total_count, probs=None, logits=None, validate_args=None):
