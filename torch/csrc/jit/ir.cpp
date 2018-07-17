@@ -568,6 +568,22 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
+template<typename T>
+Value* Graph::insertConstant(T value) {
+  Node *n = create(prim::Constant);
+  insertNode(n);
+  auto t_value = as_tensor(value);
+  n->t_(attr::value, t_value.clone());
+  n->output()->inferTypeFrom(t_value);
+  return n->output();
+}
+
+template Value* Graph::insertConstant(int64_t value);
+template Value* Graph::insertConstant(double value);
+template Value* Graph::insertConstant(at::Tensor value);
+template Value* Graph::insertConstant(at::IntList value);
+template Value* Graph::insertConstant(at::Scalar value);
+
 namespace {
 
 template<typename T>
@@ -611,9 +627,10 @@ at::optional<T> Node::get(Symbol name) {
     // doing an invalid lookup and it should throw anyway.
     return getattr<T>(this, name);
   }
-  auto inp = findConstInput(name);
-  if (!inp) return at::nullopt;
-  auto value = inp->first->node()->t(attr::value);
+  auto inp = findInput(name);
+  Node *producer = inp.first->node();
+  if (producer->kind() != prim::Constant) return at::nullopt;
+  auto value = producer->t(attr::value);
   return tensor_as<T>(std::move(value));
 }
 
@@ -627,10 +644,11 @@ at::optional<IValue> Node::get(Symbol name) {
   if (hasAttributes()) {
     throw std::runtime_error("IValue Node::get() not implemented for the attribute case");
   }
-  auto inp = findConstInput(name);
-  if (!inp) return at::nullopt;
-  auto value = inp->first->node()->t(attr::value);
-  const Argument & arg = inp->second;
+  auto inp = findInput(name);
+  Node * producer = inp.first->node();
+  if (producer->kind() != prim::Constant) return at::nullopt;
+  auto value = producer->t(attr::value);
+  const Argument & arg = inp.second;
   if (arg.type->isSubtypeOf(*DynamicType::get())) {
     return IValue{std::move(value)};
   } else if (arg.type->isSubtypeOf(*IntType::get())) {
@@ -641,20 +659,36 @@ at::optional<IValue> Node::get(Symbol name) {
   throw std::runtime_error("Unsupported case in Node::get! File a bug report.");
 }
 
-at::optional<std::pair<Value*, const Argument&>> Node::findConstInput(Symbol name) {
+Value* Node::getValue(Symbol name) {
+  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
+  if (hasAttribute(name)) {
+    switch (kindOf(name)) {
+      case AttributeKind::i:
+        return owningGraph()->insertConstant(i(name));
+      case AttributeKind::is:
+        return owningGraph()->insertConstant(is(name));
+      case AttributeKind::t:
+        return owningGraph()->insertConstant(t(name));
+      default:
+        throw std::runtime_error("getValue() NYI");
+    }
+  }
+  return findInput(name).first;
+}
+
+std::pair<Value*, const Argument&> Node::findInput(Symbol name) {
   if (!schema_) {
     findSchema();
   }
   auto name_str = name.toUnqualString();
+  size_t input_i = 0;
   for (size_t i = 0; i < schema_->arguments.size(); ++i) {
     const auto & arg = schema_->arguments[i];
-    if (arg.name != name_str) continue;
-    Node *producer = input(i)->node();
-    if (producer->kind() == prim::Constant) {
-      return at::make_optional(std::pair<Value*, const Argument&>(input(i), arg));
-    } else {
-      return at::nullopt;
+    if (hasAttributeS(arg.name)) continue;
+    if (arg.name == name_str) {
+      return std::pair<Value*, const Argument&>(input(input_i), arg);
     }
+    input_i++;
   }
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }

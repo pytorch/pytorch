@@ -401,8 +401,8 @@ public:
 
   template<typename T>
   at::optional<T> get(Symbol name);
-
   at::optional<IValue> get(Symbol name);
+  Value* getValue(Symbol name);
 
   // Graphs
 
@@ -663,7 +663,7 @@ public:
 
   virtual ~Node() {}
 private:
-  at::optional<std::pair<Value*, const Argument&>> findConstInput(Symbol name);
+  std::pair<Value*, const Argument&> findInput(Symbol name);
   void findSchema();
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
   use_list::iterator findUseForInput(size_t i) {
@@ -1017,6 +1017,9 @@ public:
     }
     return r;
   }
+
+  template<typename T>
+  Value * insertConstant(T value);
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);

@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
+
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {
@@ -28,7 +30,7 @@ void PeepholeOptimize(Block * block) {
         if (!n->input()->isTensor()) break;
         // the sizes are dynamic
         if(n->inputs().size() != 1) break;
-        if (n->is(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
+        if (n->get<std::vector<int64_t>>(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
           n->output()->replaceAllUsesWith(n->input());
           // Let DCE clean up any unused nodes at this point
         }
@@ -59,12 +61,12 @@ void PeepholeOptimize(Block * block) {
       case aten::add: {
         // mm + add == addmm
         if (n->inputs().size() == 2 &&
-            at::Scalar(n->t(attr::alpha)).to<double>() == 1. &&
+            n->get<at::Tensor>(attr::alpha) &&
+            tensor_as<double>(*n->get<at::Tensor>(attr::alpha)) == 1. &&
             n->input(1)->node()->kind() == aten::mm) {
-          auto input_node = n->input(1)->node();
-
           WithInsertPoint guard(n);
 
+          auto input_node = n->input(1)->node();
           SymbolicVariable mat(n->input(0));
           SymbolicVariable mat1(input_node->input(0));
           SymbolicVariable mat2(input_node->input(1));
@@ -74,17 +76,6 @@ void PeepholeOptimize(Block * block) {
           ((Value*)addmm_value)->copyMetadata(n->output());
           n->output()->replaceAllUsesWith(addmm_value);
         }
-        // x + 0 == 0 + x == x
-        //if (n->get<double>(attr::alpha) == 1.) {
-          //if (n->get<double>(attr::other) == 0.) {
-            //n->output()->replaceAllUsesWith(n->input(0));
-            //continue;
-          //}
-          //if (n->get<double>(attr::self) == 0.) {
-            //n->output()->replaceAllUsesWith(n->input(1));
-            //continue;
-          //}
-        //}
       } break;
     }
   }

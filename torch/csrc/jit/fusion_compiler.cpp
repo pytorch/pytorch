@@ -3,6 +3,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/variable_tensor_functions.h"
 
@@ -125,9 +126,9 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 // This snippet enables half support in the jit. Following the pattern for
 // reductions, fp16 input data is immediately upconverted to float
 // with __half2float(). All mathematical operations are done on float
-// values, and if needed the intermediate float representation is 
+// values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
-constexpr auto half_support_literal  = R"(    
+constexpr auto half_support_literal  = R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
 #if defined(__cplusplus)
@@ -190,10 +191,19 @@ std::string valueName(Value * n) {
   return "n" + std::to_string(n->unique());
 }
 
-std::string scalarValue(const at::Tensor & t) {
+std::string valueNameOrConstant(Value * n) {
+  if (auto value = constant_as<double>(n)) {
+    std::ostringstream s;
+    s << std::scientific << *value;
+    return s.str();
+  }
+  return "n" + std::to_string(n->unique());
+}
+
+ std::string scalarValue(const at::Tensor & t) {
   auto s =  at::Scalar(t);
-  if (s.isIntegral()){ 
-    return std::to_string(s.toLong()); 
+  if (s.isIntegral()){
+    return std::to_string(s.toLong());
   } else {
      std::ostringstream out;
      out << std::scientific << s.toDouble() << "f";
@@ -291,8 +301,9 @@ std::string encodeRHS(Node * n) {
   TemplateEnv env;
   size_t i = 0;
   for(auto in : n->inputs()) {
-    env.s(std::to_string(i++),valueName(in));
+    env.s(std::to_string(i++), valueNameOrConstant(in));
   }
+  // TODO (apaszke): remove once we get rid of attributes
   // ops like div have a / b or a / 2 with the constant having the attribute other
   // so we add other as an input if it is present
   // 'pow' is the same but uses exponent as the attribute, so we handle that here as well
@@ -356,7 +367,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
       } else {
         auto cat = o->node();
         size_t nInputs = cat->inputs().size();
-        concat_desc.emplace_back(desc, nInputs, cat->i(attr::dim));
+        concat_desc.emplace_back(desc, nInputs, cat->get<int64_t>(attr::dim).value());
         for(auto c : cat->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
@@ -381,7 +392,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
-    
+
     //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }

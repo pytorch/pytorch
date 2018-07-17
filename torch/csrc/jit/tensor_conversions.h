@@ -15,7 +15,7 @@ struct tensor_conversion_error : public std::runtime_error {
 };
 
 template<typename T>
-inline T tensor_as(at::Tensor&& t);
+inline T tensor_as(at::Tensor t);
 
 namespace detail {
 
@@ -79,7 +79,7 @@ struct tensor_as_impl<at::Scalar> {
 }
 
 template<typename T>
-inline T tensor_as(at::Tensor&& t) {
+inline T tensor_as(at::Tensor t) {
   return detail::tensor_as_impl<T>()(std::move(t));
 }
 
@@ -107,6 +107,10 @@ inline at::Tensor as_tensor(at::IntList l) {
 
 inline at::Tensor as_tensor(const at::Scalar& s) {
   return s.toTensor();
+}
+
+inline at::Tensor as_tensor(at::Tensor t) {
+  return t;
 }
 
 template<size_t N>
