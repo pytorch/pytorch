@@ -544,6 +544,9 @@ def preprocessor(filepath, stats, hipify_caffe2):
                 hip_type = value[0]
                 meta_data = value[1:]
 
+                if constants.API_CAFFE2 in meta_data and not hipify_caffe2:
+                    continue
+
                 if output_source.find(cuda_type) > -1:
                     # Check if supported
                     if constants.HIP_UNSUPPORTED in meta_data:
