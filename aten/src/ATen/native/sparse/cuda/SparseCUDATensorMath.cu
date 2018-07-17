@@ -479,4 +479,77 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
 #endif
 }
 
+// --------------------------------------------------------------------
+// mul(SparseTensor, DenseTensor) -> SparseTensor
+// --------------------------------------------------------------------
+
+SparseTensor& s_mul_out_sparse_dense_cuda(SparseTensor& r_, const SparseTensor& t_, const Tensor& dense) {
+#ifndef __HIP_PLATFORM_HCC__
+  AT_ASSERT(t_.is_cuda()); // dispatch argument
+  AT_CHECK(dense.is_cuda(), "mul: expected 'other' to be CUDA, but got CPU");
+  AT_CHECK(r_.is_cuda(), "mul: expected 'out' to be CUDA, but got CPU");
+
+  AT_CHECK(_check_device({r_, t_, dense})); // check if all tensors are in the same device
+  AT_CHECK(t_.sizes().equals(dense.sizes()), "mul: expected 'self' and 'other' to have same size, but ", t_.sizes(), " != ", dense.sizes());
+  AT_CHECK(t_._values().dim() == 1, "only support mul(result, sparse, dense) with sparse._values() dim = 1, but found ", t_._values().dim());
+
+  SparseTensor t = t_.coalesce();
+
+  if (dense.numel() == 0 || t_._nnz() == 0) {
+    return r_.zero_();
+  }
+
+  // saving those because they can be overwritten when doing in-place operations
+  int64_t t_nnz = t._nnz();
+  int64_t sparseDims = t._sparseDims();
+  LongTensor t_indices_ = t._indices();
+  Tensor t_values_ = t._values();
+  LongTensor r_indices_ = t_indices_.type().tensor({sparseDims, t_nnz});
+  Tensor r_values_ = _new_values_with_size_of(t_values_, t_nnz).zero_();
+  r_.resize_as_(t);
+  _get_sparse_impl(r_)->set_indices_and_values(r_indices_, r_values_);
+
+  int64_t valueSize = t_values_.stride(0);
+  const dim3 block = dim3(std::min(static_cast<int64_t>(cuda::getApplyBlock().x), valueSize));
+  dim3 grid;
+  int curDevice = -1;
+  cudaGetDevice(&curDevice);
+  cudaStream_t stream = globalContext().getCurrentCUDAStreamOnDevice(curDevice);
+  AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
+
+  LongTensor result_nnz = at::empty({1}, CUDA(kLong));
+  AT_DISPATCH_ALL_TYPES_AND_HALF(
+      t_values_.type(), "s_mul_out_sparse_cuda", [&] {
+
+        apply::sparseAndDenseIntersectionKernel<TensorMulOp<scalar_t>, uint64_t, scalar_t>
+          <<<grid, block, 0, stream>>>(
+            TensorMulOp<scalar_t>(),
+            I_INFO(r_indices_),
+            I_INFO(t_indices_),
+            V_INFO(r_values_),
+            V_INFO(t_values_),
+            V_INFO(dense),
+            static_cast<uint64_t>(t_nnz),
+            reinterpret_cast<uint64_t*>(result_nnz.data_ptr()));
+      });
+
+  _get_sparse_impl(r_)->set_nnz(result_nnz.toType(CPU(kLong)).accessor<int64_t, 1>()[0]);
+  _get_sparse_impl(r_)->set_coalesced(true);
+
+  return r_;
+#else
+  AT_ERROR("s_mul_out_sparse_dense_cuda: HIP not supported");
+#endif
+}
+
+SparseTensor s_mul_sparse_dense_cuda(const SparseTensor& t, const Tensor& dense) {
+  SparseTensor r = t.type().tensor();
+  s_mul_out_sparse_dense_cuda(r, t, dense);
+  return r;
+}
+
+SparseTensor& s_mul_sparse_dense_cuda_(SparseTensor& t, const Tensor& dense) {
+  return s_mul_out_sparse_dense_cuda(t, t, dense);
+}
+
 }} // namespace at::native

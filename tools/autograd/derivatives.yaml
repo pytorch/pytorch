@@ -474,7 +474,10 @@
   other: grad * self
 
 - name: mul(Tensor self, Scalar other)
+
+- name: s_native_sparse_dense_mul(Tensor self, Tensor other)
   self: grad * other
+  other: grad * self
 
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)

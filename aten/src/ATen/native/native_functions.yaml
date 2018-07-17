@@ -1860,6 +1860,12 @@
 - func: sub_(Tensor self, Scalar other, Scalar alpha=1) -> Tensor
   variants: method
 
+- func: s_native_sparse_dense_mul_(Tensor self, Tensor other) -> Tensor
+  variants: function
+  dispatch:
+    SparseCPU: s_mul_sparse_dense_cpu_
+    SparseCUDA: s_mul_sparse_dense_cuda_
+
 - func: s_native_addmm_out(Tensor result, Tensor self, Tensor mat1, Tensor mat2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
   dispatch:

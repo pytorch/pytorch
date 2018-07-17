@@ -38,6 +38,21 @@ __device__ void applyOp3(
   }
 }
 
+template <typename IndexType, typename Real, typename Op>
+__device__ void sparseAndDenseApplyOp3(
+    Op op, IndexType blockSize,
+    TensorInfo<Real, IndexType> values1, IndexType idx1,
+    TensorInfo<Real, IndexType> values2, IndexType idx2,
+    TensorInfo<Real, IndexType> dense_values, IndexType dense_idx) {
+  for (IndexType k = blockIdx.x * blockDim.x + threadIdx.x;
+       k < blockSize;
+       k += gridDim.x * blockDim.x) {
+    op(values1.data + idx1 * blockSize + k,
+       values2.data + idx2 * blockSize + k,
+       dense_values.data + dense_idx + k);
+  }
+}
+
 template <typename Op, typename IndexType, typename Real>
 __global__ void sparseElementwiseKernel(
     Op op,
@@ -205,6 +220,45 @@ __global__ void valueSparseIntersectionKernel(
     if (!match) continue;
     applyOp3(op, valueSize, r_values, r_i++, t_values, t_i++, s_values, s_i++);
   }
+}
+
+// TODO find a way to parallelize this...
+template <typename Op, typename IndexType, typename Real>
+__global__ void sparseAndDenseIntersectionKernel(
+    Op op,
+    TensorInfo<indexT, IndexType> r_indices,
+    TensorInfo<indexT, IndexType> t_indices,
+    TensorInfo<Real, IndexType> r_values,
+    TensorInfo<Real, IndexType> t_values,
+    TensorInfo<Real, IndexType> s_values,
+    const IndexType t_nnz,
+    IndexType *result_nnz) {
+  IndexType t_indskip = t_indices.strides[0];
+  IndexType r_indskip = r_indices.strides[0];
+  int64_t nDimI = r_indices.sizes[0];
+  IndexType valueSize = r_values.strides[0];
+
+  IndexType r_i = 0, t_i = 0;
+  while (t_i < t_nnz) {
+    IndexType s_i = 0;
+    for (int64_t d = 0; d < nDimI; d++) {
+      s_i += t_indices.data[d * t_indskip + t_i] * s_values.strides[d];
+    }
+
+    if (static_cast<double>(s_values.data[s_i]) == 0.0) {
+      t_i++;
+      continue;
+    }
+
+    sparseAndDenseApplyOp3(op, valueSize, r_values, r_i, t_values, t_i, s_values, s_i);
+
+    for (int64_t d = 0; d < nDimI; d++) {
+      r_indices.data[d * r_indskip + r_i] = t_indices.data[d * t_indskip + t_i];
+    }
+
+    r_i++; t_i++; s_i++;
+  }
+  *result_nnz = r_i;
 }
 
 // TODO find a way to parallelize this...
