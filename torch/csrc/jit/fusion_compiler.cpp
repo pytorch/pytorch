@@ -192,9 +192,9 @@ std::string valueName(Value * n) {
 
 std::string scalarValue(const at::Tensor & t) {
   auto s =  at::Scalar(t);
-  if (s.isIntegral()) 
+  if (s.isIntegral()){ 
     return std::to_string(s.toLong()); 
-  else {
+  } else {
      std::ostringstream out;
      out << std::scientific << s.toDouble() << "f";
      return out.str();
