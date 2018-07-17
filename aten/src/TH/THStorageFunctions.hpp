@@ -34,7 +34,7 @@
 //
 
 ptrdiff_t THStorage_size(const THStorage *self);
-size_t THStorage_elementSize(const THStorage *self);
+
 void THStorage_setFlag(THStorage *storage, const char flag);
 void THStorage_clearFlag(THStorage *storage, const char flag);
 void THStorage_retain(THStorage *storage);

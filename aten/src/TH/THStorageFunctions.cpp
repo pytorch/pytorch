@@ -92,11 +92,6 @@ ptrdiff_t THStorage_size(const THStorage *self)
   return self->size;
 }
 
-size_t THStorage_elementSize(const THStorage *self)
-{
-  return at::elementSize(self->scalar_type);
-}
-
 void THStorage_setFlag(THStorage *storage, const char flag)
 {
   storage->flag |= flag;

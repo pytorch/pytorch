@@ -64,7 +64,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
 
   if (size <= 0) {
-    storage->size = actual_size/THStorage_elementSize(storage);
+    storage->size = actual_size / at::elementSize(scalar_type);
   }
 
   THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
