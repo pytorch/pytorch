@@ -20,8 +20,6 @@ typedef struct THCTensor
     ptrdiff_t storageOffset;
     std::atomic<int> refcount;
 
-    char flag;
-
     template <typename T>
     inline T * data() const {
       return storage->data<T>() + storageOffset;
