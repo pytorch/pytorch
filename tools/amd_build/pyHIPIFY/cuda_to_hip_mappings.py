@@ -2111,7 +2111,9 @@ CAFFE2_SPECIFIC_MAPPINGS = {
      "cublas_handle" : ("rocblas_handle", API_CAFFE2),
      "CURAND_ENFORCE" :("HIPRAND_ENFORCE", API_CAFFE2),
      "curandGenerateUniform" : ("hiprandGenerateUniform", API_CAFFE2),
-     "curand_generator" : ("hiprand_generator", API_CAFFE2)
+     "curand_generator" : ("hiprand_generator", API_CAFFE2),
+     "set_cuda_gpu_id" : ("set_hip_gpu_id", API_CAFFE2),
+     "CaffeCudaGetDevice" : ("CaffeHipGetDevice", API_CAFFE2),
 }
 
 CUDA_TO_HIP_MAPPINGS = [CUDA_TYPE_NAME_MAP, CUDA_IDENTIFIER_MAP,
