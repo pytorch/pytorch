@@ -69,18 +69,18 @@ TH_API THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t si
 TH_API THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
                                              at::Allocator *allocator);
 
-ptrdiff_t THStorage_size(const THStorage *self);
-size_t THStorage_elementSize();
-THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags);
-void THStorage_setFlag(THStorage *storage, const char flag);
-void THStorage_clearFlag(THStorage *storage, const char flag);
-void THStorage_retain(THStorage *storage);
-THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
-                                             at::DataPtr&& data, ptrdiff_t size,
-                                             at::Allocator* allocator);
-void THStorage_resize(THStorage *storage, ptrdiff_t size);
-void THStorage_swap(THStorage *storage1, THStorage *storage2);
+TH_API ptrdiff_t THStorage_size(const THStorage *self);
+TH_API size_t THStorage_elementSize();
+TH_API THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags);
+TH_API void THStorage_setFlag(THStorage *storage, const char flag);
+TH_API void THStorage_clearFlag(THStorage *storage, const char flag);
+TH_API void THStorage_retain(THStorage *storage);
+TH_API THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
+                                                    at::DataPtr&& data, ptrdiff_t size,
+                                                    at::Allocator* allocator);
+TH_API void THStorage_resize(THStorage *storage, ptrdiff_t size);
+TH_API void THStorage_swap(THStorage *storage1, THStorage *storage2);
 
-void THStorage_weakRetain(THStorage *weak_storage);
-void THStorage_weakFree(THStorage *weak_storage);
-THStorage* THStorage_weakLock(THStorage *weak_storage);
+TH_API void THStorage_weakRetain(THStorage *weak_storage);
+TH_API void THStorage_weakFree(THStorage *weak_storage);
+TH_API THStorage* THStorage_weakLock(THStorage *weak_storage);
