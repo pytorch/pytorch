@@ -2044,15 +2044,19 @@ class TestAutograd(TestCase):
         def run_test(input_size, val):
             input = torch.full(input_size, val).to(torch.double).requires_grad_()
             input.std().backward()
-            with torch.no_grad():
-                eps = 1e-09
-                input[0] = input[0] + eps
-                print(torch.std(input) / eps)
-                num_der = torch.std(input) / eps
-                self.assertEqual(input.grad, torch.full(input_size, num_der.item()))
+            grad_val = input.grad
+
+            eps = 1e-09
+            random_index = torch.randint(min(input.size()), size=(input.dim(),), dtype=torch.long)
+            random_index = tuple(random_index.tolist())
+            input[random_index] = input[random_index] + eps
+            numerical_derivative = torch.std(input) / eps
+            self.assertEqual(input.grad, torch.full(input_size, numerical_derivative.item()))
 
         run_test((10,), 0)
         run_test((10,), 0.5)
+        run_test((10, 10), 0)
+        run_test((10, 10), 0.5)
 
     def test_pinverse(self):
         # Why is pinverse tested this way, and not ordinarily as other linear algebra methods?
