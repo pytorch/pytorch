@@ -79,7 +79,7 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
                          int dimension, real init, BinaryFunction binary_op)
 {
   // "init" must be the identity element for binary_op
-  int ndim = THCTensor_(_nDimension)(state, src);
+  int ndim = THCTensor_(nDimension)(state, src);
   THArgCheck(dimension >= 0 && dimension < ndim, 3, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
@@ -87,16 +87,18 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
 
-#ifndef THC_REAL_IS_HALF
-  if (ndim == 1) {
-    // thrust does not take an "init"
-    THCTensor_(scanThrust)(state, self, src, binary_op);
-  } else
-#endif
-  if (dimension == ndim - 1) {
-    THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
-  } else {
-    THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
+  if (!self->is_empty()) {
+  #ifndef THC_REAL_IS_HALF
+    if (ndim == 1) {
+      // thrust does not take an "init"
+      THCTensor_(scanThrust)(state, self, src, binary_op);
+    } else
+  #endif
+    if (dimension == ndim - 1) {
+      THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
+    } else {
+      THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
+    }
   }
 
   THCTensor_(free)(state, src);
