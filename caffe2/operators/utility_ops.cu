@@ -404,7 +404,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   TIndex K = indices.size();
   TIndex block_size = M / N;
 
-  T* data = output->template mutable_data<T>();
+  float* data = output->template mutable_data<float>();
 
   // In order to have all device pointers of x_i (and weight_i similarly)
   // consecutively in device memory, copy pointers to a host vector and then
