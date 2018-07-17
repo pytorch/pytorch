@@ -5,6 +5,9 @@
 
 #include "generic/THCTensorRandom.h"
 #include "THCGenerateAllTypes.h"
+#ifdef __HIP_PLATFORM_HCC__
+#include <hiprand_kernel.h>
+#endif
 
 typedef struct THCGenerator THCGenerator;
 
