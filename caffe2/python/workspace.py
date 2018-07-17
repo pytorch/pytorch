@@ -61,6 +61,7 @@ else:
 IsNUMAEnabled = C.is_numa_enabled
 GetNumNUMANodes = C.get_num_numa_nodes
 GetBlobNUMANode = C.get_blob_numa_node
+GetBlobSizeBytes = C.get_blob_size_bytes
 
 def _GetFreeFlaskPort():
     """Get a free flask port."""
