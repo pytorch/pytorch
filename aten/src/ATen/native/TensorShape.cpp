@@ -265,6 +265,10 @@ Tensor reshape(const Tensor& self, IntList proposed_shape) {
   return at::_unsafe_view(self.clone(), shape);
 }
 
+Tensor reshape_as(const Tensor& self, const Tensor& other) {
+  return self.reshape(other.sizes());
+}
+
 Tensor select(const Tensor& self, int64_t dim, int64_t index) {
   int64_t ndim = self.dim();
   AT_CHECK(ndim > 0, "select() cannot be applied to a 0-dim tensor.");
