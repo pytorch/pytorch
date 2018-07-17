@@ -25,8 +25,6 @@ void THStorage_free(THStorage *storage) {
       if (storage->finalizer) {
         (*storage->finalizer)();
       }
-      storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~DataPtr();
       THStorage_weakFree(storage);
     }
   }
@@ -40,8 +38,6 @@ void THStorage_weakRetain(THStorage *weak_storage) {
 // Releases a weak reference
 void THStorage_weakFree(THStorage *weak_storage) {
   if (--weak_storage->weakcount == 0) {
-    weak_storage->refcount.~atomic<int>();
-    weak_storage->weakcount.~atomic<int>();
     delete weak_storage;
   }
 }
