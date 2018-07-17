@@ -3,7 +3,8 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THAllocator.h"
+// #include "THAllocator.h"
+#include <ATen/Allocator.h>
 
 #include <ATen/ScalarType.h>
 #include <ATen/ScalarTypeUtils.h>
@@ -39,6 +40,7 @@ struct THFinalizer {
 
 struct THStorage
 {
+  THStorage() = delete;
   THStorage(at::ScalarType, ptrdiff_t, at::Allocator*, char);
   at::ScalarType scalar_type;
   at::DataPtr data_ptr;
@@ -49,6 +51,10 @@ struct THStorage
   at::Allocator* allocator;
   std::unique_ptr<THFinalizer> finalizer;
   struct THStorage* view;
+  THStorage(THStorage&) = delete;
+  THStorage(const THStorage&) = delete;
+  THStorage(THStorage&&) = delete;
+  THStorage(const THStorage&&) = delete;
 
   template <typename T>
   inline T* data() const {
