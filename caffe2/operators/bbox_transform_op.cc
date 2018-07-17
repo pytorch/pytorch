@@ -54,6 +54,11 @@ Transform proposal bounding boxes to target bounding box using bounding box
         "angle_bound_hi",
         "int (default 90 degrees). If set, for rotated boxes, angle is "
         "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "clip_angle_thresh",
+        "float (default 1.0 degrees). For RRPN, clip almost horizontal boxes "
+        "within this threshold of tolerance for backward compatibility. "
+        "Set to negative value for no clipping.")
     .Input(
         0,
         "rois",
@@ -168,7 +173,8 @@ bool BBoxTransformOp<float, CPUContext>::RunOnDevice() {
           angle_bound_on_,
           angle_bound_lo_,
           angle_bound_hi_);
-      EArrXXf clip_boxes = utils::clip_boxes(trans_boxes, img_h, img_w);
+      EArrXXf clip_boxes =
+          utils::clip_boxes(trans_boxes, img_h, img_w, clip_angle_thresh_);
       // Do not apply scale for angle in rotated boxes
       clip_boxes.leftCols(4) *= scale_after;
       new_boxes.block(offset, k * box_dim, num_rois, box_dim) = clip_boxes;
