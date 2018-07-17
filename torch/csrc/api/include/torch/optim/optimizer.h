@@ -30,10 +30,14 @@ class OptimizerBase {
   virtual ~OptimizerBase() = default;
 
   /// Adds the given vector of parameters to the optimizer's parameter list.
-  void add_parameters(const std::vector<Tensor>& parameters);
+  /// Override this method if you want to modify the way parameters are added to
+  /// the `Optimizer`.
+  virtual void add_parameters(const std::vector<Tensor>& parameters);
 
   /// Adds the `ParameterCursor`'s parameters to the optimizer's parameter list.
-  void add_parameters(const ParameterCursor& cursor);
+  /// NOTE: Calls the `vector<Tensor>` overload of `add_parameters` -- override
+  /// that method if you want to modify the behavior of `add_parameters`.
+  virtual void add_parameters(const ParameterCursor& cursor);
 
   /// Zeros out the gradients of all parameters.
   virtual void zero_grad();

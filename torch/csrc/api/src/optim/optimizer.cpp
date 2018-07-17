@@ -22,10 +22,9 @@ void OptimizerBase::add_parameters(const std::vector<Tensor>& parameters) {
 }
 
 void OptimizerBase::add_parameters(const ParameterCursor& cursor) {
-  parameters_.reserve(parameters_.size() + cursor.size());
-  for (const auto& parameter : cursor) {
-    parameters_.push_back(*parameter);
-  }
+  std::vector<Tensor> tensors(cursor.size());
+  cursor.map(tensors.begin(), [](const Tensor& tensor) { return tensor; });
+  add_parameters(tensors);
 }
 
 void OptimizerBase::zero_grad() {
