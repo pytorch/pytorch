@@ -14,6 +14,9 @@ template <typename scalar_t, bool LogSoftMax>
 void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
+  if (input.numel() == 0) {
+    return;
+  }
   int64_t inner_size = 1;
   for (int64_t i = 0; i < dim; ++i)
     outer_size *= input.size(i);
