@@ -3,7 +3,7 @@ import sys
 import ast
 import inspect
 import torch
-from torch._C import DynamicType, TupleType
+from torch._C import DynamicType, TupleType, FunctionSchema, Argument
 from textwrap import dedent
 
 
@@ -90,6 +90,20 @@ def flatten_return_type(type):
         return [type]
 
 
+def _pack_types_into_args(types):
+    argument_objects = []
+    for type in types:
+        # TODO: name?
+        argument_objects.append(torch._C.Argument('', type, None, None))
+    return argument_objects
+
+
+def _types_to_function_schema(arg_types, ret_types):
+    # TODO: get function name
+    return torch._C.FunctionSchema('', _pack_types_into_args(arg_types),
+                                   _pack_types_into_args(ret_types), False, False)
+
+
 def parse_type_line(type_line):
     """Parses a type annotation specified as a comment.
 
@@ -112,7 +126,10 @@ def parse_type_line(type_line):
     except SyntaxError:
         raise RuntimeError("Failed to parse the return type of a type annotation")
 
-    return [ann_to_type(ann) for ann in arg_ann], flatten_return_type(ann_to_type(ret_ann))
+    arg_types = [ann_to_type(ann) for ann in arg_ann]
+    ret_types = flatten_return_type(ann_to_type(ret_ann))
+
+    return _types_to_function_schema(arg_types, ret_types)
 
 
 def default_signature(fn, source, _n_arguments, _n_binders):
@@ -146,7 +163,7 @@ def default_signature(fn, source, _n_arguments, _n_binders):
     else:
         arg_types = [DynamicType()] * _n_arguments
 
-    return arg_types, [DynamicType() for _ in range(_n_binders)]
+    return _types_to_function_schema(arg_types, [DynamicType() for _ in range(_n_binders)])
 
 
 _def_end_regex = re.compile(r'.*\)\s*:.*')
@@ -202,10 +219,10 @@ def try_real_annotations(fn):
         # sig.empty is really annoying so convert it to None
         return ann if ann is not sig.empty else None
 
-    param_types = [ann_to_type(as_ann(p.annotation))
+    arg_types = [ann_to_type(as_ann(p.annotation))
                    for p in sig.parameters.values()]
-    return_type = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
-    return param_types, return_type
+    return_types = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
+    return _types_to_function_schema(arg_types, return_types)
 
 
 def ann_to_type(ann):

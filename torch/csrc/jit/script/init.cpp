@@ -8,6 +8,8 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/function_schema.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -47,25 +49,26 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
   PythonValue(py::object self)
   : self(std::move(self)) {}
 
-  std::pair<std::vector<TypePtr>, std::vector<TypePtr>> getFunctionType(size_t n_args, size_t n_binders) {
+  FunctionSchema getFunctionSchema(size_t n_args, size_t n_binders) {
     auto annotations = py::module::import("torch.jit.annotations");
-    return py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(annotations.attr("get_signature")(self, n_args, n_binders));
+    return py::cast<FunctionSchema>(annotations.attr("get_signature")(self, n_args, n_binders));
   }
 
   // call it like a function, e.g. `outputs = this(inputs)`
   virtual std::shared_ptr<SugaredValue> call(SourceRange loc, Method & m, at::ArrayRef<NamedValue> inputs_, at::ArrayRef<NamedValue> attributes, size_t n_binders) override {
     auto inputs = toValues(inputs_);
-    std::vector<TypePtr> arg_types, ret_types;
-    std::tie(arg_types, ret_types) = getFunctionType(inputs.size(), n_binders);
+    FunctionSchema schema = getFunctionSchema(inputs.size(), n_binders);
+    const std::vector<Argument> &arg_types = schema.arguments;
+    const std::vector<Argument> &ret_types = schema.returns;
 
     if (arg_types.size() != inputs.size())
       throw ErrorReport(loc) << "calling a Python function with an incorrect number "
                              << "of arguments: expected " << arg_types.size() << ", but got "
                              << inputs.size();
     for (size_t i = 0; i < arg_types.size(); ++i) {
-      if (!inputs[i]->type()->isSubtypeOf(*arg_types[i]))
+      if (!inputs[i]->type()->isSubtypeOf(*arg_types[i].type))
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
-                               << arg_types[i]->str() << ", but got " << inputs[i]->type()->str();
+                               << arg_types[i].type->str() << ", but got " << inputs[i]->type()->str();
     }
     // We have to do this check here, because implementation of this function is tightly
     // coupled with the impl for PythonOp in the interpreter. Right now it assumes that
@@ -112,7 +115,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
     // to do it.
     for (auto & ret_type_elem : ret_types) {
-      if (!ret_type_elem->isSubtypeOf(*DynamicType::get())) {
+      if (!ret_type_elem.type->isSubtypeOf(*DynamicType::get())) {
         throw ErrorReport(loc) << "Python functions can currently only return Tensors";
       }
     }

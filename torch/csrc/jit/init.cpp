@@ -26,6 +26,7 @@
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/function_schema.h"
 
 namespace torch  { namespace jit {
 
@@ -202,6 +203,12 @@ void initJITBindings(PyObject *module) {
           return tuple;
         }
       });
+
+  py::class_<FunctionSchema>(m, "FunctionSchema")
+    .def(py::init<std::string, std::vector<Argument>, std::vector<Argument>, bool, bool>());
+
+  py::class_<Argument>(m, "Argument")
+    .def(py::init<std::string, TypePtr, at::optional<int32_t>, at::optional<at::Tensor>>());
 
   initPythonIRBindings(module);
   tracer::initPythonTracerBindings(module);

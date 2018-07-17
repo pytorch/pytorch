@@ -339,15 +339,11 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def _script_graph(fn, _frames_up=0):
+def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
     ast = get_jit_ast(fn)
-    arg_types, ret_types = annotations.get_signature(fn, 0, 0)
-    return _jit_script_compile(ast, rcb)
-
-
-def script(fn, optimize=True, _frames_up=0):
-    graph = _script_graph(fn, _frames_up=_frames_up + 1)
+    schema = annotations.get_signature(fn, 0, 0)
+    graph = _jit_script_compile(ast, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
     # Forward docstrings
