@@ -329,7 +329,14 @@ THC_API accreal
 THCTensor_(meanall)(THCState *state, THCTensor *self)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  return THCTensor_(sumall)(state, self)/THCTensor_(nElement)(state, self);
+  auto nElement = THCTensor_(nElement)(state, self);
+  // this just matches the native function implementation; this can go away when we can call
+  // ATen functions directly from here.
+  if (nElement != 0 || !std::numeric_limits<accreal>::has_quiet_NaN) {
+    return THCTensor_(sumall)(state, self) / nElement;
+  } else {
+    return std::numeric_limits<accreal>::has_quiet_NaN;
+  }
 }
 
 THC_API real
