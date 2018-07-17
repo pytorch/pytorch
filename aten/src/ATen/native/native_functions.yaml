@@ -718,6 +718,11 @@
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
+- func: inverse(Tensor self) -> Tensor
+
+- func: inverse_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
