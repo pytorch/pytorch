@@ -338,7 +338,7 @@ def add_dim3(kernel_string, cuda_kernel):
     return cuda_kernel
 
 
-def processKernelLaunches(string, stats, hipify_caffe2):
+def processKernelLaunches(string, stats):
     """ Replace the CUDA style Kernel launches with the HIP style kernel launches."""
     # Concat the namespace with the kernel names. (Find cleaner way of doing this later).
     string = re.sub(r'([ ]+)(detail?)::[ ]+\\\n[ ]+', lambda inp: "{0}{1}::".format(inp.group(1), inp.group(2)), string)
@@ -437,11 +437,8 @@ def processKernelLaunches(string, stats, hipify_caffe2):
 
         # Extract cuda kernel
         cuda_kernel = string[params[0]["start"]:parenthesis + 1]
-        cuda_kernel_dim3 = cuda_kernel
-
-        if hipify_caffe2:
-            kernel_string = string[kernel['start']:kernel['end']]
-            cuda_kernel_dim3 = add_dim3(kernel_string, cuda_kernel_dim3)
+        kernel_string = string[kernel['start']:kernel['end']]
+        cuda_kernel_dim3 = add_dim3(kernel_string, cuda_kernel)
         # Keep number of kernel launch params consistent (grid dims, group dims, stream, dynamic shared size)
         num_klp = len(extract_arguments(0, kernel["group"].replace("<<<", "(").replace(">>>", ")")))
 
@@ -701,7 +698,7 @@ def preprocessor(filepath, stats, hipify_caffe2):
                         output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
 
         # Perform Kernel Launch Replacements
-        output_source = processKernelLaunches(output_source, stats, hipify_caffe2)
+        output_source = processKernelLaunches(output_source, stats)
 
         # Disable asserts
         if not filepath.endswith("THCGeneral.h.in"):
