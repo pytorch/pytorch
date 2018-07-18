@@ -72,6 +72,9 @@ For example:
 
 You do not need to repeatedly install after modifying python files.
 
+In case you want to reinstall, make sure that you uninstall pytorch first by running `pip uninstall torch`
+and `python setup.py clean`. Then you can install in `build develop` mode again.
+
 ## Unit testing
 
 PyTorch's testing is located under `test/`. Run the entire test suite with
