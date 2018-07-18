@@ -1,7 +1,7 @@
 #pragma once
 
 #include <Python.h>
-#include <TH/THStorage.hpp>
+#include <TH/THStorageFunctions.hpp>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/auto_gil.h>
 
