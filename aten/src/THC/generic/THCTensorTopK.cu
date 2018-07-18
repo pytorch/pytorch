@@ -149,7 +149,7 @@ THC_API void THCTensor_(topk)(THCState* state,
       THCudaLongTensor* sortedTopKIndices = THCudaLongTensor_new(state);
 
       THCudaLongTensor_resizeAs(state, sortedTopKIndices, indices);
-      THCudaLongTensor_gather(state, sortedTopKIndices, indices, dim, sortedIndices);
+      THCudaLongTensor__s_gather(state, sortedTopKIndices, indices, dim, sortedIndices);
 
       THCTensor_(freeCopyTo)(state, sortedTopK, topK);
       THCudaLongTensor_freeCopyTo(state, sortedTopKIndices, indices);

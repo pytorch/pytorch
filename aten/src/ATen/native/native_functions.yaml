@@ -1926,6 +1926,4 @@
     - function
 
 - func: gather_out(Tensor result, Tensor self, int64_t dim, IndexTensor index) -> Tensor
-  variants:
-    - method
-    - function
+  variants: function

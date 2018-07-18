@@ -16,7 +16,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
   auto dimsB = indices.size();
   ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
   std::vector<int64_t> expandedSizesB(ndim);
-  int64_t expandedSizeA;
+  int64_t expandedSizeA = -1;
 
   for (long i = ndim - 1; i >= 0; --i) {
     long offset = ndim - 1 - i;
