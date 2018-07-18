@@ -308,7 +308,7 @@ def add_dim3(kernel_string, cuda_kernel):
     '''adds dim3() to the second and third arguments in the kernel launch'''
     count = 0
     closure = 0
-    kernel_string = kernel_string.replace("<<<", "")
+    kernel_string = kernel_string.replace("<<<", "").replace(">>>", "")
     arg_locs = [{} for _ in range(2)]
     arg_locs[count]['start'] = 0
     for ind, c in enumerate(kernel_string):
@@ -318,7 +318,7 @@ def add_dim3(kernel_string, cuda_kernel):
             closure += 1
         elif c == ")":
             closure -= 1
-        elif c == "," and closure == 0:
+        elif (c == "," or ind == len(kernel_string) - 1) and closure == 0:
             arg_locs[count]['end'] = ind
             count += 1
             if count < 2:
