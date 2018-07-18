@@ -93,12 +93,6 @@ struct AT_API CUDAHooksInterface {
     AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
   }
 
-#ifndef __HIP_PLATFORM_HCC__
-  virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
-    AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
-  }
-#endif
-
   virtual cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device)
       const {
     AT_ERROR("Cannot getCurrentCUDAStream() without ATen_cuda library. ", CUDA_HELP);
@@ -126,6 +120,10 @@ struct AT_API CUDAHooksInterface {
   }
 
   virtual bool compiledWithCuDNN() const {
+    return false;
+  }
+
+  virtual bool compiledWithMIOpen() const {
     return false;
   }
 
@@ -161,6 +159,12 @@ struct AT_API CUDAHooksInterface {
   virtual int getNumGPUs() const {
     return 0;
   }
+
+#ifndef __HIP_PLATFORM_HCC__
+  virtual cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const {
+    AT_ERROR("Cannot getCurrentCUDASparseHandle() without ATen_cuda library. ", CUDA_HELP);
+  }
+#endif
 };
 
 // NB: dummy argument to suppress "ISO C++11 requires at least one argument

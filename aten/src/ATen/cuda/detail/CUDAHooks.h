@@ -15,9 +15,6 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   bool hasCUDA() const override;
   bool hasCuDNN() const override;
   cudaStream_t getCurrentCUDAStream(THCState*) const override;
-#ifndef __HIP_PLATFORM_HCC__
-  cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const override;
-#endif
   cudaStream_t getCurrentCUDAStreamOnDevice(THCState*, int64_t device) const override;
   struct cudaDeviceProp* getCurrentDeviceProperties(THCState*) const override;
   struct cudaDeviceProp* getDeviceProperties(THCState*, int device) const override;
@@ -25,6 +22,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   Allocator* getPinnedMemoryAllocator() const override;
   void registerCUDATypes(Context*) const override;
   bool compiledWithCuDNN() const override;
+  bool compiledWithMIOpen() const override;
   bool supportsDilatedConvolutionWithCuDNN() const override;
   long versionCuDNN() const override;
   double batchnormMinEpsilonCuDNN() const override;
@@ -33,6 +31,9 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   int64_t cuFFTGetPlanCacheSize() const override;
   void cuFFTClearPlanCache() const override;
   int getNumGPUs() const override;
+#ifndef __HIP_PLATFORM_HCC__
+  cusparseHandle_t getCurrentCUDASparseHandle(THCState*) const override;
+#endif
 };
 
 }}} // at::cuda::detail
