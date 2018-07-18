@@ -6189,6 +6189,120 @@ class TestTorch(TestCase):
             z = torch.randn((2, 3, 4), device=device)  # non-empty
             self.assertEqual((0, 3, 4), z.index_select(0, ind_empty).shape)
 
+    @skipIfNoZeroSize
+    def test_blas_empty(self):
+        # FIXME: enable CUDA tests.
+        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+
+            def fn(torchfn, *args):
+                return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
+                                      for shape in args))
+
+            # mm, addmm
+            self.assertEqual((0, 0), fn(torch.mm, (0, 0), (0, 0)).shape)
+            self.assertEqual((0, 5), fn(torch.mm, (0, 0), (0, 5)).shape)
+            self.assertEqual((5, 0), fn(torch.mm, (5, 0), (0, 0)).shape)
+            self.assertEqual((3, 0), fn(torch.mm, (3, 2), (2, 0)).shape)
+            self.assertEqual(torch.zeros((5, 6), device=device), fn(torch.mm, (5, 0), (0, 6)))
+
+            self.assertEqual((0, 0), fn(torch.addmm, (0, 0), (0, 0), (0, 0)).shape)
+            self.assertEqual((5, 6), fn(torch.addmm, (5, 6), (5, 0), (0, 6)).shape)
+
+            # mv, addmv
+            self.assertEqual((0,), fn(torch.mv, (0, 0), (0,)).shape)
+            self.assertEqual((0,), fn(torch.mv, (0, 2), (2,)).shape)
+            self.assertEqual(torch.zeros((3,), device=device), fn(torch.mv, (3, 0), (0,)))
+
+            self.assertEqual((0,), fn(torch.addmv, (0,), (0, 0), (0,)).shape)
+            self.assertEqual((3,), fn(torch.addmv, (3,), (3, 0), (0,)).shape)
+
+            # ger, addr
+            self.assertEqual((0, 0), fn(torch.ger, (0,), (0,)).shape)
+            self.assertEqual((5, 0), fn(torch.ger, (5,), (0,)).shape)
+            self.assertEqual((0, 4), fn(torch.ger, (0,), (4,)).shape)
+
+            self.assertEqual((0, 0), fn(torch.addr, (0, 0), (0,), (0,)).shape)
+            self.assertEqual((5, 0), fn(torch.addr, (5, 0), (5,), (0,)).shape)
+            self.assertEqual((0, 4), fn(torch.addr, (0, 4), (0,), (4,)).shape)
+
+            # bmm, baddbmm
+            self.assertEqual((0, 0, 0), fn(torch.bmm, (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((3, 0, 5), fn(torch.bmm, (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((0, 5, 6), fn(torch.bmm, (0, 5, 0), (0, 0, 6)).shape)
+            self.assertEqual(torch.zeros((3, 5, 6), device=device), fn(torch.bmm, (3, 5, 0), (3, 0, 6)))
+
+            self.assertEqual((0, 0, 0), fn(torch.baddbmm, (0, 0, 0), (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((3, 0, 5), fn(torch.baddbmm, (3, 0, 5), (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((0, 5, 6), fn(torch.baddbmm, (0, 5, 6), (0, 5, 0), (0, 0, 6)).shape)
+            self.assertEqual((3, 5, 6), fn(torch.baddbmm, (3, 5, 6), (3, 5, 0), (3, 0, 6)).shape)
+
+            # addbmm
+            self.assertEqual((0, 0), fn(torch.addbmm, (0, 0), (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((0, 5), fn(torch.addbmm, (0, 5), (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((5, 6), fn(torch.addbmm, (5, 6), (0, 5, 0), (0, 0, 6)).shape)
+
+            # matmul
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.matmul, (0,), (0,)))
+            self.assertEqual((0, 0), fn(torch.matmul, (0, 0), (0, 0)).shape)
+            self.assertEqual((0, 0, 0), fn(torch.matmul, (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((5, 0, 0), fn(torch.matmul, (5, 0, 0), (5, 0, 0)).shape)
+            self.assertEqual(torch.zeros((5, 3, 4), device=device), fn(torch.matmul, (5, 3, 0), (5, 0, 4)))
+
+            # dot
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
+
+    @skipIfNoZeroSize
+    @skipIfNoLapack
+    def test_lapack_empty(self):
+        # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
+        # The LAPACK functions themselves generally do NOT work with zero sized dimensions, although
+        # numpy/sci often has a direct wrapper (e.g. lu_factor) and a wrapper that "does the right thing"
+        # (e.g. lu).  We often name our functions identically to the lapack function, so it will take work
+        # to name / migrate-to better wrappers.
+
+        # FIXME: enable CUDA tests.
+        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+
+            def fn(torchfn, *args):
+                return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
+                                      for shape in args))
+
+            # inverse, pinverse
+            self.assertEqual((0, 0), fn(torch.inverse, (0, 0)).shape)
+            self.assertEqual((5, 0), fn(torch.pinverse, (0, 5)).shape)
+            self.assertEqual((0, 5), fn(torch.pinverse, (5, 0)).shape)
+            self.assertEqual((0, 0), fn(torch.pinverse, (0, 0)).shape)
+
+            # svd
+            self.assertRaises(RuntimeError, lambda: fn(torch.svd, (0, 0)))
+
+            # det, logdet, slogdet
+            self.assertEqual(torch.tensor(1., device=device), fn(torch.det, (0, 0)))
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.logdet, (0, 0)))
+            self.assertEqual((torch.tensor(1., device=device), torch.tensor(0., device=device)),
+                             fn(torch.slogdet, (0, 0)))
+
+            # eig, symeig
+            evalues, evectors = fn(torch.eig, (0, 0), True)
+            self.assertEqual([(0, 2), (0, 0)], [evalues.shape, evectors.shape])
+            evalues, evectors = fn(torch.symeig, (0, 0), True)
+            self.assertEqual([(0,), (0, 0)], [evalues.shape, evectors.shape])
+
+            # qr, gels
+            self.assertRaises(RuntimeError, lambda: torch.qr(torch.randn(0, 0)))
+            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0, 0), torch.randn(0, 0)))
+            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0,), torch.randn(0, 0)))
+
+            # btrifact
+            A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
+
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)
         tensor2 = torch.rand(5)

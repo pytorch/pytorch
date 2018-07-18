@@ -25,7 +25,8 @@ SKIP_PYTHON_BINDINGS = [
     'index',
     '_indexCopy_', 'max_values', 'min_values', 'argmax', 'argmin',
     '_cumsum.*', '_cumprod.*', '_sum.*', '_prod.*', '_th_.*',
-    'arange.*', 'range.*', '_gesv.*', 'slice', 'max_pool1d', 'max_pool2d', 'max_pool3d'
+    'arange.*', 'range.*', '_gesv.*', '_getri.*', 'slice',
+    'max_pool1d', 'max_pool2d', 'max_pool3d'
 ]
 
 PY_VARIABLE_METHOD_VARARGS = CodeTemplate("""\
