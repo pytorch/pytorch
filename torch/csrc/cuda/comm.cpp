@@ -2,12 +2,11 @@
 
 #include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
+#include <torch/csrc/utils/auto_stream.h>
 
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/nccl.h>
 #endif
-
-#include <THC/THC.h>
 
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
@@ -18,6 +17,18 @@
 namespace torch { namespace cuda {
 
 using namespace at;
+namespace {
+CUDAStream stream_or_default(
+    const at::optional<std::vector<at::CUDAStream>>& streams,
+    size_t stream_index,
+    size_t device_index) {
+  if (streams) {
+    return streams.value()[stream_index];
+  } else {
+    return at::globalContext().getCurrentCUDAStreamOnDevice(device_index);
+  }
+}
+} // namespace
 
 // Some operations can be performed more efficiently if we're handling tensors
 // of a single type only. Adding this logic directly in the loop makes it a bit
@@ -121,7 +132,7 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const at::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const at::optional<std::vector<THCStream*>>& streams) {
+    const at::optional<std::vector<at::CUDAStream>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
@@ -174,7 +185,7 @@ at::Tensor gather(
   for (const auto& tensor : tensors) {
     AT_CHECK(
         tensor.type().is_cuda(), "Gather expects all inputs to have CUDA type");
-    AT_CHECK(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       AT_CHECK(

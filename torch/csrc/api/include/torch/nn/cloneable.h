@@ -43,7 +43,8 @@ class Cloneable : public Module {
         "Are you sure you called register_parameter() inside reset() "
         "and not the constructor?");
     for (const auto& parameter : parameters_) {
-      copy->parameters_[parameter.key].data().copy_(parameter->data());
+      copy->parameters_[parameter.key].data().copy_(
+          parameter->data(), /*non_blocking=*/true);
     }
     AT_CHECK(
         copy->buffers_.size() == buffers_.size(),
@@ -52,7 +53,8 @@ class Cloneable : public Module {
         "Are you sure you called register_buffer() inside reset() "
         "and not the constructor?");
     for (const auto& buffer : buffers_) {
-      copy->buffers_[buffer.key].data().copy_(buffer->data());
+      copy->buffers_[buffer.key].data().copy_(
+          buffer->data(), /*non_blocking=*/true);
     }
     AT_CHECK(
         copy->children_.size() == children_.size(),
