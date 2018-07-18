@@ -1909,6 +1909,12 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: torch.device('other'))
         self.assertRaises(TypeError, lambda: torch.device('other:0'))
 
+        device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
+        device_hash_set = set()
+        for device in list(device_set):
+            device_hash_set.add(hash(torch.device(device)))
+        self.assertEqual(len(device_set), len(device_hash_set))
+
     def test_tensor_device(self):
         def assertEqual(device_str, fn):
             self.assertEqual(torch.device(device_str), fn().device)
