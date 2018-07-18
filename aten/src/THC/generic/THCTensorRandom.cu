@@ -490,11 +490,11 @@ THC_API void THCTensor_(clampedRandom)(THCState* state, THCTensor *self_, int64_
 #if defined(THC_REAL_IS_LONG) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_FLOAT)
   if (range > 1ULL << 32) {
     generate_random_64<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        gen->state.gen_states, size, data, min_val, range);
+        gen->state.gen_states, static_cast<int>(size), data, min_val, range);
   } else {
 #endif
     generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-        gen->state.gen_states, size, data, min_val, range);
+        gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(min_val), static_cast<uint32_t>(range));
 #if defined(THC_REAL_IS_LONG) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_FLOAT)
   }
 #endif
@@ -520,19 +520,19 @@ THC_API void THCTensor_(random)(THCState* state, THCTensor *self_)
 
 #if defined(THC_REAL_IS_HALF)
   generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, 0UL, (1UL << HLF_MANT_DIG) + 1);
+      gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(0UL), static_cast<uint32_t>((1UL << HLF_MANT_DIG) + 1));
 #elif defined(THC_REAL_IS_FLOAT)
   generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, 0UL, (1UL << FLT_MANT_DIG) + 1);
+      gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(0UL), static_cast<uint32_t>((1UL << FLT_MANT_DIG) + 1));
 #elif defined(THC_REAL_IS_DOUBLE)
   generate_random_64<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, 0ULL, (1ULL << DBL_MANT_DIG) + 1);
+      gen->state.gen_states, static_cast<int>(size), data, static_cast<int64_t>(0ULL), static_cast<uint64_t>((1ULL << DBL_MANT_DIG) + 1));
 #elif defined(THC_REAL_IS_LONG)
   generate_random_64<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, 0ULL, static_cast<uint64_t>(std::numeric_limits<real>::max()) + 1);
+      gen->state.gen_states, static_cast<int>(size), data, static_cast<int64_t>(0ULL), static_cast<uint64_t>(std::numeric_limits<real>::max()) + 1);
 #else
   generate_random<<<NUM_BLOCKS, BLOCK_SIZE, 0, THCState_getCurrentStream(state)>>>(
-      gen->state.gen_states, size, data, 0UL, static_cast<uint32_t>(std::numeric_limits<real>::max()) + 1);
+      gen->state.gen_states, static_cast<int>(size), data, static_cast<int32_t>(0UL), static_cast<uint32_t>(std::numeric_limits<real>::max()) + 1);
 #endif
 
   THCTensor_(freeCopyTo)(state, self, self_);
