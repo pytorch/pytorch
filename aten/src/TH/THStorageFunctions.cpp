@@ -89,11 +89,6 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   return copy;
 }
 
-ptrdiff_t THStorage_size(const THStorage *self)
-{
-  return self->size;
-}
-
 void THStorage_setFlag(THStorage *storage, const char flag)
 {
   storage->flag |= flag;
@@ -144,17 +139,4 @@ void THStorage_resize(THStorage *storage, ptrdiff_t size)
   } else {
     THError("Trying to resize storage that is not resizable");
   }
-}
-
-void THStorage_swap(THStorage *storage1, THStorage *storage2)
-{
-#define SWAP(val) { std::swap(storage1->val, storage2->val); }
-    SWAP(scalar_type);
-    SWAP(data_ptr);
-    SWAP(size);
-    // don't swap refcount!
-    SWAP(flag);
-    SWAP(allocator);
-    SWAP(finalizer);
-#undef SWAP
 }

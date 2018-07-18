@@ -9,7 +9,7 @@ real* THCStorage_(data)(THCState *state, const THCStorage *self)
 
 ptrdiff_t THCStorage_(size)(THCState *state, const THCStorage *self)
 {
-  return THStorage_size(self);
+  return self->size;
 }
 
 int THCStorage_(elementSize)(THCState *state)

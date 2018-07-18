@@ -11,7 +11,7 @@ real* THStorage_(data)(const THStorage *self)
 
 ptrdiff_t THStorage_(size)(const THStorage *self)
 {
-  return THStorage_size(self);
+  return self->size;
 }
 
 size_t THStorage_(elementSize)()
@@ -167,7 +167,15 @@ real THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 
 void THStorage_(swap)(THStorage *storage1, THStorage *storage2)
 {
-  THStorage_swap(storage1, storage2);
+#define SWAP(val) { std::swap(storage1->val, storage2->val); }
+    SWAP(scalar_type);
+    SWAP(data_ptr);
+    SWAP(size);
+    // don't swap refcount!
+    SWAP(flag);
+    SWAP(allocator);
+    SWAP(finalizer);
+#undef SWAP
 }
 
 #endif
