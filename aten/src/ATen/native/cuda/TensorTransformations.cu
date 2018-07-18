@@ -104,7 +104,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   // it is used to compute indices for each element in non-contiguous tensor
   Tensor stride_contiguous = at::zeros({total_dims}, kLong);
   int64_t* stride_contiguous_d = stride_contiguous.data<int64_t>();
-  for (int64_t i = total_dims - 1; i >=0; i--) {
+  for (int64_t i = total_dims - 1; i >= 0; i--) {
     if (i == total_dims - 1) {
       stride_contiguous_d[i] = 1;
     } else {
