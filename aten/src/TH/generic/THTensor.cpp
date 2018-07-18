@@ -229,7 +229,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
   ptrdiff_t numel = THTensor_(nElement)(tensor);
   THTensor *self = THTensor_(new)();
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
-  auto stride = THTensor_compute_stride(tensor->sizes(),
+  auto stride = THTensor_compute_stride(at::IntList(THTensor_getSizePtr(tensor), tensor->dim()),
                                         at::IntList(tensor->stride, tensor->dim()),
                                         at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
   THArgCheck(stride.has_value(), 2, "view size is "
