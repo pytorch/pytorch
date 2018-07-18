@@ -44,7 +44,7 @@ Tensor mvlgamma(const Tensor& self, int64_t p) {
   AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
            "Condition for computing multivariate log-gamma not met");
   AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
-  Tensor args = native::arange(-p / 2. + 0.5, 0.5, step=0.5, self.options());
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
 }
@@ -55,7 +55,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
   AT_CHECK((self > 0.5 * (p - 1.)).all().toCByte(),
            "Condition for computing multivariate log-gamma not met");
   AT_CHECK(p >= 1, "p has to be greater than or equal to 1");
-  Tensor args = native::arange(-p / 2. + 0.5, 0.5, step=0.5, self.options());
+  Tensor args = native::arange(-p / 2. + 0.5, 0.5, 0.5, self.options());
   args = args.add(self.unsqueeze(-1));
   return self.copy_(args.lgamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.));
 }
