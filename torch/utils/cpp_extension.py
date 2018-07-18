@@ -303,6 +303,7 @@ def CppExtension(name, sources, *args, **kwargs):
 
         libraries = kwargs.get('libraries', [])
         libraries.append('caffe2')
+        libraries.append('torch')
         libraries.append('_C')
         kwargs['libraries'] = libraries
 
@@ -346,6 +347,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('cudart')
     if sys.platform == 'win32':
         libraries.append('caffe2')
+        libraries.append('torch')
         libraries.append('caffe2_gpu')
         libraries.append('_C')
     kwargs['libraries'] = libraries
@@ -692,6 +694,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         lib_path = os.path.join(torch_path, 'lib')
 
         extra_ldflags.append('caffe2.lib')
+        extra_ldflags.append('torch.lib')
         if with_cuda:
             extra_ldflags.append('caffe2_gpu.lib')
         extra_ldflags.append('_C.lib')
