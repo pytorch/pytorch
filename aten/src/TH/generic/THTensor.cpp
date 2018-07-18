@@ -873,4 +873,11 @@ THDescBuff THTensor_(desc)(const THTensor *tensor) {
   return buf;
 }
 
+THDescBuff THTensor_(sizeDesc)(const THTensor *tensor) {
+  THLongStorage *size = THTensor_(newSizeOf)((THTensor*)tensor);
+  THDescBuff buf = THLongStorage_sizeDesc(size);
+  THLongStorage_free(size);
+  return buf;
+}
+
 #endif
