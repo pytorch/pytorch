@@ -426,8 +426,8 @@ void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dim
   if(!src)
     src = self;
 
-  THArgCheck( (dimension1 >= 0) && (dimension1 < src->_dim()), 1, "out of range");
-  THArgCheck( (dimension2 >= 0) && (dimension2 < src->_dim()), 2, "out of range");
+  THArgCheck( (dimension1 >= 0) && (dimension1 < src->dim()), 1, "out of range");
+  THArgCheck( (dimension2 >= 0) && (dimension2 < src->dim()), 2, "out of range");
 
   THTensor_(set)(self, src);
 
