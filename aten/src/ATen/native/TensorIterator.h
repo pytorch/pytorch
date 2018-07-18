@@ -9,7 +9,7 @@
 // arithmetic, comparisions, and trigonometric functions. It handles
 // broadcasting and type conversions of operands.
 //
-// This inspired by NumPy's Array Iterator API (NpyIter).
+// This is inspired by NumPy's Array Iterator API (NpyIter).
 //
 // The files Loops.h and Loops.cuh provide functions to build kernels that
 // use TensorIterator.
@@ -33,8 +33,8 @@
 // Note [Result type computation]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 // TensorIterator handles limited mixed-type operations. The result type is
-// computed using promoteTypes on the types of the operands with the following
-// precedence:
+// computed using promoteTypes on the scalar types of the operands with the
+// following precedence:
 //
 // 1) Tensors with dim 1 or higher
 // 2) Tensors with dim 0 that aren't wrapped numbers (e.g. `tensor(5)`)
@@ -43,6 +43,7 @@
 // So if there are any tensors of dim 1 or higher, then 0-dim tensors do not
 // affect the result type. This behavior was chosen to preserve backwards
 // compatibility and is *likely to change* in the near future.
+// (See https://github.com/pytorch/pytorch/issues/9515)
 //
 // Note that TensorIterator currently supports type conversions on 0-dim
 // tensors. Other type conversions will raise an exception.
@@ -223,7 +224,7 @@ struct SplitUntil32Bit {
     // needed for C++11 range-based for loop
     bool operator!=(const iterator& other) const { return !(*this == other); }
 
-    /// stack of TensorIterator's to be split
+    /// stack of TensorIterators to be split
     std::vector<std::unique_ptr<TensorIterator>> vec;
   };
 
