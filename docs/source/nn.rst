@@ -604,6 +604,12 @@ Loss functions
 .. autoclass:: CrossEntropyLoss
     :members:
 
+:hidden:`CTCLoss`
+~~~~~~~~~~~~~~~~~
+
+.. autoclass:: CTCLoss
+    :members:
+
 :hidden:`NLLLoss`
 ~~~~~~~~~~~~~~~~~
 
@@ -1174,6 +1180,11 @@ Loss functions
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: cross_entropy
+
+:hidden:`ctc_loss`
+~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: ctc_loss
 
 :hidden:`hinge_embedding_loss`
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
