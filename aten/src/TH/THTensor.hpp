@@ -89,11 +89,16 @@ inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
 }
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
+  tensor->dim_ = ndim;
+  // NB: This is *truly* a resize; calling code (e.g., squeeze)
+  // assumes that old values are preserved
   tensor->size.resize(ndim);
   tensor->stride.resize(ndim);
 }
 
 inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
+  AT_ASSERT(new_size.size() == new_stride.size());
+  tensor->dim_ = new_size.size();
   tensor->size = std::move(new_size);
   tensor->stride = std::move(new_stride);
 }
