@@ -1,40 +1,16 @@
 import torch
 import torch.nn.functional as F
 from torch.distributions import constraints
-from torch.distributions.constraints import Constraint
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import broadcast_all, probs_to_logits, lazy_property, logits_to_probs
 
 
-class _GreaterThanEq(Constraint):
-    """
-    Constrain to a real half line `[lower_bound, inf)`.
-    """
-    def __init__(self, lower_bound):
-        self.lower_bound = lower_bound
-
-    def check(self, value):
-        return self.lower_bound <= value
-
-
-class _HalfOpenInterval(Constraint):
-    """
-    Constrain to a real interval `[lower_bound, upper_bound)`.
-    """
-    def __init__(self, lower_bound, upper_bound):
-        self.lower_bound = lower_bound
-        self.upper_bound = upper_bound
-
-    def check(self, value):
-        return (self.lower_bound <= value) & (value < self.upper_bound)
-
-
 class NegativeBinomial(Distribution):
     r"""
-        Creates a Negative Binomial distribution, i.e. distribution
-        of the number of independent identical Bernoulli trials
-        needed before `total_count` failures are achieved. The probability
-        of success of each Bernoulli trial is `probs`.
+    Creates a Negative Binomial distribution, i.e. distribution
+    of the number of independent identical Bernoulli trials
+    needed before `total_count` failures are achieved. The probability
+    of success of each Bernoulli trial is `probs`.
 
     Args:
         total_count (float or Tensor): non-negative number of negative Bernoulli
@@ -43,8 +19,8 @@ class NegativeBinomial(Distribution):
         probs (Tensor): Event probabilities of success in the open interval (0, 1)
         logits (Tensor): Event log-odds for probabilities of success
     """
-    arg_constraints = {'total_count': _GreaterThanEq(0),
-                       'probs': _HalfOpenInterval(0., 1.)}
+    arg_constraints = {'total_count': constraints.greater_than_eq(0),
+                       'probs': constraints.half_open_interval(0., 1.)}
     support = constraints.nonnegative_integer
 
     def __init__(self, total_count, probs=None, logits=None, validate_args=None):
@@ -84,10 +60,14 @@ class NegativeBinomial(Distribution):
     def param_shape(self):
         return self._param.size()
 
+    @lazy_property
+    def _gamma(self):
+        return torch.distributions.Gamma(concentration=self.total_count,
+                                         rate=(1. - self.probs) / self.probs)
+
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
-            rate = torch.distributions.Gamma(concentration=self.total_count,
-                                             rate=(1 - self.probs) / self.probs).sample(sample_shape=sample_shape)
+            rate = self._gamma.sample(sample_shape=sample_shape)
             return torch.poisson(rate)
 
     def log_prob(self, value):
