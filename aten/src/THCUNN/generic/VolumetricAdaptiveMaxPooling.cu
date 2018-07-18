@@ -34,10 +34,10 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
     isizeH = input->size(2);
     isizeW = input->size(3);
 
-    istrideD = input->stride[0];
-    istrideT = input->stride[1];
-    istrideH = input->stride[2];
-    istrideW = input->stride[3];
+    istrideD = input->stride(0);
+    istrideT = input->stride(1);
+    istrideH = input->stride(2);
+    istrideW = input->stride(3);
 
     THCTensor_(resize4d)(state, output, sizeD, osizeT, osizeH, osizeW);
     THCIndexTensor_(resize4d)(state, indices, sizeD, osizeT, osizeH, osizeW);
@@ -52,10 +52,10 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
     isizeH = input->size(3);
     isizeW = input->size(4);
 
-    istrideD = input->stride[1];
-    istrideT = input->stride[2];
-    istrideH = input->stride[3];
-    istrideW = input->stride[4];
+    istrideD = input->stride(1);
+    istrideT = input->stride(2);
+    istrideH = input->stride(3);
+    istrideW = input->stride(4);
 
     THCTensor_(resize5d)(state, output, sizeB, sizeD, osizeT, osizeH, osizeW);
     THCIndexTensor_(resize5d)(state, indices, sizeB, sizeD, osizeT, osizeH, osizeW);

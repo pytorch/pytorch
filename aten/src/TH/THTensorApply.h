@@ -48,7 +48,7 @@
     TENSOR##_stride = 1; \
     for(TENSOR##_i = TENSOR->_dim()-1; TENSOR##_i >= 0; TENSOR##_i--) { \
       if(TENSOR->size(TENSOR##_i) != 1) { \
-        if(TENSOR->stride[TENSOR##_i] == TENSOR##_size && TENSOR##_i != DIM) \
+        if(TENSOR->stride(TENSOR##_i) == TENSOR##_size && TENSOR##_i != DIM) \
           TENSOR##_size *= TENSOR->size(TENSOR##_i); \
         else{ \
           TENSOR##_contiguous = 0; \
@@ -61,7 +61,7 @@
       TENSOR##_dim = 1; \
       for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; TENSOR##_i--) \
       { \
-        if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size(TENSOR##_i+1) || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
+        if(TENSOR->stride(TENSOR##_i) != TENSOR->stride(TENSOR##_i+1) * TENSOR->size(TENSOR##_i+1) || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
           TENSOR##_dim++; \
       } \
       /* Allocate an array of 3*dim elements, where dim is the number of contiguous sections */ \
@@ -71,7 +71,7 @@
       TH_TENSOR_dim_index = TENSOR##_dim-1; \
       TENSOR##_dimOffset = (DIM == TENSOR->_dim()-1) ? &TENSOR##_i : &TENSOR##_counter[DIM]; \
       TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR->_dim()-1); \
-      TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR->_dim()-1]; \
+      TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride(TENSOR->_dim()-1); \
       /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
       /* storage is given by storage_offset + (i * j), where i is the stride */ \
       /* vector and j is tensor_counter vector. This sets the starting position for the loop. */ \
@@ -79,14 +79,14 @@
         TENSOR##_counter[TENSOR##_i] = 0; \
       } \
       for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; --TENSOR##_i) { \
-        if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size(TENSOR##_i+1) && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
+        if (TENSOR->stride(TENSOR##_i) == TENSOR->stride(TENSOR##_i+1) * TENSOR->size(TENSOR##_i+1) && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
           TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR##_i) * TENSOR##_sizes[TH_TENSOR_dim_index]; \
           if (DIM != TENSOR->_dim()-1 && TENSOR##_i < DIM) \
             TENSOR##_dimOffset--; \
         } else { \
           --TH_TENSOR_dim_index; \
           TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR##_i); \
-          TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR##_i]; \
+          TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride(TENSOR##_i); \
         } \
       } \
       /* Size of the inner most section */ \

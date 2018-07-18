@@ -1976,28 +1976,28 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   // n == 1 || lda >= max(1, m)
   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
 
-  if(mat->stride[0] == 1 && LDA_COND(mat->size(0), mat->size(1), mat->stride[1]))
+  if(mat->stride(0) == 1 && LDA_COND(mat->size(0), mat->size(1), mat->stride(1)))
   {
     THBlas_(gemv)('n', mat->size(0), mat->size(1),
-                  alpha, THTensor_(data)(mat), mat->stride[1],
-                  THTensor_(data)(vec), vec->stride[0],
-                  beta, THTensor_(data)(r_), r_->stride[0]);
+                  alpha, THTensor_(data)(mat), mat->stride(1),
+                  THTensor_(data)(vec), vec->stride(0),
+                  beta, THTensor_(data)(r_), r_->stride(0));
   }
-  else if(mat->stride[1] == 1 && LDA_COND(mat->size(1), mat->size(0), mat->stride[0]))
+  else if(mat->stride(1) == 1 && LDA_COND(mat->size(1), mat->size(0), mat->stride(0)))
   {
     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, THTensor_(data)(mat), mat->stride[0],
-                  THTensor_(data)(vec), vec->stride[0],
-                  beta, THTensor_(data)(r_), r_->stride[0]);
+                  alpha, THTensor_(data)(mat), mat->stride(0),
+                  THTensor_(data)(vec), vec->stride(0),
+                  beta, THTensor_(data)(r_), r_->stride(0));
   }
   else
   {
     THTensor *cmat = THTensor_(newContiguous)(mat);
 
     THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, THTensor_(data)(cmat), cmat->stride[0],
-                  THTensor_(data)(vec), vec->stride[0],
-                  beta, THTensor_(data)(r_), r_->stride[0]);
+                  alpha, THTensor_(data)(cmat), cmat->stride(0),
+                  THTensor_(data)(vec), vec->stride(0),
+                  beta, THTensor_(data)(r_), r_->stride(0));
 
     THTensor_(free)(cmat);
   }
@@ -2085,14 +2085,14 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   #define LDC_COND(M, N, LDC) ((N) == 1 || (LDC) >= THMax(1, M))
 
   /* r_ */
-  if(r_->stride[0] == 1 &&
-     LDC_COND(r_->size(0), r_->size(1), r_->stride[1]))
+  if(r_->stride(0) == 1 &&
+     LDC_COND(r_->size(0), r_->size(1), r_->stride(1)))
   {
     transpose_r = 'n';
     r__ = r_;
   }
-  else if(r_->stride[1] == 1 &&
-          LDC_COND(r_->size(1), r_->size(0), r_->stride[0]))
+  else if(r_->stride(1) == 1 &&
+          LDC_COND(r_->size(1), r_->size(0), r_->stride(0)))
   {
     THTensor *swap = m2;
     m2 = m1;
@@ -2115,18 +2115,18 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   int64_t m = r__->size((transpose_r == 'n' ? 0 : 1));
   int64_t n = r__->size((transpose_r == 'n' ? 1 : 0));
   int64_t k = m1->size((transpose_r == 'n' ? 1 : 0));
-  int64_t ldr__ = r__->stride[(transpose_r == 'n' ? 1 : 0)];
+  int64_t ldr__ = r__->stride((transpose_r == 'n' ? 1 : 0));
 
   /* m1 */
   /* Need ldm1_ >= max(1, (transpose_m1 == 'n' ? m : k)) */
-  if(m1->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
-     m1->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, m))
+  if(m1->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
+     m1->stride((transpose_r == 'n' ? 1 : 0)) >= THMax(1, m))
   {
     transpose_m1 = 'n';
     m1_ = m1;
   }
-  else if(m1->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
-          m1->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, k))
+  else if(m1->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
+          m1->stride((transpose_r == 'n' ? 0 : 1)) >= THMax(1, k))
   {
     transpose_m1 = 't';
     m1_ = m1;
@@ -2140,14 +2140,14 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
   /* m2 */
   /* Need ldm2_ >= max(1, (transpose_m2 == 'n' ? k : n)) */
-  if(m2->stride[(transpose_r == 'n' ? 0 : 1)] == 1 &&
-     m2->stride[(transpose_r == 'n' ? 1 : 0)] >= THMax(1, k))
+  if(m2->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
+     m2->stride((transpose_r == 'n' ? 1 : 0)) >= THMax(1, k))
   {
     transpose_m2 = 'n';
     m2_ = m2;
   }
-  else if(m2->stride[(transpose_r == 'n' ? 1 : 0)] == 1 &&
-          m2->stride[(transpose_r == 'n' ? 0 : 1)] >= THMax(1, n))
+  else if(m2->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
+          m2->stride((transpose_r == 'n' ? 0 : 1)) >= THMax(1, n))
   {
     transpose_m2 = 't';
     m2_ = m2;
@@ -2159,8 +2159,8 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     free_m2 = 1;
   }
 
-  int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride[(transpose_r == 'n' ? 1 : 0)] : m1_->stride[(transpose_r == 'n' ? 0 : 1)]);
-  int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride[(transpose_r == 'n' ? 1 : 0)] : m2_->stride[(transpose_r == 'n' ? 0 : 1)]);
+  int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1)));
+  int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1)));
 
 #pragma omp critical(blasgemm)
   /* do the operation */
@@ -2220,28 +2220,28 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   // n == 1 || lda >= max(1, m)
   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
 
-  if(r_->stride[0] == 1 && LDA_COND(vec1->size(0), vec2->size(0), r_->stride[1]))
+  if(r_->stride(0) == 1 && LDA_COND(vec1->size(0), vec2->size(0), r_->stride(1)))
   {
     THBlas_(ger)(vec1->size(0), vec2->size(0),
-                 alpha, THTensor_(data)(vec1), vec1->stride[0],
-                 THTensor_(data)(vec2), vec2->stride[0],
-                 THTensor_(data)(r_), r_->stride[1]);
+                 alpha, THTensor_(data)(vec1), vec1->stride(0),
+                 THTensor_(data)(vec2), vec2->stride(0),
+                 THTensor_(data)(r_), r_->stride(1));
   }
-  else if(r_->stride[1] == 1 && LDA_COND(vec2->size(0), vec1->size(0), r_->stride[0]))
+  else if(r_->stride(1) == 1 && LDA_COND(vec2->size(0), vec1->size(0), r_->stride(0)))
   {
     THBlas_(ger)(vec2->size(0), vec1->size(0),
-                 alpha, THTensor_(data)(vec2), vec2->stride[0],
-                 THTensor_(data)(vec1), vec1->stride[0],
-                 THTensor_(data)(r_), r_->stride[0]);
+                 alpha, THTensor_(data)(vec2), vec2->stride(0),
+                 THTensor_(data)(vec1), vec1->stride(0),
+                 THTensor_(data)(r_), r_->stride(0));
   }
   else
   {
     THTensor *cr = THTensor_(newClone)(r_);
 
     THBlas_(ger)(vec2->size(0), vec1->size(0),
-                 alpha, THTensor_(data)(vec2), vec2->stride[0],
-                 THTensor_(data)(vec1), vec1->stride[0],
-                 THTensor_(data)(cr), cr->stride[0]);
+                 alpha, THTensor_(data)(vec2), vec2->stride(0),
+                 THTensor_(data)(vec1), vec1->stride(0),
+                 THTensor_(data)(cr), cr->stride(0));
 
     THTensor_(freeCopyTo)(cr, r_);
   }
@@ -2374,7 +2374,7 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongStorage_free(dim);
 
   // two implementations optimized for data locality
-  if (t->stride[dimension] == 1) {
+  if (t->stride(dimension) == 1) {
     real theMax;
     real value;
     int64_t theIndex;
@@ -2458,7 +2458,7 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
   THLongStorage_free(dim);
 
   // two implementations optimized for data locality
-  if (t->stride[dimension] == 1) {
+  if (t->stride(dimension) == 1) {
     real theMax;
     real value;
     int64_t theIndex;
@@ -2560,16 +2560,16 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride[j];
-            rem = rem%r_->stride[j];
-            tBasicIndex += quot*t->stride[j];
+            quot = rem/r_->stride(j);
+            rem = rem%r_->stride(j);
+            tBasicIndex += quot*t->stride(j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 0;
         for(j=0; j < t->size(dimension); ++j) {
-          *r__data += *(t_data + j*t->stride[dimension]);
+          *r__data += *(t_data + j*t->stride(dimension));
         }
       }
     } else {
@@ -2581,7 +2581,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 #endif
   if (serial_path) {
     // two implementations optimized for data locality
-    if (t->stride[dimension] == 1) {
+    if (t->stride(dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal sum = 0;
                            int64_t i;
@@ -2640,16 +2640,16 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride[j];
-            rem = rem%r_->stride[j];
-            tBasicIndex += quot*t->stride[j];
+            quot = rem/r_->stride(j);
+            rem = rem%r_->stride(j);
+            tBasicIndex += quot*t->stride(j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 1;
         for(j=0; j < t->size(dimension); ++j) {
-          *r__data *= *(t_data + j*t->stride[dimension]);
+          *r__data *= *(t_data + j*t->stride(dimension));
         }
       }
     } else {
@@ -2662,7 +2662,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
   if(serial_path) {
     // two implementations optimized for data locality
-    if (t->stride[dimension] == 1) {
+    if (t->stride(dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal prod = 1;
                            int64_t i;
@@ -2910,7 +2910,7 @@ void THTensor_(eye)(THTensor *r_, int64_t n, int64_t m)
   r__data = THTensor_(data)(r_);
   sz = THMin(THTensor_(size)(r_, 0), THTensor_(size)(r_, 1));
   for(i = 0; i < sz; i++)
-    r__data[i*(r_->stride[0]+r_->stride[1])] = 1;
+    r__data[i*(r_->stride(0)+r_->stride(1))] = 1;
 }
 
 
@@ -3951,16 +3951,16 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride[j];
-            rem = rem%r_->stride[j];
-            tBasicIndex += quot*t->stride[j];
+            quot = rem/r_->stride(j);
+            rem = rem%r_->stride(j);
+            tBasicIndex += quot*t->stride(j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 1;
         for(j=0; j < t->size(dimension); ++j) {
-          *r__data = *r__data && *(t_data + j*t->stride[dimension]);
+          *r__data = *r__data && *(t_data + j*t->stride(dimension));
         }
       }
     } else {
@@ -3973,7 +3973,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
   if(serial_path) {
     // two implementations optimized for data locality
-    if (t->stride[dimension] == 1) {
+    if (t->stride(dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal prod = 1;
                            int64_t i;
@@ -4031,16 +4031,16 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
 
         for(j = 0; j < r_Dim; ++j) {
           if(j != dimension){
-            quot = rem/r_->stride[j];
-            rem = rem%r_->stride[j];
-            tBasicIndex += quot*t->stride[j];
+            quot = rem/r_->stride(j);
+            rem = rem%r_->stride(j);
+            tBasicIndex += quot*t->stride(j);
           }
         }
         real *t_data = tp+tBasicIndex;
         real *r__data = rp+iter;
         *r__data = 0;
         for(j=0; j < t->size(dimension); ++j) {
-          *r__data = *r__data || *(t_data + j*t->stride[dimension]);
+          *r__data = *r__data || *(t_data + j*t->stride(dimension));
         }
       }
     } else {
@@ -4052,7 +4052,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
 #endif
   if (serial_path) {
     // two implementations optimized for data locality
-    if (t->stride[dimension] == 1) {
+    if (t->stride(dimension) == 1) {
       TH_TENSOR_DIM_APPLY2(real, t, real, r_, dimension,
                            accreal sum = 0;
                            int64_t i;

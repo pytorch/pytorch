@@ -44,7 +44,7 @@ void THNN_(IndexLinear_updateOutput)(
     int64_t batchSize = sizes->size(0);
     int64_t outDim = bias->size(0);
     int64_t wDim = weight->size(1);
-    int64_t weightStride = weight->stride[0];
+    int64_t weightStride = weight->stride(0);
     int maxNormalize = wDim - outDim;
     int64_t keysSize = keys->size(0);
     int64_t nnzPerRow = divup(keysSize, batchSize);
@@ -137,7 +137,7 @@ void THNN_(IndexLinear_accGradParameters)(
     real *gradOutputData  = THCTensor_(data)      (state, gradOutput);
     real *gradBiasData    = THCTensor_(data)      (state, gradBias);
     real *gradWeightData  = THCTensor_(data)      (state, gradWeight);
-    int64_t gradWeightStride = gradWeight->stride[0];
+    int64_t gradWeightStride = gradWeight->stride(0);
 
     cudaStream_t stream = THCState_getCurrentStream(state);
     dim3 threads(THREADS_X, THREADS_Y);
@@ -194,7 +194,7 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
     real *valuesData       = THCTensor_(data)      (state, values);
     int64_t *keysData         = THCudaLongTensor_data (state, keys);
     int64_t *cumSumSizesData  = THCudaLongTensor_data (state, cumSumSizes);
-    int64_t weightStride = weight->stride[0];
+    int64_t weightStride = weight->stride(0);
 
     cudaStream_t stream = THCState_getCurrentStream(state);
     dim3 threads(THREADS_X, THREADS_Y);
@@ -248,8 +248,8 @@ void THNN_(IndexLinear_updateParameters)(
     int64_t batchSize = cumSumSizes->size(0);
 
     THCTensor_(cadd)(state, bias, bias, -learningRate, gradBias);
-    int64_t gradWeightStride = gradWeight->stride[0];
-    int64_t weightStride = weight->stride[0];
+    int64_t gradWeightStride = gradWeight->stride(0);
+    int64_t weightStride = weight->stride(0);
 
     int64_t *keysData        = THCudaLongTensor_data (state, runningKeys);
     int64_t *cumSumSizesData = THCudaLongTensor_data (state, cumSumSizes);

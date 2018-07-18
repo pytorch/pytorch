@@ -7,7 +7,7 @@ Check if self is transpose of a contiguous matrix
 */
 static int THTensor_(isTransposedContiguous)(THTensor *self)
 {
-  return self->stride[0] == 1 && self->stride[1] == self->size(0);
+  return self->stride(0) == 1 && self->stride(1) == self->size(0);
 }
 /*
 If a matrix is a regular contiguous matrix, make sure it is transposed
@@ -119,7 +119,7 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 
   if (b->dim() == 1) {
     b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
-            b->stride[0], 1, 0);
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -172,7 +172,7 @@ void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
 
   if (b->_dim() == 1) {
     b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
-            b->stride[0], 1, 0);
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -222,7 +222,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 
   if (b->_dim() == 1) {
     b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
-            b->stride[0], 1, 0);
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -645,7 +645,7 @@ void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
 
   if (b->_dim() == 1) {
     b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
-            b->stride[0], 1, 0);
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -977,9 +977,9 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
   THTensor *ra__;
   int lda;
 
-  if (ra_->stride[1] == 1) {
+  if (ra_->stride(1) == 1) {
     // column ordered, what BLAS wants
-    lda = ra_->stride[2];
+    lda = ra_->stride(2);
     ra__ = ra_;
   } else {
     // not column ordered, need to make it such (requires copy)
@@ -987,7 +987,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
     ra__ = THTensor_(newClone)(transp_r_);
     THTensor_(free)(transp_r_);
     THTensor_(transpose)(ra__, NULL, 1, 2);
-    lda = ra__->stride[2];
+    lda = ra__->stride(2);
   }
 
   THTensor *ai = THTensor_(new)();
@@ -1058,9 +1058,9 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
   THTensor *rb__;
 
   // correct ordering of A
-  if (atf->stride[1] == 1) {
+  if (atf->stride(1) == 1) {
     // column ordered, what BLAS wants
-    lda = atf->stride[2];
+    lda = atf->stride(2);
     atf_ = atf;
   } else {
     // not column ordered, need to make it such (requires copy)
@@ -1071,16 +1071,16 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
     atf_ = THTensor_(newClone)(transp_r_);
     THTensor_(free)(transp_r_);
     THTensor_(transpose)(atf_, NULL, 1, 2);
-    lda = atf_->stride[2];
+    lda = atf_->stride(2);
   }
 
   // correct ordering of B
-  if (rb_->stride[1] == 1) {
+  if (rb_->stride(1) == 1) {
     // column ordered
     if (rb_->_dim() == 2 || rb_->size(2) == 1) {
       ldb = n;
     } else {
-      ldb = rb_->stride[2];
+      ldb = rb_->stride(2);
     }
     rb__ = rb_;
   } else {
@@ -1090,7 +1090,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
       rb__ = THTensor_(newClone)(transp_r_);
       THTensor_(free)(transp_r_);
       THTensor_(transpose)(rb__, NULL, 1, 2);
-      ldb = rb__->stride[2];
+      ldb = rb__->stride(2);
     } else {
       rb__ = THTensor_(newClone)(rb_);
       ldb = n;

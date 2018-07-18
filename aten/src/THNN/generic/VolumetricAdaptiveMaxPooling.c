@@ -120,7 +120,7 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
 
   if (input->dim() == 5)
   {
-    istrideB = input->stride[0];
+    istrideB = input->stride(0);
     sizeB = input->size(0);
     dimD++;
     dimT++;
@@ -134,10 +134,10 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
   isizeH = input->size(dimH);
   isizeW = input->size(dimW);
   /* strides */
-  istrideD = input->stride[dimD];
-  istrideT = input->stride[dimT];
-  istrideH = input->stride[dimH];
-  istrideW = input->stride[dimW];
+  istrideD = input->stride(dimD);
+  istrideT = input->stride(dimT);
+  istrideH = input->stride(dimH);
+  istrideW = input->stride(dimW);
 
   /* resize output */
   if (input->dim() == 4)

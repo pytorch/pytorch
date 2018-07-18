@@ -242,8 +242,8 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     int64_t sl;
     for (sl=0; sl<nbatch; sl++) {
       subgradweight<real, accreal> <<<blocks, threads, 0, THCState_getCurrentStream(state)>>> (
-        input_data + sl*input->stride[0],
-        gradOutput_data + sl*gradOutput->stride[0],
+        input_data + sl*input->stride(0),
+        gradOutput_data + sl*gradOutput->stride(0),
         gradWeight_data, gradBias_data,
         nInputPlane, nInputRows, nInputCols, kH, kW, dH, dW, scale);
     }

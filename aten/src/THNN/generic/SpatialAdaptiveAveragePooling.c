@@ -92,7 +92,7 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
 
   if (input->dim() == 4)
   {
-    istrideB = input->stride[0];
+    istrideB = input->stride(0);
     sizeB = input->size(0);
     dimD++;
     dimH++;
@@ -104,9 +104,9 @@ void THNN_(SpatialAdaptiveAveragePooling_updateOutput)(
   isizeH = input->size(dimH);
   isizeW = input->size(dimW);
   /* strides */
-  istrideD = input->stride[dimD];
-  istrideH = input->stride[dimH];
-  istrideW = input->stride[dimW];
+  istrideD = input->stride(dimD);
+  istrideH = input->stride(dimH);
+  istrideW = input->stride(dimW);
 
   /* resize output */
   if (input->dim() == 3)

@@ -28,9 +28,9 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     int64_t isizeH = input->size(1);
     int64_t isizeW = input->size(2);
 
-    int64_t istrideD = input->stride[0];
-    int64_t istrideH = input->stride[1];
-    int64_t istrideW = input->stride[2];
+    int64_t istrideD = input->stride(0);
+    int64_t istrideH = input->stride(1);
+    int64_t istrideW = input->stride(2);
 
     input_data = THCTensor_(data)(state, input);
 
@@ -60,9 +60,9 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     int64_t isizeH = input->size(2);
     int64_t isizeW = input->size(3);
 
-    int64_t istrideD = input->stride[1];
-    int64_t istrideH = input->stride[2];
-    int64_t istrideW = input->stride[3];
+    int64_t istrideD = input->stride(1);
+    int64_t istrideH = input->stride(2);
+    int64_t istrideW = input->stride(3);
 
     input_data = THCTensor_(data)(state, input);
 

@@ -601,11 +601,11 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   kernel = THTensor_(newContiguous)(k_);
 
   nInputPlane = input->size(0);
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputRows  = input->size(1);
   nInputCols  = input->size(2);
 
-  kstride0 = kernel->stride[0];
+  kstride0 = kernel->stride(0);
   nKernelPlane = kernel->size(0);
   nKernelRows = kernel->size(1);
   nKernelCols = kernel->size(2);
@@ -706,15 +706,15 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
-  istride1    = input->stride[1];
+  istride0    = input->stride(0);
+  istride1    = input->stride(1);
   nbatch      = input->size(0);
   nInputPlane = input->size(1);
   nInputRows  = input->size(2);
   nInputCols  = input->size(3);
 
-  kstride0 = kernel->stride[0];
-  kstride1 = kernel->stride[1];
+  kstride0 = kernel->stride(0);
+  kstride1 = kernel->stride(1);
   nKernelPlane = kernel->size(1);
   nKernelRows = kernel->size(2);
   nKernelCols = kernel->size(3);
@@ -821,11 +821,11 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   kernel = THTensor_(newContiguous)(k_);
 
   nInputPlane = input->size(0);
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputRows  = input->size(1);
   nInputCols  = input->size(2);
 
-  kstride0 = kernel->stride[0];
+  kstride0 = kernel->stride(0);
   nKernelPlane = kernel->size(0);
   nKernelRows = kernel->size(1);
   nKernelCols = kernel->size(2);
@@ -949,7 +949,7 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   THArgCheck(*xc == 'C' || *xc == 'X', 7, "type of convolution can 'X' or 'C'");
 
   input = THTensor_(newContiguous)(t_);
-  if (!(k_->stride[3] == 1) || !(k_->stride[2] == k_->size(3))) {
+  if (!(k_->stride(3) == 1) || !(k_->stride(2) == k_->size(3))) {
     kernel = THTensor_(newContiguous)(k_);
   } else {
     THTensor_(retain)(k_);
@@ -957,12 +957,12 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   }
 
   nInputPlane = input->size(0);
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputRows  = input->size(1);
   nInputCols  = input->size(2);
 
-  kstride0    = kernel->stride[0];
-  kstride1    = kernel->stride[1];
+  kstride0    = kernel->stride(0);
+  kstride1    = kernel->stride(1);
   nKernelRows = kernel->size(2);
   nKernelCols = kernel->size(3);
   nOutputPlane = kernel->size(0);
@@ -1087,7 +1087,7 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   THArgCheck(*xc == 'C' || *xc == 'X', 7, "type of convolution can 'X' or 'C'");
 
   input = THTensor_(newContiguous)(t_);
-  if (!(k_->stride[3] == 1) || !(k_->stride[2] == k_->size(3))) {
+  if (!(k_->stride(3) == 1) || !(k_->stride(2) == k_->size(3))) {
     kernel = THTensor_(newContiguous)(k_);
   } else {
     THTensor_(retain)(k_);
@@ -1099,8 +1099,8 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   nInputRows  = input->size(2);
   nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
-  kstride1    = kernel->stride[1];
+  kstride0    = kernel->stride(0);
+  kstride1    = kernel->stride(1);
   nKernelRows = kernel->size(2);
   nKernelCols = kernel->size(3);
   nOutputPlane = kernel->size(0);
@@ -1295,12 +1295,12 @@ void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputPlane = input->size(0);
   nInputRows  = input->size(1);
   nInputCols  = input->size(2);
 
-  kstride0    = kernel->stride[0];
+  kstride0    = kernel->stride(0);
   nOutputPlane = kernel->size(0);
   nKernelRows = kernel->size(1);
   nKernelCols = kernel->size(2);
@@ -1374,12 +1374,12 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputPlane = input->size(0);
   nInputRows  = input->size(1);
   nInputCols  = input->size(2);
 
-  kstride0    = kernel->stride[0];
+  kstride0    = kernel->stride(0);
   nOutputPlane = kernel->size(0);
   nKernelRows = kernel->size(1);
   nKernelCols = kernel->size(2);
@@ -1463,12 +1463,12 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   kernel = THTensor_(newContiguous)(k_);
 
   nInputPlane = input->size(0);
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputDepth = input->size(1);
   nInputRows  = input->size(2);
   nInputCols  = input->size(3);
 
-  kstride0 = kernel->stride[0];
+  kstride0 = kernel->stride(0);
   nKernelPlane = kernel->size(0);
   nKernelDepth= kernel->size(1);
   nKernelRows = kernel->size(2);
@@ -1551,12 +1551,12 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   kernel = THTensor_(newContiguous)(k_);
 
   nInputPlane = input->size(0);
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputDepth = input->size(1);
   nInputRows  = input->size(2);
   nInputCols  = input->size(3);
 
-  kstride0     = kernel->stride[0];
+  kstride0     = kernel->stride(0);
   nKernelPlane = kernel->size(0);
   nKernelDepth = kernel->size(1);
   nKernelRows  = kernel->size(2);
@@ -1639,7 +1639,7 @@ void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   THArgCheck(*xc == 'C' || *xc == 'X', 8, "type of convolution can 'X' or 'C'");
 
   input = THTensor_(newContiguous)(t_);
-  if (!(k_->stride[4] == 1) || !(k_->stride[3] == k_->size(4))) {
+  if (!(k_->stride(4) == 1) || !(k_->stride(3) == k_->size(4))) {
     kernel = THTensor_(newContiguous)(k_);
   } else {
     THTensor_(retain)(k_);
@@ -1647,13 +1647,13 @@ void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   }
 
   nInputPlane = input->size(0);
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputDepth = input->size(1);
   nInputRows  = input->size(2);
   nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
-  kstride1    = kernel->stride[1];
+  kstride0    = kernel->stride(0);
+  kstride1    = kernel->stride(1);
   nKernelDepth = kernel->size(2);
   nKernelRows = kernel->size(3);
   nKernelCols = kernel->size(4);
@@ -1802,13 +1802,13 @@ void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputPlane = input->size(0);
   nInputDepth = input->size(1);
   nInputRows  = input->size(2);
   nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
+  kstride0    = kernel->stride(0);
   nOutputPlane = kernel->size(0);
   nKernelDepth = kernel->size(1);
   nKernelRows = kernel->size(2);
@@ -1889,13 +1889,13 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
+  istride0    = input->stride(0);
   nInputPlane = input->size(0);
   nInputDepth = input->size(1);
   nInputRows  = input->size(2);
   nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
+  kstride0    = kernel->stride(0);
   nOutputPlane = kernel->size(0);
   nKernelDepth = kernel->size(1);
   nKernelRows = kernel->size(2);
