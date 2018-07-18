@@ -38,7 +38,7 @@ struct abs_updateGradInput_no_reduce_functor
       const Dtype *y,
       Dtype *gradInput)
   {
-    *gradInput = ScalarConvert<int, Dtype>::to(*x >= *y ? 1 : -1);
+    *gradInput = ScalarConvert<int64_t, Dtype>::to(*x >= *y ? 1 : -1);
   }
 };
 

@@ -15,23 +15,23 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          THCTensor *input,
                          THCTensor *gradOutput,
                          THCIndexTensor *indices,
-                         int kT, int kW, int kH,
-                         int dT, int dW, int dH,
-                         int padT, int padW, int padH,
-                         int dilationT, int dilationW, int dilationH,
+                         int64_t kT, int64_t kW, int64_t kH,
+                         int64_t dT, int64_t dW, int64_t dH,
+                         int64_t padT, int64_t padW, int64_t padH,
+                         int64_t dilationT, int64_t dilationW, int64_t dilationH,
                          bool ceilMode) {
-  int ndim = input->dim();
-  int inputSlices;
-  int inputTime;
-  int inputHeight;
-  int inputWidth;
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
-  int dimf = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t ndim = input->dim();
+  int64_t inputSlices;
+  int64_t inputTime;
+  int64_t inputHeight;
+  int64_t inputWidth;
+  int64_t outputTime;
+  int64_t outputHeight;
+  int64_t outputWidth;
+  int64_t dimf = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 7,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d",
@@ -79,15 +79,15 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
 
   if (ceilMode)
   {
-    outputTime   = (int)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputTime   = (int64_t)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+    outputHeight = (int64_t)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
   else
   {
-    outputTime   = (int)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputTime   = (int64_t)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+    outputHeight = (int64_t)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
 
   if (padT || padW || padH)
@@ -123,26 +123,26 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            THCIndexTensor *indices,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
-           int dilationT, int dilationW, int dilationH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
+           int64_t dilationT, int64_t dilationW, int64_t dilationH,
            bool ceilMode)
 {
-  int batchSize;
-  int inputSlices;
-  int inputTime;
-  int inputHeight;
-  int inputWidth;
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
+  int64_t batchSize;
+  int64_t inputSlices;
+  int64_t inputTime;
+  int64_t inputHeight;
+  int64_t inputWidth;
+  int64_t outputTime;
+  int64_t outputHeight;
+  int64_t outputWidth;
 
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int64_t fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
 
   if (fiveDimensionalInput)
   {
@@ -182,15 +182,15 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
 
   if (ceilMode)
   {
-    outputTime   = (int)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputTime   = (int64_t)(ceil((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+    outputHeight = (int64_t)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(ceil((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
   else
   {
-    outputTime   = (int)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
-    outputHeight = (int)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
-    outputWidth  = (int)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
+    outputTime   = (int64_t)(floor((float)(inputTime - (dilationT * (kT - 1) + 1) + 2*padT) / dT)) + 1;
+    outputHeight = (int64_t)(floor((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
+    outputWidth  = (int64_t)(floor((float)(inputWidth  - (dilationW * (kW - 1) + 1) + 2*padW) / dW)) + 1;
   }
 
   if (padT || padW || padH)
@@ -255,13 +255,13 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   THCDeviceTensor<THCIndex_t, 4> cudaIndices =
     toDeviceTensor<THCIndex_t, 4>(state, indices1);
 
-  int totalZ = outputTime * inputSlices * batchSize;
-  int offsetZ = 0;
+  int64_t totalZ = outputTime * inputSlices * batchSize;
+  int64_t offsetZ = 0;
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
-              THCCeilDiv(outputHeight, static_cast<int>(block.y)),
+    dim3 grid(THCCeilDiv(outputWidth, static_cast<int64_t>(block.x)),
+              THCCeilDiv(outputHeight, static_cast<int64_t>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     switch (kW)
@@ -299,10 +299,10 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCIndexTensor *indices,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
-           int dilationT, int dilationW, int dilationH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
+           int64_t dilationT, int64_t dilationW, int64_t dilationH,
            bool ceilMode)
 {
   // TODO: gradOutput shape check
@@ -310,13 +310,13 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  int batchSize;
-  int inputSlices;
+  int64_t batchSize;
+  int64_t inputSlices;
 
-  int outputTime, outputHeight, outputWidth;
-  int inputTime, inputHeight, inputWidth;
+  int64_t outputTime, outputHeight, outputWidth;
+  int64_t inputTime, inputHeight, inputWidth;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int64_t fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
 
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
   THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
@@ -378,12 +378,12 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
     toDeviceTensor<THCIndex_t, 4>(state, indices1);
 
   int64_t totalZ = outputTime * inputSlices * batchSize;
-  int offsetZ = 0;
+  int64_t offsetZ = 0;
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
-              THCCeilDiv(outputHeight, static_cast<int>(block.y)),
+    dim3 grid(THCCeilDiv(outputWidth, static_cast<int64_t>(block.x)),
+              THCCeilDiv(outputHeight, static_cast<int64_t>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     cuda_VolumetricDilatedMaxPooling_updateGradInput<<<grid, block,

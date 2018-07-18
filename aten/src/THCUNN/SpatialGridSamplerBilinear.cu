@@ -21,31 +21,31 @@
 #define MAX(a,b) ( ((a)>(b)) ? (a) : (b) )
 #define CLIP_COORDINATES(in, out, clip_limit) out = MIN((clip_limit-1), MAX(in, 0))
 
-const int MODE_BORDER = 1;
+const int64_t MODE_BORDER = 1;
 
 
 template <typename Dtype>
 __launch_bounds__(1024)
 __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
-    const int nthreads,
+    const int64_t nthreads,
     THCDeviceTensor<Dtype, 4> input,
     THCDeviceTensor<Dtype, 4> grid,
     THCDeviceTensor<Dtype, 4> output,
-    const int padding_mode) {
+    const int64_t padding_mode) {
 
-  int N = input.getSize(0);
-  int C = input.getSize(1);
-  int IH = input.getSize(2);
-  int IW = input.getSize(3);
-  int H = grid.getSize(1);
-  int W = grid.getSize(2);
+  int64_t N = input.getSize(0);
+  int64_t C = input.getSize(1);
+  int64_t IH = input.getSize(2);
+  int64_t IW = input.getSize(3);
+  int64_t H = grid.getSize(1);
+  int64_t W = grid.getSize(2);
 
   CUDA_KERNEL_LOOP(index, nthreads) {
 
-    const int n = index % N;
-    const int h = (index / N) % H;
-    const int w = (index / (N * H)) % W;
-    int c;
+    const int64_t n = index % N;
+    const int64_t h = (index / N) % H;
+    const int64_t w = (index / (N * H)) % W;
+    int64_t c;
 
     // get the corresponding input x, y co-ordinates from grid
     Dtype ix = grid[n][h][w][0];
@@ -56,14 +56,14 @@ __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
     iy = ScalarConvert<float,Dtype>::to(((iy + 1.f) / 2) * (IH-1));
 
     // get NE, NW, SE, SW pixel values from (x, y)
-    int ix_nw = floor(ScalarConvert<Dtype,float>::to(ix));
-    int iy_nw = floor(ScalarConvert<Dtype,float>::to(iy));
-    int ix_ne = ix_nw + 1;
-    int iy_ne = iy_nw;
-    int ix_sw = ix_nw;
-    int iy_sw = iy_nw + 1;
-    int ix_se = ix_nw + 1;
-    int iy_se = iy_nw + 1;
+    int64_t ix_nw = floor(ScalarConvert<Dtype,float>::to(ix));
+    int64_t iy_nw = floor(ScalarConvert<Dtype,float>::to(iy));
+    int64_t ix_ne = ix_nw + 1;
+    int64_t iy_ne = iy_nw;
+    int64_t ix_sw = ix_nw;
+    int64_t iy_sw = iy_nw + 1;
+    int64_t ix_se = ix_nw + 1;
+    int64_t iy_se = iy_nw + 1;
 
     // get surfaces to each neighbor:
     Dtype nw = (ix_se - ix)    * (iy_se - iy);
@@ -86,7 +86,7 @@ __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
 
     Dtype out_val;
     for (c = 0; c < C; ++c) {
-      out_val = ScalarConvert<int,Dtype>::to(0);
+      out_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_nw, iy_nw, IH, IW)) {
         out_val += input[n][c][iy_nw][ix_nw] * nw;
       }
@@ -107,45 +107,45 @@ __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
 template <typename Dtype>
 __launch_bounds__(1024)
 __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
-    const int nthreads,
+    const int64_t nthreads,
     THCDeviceTensor<Dtype, 4> input, THCDeviceTensor<Dtype, 4> gradInput,
     THCDeviceTensor<Dtype, 4> grid, THCDeviceTensor<Dtype, 4> gradGrid,
     THCDeviceTensor<Dtype, 4> gradOutput,
-    const int padding_mode) {
+    const int64_t padding_mode) {
 
-  int N = input.getSize(0);
-  int C = input.getSize(1);
-  int IH = input.getSize(2);
-  int IW = input.getSize(3);
-  int H = grid.getSize(1);
-  int W = grid.getSize(2);
+  int64_t N = input.getSize(0);
+  int64_t C = input.getSize(1);
+  int64_t IH = input.getSize(2);
+  int64_t IW = input.getSize(3);
+  int64_t H = grid.getSize(1);
+  int64_t W = grid.getSize(2);
 
   CUDA_KERNEL_LOOP(index, nthreads) {
 
-    const int n = index % N;
-    const int h = (index / N) % H;
-    const int w = (index / (N * H)) % W;
+    const int64_t n = index % N;
+    const int64_t h = (index / N) % H;
+    const int64_t w = (index / (N * H)) % W;
 
     // get the corresponding input x, y co-ordinates from grid
     Dtype ix = grid[n][h][w][0];
     Dtype iy = grid[n][h][w][1];
 
-    Dtype gix = ScalarConvert<int,Dtype>::to(0);
-    Dtype giy = ScalarConvert<int,Dtype>::to(0);
+    Dtype gix = ScalarConvert<int64_t,Dtype>::to(0);
+    Dtype giy = ScalarConvert<int64_t,Dtype>::to(0);
 
     // normalize ix, iy from [-1, 1] to [0, H-1] & [0, W-1]
     ix = ScalarConvert<float,Dtype>::to(((ix + 1.f) / 2) * (IW-1));
     iy = ScalarConvert<float,Dtype>::to(((iy + 1.f) / 2) * (IH-1));;
 
     // get NE, NW, SE, SW pixel values from (x, y)
-    int ix_nw = floor(ScalarConvert<Dtype,float>::to(ix));
-    int iy_nw = floor(ScalarConvert<Dtype,float>::to(iy));;
-    int ix_ne = ix_nw + 1;
-    int iy_ne = iy_nw;
-    int ix_sw = ix_nw;
-    int iy_sw = iy_nw + 1;
-    int ix_se = ix_nw + 1;
-    int iy_se = iy_nw + 1;
+    int64_t ix_nw = floor(ScalarConvert<Dtype,float>::to(ix));
+    int64_t iy_nw = floor(ScalarConvert<Dtype,float>::to(iy));;
+    int64_t ix_ne = ix_nw + 1;
+    int64_t iy_ne = iy_nw;
+    int64_t ix_sw = ix_nw;
+    int64_t iy_sw = iy_nw + 1;
+    int64_t ix_se = ix_nw + 1;
+    int64_t iy_se = iy_nw + 1;
 
     // get surfaces to each neighbor:
     Dtype nw = (ix_se - ix)    * (iy_se - iy);
@@ -159,7 +159,7 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
     Dtype sw_val;
     Dtype se_val;
     
-    int ix_nw_cl, iy_nw_cl, ix_ne_cl, iy_ne_cl, ix_sw_cl, iy_sw_cl, ix_se_cl, iy_se_cl;
+    int64_t ix_nw_cl, iy_nw_cl, ix_ne_cl, iy_ne_cl, ix_sw_cl, iy_sw_cl, ix_se_cl, iy_se_cl;
 
     if (padding_mode==MODE_BORDER){
       // get clipped NE, NW, SE, SW pixel values from (x, y)
@@ -183,7 +183,7 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
       iy_se_cl = iy_se;
     }
 
-    for (int c = 0; c < C; ++c) {
+    for (int64_t c = 0; c < C; ++c) {
       gradout = gradOutput[n][c][h][w];
 
       // calculate and set gradInput
@@ -193,30 +193,30 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
       SAFE_ADD(gradInput, ix_se_cl, iy_se_cl, n, c, IH, IW, se * gradout);
 
       // calculate gradGrid
-      nw_val = ScalarConvert<int,Dtype>::to(0);
+      nw_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_nw_cl, iy_nw_cl, IH, IW)) {
         nw_val = input[n][c][iy_nw_cl][ix_nw_cl];
       }
-      ne_val = ScalarConvert<int,Dtype>::to(0);
+      ne_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_ne_cl, iy_ne_cl, IH, IW)) {
         ne_val = input[n][c][iy_ne_cl][ix_ne_cl];
       }
-      sw_val = ScalarConvert<int,Dtype>::to(0);
+      sw_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_sw_cl, iy_sw_cl, IH, IW)) {
         sw_val = input[n][c][iy_sw_cl][ix_sw_cl];
       }
-      se_val = ScalarConvert<int,Dtype>::to(0);
+      se_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_se_cl, iy_se_cl, IH, IW)) {
         se_val = input[n][c][iy_se_cl][ix_se_cl];
       }
 
-      gix += ScalarConvert<int,Dtype>::to(-1)*(nw_val * (iy_se - iy) * gradout);
+      gix += ScalarConvert<int64_t,Dtype>::to(-1)*(nw_val * (iy_se - iy) * gradout);
       gix += ne_val * (iy_sw - iy) * gradout;
-      gix += ScalarConvert<int,Dtype>::to(-1)*(sw_val * (iy - iy_ne) * gradout);
+      gix += ScalarConvert<int64_t,Dtype>::to(-1)*(sw_val * (iy - iy_ne) * gradout);
       gix += se_val * (iy - iy_nw) * gradout;
 
-      giy += ScalarConvert<int,Dtype>::to(-1)*(nw_val * (ix_se - ix) * gradout);
-      giy += ScalarConvert<int,Dtype>::to(-1)*(ne_val * (ix - ix_sw) * gradout);
+      giy += ScalarConvert<int64_t,Dtype>::to(-1)*(nw_val * (ix_se - ix) * gradout);
+      giy += ScalarConvert<int64_t,Dtype>::to(-1)*(ne_val * (ix - ix_sw) * gradout);
       giy += sw_val * (ix_ne - ix) * gradout;
       giy += se_val * (ix - ix_nw) * gradout;
     }

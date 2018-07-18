@@ -6,21 +6,21 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          THCState *state,
                          THCTensor *input,
                          THCTensor *gradOutput,
-                         int kT, int kW, int kH,
-                         int dT, int dW, int dH,
-                         int padT, int padW, int padH,
+                         int64_t kT, int64_t kW, int64_t kH,
+                         int64_t dT, int64_t dW, int64_t dH,
+                         int64_t padT, int64_t padW, int64_t padH,
                          bool ceil_mode)
 {
-  int inputSlices;
-  int inputTime;
-  int inputHeight;
-  int inputWidth;
+  int64_t inputSlices;
+  int64_t inputTime;
+  int64_t inputHeight;
+  int64_t inputWidth;
 
-  int ndim = input->dim();
-  int dimN = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t ndim = input->dim();
+  int64_t dimN = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (input->dim() == 5)
   {
@@ -71,9 +71,9 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
              "padT = %d, padW = %d, padH = %d, kT = %d, kW = %d, kH = %d",
              padT, padW, padH, kT, kW, kH);
 
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
+  int64_t outputTime;
+  int64_t outputHeight;
+  int64_t outputWidth;
 
   if (ceil_mode)
   {
@@ -112,23 +112,23 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
            bool ceil_mode,
            bool count_include_pad)
 {
-  int batchSize;
-  int inputSlices;
-  int inputTime;
-  int inputHeight;
-  int inputWidth;
+  int64_t batchSize;
+  int64_t inputSlices;
+  int64_t inputTime;
+  int64_t inputHeight;
+  int64_t inputWidth;
 
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int64_t fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
   if (fiveDimensionalInput)
   {
     dimt++;
@@ -159,9 +159,9 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
     inputWidth  = THCTensor_(size)(state, input, 4);
   }
 
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
+  int64_t outputTime;
+  int64_t outputHeight;
+  int64_t outputWidth;
 
   if (ceil_mode)
   {
@@ -216,12 +216,12 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   cudaInput  = toDeviceTensor<real, 4>(state, input);
   cudaOutput = toDeviceTensor<real, 4>(state, output);
 
-  int totalZ = outputTime * inputSlices * batchSize;
-  int offsetZ = 0;
+  int64_t totalZ = outputTime * inputSlices * batchSize;
+  int64_t offsetZ = 0;
   dim3 block(32, 8);
   while (totalZ > 0) {
-    dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
-              THCCeilDiv(outputHeight, static_cast<int>(block.y)),
+    dim3 grid(THCCeilDiv(outputWidth, static_cast<int64_t>(block.x)),
+              THCCeilDiv(outputHeight, static_cast<int64_t>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     switch (kW)
@@ -259,9 +259,9 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
            bool ceil_mode,
            bool count_include_pad)
 {
@@ -274,17 +274,17 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  int batchSize;
-  int inputSlices;
-  int inputTime;
-  int inputHeight;
-  int inputWidth;
+  int64_t batchSize;
+  int64_t inputSlices;
+  int64_t inputTime;
+  int64_t inputHeight;
+  int64_t inputWidth;
 
-  int outputTime;
-  int outputHeight;
-  int outputWidth;
+  int64_t outputTime;
+  int64_t outputHeight;
+  int64_t outputWidth;
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int64_t fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
@@ -334,11 +334,11 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   // Padding must be 0, otherwise, pool size may change.
   if (dT == 1 && dH == 1 && dW == 1 && padT == 0 && padH == 0 && padW == 0)
   {
-    int totalZ = inputTime * inputSlices * batchSize;
-    int offsetZ = 0;
+    int64_t totalZ = inputTime * inputSlices * batchSize;
+    int64_t offsetZ = 0;
     while (totalZ > 0) {
-      dim3 grid(THCCeilDiv(inputWidth, static_cast<int>(block.x)),
-                THCCeilDiv(inputHeight, static_cast<int>(block.y)),
+      dim3 grid(THCCeilDiv(inputWidth, static_cast<int64_t>(block.x)),
+                THCCeilDiv(inputHeight, static_cast<int64_t>(block.y)),
                 totalZ > 65535 ? 65535 : totalZ);
       cuda_VolumetricAveragePooling_updateGradInput_Stride1<real, accreal>
         <<<grid, block, 0, THCState_getCurrentStream(state)>>>(
@@ -350,11 +350,11 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   }
   else
   {
-    int totalZ = outputTime * inputSlices * batchSize;
-    int offsetZ = 0;
+    int64_t totalZ = outputTime * inputSlices * batchSize;
+    int64_t offsetZ = 0;
     while (totalZ > 0) {
-      dim3 grid(THCCeilDiv(outputWidth, static_cast<int>(block.x)),
-                THCCeilDiv(outputHeight, static_cast<int>(block.y)),
+      dim3 grid(THCCeilDiv(outputWidth, static_cast<int64_t>(block.x)),
+                THCCeilDiv(outputHeight, static_cast<int64_t>(block.y)),
                 totalZ > 65535 ? 65535 : totalZ);
       if (kernelsOverlap)
       {

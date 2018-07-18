@@ -13,28 +13,28 @@
  */
  template <typename Dtype, typename Acctype>
 __global__ void subsample(Dtype *input, Dtype *output, Dtype *weight, Dtype *bias,
-                          int input_n, int input_h, int input_w,
-                          int kH, int kW, int dH, int dW)
+                          int64_t input_n, int64_t input_h, int64_t input_w,
+                          int64_t kH, int64_t kW, int64_t dH, int64_t dW)
 {
   // iterators
-  int xx, yy;
+  int64_t xx, yy;
 
   // output size
-  int output_w = (input_w - kW) / dW + 1;
-  int output_h = (input_h - kH) / dH + 1;
+  int64_t output_w = (input_w - kW) / dW + 1;
+  int64_t output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
-  int k = blockIdx.x % input_n;
+  int64_t o = blockIdx.x;
+  int64_t i = o;
+  int64_t k = blockIdx.x % input_n;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int64_t xx_start = threadIdx.x;
+  int64_t xx_end = output_w;
+  int64_t xx_step = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int64_t yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t yy_end = output_h;
+  int64_t yy_step = blockDim.y*gridDim.y;
 
   // select input/output plane
   output = output + o*output_w*output_h;
@@ -53,7 +53,7 @@ __global__ void subsample(Dtype *input, Dtype *output, Dtype *weight, Dtype *bia
       Dtype *ptr_input = input + yy*dH*input_w + xx*dW;
       Dtype *ptr_output = output + yy*output_w + xx;
       Acctype sum = 0;
-      int kx, ky;
+      int64_t kx, ky;
       for(ky = 0; ky < kH; ky++) {
         for(kx = 0; kx < kW; kx++)
           sum += ptr_input[kx];
@@ -71,36 +71,36 @@ __global__ void subsample(Dtype *input, Dtype *output, Dtype *weight, Dtype *bia
  */
  template <typename Dtype, typename Acctype>
 __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight, Dtype *gradBias,
-                              int input_n, int input_h, int input_w,
-                              int kH, int kW, int dH, int dW,
+                              int64_t input_n, int64_t input_h, int64_t input_w,
+                              int64_t kH, int64_t kW, int64_t dH, int64_t dW,
                               float scale)
 {
   // iterators
-  int xx, yy;
+  int64_t xx, yy;
 
   // output size
-  int output_w = (input_w - kW) / dW + 1;
-  int output_h = (input_h - kH) / dH + 1;
+  int64_t output_w = (input_w - kW) / dW + 1;
+  int64_t output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
-  int k = blockIdx.x % input_n;
+  int64_t o = blockIdx.x;
+  int64_t i = o;
+  int64_t k = blockIdx.x % input_n;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int64_t xx_start = threadIdx.x;
+  int64_t xx_end = output_w;
+  int64_t xx_step = blockDim.x;
 
-  int yy_start = threadIdx.y;
-  int yy_end = output_h;
-  int yy_step = blockDim.y;
+  int64_t yy_start = threadIdx.y;
+  int64_t yy_end = output_h;
+  int64_t yy_step = blockDim.y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
   input = input + i*input_w*input_h;
 
   // thread ID
-  int tid = blockDim.x*threadIdx.y + threadIdx.x;
+  int64_t tid = blockDim.x*threadIdx.y + threadIdx.x;
 
   // create array to hold partial sums
   __shared__ Acctype sums[CUDA_MAX_THREADS];
@@ -126,7 +126,7 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
   // reduce: accumulate all partial sums to produce final gradWeight
   if ((threadIdx.x == 0) && (threadIdx.y == 0)) {
     Acctype scaledSums = Acctype(0);
-    for(int i = 0; i < blockDim.x*blockDim.y; i++) {
+    for(int64_t i = 0; i < blockDim.x*blockDim.y; i++) {
       scaledSums += scale*sums[i];
     }
     gradWeight[k] += ScalarConvert<Acctype, Dtype>::to(scaledSums);
@@ -135,7 +135,7 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
 
   // compute gradBias
   sums[tid] = 0;
-  for (int i=tid; i<output_w*output_h; i+=(blockDim.x*blockDim.y)) {
+  for (int64_t i=tid; i<output_w*output_h; i+=(blockDim.x*blockDim.y)) {
     sums[tid] += gradOutput[i];
   }
   __syncthreads();
@@ -143,7 +143,7 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
   // reduce gradBias
   if ((threadIdx.x == 0) && (threadIdx.y == 0)) {
     Acctype scaledSums = Acctype(0);
-    for (int i=0; i<(blockDim.x*blockDim.y); i++) {
+    for (int64_t i=0; i<(blockDim.x*blockDim.y); i++) {
       scaledSums += scale*sums[i];
     }
     gradBias[k] += ScalarConvert<Acctype, Dtype>::to(scaledSums);
@@ -156,28 +156,28 @@ __global__ void subgradweight(Dtype *input, Dtype *gradOutput, Dtype *gradWeight
  */
  template <typename Dtype>
 __global__ void subgradinput(Dtype *gradInput, Dtype *gradOutput, Dtype *weight,
-                             int input_n, int input_h, int input_w,
-                             int kH, int kW, int dH, int dW)
+                             int64_t input_n, int64_t input_h, int64_t input_w,
+                             int64_t kH, int64_t kW, int64_t dH, int64_t dW)
 {
   // iterators
-  int xx, yy;
+  int64_t xx, yy;
 
   // output size
-  int output_w = (input_w - kW) / dW + 1;
-  int output_h = (input_h - kH) / dH + 1;
+  int64_t output_w = (input_w - kW) / dW + 1;
+  int64_t output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
-  int k = blockIdx.x % input_n;
+  int64_t o = blockIdx.x;
+  int64_t i = o;
+  int64_t k = blockIdx.x % input_n;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int64_t xx_start = threadIdx.x;
+  int64_t xx_end = output_w;
+  int64_t xx_step = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int64_t yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t yy_end = output_h;
+  int64_t yy_step = blockDim.y*gridDim.y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
@@ -192,7 +192,7 @@ __global__ void subgradinput(Dtype *gradInput, Dtype *gradOutput, Dtype *weight,
       Dtype *ptr_gradInput = gradInput + yy*dH*input_w + xx*dW;
       Dtype *ptr_gradOutput = gradOutput + yy*output_w + xx;
       Dtype z = *ptr_gradOutput * the_weight;
-      int kx, ky;
+      int64_t kx, ky;
       for(ky = 0; ky < kH; ky++) {
         for(kx = 0; kx < kW; kx++) {
           // FIXME: should this be done at accreal precision?
@@ -210,28 +210,28 @@ __global__ void subgradinput(Dtype *gradInput, Dtype *gradOutput, Dtype *weight,
  */
  template <typename Dtype>
 __global__ void subgradinputAtomic(Dtype *gradInput, Dtype *gradOutput, Dtype *weight,
-                                   int input_n, int input_h, int input_w,
-                                   int kH, int kW, int dH, int dW)
+                                   int64_t input_n, int64_t input_h, int64_t input_w,
+                                   int64_t kH, int64_t kW, int64_t dH, int64_t dW)
 {
   // iterators
-  int xx, yy;
+  int64_t xx, yy;
 
   // output size
-  int output_w = (input_w - kW) / dW + 1;
-  int output_h = (input_h - kH) / dH + 1;
+  int64_t output_w = (input_w - kW) / dW + 1;
+  int64_t output_h = (input_h - kH) / dH + 1;
 
   // compute offsets based on thread/block ID
-  int o = blockIdx.x;
-  int i = o;
-  int k = blockIdx.x % input_n;
+  int64_t o = blockIdx.x;
+  int64_t i = o;
+  int64_t k = blockIdx.x % input_n;
 
-  int xx_start = threadIdx.x;
-  int xx_end = output_w;
-  int xx_step = blockDim.x;
+  int64_t xx_start = threadIdx.x;
+  int64_t xx_end = output_w;
+  int64_t xx_step = blockDim.x;
 
-  int yy_start = blockDim.y*blockIdx.y + threadIdx.y;
-  int yy_end = output_h;
-  int yy_step = blockDim.y*gridDim.y;
+  int64_t yy_start = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t yy_end = output_h;
+  int64_t yy_step = blockDim.y*gridDim.y;
 
   // select input/output plane
   gradOutput = gradOutput + o*output_w*output_h;
@@ -246,7 +246,7 @@ __global__ void subgradinputAtomic(Dtype *gradInput, Dtype *gradOutput, Dtype *w
       Dtype *ptr_gradInput = gradInput + yy*dH*input_w + xx*dW;
       Dtype *ptr_gradOutput = gradOutput + yy*output_w + xx;
       Dtype z = *ptr_gradOutput * the_weight;
-      int kx, ky;
+      int64_t kx, ky;
       for(ky = 0; ky < kH; ky++) {
         for(kx = 0; kx < kW; kx++) {
           // FIXME: should this be done at accreal precision?

@@ -31,7 +31,7 @@ void THNN_(PReLU_updateOutput)(
 
     if (input_ndim > 1) {
         bs = input->size[0];
-        for (int d = 2; d < input_ndim; d++) {
+        for (int64_t d = 2; d < input_ndim; d++) {
             ks *= input->size[d];
         }
     }
@@ -96,7 +96,7 @@ void THNN_(PReLU_updateGradInput)(
 
     if (input_ndim > 1) {
         bs = input->size[0];
-        for (int d = 2; d < input_ndim; d++) {
+        for (int64_t d = 2; d < input_ndim; d++) {
             ks *= input->size[d];
         }
     }
@@ -167,7 +167,7 @@ void THNN_(PReLU_accGradParameters)(
 
     if (input_ndim > 1) {
         bs = input->size[0];
-        for (int d = 2; d < input_ndim; d++) {
+        for (int64_t d = 2; d < input_ndim; d++) {
           ks *= input->size[d];
         }
     }

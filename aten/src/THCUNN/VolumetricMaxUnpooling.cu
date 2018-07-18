@@ -14,9 +14,9 @@ __global__ void cuda_VolumetricMaxUnpooling_updateOutput(
   THCDeviceTensor<Dtype, 4> input,
   THCDeviceTensor<THCIndex_t, 4> indices,
   Dtype* outputData,
-  int oT, int oH, int oW,
-  int dT, int dH, int dW,
-  int padT, int padH, int padW, int offsetZ)
+  int64_t oT, int64_t oH, int64_t oW,
+  int64_t dT, int64_t dH, int64_t dW,
+  int64_t padT, int64_t padH, int64_t padW, int64_t offsetZ)
 {
   int64_t iColumn = blockIdx.x * blockDim.x + threadIdx.x;
   int64_t iRow    = blockIdx.y * blockDim.y + threadIdx.y;
@@ -34,16 +34,16 @@ __global__ void cuda_VolumetricMaxUnpooling_updateOutput(
 template <typename Dtype>
 __global__ void cuda_VolumetricMaxUnpooling_updateGradInput(
   Dtype* gradOutputData,
-  int oT, int oH, int oW,
+  int64_t oT, int64_t oH, int64_t oW,
   THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<Dtype, 4> gradInput,
-  int dT, int dH, int dW,
-  int padT, int padH, int padW, int offsetZ)
+  int64_t dT, int64_t dH, int64_t dW,
+  int64_t padT, int64_t padH, int64_t padW, int64_t offsetZ)
 {
-  int iColumn = blockIdx.x * blockDim.x + threadIdx.x;
-  int iRow    = blockIdx.y * blockDim.y + threadIdx.y;
-  int iFrame  = (blockIdx.z + offsetZ) % gradInput.getSize(1); // output frame/time
-  int slice   = (blockIdx.z + offsetZ) / gradInput.getSize(1); // output slice/feature
+  int64_t iColumn = blockIdx.x * blockDim.x + threadIdx.x;
+  int64_t iRow    = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t iFrame  = (blockIdx.z + offsetZ) % gradInput.getSize(1); // output frame/time
+  int64_t slice   = (blockIdx.z + offsetZ) / gradInput.getSize(1); // output slice/feature
 
   if (iRow < gradInput.getSize(2) && iColumn < gradInput.getSize(3))
   {

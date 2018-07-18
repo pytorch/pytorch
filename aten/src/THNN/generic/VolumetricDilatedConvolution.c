@@ -5,10 +5,10 @@
 static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
                          THTensor *input, THTensor *gradOutput,
                          THTensor *weight, THTensor *bias,
-                         int kT, int kH, int kW, int dT, int dH, int dW,
-                         int padT, int padH, int padW,
-                         int dilationT, int dilationH, int dilationW,
-                         int weight_nullable) {
+                         int64_t kT, int64_t kH, int64_t kW, int64_t dT, int64_t dH, int64_t dW,
+                         int64_t padT, int64_t padH, int64_t padW,
+                         int64_t dilationT, int64_t dilationH, int64_t dilationW,
+                         int64_t weight_nullable) {
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
                 "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 8,
@@ -31,11 +31,11 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
   }
 
   // Params
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimd = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (ndim == 5) {
     dimf++;
@@ -84,10 +84,10 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
           THTensor *bias,
           THTensor *columns,
           THTensor *ones,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          int dilationT, int dilationW, int dilationH)
+          int64_t kT, int64_t kW, int64_t kH,
+          int64_t dT, int64_t dW, int64_t dH,
+          int64_t padT, int64_t padW, int64_t padH,
+          int64_t dilationT, int64_t dilationW, int64_t dilationH)
 {
   THNN_(VolumetricDilatedConvolution_shapeCheck)(
         input, NULL, weight, bias,
@@ -105,7 +105,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
     bias = THTensor_(newContiguous)(bias);
     THArgCheck(THTensor_(isContiguous)(ones), 6, "ones needs to be contiguous");
   }
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
@@ -144,7 +144,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   THTensor *output_n = THTensor_(new)();
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THTensor_(select)(input_n, input, 0, elt);
     THTensor_(select)(output_n, output, 0, elt);
@@ -219,10 +219,10 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
           THTensor *gradInput,
           THTensor *weight,
           THTensor *gradColumns,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          int dilationT, int dilationW, int dilationH)
+          int64_t kT, int64_t kW, int64_t kH,
+          int64_t dT, int64_t dW, int64_t dH,
+          int64_t padT, int64_t padW, int64_t padH,
+          int64_t dilationT, int64_t dilationW, int64_t dilationH)
 {
   THNN_(VolumetricDilatedConvolution_shapeCheck)(
         input, gradOutput, weight, NULL,
@@ -238,7 +238,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
   weight = THTensor_(newContiguous)(weight);
   THArgCheck(THTensor_(isContiguous)(gradColumns), 5, "gradColumns needs to be contiguous");
 
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
@@ -268,7 +268,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
   THTensor *gradOutput_n = THTensor_(new)();
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per sample:
     THTensor_(select)(gradInput_n, gradInput, 0, elt);
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
@@ -324,10 +324,10 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
           THTensor *gradBias,
           THTensor *columns,
           THTensor *ones,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int padT, int padW, int padH,
-          int dilationT, int dilationW, int dilationH,
+          int64_t kT, int64_t kW, int64_t kH,
+          int64_t dT, int64_t dW, int64_t dH,
+          int64_t padT, int64_t padW, int64_t padH,
+          int64_t dilationT, int64_t dilationW, int64_t dilationH,
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
@@ -348,7 +348,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
     THArgCheck(THTensor_(isContiguous)(ones), 7, "ones needs to be contiguous");
   }
 
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
@@ -383,7 +383,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   THTensor *gradOutput_n = THTensor_(new)();
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 

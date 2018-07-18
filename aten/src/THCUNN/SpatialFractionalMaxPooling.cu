@@ -10,49 +10,49 @@
 #include <cfloat>
 
 template <typename Dtype, typename Acctype>
-__device__ inline int getInterval(Acctype sample,
-                                  int index,
-                                  int inputSize,
-                                  int outputSize,
-                                  int poolSize) {
+__device__ inline int64_t getInterval(Acctype sample,
+                                  int64_t index,
+                                  int64_t inputSize,
+                                  int64_t outputSize,
+                                  int64_t poolSize) {
   Acctype alpha = (Acctype)(inputSize - poolSize) / (Acctype) (outputSize - 1);
   if (index == outputSize - 1) {
     return inputSize - poolSize;
   } else {
-    return (int) ((index + sample) * alpha) - (int) (sample * alpha);
+    return (int64_t) ((index + sample) * alpha) - (int64_t) (sample * alpha);
   }
 }
 
 // We template on poolSizeW to allow the innermost loop to be unrolled
-template <int PoolSizeWStatic, typename Dtype, typename Acctype>
+template <int64_t PoolSizeWStatic, typename Dtype, typename Acctype>
 __global__ void SpatialFractionalMaxPooling_updateOutput(
   THCDeviceTensor<Dtype, 4> input,
   THCDeviceTensor<Dtype, 4> output,
   THCDeviceTensor<THCIndex_t, 4> indices,
   THCDeviceTensor<Dtype, 3> samples,
-  int poolSizeW, int poolSizeH) {
+  int64_t poolSizeW, int64_t poolSizeH) {
 
   // Output (h, w) point that this thread is responsible for
-  int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int64_t ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
+  int64_t plane = blockIdx.y;
+  int64_t batch = blockIdx.z;
 
   // Each thread generates a specific output point
   if (ourOutputPoint < output.getSize(2) * output.getSize(3)) {
-    int outputW = ourOutputPoint % output.getSize(3);
-    int outputH = ourOutputPoint / output.getSize(3);
+    int64_t outputW = ourOutputPoint % output.getSize(3);
+    int64_t outputH = ourOutputPoint / output.getSize(3);
 
-    int poolW = getInterval<Dtype, Acctype>(ScalarConvert<Dtype, Acctype>::to(samples[batch][plane][0]), outputW,
+    int64_t poolW = getInterval<Dtype, Acctype>(ScalarConvert<Dtype, Acctype>::to(samples[batch][plane][0]), outputW,
                             input.getSize(3), output.getSize(3), poolSizeW);
-    int poolH = getInterval<Dtype, Acctype>(ScalarConvert<Dtype, Acctype>::to(samples[batch][plane][1]), outputH,
+    int64_t poolH = getInterval<Dtype, Acctype>(ScalarConvert<Dtype, Acctype>::to(samples[batch][plane][1]), outputH,
                             input.getSize(2), output.getSize(2), poolSizeH);
 
     Dtype maxVal = THCNumerics<Dtype>::min();
-    int maxIndex = -1;
+    int64_t maxIndex = -1;
 
-    for (int h = poolH; h < poolH + poolSizeH; ++h) {
+    for (int64_t h = poolH; h < poolH + poolSizeH; ++h) {
       if (PoolSizeWStatic == -1) {
-        for (int w = poolW; w < poolW + poolSizeW; ++w) {
+        for (int64_t w = poolW; w < poolW + poolSizeW; ++w) {
           Dtype val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
           if (val > maxVal) {
@@ -62,8 +62,8 @@ __global__ void SpatialFractionalMaxPooling_updateOutput(
         }
       } else {
 #pragma unroll
-        for (int i = 0; i < PoolSizeWStatic; ++i) {
-          int w = i + poolW;
+        for (int64_t i = 0; i < PoolSizeWStatic; ++i) {
+          int64_t w = i + poolW;
           Dtype val = input[batch][plane][h][w];
           // for consistency with THNN, favor the first max
           if (val > maxVal) {
@@ -89,19 +89,19 @@ __global__ void SpatialFractionalMaxPooling_updateGradInput(
   THCDeviceTensor<Dtype, 4> gradOutput,
   THCDeviceTensor<THCIndex_t, 4> indices) {
   // Output (h, w) point that this thread is responsible for
-  int ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int64_t ourOutputPoint = threadIdx.x + blockIdx.x * blockDim.x;
+  int64_t plane = blockIdx.y;
+  int64_t batch = blockIdx.z;
 
   // Each thread generates a specific output point
   if (ourOutputPoint < gradOutput.getSize(2) * gradOutput.getSize(3)) {
-    int outputW = ourOutputPoint % gradOutput.getSize(3);
-    int outputH = ourOutputPoint / gradOutput.getSize(3);
+    int64_t outputW = ourOutputPoint % gradOutput.getSize(3);
+    int64_t outputH = ourOutputPoint / gradOutput.getSize(3);
 
-    int index = indices[batch][plane][outputH][outputW] - TH_INDEX_BASE;
+    int64_t index = indices[batch][plane][outputH][outputW] - TH_INDEX_BASE;
     assert(index >= 0);
-    int inputW = index % gradInput.getSize(3);
-    int inputH = index / gradInput.getSize(3);
+    int64_t inputW = index % gradInput.getSize(3);
+    int64_t inputH = index / gradInput.getSize(3);
     assert(inputH < gradInput.getSize(2));
 
     atomicAdd(gradInput[batch][plane][inputH][inputW].data(),

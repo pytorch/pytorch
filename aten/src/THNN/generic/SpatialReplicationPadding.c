@@ -7,13 +7,13 @@ static void THNN_(SpatialReplicationPadding_updateOutput_frame)(
   int64_t nslices,
   int64_t iwidth, int64_t iheight,
   int64_t owidth, int64_t oheight,
-  int pad_l, int pad_r,
-  int pad_t, int pad_b)
+  int64_t pad_l, int64_t pad_r,
+  int64_t pad_t, int64_t pad_b)
 {
-  int iStartX = fmax(0, -pad_l);
-  int iStartY = fmax(0, -pad_t);
-  int oStartX = fmax(0, pad_l);
-  int oStartY = fmax(0, pad_t);
+  int64_t iStartX = fmax(0, -pad_l);
+  int64_t iStartY = fmax(0, -pad_t);
+  int64_t oStartX = fmax(0, pad_l);
+  int64_t oStartY = fmax(0, pad_t);
 
   int64_t k, ip_x, ip_y;
 #pragma omp parallel for private(k, ip_x, ip_y)
@@ -51,12 +51,12 @@ static void THNN_(SpatialReplicationPadding_updateOutput_frame)(
 void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
                                                          THTensor *input,
                                                          THTensor *output,
-                                                         int pad_l, int pad_r,
-                                                         int pad_t, int pad_b)
+                                                         int64_t pad_l, int64_t pad_r,
+                                                         int64_t pad_t, int64_t pad_b)
 {
-  int dimw = 2;
-  int dimh = 1;
-  int dimslices = 0;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t dimslices = 0;
   int64_t nbatch = 1;
   int64_t nslices;
   int64_t iheight;
@@ -140,13 +140,13 @@ static void THNN_(SpatialReplicationPadding_updateGradInput_frame)(
   int64_t nslices,
   int64_t iwidth, int64_t iheight,
   int64_t owidth, int64_t oheight,
-  int pad_l, int pad_r,
-  int pad_t, int pad_b)
+  int64_t pad_l, int64_t pad_r,
+  int64_t pad_t, int64_t pad_b)
 {
-  int iStartX = fmax(0, -pad_l);
-  int iStartY = fmax(0, -pad_t);
-  int oStartX = fmax(0, pad_l);
-  int oStartY = fmax(0, pad_t);
+  int64_t iStartX = fmax(0, -pad_l);
+  int64_t iStartY = fmax(0, -pad_t);
+  int64_t oStartX = fmax(0, pad_l);
+  int64_t oStartY = fmax(0, pad_t);
 
   int64_t k, ip_x, ip_y;
 #pragma omp parallel for private(k, ip_x, ip_y)
@@ -185,12 +185,12 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
                                                       THTensor *input,
                                                       THTensor *gradOutput,
                                                       THTensor *gradInput,
-                                                      int pad_l, int pad_r,
-                                                      int pad_t, int pad_b)
+                                                      int64_t pad_l, int64_t pad_r,
+                                                      int64_t pad_t, int64_t pad_b)
 {
-  int dimw = 2;
-  int dimh = 1;
-  int dimslices = 0;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t dimslices = 0;
   int64_t nbatch = 1;
   int64_t nslices;
   int64_t iheight;

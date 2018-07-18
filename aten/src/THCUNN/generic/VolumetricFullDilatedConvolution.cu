@@ -8,11 +8,11 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
                THCTensor *gradOutput,
                THCTensor *weight,
                THCTensor *bias,
-               int kT, int kW, int kH,
-               int dT, int dW, int dH,
-               int padT, int padW, int padH,
-               int dilationT, int dilationW, int dilationH,
-               int adjT, int adjW, int adjH, int weight_nullable) {
+               int64_t kT, int64_t kW, int64_t kH,
+               int64_t dT, int64_t dW, int64_t dH,
+               int64_t padT, int64_t padW, int64_t padH,
+               int64_t dilationT, int64_t dilationW, int64_t dilationH,
+               int64_t adjT, int64_t adjW, int64_t adjH, int64_t weight_nullable) {
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
             "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(dT > 0 && dW > 0 && dH > 0, 8,
@@ -40,11 +40,11 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimd = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (ndim == 5) {
     dimf++;
@@ -93,18 +93,18 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
        THCTensor  *bias,
        THCTensor  *finput,
        THCTensor  *fgradInput,
-       int kT, int kW, int kH,
-       int dT, int dW, int dH,
-       int padT, int padW, int padH,
-       int dilationT, int dilationW, int dilationH,
-       int adjT, int adjW, int adjH)
+       int64_t kT, int64_t kW, int64_t kH,
+       int64_t dT, int64_t dW, int64_t dH,
+       int64_t padT, int64_t padW, int64_t padH,
+       int64_t dilationT, int64_t dilationW, int64_t dilationH,
+       int64_t adjT, int64_t adjW, int64_t adjH)
 {
 
   THCTensor  *columns = finput;
   THCTensor  *ones    = fgradInput;
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
-  int nOutputPlane = THCTensor_(size)(state, weight, 1);
+  int64_t nInputPlane = THCTensor_(size)(state, weight, 0);
+  int64_t nOutputPlane = THCTensor_(size)(state, weight, 1);
 
   THCUNN_assertSameGPU(state, 6, input, output, weight,
                bias, columns, ones);
@@ -118,7 +118,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   input = THCTensor_(newContiguous)(state, input);
   weight = THCTensor_(newContiguous)(state, weight);
 
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
@@ -155,7 +155,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   THCTensor  *output_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, output_n, output, 0, elt);
@@ -246,16 +246,16 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
        THCTensor  *weight,
        THCTensor  *finput,
        THCTensor  *fgradInput,
-       int kT, int kW, int kH,
-       int dT, int dW, int dH,
-       int padT, int padW, int padH,
-       int dilationT, int dilationW, int dilationH,
-       int adjT, int adjW, int adjH)
+       int64_t kT, int64_t kW, int64_t kH,
+       int64_t dT, int64_t dW, int64_t dH,
+       int64_t padT, int64_t padW, int64_t padH,
+       int64_t dilationT, int64_t dilationW, int64_t dilationH,
+       int64_t adjT, int64_t adjW, int64_t adjH)
 {
   THCTensor  *gradColumns = finput;
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
-  int nOutputPlane = THCTensor_(size)(state, weight, 1);
+  int64_t nInputPlane = THCTensor_(size)(state, weight, 0);
+  int64_t nOutputPlane = THCTensor_(size)(state, weight, 1);
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                gradColumns, gradInput);
@@ -268,7 +268,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   weight = THCTensor_(newContiguous)(state, weight);
 
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
@@ -297,7 +297,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
   THCTensor  *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per sample:
     THCTensor_(select)(state, gradInput_n, gradInput, 0, elt);
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
@@ -365,11 +365,11 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
            THCTensor  *gradBias,
            THCTensor  *finput,
            THCTensor  *fgradInput,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
-           int dilationT, int dilationW, int dilationH,
-           int adjT, int adjW, int adjH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
+           int64_t dilationT, int64_t dilationW, int64_t dilationH,
+           int64_t adjT, int64_t adjW, int64_t adjH,
            accreal scale_)
 {
   THCTensor  *columns = finput;
@@ -383,7 +383,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
       dT, dW, dH, padT, padW, padH, dilationT, dilationW, dilationH,
       adjT, adjW, adjH, 1);
 
-  int nOutputPlane;
+  int64_t nOutputPlane;
   if (gradWeight) {
     nOutputPlane = THCTensor_(size)(state, gradWeight, 1);
   } else if (gradBias) {
@@ -403,7 +403,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
@@ -436,7 +436,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   THCTensor  *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 

@@ -6,8 +6,8 @@
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
-#define START_IND(a,b,c) (int)floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
+#define START_IND(a,b,c) (int64_t)floor((float)(a * c) / b)
+#define END_IND(a,b,c) (int64_t)ceil((float)((a + 1) * c) / b)
 // #define START_IND(a,b,c) a * c / b
 // #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 
@@ -21,32 +21,32 @@
  template <typename T>
 __global__ void cunn_VolumetricAdaptiveMaxPooling_updateOutput_kernel(
                         T *input, T *output, THCIndex_t *indices,
-                        int isizeT, int isizeH, int isizeW,
-                        int osizeT, int osizeH, int osizeW,
+                        int64_t isizeT, int64_t isizeH, int64_t isizeW,
+                        int64_t osizeT, int64_t osizeH, int64_t osizeW,
                         int64_t istrideD,
                         int64_t istrideT, int64_t istrideH, int64_t istrideW,
                         int64_t offsetZ)
 {
   // iterators on output pixels
-  int ot, oh, ow;
+  int64_t ot, oh, ow;
 
   // compute offsets based on thread/block ID
-  int ostartH = blockIdx.y * blockDim.y + threadIdx.y;
-  int oendH   = osizeH;
-  int ostepH  = gridDim.y * blockDim.y;
-  int ostartW = threadIdx.x;
-  int oendW   = osizeW;
-  int ostepW  = blockDim.x;
+  int64_t ostartH = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t oendH   = osizeH;
+  int64_t ostepH  = gridDim.y * blockDim.y;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW   = osizeW;
+  int64_t ostepW  = blockDim.x;
 
   // select output plane
   int64_t o_plane = blockIdx.x + offsetZ;
   ot = o_plane % osizeT;     // output frame/time
-  int d = o_plane / osizeT;  // slice/feature
+  int64_t d = o_plane / osizeT;  // slice/feature
 
   // input frame/time ramge is fixed.
-  int istartT = START_IND(ot, osizeT, isizeT);
-  int iendT = END_IND(ot, osizeT, isizeT);
-  int kT = iendT - istartT;
+  int64_t istartT = START_IND(ot, osizeT, isizeT);
+  int64_t iendT = END_IND(ot, osizeT, isizeT);
+  int64_t kT = iendT - istartT;
 
   // input offset by slice/feature and earliest relevant frame/time
   T *input_dt = input + d*istrideD + istartT*istrideT;
@@ -58,15 +58,15 @@ __global__ void cunn_VolumetricAdaptiveMaxPooling_updateOutput_kernel(
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = START_IND(oh, osizeH, isizeH);
-    int iendH   = END_IND(oh, osizeH, isizeH);
-    int kH = iendH - istartH;
+    int64_t istartH = START_IND(oh, osizeH, isizeH);
+    int64_t iendH   = END_IND(oh, osizeH, isizeH);
+    int64_t kH = iendH - istartH;
 
     for(ow = ostartW; ow < oendW; ow += ostepW) {
 
-      int istartW = START_IND(ow, osizeW, isizeW);
-      int iendW   = END_IND(ow, osizeW, isizeW);
-      int kW = iendW - istartW;
+      int64_t istartW = START_IND(ow, osizeW, isizeW);
+      int64_t iendW   = END_IND(ow, osizeW, isizeW);
+      int64_t kW = iendW - istartW;
 
       // Compute the average pooling from corresponding input pixels
       T *ptr_input = input_dt + istartH*istrideH + istartW*istrideW;
@@ -75,7 +75,7 @@ __global__ void cunn_VolumetricAdaptiveMaxPooling_updateOutput_kernel(
       int64_t argmax = -1;
       T max = THCNumerics<T>::min();
 
-      int it, ih, iw;
+      int64_t it, ih, iw;
       for(it = 0; it < kT; ++it) {
         for(ih = 0; ih < kH; ++ih) {
           for(iw = 0; iw < kW; ++iw) {
@@ -108,25 +108,25 @@ __global__ void cunn_VolumetricAdaptiveMaxPooling_updateOutput_kernel(
  template <typename T>
 __global__ void cunn_VolumetricAdaptiveMaxPooling_updateGradInput_kernel(
   T *gradInput, T *gradOutput, THCIndex_t *indices,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW,
+  int64_t isizeT, int64_t isizeH, int64_t isizeW,
+  int64_t osizeT, int64_t osizeH, int64_t osizeW,
   int64_t offsetZ
 )
 {
   // iterators on output pixels
-  int oh, ow;
+  int64_t oh, ow;
 
   // compute offsets based on thread/block ID
-  int ostartH = blockIdx.y * blockDim.y + threadIdx.y;
-  int oendH   = osizeH;
-  int ostepH  = gridDim.y * blockDim.y;
-  int ostartW = threadIdx.x;
-  int oendW   = osizeW;
-  int ostepW  = blockDim.x;
+  int64_t ostartH = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t oendH   = osizeH;
+  int64_t ostepH  = gridDim.y * blockDim.y;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW   = osizeW;
+  int64_t ostepW  = blockDim.x;
 
   // select output plane
   int64_t o_plane = blockIdx.x + offsetZ;
-  int d = o_plane / osizeT;     // output slice/feature
+  int64_t d = o_plane / osizeT;     // output slice/feature
 
   // gradInput offset by slice/feature
   T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;
@@ -142,7 +142,7 @@ __global__ void cunn_VolumetricAdaptiveMaxPooling_updateGradInput_kernel(
       T *ptr_gradOutput = gradOutput_dt + oh*osizeW + ow;
       THCIndex_t *ptr_ind = indices_dt + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput;
-      int argmax = (*ptr_ind) - TH_INDEX_BASE;
+      int64_t argmax = (*ptr_ind) - TH_INDEX_BASE;
       gradInput_d[argmax] += grad_delta;
     }
   }
@@ -161,25 +161,25 @@ __global__ void cunn_VolumetricAdaptiveMaxPooling_updateGradInput_kernel(
  template <typename T>
 __global__ void cunn_atomic_VolumetricAdaptiveMaxPooling_updateGradInput_kernel(
   T *gradInput, T *gradOutput, THCIndex_t *indices,
-  int isizeT, int isizeH, int isizeW,
-  int osizeT, int osizeH, int osizeW,
+  int64_t isizeT, int64_t isizeH, int64_t isizeW,
+  int64_t osizeT, int64_t osizeH, int64_t osizeW,
   int64_t offsetZ
 )
 {
   // iterators on output pixels
-  int oh, ow;
+  int64_t oh, ow;
 
   // compute offsets based on thread/block ID
-  int ostartH = blockIdx.y * blockDim.y + threadIdx.y;
-  int oendH   = osizeH;
-  int ostepH  = gridDim.y * blockDim.y;
-  int ostartW = threadIdx.x;
-  int oendW   = osizeW;
-  int ostepW  = blockDim.x;
+  int64_t ostartH = blockIdx.y * blockDim.y + threadIdx.y;
+  int64_t oendH   = osizeH;
+  int64_t ostepH  = gridDim.y * blockDim.y;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW   = osizeW;
+  int64_t ostepW  = blockDim.x;
 
   // select output plane
   int64_t o_plane = blockIdx.x + offsetZ;
-  int d = o_plane / osizeT;     // output slice/feature
+  int64_t d = o_plane / osizeT;     // output slice/feature
 
   // gradInput offset by slice/feature
   T *gradInput_d = gradInput + d*isizeT*isizeH*isizeW;

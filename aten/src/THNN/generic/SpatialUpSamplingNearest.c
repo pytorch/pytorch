@@ -6,9 +6,9 @@
 
 static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
-      int nBatch, int nChannels,
-      int inputHeight, int inputWidth,
-      int outputHeight, int outputWidth) {
+      int64_t nBatch, int64_t nChannels,
+      int64_t inputHeight, int64_t inputWidth,
+      int64_t outputHeight, int64_t outputWidth) {
   THArgCheck(inputHeight > 0 && inputWidth > 0
        && outputHeight > 0 && outputWidth > 0, 2,
        "input and output sizes should be greater than 0,"
@@ -32,13 +32,13 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     THNNState *state,
     THTensor *input,
     THTensor *output,
-    int outputHeight,
-    int outputWidth)
+    int64_t outputHeight,
+    int64_t outputWidth)
 {
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputHeight = THTensor_(size)(input, 2);
-  int inputWidth = THTensor_(size)(input, 3);
+  int64_t nbatch = THTensor_(size)(input, 0);
+  int64_t channels = THTensor_(size)(input, 1);
+  int64_t inputHeight = THTensor_(size)(input, 2);
+  int64_t inputWidth = THTensor_(size)(input, 3);
   const float height_scale = (float) inputHeight / (float) outputHeight;
   const float width_scale = (float) inputWidth / (float) outputWidth;
 
@@ -61,13 +61,13 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
 
   // special case: just copy
   if (inputHeight == outputHeight && inputWidth == outputWidth) {
-    for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const int h1 = h2;
-      for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const int w1 = w2;
+    for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+      const int64_t h1 = h2;
+      for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+        const int64_t w1 = w2;
         const real* pos1 = &idata[h1 * inputWidth + w1];
         real* pos2 = &odata[h2 * outputWidth + w2];
-        for (int c = 0; c < channels; ++c) {
+        for (int64_t c = 0; c < channels; ++c) {
           pos2[0] = pos1[0];
           pos1 += inputHeight * inputWidth;
           pos2 += outputHeight * outputWidth;
@@ -78,13 +78,13 @@ void THNN_(SpatialUpSamplingNearest_updateOutput)(
     return;
   }
 
-  for (int h2 = 0; h2 < outputHeight; ++h2) {
-    const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
-    for (int w2 = 0; w2 < outputWidth; ++w2) {
-      const int w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
+  for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+    const int64_t h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
+    for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+      const int64_t w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
       const real* pos1 = &idata[h1 * inputWidth + w1];
       real* pos2 = &odata[h2 * outputWidth + w2];
-      for (int c = 0; c < channels; ++c) {
+      for (int64_t c = 0; c < channels; ++c) {
         pos2[0] = pos1[0];
         pos1 += inputHeight * inputWidth;
         pos2 += outputHeight * outputWidth;
@@ -98,12 +98,12 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     THNNState *state,
     THTensor *gradOutput,
     THTensor *gradInput,
-    int nbatch,
-    int channels,
-    int inputHeight,
-    int inputWidth,
-    int outputHeight,
-    int outputWidth)
+    int64_t nbatch,
+    int64_t channels,
+    int64_t inputHeight,
+    int64_t inputWidth,
+    int64_t outputHeight,
+    int64_t outputWidth)
 {
   THNN_(SpatialUpSamplingNearest_shapeCheck)(NULL, gradOutput, nbatch, channels,
 		  inputHeight, inputWidth, outputHeight, outputWidth);
@@ -117,13 +117,13 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
   const float width_scale = (float) inputWidth / (float)outputWidth;
   // special case: just copy
   if (inputHeight == outputHeight && inputWidth == outputWidth) {
-    for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const int h1 = h2;
-      for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const int w1 = w2;
+    for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+      const int64_t h1 = h2;
+      for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+        const int64_t w1 = w2;
         real* pos1 = &idata[h1 * inputWidth + w1];
         const real* pos2 = &odata[h2 * outputWidth + w2];
-        for (int c = 0; c < channels; ++c) {
+        for (int64_t c = 0; c < channels; ++c) {
           pos1[0] = pos2[0];
           pos1 += inputHeight * inputWidth;
           pos2 += outputHeight * outputWidth;
@@ -134,13 +134,13 @@ void THNN_(SpatialUpSamplingNearest_updateGradInput)(
     return;
   }
 
-  for (int h2 = 0; h2 < outputHeight; ++h2) {
-    const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
-    for (int w2 = 0; w2 < outputWidth; ++w2) {
-      const int w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
+  for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+    const int64_t h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
+    for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+      const int64_t w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
       real* pos1 = &idata[h1 * inputWidth + w1];
       const real* pos2 = &odata[h2 * outputWidth + w2];
-      for (int c = 0; c < channels; ++c) {
+      for (int64_t c = 0; c < channels; ++c) {
         pos1[0] += pos2[0];
         pos1 += inputHeight * inputWidth;
         pos2 += outputHeight * outputWidth;

@@ -5,17 +5,17 @@
 void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int padL, int padR,
-           int padT, int padB) {
+           int64_t padL, int64_t padR,
+           int64_t padT, int64_t padB) {
   THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
 
-  int planeDim = 0;
-  int dimh = 1;
-  int dimw = 2;
-  int numBatch = 1;
+  int64_t planeDim = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
+  int64_t numBatch = 1;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int64_t numInputDims = THCTensor_(nDimension)(state, input);
   THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 3 || numInputDims == 4), 2, input,
                   "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s")
 
@@ -26,9 +26,9 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
     dimw++;
   }
 
-  int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int inputH = THCTensor_(size)(state, input, dimh);
-  int inputW = THCTensor_(size)(state, input, dimw);
+  int64_t numPlanes = THCTensor_(size)(state, input, planeDim);
+  int64_t inputH = THCTensor_(size)(state, input, dimh);
+  int64_t inputW = THCTensor_(size)(state, input, dimw);
 
   THArgCheck(padL < inputW && padR < inputW, 4,
              "Padding size should be less than the corresponding input dimension, "
@@ -40,8 +40,8 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
              "but got: padding (%d, %d) at dimension %d of input %s",
              padT, padB, dimh, THCTensor_(sizeDesc)(state, input).str);
 
-  int outputH = inputH + padT + padB;
-  int outputW  = inputW + padL + padR;
+  int64_t outputH = inputH + padT + padB;
+  int64_t outputW  = inputW + padL + padR;
 
   THArgCheck(outputW >= 1 || outputH >= 1, 2,
              "input (H: %d, W: %d)is too small."
@@ -63,7 +63,7 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
     devOutput = toDeviceTensor<real, 4>(state, output);
   }
 
-  int outputPlaneSize = devOutput.getSize(2) * devOutput.getSize(3);
+  int64_t outputPlaneSize = devOutput.getSize(2) * devOutput.getSize(3);
   dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
             devOutput.getSize(1),
             devOutput.getSize(0));
@@ -79,28 +79,28 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int padL, int padR,
-           int padT, int padB) {
+           int64_t padL, int64_t padR,
+           int64_t padT, int64_t padB) {
 
   THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
                 "input tensor must fit into 32-bit index math");
   THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutput), 3,
                 "output gradient tensor must fit into 32-bit index math");
 
-  int planeDim = 0;
-  int dimh = 1;
-  int dimw = 2;
+  int64_t planeDim = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int64_t numInputDims = THCTensor_(nDimension)(state, input);
   if (numInputDims == 4) {
     planeDim++;
     dimh++;
     dimw++;
   }
-  int iheight = input->size[dimh];
-  int iwidth = input->size[dimw];
-  int oheight = iheight + padT + padB;
-  int owidth  = iwidth + padL + padR;
+  int64_t iheight = input->size[dimh];
+  int64_t iwidth = input->size[dimw];
+  int64_t oheight = iheight + padT + padB;
+  int64_t owidth  = iwidth + padL + padR;
 
   THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
              "gradOutput width unexpected. Expected: %d, Got: %d",
@@ -123,7 +123,7 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(
     devGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
   }
 
-  int outputPlaneSize = devGradOutput.getSize(2) * devGradOutput.getSize(3);
+  int64_t outputPlaneSize = devGradOutput.getSize(2) * devGradOutput.getSize(3);
   dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
             devGradOutput.getSize(1),
             devGradOutput.getSize(0));

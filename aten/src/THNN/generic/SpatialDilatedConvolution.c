@@ -5,8 +5,8 @@
 static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
 	THTensor *weight, THTensor *bias,
-	int kH, int kW, int dH, int dW, int padH, int padW,
-	int dilationH, int dilationW, int weight_nullable) {
+	int64_t kH, int64_t kW, int64_t dH, int64_t dW, int64_t padH, int64_t padW,
+	int64_t dilationH, int64_t dilationW, int64_t weight_nullable) {
   THArgCheck(kW > 0 && kH > 0, 9,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
@@ -26,10 +26,10 @@ static inline void THNN_(SpatialDilatedConvolution_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
 
   if (ndim == 4) {
     dimf++;
@@ -78,10 +78,10 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     THTensor *bias,
     THTensor *columns,
     THTensor *ones,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int dilationW, int dilationH)
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
+    int64_t padW, int64_t padH,
+    int64_t dilationW, int64_t dilationH)
 {
 
   THNN_(SpatialDilatedConvolution_shapeCheck)
@@ -89,8 +89,8 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
      dilationH, dilationW, 0);
 
   // Params:
-  int nInputPlane = weight->size[1];
-  int nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->size[1];
+  int64_t nOutputPlane = weight->size[0];
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
@@ -99,7 +99,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
     bias = THTensor_(newContiguous)(bias);
     THArgCheck(THTensor_(isContiguous)(ones), 6, "ones needs to be contiguous");
   }
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
@@ -135,7 +135,7 @@ void THNN_(SpatialDilatedConvolution_updateOutput)(
   THTensor *output_n = THTensor_(new)();
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THTensor_(select)(input_n, input, 0, elt);
     THTensor_(select)(output_n, output, 0, elt);
@@ -210,24 +210,24 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
     THTensor *gradInput,
     THTensor *weight,
     THTensor *gradColumns,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int dilationW, int dilationH)
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
+    int64_t padW, int64_t padH,
+    int64_t dilationW, int64_t dilationH)
 {
   THNN_(SpatialDilatedConvolution_shapeCheck)
     (input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, 0);
 
   // Params
-  int nInputPlane = weight->size[1];
-  int nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->size[1];
+  int64_t nOutputPlane = weight->size[0];
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
   gradOutput = THTensor_(newContiguous)(gradOutput);
   THArgCheck(THTensor_(isContiguous)(gradColumns), 5, "gradColumns needs to be contiguous");
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
@@ -256,7 +256,7 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
   THTensor *gradOutput_n = THTensor_(new)();
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per sample:
     THTensor_(select)(gradInput_n, gradInput, 0, elt);
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
@@ -312,10 +312,10 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     THTensor *gradBias,
     THTensor *columns,
     THTensor *ones,
-    int kW, int kH,
-    int dW, int dH,
-    int padW, int padH,
-    int dilationW, int dilationH,
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
+    int64_t padW, int64_t padH,
+    int64_t dilationW, int64_t dilationH,
     accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
@@ -334,7 +334,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
     THArgCheck(THTensor_(isContiguous)(gradBias), 5, "gradBias needs to be contiguous");
     THArgCheck(THTensor_(isContiguous)(ones), 7, "ones needs to be contiguous");
   }
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
@@ -361,7 +361,7 @@ void THNN_(SpatialDilatedConvolution_accGradParameters)(
   THTensor *gradOutput_n = THTensor_(new)();
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THTensor_(select)(gradOutput_n, gradOutput, 0, elt);
 

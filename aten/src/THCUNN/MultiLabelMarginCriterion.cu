@@ -14,30 +14,30 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
                                                                    Dtype *input,
                                                                    THCIndex_t *target,
                                                                    Dtype *istarget,
-                                                                   int nframe,
-                                                                   int dim,
-                                                                   int sizeaverage)
+                                                                   int64_t nframe,
+                                                                   int64_t dim,
+                                                                   int64_t sizeaverage)
 {
   // Temporary sums (for mapreduce)
   __shared__ Acctype sums[MULTILABELMARGIN_THREADS];
 
   // vectors:
-  int k = blockIdx.x;
+  int64_t k = blockIdx.x;
   Dtype *input_k = input + k*dim;
   THCIndex_t *target_k = target + k*dim;
   Dtype *output_k = output + k;
   Dtype *istarget_k = istarget + k*dim;
 
   // zero istarget
-  for (int d = threadIdx.x; d < dim; d += blockDim.x) {
+  for (int64_t d = threadIdx.x; d < dim; d += blockDim.x) {
     istarget_k[d] = ScalarConvert<int, Dtype>::to(0);
   }
   __syncthreads();
 
   // mark targets in istarget
   if (threadIdx.x == 0) {
-    for (int dt = 0; dt < dim; dt++) {
-      int target_idx = target_k[dt] - TH_INDEX_BASE;
+    for (int64_t dt = 0; dt < dim; dt++) {
+      int64_t target_idx = target_k[dt] - TH_INDEX_BASE;
       if (target_idx < 0) break;
       istarget_k[target_idx] = ScalarConvert<int, Dtype>::to(1);
     }
@@ -46,18 +46,18 @@ __global__ void cunn_MultiLabelMarginCriterion_updateOutput_kernel(Dtype *output
 
   // iterate over targets
   Acctype sum = 0;
-  for (int dt = 0; dt < dim; dt++) {
+  for (int64_t dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = target_k[dt] - TH_INDEX_BASE;
+    int64_t target_idx = target_k[dt] - TH_INDEX_BASE;
     if (target_idx < 0) break;
 
     // current value for target
     Dtype input_target_k = input_k[target_idx];
 
     // compare to all inputs (multithreaded):
-    for (int d = threadIdx.x; d < dim; d += blockDim.x) {
+    for (int64_t d = threadIdx.x; d < dim; d += blockDim.x) {
       // contribute to loss only if not a target
-      if (!ScalarConvert<Dtype, int>::to(istarget_k[d])) {
+      if (!ScalarConvert<Dtype, int64_t>::to(istarget_k[d])) {
         Dtype z = 1 - input_target_k + input_k[d];
         if (z > 0)
           sum += z;
@@ -82,21 +82,21 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
                                                                       Dtype *input,
                                                                       THCIndex_t *target,
                                                                       Dtype *istarget,
-                                                                      int nframe,
-                                                                      int dim,
-                                                                      int sizeaverage,
-                                                                      int reduce)
+                                                                      int64_t nframe,
+                                                                      int64_t dim,
+                                                                      int64_t sizeaverage,
+                                                                      int64_t reduce)
 {
   // Temporary sums (for mapreduce)
   __shared__ Acctype sums[MULTILABELMARGIN_THREADS];
 
   // vectors:
-  int k = blockIdx.x;
+  int64_t k = blockIdx.x;
   Dtype *input_k = input + k*dim;
   Dtype *gradInput_k = gradInput + k*dim;
   THCIndex_t *target_k = target + k*dim;
   Dtype *istarget_k = istarget + k*dim;
- 
+
   Dtype *gradOutput_k = gradOutput;
   if (!reduce) {
     gradOutput_k += k;
@@ -106,15 +106,15 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
   Dtype g = ScalarConvert<Acctype, Dtype>::to( sizeaverage && reduce ? 1./((Acctype)(nframe*dim)) : 1./((Acctype)dim) );
 
   // zero gradients:
-  for (int d = threadIdx.x; d < dim; d += blockDim.x) {
+  for (int64_t d = threadIdx.x; d < dim; d += blockDim.x) {
     gradInput_k[d] = ScalarConvert<int, Dtype>::to(0);
   }
   __syncthreads();
 
   // iterate over targets
-  for (int dt = 0; dt < dim; dt++) {
+  for (int64_t dt = 0; dt < dim; dt++) {
     // next target:
-    int target_idx = (int)target_k[dt] - TH_INDEX_BASE;
+    int64_t target_idx = (int64_t)target_k[dt] - TH_INDEX_BASE;
     if (target_idx < 0) break;
 
     // current value for target
@@ -122,9 +122,9 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
 
     // compare to all inputs (multithreaded):
     Acctype sum = 0;
-    for (int d = threadIdx.x; d < dim; d += blockDim.x) {
+    for (int64_t d = threadIdx.x; d < dim; d += blockDim.x) {
       // contribute to loss only if not a target
-      if (!ScalarConvert<Dtype, int>::to(istarget_k[d])) {
+      if (!ScalarConvert<Dtype, int64_t>::to(istarget_k[d])) {
         Dtype z = 1 - input_target_k + input_k[d];
         if (z > 0) {
           sum -= g;
@@ -141,7 +141,7 @@ __global__ void cunn_MultiLabelMarginCriterion_updateGradInput_kernel(Dtype *gra
     }
   }
 
-  for (int d = threadIdx.x; d < dim; d += blockDim.x) {
+  for (int64_t d = threadIdx.x; d < dim; d += blockDim.x) {
     gradInput_k[d] *= *gradOutput_k;
   }
 }

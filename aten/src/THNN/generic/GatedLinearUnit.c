@@ -6,7 +6,7 @@ void THNN_(GatedLinear_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int dim)
+          int64_t dim)
 {
   // size output to half of input
   dim = dim - TH_INDEX_BASE;
@@ -37,7 +37,7 @@ void THNN_(GatedLinear_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int dim)
+          int64_t dim)
 {
   // set up tensors
   dim = dim - TH_INDEX_BASE;

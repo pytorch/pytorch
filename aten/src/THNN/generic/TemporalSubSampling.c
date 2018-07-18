@@ -6,10 +6,10 @@ static inline void THNN_(TemporalSubSampling_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
                          THTensor *gradOutput,
-                         int kW,
-                         int dW,
-                         int *inputFrameSize) {
-  int nInputFrame, nOutputFrame;
+                         int64_t kW,
+                         int64_t dW,
+                         int64_t *inputFrameSize) {
+  int64_t nInputFrame, nOutputFrame;
 
   THArgCheck(kW > 0, 6,
              "kernel size should be greater than zero, but got kW: %d", kW);
@@ -44,12 +44,12 @@ void THNN_(TemporalSubSampling_updateOutput)(
           THTensor *output,
           THTensor *weight,
           THTensor *bias,
-          int kW,
-          int dW,
-          int inputFrameSize)
+          int64_t kW,
+          int64_t dW,
+          int64_t inputFrameSize)
 {
   THTensor *outputFrame, *inputWindow;
-  int nInputFrame, nOutputFrame;
+  int64_t nInputFrame, nOutputFrame;
   int64_t k;
 
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
@@ -85,8 +85,8 @@ void THNN_(TemporalSubSampling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *weight,
-          int kW,
-          int dW)
+          int64_t kW,
+          int64_t dW)
 {
 
   THTensor *gradOutputFrame;
@@ -125,8 +125,8 @@ void THNN_(TemporalSubSampling_accGradParameters)(
           THTensor *gradOutput,
           THTensor *gradWeight,
           THTensor *gradBias,
-          int kW,
-          int dW,
+          int64_t kW,
+          int64_t dW,
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);

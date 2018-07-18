@@ -18,7 +18,7 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
 
   if(input->dim() == 1)
   {
-    int dim = input->size[0];
+    int64_t dim = input->size[0];
     THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == dim), 3,
         "inconsistent target size");
     THCTensor_(resize1d)(state, output, 1);
@@ -39,8 +39,8 @@ void THNN_(MultiLabelMarginCriterion_updateOutput)(
   }
   else if(input->dim() == 2)
   {
-    int nframe = input->size[0];
-    int dim = input->size[1];
+    int64_t nframe = input->size[0];
+    int64_t dim = input->size[1];
     THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size[0] == nframe)
                && (target->size[1] == dim), 3, "inconsistent target size");
 
@@ -106,7 +106,7 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
 
   if(gradInput->dim() == 1)
   {
-    int dim = gradInput->size[0];
+    int64_t dim = gradInput->size[0];
     THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == dim), 3,
                "inconsistent target size");
     THArgCheck(!istarget->is_empty() && (istarget->dim() == 1) && (istarget->size[0] == dim), 3,
@@ -128,8 +128,8 @@ void THNN_(MultiLabelMarginCriterion_updateGradInput)(
   }
   else if(gradInput->dim() == 2)
   {
-    int nframe = gradInput->size[0];
-    int dim = gradInput->size[1];
+    int64_t nframe = gradInput->size[0];
+    int64_t dim = gradInput->size[1];
     THArgCheck(!target->is_empty() && (target->dim() == 2) && (target->size[0] == nframe)
                && (target->size[1] == dim), 3, "inconsistent target size");
     THArgCheck(!istarget->is_empty() && (istarget->dim() == 2) && (istarget->size[0] == nframe)

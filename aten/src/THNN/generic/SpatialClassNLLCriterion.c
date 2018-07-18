@@ -103,9 +103,9 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
 
   real total_weight_acc = 0;
   real output_acc = 0;
-  for (int b = 0; b < batch_size; b++) {
-    for (int elem = 0; elem < map_size; elem++) {
-      int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
+  for (int64_t b = 0; b < batch_size; b++) {
+    for (int64_t elem = 0; elem < map_size; elem++) {
+      int64_t cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
       if (cur_target == ignore_index) continue;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
@@ -190,16 +190,16 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
   real normalize = (reduction == Reduction::ElementwiseMean) ? *total_weight_data : 1.0f;
 
-  int b;
+  int64_t b;
   #pragma omp parallel for
   for (b = 0; b < batch_size; b++) {
-    int elem;
+    int64_t elem;
     for (elem = 0; elem < map_size; elem++) {
-      int cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
+      int64_t cur_target = target_data[b * map_size + elem] - TH_INDEX_BASE;
       if (cur_target == ignore_index) continue;
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
-      int index = b * sample_size + cur_target * map_size + elem;
+      int64_t index = b * sample_size + cur_target * map_size + elem;
       gradInput_data[index] =
         -(weights ? weights_data[cur_target] : 1.0f) / normalize * THTensor_(fastGet1d)(gradOutput, 0);
     }

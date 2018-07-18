@@ -7,17 +7,17 @@
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THCState *state,
   THCTensor *input, THCTensor *gradOutput,
-  int kH, int kW, int dH, int dW, int padH, int padW, bool ceil_mode) {
+  int64_t kH, int64_t kW, int64_t dH, int64_t dW, int64_t padH, int64_t padW, bool ceil_mode) {
 
   THArgCheck(kW > 0 && kH > 0, 5,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 8,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
 
   if (ndim == 4) {
     dimf++;
@@ -73,9 +73,9 @@ void THNN_(SpatialAveragePooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
            bool ceil_mode,
            bool count_include_pad)
 {
@@ -126,7 +126,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 
   real* output_data = THCTensor_(data)(state, output);
 
-  int count = THCTensor_(nElement)(state, output);
+  int64_t count = THCTensor_(nElement)(state, output);
 
   if(count_include_pad)
     AvePoolForward<real, accreal, true>
@@ -154,9 +154,9 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
            bool ceil_mode,
            bool count_include_pad)
 {
@@ -170,8 +170,8 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
   int64_t nOutputCols, nOutputRows;
-  int dimCol = 2;
-  int dimRow = 1;
+  int64_t dimCol = 2;
+  int64_t dimRow = 1;
 
   if (input->dim() == 3) {
     nInputPlane = input->size[0];
@@ -209,7 +209,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, input->dim(), dimCol, nOutputCols);
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  int count = THCTensor_(nElement)(state, input);
+  int64_t count = THCTensor_(nElement)(state, input);
 
   if(count_include_pad)
     AvePoolBackward<real, accreal, true>

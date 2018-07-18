@@ -2,8 +2,8 @@
 #define TH_GENERIC_FILE "generic/VolumetricAdaptiveAveragePooling.c"
 #else
 
-#define START_IND(a,b,c) (int)floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
+#define START_IND(a,b,c) (int64_t)floor((float)(a * c) / b)
+#define END_IND(a,b,c) (int64_t)ceil((float)((a + 1) * c) / b)
 // #define START_IND(a,b,c) a * c / b
 // #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 
@@ -32,22 +32,22 @@ static void THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(
     int64_t ot, oh, ow;
     for(ot = 0; ot < osizeT; ot++)
     {
-      int istartT = START_IND(ot, osizeT, isizeT);
-      int iendT   = END_IND(ot, osizeT, isizeT);
-      int kT = iendT - istartT;
+      int64_t istartT = START_IND(ot, osizeT, isizeT);
+      int64_t iendT   = END_IND(ot, osizeT, isizeT);
+      int64_t kT = iendT - istartT;
 
       for(oh = 0; oh < osizeH; oh++)
       {
-        int istartH = START_IND(oh, osizeH, isizeH);
-        int iendH   = END_IND(oh, osizeH, isizeH);
-        int kH = iendH - istartH;
+        int64_t istartH = START_IND(oh, osizeH, isizeH);
+        int64_t iendH   = END_IND(oh, osizeH, isizeH);
+        int64_t kH = iendH - istartH;
 
         for(ow = 0; ow < osizeW; ow++)
         {
 
-          int istartW = START_IND(ow, osizeW, isizeW);
-          int iendW   = END_IND(ow, osizeW, isizeW);
-          int kW = iendW - istartW;
+          int64_t istartW = START_IND(ow, osizeW, isizeW);
+          int64_t iendW   = END_IND(ow, osizeW, isizeW);
+          int64_t kW = iendW - istartW;
 
           /* local pointers */
           real *ip = input_p  + d*istrideD + istartT*istrideT + istartH*istrideH + istartW*istrideW;
@@ -55,7 +55,7 @@ static void THNN_(VolumetricAdaptiveAveragePooling_updateOutput_frame)(
 
           /* compute local average: */
           real sum = 0;
-          int it, ih, iw;
+          int64_t it, ih, iw;
           for(it = 0; it < kT; it++)
           {
             for(ih = 0; ih < kH; ih++)
@@ -80,14 +80,14 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int osizeT,
-          int osizeW,
-          int osizeH)
+          int64_t osizeT,
+          int64_t osizeW,
+          int64_t osizeH)
 {
-  int dimD = 0;
-  int dimT = 1;
-  int dimH = 2;
-  int dimW = 3;
+  int64_t dimD = 0;
+  int64_t dimT = 1;
+  int64_t dimH = 2;
+  int64_t dimW = 3;
   int64_t sizeB = 1;
   int64_t sizeD = 0;
   int64_t isizeT = 0;
@@ -187,26 +187,26 @@ static void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput_frame)(
     int64_t ot, oh, ow;
     for(ot = 0; ot < osizeT; ot++)
     {
-      int istartT = START_IND(ot, osizeT, isizeT);
-      int iendT   = END_IND(ot, osizeT, isizeT);
-      int kT = iendT - istartT;
+      int64_t istartT = START_IND(ot, osizeT, isizeT);
+      int64_t iendT   = END_IND(ot, osizeT, isizeT);
+      int64_t kT = iendT - istartT;
 
       for(oh = 0; oh < osizeH; oh++)
       {
-        int istartH = START_IND(oh, osizeH, isizeH);
-        int iendH   = END_IND(oh, osizeH, isizeH);
-        int kH = iendH - istartH;
+        int64_t istartH = START_IND(oh, osizeH, isizeH);
+        int64_t iendH   = END_IND(oh, osizeH, isizeH);
+        int64_t kH = iendH - istartH;
 
         for(ow = 0; ow < osizeW; ow++)
         {
 
-          int istartW = START_IND(ow, osizeW, isizeW);
-          int iendW   = END_IND(ow, osizeW, isizeW);
-          int kW = iendW - istartW;
+          int64_t istartW = START_IND(ow, osizeW, isizeW);
+          int64_t iendW   = END_IND(ow, osizeW, isizeW);
+          int64_t kW = iendW - istartW;
 
           real grad_delta = gradOutput_p_d[ot*osizeH*osizeW + oh*osizeW + ow] / kT / kH / kW;
 
-          int it, ih, iw;
+          int64_t it, ih, iw;
           for(it = istartT; it < iendT; it++)
           {
             for(ih = istartH; ih < iendH; ih++)
@@ -230,10 +230,10 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput)
 {
-  int dimD = 0;
-  int dimT = 1;
-  int dimH = 2;
-  int dimW = 3;
+  int64_t dimD = 0;
+  int64_t dimT = 1;
+  int64_t dimH = 2;
+  int64_t dimW = 3;
   int64_t sizeB = 1;
   int64_t sizeD;
   int64_t isizeT;

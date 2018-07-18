@@ -6,13 +6,13 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
                          THTensor *gradOutput,
-                         int pleft, int pright,
-                         int ptop, int pbottom,
-                         int pfront, int pback) {
-  int dimw = 3;
-  int dimh = 2;
-  int dimd = 1;
-  int dimslices = 0;
+                         int64_t pleft, int64_t pright,
+                         int64_t ptop, int64_t pbottom,
+                         int64_t pfront, int64_t pback) {
+  int64_t dimw = 3;
+  int64_t dimh = 2;
+  int64_t dimd = 1;
+  int64_t dimslices = 0;
   int64_t nslices;
   int64_t idepth;
   int64_t iheight;
@@ -67,16 +67,16 @@ static void THNN_(VolumetricReplicationPadding_updateOutput_frame)(
   int64_t nslices,
   int64_t iwidth, int64_t iheight, int64_t idepth,
   int64_t owidth, int64_t oheight, int64_t odepth,
-  int pleft, int pright,
-  int ptop, int pbottom,
-  int pfront, int pback)
+  int64_t pleft, int64_t pright,
+  int64_t ptop, int64_t pbottom,
+  int64_t pfront, int64_t pback)
 {
-  int iStartX = fmax(0, -pleft);
-  int iStartY = fmax(0, -ptop);
-  int iStartZ = fmax(0, -pfront);
-  int oStartX = fmax(0, pleft);
-  int oStartY = fmax(0, ptop);
-  int oStartZ = fmax(0, pfront);
+  int64_t iStartX = fmax(0, -pleft);
+  int64_t iStartY = fmax(0, -ptop);
+  int64_t iStartZ = fmax(0, -pfront);
+  int64_t oStartX = fmax(0, pleft);
+  int64_t oStartY = fmax(0, ptop);
+  int64_t oStartZ = fmax(0, pfront);
 
   int64_t k, ip_x, ip_y, ip_z;
 #pragma omp parallel for private(k, ip_x, ip_y, ip_z)
@@ -126,14 +126,14 @@ static void THNN_(VolumetricReplicationPadding_updateOutput_frame)(
 void THNN_(VolumetricReplicationPadding_updateOutput)(THNNState *state,
                                                       THTensor *input,
                                                       THTensor *output,
-                                                      int pleft, int pright,
-                                                      int ptop, int pbottom,
-                                                      int pfront, int pback)
+                                                      int64_t pleft, int64_t pright,
+                                                      int64_t ptop, int64_t pbottom,
+                                                      int64_t pfront, int64_t pback)
 {
-  int dimw = 3;
-  int dimh = 2;
-  int dimd = 1;
-  int dimslices = 0;
+  int64_t dimw = 3;
+  int64_t dimh = 2;
+  int64_t dimd = 1;
+  int64_t dimslices = 0;
   int64_t nbatch = 1;
   int64_t nslices;
   int64_t idepth;
@@ -216,16 +216,16 @@ static void THNN_(VolumetricReplicationPadding_updateGradInput_frame)(
   int64_t nslices,
   int64_t iwidth, int64_t iheight, int64_t idepth,
   int64_t owidth, int64_t oheight, int64_t odepth,
-  int pleft, int pright,
-  int ptop, int pbottom,
-  int pfront, int pback)
+  int64_t pleft, int64_t pright,
+  int64_t ptop, int64_t pbottom,
+  int64_t pfront, int64_t pback)
 {
-  int iStartX = fmax(0, -pleft);
-  int iStartY = fmax(0, -ptop);
-  int iStartZ = fmax(0, -pfront);
-  int oStartX = fmax(0, pleft);
-  int oStartY = fmax(0, ptop);
-  int oStartZ = fmax(0, pfront);
+  int64_t iStartX = fmax(0, -pleft);
+  int64_t iStartY = fmax(0, -ptop);
+  int64_t iStartZ = fmax(0, -pfront);
+  int64_t oStartX = fmax(0, pleft);
+  int64_t oStartY = fmax(0, ptop);
+  int64_t oStartZ = fmax(0, pfront);
 
   int64_t k, ip_x, ip_y, ip_z;
 #pragma omp parallel for private(k, ip_x, ip_y, ip_z)
@@ -276,14 +276,14 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(THNNState *state,
                                                          THTensor *input,
                                                          THTensor *gradOutput,
                                                          THTensor *gradInput,
-                                                         int pleft, int pright,
-                                                         int ptop, int pbottom,
-                                                         int pfront, int pback)
+                                                         int64_t pleft, int64_t pright,
+                                                         int64_t ptop, int64_t pbottom,
+                                                         int64_t pfront, int64_t pback)
 {
-  int dimw = 3;
-  int dimh = 2;
-  int dimd = 1;
-  int dimslices = 0;
+  int64_t dimw = 3;
+  int64_t dimh = 2;
+  int64_t dimd = 1;
+  int64_t dimslices = 0;
   int64_t nbatch = 1;
   int64_t nslices;
   int64_t idepth;

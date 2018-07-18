@@ -16,20 +16,20 @@ template<typename Dtype>
 __global__ void TemporalReflectionPadding_updateOutput(
   THCDeviceTensor<Dtype, 3> input,
   THCDeviceTensor<Dtype, 3> output,
-  int padL, int padR) {
+  int64_t padL, int64_t padR) {
 
-  int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  int64_t plane = blockIdx.y;
+  int64_t batch = blockIdx.z;
   if (outputPointId >= output.getSize(2)) {
     return;
   }
-  int outputPointX = outputPointId % output.getSize(2);
+  int64_t outputPointX = outputPointId % output.getSize(2);
 
-  int iStartX = max(0, -padL);
-  int oStartX = max(0, padL);
+  int64_t iStartX = max(0, -padL);
+  int64_t oStartX = max(0, padL);
 
-  int inputPointX = abs(outputPointX - padL)
+  int64_t inputPointX = abs(outputPointX - padL)
                   - abs(outputPointX - (input.getSize(2) + padL - 1))
                   - outputPointX
                   + 2 * padL + input.getSize(2) - 1
@@ -43,20 +43,20 @@ template <typename Dtype>
 __global__ void TemporalReflectionPadding_updateGradInput(
   THCDeviceTensor<Dtype, 3> gradInput,
   THCDeviceTensor<Dtype, 3> gradOutput,
-  int padL, int padR) {
+  int64_t padL, int64_t padR) {
 
-  int outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
-  int plane = blockIdx.y;
-  int batch = blockIdx.z;
+  int64_t outputPointId = threadIdx.x + blockIdx.x * blockDim.x;
+  int64_t plane = blockIdx.y;
+  int64_t batch = blockIdx.z;
   if (outputPointId >= gradOutput.getSize(2)) {
     return;
   }
-  int outputPointX = outputPointId % gradOutput.getSize(2);
+  int64_t outputPointX = outputPointId % gradOutput.getSize(2);
 
-  int iStartX = max(0, -padL);
-  int oStartX = max(0, padL);
+  int64_t iStartX = max(0, -padL);
+  int64_t oStartX = max(0, padL);
 
-  int inputPointX = abs(outputPointX - padL)
+  int64_t inputPointX = abs(outputPointX - padL)
                   - abs(outputPointX - (gradInput.getSize(2) + padL - 1))
                   - outputPointX
                   + 2 * padL + gradInput.getSize(2) - 1

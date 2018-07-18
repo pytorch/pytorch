@@ -7,8 +7,8 @@
 static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput, THCIndexTensor *indices,
-                         int kH, int kW, int dH, int dW, int padH, int padW,
-                         int dilationH, int dilationW, bool ceil_mode) {
+                         int64_t kH, int64_t kW, int64_t dH, int64_t dW, int64_t padH, int64_t padW,
+                         int64_t dilationH, int64_t dilationW, bool ceil_mode) {
 
   THArgCheck(kW > 0 && kH > 0, 5,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
@@ -18,11 +18,11 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
              "dilation should be greater than zero, but got dilationH: %d dilationW: %d",
              dilationH, dilationW);
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
-  int batchSize = 1;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
+  int64_t batchSize = 1;
 
   if (ndim == 4) {
     batchSize = input->size[0];
@@ -86,10 +86,10 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            THCIndexTensor *indices,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
-           int dilationW, int dilationH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
+           int64_t dilationW, int64_t dilationH,
            bool ceil_mode)
 {
 
@@ -143,7 +143,7 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
   THCIndex_t* indices_data = THCIndexTensor_(data)(state, indices);
   real* output_data = THCTensor_(data)(state, output);
 
-  int count = THCTensor_(nElement)(state, output);
+  int64_t count = THCTensor_(nElement)(state, output);
 
   MaxPoolForward<real, accreal> <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count, input_data,
@@ -163,10 +163,10 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCIndexTensor *indices,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
-           int dilationW, int dilationH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
+           int64_t dilationW, int64_t dilationH,
            bool ceil_mode)
 {
   THCUNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
@@ -216,10 +216,10 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  int count = THCTensor_(nElement)(state, input);
+  int64_t count = THCTensor_(nElement)(state, input);
   dim3 grid;
-  int imgcount = nInputCols * nInputRows;
-  const int blocks = (imgcount + BACKWARD_THREADS - 1) / BACKWARD_THREADS;
+  int64_t imgcount = nInputCols * nInputRows;
+  const int64_t blocks = (imgcount + BACKWARD_THREADS - 1) / BACKWARD_THREADS;
   grid.x = blocks;
   grid.y = batchSize;
   grid.z = nInputPlane;

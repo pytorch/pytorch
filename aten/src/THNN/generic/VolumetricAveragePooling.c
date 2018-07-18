@@ -6,15 +6,15 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
                          THTensor *gradOutput,
-                         int kT,
-                         int kW,
-                         int kH,
-                         int dT,
-                         int dW,
-                         int dH,
-                         int padT,
-                         int padW,
-                         int padH,
+                         int64_t kT,
+                         int64_t kW,
+                         int64_t kH,
+                         int64_t dT,
+                         int64_t dW,
+                         int64_t dH,
+                         int64_t padT,
+                         int64_t padW,
+                         int64_t padH,
                          bool ceil_mode)
 {
   int64_t nslices;
@@ -24,11 +24,11 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   int64_t otime;
   int64_t oheight;
   int64_t owidth;
-  int ndim = input->dim();
-  int dimN = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t ndim = input->dim();
+  int64_t dimN = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (input->dim() == 5)
   {
@@ -113,15 +113,15 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           int64_t otime,
           int64_t owidth,
           int64_t oheight,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int padT,
-          int padW,
-          int padH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t padT,
+          int64_t padW,
+          int64_t padH,
           bool count_include_pad)
 {
   int64_t k;
@@ -158,7 +158,7 @@ static void THNN_(VolumetricAveragePooling_updateOutput_frame)(
           hend = fmin(hend, iheight);
           wend = fmin(wend, iwidth);
 
-          int divide_factor;
+          int64_t divide_factor;
           if (count_include_pad)
             divide_factor = pool_size;
           else
@@ -191,15 +191,15 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int padT,
-          int padW,
-          int padH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t padT,
+          int64_t padW,
+          int64_t padH,
           bool ceil_mode,
           bool count_include_pad)
 {
@@ -217,10 +217,10 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
         state, input, NULL, kT, kW, kH,
         dT, dW, dH, padT, padW, padH, ceil_mode);
 
-  int dimN = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimN = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (input->dim() == 5)
   {
@@ -323,15 +323,15 @@ static void THNN_(VolumetricAveragePooling_updateGradInput_frame)(
           int64_t otime,
           int64_t owidth,
           int64_t oheight,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int padT,
-          int padW,
-          int padH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t padT,
+          int64_t padW,
+          int64_t padH,
           bool count_include_pad)
 {
   int64_t k;
@@ -398,15 +398,15 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int padT,
-          int padW,
-          int padH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t padT,
+          int64_t padW,
+          int64_t padH,
           bool ceil_mode,
           bool count_include_pad)
 {
@@ -420,10 +420,10 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   real *gradInput_data;
   real *gradOutput_data;
 
-  int dimN = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimN = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   THNN_(VolumetricAveragePooling_shapeCheck)(
         state, input, gradOutput, kT, kW, kH,

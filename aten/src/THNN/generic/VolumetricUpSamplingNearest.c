@@ -6,9 +6,9 @@
 
 static inline void THNN_(VolumetricUpSamplingNearest_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
-      int nBatch, int nChannels,
-      int inputDepth, int inputHeight, int inputWidth,
-      int outputDepth, int outputHeight, int outputWidth) {
+      int64_t nBatch, int64_t nChannels,
+      int64_t inputDepth, int64_t inputHeight, int64_t inputWidth,
+      int64_t outputDepth, int64_t outputHeight, int64_t outputWidth) {
   THArgCheck(inputDepth > 0 && inputHeight > 0 && inputWidth > 0
        && outputDepth > 0 && outputHeight > 0 && outputWidth > 0, 2,
        "input and output sizes should be greater than 0,"
@@ -33,15 +33,15 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
     THNNState *state,
     THTensor *input,
     THTensor *output,
-    int outputDepth,
-    int outputHeight,
-    int outputWidth)
+    int64_t outputDepth,
+    int64_t outputHeight,
+    int64_t outputWidth)
 {
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputDepth = THTensor_(size)(input, 2);
-  int inputHeight = THTensor_(size)(input, 3);
-  int inputWidth = THTensor_(size)(input, 4);
+  int64_t nbatch = THTensor_(size)(input, 0);
+  int64_t channels = THTensor_(size)(input, 1);
+  int64_t inputDepth = THTensor_(size)(input, 2);
+  int64_t inputHeight = THTensor_(size)(input, 3);
+  int64_t inputWidth = THTensor_(size)(input, 4);
   const float depth_scale = (float) inputDepth / (float) outputDepth;
   const float height_scale = (float) inputHeight / (float)outputHeight;
   const float width_scale = (float) inputWidth / (float)outputWidth;
@@ -65,15 +65,15 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
 
   // special case: just copy
   if (inputDepth == outputDepth && inputHeight == outputHeight && inputWidth == outputWidth) {
-    for (int d2 = 0; d2 < outputDepth; ++d2) {
-      const int d1 = d2;
-      for (int h2 = 0; h2 < outputHeight; ++h2) {
-        const int h1 = h2;
-        for (int w2 = 0; w2 < outputWidth; ++w2) {
-          const int w1 = w2;
+    for (int64_t d2 = 0; d2 < outputDepth; ++d2) {
+      const int64_t d1 = d2;
+      for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+        const int64_t h1 = h2;
+        for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+          const int64_t w1 = w2;
           const real* pos1 = &idata[d1 * inputHeight * inputWidth + h1 * inputWidth + w1];
           real* pos2 = &odata[d2 * outputHeight * outputWidth + h2 * outputWidth + w2];
-          for (int c = 0; c < channels; ++c) {
+          for (int64_t c = 0; c < channels; ++c) {
             pos2[0] = pos1[0];
             pos1 += inputDepth * inputHeight * inputWidth;
             pos2 += outputDepth * outputHeight * outputWidth;
@@ -85,15 +85,15 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
     return;
   }
 
-  for (int d2 = 0; d2 < outputDepth; ++d2) {
-    const int d1 = nearest_neighbor_compute_source_index(depth_scale, d2, inputDepth);
-    for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
-      for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const int w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
+  for (int64_t d2 = 0; d2 < outputDepth; ++d2) {
+    const int64_t d1 = nearest_neighbor_compute_source_index(depth_scale, d2, inputDepth);
+    for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+      const int64_t h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
+      for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+        const int64_t w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
         const real* pos1 = &idata[d1 * inputHeight * inputWidth + h1 * inputWidth + w1];
         real* pos2 = &odata[d2 * outputHeight * outputWidth + h2 * outputWidth + w2];
-        for (int c = 0; c < channels; ++c) {
+        for (int64_t c = 0; c < channels; ++c) {
           pos2[0] = pos1[0];
           pos1 += inputDepth * inputHeight * inputWidth;
           pos2 += outputDepth * outputHeight * outputWidth;
@@ -108,14 +108,14 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
     THNNState *state,
     THTensor *gradOutput,
     THTensor *gradInput,
-    int nbatch,
-    int channels,
-    int inputDepth,
-    int inputHeight,
-    int inputWidth,
-    int outputDepth,
-    int outputHeight,
-    int outputWidth)
+    int64_t nbatch,
+    int64_t channels,
+    int64_t inputDepth,
+    int64_t inputHeight,
+    int64_t inputWidth,
+    int64_t outputDepth,
+    int64_t outputHeight,
+    int64_t outputWidth)
 {
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(NULL, gradOutput, nbatch, channels, inputDepth, inputHeight, inputWidth, outputDepth, outputHeight, outputWidth);
   THTensor_(resize5d)(gradInput, nbatch, channels, inputDepth, inputHeight, inputWidth);
@@ -130,15 +130,15 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
 
   // special case: just copy
   if (inputDepth == outputDepth && inputHeight == outputHeight && inputWidth == outputWidth) {
-    for (int d2 = 0; d2 < outputDepth; ++d2) {
-      const int d1 = d2;
-      for (int h2 = 0; h2 < outputHeight; ++h2) {
-        const int h1 = h2;
-        for (int w2 = 0; w2 < outputWidth; ++w2) {
-          const int w1 = w2;
+    for (int64_t d2 = 0; d2 < outputDepth; ++d2) {
+      const int64_t d1 = d2;
+      for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+        const int64_t h1 = h2;
+        for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+          const int64_t w1 = w2;
           real* pos1 = &idata[d1 * inputHeight * inputWidth + h1 * inputWidth + w1];
           const real* pos2 = &odata[d2 * outputHeight * outputWidth + h2 * outputWidth + w2];
-          for (int c = 0; c < channels; ++c) {
+          for (int64_t c = 0; c < channels; ++c) {
             pos1[0] += pos2[0];
             pos1 += inputDepth * inputHeight * inputWidth;
             pos2 += outputDepth * outputHeight * outputWidth;
@@ -150,15 +150,15 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
     return;
   }
 
-  for (int d2 = 0; d2 < outputDepth; ++d2) {
-    const int d1 = nearest_neighbor_compute_source_index(depth_scale, d2, inputDepth);
-    for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const int h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
-      for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const int w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
+  for (int64_t d2 = 0; d2 < outputDepth; ++d2) {
+    const int64_t d1 = nearest_neighbor_compute_source_index(depth_scale, d2, inputDepth);
+    for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+      const int64_t h1 = nearest_neighbor_compute_source_index(height_scale, h2, inputHeight);
+      for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+        const int64_t w1 = nearest_neighbor_compute_source_index(width_scale, w2, inputWidth);
         real* pos1 = &idata[d1 * inputHeight * inputWidth + h1 * inputWidth + w1];
         const real* pos2 = &odata[d2 * outputHeight * outputWidth + h2 * outputWidth + w2];
-        for (int c = 0; c < channels; ++c) {
+        for (int64_t c = 0; c < channels; ++c) {
           pos1[0] += pos2[0];
           pos1 += inputDepth * inputHeight * inputWidth;
           pos2 += outputDepth * outputHeight * outputWidth;

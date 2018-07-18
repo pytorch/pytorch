@@ -10,10 +10,10 @@ void THNN_(VolumetricFullConvolution_updateOutput)(
        THCTensor  *bias,
        THCTensor  *finput,
        THCTensor  *fgradInput,
-       int kT, int kW, int kH,
-       int dT, int dW, int dH,
-       int padT, int padW, int padH,
-       int adjT, int adjW, int adjH)
+       int64_t kT, int64_t kW, int64_t kH,
+       int64_t dT, int64_t dW, int64_t dH,
+       int64_t padT, int64_t padW, int64_t padH,
+       int64_t adjT, int64_t adjW, int64_t adjH)
 {
   THNN_(VolumetricFullDilatedConvolution_updateOutput)(
        state, input, output, weight, bias, finput, fgradInput,
@@ -28,10 +28,10 @@ void THNN_(VolumetricFullConvolution_updateGradInput)(
        THCTensor  *weight,
        THCTensor  *finput,
        THCTensor  *fgradInput,
-       int kT, int kW, int kH,
-       int dT, int dW, int dH,
-       int padT, int padW, int padH,
-       int adjT, int adjW, int adjH)
+       int64_t kT, int64_t kW, int64_t kH,
+       int64_t dT, int64_t dW, int64_t dH,
+       int64_t padT, int64_t padW, int64_t padH,
+       int64_t adjT, int64_t adjW, int64_t adjH)
 {
   THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
        state, input, gradOutput, gradInput, weight, finput, fgradInput,
@@ -47,10 +47,10 @@ void THNN_(VolumetricFullConvolution_accGradParameters)(
            THCTensor  *gradBias,
            THCTensor  *finput,
            THCTensor  *fgradInput,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
-           int adjT, int adjW, int adjH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
+           int64_t adjT, int64_t adjW, int64_t adjH,
            accreal scale_)
 {
   THNN_(VolumetricFullDilatedConvolution_accGradParameters)(

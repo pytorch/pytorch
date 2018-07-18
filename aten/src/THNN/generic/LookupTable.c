@@ -31,7 +31,7 @@ void THNN_(LookupTable_accGradParameters)(
           THTensor *sorted,
           THIndexTensor *indices,
           bool scaleGradByFreq,
-          int paddingValue,
+          int64_t paddingValue,
           accreal ascale)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(ascale);
@@ -83,8 +83,8 @@ void THNN_(LookupTable_accGradParameters)(
     // BLAS call.
     #pragma omp parallel private(i)
     {
-      int tid = omp_get_thread_num();
-      int nthreads = omp_get_num_threads();
+      int64_t tid = omp_get_thread_num();
+      int64_t nthreads = omp_get_num_threads();
 
       int64_t start = tid * (numw/nthreads + 1);
       int64_t end = start + (numw/nthreads + 1);
@@ -155,7 +155,7 @@ static void THNN_(LookupTable_renormRow)(
   }
 }
 
-static int THNN_(compare_THIndex)(const void* a, const void* b)
+static int64_t THNN_(compare_THIndex)(const void* a, const void* b)
 {
    return *(const THIndex_t*)a < *(const THIndex_t*)b ? -1 : 1;
 }

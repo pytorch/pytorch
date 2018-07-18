@@ -7,9 +7,9 @@
 static inline void THNN_(VolumetricUpSamplingNearest_shapeCheck)
                         (THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
-                         int nBatch, int nChannels,
-                         int inputDepth, int inputHeight, int inputWidth,
-                         int outputDepth, int outputHeight, int outputWidth) {
+                         int64_t nBatch, int64_t nChannels,
+                         int64_t inputDepth, int64_t inputHeight, int64_t inputWidth,
+                         int64_t outputDepth, int64_t outputHeight, int64_t outputWidth) {
   THArgCheck(inputDepth > 0 && inputHeight > 0 && inputWidth > 0
              && outputDepth && outputHeight > 0 && outputWidth > 0, 2,
              "input and output sizes should be greater than 0,"
@@ -34,16 +34,16 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int outputDepth,
-           int outputHeight,
-           int outputWidth)
+           int64_t outputDepth,
+           int64_t outputHeight,
+           int64_t outputWidth)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
-  int nbatch = THCTensor_(size)(state, input, 0);
-  int channels = THCTensor_(size)(state, input, 1);
-  int inputDepth = THCTensor_(size)(state, input, 2);
-  int inputHeight = THCTensor_(size)(state, input, 3);
-  int inputWidth  = THCTensor_(size)(state, input, 4);
+  int64_t nbatch = THCTensor_(size)(state, input, 0);
+  int64_t channels = THCTensor_(size)(state, input, 1);
+  int64_t inputDepth = THCTensor_(size)(state, input, 2);
+  int64_t inputHeight = THCTensor_(size)(state, input, 3);
+  int64_t inputWidth  = THCTensor_(size)(state, input, 4);
 
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(state, input, NULL, nbatch, channels,
 		  inputDepth, inputHeight, inputWidth,
@@ -62,8 +62,8 @@ void THNN_(VolumetricUpSamplingNearest_updateOutput)(
   THCDeviceTensor<real, 5> idata = toDeviceTensor<real, 5>(state, input);
   THCDeviceTensor<real, 5> odata = toDeviceTensor<real, 5>(state, output);
 
-  const int num_kernels = outputDepth * outputHeight * outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int64_t num_kernels = outputDepth * outputHeight * outputWidth;
+  const int64_t num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   nearest_neighbor_5d_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
 	 0, stream>>>(num_kernels, idata, odata);
@@ -76,14 +76,14 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
            THCState *state,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int nbatch,
-           int nchannels,
-           int inputDepth,
-           int inputHeight,
-           int inputWidth,
-           int outputDepth,
-           int outputHeight,
-           int outputWidth)
+           int64_t nbatch,
+           int64_t nchannels,
+           int64_t inputDepth,
+           int64_t inputHeight,
+           int64_t inputWidth,
+           int64_t outputDepth,
+           int64_t outputHeight,
+           int64_t outputWidth)
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(VolumetricUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels,
@@ -95,8 +95,8 @@ void THNN_(VolumetricUpSamplingNearest_updateGradInput)(
   THCTensor_(zero)(state, gradInput);
   THCDeviceTensor<real, 5> data1 = toDeviceTensor<real, 5>(state, gradInput);
   THCDeviceTensor<real, 5> data2 = toDeviceTensor<real, 5>(state, gradOutput);
-  const int num_kernels = outputDepth * outputHeight * outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int64_t num_kernels = outputDepth * outputHeight * outputWidth;
+  const int64_t num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   nearest_neighbor_5d_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),
 	  num_threads, 0, stream>>>(num_kernels, data1, data2);

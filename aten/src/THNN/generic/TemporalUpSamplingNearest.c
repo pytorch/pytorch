@@ -6,8 +6,8 @@
 
 static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
-      int nBatch, int nChannels,
-      int inputWidth, int outputWidth) {
+      int64_t nBatch, int64_t nChannels,
+      int64_t inputWidth, int64_t outputWidth) {
   THArgCheck(inputWidth > 0 && outputWidth > 0, 2,
        "input and output sizes should be greater than 0,"
        " but got input (W: %d) output (W: %d)",
@@ -28,11 +28,11 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
     THNNState *state,
     THTensor *input,
     THTensor *output,
-    int outputWidth)
+    int64_t outputWidth)
 {
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputWidth = THTensor_(size)(input, 2);
+  int64_t nbatch = THTensor_(size)(input, 0);
+  int64_t channels = THTensor_(size)(input, 1);
+  int64_t inputWidth = THTensor_(size)(input, 2);
   const float scale = (float) inputWidth / (float)outputWidth;
 
   THNN_(TemporalUpSamplingNearest_shapeCheck)(input, NULL, nbatch, channels, inputWidth, outputWidth);
@@ -52,11 +52,11 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
 
   // special case: just copy
   if (inputWidth == outputWidth) {
-    for (int w2 = 0; w2 < outputWidth; ++w2) {
-      const int w1 = w2;
+    for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+      const int64_t w1 = w2;
       const real* pos1 = &idata[w1];
       real* pos2 = &odata[w2];
-      for (int c = 0; c < channels; ++c) {
+      for (int64_t c = 0; c < channels; ++c) {
         pos2[0] = pos1[0];
         pos1 += inputWidth;
         pos2 += outputWidth;
@@ -66,12 +66,12 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
     return;
   }
 
-  for (int w2 = 0; w2 < outputWidth; ++w2) {
+  for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
     const accreal src_x = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
-    const int w1 = src_x;
+    const int64_t w1 = src_x;
     const real* pos1 = &idata[w1];
     real* pos2 = &odata[w2];
-    for (int c = 0; c < channels; ++c) {
+    for (int64_t c = 0; c < channels; ++c) {
       pos2[0] = pos1[0];
       pos1 += inputWidth;
       pos2 += outputWidth;
@@ -84,10 +84,10 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
     THNNState *state,
     THTensor *gradOutput,
     THTensor *gradInput,
-    int nbatch,
-    int channels,
-    int inputWidth,
-    int outputWidth)
+    int64_t nbatch,
+    int64_t channels,
+    int64_t inputWidth,
+    int64_t outputWidth)
 {
   THNN_(TemporalUpSamplingNearest_shapeCheck)(NULL, gradOutput, nbatch, channels, inputWidth, outputWidth);
   THTensor_(resize3d)(gradInput, nbatch, channels, inputWidth);
@@ -100,11 +100,11 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
 
   // special case: same-size matching grids
   if (inputWidth == outputWidth) {
-    for (int w2 = 0; w2 < outputWidth; ++w2) {
-      const int w1 = w2;
+    for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+      const int64_t w1 = w2;
       real* pos1 = &data1[w1];
       const real* pos2 = &data2[w2];
-      for (int c = 0; c < channels; ++c) {
+      for (int64_t c = 0; c < channels; ++c) {
         pos1[0] += pos2[0];
         pos1 += inputWidth;
         pos2 += outputWidth;
@@ -114,11 +114,11 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
     return;
   }
 
-  for (int w2 = 0; w2 < outputWidth; ++w2) {
-    const int w1 = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
+  for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+    const int64_t w1 = nearest_neighbor_compute_source_index(scale, w2, inputWidth);
     real* pos1 = &data1[w1];
     const real* pos2 = &data2[w2];
-    for (int c = 0; c < channels; ++c) {
+    for (int64_t c = 0; c < channels; ++c) {
       pos1[0] += pos2[0];
       pos1 += inputWidth;
       pos2 += outputWidth;

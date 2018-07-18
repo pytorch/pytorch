@@ -6,8 +6,8 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
                          THCTensor *weight, THCTensor *bias,
-                         int kH, int kW, int dH, int dW, int padH, int padW,
-                         int weight_nullable) {
+                         int64_t kH, int64_t kW, int64_t dH, int64_t dW, int64_t padH, int64_t padW,
+                         int64_t weight_nullable) {
   THArgCheck(kW > 0 && kH > 0, 9,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
   THArgCheck(dW > 0 && dH > 0, 11,
@@ -23,10 +23,10 @@ static inline void THNN_(SpatialConvolutionMM_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
 
   if (ndim == 4) {
     dimf++;
@@ -87,9 +87,9 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
            THCTensor *bias,
            THCTensor *columns,
            THCTensor *ones,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH) {
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH) {
 
   THCUNN_assertSameGPU(state, 5, input, output, weight, columns, ones);
   if (bias) {
@@ -100,11 +100,11 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5,
              "bias tensor has to be contiguous");
 
-  int freeWeight = 0;
+  int64_t freeWeight = 0;
 
   // Params:
-  int nInputPlane = weight->dim() == 2 ? weight->size[1]/(kH*kW) : weight->size[1];
-  int nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->dim() == 2 ? weight->size[1]/(kH*kW) : weight->size[1];
+  int64_t nOutputPlane = weight->size[0];
 
   if (weight->dim() == 4) {
     int64_t s1 = weight->size[0];
@@ -117,7 +117,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
        (state, input, NULL, weight, bias, kH, kW, dH, dW, padH, padW, 0);
 
   input = THCTensor_(newContiguous)(state, input);
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
@@ -152,7 +152,7 @@ void THNN_(SpatialConvolutionMM_updateOutput)(
   THCTensor *output_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, output_n, output, 0, elt);
@@ -244,9 +244,9 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
            THCTensor *weight,
            THCTensor *gradColumns,
            THCTensor *ones,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH) {
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH) {
 
   THCUNN_assertSameGPU(state, 5, input, gradOutput, weight,
                        gradColumns, gradInput);
@@ -257,10 +257,10 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
        (state, input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW, 0);
 
   // Params
-  int nInputPlane = weight->dim() == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
-  int nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->dim() == 2 ? weight->size[1]/(kW*kH) : weight->size[1];
+  int64_t nOutputPlane = weight->size[0];
 
-  int freeWeight = 0;
+  int64_t freeWeight = 0;
   if (weight->dim() == 4) {
     int64_t s1 = weight->size[0];
     int64_t s2 = weight->size[1] * weight->size[2] * weight->size[3];
@@ -271,7 +271,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
@@ -298,7 +298,7 @@ void THNN_(SpatialConvolutionMM_updateGradInput)(
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per sample:
     THCTensor_(select)(state, gradInput_n, gradInput, 0, elt);
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
@@ -361,9 +361,9 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
            THCTensor *gradBias,
            THCTensor *columns,
            THCTensor *ones,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
            accreal scale_) {
 
   real scale = ScalarConvert<accreal, real>::to(scale_);
@@ -383,7 +383,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  int is_batch = 1;
+  int64_t is_batch = 1;
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
@@ -394,7 +394,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   int64_t nInputPlane = input->size[1];
   int64_t nOutputPlane = gradOutput->size[1];
 
-  int freeWeight = 0;
+  int64_t freeWeight = 0;
   if (gradWeight && gradWeight->dim() == 4) {
     int64_t s1 = gradWeight->size[0];
     int64_t s2 = gradWeight->size[1] * gradWeight->size[2] * gradWeight->size[3];
@@ -425,7 +425,7 @@ void THNN_(SpatialConvolutionMM_accGradParameters)(
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     // Matrix mulitply per output:
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 

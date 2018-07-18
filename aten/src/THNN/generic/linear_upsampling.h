@@ -9,7 +9,7 @@
 
 template<typename T>
 static inline T linear_upsampling_compute_scale(
-                          int inputSize, int outputSize, bool align_corners) {
+                          int64_t inputSize, int64_t outputSize, bool align_corners) {
   /* We view each pixel as an area, idx + 0.5 as its center index.
    * Here is an example formula in 1D case.
    * if align_corners: center of two corner pixel areas are preserved,
@@ -31,7 +31,7 @@ static inline T linear_upsampling_compute_scale(
 
 template<typename T>
 static inline T linear_upsampling_compute_source_index(
-                          T scale, int dst_index, bool align_corners) {
+                          T scale, int64_t dst_index, bool align_corners) {
   if (align_corners) {
     return scale * dst_index;
   } else {
@@ -40,9 +40,9 @@ static inline T linear_upsampling_compute_source_index(
   }
 }
 
-static inline int nearest_neighbor_compute_source_index(
-		const float scale, int dst_index, int inputSize) {
-  const int src_index = MIN(floorf(dst_index * scale), inputSize - 1);
+static inline int64_t nearest_neighbor_compute_source_index(
+		const float scale, int64_t dst_index, int64_t inputSize) {
+  const int64_t src_index = MIN(floorf(dst_index * scale), inputSize - 1);
   return src_index;
 }
 

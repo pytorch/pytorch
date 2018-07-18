@@ -6,20 +6,20 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
                          THCState *state,
                          THCTensor *input,
                          THCTensor *gradOutput,
-                         int pleft, int pright,
-                         int ptop, int pbottom,
-                         int pfront, int pback) {
+                         int64_t pleft, int64_t pright,
+                         int64_t ptop, int64_t pbottom,
+                         int64_t pfront, int64_t pback) {
   THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int64_t numInputDims = THCTensor_(nDimension)(state, input);
 
   THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 4 || numInputDims == 5), 2, input,
     "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
-  int planeDim = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t planeDim = 0;
+  int64_t dimd = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
   if (numInputDims == 5) {
     planeDim++;
     dimd++;
@@ -27,13 +27,13 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
     dimw++;
     }
 
-  int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int idepth = input->size[dimd];
-  int iheight = input->size[dimh];
-  int iwidth = input->size[dimw];
-  int odepth = idepth + pfront + pback;
-  int oheight = iheight + ptop + pbottom;
-  int owidth  = iwidth + pleft + pright;
+  int64_t numPlanes = THCTensor_(size)(state, input, planeDim);
+  int64_t idepth = input->size[dimd];
+  int64_t iheight = input->size[dimh];
+  int64_t iwidth = input->size[dimw];
+  int64_t odepth = idepth + pfront + pback;
+  int64_t oheight = iheight + ptop + pbottom;
+  int64_t owidth  = iwidth + pleft + pright;
   THArgCheck(owidth >= 1 || oheight >= 1 || odepth >= 1, 2,
              "input (D: %d H: %d, W: %d) is too small."
              " Calculated output D: %d H: %d W: %d",
@@ -62,20 +62,20 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int pleft, int pright,
-           int ptop, int pbottom,
-           int pfront, int pback) {
+           int64_t pleft, int64_t pright,
+           int64_t ptop, int64_t pbottom,
+           int64_t pfront, int64_t pback) {
   THNN_(VolumetricReplicationPadding_shapeCheck)(
         state, input, NULL, pleft, pright, ptop,
         pbottom, pfront, pback);
 
-  int planeDim = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
-  int numBatch = 1;
+  int64_t planeDim = 0;
+  int64_t dimd = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
+  int64_t numBatch = 1;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int64_t numInputDims = THCTensor_(nDimension)(state, input);
 
   if (numInputDims == 5) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -85,13 +85,13 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
     dimw++;
   }
 
-  int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int inputD = THCTensor_(size)(state, input, dimd);
-  int inputH = THCTensor_(size)(state, input, dimh);
-  int inputW = THCTensor_(size)(state, input, dimw);
-  int outputD = inputD + pfront + pback;
-  int outputH = inputH + ptop + pbottom;
-  int outputW  = inputW + pleft + pright;
+  int64_t numPlanes = THCTensor_(size)(state, input, planeDim);
+  int64_t inputD = THCTensor_(size)(state, input, dimd);
+  int64_t inputH = THCTensor_(size)(state, input, dimh);
+  int64_t inputW = THCTensor_(size)(state, input, dimw);
+  int64_t outputD = inputD + pfront + pback;
+  int64_t outputH = inputH + ptop + pbottom;
+  int64_t outputW  = inputW + pleft + pright;
 
   THCDeviceTensor<real, 5> devInput;
   THCDeviceTensor<real, 5> devOutput;
@@ -109,7 +109,7 @@ void THNN_(VolumetricReplicationPadding_updateOutput)(
     devOutput = toDeviceTensor<real, 5>(state, output);
   }
 
-  int outputPlaneSize = devOutput.getSize(2) * devOutput.getSize(3) *
+  int64_t outputPlaneSize = devOutput.getSize(2) * devOutput.getSize(3) *
       devOutput.getSize(4);
   dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
             devOutput.getSize(1),
@@ -125,19 +125,19 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int pleft, int pright,
-           int ptop, int pbottom,
-           int pfront, int pback) {
+           int64_t pleft, int64_t pright,
+           int64_t ptop, int64_t pbottom,
+           int64_t pfront, int64_t pback) {
   THNN_(VolumetricReplicationPadding_shapeCheck)(
         state, input, gradOutput, pleft, pright, ptop,
         pbottom, pfront, pback);
 
-  int planeDim = 0;
-  int dimd = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t planeDim = 0;
+  int64_t dimd = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
-  int numInputDims = THCTensor_(nDimension)(state, input);
+  int64_t numInputDims = THCTensor_(nDimension)(state, input);
   if (numInputDims == 5) {
     planeDim++;
     dimd++;
@@ -160,7 +160,7 @@ void THNN_(VolumetricReplicationPadding_updateGradInput)(
     devGradOutput = toDeviceTensor<real, 5>(state, gradOutput);
   }
 
-  int outputPlaneSize = devGradOutput.getSize(2) * devGradOutput.getSize(3) *
+  int64_t outputPlaneSize = devGradOutput.getSize(2) * devGradOutput.getSize(3) *
       devGradOutput.getSize(4);
   dim3 gridSize(THCCeilDiv(outputPlaneSize, 256),
             devGradOutput.getSize(1),

@@ -21,34 +21,34 @@
 #define MAX(a,b) ( ((a)>(b)) ? (a) : (b) )
 #define CLIP_COORDINATES(in, out, clip_limit) out = MIN((clip_limit-1), MAX(in, 0))
 
-const int MODE_BORDER = 1;
+const int64_t MODE_BORDER = 1;
 
 
 template <typename Dtype>
 __launch_bounds__(1024)
 __global__ void VolumetricGridSamplerBilinear_updateOutput_kernel(
-    const int nthreads,
+    const int64_t nthreads,
     THCDeviceTensor<Dtype, 5> input,
     THCDeviceTensor<Dtype, 5> grid,
     THCDeviceTensor<Dtype, 5> output,
-    const int padding_mode) {
+    const int64_t padding_mode) {
 
-  int N = input.getSize(0);
-  int C = input.getSize(1);
-  int ID = input.getSize(2);
-  int IH = input.getSize(3);
-  int IW = input.getSize(4);
-  int D = grid.getSize(1);
-  int H = grid.getSize(2);
-  int W = grid.getSize(3);
+  int64_t N = input.getSize(0);
+  int64_t C = input.getSize(1);
+  int64_t ID = input.getSize(2);
+  int64_t IH = input.getSize(3);
+  int64_t IW = input.getSize(4);
+  int64_t D = grid.getSize(1);
+  int64_t H = grid.getSize(2);
+  int64_t W = grid.getSize(3);
 
   CUDA_KERNEL_LOOP(index, nthreads) {
 
-    const int n = index % N;
-    const int d = (index / N) % D;
-    const int h = (index / (N * D)) % H;
-    const int w = (index / (N * D * H)) % W;
-    int c;
+    const int64_t n = index % N;
+    const int64_t d = (index / N) % D;
+    const int64_t h = (index / (N * D)) % H;
+    const int64_t w = (index / (N * D * H)) % W;
+    int64_t c;
 
     // get the corresponding input x, y, z co-ordinates from grid
     Dtype ix = grid[n][d][h][w][0];
@@ -63,37 +63,37 @@ __global__ void VolumetricGridSamplerBilinear_updateOutput_kernel(
     // get corner pixel values from (x, y, z)
     // for 4d, we used north-east-south-west
     // for 5d, we add top-bottom
-    int ix_tnw = floor(ScalarConvert<Dtype,float>::to(ix));
-    int iy_tnw = floor(ScalarConvert<Dtype,float>::to(iy));
-    int iz_tnw = floor(ScalarConvert<Dtype,float>::to(iz));
+    int64_t ix_tnw = floor(ScalarConvert<Dtype,float>::to(ix));
+    int64_t iy_tnw = floor(ScalarConvert<Dtype,float>::to(iy));
+    int64_t iz_tnw = floor(ScalarConvert<Dtype,float>::to(iz));
     
-    int ix_tne = ix_tnw + 1;
-    int iy_tne = iy_tnw;
-    int iz_tne = iz_tnw;
+    int64_t ix_tne = ix_tnw + 1;
+    int64_t iy_tne = iy_tnw;
+    int64_t iz_tne = iz_tnw;
 
-    int ix_tsw = ix_tnw;
-    int iy_tsw = iy_tnw + 1;
-    int iz_tsw = iz_tnw;
+    int64_t ix_tsw = ix_tnw;
+    int64_t iy_tsw = iy_tnw + 1;
+    int64_t iz_tsw = iz_tnw;
 
-    int ix_tse = ix_tnw + 1;
-    int iy_tse = iy_tnw + 1;
-    int iz_tse = iz_tnw;
+    int64_t ix_tse = ix_tnw + 1;
+    int64_t iy_tse = iy_tnw + 1;
+    int64_t iz_tse = iz_tnw;
 
-    int ix_bnw = ix_tnw;
-    int iy_bnw = iy_tnw;
-    int iz_bnw = iz_tnw + 1;
+    int64_t ix_bnw = ix_tnw;
+    int64_t iy_bnw = iy_tnw;
+    int64_t iz_bnw = iz_tnw + 1;
 
-    int ix_bne = ix_tnw + 1;
-    int iy_bne = iy_tnw;
-    int iz_bne = iz_tnw + 1;
+    int64_t ix_bne = ix_tnw + 1;
+    int64_t iy_bne = iy_tnw;
+    int64_t iz_bne = iz_tnw + 1;
 
-    int ix_bsw = ix_tnw;
-    int iy_bsw = iy_tnw + 1;
-    int iz_bsw = iz_tnw + 1;
+    int64_t ix_bsw = ix_tnw;
+    int64_t iy_bsw = iy_tnw + 1;
+    int64_t iz_bsw = iz_tnw + 1;
 
-    int ix_bse = ix_tnw + 1;
-    int iy_bse = iy_tnw + 1;
-    int iz_bse = iz_tnw + 1;
+    int64_t ix_bse = ix_tnw + 1;
+    int64_t iy_bse = iy_tnw + 1;
+    int64_t iz_bse = iz_tnw + 1;
 
     // get surfaces to each neighbor:
     Dtype tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
@@ -136,7 +136,7 @@ __global__ void VolumetricGridSamplerBilinear_updateOutput_kernel(
 
     Dtype out_val;
     for (c = 0; c < C; ++c) {
-      out_val = ScalarConvert<int,Dtype>::to(0);
+      out_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_tnw, iy_tnw, iz_tnw, ID, IH, IW)) {
         out_val += input[n][c][iz_tnw][iy_tnw][ix_tnw] * tnw;
       }
@@ -169,36 +169,36 @@ __global__ void VolumetricGridSamplerBilinear_updateOutput_kernel(
 template <typename Dtype>
 __launch_bounds__(1024)
 __global__ void VolumetricGridSamplerBilinear_updateGradInput_kernel(
-    const int nthreads,
+    const int64_t nthreads,
     THCDeviceTensor<Dtype, 5> input, THCDeviceTensor<Dtype, 5> gradInput,
     THCDeviceTensor<Dtype, 5> grid, THCDeviceTensor<Dtype, 5> gradGrid,
     THCDeviceTensor<Dtype, 5> gradOutput,
-    const int padding_mode) {
+    const int64_t padding_mode) {
 
-  int N = input.getSize(0);
-  int C = input.getSize(1);
-  int ID = input.getSize(2);
-  int IH = input.getSize(3);
-  int IW = input.getSize(4);
-  int D = grid.getSize(1);
-  int H = grid.getSize(2);
-  int W = grid.getSize(3);
+  int64_t N = input.getSize(0);
+  int64_t C = input.getSize(1);
+  int64_t ID = input.getSize(2);
+  int64_t IH = input.getSize(3);
+  int64_t IW = input.getSize(4);
+  int64_t D = grid.getSize(1);
+  int64_t H = grid.getSize(2);
+  int64_t W = grid.getSize(3);
 
   CUDA_KERNEL_LOOP(index, nthreads) {
 
-    const int n = index % N;
-    const int d = (index / N) % D;
-    const int h = (index / (N * D)) % H;
-    const int w = (index / (N * D * H)) % W;
+    const int64_t n = index % N;
+    const int64_t d = (index / N) % D;
+    const int64_t h = (index / (N * D)) % H;
+    const int64_t w = (index / (N * D * H)) % W;
 
     // get the corresponding input x, y, z co-ordinates from grid
     Dtype ix = grid[n][d][h][w][0];
     Dtype iy = grid[n][d][h][w][1];
     Dtype iz = grid[n][d][h][w][2];
 
-    Dtype gix = ScalarConvert<int,Dtype>::to(0);
-    Dtype giy = ScalarConvert<int,Dtype>::to(0);
-    Dtype giz = ScalarConvert<int,Dtype>::to(0);
+    Dtype gix = ScalarConvert<int64_t,Dtype>::to(0);
+    Dtype giy = ScalarConvert<int64_t,Dtype>::to(0);
+    Dtype giz = ScalarConvert<int64_t,Dtype>::to(0);
 
     // normalize ix, iy, iz from [-1, 1] to [0, IW-1] & [0, IH-1] & [0, ID-1]
     ix = ScalarConvert<float,Dtype>::to(((ix + 1.f) / 2) * (IW-1));
@@ -208,37 +208,37 @@ __global__ void VolumetricGridSamplerBilinear_updateGradInput_kernel(
     // get corner pixel values from (x, y, z)
     // for 4d, we used north-east-south-west
     // for 5d, we add top-bottom
-    int ix_tnw = floor(ScalarConvert<Dtype,float>::to(ix));
-    int iy_tnw = floor(ScalarConvert<Dtype,float>::to(iy));
-    int iz_tnw = floor(ScalarConvert<Dtype,float>::to(iz));
+    int64_t ix_tnw = floor(ScalarConvert<Dtype,float>::to(ix));
+    int64_t iy_tnw = floor(ScalarConvert<Dtype,float>::to(iy));
+    int64_t iz_tnw = floor(ScalarConvert<Dtype,float>::to(iz));
     
-    int ix_tne = ix_tnw + 1;
-    int iy_tne = iy_tnw;
-    int iz_tne = iz_tnw;
+    int64_t ix_tne = ix_tnw + 1;
+    int64_t iy_tne = iy_tnw;
+    int64_t iz_tne = iz_tnw;
 
-    int ix_tsw = ix_tnw;
-    int iy_tsw = iy_tnw + 1;
-    int iz_tsw = iz_tnw;
+    int64_t ix_tsw = ix_tnw;
+    int64_t iy_tsw = iy_tnw + 1;
+    int64_t iz_tsw = iz_tnw;
 
-    int ix_tse = ix_tnw + 1;
-    int iy_tse = iy_tnw + 1;
-    int iz_tse = iz_tnw;
+    int64_t ix_tse = ix_tnw + 1;
+    int64_t iy_tse = iy_tnw + 1;
+    int64_t iz_tse = iz_tnw;
 
-    int ix_bnw = ix_tnw;
-    int iy_bnw = iy_tnw;
-    int iz_bnw = iz_tnw + 1;
+    int64_t ix_bnw = ix_tnw;
+    int64_t iy_bnw = iy_tnw;
+    int64_t iz_bnw = iz_tnw + 1;
 
-    int ix_bne = ix_tnw + 1;
-    int iy_bne = iy_tnw;
-    int iz_bne = iz_tnw + 1;
+    int64_t ix_bne = ix_tnw + 1;
+    int64_t iy_bne = iy_tnw;
+    int64_t iz_bne = iz_tnw + 1;
 
-    int ix_bsw = ix_tnw;
-    int iy_bsw = iy_tnw + 1;
-    int iz_bsw = iz_tnw + 1;
+    int64_t ix_bsw = ix_tnw;
+    int64_t iy_bsw = iy_tnw + 1;
+    int64_t iz_bsw = iz_tnw + 1;
 
-    int ix_bse = ix_tnw + 1;
-    int iy_bse = iy_tnw + 1;
-    int iz_bse = iz_tnw + 1;
+    int64_t ix_bse = ix_tnw + 1;
+    int64_t iy_bse = iy_tnw + 1;
+    int64_t iz_bse = iz_tnw + 1;
 
     // get surfaces to each neighbor:
     Dtype tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
@@ -260,10 +260,10 @@ __global__ void VolumetricGridSamplerBilinear_updateGradInput_kernel(
     Dtype bsw_val;
     Dtype bse_val;
     
-    int ix_tnw_cl, iy_tnw_cl, iz_tnw_cl, ix_tne_cl, iy_tne_cl, iz_tne_cl;
-    int ix_tsw_cl, iy_tsw_cl, iz_tsw_cl, ix_tse_cl, iy_tse_cl, iz_tse_cl;
-    int ix_bnw_cl, iy_bnw_cl, iz_bnw_cl, ix_bne_cl, iy_bne_cl, iz_bne_cl;
-    int ix_bsw_cl, iy_bsw_cl, iz_bsw_cl, ix_bse_cl, iy_bse_cl, iz_bse_cl;
+    int64_t ix_tnw_cl, iy_tnw_cl, iz_tnw_cl, ix_tne_cl, iy_tne_cl, iz_tne_cl;
+    int64_t ix_tsw_cl, iy_tsw_cl, iz_tsw_cl, ix_tse_cl, iy_tse_cl, iz_tse_cl;
+    int64_t ix_bnw_cl, iy_bnw_cl, iz_bnw_cl, ix_bne_cl, iy_bne_cl, iz_bne_cl;
+    int64_t ix_bsw_cl, iy_bsw_cl, iz_bsw_cl, ix_bse_cl, iy_bse_cl, iz_bse_cl;
 
     if (padding_mode==MODE_BORDER){
       // clip coordinates to image borders
@@ -319,7 +319,7 @@ __global__ void VolumetricGridSamplerBilinear_updateGradInput_kernel(
       iz_bse_cl = iz_bse;
     }
 
-    for (int c = 0; c < C; ++c) {
+    for (int64_t c = 0; c < C; ++c) {
       gradout = gradOutput[n][c][d][h][w];
 
       // calculate and set gradInput
@@ -333,40 +333,40 @@ __global__ void VolumetricGridSamplerBilinear_updateGradInput_kernel(
       SAFE_ADD(gradInput, ix_bse_cl, iy_bse_cl, iz_bse_cl, n, c, ID, IH, IW, bse * gradout);
 
       // calculate gradGrid
-      tnw_val = ScalarConvert<int,Dtype>::to(0);
+      tnw_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_tnw_cl, iy_tnw_cl, iz_tnw_cl, ID, IH, IW)) {
         tnw_val = input[n][c][iz_tnw_cl][iy_tnw_cl][ix_tnw_cl];
       }
-      tne_val = ScalarConvert<int,Dtype>::to(0);
+      tne_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_tne_cl, iy_tne_cl, iz_tne_cl, ID, IH, IW)) {
         tne_val = input[n][c][iz_tne_cl][iy_tne_cl][ix_tne_cl];
       }
-      tsw_val = ScalarConvert<int,Dtype>::to(0);
+      tsw_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_tsw_cl, iy_tsw_cl, iz_tsw_cl, ID, IH, IW)) {
         tsw_val = input[n][c][iz_tsw_cl][iy_tsw_cl][ix_tsw_cl];
       }
-      tse_val = ScalarConvert<int,Dtype>::to(0);
+      tse_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_tse_cl, iy_tse_cl, iz_tse_cl, ID, IH, IW)) {
         tse_val = input[n][c][iz_tse_cl][iy_tse_cl][ix_tse_cl];
       }
-      bnw_val = ScalarConvert<int,Dtype>::to(0);
+      bnw_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_bnw_cl, iy_bnw_cl, iz_bnw_cl, ID, IH, IW)) {
         bnw_val = input[n][c][iz_bnw_cl][iy_bnw_cl][ix_bnw_cl];
       }
-      bne_val = ScalarConvert<int,Dtype>::to(0);
+      bne_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_bne_cl, iy_bne_cl, iz_bne_cl, ID, IH, IW)) {
         bne_val = input[n][c][iz_bne_cl][iy_bne_cl][ix_bne_cl];
       }
-      bsw_val = ScalarConvert<int,Dtype>::to(0);
+      bsw_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_bsw_cl, iy_bsw_cl, iz_bsw_cl, ID, IH, IW)) {
         bsw_val = input[n][c][iz_bsw_cl][iy_bsw_cl][ix_bsw_cl];
       }
-      bse_val = ScalarConvert<int,Dtype>::to(0);
+      bse_val = ScalarConvert<int64_t,Dtype>::to(0);
       if (WITHIN_BOUNDS(ix_bse_cl, iy_bse_cl, iz_bse_cl, ID, IH, IW)) {
         bse_val = input[n][c][iz_bse_cl][iy_bse_cl][ix_bse_cl];
       }
 
-      Dtype m1 = ScalarConvert<int,Dtype>::to(-1);
+      Dtype m1 = ScalarConvert<int64_t,Dtype>::to(-1);
       gix += m1 * tnw_val * (iy_bse - iy) * (iz_bse - iz) * gradout;
       gix += tne_val * (iy_bsw - iy) * (iz_bsw - iz) * gradout;
       gix += m1 * tsw_val * (iy - iy_bne) * (iz_bne - iz) * gradout;

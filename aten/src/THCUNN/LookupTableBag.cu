@@ -15,14 +15,14 @@
 #include "THCHalfAutoNumerics.cuh"
 #include "THCTensorSort.cuh"
 
-const int WARP_SIZE = 32;
-const int MODE_SUM = 0;
-const int MODE_MEAN = 1;
+const int64_t WARP_SIZE = 32;
+const int64_t MODE_SUM = 0;
+const int64_t MODE_MEAN = 1;
 
 template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTableBag_updateOutputKernel(
   int64_t *input, int64_t *offsets, Dtype *weight, Dtype *output,
-  int64_t *offset2bag, int64_t numIndices, int64_t numBags, int64_t stride, int mode,
+  int64_t *offset2bag, int64_t numIndices, int64_t numBags, int64_t stride, int64_t mode,
   int64_t *bag_size) {
 
   // the strategy here is that each bag x feature is handled by a single thread
@@ -43,7 +43,7 @@ __global__ void cunn_LookupTableBag_updateOutputKernel(
       Acctype weightFeatSum = ScalarConvert<float, Acctype>::to(0);
       int64_t bag_size_ = 0;
       for (int64_t emb = begin; emb < end; emb++) {
-        const int weightRow = ((int) input[emb] - TH_INDEX_BASE) * stride;
+        const int64_t weightRow = ((int64_t) input[emb] - TH_INDEX_BASE) * stride;
         weightFeatSum += ScalarConvert<Dtype, Acctype>::to(weightFeat[weightRow]);
 	bag_size_ ++;
         if (featureDim == 0) {
@@ -69,9 +69,9 @@ template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTableBag_accGradParametersKernel(
   int64_t *input, int64_t *indices, Dtype *gradOutput, Dtype *gradWeight, int64_t *offset2bag,
   int64_t *count, Dtype defaultScale, ptrdiff_t numel, int64_t stride,
-  int mode, int64_t *bag_size) {
+  int64_t mode, int64_t *bag_size) {
 
-  int idx = blockIdx.x * 4 + threadIdx.y;
+  int64_t idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same as this input, then the warp
@@ -85,18 +85,18 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
   // 8     <warp 4>
 
   // Number of values proceessed by each thread (grain size)
-  const int SZ = 4;
+  const int64_t SZ = 4;
 
   if (idx < numel
       && (idx == 0 || input[idx] != input[idx - 1])) {
     do {
-      const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
+      const int64_t startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+      const int64_t weightRow = ((int64_t) input[idx] - TH_INDEX_BASE) * stride;
 
       // Note: only this line changes from LookupTable_accgradParametersKernel
-      const int origRow = ((int) indices[idx] - TH_INDEX_BASE);
-      const int seq_number = offset2bag[origRow] - TH_INDEX_BASE;
-      const int gradOutputRow = ((int) seq_number) * stride;
+      const int64_t origRow = ((int64_t) indices[idx] - TH_INDEX_BASE);
+      const int64_t seq_number = offset2bag[origRow] - TH_INDEX_BASE;
+      const int64_t gradOutputRow = ((int64_t) seq_number) * stride;
 
       const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);
 
@@ -104,9 +104,9 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
       Acctype weight[SZ];
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
+      for (int64_t ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * WARP_SIZE;
+        int64_t featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
           gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
@@ -118,15 +118,15 @@ __global__ void cunn_LookupTableBag_accGradParametersKernel(
       }
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
+      for (int64_t ii = 0; ii < SZ; ii++)
       {
         weight[ii] += gradient[ii] * scale;
       }
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
+      for (int64_t ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * WARP_SIZE;
+        int64_t featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
           gradWeight[weightRow + featureDim] = ScalarConvert<Acctype, Dtype>::to(weight[ii]);

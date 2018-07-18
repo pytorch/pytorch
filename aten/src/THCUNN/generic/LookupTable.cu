@@ -11,7 +11,7 @@ void THNN_(LookupTable_accGradParameters)(
            THCIndexTensor *sortedIndices,
            THCIndexTensor *origIndices,
            bool scaleGradByFreq,
-           int paddingValue,
+           int64_t paddingValue,
            accreal scale_)
 {
   real scale = ScalarConvert<accreal, real>::to(scale_);
@@ -22,7 +22,7 @@ void THNN_(LookupTable_accGradParameters)(
     THError("Tensors must be contiguous");
   }
 
-  int nDim = THCIndexTensor_(_nDimension)(state, input);
+  int64_t nDim = THCIndexTensor_(_nDimension)(state, input);
   if (THCIndexTensor_(_nDimension)(state, input) != 1 && THCIndexTensor_(_nDimension)(state, input) != 2) {
     THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, input);
     THError("input must be a vector or matrix, but is of shape: %s", s1.str);
@@ -34,15 +34,15 @@ void THNN_(LookupTable_accGradParameters)(
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   if (numel <= 768 && !scaleGradByFreq) {
-    const int WARP_SIZE = 32;
-    const int BLOCKDIMY = 32;
+    const int64_t WARP_SIZE = 32;
+    const int64_t BLOCKDIMY = 32;
     dim3 grid(THCCeilDiv(stride, (int64_t)WARP_SIZE));
     dim3 block(WARP_SIZE, BLOCKDIMY);
 
     cunn_LookupTable_accGradParametersKernelByFeature<real, accreal>
     <<<grid, 
        block, 
-       sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int)*WARP_SIZE*BLOCKDIMY,
+       sizeof(accreal)*WARP_SIZE*BLOCKDIMY + sizeof(int64_t)*WARP_SIZE*BLOCKDIMY,
        stream>>>
       (THCIndexTensor_(data)(state, input),
        THCTensor_(data)(state, gradOutput),
@@ -189,14 +189,14 @@ void THNN_(LookupTable_renorm)(
   numel = endIdxThrust - idxThrust;
 
   // At launch time figure out what the index type is and norm type
-  int Norm = ScalarConvert<accreal, int>::to(normType);
+  int64_t Norm = ScalarConvert<accreal, int64_t>::to(normType);
   if (THCTensor_canUse32BitIndexMath(state, idx)) {
     if (Norm == 1) {
-      RUN(1, unsigned int);
+      RUN(1, unsigned int64_t);
     } else if (Norm == 2) {
-      RUN(2, unsigned int);
+      RUN(2, unsigned int64_t);
     } else {
-      RUN(-1, unsigned int);
+      RUN(-1, unsigned int64_t);
     }
   } else {
     if (Norm == 1) {

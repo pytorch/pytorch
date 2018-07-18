@@ -8,9 +8,9 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 	THTensor *gradOutput,
 	THTensor *weight,
 	THTensor *bias,
-	int kW,
-	int dW,
-	int padW) {
+	int64_t kW,
+	int64_t dW,
+	int64_t padW) {
 
 	THArgCheck(kW > 0, 5,
 	           "kernel size should be greater than zero, but got kW: %d", kW);
@@ -26,9 +26,9 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 	}
 
 	// we're always looking at (possibly batch) x feats x seq
-	int ndim = input->dim();
-	int dimF = 0;
-	int dimS = 1;
+	int64_t ndim = input->dim();
+	int64_t dimF = 0;
+	int64_t dimS = 1;
 
 	if (ndim == 3) {
 		++dimS;
@@ -59,9 +59,9 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 static void THNN_(unfolded_acc_row)(
 	THTensor *finput,
 	THTensor *input,
-	int kW,
-	int dW,
-	int padW,
+	int64_t kW,
+	int64_t dW,
+	int64_t padW,
 	int64_t inputFrameSize,
 	int64_t nInputFrame,
 	int64_t nOutputFrame) {
@@ -99,9 +99,9 @@ static void THNN_(unfolded_acc_row)(
 static void THNN_(unfolded_copy_row)(
 	THTensor *finput,
 	THTensor *input,
-	int kW,
-	int dW,
-	int padW,
+	int64_t kW,
+	int64_t dW,
+	int64_t padW,
 	int64_t inputFrameSize,
 	int64_t nInputFrame,
 	int64_t nOutputFrame) {
@@ -138,9 +138,9 @@ static void THNN_(TemporalRowConvolution_updateOutput_frame)(
 	THTensor *weight,
 	THTensor *bias,
 	THTensor *finput,
-	int kW,
-	int dW,
-	int padW,
+	int64_t kW,
+	int64_t dW,
+	int64_t padW,
 	int64_t inputFrameSize,
 	int64_t nInputFrame,
 	int64_t nOutputFrame) {
@@ -179,12 +179,12 @@ void THNN_(TemporalRowConvolution_updateOutput)(
 	THTensor *bias,
 	THTensor *finput,
 	THTensor *fgradInput,     // unused here but needed for Cuda
-	int kW,
-	int dW,
-	int padW,
+	int64_t kW,
+	int64_t dW,
+	int64_t padW,
 	bool featFirst) {
 
-	int ndim = input->dim();
+	int64_t ndim = input->dim();
 
 	THTensor *tinput;
 	if (!featFirst) {
@@ -253,9 +253,9 @@ static void THNN_(TemporalRowConvolution_updateGradInput_frame)(
 	THTensor *gradOutput,
 	THTensor *weight,
 	THTensor *fgradInput,
-	int kW,
-	int dW,
-	int padW,
+	int64_t kW,
+	int64_t dW,
+	int64_t padW,
 	int64_t inputFrameSize,
 	int64_t nInputFrame,
 	int64_t nOutputFrame) {
@@ -287,12 +287,12 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 	THTensor *weight,
 	THTensor *finput,
 	THTensor *fgradInput,
-	int kW,
-	int dW,
-	int padW,
+	int64_t kW,
+	int64_t dW,
+	int64_t padW,
 	bool featFirst) {
 
-	int ndim = input->dim();
+	int64_t ndim = input->dim();
 
 	THTensor *tinput, *tgradOutput;
 
@@ -412,14 +412,14 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
 	THTensor *gradBias,
 	THTensor *finput,
 	THTensor *fgradInput,
-	int kW,
-	int dW,
-	int padW,
+	int64_t kW,
+	int64_t dW,
+	int64_t padW,
 	bool featFirst,
 	accreal scale_) {
 
     real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-	int ndim = input->dim();
+	int64_t ndim = input->dim();
 
 	THTensor *tinput, *tgradOutput;
 

@@ -5,21 +5,21 @@
 #define DeviceTensor3 THCDeviceTensor<real, 3>
 #define DeviceTensor1 THCDeviceTensor<real, 1>
 
-template <int Dim>
+template <int64_t Dim>
 static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor *t) {
   if (!t) {
     return THCDeviceTensor<real, Dim>();
   }
 
-  int inDim = THCTensor__nDimension(state, t);
+  int64_t inDim = THCTensor__nDimension(state, t);
   if (inDim == Dim) {
     return toDeviceTensor<real, Dim>(state, t);
   }
 
   // View in which the last dimensions are collapsed or expanded as needed
   THAssert(THCTensor_isContiguous(state, t));
-  int size[Dim];
-  for (int i = 0; i < Dim || i < inDim; ++i) {
+  int64_t size[Dim];
+  for (int64_t i = 0; i < Dim || i < inDim; ++i) {
     if (i < Dim && i < inDim) {
       size[i] = t->size[i];
     } else if (i < Dim) {

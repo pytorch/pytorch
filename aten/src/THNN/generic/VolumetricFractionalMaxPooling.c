@@ -6,7 +6,7 @@ static int64_t* THNN_(VolumetricFractionalMaxPooling_generateIntervals)(
   real sample,
   int64_t inputSize,
   int64_t outputSize,
-  int poolSize) {
+  int64_t poolSize) {
   real alpha = (real) (inputSize - poolSize) / (real) (outputSize - 1);
   int64_t* sequence = (int64_t*) THAlloc(sizeof(int64_t) * outputSize);
 
@@ -28,7 +28,7 @@ static void THNN_(VolumetricFractionalMaxPooling_updateOutput_frame)(
   int64_t numPlanes,
   int64_t inputT, int64_t inputW, int64_t inputH,
   int64_t outputT, int64_t outputW, int64_t outputH,
-  int poolSizeT, int poolSizeW, int poolSizeH) {
+  int64_t poolSizeT, int64_t poolSizeW, int64_t poolSizeH) {
   int64_t plane;
 #pragma omp parallel for private(plane)
   for (plane = 0; plane < numPlanes; ++plane) {
@@ -103,16 +103,16 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
     THNNState *state,
     THTensor *input,
     THTensor *output,
-    int outputT, int outputW, int outputH,
-    int poolSizeT, int poolSizeW, int poolSizeH,
+    int64_t outputT, int64_t outputW, int64_t outputH,
+    int64_t poolSizeT, int64_t poolSizeW, int64_t poolSizeH,
     THIndexTensor *indices,
     THTensor *randomSamples) {
 
   int64_t numBatch = 1;
-  int planeDim = 0;
-  int heightDim = 1;
-  int widthDim = 2;
-  int timeDim = 3;
+  int64_t planeDim = 0;
+  int64_t heightDim = 1;
+  int64_t widthDim = 2;
+  int64_t timeDim = 3;
 
   int64_t numInputDims = THTensor_(nDimension)(input);
   THNN_ARGCHECK(!input->is_empty() && (numInputDims == 4 || numInputDims == 5), 2, input,
@@ -214,15 +214,15 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
     THTensor *input,
     THTensor *gradOutput,
     THTensor *gradInput,
-    int outputT, int outputW, int outputH,
-    int poolSizeT, int poolSizeW, int poolSizeH,
+    int64_t outputT, int64_t outputW, int64_t outputH,
+    int64_t poolSizeT, int64_t poolSizeW, int64_t poolSizeH,
     THIndexTensor *indices) {
 
   int64_t numBatch = 1;
-  int planeDim = 0;
-  int heightDim = 1;
-  int widthDim = 2;
-  int timeDim = 3;
+  int64_t planeDim = 0;
+  int64_t heightDim = 1;
+  int64_t widthDim = 2;
+  int64_t timeDim = 3;
 
   int64_t numInputDims = THTensor_(nDimension)(input);
   if (numInputDims == 5) {

@@ -7,13 +7,13 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
                          THCTensor *input,
                          THCTensor *gradOutput,
                          THCIndexTensor *indices,
-                         int kW, int dW) {
-  int dimT = 0; // Temporal dimension
-  int dimF = 1; // Feature dimension
-  int input_w;
-  int input_n;
-  int output_w;
-  int ndims = input->dim();
+                         int64_t kW, int64_t dW) {
+  int64_t dimT = 0; // Temporal dimension
+  int64_t dimF = 1; // Feature dimension
+  int64_t input_w;
+  int64_t input_n;
+  int64_t output_w;
+  int64_t ndims = input->dim();
 
   if (ndims == 3)
   {
@@ -50,16 +50,16 @@ void THNN_(TemporalMaxPooling_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            THCIndexTensor *indices,
-           int kW, int dW) {
+           int64_t kW, int64_t dW) {
 
-  int dimT = 0; // Temporal dimension
-  int dimF = 1; // Feature dimension
+  int64_t dimT = 0; // Temporal dimension
+  int64_t dimF = 1; // Feature dimension
 
-  int batch = 1;
-  int input_w;
-  int input_n;
-  int output_w;
-  int nthreads;
+  int64_t batch = 1;
+  int64_t input_w;
+  int64_t input_n;
+  int64_t output_w;
+  int64_t nthreads;
 
   real *input_data;
   real *output_data;
@@ -122,16 +122,16 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCIndexTensor *indices,
-           int kW, int dW) {
+           int64_t kW, int64_t dW) {
 
-  int dimT = 0; // Temporal dimension
-  int dimF = 1; // Feature dimension
+  int64_t dimT = 0; // Temporal dimension
+  int64_t dimF = 1; // Feature dimension
 
-  int batch = 1;
-  int input_w;
-  int input_n;
-  int output_w;
-  int nthreads;
+  int64_t batch = 1;
+  int64_t input_w;
+  int64_t input_n;
+  int64_t output_w;
+  int64_t nthreads;
 
   real *gradInput_data;
   real *gradOutput_data;

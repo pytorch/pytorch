@@ -55,8 +55,8 @@ inline __host__ __device__ half operator-(half a, half b) {
   return THCNumerics<half>::add(a, THCNumerics<half>::neg(b));
 }
 
-inline __host__ __device__ half operator-(half a, int b) {
-  return THCNumerics<half>::add(a, THCNumerics<half>::neg(ScalarConvert<int, half>::to(b)));
+inline __host__ __device__ half operator-(half a, int64_t b) {
+  return THCNumerics<half>::add(a, THCNumerics<half>::neg(ScalarConvert<int64_t, half>::to(b)));
 }
 
 inline __host__ __device__ float operator-(half a, float b) {
@@ -67,8 +67,8 @@ inline __host__ __device__ double operator-(half a, double b) {
   return ScalarConvert<half, double>::to(a) - b;
 }
 
-inline __host__ __device__ half operator-(int a, half b) {
-  return THCNumerics<half>::add(ScalarConvert<int, half>::to(a), THCNumerics<half>::neg(b));
+inline __host__ __device__ half operator-(int64_t a, half b) {
+  return THCNumerics<half>::add(ScalarConvert<int64_t, half>::to(a), THCNumerics<half>::neg(b));
 }
 
 inline __host__ __device__ float operator-(float a, half b) {
@@ -91,8 +91,8 @@ inline __host__ __device__ double operator*(half a, double b) {
   return ScalarConvert<half, double>::to(a) * b;
 }
 
-inline __host__ __device__ half operator*(half a, int b) {
-  return a * ScalarConvert<int, half>::to(b);
+inline __host__ __device__ half operator*(half a, int64_t b) {
+  return a * ScalarConvert<int64_t, half>::to(b);
 }
 
 inline __host__ __device__ float operator*(float a, half b) {
@@ -115,8 +115,8 @@ inline __host__ __device__ double operator/(double a, half b) {
   return a / ScalarConvert<half, double>::to(b);
 }
 
-inline __host__ __device__ half operator/(int a, half b) {
-  return ScalarConvert<int, half>::to(a) / b;
+inline __host__ __device__ half operator/(int64_t a, half b) {
+  return ScalarConvert<int64_t, half>::to(a) / b;
 }
 
 inline __host__ __device__ float operator/(half a, float b) {
@@ -127,8 +127,8 @@ inline __host__ __device__ double operator/(half a, double b) {
   return ScalarConvert<half, double>::to(a) / b;
 }
 
-inline __host__ __device__ half operator/(half a, int b) {
-  return a / ScalarConvert<int, half>::to(b);
+inline __host__ __device__ half operator/(half a, int64_t b) {
+  return a / ScalarConvert<int64_t, half>::to(b);
 }
 
 inline __host__ __device__ half& operator+=(half &lhs, const half &rhs) {
@@ -150,7 +150,7 @@ inline __host__ __device__ half& operator*=(half &lhs, const half &rhs) {
   return lhs;
 }
 
-inline __host__ __device__ half& operator/=(half &lhs, const int &rhs) {
+inline __host__ __device__ half& operator/=(half &lhs, const int64_t &rhs) {
   lhs = lhs / rhs;
   return lhs;
 }
@@ -197,8 +197,8 @@ inline __host__ __device__ half tanh(half a) {
 }
 
 #if defined(_MSC_VER) && CUDA_VERSION >= 9000 || defined(__HIP_PLATFORM_HCC__)
-inline __host__ __device__ half operator+(half a, int b) {
-  return THCNumerics<half>::add(a, ScalarConvert<int, half>::to(b));
+inline __host__ __device__ half operator+(half a, int64_t b) {
+  return THCNumerics<half>::add(a, ScalarConvert<int64_t, half>::to(b));
 }
 
 inline __host__ __device__ double operator+(half a, double b) {
@@ -220,28 +220,28 @@ inline __host__ __device__ bool operator<=(half a, half b) {
   return THCNumerics<half>::le(a, b);
 }
 
-inline __host__ __device__ bool operator<=(half a, int b) {
-  return THCNumerics<half>::le(a, ScalarConvert<int, half>::to(b));
+inline __host__ __device__ bool operator<=(half a, int64_t b) {
+  return THCNumerics<half>::le(a, ScalarConvert<int64_t, half>::to(b));
 }
 
-inline __host__ __device__ bool operator<(half a, int b) {
-  return THCNumerics<half>::lt(a, ScalarConvert<int, half>::to(b));
+inline __host__ __device__ bool operator<(half a, int64_t b) {
+  return THCNumerics<half>::lt(a, ScalarConvert<int64_t, half>::to(b));
 }
 
 inline __host__ __device__ bool operator>(half a, half b) {
   return THCNumerics<half>::gt(a, b);
 }
 
-inline __host__ __device__ bool operator>(half a, int b) {
-  return THCNumerics<half>::gt(a, ScalarConvert<int, half>::to(b));
+inline __host__ __device__ bool operator>(half a, int64_t b) {
+  return THCNumerics<half>::gt(a, ScalarConvert<int64_t, half>::to(b));
 }
 
 inline __host__ __device__ bool operator>=(half a, half b) {
   return THCNumerics<half>::ge(a, b);
 }
 
-inline __host__ __device__ bool operator>=(half a, int b) {
-  return THCNumerics<half>::ge(a, ScalarConvert<int ,half>::to(b));
+inline __host__ __device__ bool operator>=(half a, int64_t b) {
+  return THCNumerics<half>::ge(a, ScalarConvert<int64_t ,half>::to(b));
 }
 
 #endif

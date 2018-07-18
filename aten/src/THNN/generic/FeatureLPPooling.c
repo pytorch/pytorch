@@ -39,11 +39,11 @@ static inline size_t flpOutputSize(FEATURE_LP_SIZE_TYPE inputSize,
 
 FeatureLPPoolingSizes
 THNN_(FeatureLPPooling_upcastCPU)(THTensor* t, bool batchMode) {
-  int dim = THTensor_(_nDimension)(t);
+  int64_t dim = THTensor_(_nDimension)(t);
 
   // Upcast to [batch dim][feature dim][opt dim 1][opt dim 2]
   FeatureLPPoolingSizes s;
-  for (int i = 0; i < 4; ++i) {
+  for (int64_t i = 0; i < 4; ++i) {
     s.size[i] = 1;
     s.stride[i] = 1;
   }
@@ -56,7 +56,7 @@ THNN_(FeatureLPPooling_upcastCPU)(THTensor* t, bool batchMode) {
   } else if (dim == 2) {
     if (batchMode) {
       // [batch dim][feature dim]
-      for (int i = 0; i < 2; ++i) {
+      for (int64_t i = 0; i < 2; ++i) {
         s.size[i] = THTensor_(size)(t, i);
         s.stride[i] = THTensor_(stride)(t, i);
       }
@@ -70,13 +70,13 @@ THNN_(FeatureLPPooling_upcastCPU)(THTensor* t, bool batchMode) {
   } else if (dim == 3) {
     if (batchMode) {
       // [batch dim][feature dim][opt dim 1]
-      for (int i = 0; i < 3; ++i) {
+      for (int64_t i = 0; i < 3; ++i) {
         s.size[i] = THTensor_(size)(t, i);
         s.stride[i] = THTensor_(stride)(t, i);
       }
     } else {
       // [feature dim][opt dim 1][opt dim 2]
-      for (int i = 1; i < 4; ++i) {
+      for (int64_t i = 1; i < 4; ++i) {
         s.size[i] = THTensor_(size)(t, i - 1);
         s.stride[i] = THTensor_(stride)(t, i - 1);
       }
@@ -84,7 +84,7 @@ THNN_(FeatureLPPooling_upcastCPU)(THTensor* t, bool batchMode) {
   } else if (dim == 4) {
     // [batch dim][feature dim][opt dim 1][opt dim 2]
     THAssert(batchMode);
-    for (int i = 0; i < 4; ++i) {
+    for (int64_t i = 0; i < 4; ++i) {
       s.size[i] = THTensor_(size)(t, i);
       s.stride[i] = THTensor_(stride)(t, i);
     }
@@ -97,9 +97,9 @@ void
 THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
                                            THTensor* input,
                                            bool batchMode,
-                                           int width,
-                                           int stride) {
-  int inputDim = THTensor_(_nDimension)(input);
+                                           int64_t width,
+                                           int64_t stride) {
+  int64_t inputDim = THTensor_(_nDimension)(input);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   int64_t outSize =
@@ -147,7 +147,7 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
 void
 THNN_(FeatureLPPooling_resizeCPU)(THTensor* toResize,
                                   THTensor* src) {
-  int inputDim = THTensor_(_nDimension)(src);
+  int64_t inputDim = THTensor_(_nDimension)(src);
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   if (inputDim == 1) {
@@ -180,10 +180,10 @@ THNN_(FeatureLPPooling_updateOutput)(
   THTensor *input,
   THTensor *output,
   accreal power,
-  int width,
-  int stride,
+  int64_t width,
+  int64_t stride,
   bool batchMode) {
-  int inputDim = THTensor_(_nDimension)(input);
+  int64_t inputDim = THTensor_(_nDimension)(input);
 
   if (batchMode) {
     THArgCheck(inputDim >= 2 && inputDim <= 4, 2,
@@ -258,10 +258,10 @@ THNN_(FeatureLPPooling_updateGradInput)(
   THTensor* output,
   THTensor* gradInput,
   accreal power,
-  int width,
-  int stride,
+  int64_t width,
+  int64_t stride,
   bool batchMode) {
-  int inputDim = THTensor_(_nDimension)(input);
+  int64_t inputDim = THTensor_(_nDimension)(input);
 
   if (batchMode) {
     THArgCheck(inputDim >= 2 && inputDim <= 4, 3,
@@ -289,7 +289,7 @@ THNN_(FeatureLPPooling_updateGradInput)(
   THArgCheck(stride >= 1 && stride <= 4, 8,
              "stride must be between 1 - 4");
 
-  for (int i = 0; i < 4; ++i) {
+  for (int64_t i = 0; i < 4; ++i) {
     THAssertMsg(outputDesc.size[i] == gradOutputDesc.size[i],
                 "output and gradOutput sizes do not match");
   }

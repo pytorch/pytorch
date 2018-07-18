@@ -7,15 +7,15 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
                          THTensor *input,
                          THTensor *gradOutput,
                          THIndexTensor *indices,
-                         int kW,
-                         int dW) {
+                         int64_t kW,
+                         int64_t dW) {
   int64_t niframe;
   int64_t framesize;
   int64_t noframe;
 
-  int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
-  int ndims = input->dim();
+  int64_t dimS = 0; // sequence dimension
+  int64_t dimF = 1; // feature dimension
+  int64_t ndims = input->dim();
 
   if (input->dim() == 3)
   {
@@ -53,8 +53,8 @@ void THNN_(TemporalMaxPooling_updateOutput)(
           THTensor *input,
           THTensor *output,
           THIndexTensor *indices,
-          int kW,
-          int dW)
+          int64_t kW,
+          int64_t dW)
 {
   int64_t niframe;
   int64_t framesize;
@@ -66,8 +66,8 @@ void THNN_(TemporalMaxPooling_updateOutput)(
 
   int64_t t, y;
 
-  int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
+  int64_t dimS = 0; // sequence dimension
+  int64_t dimF = 1; // feature dimension
 
   THNN_(TemporalMaxPooling_shapeCheck)(state, input, NULL, NULL, kW, dW);
 
@@ -191,11 +191,11 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THIndexTensor *indices,
-          int kW,
-          int dW)
+          int64_t kW,
+          int64_t dW)
 {
   int64_t niframe;
-  int noframe;
+  int64_t noframe;
   int64_t framesize;
 
   real *gradInput_data;
@@ -212,8 +212,8 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
+  int64_t dimS = 0; // sequence dimension
+  int64_t dimF = 1; // feature dimension
 
   if (input->dim() == 3)
   {

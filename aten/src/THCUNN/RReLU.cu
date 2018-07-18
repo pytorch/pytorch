@@ -9,7 +9,7 @@
 // copied from cutorch/lib/THC/THCTensorRandom.cu
 #define MAX_NUM_BLOCKS 64
 #define BLOCK_SIZE 256
-#define NUM_BLOCKS(n) min((int)THCCeilDiv(n, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
+#define NUM_BLOCKS(n) min((int64_t)THCCeilDiv(n, (ptrdiff_t) BLOCK_SIZE), MAX_NUM_BLOCKS)
 
 template<typename T>
 inline T __device__ curand_uniform_type(curandStateMtgp32 *state);
@@ -32,7 +32,7 @@ inline double __device__ curand_uniform_type<double>(curandStateMtgp32 *state) {
 }
 
 template <typename T>
-__global__ void rreluUpdateOutputTrain(int n, curandStateMtgp32 *state,
+__global__ void rreluUpdateOutputTrain(int64_t n, curandStateMtgp32 *state,
   T *input, T* noise, T *output, double a, double b)
 {
   CUDA_KERNEL_LOOP(i, n)

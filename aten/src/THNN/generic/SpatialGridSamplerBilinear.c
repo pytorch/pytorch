@@ -17,10 +17,10 @@ static inline void THNN_(SpatialGridSamplerBilinear_shapeCheck)
   THNN_ARGCHECK(!grid->is_empty() && grid->dim() == 4, 2, grid,
     "non-empty 4D grid tensor expected but got: %s");
 
-  int nbatch   = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int oheight   = THTensor_(size)(grid, 1);
-  int owidth    = THTensor_(size)(grid, 2);
+  int64_t nbatch   = THTensor_(size)(input, 0);
+  int64_t channels = THTensor_(size)(input, 1);
+  int64_t oheight   = THTensor_(size)(grid, 1);
+  int64_t owidth    = THTensor_(size)(grid, 2);
 
   THNN_CHECK_DIM_SIZE(grid, 4, 0, nbatch);
   THNN_CHECK_DIM_SIZE(grid, 4, 3, 2);
@@ -43,21 +43,21 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
     THTensor *input,
     THTensor *grid,
     THTensor *output,
-    int padding_mode) {
+    int64_t padding_mode) {
 
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(input, grid, NULL);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int IH = THTensor_(size)(input, 2);
-  int IW = THTensor_(size)(input, 3);
-  int H = THTensor_(size)(grid, 1);
-  int W = THTensor_(size)(grid, 2);
+  int64_t N = THTensor_(size)(input, 0);
+  int64_t C = THTensor_(size)(input, 1);
+  int64_t IH = THTensor_(size)(input, 2);
+  int64_t IW = THTensor_(size)(input, 3);
+  int64_t H = THTensor_(size)(grid, 1);
+  int64_t W = THTensor_(size)(grid, 2);
 
   // resize output to the same shape as input
   THTensor_(resize4d)(output, N, C, H, W);
 
   // loop over each output pixel
-  int n, h, w, c;
+  int64_t n, h, w, c;
 #pragma omp parallel for private(n, h, w, c)
   for (n = 0; n < N; ++n) {
     for (h = 0; h < H; ++h) {
@@ -71,14 +71,14 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
         iy = ((iy + 1) / 2) * (IH-1);
 
         // get NE, NW, SE, SW pixel values from (x, y)
-        int ix_nw = floor(ix);
-        int iy_nw = floor(iy);
-        int ix_ne = ix_nw + 1;
-        int iy_ne = iy_nw;
-        int ix_sw = ix_nw;
-        int iy_sw = iy_nw + 1;
-        int ix_se = ix_nw + 1;
-        int iy_se = iy_nw + 1;
+        int64_t ix_nw = floor(ix);
+        int64_t iy_nw = floor(iy);
+        int64_t ix_ne = ix_nw + 1;
+        int64_t iy_ne = iy_nw;
+        int64_t ix_sw = ix_nw;
+        int64_t iy_sw = iy_nw + 1;
+        int64_t ix_se = ix_nw + 1;
+        int64_t iy_se = iy_nw + 1;
 
         // get surfaces to each neighbor:
         real nw = (ix_se - ix)    * (iy_se - iy);
@@ -127,15 +127,15 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
     THTensor *input, THTensor *gradInput,
     THTensor *grid, THTensor *gradGrid,
     THTensor *gradOutput,
-    int padding_mode) {
+    int64_t padding_mode) {
 
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(input, grid, gradOutput);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int IH = THTensor_(size)(input, 2);
-  int IW = THTensor_(size)(input, 3);
-  int H = THTensor_(size)(grid, 1);
-  int W = THTensor_(size)(grid, 2);
+  int64_t N = THTensor_(size)(input, 0);
+  int64_t C = THTensor_(size)(input, 1);
+  int64_t IH = THTensor_(size)(input, 2);
+  int64_t IW = THTensor_(size)(input, 3);
+  int64_t H = THTensor_(size)(grid, 1);
+  int64_t W = THTensor_(size)(grid, 2);
 
   THTensor_(resize4d)(gradInput, N, C, IH, IW);
   THTensor_(resize4d)(gradGrid, N, H, W, 2);
@@ -143,7 +143,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
   THTensor_(zero)(gradGrid);
 
   // loop over each output pixel
-  int n, h, w;
+  int64_t n, h, w;
 #pragma omp parallel for private(n, h, w)
   for (n = 0; n < N; ++n) {
     for (h = 0; h < H; ++h) {
@@ -160,14 +160,14 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
         iy = ((iy + 1) / 2) * (IH-1);
 
         // get NE, NW, SE, SW pixel values from (x, y)
-        int ix_nw = floor(ix);
-        int iy_nw = floor(iy);
-        int ix_ne = ix_nw + 1;
-        int iy_ne = iy_nw;
-        int ix_sw = ix_nw;
-        int iy_sw = iy_nw + 1;
-        int ix_se = ix_nw + 1;
-        int iy_se = iy_nw + 1;
+        int64_t ix_nw = floor(ix);
+        int64_t iy_nw = floor(iy);
+        int64_t ix_ne = ix_nw + 1;
+        int64_t iy_ne = iy_nw;
+        int64_t ix_sw = ix_nw;
+        int64_t iy_sw = iy_nw + 1;
+        int64_t ix_se = ix_nw + 1;
+        int64_t iy_se = iy_nw + 1;
 
         // get surfaces to each neighbor:
         real nw = (ix_se - ix)    * (iy_se - iy);
@@ -175,7 +175,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
         real sw = (ix_ne - ix)    * (iy    - iy_ne);
         real se = (ix    - ix_nw) * (iy    - iy_nw);
 
-        int ix_nw_cl, iy_nw_cl, ix_ne_cl, iy_ne_cl, ix_sw_cl, iy_sw_cl, ix_se_cl, iy_se_cl;
+        int64_t ix_nw_cl, iy_nw_cl, ix_ne_cl, iy_ne_cl, ix_sw_cl, iy_sw_cl, ix_se_cl, iy_se_cl;
 
         if (padding_mode==MODE_BORDER){
           // get clipped NE, NW, SE, SW pixel values from (x, y)
@@ -199,7 +199,7 @@ TH_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
           iy_se_cl = iy_se;
         }
 
-        for (int c = 0; c < C; ++c) {
+        for (int64_t c = 0; c < C; ++c) {
           real gradout = THTensor_(fastGet4d)(gradOutput, n, c, h, w);
 
           // calculate and set gradInput

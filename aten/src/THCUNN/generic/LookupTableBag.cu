@@ -10,7 +10,7 @@ void THNN_(LookupTableBag_updateOutput)(
            THCTensor *weight,
            THCTensor *output,
            THCIndexTensor *offset2bag,
-	   int mode,
+	   int64_t mode,
            THCIndexTensor *bag_size)
 {
   THCUNN_assertSameGPU(state, 5, input, offsets, weight, output, offset2bag);
@@ -42,7 +42,7 @@ void THNN_(LookupTableBag_updateOutput)(
   THLongStorage_free(outputSize);
 
   dim3 block = dim3(32, 8);
-  int grid = 1024;
+  int64_t grid = 1024;
   cunn_LookupTableBag_updateOutputKernel<real, accreal><<<grid, block, 0, stream>>>(
     THCIndexTensor_(data)(state, input),
     THCIndexTensor_(data)(state, offsets),
@@ -70,7 +70,7 @@ void THNN_(LookupTableBag_accGradParameters)(
            THCIndexTensor *sortedIndices,
            THCIndexTensor *origIndices,
            bool scaleGradByFreq,
-	   int mode,
+	   int64_t mode,
 	   THCIndexTensor *bag_size,
            accreal scale_)
 {
@@ -88,7 +88,7 @@ void THNN_(LookupTableBag_accGradParameters)(
     bag_size_data = THCIndexTensor_(data)(state, bag_size);
   }
 
-  int nDim = THCIndexTensor_(_nDimension)(state, input);
+  int64_t nDim = THCIndexTensor_(_nDimension)(state, input);
   if (THCIndexTensor_(_nDimension)(state, input) != 1 && THCIndexTensor_(_nDimension)(state, input) != 2) {
     THCDescBuff s1 = THCIndexTensor_(sizeDesc)(state, input);
     THError("input must be a vector or matrix, but is of shape: %s", s1.str);

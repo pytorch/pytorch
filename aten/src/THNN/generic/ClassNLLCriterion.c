@@ -13,8 +13,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
           int64_t ignore_index)
 {
   THTensor_(resize1d)(total_weight, 1);
-  int n_dims = THTensor_(_nDimension)(input);
-  int n_classes = THTensor_(size)(input, n_dims - 1);
+  int64_t n_dims = THTensor_(_nDimension)(input);
+  int64_t n_classes = THTensor_(size)(input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (THIndexTensor_(_nDimension)(target) > 1) {
@@ -30,14 +30,14 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   }
 
   if (reduction == Reduction::None && n_dims == 2) {
-    int batch_size = THTensor_(size)(input, 0);
+    int64_t batch_size = THTensor_(size)(input, 0);
     THTensor_(resize1d)(output, batch_size);
 
-    std::atomic<int> invalid_target(-1);  // We cannot throw an exception inside omp parallel
-    int i;
+    std::atomic<int64_t> invalid_target(-1);  // We cannot throw an exception inside omp parallel
+    int64_t i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
-      int cur_target = THLongTensor_fastGet1d(target, i) - TH_INDEX_BASE;
+      int64_t cur_target = THLongTensor_fastGet1d(target, i) - TH_INDEX_BASE;
 
       if (cur_target >= 0 && cur_target < n_classes) {
           if (cur_target == ignore_index) {
@@ -47,7 +47,7 @@ void THNN_(ClassNLLCriterion_updateOutput)(
           real cur_weight = weights ? THTensor_(fastGet1d)(weights, cur_target) : 1.0f;
           THTensor_(fastSet1d)(output, i, -THTensor_(fastGet2d)(input, i, cur_target) * cur_weight);
       } else {
-        int tmp = -1;
+        int64_t tmp = -1;
         invalid_target.compare_exchange_strong(tmp, cur_target);
       }
     }
@@ -74,21 +74,21 @@ void THNN_(ClassNLLCriterion_updateOutput)(
   output_data[0] = total_weight_data[0] = 0.0;
 
   if (THTensor_(_nDimension)(input) == 1) {
-    int cur_target = target_data[0] - TH_INDEX_BASE;
+    int64_t cur_target = target_data[0] - TH_INDEX_BASE;
     if (cur_target != ignore_index) {
       THAssert(cur_target >= 0 && cur_target < n_classes);
       total_weight_data[0] = weights ? weights_data[cur_target] : 1.0f;
       output_data[0] = -input_data[cur_target] * total_weight_data[0];
     }
   } else if (THTensor_(_nDimension)(input) == 2) {
-    int batch_size = THTensor_(size)(input, 0);
+    int64_t batch_size = THTensor_(size)(input, 0);
     THAssert(THIndexTensor_(size)(target, 0) == batch_size);
 
-    int n_target = THTensor_(size)(input, 1);
+    int64_t n_target = THTensor_(size)(input, 1);
 
-    int i;
+    int64_t i;
     for (i = 0; i < batch_size; i++) {
-      int cur_target = target_data[i] - TH_INDEX_BASE;
+      int64_t cur_target = target_data[i] - TH_INDEX_BASE;
       if (cur_target != ignore_index) {
         THAssert(cur_target >= 0 && cur_target < n_classes);
 
@@ -124,8 +124,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   THTensor_(resizeAs)(gradInput, input);
   THTensor_(zero)(gradInput);
 
-  int n_dims = THTensor_(_nDimension)(input);
-  int n_classes = THTensor_(size)(input, n_dims - 1);
+  int64_t n_dims = THTensor_(_nDimension)(input);
+  int64_t n_classes = THTensor_(size)(input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (!THTensor_(isContiguous)(gradInput)) {
@@ -145,13 +145,13 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   }
 
   if (reduction == Reduction::None && n_dims == 2) {
-    int batch_size = THTensor_(size)(input, 0);
+    int64_t batch_size = THTensor_(size)(input, 0);
     THNN_CHECK_DIM_SIZE(gradOutput, 1, 0, batch_size);
 
-    int i;
+    int64_t i;
     #pragma omp parallel for private(i)
     for (i = 0; i < batch_size; i++) {
-      int cur_target = THLongTensor_fastGet1d(target, i) - TH_INDEX_BASE;
+      int64_t cur_target = THLongTensor_fastGet1d(target, i) - TH_INDEX_BASE;
       if (cur_target == ignore_index) {
         continue;
       }
@@ -178,7 +178,7 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
   real gradOutput_value = THTensor_(get1d)(gradOutput, 0);
 
   if (THTensor_(_nDimension)(input) == 1) {
-    int cur_target = target_data[0] - TH_INDEX_BASE;
+    int64_t cur_target = target_data[0] - TH_INDEX_BASE;
     if (cur_target != ignore_index) {
       THAssert(cur_target >= 0 && cur_target < n_classes);
 
@@ -188,14 +188,14 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     }
 
   } else if (THTensor_(_nDimension)(input) == 2) {
-    int batch_size = THTensor_(size)(input, 0);
+    int64_t batch_size = THTensor_(size)(input, 0);
     THAssert(THIndexTensor_(size)(target, 0) == batch_size);
 
-    int n_target = THTensor_(size)(input, 1);
+    int64_t n_target = THTensor_(size)(input, 1);
 
-    int i;
+    int64_t i;
     for (i = 0; i < batch_size; i++){
-      int cur_target = target_data[i] - TH_INDEX_BASE;
+      int64_t cur_target = target_data[i] - TH_INDEX_BASE;
 
       if (cur_target != ignore_index) {
         THAssert(cur_target >= 0 && cur_target < n_classes);

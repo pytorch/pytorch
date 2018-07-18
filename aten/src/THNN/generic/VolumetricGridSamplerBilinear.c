@@ -17,11 +17,11 @@ static inline void THNN_(VolumetricGridSamplerBilinear_shapeCheck)
   THNN_ARGCHECK(!grid->is_empty() && grid->dim() == 5, 2, grid,
     "non-empty 5D grid tensor expected but got: %s");
 
-  int nbatch   = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int odepth    = THTensor_(size)(grid, 1);
-  int oheight   = THTensor_(size)(grid, 2);
-  int owidth    = THTensor_(size)(grid, 3);
+  int64_t nbatch   = THTensor_(size)(input, 0);
+  int64_t channels = THTensor_(size)(input, 1);
+  int64_t odepth    = THTensor_(size)(grid, 1);
+  int64_t oheight   = THTensor_(size)(grid, 2);
+  int64_t owidth    = THTensor_(size)(grid, 3);
 
   THNN_CHECK_DIM_SIZE(grid, 5, 0, nbatch);
   THNN_CHECK_DIM_SIZE(grid, 5, 4, 3);
@@ -46,23 +46,23 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
     THTensor *input,
     THTensor *grid,
     THTensor *output,
-    int padding_mode) {
+    int64_t padding_mode) {
 
   THNN_(VolumetricGridSamplerBilinear_shapeCheck)(input, grid, NULL);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int ID = THTensor_(size)(input, 2);
-  int IH = THTensor_(size)(input, 3);
-  int IW = THTensor_(size)(input, 4);
-  int D = THTensor_(size)(grid, 1);
-  int H = THTensor_(size)(grid, 2);
-  int W = THTensor_(size)(grid, 3);
+  int64_t N = THTensor_(size)(input, 0);
+  int64_t C = THTensor_(size)(input, 1);
+  int64_t ID = THTensor_(size)(input, 2);
+  int64_t IH = THTensor_(size)(input, 3);
+  int64_t IW = THTensor_(size)(input, 4);
+  int64_t D = THTensor_(size)(grid, 1);
+  int64_t H = THTensor_(size)(grid, 2);
+  int64_t W = THTensor_(size)(grid, 3);
 
   // resize output to the same shape as input
   THTensor_(resize5d)(output, N, C, D, H, W);
 
   // loop over each output pixel
-  int n, d, h, w, c;
+  int64_t n, d, h, w, c;
 #pragma omp parallel for private(n, d, h, w, c)
   for (n = 0; n < N; ++n) {
     for (d = 0; d < D; ++d) {
@@ -81,37 +81,37 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
           // get corner pixel values from (x, y, z)
           // for 4d, we used north-east-south-west
           // for 5d, we add top-bottom
-          int ix_tnw = floor(ix);
-          int iy_tnw = floor(iy);
-          int iz_tnw = floor(iz);
+          int64_t ix_tnw = floor(ix);
+          int64_t iy_tnw = floor(iy);
+          int64_t iz_tnw = floor(iz);
 
-          int ix_tne = ix_tnw + 1;
-          int iy_tne = iy_tnw;
-          int iz_tne = iz_tnw;
+          int64_t ix_tne = ix_tnw + 1;
+          int64_t iy_tne = iy_tnw;
+          int64_t iz_tne = iz_tnw;
 
-          int ix_tsw = ix_tnw;
-          int iy_tsw = iy_tnw + 1;
-          int iz_tsw = iz_tnw;
+          int64_t ix_tsw = ix_tnw;
+          int64_t iy_tsw = iy_tnw + 1;
+          int64_t iz_tsw = iz_tnw;
 
-          int ix_tse = ix_tnw + 1;
-          int iy_tse = iy_tnw + 1;
-          int iz_tse = iz_tnw;
+          int64_t ix_tse = ix_tnw + 1;
+          int64_t iy_tse = iy_tnw + 1;
+          int64_t iz_tse = iz_tnw;
 
-          int ix_bnw = ix_tnw;
-          int iy_bnw = iy_tnw;
-          int iz_bnw = iz_tnw + 1;
+          int64_t ix_bnw = ix_tnw;
+          int64_t iy_bnw = iy_tnw;
+          int64_t iz_bnw = iz_tnw + 1;
 
-          int ix_bne = ix_tnw + 1;
-          int iy_bne = iy_tnw;
-          int iz_bne = iz_tnw + 1;
+          int64_t ix_bne = ix_tnw + 1;
+          int64_t iy_bne = iy_tnw;
+          int64_t iz_bne = iz_tnw + 1;
 
-          int ix_bsw = ix_tnw;
-          int iy_bsw = iy_tnw + 1;
-          int iz_bsw = iz_tnw + 1;
+          int64_t ix_bsw = ix_tnw;
+          int64_t iy_bsw = iy_tnw + 1;
+          int64_t iz_bsw = iz_tnw + 1;
 
-          int ix_bse = ix_tnw + 1;
-          int iy_bse = iy_tnw + 1;
-          int iz_bse = iz_tnw + 1;
+          int64_t ix_bse = ix_tnw + 1;
+          int64_t iy_bse = iy_tnw + 1;
+          int64_t iz_bse = iz_tnw + 1;
 
           // get surfaces to each neighbor:
           real tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
@@ -186,17 +186,17 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
     THTensor *input, THTensor *gradInput,
     THTensor *grid, THTensor *gradGrid,
     THTensor *gradOutput,
-    int padding_mode) {
+    int64_t padding_mode) {
 
   THNN_(VolumetricGridSamplerBilinear_shapeCheck)(input, grid, gradOutput);
-  int N = THTensor_(size)(input, 0);
-  int C = THTensor_(size)(input, 1);
-  int ID = THTensor_(size)(input, 2);
-  int IH = THTensor_(size)(input, 3);
-  int IW = THTensor_(size)(input, 4);
-  int D = THTensor_(size)(grid, 1);
-  int H = THTensor_(size)(grid, 2);
-  int W = THTensor_(size)(grid, 3);
+  int64_t N = THTensor_(size)(input, 0);
+  int64_t C = THTensor_(size)(input, 1);
+  int64_t ID = THTensor_(size)(input, 2);
+  int64_t IH = THTensor_(size)(input, 3);
+  int64_t IW = THTensor_(size)(input, 4);
+  int64_t D = THTensor_(size)(grid, 1);
+  int64_t H = THTensor_(size)(grid, 2);
+  int64_t W = THTensor_(size)(grid, 3);
 
   THTensor_(resize5d)(gradInput, N, C, ID, IH, IW);
   THTensor_(resize5d)(gradGrid, N, D, H, W, 3);
@@ -204,7 +204,7 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
   THTensor_(zero)(gradGrid);
 
   // loop over each output pixel
-  int n, d, h, w;
+  int64_t n, d, h, w;
 //#pragma omp parallel for private(n, d, h, w)
   for (n = 0; n < N; ++n) {
     for (d = 0; d < D; ++d) {
@@ -227,37 +227,37 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
           // get corner pixel values from (x, y, z)
           // for 4d, we used north-east-south-west
           // for 5d, we add top-bottom
-          int ix_tnw = floor(ix);
-          int iy_tnw = floor(iy);
-          int iz_tnw = floor(iz);
+          int64_t ix_tnw = floor(ix);
+          int64_t iy_tnw = floor(iy);
+          int64_t iz_tnw = floor(iz);
 
-          int ix_tne = ix_tnw + 1;
-          int iy_tne = iy_tnw;
-          int iz_tne = iz_tnw;
+          int64_t ix_tne = ix_tnw + 1;
+          int64_t iy_tne = iy_tnw;
+          int64_t iz_tne = iz_tnw;
 
-          int ix_tsw = ix_tnw;
-          int iy_tsw = iy_tnw + 1;
-          int iz_tsw = iz_tnw;
+          int64_t ix_tsw = ix_tnw;
+          int64_t iy_tsw = iy_tnw + 1;
+          int64_t iz_tsw = iz_tnw;
 
-          int ix_tse = ix_tnw + 1;
-          int iy_tse = iy_tnw + 1;
-          int iz_tse = iz_tnw;
+          int64_t ix_tse = ix_tnw + 1;
+          int64_t iy_tse = iy_tnw + 1;
+          int64_t iz_tse = iz_tnw;
 
-          int ix_bnw = ix_tnw;
-          int iy_bnw = iy_tnw;
-          int iz_bnw = iz_tnw + 1;
+          int64_t ix_bnw = ix_tnw;
+          int64_t iy_bnw = iy_tnw;
+          int64_t iz_bnw = iz_tnw + 1;
 
-          int ix_bne = ix_tnw + 1;
-          int iy_bne = iy_tnw;
-          int iz_bne = iz_tnw + 1;
+          int64_t ix_bne = ix_tnw + 1;
+          int64_t iy_bne = iy_tnw;
+          int64_t iz_bne = iz_tnw + 1;
 
-          int ix_bsw = ix_tnw;
-          int iy_bsw = iy_tnw + 1;
-          int iz_bsw = iz_tnw + 1;
+          int64_t ix_bsw = ix_tnw;
+          int64_t iy_bsw = iy_tnw + 1;
+          int64_t iz_bsw = iz_tnw + 1;
 
-          int ix_bse = ix_tnw + 1;
-          int iy_bse = iy_tnw + 1;
-          int iz_bse = iz_tnw + 1;
+          int64_t ix_bse = ix_tnw + 1;
+          int64_t iy_bse = iy_tnw + 1;
+          int64_t iz_bse = iz_tnw + 1;
 
           // get surfaces to each neighbor:
           real tnw = (ix_bse - ix)    * (iy_bse - iy)    * (iz_bse - iz);
@@ -269,10 +269,10 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
           real bsw = (ix_tne - ix)    * (iy    - iy_tne) * (iz - iz_tne);
           real bse = (ix    - ix_tnw) * (iy    - iy_tnw) * (iz - iz_tnw);
 
-          int ix_tnw_cl, iy_tnw_cl, iz_tnw_cl, ix_tne_cl, iy_tne_cl, iz_tne_cl;
-          int ix_tsw_cl, iy_tsw_cl, iz_tsw_cl, ix_tse_cl, iy_tse_cl, iz_tse_cl;
-          int ix_bnw_cl, iy_bnw_cl, iz_bnw_cl, ix_bne_cl, iy_bne_cl, iz_bne_cl;
-          int ix_bsw_cl, iy_bsw_cl, iz_bsw_cl, ix_bse_cl, iy_bse_cl, iz_bse_cl;
+          int64_t ix_tnw_cl, iy_tnw_cl, iz_tnw_cl, ix_tne_cl, iy_tne_cl, iz_tne_cl;
+          int64_t ix_tsw_cl, iy_tsw_cl, iz_tsw_cl, ix_tse_cl, iy_tse_cl, iz_tse_cl;
+          int64_t ix_bnw_cl, iy_bnw_cl, iz_bnw_cl, ix_bne_cl, iy_bne_cl, iz_bne_cl;
+          int64_t ix_bsw_cl, iy_bsw_cl, iz_bsw_cl, ix_bse_cl, iy_bse_cl, iz_bse_cl;
 
           if (padding_mode==MODE_BORDER){
             // clip coordinates to image borders
@@ -328,7 +328,7 @@ TH_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
             iz_bse_cl = iz_bse;
           }
 
-          for (int c = 0; c < C; ++c) {
+          for (int64_t c = 0; c < C; ++c) {
             real gradout = THTensor_(fastGet5d)(gradOutput, n, c, d, h, w);
 
             // calculate and set gradInput

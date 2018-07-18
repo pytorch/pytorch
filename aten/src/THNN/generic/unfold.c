@@ -6,23 +6,23 @@
 void THNN_(unfolded_acc)(
           THTensor *finput,
           THTensor *input,
-          int kW,
-          int kH,
-          int dW,
-          int dH,
-          int padW,
-          int padH,
-          int nInputPlane,
-          int inputWidth,
-          int inputHeight,
-          int outputWidth,
-          int outputHeight)
+          int64_t kW,
+          int64_t kH,
+          int64_t dW,
+          int64_t dH,
+          int64_t padW,
+          int64_t padH,
+          int64_t nInputPlane,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputWidth,
+          int64_t outputHeight)
 {
   // This function assumes that
   // outputHeight*dH does not overflow a int64_t
   // outputWidth*dW does not overflow a int64_t
 
-  int nip;
+  int64_t nip;
 
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
@@ -30,7 +30,7 @@ void THNN_(unfolded_acc)(
 #pragma omp parallel for private(nip)
   for(nip = 0; nip < nInputPlane; nip++)
   {
-    int kw, kh, y, x;
+    int64_t kw, kh, y, x;
     int64_t ix, iy;
     for(kh = 0; kh < kH; kh++)
     {
@@ -39,7 +39,7 @@ void THNN_(unfolded_acc)(
         real *src = finput_data + nip*((size_t)kH*kW*outputHeight*outputWidth) + kh*((size_t)kW*outputHeight*outputWidth) + kw*((size_t)outputHeight*outputWidth);
         real *dst = input_data + nip*((size_t)inputHeight*inputWidth);
         if (padW > 0 || padH > 0) {
-          int lpad,rpad;
+          int64_t lpad,rpad;
           for(y = 0; y < outputHeight; y++) {
             iy = (int64_t)y*dH - padH + kh;
             if (iy < 0 || iy >= inputHeight) {
@@ -86,20 +86,20 @@ void THNN_(unfolded_acc)(
 void THNN_(unfolded_copy)(
           THTensor *finput,
           THTensor *input,
-          int kW,
-          int kH,
-          int dW,
-          int dH,
-          int padW,
-          int padH,
-          int nInputPlane,
-          int inputWidth,
-          int inputHeight,
-          int outputWidth,
-          int outputHeight)
+          int64_t kW,
+          int64_t kH,
+          int64_t dW,
+          int64_t dH,
+          int64_t padW,
+          int64_t padH,
+          int64_t nInputPlane,
+          int64_t inputWidth,
+          int64_t inputHeight,
+          int64_t outputWidth,
+          int64_t outputHeight)
 {
   // This function assumes that
-  // kH*kW does not overflow an int
+  // kH*kW does not overflow an int64_t
   // nInputPlane*kH*kW does not overflow a int64_t
   // outputHeight*dH does not overflow a int64_t
   // outputWidth*dW does not overflow a int64_t
@@ -114,7 +114,7 @@ void THNN_(unfolded_copy)(
     int64_t rest = k % (kH*kW);
     int64_t kh = rest / kW;
     int64_t kw = rest % kW;
-    int x, y;
+    int64_t x, y;
     int64_t ix, iy;
     real *dst = finput_data + nip*((size_t)kH*kW*outputHeight*outputWidth) + kh*((size_t)kW*outputHeight*outputWidth) + kw*((size_t)outputHeight*outputWidth);
     real *src = input_data + nip*((size_t)inputHeight*inputWidth);
