@@ -30,9 +30,10 @@ __all__ += multiprocessing.__all__
 if sys.version_info < (3, 3):
     """Override basic classes in Python 2.7 and Python 3.3 to use ForkingPickler
     for serialization. Later versions of Python already use ForkingPickler."""
-    from .queue import Queue, SimpleQueue
+    from .queue import SimpleQueue
     from .pool import Pool
 
+from .queue import Queue
 
 if sys.platform == 'darwin' or sys.platform == 'win32':
     _sharing_strategy = 'file_system'

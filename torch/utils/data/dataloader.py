@@ -250,9 +250,9 @@ class _DataLoaderIter(object):
 
         if self.num_workers > 0:
             self.worker_init_fn = loader.worker_init_fn
-            self.index_queues = [multiprocessing.Queue() for _ in range(self.num_workers)]
+            self.index_queues = [multiprocessing.queue.Queue() for _ in range(self.num_workers)]
             self.worker_queue_idx = 0
-            self.worker_result_queue = multiprocessing.SimpleQueue()
+            self.worker_result_queue = multiprocessing.queue.Queue()
             self.batches_outstanding = 0
             self.worker_pids_set = False
             self.shutdown = False

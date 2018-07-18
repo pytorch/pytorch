@@ -1,3 +1,4 @@
+import sys
 import io
 import multiprocessing
 import multiprocessing.queues
@@ -31,11 +32,87 @@ class ConnectionWrapper(object):
 class Queue(multiprocessing.queues.Queue):
 
     def __init__(self, *args, **kwargs):
+        if hasattr(multiprocessing, "get_context"):
+            kwargs['ctx'] = multiprocessing.get_context()
         super(Queue, self).__init__(*args, **kwargs)
-        self._reader = ConnectionWrapper(self._reader)
-        self._writer = ConnectionWrapper(self._writer)
-        self._send = self._writer.send
-        self._recv = self._reader.recv
+
+        if sys.version_info < (3, 3):
+            self._reader = ConnectionWrapper(self._reader)
+            self._writer = ConnectionWrapper(self._writer)
+            self._send = self._writer.send
+            self._recv = self._reader.recv
+
+        self.sig_shutdown = multiprocessing.Value('i', 0)
+        self.put_lock = multiprocessing.Lock()
+        self.get_lock = multiprocessing.Lock()
+
+    def __setstate__(self, state):
+        default_state, extra_state = state
+        (self.sig_shutdown, self.put_lock, self.get_lock) = extra_state
+        super(Queue, self).__setstate__(default_state)
+
+    def __getstate__(self):
+        return (super(Queue, self).__getstate__(),
+                (self.sig_shutdown, self.put_lock, self.get_lock))
+
+    def shutdown(self):
+        with self.sig_shutdown.get_lock():
+            with self.put_lock and self.get_lock:
+                self.shutdown.value = 1
+
+    def is_shutdown(self):
+        with self.sig_shutdown.get_lock():
+            return self.sig_shutdown.value
+
+    def qsize(self):
+        if self.is_shutdown():
+            return -1
+        super(Queue, self).qsize(self)
+
+    def empty(self):
+        if self.is_shutdown():
+            return True
+        return super(Queue, self).empty()
+
+    def full(self):
+        if self.is_shutdown():
+            return True
+        return super(Queue, self).full()
+
+    def put(self, obj, block=True, timeout=None):
+        if self.is_shutdown():
+            return False
+        with self.put_lock:
+            super(Queue, self).put(obj, block, timeout)
+            return True
+
+    def get(self, block=True, timeout=None):
+        if self.is_shutdown():
+            return None
+        with self.get_lock:
+            return super(Queue, self).get(block, timeout)
+
+    def get_nowait(self):
+        return self.get(False)
+
+    def put_nowait(self, obj):
+        return self.put(obj, block=False)
+
+    def close(self):
+        if self.is_shutdown():
+            return
+        return super(Queue, self).close()
+
+    def join_thread(self):
+        if self.is_shutdown():
+            return
+        with self.put_lock and self.get_lock:
+            return super(Queue, self).join_thread()
+
+    def cancel_join_thread(self):
+        if self.is_shutdown():
+            return
+        return super(Queue, self).cancel_join_thread()
 
 
 class SimpleQueue(multiprocessing.queues.SimpleQueue):
