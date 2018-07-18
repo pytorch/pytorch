@@ -40,7 +40,7 @@ class TestCaffe2Basic(TestCase):
         b2 = C.Caffe2Backend()
 
         node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"])
-        output = b2.convert_node(node_def.SerializeToString(), 6)
+        b2.convert_node(node_def.SerializeToString(), 6)
 
         bad_node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], foo = 42, bar = 56)
         with self.assertRaisesRegexp(
@@ -100,6 +100,37 @@ class TestCaffe2Basic(TestCase):
         c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
         output = c2_rep.run({"X": X, "Y": Y})
         np.testing.assert_almost_equal(output["W3"], W_ref)
+
+    def test_upsample(self):
+        X = np.random.randn(1, 1, 2, 2).astype(np.float32)
+        width_scale = 2.0
+        height_scale = 2.0
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-upsample-net'
+        predict_net.external_input[:] = ['X']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'ResizeNearest',
+                inputs=['X'],
+                outputs=['Y'],
+                width_scale=width_scale,
+                height_scale=height_scale,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
 
     def test_gemm(self):
         # simple
