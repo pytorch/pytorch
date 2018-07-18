@@ -41,6 +41,7 @@ from cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 """This dictionary provides the mapping from PyTorch kernel template types
 to their actual types."""
 PYTORCH_TEMPLATE_MAP = {"Dtype": "real", "T": "real"}
+CAFFE2_TEMPLATE_MAP = {}
 
 
 def openf(filename, mode):
@@ -684,6 +685,8 @@ def preprocessor(filepath, stats, hipify_caffe2):
 
                 if constants.API_CAFFE2 in meta_data and not hipify_caffe2:
                     continue
+                if constants.API_RAND in meta_data and hipify_caffe2:
+                    continue
 
                 if output_source.find(cuda_type) > -1:
                     # Check if supported
@@ -691,11 +694,7 @@ def preprocessor(filepath, stats, hipify_caffe2):
                         stats["unsupported_calls"].append((cuda_type, filepath))
 
                 if cuda_type in output_source:
-                    if hipify_caffe2:
-                        if constants.API_RAND not in meta_data:
-                            output_source = re.sub(r'({0})'.format(cuda_type), lambda x: hip_type, output_source)
-                    else:
-                        output_source = re.sub(r'\b({0})\b'.format(cuda_type), lambda x: hip_type, output_source)
+                    output_source = re.sub(r'({0})'.format(cuda_type), lambda x: hip_type, output_source)
 
         # Perform Kernel Launch Replacements
         output_source = processKernelLaunches(output_source, stats)
@@ -938,7 +937,7 @@ def extract_arguments(start, string):
 
 
 # Add static_cast to ensure that the type of kernel arguments matches that in the corresponding kernel definition
-def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=False):
+def add_static_casts(directory, extensions, KernelTemplateParams):
     """Add static casts to kernel launches in order to keep launch argument types and kernel definition types matching.
 
        Example:
@@ -954,12 +953,6 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
     # These are the types that generally have issues with hipKernelLaunch.
     static_cast_types = ["int", "const int", "int64_t", "THCIndex_t *",
                          "const int *", "ptrdiff_t", "long", "const int64_t*", "int64_t *", "double"]
-
-    # Add static_casts<> to all kernel launches.
-    if hipify_caffe2:
-        # substitute CUDA with HIP in KernelTemplateParams to align with hipified names
-        KernelTemplateParams = re.sub(r'CUDA', r'HIP', str(KernelTemplateParams))
-        KernelTemplateParams = ast.literal_eval(KernelTemplateParams)
 
     for (dirpath, _dirnames, filenames) in os.walk(directory):
         for filename in filenames:
@@ -1013,9 +1006,9 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
                             # Here the template value will be resolved from <real> to <Dtype>.
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            if not hipify_caffe2:
-                                full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
-                                                                lambda x: kernel_name_with_template, full_new_kernel_launch)
+
+                            full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
+                                                            lambda x: kernel_name_with_template, full_new_kernel_launch)
 
                             # Replace Launch
                             new_output_source = new_output_source.replace(full_old_kernel_launch, full_new_kernel_launch)
@@ -1167,7 +1160,7 @@ def main():
                     get_kernel_template_params(
                         the_file,
                         KernelTemplateParams,
-                        PYTORCH_TEMPLATE_MAP)
+                        CAFFE2_TEMPLATE_MAP if args.hipify_caffe2 else PYTORCH_TEMPLATE_MAP)
 
     # Open YAML file with disable information.
     if args.yaml_settings != "":
@@ -1269,7 +1262,7 @@ def main():
 
     if args.add_static_casts:
         # Execute the Clang Tool to Automatically add static casts
-        add_static_casts(args.output_directory, args.extensions, KernelTemplateParams, hipify_caffe2=args.hipify_caffe2)
+        add_static_casts(args.output_directory, args.extensions, KernelTemplateParams)
 
     if args.hipify_caffe2:
         copy_files_to_hip_dirs(args.output_directory, args.project_directory, args.include_dirs)

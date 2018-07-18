@@ -1,6 +1,8 @@
 #!/usr/bin/env python
 
 import os
+import sys
+import subprocess
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2")
@@ -12,7 +14,7 @@ include_dirs = ["operators",
                 "video",
                 "distributed"]
 
-output_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2_hip")
+output_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), ".caffe2_hip")
 
 file_extensions = ['cc', 'cu', 'h', 'cuh']
 
@@ -29,9 +31,12 @@ ignore_file_list = ["depthwise_3x3_conv_op.cu",
 args = ["--project-directory", proj_dir,
         "--output-directory", output_dir,
         "--include-dirs"] + include_dirs + \
-    ["--extensions"] + file_extensions + \
-    ["--ignore_files"] + ignore_file_list + \
-    ["--hipify_caffe2", "True"] + \
-    ["--add-static-casts", "True"]
+        ["--extensions"] + file_extensions + \
+        ["--ignore_files"] + ignore_file_list + \
+        ["--hipify_caffe2", "True"] + \
+        ["--add-static-casts", "True"]
 
-os.system("python " + os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py") + " " + " ".join(args))
+subprocess.check_call([
+    sys.executable,
+    os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py"),
+] + args)
