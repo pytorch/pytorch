@@ -18,3 +18,6 @@ workflows:
   linux-trusty-py3.6-gcc7:
     jobs:
       - linux-trusty-py3.6-gcc7-build
+          - filters:
+              branches:
+                only: circleci
