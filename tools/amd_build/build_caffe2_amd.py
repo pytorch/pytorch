@@ -31,10 +31,10 @@ ignore_file_list = ["depthwise_3x3_conv_op.cu",
 args = ["--project-directory", proj_dir,
         "--output-directory", output_dir,
         "--include-dirs"] + include_dirs + \
-        ["--extensions"] + file_extensions + \
-        ["--ignore_files"] + ignore_file_list + \
-        ["--hipify_caffe2", "True"] + \
-        ["--add-static-casts", "True"]
+    ["--extensions"] + file_extensions + \
+    ["--ignore_files"] + ignore_file_list + \
+    ["--hipify_caffe2", "True"] + \
+    ["--add-static-casts", "True"]
 
 subprocess.check_call([
     sys.executable,
