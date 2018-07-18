@@ -47,6 +47,9 @@ class SparseFunHashOp : public Operator<Context> {
     adaptive_ = (InputSize() == 5);
   }
 
+  // TODO: enable the filler
+  DISABLE_INPUT_FILLERS(Context)
+
   bool RunOnDevice() override {
     const auto& val = Input(0);
     const auto& key = Input(1);
@@ -150,6 +153,9 @@ class SparseFunHashGradientOp : public Operator<Context> {
         seed_(OperatorBase::GetSingleArgument<uint64_t>("seed", 0)) {
     adaptive_ = (InputSize() == 6);
   }
+
+  // TODO: enable the filler
+  DISABLE_INPUT_FILLERS(Context)
 
   bool RunOnDevice() override {
     const auto& grad_out = Input(0);
