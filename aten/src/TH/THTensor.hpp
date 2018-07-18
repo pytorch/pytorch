@@ -9,19 +9,39 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
-typedef struct THTensor
+struct THTensor
 {
-    int64_t *size;
-    int64_t *stride;
-    int64_t dim_;
+    THTensor(THStorage* storage)
+      : refcount(1)
+      , storage(storage)
+      , storageOffset(0)
+      // TODO: Naughty naughty!
+      , size(static_cast<int64_t *>(THAlloc(sizeof(int64_t))))
+      , stride(static_cast<int64_t *>(THAlloc(sizeof(int64_t))))
+      , dim_(1)
+      {
+        size[0] = 0;
+        stride[0] = 1;
+      }
+
+    ~THTensor() {
+      THFree(size);
+      THFree(stride);
+      if (storage) {
+        THStorage_free(storage);
+      }
+    }
+
+    std::atomic<int> refcount;
 
     // Note: storage->size may be greater than the recorded size
     // of a tensor
     THStorage *storage;
     ptrdiff_t storageOffset;
-    std::atomic<int> refcount;
 
-    char flag;
+    int64_t *size;
+    int64_t *stride;
+    int64_t dim_;
 
     template <typename T>
     inline T * data() const {
@@ -57,7 +77,7 @@ typedef struct THTensor
     inline at::IntList sizes() {
       return at::IntList(size, dim_);
     }
-} THTensor;
+};
 
 #include "generic/THTensorFastGetSet.hpp"
 #include "THGenerateAllTypes.h"
