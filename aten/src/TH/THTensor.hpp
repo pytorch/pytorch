@@ -84,4 +84,4 @@ struct THTensor
 
 TH_API void THTensor_free(THTensor *self);
 TH_CPP_API at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
-                                                                  at::IntList newshape);
+                                                                      at::IntList newshape);
