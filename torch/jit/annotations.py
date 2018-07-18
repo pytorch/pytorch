@@ -86,7 +86,7 @@ def get_signature(fn):
 def get_num_params(fn):
     try:
         source = dedent(inspect.getsource(fn))
-    except:
+    except TypeError:
         return None
     if source is None:
         return None
@@ -178,6 +178,7 @@ def split_type_line(type_line):
         raise RuntimeError("Syntax error in type annotation (cound't find `->`)")
     return type_line[start_offset:arrow_pos].strip(), type_line[arrow_pos + 2:].strip()
 
+
 def try_real_annotations(fn):
     """Tries to use the Py3.5+ annotation syntax to get the type."""
     try:
@@ -194,7 +195,7 @@ def try_real_annotations(fn):
         return ann if ann is not sig.empty else None
 
     arg_types = [ann_to_type(as_ann(p.annotation))
-                   for p in sig.parameters.values()]
+                 for p in sig.parameters.values()]
     return_types = flatten_return_type(ann_to_type(as_ann(sig.return_annotation)))
     return arg_types, return_types
 
