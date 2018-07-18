@@ -2417,12 +2417,12 @@ void THTensor_(max)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
     THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
-    tempValues_->size[dimension] = t->size[dimension];
+    THTensor_setSizeAtDim(tempValues_, dimension, t->size[dimension]);
     tempValues_->stride[dimension] = 0;
 
     THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
-    tempIndices_->size[dimension] = t->size[dimension];
+    THTensor_setSizeAtDim(tempIndices_, dimension, t->size[dimension]);
     tempIndices_->stride[dimension] = 0;
 
     TH_TENSOR_APPLY3_D(real, t, real, tempValues_, int64_t, tempIndices_, dimension,
@@ -2501,12 +2501,12 @@ void THTensor_(min)(THTensor *values_, THLongTensor *indices_, THTensor *t, int 
 
     THTensor *tempValues_ = THTensor_(newWithTensor)(values_);
     // tempValues_.expand_as(t)
-    tempValues_->size[dimension] = t->size[dimension];
+    THTensor_setSizeAtDim(tempValues_, dimension, t->size[dimension]);
     tempValues_->stride[dimension] = 0;
 
     THLongTensor *tempIndices_ = THLongTensor_newWithTensor(indices_);
     // tempIndices_.expand_as(t)
-    tempIndices_->size[dimension] = t->size[dimension];
+    THTensor_setSizeAtDim(tempIndices_, dimension, t->size[dimension]);
     tempIndices_->stride[dimension] = 0;
 
     TH_TENSOR_APPLY3_D(real, t, real, tempValues_, int64_t, tempIndices_, dimension,
@@ -2592,7 +2592,7 @@ void THTensor_(sum)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       THTensor_(zero)(r_);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      temp_->size[dimension] = t->size[dimension];
+      THTensor_setSizeAtDim(temp_, dimension, t->size[dimension]);
       temp_->stride[dimension] = 0;
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data + *t_data;);
@@ -2673,7 +2673,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
       THTensor_(fill)(r_, 1);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      temp_->size[dimension] = t->size[dimension];
+      THTensor_setSizeAtDim(temp_, dimension, t->size[dimension]);
       temp_->stride[dimension] = 0;
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data * *t_data;);
@@ -3984,7 +3984,7 @@ void THTensor_(logicalAnd)(THTensor *r_, THTensor *t, int dimension, int keepdim
       THTensor_(fill)(r_, 1);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      temp_->size[dimension] = t->size[dimension];
+      THTensor_setSizeAtDim(temp_, dimension, t->size[dimension]);
       temp_->stride[dimension] = 0;
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data && *t_data;);
@@ -4063,7 +4063,7 @@ void THTensor_(logicalAny)(THTensor *r_, THTensor *t, int dimension, int keepdim
       THTensor_(zero)(r_);
       THTensor *temp_ = THTensor_(newWithTensor)(r_);
       // r_.expand_as(t)
-      temp_->size[dimension] = t->size[dimension];
+      THTensor_setSizeAtDim(temp_, dimension, t->size[dimension]);
       temp_->stride[dimension] = 0;
 
       TH_TENSOR_APPLY2(real, temp_, real, t, *temp__data = *temp__data || *t_data;);
