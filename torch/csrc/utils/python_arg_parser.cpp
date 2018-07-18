@@ -184,12 +184,11 @@ static inline std::vector<int64_t> parse_intlist_args(const std::string& s, int6
   AT_CHECK(s[n - 1] == '}', "Default value of IntList is missing right brace '}', found ", s[n - 1]);
 
   auto args = std::vector<int64_t>();
-  const char* del = ",{}";
-  char* s_p = strdup(s.c_str());
-  char *token = strtok(s_p, del);
-  while (token != NULL) {
-    args.emplace_back(std::atol(token));
-    token = strtok(NULL, del);
+  std::istringstream ss(s.substr(1, s.length() - 2)); // exclude '{' and '}'
+  std::string tok;
+
+  while(std::getline(ss, tok, ',')) {
+    args.emplace_back(std::stol(tok));
   }
   return args;
 }
