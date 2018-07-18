@@ -136,13 +136,13 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
   {
     THTensor_setSizeAtDim(self, d, size[d]);
     if(stride && (stride[d] >= 0) ) {
-      self->stride[d] = stride[d];
+      THTensor_setStrideAtDim(self, d, stride[d]);
     } else {
       if(d == nDimension-1) {
-        self->stride[d] = 1;
+        THTensor_setStrideAtDim(self, d, 1);
       } else {
         // Keep stride monotonically increasing to match NumPy.
-        self->stride[d] = std::max<int64_t>(self->size[d+1],1)*self->stride[d+1];
+        THTensor_setStrideAtDim(self, d, std::max<int64_t>(self->size[d+1],1)*self->stride[d+1]);
       }
     }
     totalSize += (self->size[d]-1)*self->stride[d];
@@ -220,7 +220,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
     for(d = dimension; d < self->dim()-1; d++)
     {
       THTensor_setSizeAtDim(self, d, self->size[d+1]);
-      self->stride[d] = self->stride[d+1];
+      THTensor_setStrideAtDim(self, d, self->stride[d+1]);
     }
     THTensor_resizeDim(self, self->dim_ - 1);
   }
@@ -243,12 +243,12 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
   THTensor_resizeDim(self, self->dim() + 1);
   for (d = self->dim()-1; d > dimension; d--) {
     THTensor_setSizeAtDim(self, d, self->size[d-1]);
-    self->stride[d] = self->stride[d-1];
+    THTensor_setStrideAtDim(self, d, self->stride[d-1]);
   }
   if (dimension+1 < self->dim()) {
-    self->stride[dimension] = self->size[dimension+1] * self->stride[dimension+1];
+    THTensor_setStrideAtDim(self, dimension, self->size[dimension+1] * self->stride[dimension+1]);
   } else {
-    self->stride[dimension] = 1;
+    THTensor_setStrideAtDim(self, dimension, 1);
   }
   THTensor_setSizeAtDim(self, dimension, 1);
 }
