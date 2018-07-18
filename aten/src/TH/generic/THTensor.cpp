@@ -416,7 +416,7 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
     self->size[d] = self->size[d+1];
     self->stride[d] = self->stride[d+1];
   }
-  self->dim_--;
+  THTensor_resizeDim(self, self->dim_ - 1);
 }
 
 void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dimension2)
@@ -538,7 +538,7 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
       self->size[d] = self->size[d+1];
       self->stride[d] = self->stride[d+1];
     }
-    self->dim_--;
+    THTensor_resizeDim(self, self->dim_ - 1);
   }
 }
 

@@ -222,7 +222,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
       self->size[d] = self->size[d+1];
       self->stride[d] = self->stride[d+1];
     }
-    self->dim_--;
+    THTensor_resizeDim(self, self->dim_ - 1);
   }
 }
 
