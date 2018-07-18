@@ -88,6 +88,60 @@ class BytesIOContext(io.BytesIO):
 
 
 class TestTorch(TestCase):
+    def _check_sum_dim(tensors, dim):
+        for tensor in tensors:
+            expected = tensor.numpy().sum(dim)
+            actual = tensor.sum(dim)
+            self.assertEqual(expected.shape, actual.shape)
+            if actual.dtype == torch.float:
+                self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
+            else:
+                self.assertTrue(np.allclose(expected, actual.numpy()))
+
+    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
+        float_types = [torch.double,
+                       torch.float]
+        int_types = [torch.int64,
+                     torch.int32,
+                     torch.int16]
+
+        def make_contiguous(shape, dtype):
+            if dtype in float_types:
+                val = torch.randn(shape, dtype=dtype)
+                val = val * ((val_range[1] - val_range[0]) / (math.pi * 2.0))
+                val = val + ((val_range[1] - val_range[0]) / 2.0)
+                val = torch.clamp(val, min=val_range[0], max=val_range[1])
+                return val
+            result = torch.zeros(shape, dtype=dtype)
+            result.apply_(lambda x: random.randint(val_range[0], val_range[1]))
+            return result
+
+        def make_non_contiguous(shape, dtype):
+            contig = make_contiguous(shape, dtype)
+            non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
+            non_contig = non_contig.select(-1, -1)
+            non_contig.copy_(contig)
+            self.assertFalse(non_contig.is_contiguous())
+            return non_contig
+
+        def make_contiguous_slice(size, dtype):
+            contig = make_contiguous((1, size), dtype)
+            non_contig = contig[:1, 1:size - 1]
+            self.assertTrue(non_contig.is_contiguous())
+            return contig
+
+        types = []
+        if use_floating:
+            types += float_types
+        if use_integral:
+            types += int_types
+        tensors = {"cont": [], "noncont": [], "slice": []}
+        for dtype in types:
+            tensors["cont"].append(make_contiguous(shape, dtype))
+            tensors["noncont"].append(make_non_contiguous(shape, dtype))
+            tensors["slice"].append(make_contiguous_slice(sum(list(shape)), dtype))
+
+        return tensors
 
     def test_dot(self):
         types = {
@@ -1619,65 +1673,32 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
-        def check_sum_dim(tensors, dim):
-            for tensor in tensors:
-                expected = tensor.numpy().sum(dim)
-                actual = tensor.sum(dim)
-                self.assertEqual(expected.shape, actual.shape)
-                if actual.dtype == torch.float:
-                    self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-                else:
-                    self.assertTrue(np.allclose(expected, actual.numpy()))
+        def check_sum_dim(tensors_dict, dim):
+            for category, tensors in tensors_dict.items():
+                if category == "slice":
+                    dim = 0
+                for tensor in tensors:
+                    expected = tensor.numpy().sum(dim)
+                    actual = tensor.sum(dim)
+                    self.assertEqual(expected.shape, actual.shape)
+                    if actual.dtype == torch.float:
+                        self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
+                    else:
+                        self.assertTrue(np.allclose(expected, actual.numpy()))
 
-        float_types = [torch.double,
-                       torch.float]
-        int_types = [torch.int64,
-                     torch.int32,
-                     torch.int16]
+        float_types = [torch.double, torch.float]
+        int_types = [torch.int64, torch.int32, torch.int16]
 
-        def make_contiguous(shape, dtype):
-            if dtype in float_types:
-                return torch.randn(*shape, dtype=dtype)
-            result = torch.zeros(*shape, dtype=dtype)
-            result.apply_(lambda x: random.randint(-100, 100))
-            return result
-
-        def make_non_contiguous(shape, dtype):
-            contig = make_contiguous(shape, dtype)
-            non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
-            non_contig.copy_(contig)
-            self.assertFalse(non_contig.is_contiguous())
-            return non_contig
-
-        def make_tensors(*shape):
-            tensors = []
-            for dtype in float_types + int_types:
-                tensors.append(make_contiguous(shape, dtype))
-                tensors.append(make_non_contiguous(shape, dtype))
-            return tensors
-
-        check_sum_dim(make_tensors(5, 400000), 1)
-        check_sum_dim(make_tensors(3, 5, 7), 0)
-        check_sum_dim(make_tensors(3, 5, 7), 1)
-        check_sum_dim(make_tensors(3, 5, 7), 2)
-        check_sum_dim(make_tensors(100000), -1)
-        check_sum_dim(make_tensors(50, 50, 50), 0)
-        check_sum_dim(make_tensors(50, 50, 50), 1)
-        check_sum_dim(make_tensors(50, 50, 50), 2)
-        check_sum_dim(make_tensors(50, 50, 50), (1, 2))
-        check_sum_dim(make_tensors(50, 50, 50), (1, -1))
-
-        def make_contiguous_slice(size, dtype):
-            contig = make_contiguous((1, size), dtype)
-            non_contig = contig[:1, 1:size - 1]
-            self.assertTrue(non_contig.is_contiguous())
-            return contig
-
-        for dtype in float_types + int_types:
-            check_sum_dim(make_contiguous_slice(5, dtype), 0)
-            check_sum_dim(make_contiguous_slice(50, dtype), 0)
-            check_sum_dim(make_contiguous_slice(500, dtype), 0)
-            check_sum_dim(make_contiguous_slice(100000, dtype), 0)
+        check_sum_dim(self._make_tensors((5, 400000)), 1)
+        check_sum_dim(self._make_tensors((3, 5, 7)), 0)
+        check_sum_dim(self._make_tensors((3, 5, 7)), 1)
+        check_sum_dim(self._make_tensors((3, 5, 7)), 2)
+        check_sum_dim(self._make_tensors((100000, )), -1)
+        check_sum_dim(self._make_tensors((50, 50, 50)), 0)
+        check_sum_dim(self._make_tensors((50, 50, 50)), 1)
+        check_sum_dim(self._make_tensors((50, 50, 50)), 2)
+        check_sum_dim(self._make_tensors((50, 50, 50)), (1, 2))
+        check_sum_dim(self._make_tensors((50, 50, 50)), (1, -1))
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
@@ -5840,25 +5861,30 @@ class TestTorch(TestCase):
         self.assertEqual(dst, dst2, 0)
 
     def test_abs(self):
-        size = 1000
-        max_val = 1000
-        original = torch.rand(size).mul(max_val)
-        # Tensor filled with values from {-1, 1}
-        switch = torch.rand(size).mul(2).floor().mul(2).add(-1)
+        def _test_abs(tensors_dict):
+            for category, tensors in tensors_dict.items():
+                for data in tensors:
+                    switch = torch.rand(data.size()).mul(2).floor().mul(2).add(-1).type(data.dtype)
+                    res = torch.mul(data, switch)
+                    self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
 
-        types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor',
-                 'torch.IntTensor', 'torch.ShortTensor']
-        for t in types:
-            data = original.type(t)
-            switch = switch.type(t)
-            res = torch.mul(data, switch)
-            # abs is used in assertEqual so we use the slow version instead
-            self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
+        max_val = 1000
+        _test_abs(self._make_tensors((3, 4), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((3, 5, 7), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((2, 2, 5, 8, 2, 3), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((1000, ), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((30, 30, 30), val_range=(0, max_val)))
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
+
+        # One of
+        rec = torch.randn(2, 2, 3, 7, 6, 2).type(torch.float64).clamp(0, 1)
+        val1 = rec.select(-1, -1).data[0][0][0].sum()
+        val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
+        self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
