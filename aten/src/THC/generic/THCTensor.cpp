@@ -41,7 +41,7 @@ THLongStorage *THCTensor_(newSizeOf)(THCState *state, THCTensor *self)
 THLongStorage *THCTensor_(newStrideOf)(THCState *state, THCTensor *self)
 {
   THLongStorage *stride = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(stride, self->stride);
+  THLongStorage_rawCopy(stride, THTensor_getStridePtr(self));
   return stride;
 }
 
@@ -71,7 +71,7 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
                            tensor->storageOffset,
                            tensor->dim(),
                            THTensor_getSizePtr(tensor),
-                           tensor->stride);
+                           THTensor_getStridePtr(tensor));
   return self;
 }
 
@@ -219,7 +219,7 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage
   THCTensor *self = THCTensor_(new)(state);
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
   auto stride = THTensor_compute_stride(at::IntList(THTensor_getSizePtr(tensor), tensor->dim()),
-                                        at::IntList(tensor->stride, tensor->dim()),
+                                        at::IntList(THTensor_getStridePtr(tensor), tensor->dim()),
                                         at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
@@ -449,9 +449,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
   THCTensor_(set)(state, self, src);
 
   std::vector<int64_t> newSize(/* size */ self->dim() + 1);
-
-  int64_t *newStride;
-  newStride = (int64_t*)THAlloc(sizeof(int64_t)*(self->dim()+1));
+  std::vector<int64_t> newStride(/* size */ self->dim() + 1);
 
   newSize[self->dim()] = size;
   newStride[self->dim()] = self->stride[dimension];
@@ -469,10 +467,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
     }
   }
 
-  THFree(self->stride);
-
-  THTensor_setSize(self, std::move(newSize));
-  self->stride = newStride;
+  THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
   self->dim_++;
 }
 
