@@ -425,7 +425,7 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
 
 static ptrdiff_t THTensor_(dataOffset)(THTensor* tensor, ptrdiff_t linearIndex) {
   auto size = tensor->sizes();
-  int64_t *stride = tensor->stride;
+  auto stride = tensor->strides();
   int nDim = tensor->_dim();
   ptrdiff_t dataOffset = 0;
   for (int i = nDim - 1; i >= 0; i--) {

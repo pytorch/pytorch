@@ -1,7 +1,7 @@
 // included as 'TensorDenseOrSparse' in TensorDerived.cpp
 
 IntList ${Tensor}::strides() const {
-  return IntList(tensor->stride,dim());
+  return IntList(THTensor_getStridePtr(tensor), dim());
 }
 Scalar ${Tensor}::localScalar() {
   int64_t numel = ${THTensor}_nElement(${state,}tensor);
