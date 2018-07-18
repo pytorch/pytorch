@@ -404,7 +404,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
   for(d = dimension; d < self->dim()-1; d++)
   {
     THTensor_setSizeAtDim(self, d, self->size[d+1]);
-    self->stride[d] = self->stride[d+1];
+    THTensor_setStrideAtDim(self, d, self->stride[d+1]);
   }
   THTensor_resizeDim(self, self->dim_ - 1);
 }
@@ -425,8 +425,8 @@ void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int
     return;
 
   z = self->stride[dimension1];
-  self->stride[dimension1] = self->stride[dimension2];
-  self->stride[dimension2] = z;
+  THTensor_setStrideAtDim(self, dimension1, self->stride[dimension2]);
+  THTensor_setStrideAtDim(self, dimension2, z);
   z = self->size[dimension1];
   THTensor_setSizeAtDim(self, dimension1, self->size[dimension2]);
   THTensor_setSizeAtDim(self, dimension2, z);
@@ -488,7 +488,7 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
       if(d != ndim)
       {
         THTensor_setSizeAtDim(self, ndim, src->size[d]);
-        self->stride[ndim] = src->stride[d];
+        THTensor_setStrideAtDim(self, ndim, src->stride[d]);
       }
       ndim++;
     }
@@ -499,7 +499,7 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
   if(ndim == 0 && src->dim() > 0)
   {
     THTensor_setSizeAtDim(self, 0, 1);
-    self->stride[0] = 1;
+    THTensor_setStrideAtDim(self, 0, 1);
     ndim = 1;
   }
   THTensor_resizeDim(self, ndim);
