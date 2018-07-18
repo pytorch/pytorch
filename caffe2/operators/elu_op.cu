@@ -16,7 +16,7 @@ template <>
 __global__ void
 EluCUDAKernel<float>(const int N, const float alpha, const float* X, float* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-#if defined(__HIP_DEVICE_COMPILE__) || __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350
     Y[i] =
         __ldg(X + i) < 0 ? alpha * (expf(__ldg(X + i)) - 1.0f) : __ldg(X + i);
 #else
@@ -33,7 +33,7 @@ __global__ void EluGradientCUDAKernel(
     const T* Y,
     T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-#if defined(__HIP_DEVICE_COMPILE__) || __CUDA_ARCH__ >= 350
+#if __CUDA_ARCH__ >= 350
     dX[i] = __ldg(Y + i) < 0 ? __ldg(dY + i) * (__ldg(Y + i) + alpha)
                              : __ldg(dY + i);
 #else
