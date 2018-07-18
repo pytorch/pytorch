@@ -55,22 +55,16 @@ real *THCTensor_(data)(THCState *state, const THCTensor *self)
 
 /**** creation methods ****/
 
-static void THCTensor_(rawInit)(THCState *state, THCTensor *self);
-
-
 /* Empty init */
 THCTensor *THCTensor_(new)(THCState *state)
 {
-  THCTensor *self = (THCTensor*)THAlloc(sizeof(THCTensor));
-  THCTensor_(rawInit)(state, self);
-  return self;
+  return new THCTensor(THCStorage_(new)(state));
 }
 
 /* Pointer-copy init */
 THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 {
-  THCTensor *self = (THCTensor*)THAlloc(sizeof(THCTensor));
-  THCTensor_(rawInit)(state, self);
+  THCTensor *self = new THCTensor(THCStorage_(new)(state));
   THCTensor_(setStorageNd)(state,
                            self,
                            tensor->storage,
@@ -84,12 +78,11 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 /* Storage init */
 THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, THLongStorage *size, THLongStorage *stride)
 {
-  THCTensor *self = (THCTensor*)THAlloc(sizeof(THCTensor));
   if(size && stride)
     THArgCheck(size->size == stride->size, 4, "inconsistent size");
 
   AT_CHECK(size, "size must not be null");
-  THCTensor_(rawInit)(state, self);
+  THCTensor *self = new THCTensor(THCStorage_(new)(state));
   THCTensor_(setStorageNd)(state,
                            self,
                            storage,
@@ -103,8 +96,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
 
 THCTensor *THCTensor_(newWithStorageIntLists)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, at::IntList sizes, at::IntList strides) {
   AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
-  THCTensor *self = (THCTensor *)THAlloc(sizeof(THCTensor));
-  THCTensor_(rawInit)(state, self);
+  THCTensor *self = new THCTensor(THCStorage_(new)(state));
   THCTensor_(setStorageNd)(state, self, storage, storageOffset, sizes.size(),
                            const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 
@@ -149,8 +141,7 @@ THCTensor *THCTensor_(newWithSize)(THCState *state, THLongStorage *size, THLongS
 }
 
 THCTensor *THCTensor_(newWithSizeIntList)(THCState *state, at::IntList sizes) {
-  THCTensor *self = (THCTensor *)THAlloc(sizeof(THCTensor));
-  THCTensor_(rawInit)(state, self);
+  THCTensor *self = new THCTensor(THCStorage_(new)(state));
   THCTensor_(resizeNd)(state, self, sizes.size(), const_cast<int64_t*>(sizes.data()), nullptr);
 
   return self;
@@ -601,18 +592,6 @@ void THCTensor_(freeCopyTo)(THCState *state, THCTensor *self, THCTensor *dst)
 }
 
 /*******************************************************************************/
-
-static void THCTensor_(rawInit)(THCState *state, THCTensor *self)
-{
-  new (&self->refcount) std::atomic<int>(1);
-  self->storage = THCStorage_(new)(state);
-  self->storageOffset = 0;
-  self->size = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
-  self->stride = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
-  self->size[0] = 0;
-  self->stride[0] = 1;
-  self->dim_ = 1;
-}
 
 void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
 {
