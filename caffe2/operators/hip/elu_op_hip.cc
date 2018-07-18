@@ -16,8 +16,12 @@ template <>
 __global__ void
 EluHIPKernel<float>(const int N, const float alpha, const float* X, float* Y) {
   HIP_1D_KERNEL_LOOP(i, N) {
+#if defined(__HIP_DEVICE_COMPILE__) || __HIP_ARCH__ >= 350
     Y[i] =
         __ldg(X + i) < 0 ? alpha * (expf(__ldg(X + i)) - 1.0f) : __ldg(X + i);
+#else
+    Y[i] = X[i] < 0 ? alpha * (expf(X[i]) - 1.0f) : X[i];
+#endif
   }
 }
 
@@ -29,8 +33,12 @@ __global__ void EluGradientHIPKernel(
     const T* Y,
     T* dX) {
   HIP_1D_KERNEL_LOOP(i, N) {
+#if defined(__HIP_DEVICE_COMPILE__) || __HIP_ARCH__ >= 350
     dX[i] = __ldg(Y + i) < 0 ? __ldg(dY + i) * (__ldg(Y + i) + alpha)
                              : __ldg(dY + i);
+#else
+    dX[i] = Y[i] < 0 ? dY[i] * (Y[i] + alpha) : dY[i];
+#endif
   }
 }
 
@@ -40,7 +48,11 @@ template <>
 template <typename T>
 bool EluFunctor<HIPContext>::
 operator()(const int N, const T* X, T* Y, HIPContext* context) const {
-  hipLaunchKernelGGL(EluHIPKernel<T>, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N))), dim3(CAFFE_HIP_NUM_THREADS), 0, context->hip_stream(), static_cast<const int>(N), alpha, X, Y);
+ hipLaunchKernelGGL( EluHIPKernel<T>
+      , dim3(CAFFE_GET_BLOCKS(static_cast<const int>(N))),
+         dim3(CAFFE_HIP_NUM_THREADS),
+         0,
+         context->hip_stream(), static_cast<const int>(N), alpha, X, Y);
   return true;
 }
 
@@ -55,7 +67,11 @@ bool EluGradientFunctor<HIPContext>::Forward(
     HIPContext* context) const {
   const int size = std::accumulate(
       Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
-  hipLaunchKernelGGL(EluGradientHIPKernel<T>, dim3(CAFFE_GET_BLOCKS(static_cast<const int>(size))), dim3(CAFFE_HIP_NUM_THREADS), 0, context->hip_stream(), static_cast<const int>(size), alpha, dY, Y, dX);
+ hipLaunchKernelGGL( EluGradientHIPKernel<T>
+      , dim3(CAFFE_GET_BLOCKS(static_cast<const int>(size))),
+         dim3(CAFFE_HIP_NUM_THREADS),
+         0,
+         context->hip_stream(), static_cast<const int>(size), alpha, dY, Y, dX);
   return true;
 }
 
