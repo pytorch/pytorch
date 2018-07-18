@@ -303,10 +303,6 @@ TH_API void THInferNumThreads(void)
 #endif
 }
 
-THDescBuff _THSizeDesc(at::ArrayRef<int64_t> size, const int64_t ndim) {
-  return _THSizeDesc(size.data(), ndim);
-}
-
 THDescBuff _THSizeDesc(const int64_t *size, const int64_t ndim) {
   const int L = TH_DESC_BUFF_LEN;
   THDescBuff buf;

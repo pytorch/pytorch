@@ -23,11 +23,7 @@
     } \
   } \
   if (shape_check_flag == 1) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->dim()); \
-    THError("Expected %s %s, %s %s and %s %s to have the same size apart from dimension %d", \
-            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, DIMENSION); \
+    AT_ERROR("Expected ", #TENSOR1, " ", TENSOR1->sizes(), ", ", #TENSOR2, " ", TENSOR2->sizes(), " and ", #TENSOR3, " ", TENSOR3->sizes(), " to have the same size apart from dimension ", DIMENSION); \
   } \
 }
 
@@ -53,11 +49,7 @@
     same_dims = 0;                                   \
   } \
   if (same_dims == 0) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->dim()); \
-    THError("inconsistent tensor size, expected %s %s, %s %s and %s %s to have the same " \
-            "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str); \
+    AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), ", ", #TENSOR2, " ", TENSOR2->sizes(), " and ", #TENSOR3, " ",TENSOR3->sizes() , " to have the same number of dimensions"); \
   }                                                                     \
   SIZE_CHECK(TENSOR1, TENSOR2, TENSOR3, DIMENSION)                      \
 \
@@ -156,10 +148,7 @@
   if( (DIMENSION < 0) || (DIMENSION >= TENSOR1->dim()) ) \
     THError("invalid dimension %d (expected to be 0 <= dim < %d)", DIMENSION, TENSOR1->_dim()); \
   if( TENSOR1->dim() != TENSOR2->dim() ) {                    \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
-    THError("inconsistent tensor size, expected %s %s and %s %s to have the same " \
-            "number of dimensions", #TENSOR1, T1buff.str, #TENSOR2, T2buff.str);        \
+    AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same number of dimensions");        \
   }                                                                     \
   TH_UNUSED int shape_check_flag = 0;                                             \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->dim(); TH_TENSOR_DIM_APPLY_i++) \
@@ -167,10 +156,7 @@
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
     if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
-      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
-      THError("Expected %s %s and %s %s to have the same size in dimension %d", \
-              #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, DIMENSION);   \
+      AT_ERROR("Expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same size in dimension ", DIMENSION); \
     }                                                                   \
   } \
 \
