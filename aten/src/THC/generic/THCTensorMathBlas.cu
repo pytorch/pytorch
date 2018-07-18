@@ -49,13 +49,13 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
-  if( (mat->_dim() != 2) || (vec->_dim() != 1) )
+  if( (mat->dim() != 2) || (vec->dim() != 1) )
     THError("matrix and vector expected");
 
   if( mat->size[1] != vec->size[0] )
     THError("size mismatch");
 
-  if(t->_dim() != 1)
+  if(t->dim() != 1)
     THError("size mismatch");
 
   if(t->size[0] != mat->size[0])
@@ -115,6 +115,16 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
     THCTensor_(free)(state, cmat);
   }
 
+  // cublasSgemv, cublasDgemv have a bug where (x,0).mv(0) does not
+  // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
+  if (vec->size[0] == 0 && mat->size[0] != 0) {
+    if(THCNumerics<real>::eq(beta, ScalarConvert<int, real>::to(0))) {
+      THCTensor_(zero)(state, r_);
+    } else if(THCNumerics<real>::ne(beta, ScalarConvert<int, real>::to(1))) {
+      THCTensor_(mul)(state, r_, r_, beta);
+    }
+  }
+
 #elif defined(THC_REAL_IS_HALF)
     // Currently no Hgemv/SgemvEx in Cublas
     THCTensor *vecAsMatrix = THCTensor_(newWithTensor)(state, vec);
@@ -140,11 +150,11 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
-  if ( (vec1->_dim() != 1) || (vec2->_dim() != 1) ) {
+  if ( (vec1->dim() != 1) || (vec2->dim() != 1) ) {
     THError("vector and vector expected");
   }
 
-  if (t->_dim() != 2) {
+  if (t->dim() != 2) {
     THError("size mismatch");
   }
 
@@ -237,11 +247,11 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   char transpose_r, transpose_m1, transpose_m2;
   THCTensor *r__, *m1_, *m2_;
 
-  if( (m1->_dim() != 2) || (m2->_dim() != 2) )
-    THError("matrices expected, got %dD, %dD tensors", m1->_dim(), m2->_dim());
+  if( (m1->dim() != 2) || (m2->dim() != 2) )
+    THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
 
-  if(t->_dim() != 2)
-    THError("matrix expected, got %dD tensor for t", t->_dim());
+  if(t->dim() != 2)
+    THError("matrix expected, got %dD tensor for t", t->dim());
 
   if(m1->size[1] != m2->size[0]) {
     THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
@@ -397,9 +407,9 @@ THCTensor_(addbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
                    real alpha, THCTensor *batch1, THCTensor *batch2) {
 #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
-  THArgCheck(THCTensor_(_nDimension)(state, t) == 2, 4, "expected 2D tensor");
-  THArgCheck(THCTensor_(_nDimension)(state, batch1) == 3, 6, "expected 3D tensor");
-  THArgCheck(THCTensor_(_nDimension)(state, batch2) == 3, 7, "expected 3D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, t) == 2, 4, "expected 2D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, batch1) == 3, 6, "expected 3D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, batch2) == 3, 7, "expected 3D tensor");
 
   int64_t batchnum = THCTensor_(size)(state, batch1, 0);
   int64_t m1d1 = THCTensor_(size)(state, batch1, 1);
@@ -462,9 +472,9 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
                     real alpha, THCTensor *batch1, THCTensor *batch2) {
 #if defined(THC_REAL_IS_HALF) || defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, result, t, batch1, batch2));
-  THArgCheck(THCTensor_(_nDimension)(state, t) == 3, 4, "expected 3D tensor");
-  THArgCheck(THCTensor_(_nDimension)(state, batch1) == 3, 6, "expected 3D tensor");
-  THArgCheck(THCTensor_(_nDimension)(state, batch2) == 3, 7, "expected 3D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, t) == 3, 4, "expected 3D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, batch1) == 3, 6, "expected 3D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, batch2) == 3, 7, "expected 3D tensor");
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch1, 0), 6,
              "equal number of batches expected");
   THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
@@ -728,16 +738,13 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
 {
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THAssert(THCTensor_(checkGPU)(state, 2, ra_, a));
-  THArgCheck(THCTensor_(_nDimension)(state, a) == 3, 3, "expected 3D tensor");
+  THArgCheck(THCTensor_(nDimension)(state, a) == 3, 3, "expected 3D tensor");
   THArgCheck(THCTensor_(size)(state, a, 1) ==
              THCTensor_(size)(state, a, 2), 3, "matrices must be square");
 
   if (ra_ != a) {
     THCTensor_(resizeAs)(state, ra_, a);
-    // not sure if this is kosher, but things are nicer if we return in column major
-    if (ra_->stride[0] == 1) {
-      THCTensor_(transpose)(state, ra_, NULL, 1, 0);
-    } else if (ra_->stride[2] == 1) {
+    if (ra_->stride[2] == 1) {
       THCTensor_(transpose)(state, ra_, NULL, 1, 2);
     }
     THCTensor_(copy)(state, ra_, a);
@@ -787,11 +794,13 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
   size_t matrices_size = num_batches * sizeof(real*);
   auto d_result = static_cast<real**>(THCudaMalloc(state, matrices_size));
 
-  const int64_t block = 512;
-  const int64_t grid = (num_batches + block - 1) / block;
-  createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
-    (const real**)d_result, THCTensor_(data)(state, ra__),
-    ra__->stride[0], num_batches);
+  if (num_batches > 0) {
+    const int64_t block = 512;
+    const int64_t grid = (num_batches + block - 1) / block;
+    createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
+      (const real**)d_result, THCTensor_(data)(state, ra__),
+      ra__->stride[0], num_batches);
+  }
 
   int *pivots_gpu = NULL;
   if (pivot) {
@@ -810,12 +819,16 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
   }
 
   if (free_rinfo_) {
-    int min = THCudaIntTensor_minall(state, rinfo_);
-    int max = THCudaIntTensor_maxall(state, rinfo_);
-    THCudaIntTensor_free(state, rinfo_);
-    if (min != 0 || max != 0) {
-      THError("failed to factorize some batch elements (min info == %d, max info == %d)",
-              min, max);
+    if(THCTensor_nElement(state, rinfo_) != 0) {
+      int min = THCudaIntTensor_minall(state, rinfo_);
+      int max = THCudaIntTensor_maxall(state, rinfo_);
+      THCudaIntTensor_free(state, rinfo_);
+      if (min != 0 || max != 0) {
+        THError("failed to factorize some batch elements (min info == %d, max info == %d)",
+                min, max);
+      }
+    } else {
+      THCudaIntTensor_free(state, rinfo_);
     }
   }
 
