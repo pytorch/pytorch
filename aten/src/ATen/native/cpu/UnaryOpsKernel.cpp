@@ -12,6 +12,126 @@
 namespace at { namespace native {
 namespace {
 
+template <typename scalar_t, typename VecOp, typename ScalarOp>
+inline void _parallel_vector_map_(
+    VecOp vec_op,
+    ScalarOp scalar_op,
+    Tensor& self) {
+  CPU_tensor_parallel_kernel_apply1<scalar_t>(
+      self, [vec_op, scalar_op](int64_t size, scalar_t* x, int64_t stridex) {
+        vec256::map_(vec_op, x, size, stridex);
+      });
+}
+
+template <typename scalar_t, typename VecOp, typename ScalarOp>
+inline void _parallel_vector_map(
+    VecOp vec_op,
+    ScalarOp scalar_op,
+    Tensor& result,
+    const Tensor& self) {
+  CPU_tensor_parallel_kernel_apply2<scalar_t, scalar_t>(
+      result,
+      self,
+      [vec_op, scalar_op](
+          int64_t size,
+          scalar_t* x,
+          scalar_t* y,
+          int64_t stridex,
+          int64_t stridey) {
+          vec256::map(vec_op, x, y, size, stridex, stridey);
+      });
+}
+
+//NB on clamp: The call order here matters because of NaN propagation!
+//See [NaN propagation] in vec256 base class
+
+static void clamp_max__kernel(Tensor& self, Scalar& max_) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp_max_", [&] {
+    const scalar_t max_val = max_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map_<scalar_t>(
+        [max_val](const Vec& x) { return vec256::min(x, Vec(max_val)); },
+        [max_val](const scalar_t x) { return std::min(x, max_val); },
+        self);
+  });
+}
+
+static void clamp_min__kernel(Tensor& self, Scalar& min_) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp_min_", [&] {
+    const scalar_t min_val = min_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map_<scalar_t>(
+        [min_val](const Vec& x) { return vec256::max(x, Vec(min_val)); },
+        [min_val](const scalar_t y) { return std::max(y, min_val); },
+        self);
+  });
+}
+
+static void clamp_max_kernel(Tensor& result, const Tensor& self, Scalar& max_) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp_max", [&] {
+    const scalar_t max_val = max_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map<scalar_t>(
+        [max_val](const Vec& x) { return vec256::min(x, Vec(max_val)); },
+        [max_val](const scalar_t y) { return std::min(y, max_val); },
+        result,
+        self);
+  });
+}
+
+static void clamp_min_kernel(Tensor& result, const Tensor& self, Scalar& min_) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp_min", [&] {
+    const scalar_t min_val = min_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map<scalar_t>(
+        [min_val](const Vec& x) { return vec256::max(x, Vec(min_val)); },
+        [min_val](const scalar_t y) { return std::max(y, min_val); },
+        result,
+        self);
+  });
+}
+
+static void clamp__kernel(Tensor& self, Scalar& min_, Scalar& max_) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp_", [&] {
+    const scalar_t min_val = min_.to<scalar_t>();
+    const scalar_t max_val = max_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map_<scalar_t>(
+        [min_val, max_val](const Vec& x) {
+          Vec max_vec = Vec(max_val);
+          Vec min_vec = Vec(min_val);
+          return at::vec256::max(at::vec256::min(x, max_vec), min_vec);
+        },
+        [min_val, max_val](const scalar_t x) {
+          return std::max(std::min(x, max_val), min_val);
+        },
+        self);
+  });
+}
+
+static void clamp_kernel(
+    Tensor& result,
+    const Tensor& self,
+    Scalar& min_,
+    Scalar& max_) {
+  AT_DISPATCH_ALL_TYPES(self.type(), "clamp", [&] {
+    const scalar_t min_val = min_.to<scalar_t>();
+    const scalar_t max_val = max_.to<scalar_t>();
+    using Vec = vec256::Vec256<scalar_t>;
+    _parallel_vector_map<scalar_t>(
+        [min_val, max_val](const Vec& x) {
+          Vec max_vec = Vec(max_val);
+          Vec min_vec = Vec(min_val);
+          return at::vec256::max(at::vec256::min(x, max_vec), min_vec);
+        },
+        [min_val, max_val](const scalar_t y) {
+          return std::max(std::min(y, max_val), min_val);
+        },
+        result,
+        self);
+  });
+}
+
 using namespace vec256;
 
 template <typename scalar_t>
@@ -141,6 +261,12 @@ static void sigmoid_kernel(Tensor& result, const Tensor& self) {
 
 } // anonymous namespace
 
+REGISTER_DISPATCH(clamp_Impl, &clamp__kernel);
+REGISTER_DISPATCH(clampMax_Impl, &clamp_max__kernel);
+REGISTER_DISPATCH(clampMin_Impl, &clamp_min__kernel);
+REGISTER_DISPATCH(clampImpl, &clamp_kernel);
+REGISTER_DISPATCH(clampMaxImpl, &clamp_max_kernel);
+REGISTER_DISPATCH(clampMinImpl, &clamp_min_kernel);
 REGISTER_DISPATCH(sigmoidImpl, &sigmoid_kernel)
 
 // IMPLEMENT_FLOAT_KERNEL(ALL, abs)

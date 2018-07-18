@@ -96,20 +96,41 @@ inline scalar_t map2_reduce_all(
 }
 
 template <typename scalar_t, typename Op>
+inline void map_(
+    const Op& vec_fun,
+    scalar_t* data,
+    int64_t size,
+    int64_t stride = 1) {
+  using Vec = vec256::Vec256<scalar_t>;
+  int64_t d = 0;
+  for (; d < size - (size % Vec::size); d += Vec::size) {
+    Vec output_vec = vec_fun(Vec::loadu(data + d * stride, Vec::size, stride));
+    output_vec.store(data + d * stride, Vec::size, stride);
+  }
+  if (size - d > 0) {
+    Vec output_vec = vec_fun(Vec::loadu(data + d * stride, size - d, stride));
+    output_vec.store(data + d * stride, size - d, stride);
+  }
+}
+
+template <typename scalar_t, typename Op>
 inline void map(
     const Op& vec_fun,
     scalar_t* output_data,
     const scalar_t* input_data,
-    int64_t size) {
+    int64_t size,
+    int64_t stride_out = 1,
+    int64_t stride_in = 1) {
   using Vec = vec256::Vec256<scalar_t>;
   int64_t d = 0;
   for (; d < size - (size % Vec::size); d += Vec::size) {
-    Vec output_vec = vec_fun(Vec::loadu(input_data + d));
-    output_vec.store(output_data + d);
+    Vec output_vec =
+        vec_fun(Vec::loadu(input_data + d * stride_in, Vec::size, stride_in));
+    output_vec.store(output_data + d * stride_out, Vec::size, stride_out);
   }
   if (size - d > 0) {
-    Vec output_vec = vec_fun(Vec::loadu(input_data + d, size - d));
-    output_vec.store(output_data + d, size - d);
+    Vec output_vec = vec_fun(Vec::loadu(input_data + d * stride_in, size - d, stride_in));
+    output_vec.store(output_data + d * stride_out, size - d, stride_out);
   }
 }
 

@@ -14,6 +14,16 @@
 #define __at_align32__
 #endif
 
+
+// [NaN propagation]
+// See https://www.felixcloutier.com/x86/MINPS.html
+// In particular http://eigen.tuxfamily.org/bz/show_bug.cgi?id=1373
+// In short: SIMD max/min and std::max/std::min treat NaNs differently
+// Also see: https://software.intel.com/en-us/forums/intel-isa-extensions/topic/759566
+// The decision here is to maintain current behavior, but there's no guarantee
+// this will always perfectly be portable, because a compiler might decide to switch the
+// order in which min or max is called. If you encounter this issue, please post an issue.
+
 namespace at {
 namespace vec256 {
 namespace {
@@ -58,18 +68,23 @@ public:
     }
     return vec;
   }
-  static Vec256<T> loadu(const void* ptr) {
+  static Vec256<T> loadu(const void* ptr, int64_t count = size, int64_t stride = 1) {
     Vec256 vec;
-    std::memcpy(vec.values, ptr, 32);
+    if (stride == 1 && count == size) {
+      std::memcpy(vec.values, ptr, count * sizeof(T));
+      return vec;
+    }
+    for (int64_t i = 0; i < count; i++)
+      vec.values[i] = reinterpret_cast<const T*>(ptr)[i * stride];
     return vec;
   }
-  static Vec256<T> loadu(const void* ptr, int64_t count) {
-    Vec256 vec;
-    std::memcpy(vec.values, ptr, count * sizeof(T));
-    return vec;
-  }
-  void store(void* ptr, int count = size) const {
-    std::memcpy(ptr, values, count * sizeof(T));
+  void store(void* ptr, int count = size, int64_t stride = 1) const {
+    if (stride == 1) {
+      std::memcpy(ptr, values, count * sizeof(T));
+    } else {
+      for (int64_t i = 0; i < count; i++)
+        reinterpret_cast<T*>(ptr)[i * stride] = values[i];
+    }
   }
   const T& operator[](int idx) const {
     return values[idx];
@@ -204,6 +219,14 @@ template <class T> Vec256<T> max(const Vec256<T> &a, const Vec256<T> &b) {
   Vec256<T> c = Vec256<T>();
   for (int i = 0; i != Vec256<T>::size; i++) {
     c[i] = std::max(a[i], b[i]);
+  }
+  return c;
+}
+
+template <class T> Vec256<T> min(const Vec256<T> &a, const Vec256<T> &b) {
+  Vec256<T> c = Vec256<T>();
+  for (int i = 0; i != Vec256<T>::size; i++) {
+    c[i] = std::min(a[i], b[i]);
   }
   return c;
 }
