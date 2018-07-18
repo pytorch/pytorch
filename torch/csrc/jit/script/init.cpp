@@ -231,8 +231,7 @@ std::shared_ptr<SugaredValue> PythonValue::attr(SourceRange loc, Method & m, con
        THPDevice_Check(member.ptr()) ||
        py::isinstance<py::int_>(member) ||
        py::isinstance<py::float_>(member) ||
-       py::isinstance<py::bool_>(member)
-      ) {
+       py::isinstance<py::bool_>(member)) {
       return ConstantPythonValue::create(loc, m, member);
     }
   }
