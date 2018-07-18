@@ -7,7 +7,7 @@
   <<<grid, block, 0, THCState_getCurrentStreamOnDevice(state, curDevice)>>>(               \
     tensorInfo, srcInfo, indexInfo, dim, (TYPE)totalElements);
 
-void THCTensor_(gather)(THCState* state, THCTensor *tensor,
+void THCTensor_(_s_gather)(THCState* state, THCTensor *tensor,
                          THCTensor *src, int dim, THCudaLongTensor *index) {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));

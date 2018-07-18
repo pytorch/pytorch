@@ -593,7 +593,7 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real v
   THLongTensor_free(index);
 }
 
-void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
+void THTensor_(_s_gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *index)
 {
   int64_t elems_per_row, i, idx;
 

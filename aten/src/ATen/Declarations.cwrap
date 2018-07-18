@@ -359,7 +359,7 @@
     - THTensor* src
 ]]
 [[
-  name: gather
+  name: _s_gather
   variants:
     - method
     - function
