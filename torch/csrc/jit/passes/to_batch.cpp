@@ -9,49 +9,56 @@ std::unordered_map<std::string, std::shared_ptr<Graph>> ToBatch::batch_operator_
 // replace aten operator node with BatchTensor operator graph
 void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
   auto res_graph = res_block->owningGraph();
-  if(n->outputs().size() > 1){
-    throw std::runtime_error("NYI: multiple assignment is not supported yet");
+  auto func_name = std::string(n->kind().toUnqualString());
+  if(batch_operator_table.find(func_name) == batch_operator_table.end()){
+    throw std::runtime_error("function " + func_name + "is not supported in batched tensor yet");
   }
-  auto batch_graph = batch_operator_table.at(n->kind().toUnqualString());
+  auto batch_graph = batch_operator_table.at(func_name);
   std::vector<Value*> new_inputs;
   for(Value *input : n->inputs()){
-    if(batch_map.find(input) != batch_map.end()){
+    if(batch_map.find(input) != batch_map.end()){  // batched tensor input
       auto new_input = batch_map.at(input);
       new_inputs.insert(new_inputs.end(), new_input.begin(), new_input.end());
     }
-    else{
-      throw std::runtime_error("NYI: non-tensor input for aten operator is not supported yet");
+    else{  // non-tensor input
+      new_inputs.push_back(rn_env.at(input));
     }
   }
 
   // assume in batched operators, all attr inputs are in the end
   for(Symbol attr : n->attributeNames()){
     // std::cout << toString(n->kindOf(attr)) << std::endl;
-    at::Tensor t;
+    auto attr_node = res_graph->create(prim::Constant);
     switch (n->kindOf(attr)) {
       case AttributeKind::f:
-        t = at::tensor(n->f(attr), at::kFloat);
+        attr_node->t_(attr::value, at::tensor(n->f(attr), at::kFloat));
+        attr_node->output()->setType(FloatType::get());
         break;
       case AttributeKind::i:
-        t = at::tensor(n->i(attr), at::kInt);
+        attr_node->t_(attr::value, at::tensor(n->i(attr), at::kInt));
+        attr_node->output()->setType(IntType::get());
         break;
       case AttributeKind::t:
-        t = n->t(attr);
+        attr_node->t_(attr::value, n->t(attr).clone());
+        attr_node->output()->inferTypeFrom(n->t(attr));
         break;
       default:
         throw std::runtime_error("NYI: Attribute kind except for f, i, t is not supported yet");
     }
-    auto attr_node = res_graph->createConstant(t);
-    attr_node->output()->inferTypeFrom(t);
     res_block->appendNode(attr_node);
     new_inputs.push_back(attr_node->output());
   }
   auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_graph, new_inputs);
 
-  // Assume all outputs from inlined operator implementation are in the triple form.
-  for(size_t i = 0; i < n->outputs().size(); i++){
-    auto output = n->outputs()[i];
-    batch_map[output] = std::vector<Value*>(outputs.begin() + i * EXP_BTENSOR_SIZE, outputs.begin() + i * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE);
+  // Assume all outputs from inlined operator implementation are in the triple form batched tensor or just a single non-tensor.
+  if(outputs.size() == 1){
+    rn_env[n->outputs()[0]] = outputs[0];
+  }
+  else{
+    for(size_t i = 0; i < n->outputs().size(); i++){
+      auto output = n->outputs()[i];
+      batch_map[output] = std::vector<Value*>(outputs.begin() + i * EXP_BTENSOR_SIZE, outputs.begin() + i * EXP_BTENSOR_SIZE + EXP_BTENSOR_SIZE);
+    }
   }
 }
 
@@ -74,6 +81,15 @@ void ToBatch::visitNumToTensor(Node* n, Block* block, Block* res_block){
   res_block->appendNode(r_node);
   auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("batch_from_scalar_tensor"), r_node->outputs());
   batch_map[n->output()] = outputs;
+}
+
+// clone prim::TensorToNum to new graph
+void ToBatch::visitTensorToNum(Node* n, Block* block, Block* res_block){
+  auto res_graph = res_block->owningGraph();
+  auto* r_node = res_graph->createClone(n, rn_fn);
+  r_node->setStage(n->stage());
+  res_block->appendNode(r_node);
+  rn_env[n->output()] = r_node->output();
 }
 
 // prim::If transformation:
@@ -247,24 +263,32 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
   // if cond is tensor:    first 4 inputs of block: cond_any, cond_data, cond_mask, cond_dims
   // if cond is not tensor: first 1 input of block: cond
   auto loop_block = r_node->addBlock();
-  toBatch(n->blocks()[0], loop_block);
 
-  // change inputs and outputs of block[0] in prim::Loop
-  for(size_t i = EXP_BTENSOR_SIZE - 1; i > 0; i--){
-    loop_block->eraseInput(i);
-  }
+  // add inputs
+  loop_block->addInput("loop_num");
+  rn_env[n->blocks()[0]->inputs()[0]] = loop_block->inputs()[0];
   if(cond_is_tensor){
     for(size_t i = 0; i < EXP_BTENSOR_SIZE; i++){
-      loop_block->insertInput(i + 1, "cond_" + EXP_BTENSOR_NAME[i]);
+      loop_block->addInput("cond_" + EXP_BTENSOR_NAME[i]);
     }
   }
+  for(size_t i = 1; i < n->blocks()[0]->inputs().size(); i++){
+    auto input = n->blocks()[0]->inputs()[i];
+    auto name = input->uniqueName();
+    for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
+      loop_block->addInput(name + "_" + EXP_BTENSOR_NAME[j]);
+    }
+    batch_map[input] = std::vector<Value*>(loop_block->inputs().slice((i - 1) * EXP_BTENSOR_SIZE + 1 + EXP_BTENSOR_SIZE * cond_is_tensor, EXP_BTENSOR_SIZE));
+  }
+
+  toBatch(n->blocks()[0], loop_block);
 
   WithInsertPoint guard(loop_block);
 
   // use where operator to update variables and add to outputs
-  if(cond_is_tensor){
-    for(size_t i = 0; i < n->outputs().size(); i++){
-      std::vector<Value*> inputs;
+  for(size_t i = 0; i < n->outputs().size(); i++){
+    std::vector<Value*> inputs, outputs;
+    if(cond_is_tensor){
       for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
         inputs.push_back(loop_block->inputs()[j + 1]);
       }
@@ -273,20 +297,19 @@ void ToBatch::visitLoop(Node* n, Block* block, Block* res_block){
       for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
         inputs.push_back(loop_block->inputs()[i * EXP_BTENSOR_SIZE + j + EXP_BTENSOR_SIZE + 1]);
       }
-      auto outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("where"), inputs);
-      batch_map[n->outputs()[i]] = outputs;
-      for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
-        loop_block->registerOutput(outputs[j]);
-      }
+      outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("where"), inputs);
     }
-  }
-  // add outputs
-  else{
-    for(size_t i = 0; i < n->outputs().size(); i++){
-      auto outputs = batch_map.at(n->blocks()[0]->outputs()[i + 1]);
+    else{
       for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
-        loop_block->registerOutput(outputs[j]);
+        inputs.push_back(loop_block->inputs()[i * EXP_BTENSOR_SIZE + j + 1]);
       }
+      auto data = batch_map.at(n->blocks()[0]->outputs()[i + 1]);
+      inputs.insert(inputs.end(), data.begin(), data.end());
+      outputs = script::inlineCallTo(*res_block->owningGraph(), *batch_operator_table.at("update"), inputs);
+    }
+    batch_map[n->outputs()[i]] = outputs;
+    for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
+      loop_block->registerOutput(outputs[j]);
     }
   }
 
@@ -325,14 +348,17 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
 
   // change inputs of block - expand tensor to batchtensor eg: (data, mask, dims)
   // eg: a -> a_data, a_mask, a_dims
-  auto size = block->inputs().size();
-  for(size_t i = 0; i < size; i++){
-    auto input = block->inputs()[i];
-    auto name = input->uniqueName();
-    for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
-      res_block->addInput(name + "_" + EXP_BTENSOR_NAME[j]);
+  // for block in prim::Loop, register inputs separately to deal with cond
+  if(!block->owningNode() || block->owningNode()->kind() != prim::Loop){
+    auto size = block->inputs().size();
+    for(size_t i = 0; i < size; i++){
+      auto input = block->inputs()[i];
+      auto name = input->uniqueName();
+      for(size_t j = 0; j < EXP_BTENSOR_SIZE; j++){
+        res_block->addInput(name + "_" + EXP_BTENSOR_NAME[j]);
+      }
+      batch_map[input] = std::vector<Value*>(res_block->inputs().slice(i * EXP_BTENSOR_SIZE, EXP_BTENSOR_SIZE));
     }
-    batch_map[input] = std::vector<Value*>(res_block->inputs().slice(i * EXP_BTENSOR_SIZE, EXP_BTENSOR_SIZE));
   }
 
   for (auto it = block->nodes().begin(); it != block->nodes().end(); it++) {
@@ -348,6 +374,9 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
         case prim::NumToTensor:
           visitNumToTensor(n, block, res_block);
           break;
+        case prim::TensorToNum:
+          visitTensorToNum(n, block, res_block);
+          break;
         case prim::If:
           visitIf(n, block, res_block);
           break;
@@ -355,7 +384,7 @@ void ToBatch::toBatch(Block* block, Block* res_block) {
           visitLoop(n, block, res_block);
           break;
         default:
-          throw std::runtime_error("NYI: node of prim kind other than [Constant, NumToTensor, If, Loop] is not supported yet");
+          throw std::runtime_error("NYI: node of prim kind other than [Constant, NumToTensor, TensorToNum, If, Loop] is not supported yet");
       }
     }
     else{

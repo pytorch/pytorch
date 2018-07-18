@@ -11,23 +11,23 @@ graph(%a.1_data : Dynamic
   %10 : Dynamic = aten::mul(%7, %8)
   %11 : Dynamic = aten::sum(%10)
   %12 : Dynamic = aten::gt[other={0}](%11)
-  %39 : Dynamic, %40 : Dynamic, %41 : Dynamic, %a : Dynamic, %37 : Dynamic, %38 : Dynamic = prim::Loop(%6, %12, %7, %8, %9, %a.1_data, %a.1_mask, %a.1_dims)
-    block0(%4_data : Dynamic, %cond_data : Dynamic, %cond_mask : Dynamic, %cond_dims : Dynamic, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
-      %20 : Long() = prim::Constant[value={1}]()
-      %21 : Number = prim::TensorToNum(%20)
-      %data : Dynamic = aten::sub(%5_data, %b_data, %21)
+  %37 : Dynamic, %38 : Dynamic, %39 : Dynamic, %a : Dynamic, %35 : Dynamic, %36 : Dynamic = prim::Loop(%6, %12, %7, %8, %9, %a.1_data, %a.1_mask, %a.1_dims)
+    block0(%loop_num : Dynamic, %cond_data : Dynamic, %cond_mask : Dynamic, %cond_dims : Dynamic, %5_data : Dynamic, %5_mask : Dynamic, %5_dims : Dynamic) {
+      %21 : Long() = prim::Constant[value={1}]()
+      %22 : Number = prim::TensorToNum(%21)
+      %data : Dynamic = aten::sub(%5_data, %b_data, %22)
       %mask : Dynamic = aten::mul(%5_mask, %b_mask)
       %dims : Dynamic = aten::__or__(%5_dims, %b_dims)
-      %25 : Dynamic = aten::gt(%data, %b_data)
-      %26 : Dynamic = aten::mul(%mask, %b_mask)
-      %27 : Dynamic = aten::__or__(%dims, %b_dims)
+      %26 : Dynamic = aten::gt(%data, %b_data)
+      %27 : Dynamic = aten::mul(%mask, %b_mask)
+      %28 : Dynamic = aten::__or__(%dims, %b_dims)
       %res_data : Dynamic = aten::where(%cond_data, %data, %5_data)
       %res_mask : Dynamic = aten::where(%cond_data, %mask, %5_mask)
       %res_dims : Dynamic = aten::__or__(%dims, %5_dims)
-      %34 : Dynamic = aten::mul(%25, %26)
-      %35 : Dynamic = aten::sum(%34)
-      %36 : Dynamic = aten::gt[other={0}](%35)
-      -> (%36, %25, %26, %27, %res_data, %res_mask, %res_dims)
+      %32 : Dynamic = aten::mul(%26, %27)
+      %33 : Dynamic = aten::sum(%32)
+      %34 : Dynamic = aten::gt[other={0}](%33)
+      -> (%34, %26, %27, %28, %res_data, %res_mask, %res_dims)
     }
-  return (%a, %37, %38);
+  return (%a, %35, %36);
 }

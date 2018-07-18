@@ -20,6 +20,7 @@ private:
   void visitAten(Node* n, Block* block, Block* res_block);
   void visitConstant(Node* n, Block* block, Block* res_block);
   void visitNumToTensor(Node* n, Block* block, Block* res_block);
+  void visitTensorToNum(Node* n, Block* block, Block* res_block);
   void visitIf(Node* n, Block* block, Block* res_block);
   void visitLoop(Node* n, Block* block, Block* res_block);
 

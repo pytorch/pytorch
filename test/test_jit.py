@@ -1184,6 +1184,70 @@ class TestBatched(TestCase):
         res = [torch.where(xs_cond[j], xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+    def test_batch_argmax(self):
+        @torch.jit.batch(batch_size=4)
+        def argmax(a):
+            return torch.argmax(a, 1)
+
+        xs, batch = self.rand_batch(4, (True, 5), (True, 6))
+        res_batch = argmax(batch)
+        res = [torch.argmax(xs[j], 1) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.batch(batch_size=4)
+        def argmax(a):
+            return torch.argmax(a, 1, False)
+
+        res_batch = argmax(batch)
+        res = [torch.argmax(xs[j], 1, False) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_topk(self):
+        @torch.jit.batch(batch_size=4)
+        def topk(a):
+            return torch.topk(a, 3, 1)
+
+        xs, batch = self.rand_batch(4, (False, 5), (True, 6))
+
+        # along static dim
+        res_batch = topk(batch)
+        res = [torch.topk(xs[j], 3, 1)[0] for j in range(4)]
+        res_idx = [torch.topk(xs[j], 3, 1)[1] for j in range(4)]
+        self.assertEqual(res, res_batch[0].examples())
+        self.assertEqual(res_idx, res_batch[1].examples())
+
+        @torch.jit.batch(batch_size=4)
+        def topk(a):
+            return torch.topk(a, 1, 2)
+
+        # along dynamic dim
+        res_batch = topk(batch)
+        res = [torch.topk(xs[j], 1, 2)[0] for j in range(4)]
+        res_idx = [torch.topk(xs[j], 1, 2)[1] for j in range(4)]
+        self.assertEqual(res, res_batch[0].examples())
+        self.assertEqual(res_idx, res_batch[1].examples())
+
+    def test_batch_softmax(self):
+        @torch.jit.batch(batch_size=4)
+        def softmax(a):
+            return torch.softmax(a, 1)
+
+        xs, batch = self.rand_batch(4, (False, 5), (True, 6))
+
+        # along static dim
+        res_batch = softmax(batch)
+        res = [torch.softmax(xs[j], 1) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.batch(batch_size=4)
+        def softmax(a):
+            return torch.softmax(a, 2)
+
+        # along dynamic dim
+        res_batch = softmax(batch)
+        res = [torch.softmax(xs[j], 2) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
     def test_lstm(self):
         def LSTM(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
             for i in range(x_all.size(1)):
@@ -1198,8 +1262,10 @@ class TestBatched(TestCase):
                 # cell computations
                 c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
                 c_t = torch.tanh(c_t)
-                c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
                 h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
             return h
 
         @torch.jit.batch(batch_size=4)
@@ -1216,8 +1282,10 @@ class TestBatched(TestCase):
                 # cell computations
                 c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
                 c_t = torch.tanh(c_t)
-                c_t = torch.mul(c, f_t) + torch.mul(i_t, c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
                 h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
             return h
 
         batch_size, input_size, hidden_size = 4, 3, 2
