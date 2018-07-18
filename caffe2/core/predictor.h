@@ -2,6 +2,7 @@
 
 #include <unordered_set>
 #include "caffe2/core/net.h"
+#include "caffe2/core/predictor_config.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/proto/metanet.pb.h"
 #include "caffe2/proto/predictor_consts.pb.h"
@@ -52,29 +53,24 @@ class Predictor {
   bool run_map_outputs(const TensorMap& inputs, TensorMap* outputs);
 
   const NetDef& def() const {
-    return run_net_;
+    return *config_.predict_net;
   };
 
   Workspace* ws() {
     return &ws_;
   };
 
-  const std::unordered_set<std::string>& input_names() const {
-    return inputNames_;
+  const std::vector<std::string>& input_names() const {
+    return config_.input_names;
   }
 
   const std::vector<std::string>& output_names() const {
-    return outputNames_;
+    return config_.output_names;
   }
 
  private:
   bool run_map_workspace(const TensorMap& inputs);
-
-  NetDef run_net_;
+  PredictorConfig config_;
   Workspace ws_;
-  std::unordered_set<std::string> inputNames_;
-  // Outputs need to be ordered since TensorVector outputs rely on the outputs
-  // being in a certain order.
-  std::vector<std::string> outputNames_;
 };
 }
