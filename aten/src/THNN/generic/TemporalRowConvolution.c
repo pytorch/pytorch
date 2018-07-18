@@ -186,7 +186,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
 
 	int ndim = input->dim();
 
-	THTensor *tinput;
+	THTensor *tinput = NULL;
 	if (!featFirst) {
 		tinput = THTensor_(newTranspose)(input, ndim - 1, ndim - 2);
 		input = THTensor_(newContiguous)(tinput);
