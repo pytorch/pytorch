@@ -536,7 +536,7 @@ void initJitScriptBindings(PyObject* module) {
       for (TypePtr return_type : return_types) {
         return_type_args.push_back(Argument("", return_type));
       }
-      self.setSchema(FunctionSchema("", arg_type_args, return_type_args));
+      self.setSchema(FunctionSchema(self.name(), arg_type_args, return_type_args));
     })
     .def("pretty_print_schema", &Method::prettyPrintSchema);
 
