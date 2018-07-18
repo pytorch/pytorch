@@ -1,0 +1,15 @@
+graph(%a : Dynamic) {
+  %1 : Dynamic = aten::lt[other={2}](%a)
+  %2 : int = prim::TensorToNum(%1)
+  %c : int = prim::If(%2)
+    block0() {
+      %4 : int = prim::Constant[value=5]()
+      -> (%4)
+    }
+    block1() {
+      %5 : int = prim::Constant[value=1]()
+      -> (%5)
+    }
+  %6 : Long() = prim::NumToTensor(%c)
+  return (%6);
+}
