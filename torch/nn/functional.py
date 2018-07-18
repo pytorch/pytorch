@@ -1033,6 +1033,17 @@ def bilinear(input1, input2, weight, bias=None):
     return torch.bilinear(input1, input2, weight, bias)
 
 
+def film(input, gammas, betas):
+    r"""Applies Feature-wise Linear Modulation to the incoming data.
+
+    See :class:`~torch.nn.FiLM` for details.
+    """
+    for _ in range(input.dim() - 2):
+        gammas = gammas.unsqueeze(-1)
+        betas = betas.unsqueeze(-1)
+    return gammas * input + betas
+
+
 def embedding(input, weight, padding_idx=None, max_norm=None, norm_type=2,
               scale_grad_by_freq=False, sparse=False):
     r"""A simple lookup table that looks up embeddings in a fixed dictionary and size.

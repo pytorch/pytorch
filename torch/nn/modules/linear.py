@@ -119,4 +119,38 @@ class Bilinear(Module):
             self.in1_features, self.in2_features, self.out_features, self.bias is not None
         )
 
+
+class FiLM(Module):
+    r"""Applies Feature-wise Linear Modulation to the incoming data as described in
+    the paper `FiLM: Visual Reasoning with a General Conditioning Layer`_ .
+
+    .. math::
+        y_{n,c,*} = \gamma_{n,c} * x_{n,c,*} + \beta_{n,c},
+
+    where :math:`\gamma_{n,c}` and :math:`\beta_{n,c}` are scalars and operations are
+    broadcast over any additional dimensions of :math:`x`
+
+    Shape:
+        - Input: :math:`(N, C, *)` where :math:`*` means any number of additional
+          dimensions
+        - Gammas: :math:`(N, C)`
+        - Betas: :math:`(N, C)`
+        - Output: :math:`(N, C, *)`, same shape as the input
+
+    Examples::
+
+        >>> m = nn.FiLM()
+        >>> input = torch.randn(128, 20, 4, 4)
+        >>> gammas = torch.randn(128, 20)
+        >>> betas = torch.randn(128, 20)
+        >>> output = m(input, gammas, betas)
+        >>> print(output.size())
+
+    .. _`FiLM: Visual Reasoning with a General Conditioning Layer`:
+        https://arxiv.org/abs/1709.07871
+    """
+
+    def forward(self, input, gammas, betas):
+        return F.film(input, gammas, betas)
+
 # TODO: PartialLinear - maybe in sparse?

@@ -1,5 +1,5 @@
 from .module import Module
-from .linear import Linear, Bilinear
+from .linear import Linear, Bilinear, FiLM
 from .conv import Conv1d, Conv2d, Conv3d, \
     ConvTranspose1d, ConvTranspose2d, ConvTranspose3d
 from .activation import Threshold, ReLU, Hardtanh, ReLU6, Sigmoid, Tanh, \
@@ -47,6 +47,6 @@ __all__ = [
     'PixelShuffle', 'Upsample', 'UpsamplingNearest2d', 'UpsamplingBilinear2d', 'PairwiseDistance',
     'AdaptiveMaxPool1d', 'AdaptiveMaxPool2d', 'AdaptiveMaxPool3d', 'AdaptiveAvgPool1d', 'AdaptiveAvgPool2d',
     'AdaptiveAvgPool3d', 'TripletMarginLoss', 'ZeroPad2d', 'ConstantPad1d', 'ConstantPad2d',
-    'ConstantPad3d', 'Bilinear', 'CosineSimilarity', 'Unfold', 'Fold',
+    'ConstantPad3d', 'Bilinear', 'FiLM', 'CosineSimilarity', 'Unfold', 'Fold',
     'AdaptiveLogSoftmaxWithLoss',
 ]

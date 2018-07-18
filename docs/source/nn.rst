@@ -524,6 +524,12 @@ Linear layers
 .. autoclass:: Bilinear
     :members:
 
+:hidden:`FiLM`
+~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: FiLM
+    :members:
+
 Dropout layers
 ----------------------------------
 
@@ -1101,6 +1107,11 @@ Linear functions
 ~~~~~~~~~~~~~~~~
 
 .. autofunction:: linear
+
+:hidden:`film`
+~~~~~~~~~~~~~~~~
+
+.. autofunction:: film
 
 Dropout functions
 -----------------
