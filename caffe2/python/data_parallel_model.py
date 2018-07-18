@@ -723,8 +723,14 @@ def _AddBarrierToModelNets(model, barrier_net_timeout_sec):
         # (_DEFAULT_TIMEOUT_SEC).
         # We pass in model.param_init_net so that the barrier net can be run as
         # part of the param_init_net.
-        model._barrier_net = _CreateBarrierNet(model, model.param_init_net,
-                "pre_training", barrier_net_timeout_sec)
+
+        model._barrier_init_net = core.Net("barrier_init_net")
+
+        model._barrier_net = _CreateBarrierNet(model, model._barrier_init_net,
+        "pre_training", barrier_net_timeout_sec)
+
+        model._data_parallel_model_init_nets.insert(0, model._barrier_init_net)
+
         model._data_parallel_model_nets.insert(0, model._barrier_net)
 
 
