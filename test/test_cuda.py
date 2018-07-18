@@ -104,7 +104,14 @@ M = 50
 
 
 def make_tensor(t, *sizes):
-    return t(*sizes).copy_(torch.randn(*sizes))
+    if 'Half' in t.__name__:
+        return t(*sizes).copy_(torch.randn(*sizes))
+    else:
+        tensor = t(*sizes)
+        if tensor.is_floating_point():
+            return tensor.normal_()
+        else:
+            return tensor.random_(0, 10)
 
 
 def make_sparse_tensor(t, n, *sizes):
@@ -408,7 +415,7 @@ tests = [
     ('unsqueeze', new_t(2, 3, 4), lambda t: [2],),
     ('unsqueeze', new_t(2, 3, 4), lambda t: [-2], 'neg_dim'),
     ('view', small_3d, lambda t: [100, 10], 'contiguous'),
-    ('view_as', small_3d, lambda t: [t(100, 10)],),
+    ('view_as', small_3d, lambda t: [make_tensor(t, 100, 10)],),
     ('zero', small_3d, lambda t: [],),
     ('zeros', small_3d, lambda t: [1, 2, 3, 4],),
     ('eye', small_2d, lambda t: [3, 4],),
@@ -490,6 +497,7 @@ custom_half_precision = {
     'div': 1e-3,
     'dot': 1e-2,
     'erf': 1e-3,
+    'erfc': 1e-3,
     'erfinv': 1e-3,
     'exp': 1e-2,
     'expm1': 1e-2,
@@ -545,6 +553,7 @@ simple_pointwise_float = [
     'cos',
     'cosh',
     'erf',
+    'erfc',
     'erfinv',
     'exp',
     'expm1',
@@ -1384,6 +1393,10 @@ class TestCuda(TestCase):
     @staticmethod
     def _select_broadcastable_dims(dims_full=None):
         return TestTorch._select_broadcastable_dims(dims_full)
+
+    @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
+    def test_pinverse(self):
+        TestTorch._test_pinverse(self, lambda t: t.cuda())
 
     @unittest.skipIf(not TEST_MAGMA, "no MAGMA library detected")
     def test_det_logdet_slogdet(self):

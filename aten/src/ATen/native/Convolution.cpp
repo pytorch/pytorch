@@ -131,8 +131,7 @@ auto ConvParams::use_mkldnn(const at::Tensor& input) const -> bool {
          input.type().scalarType() == kFloat && // only on CPU Float Tensors
          !is_dilated() && // doesn't support dilation
          !transposed && // or transposed tensors
-         input.ndimension() == 4 && // must be in NCHW format
-         groups == 1;
+         input.ndimension() == 4; // must be in NCHW format
 #endif
   return false;
 }
@@ -397,7 +396,7 @@ at::Tensor _convolution(
       throw std::runtime_error(ss.str());
     }
 
-    output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation);
+    output = at::mkldnn_convolution(input, weight, bias, params.padding, params.stride, params.dilation, params.groups);
 #endif
   } else {
     if (params.groups == 1) {

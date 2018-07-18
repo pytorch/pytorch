@@ -13,7 +13,7 @@
 namespace torch { namespace autograd {
 
 struct CopyBackwards : public Function {
-  virtual variable_list apply(const variable_list& inputs) override;
+  variable_list apply(variable_list&& inputs) override;
 
   at::Type *src_type;
   int32_t src_device = -1;
@@ -25,8 +25,8 @@ struct CopyBackwards : public Function {
 struct CopySlices : public Function {
   CopySlices(const Variable& base, at::TensorGeometry view, std::shared_ptr<Function> fn);
 
-  virtual variable_list apply(const variable_list& grads) override;
-  virtual void release_variables() override;
+  variable_list apply(variable_list&& grads) override;
+  void release_variables() override;
 
   at::TensorGeometry base;
   at::TensorGeometry view;

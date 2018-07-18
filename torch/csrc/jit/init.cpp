@@ -18,14 +18,13 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
+#include "torch/csrc/jit/passes/to_batch.h"
 #include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/batched/BatchTensor.h"
-#include "torch/csrc/jit/python_interpreter.h"
 #include "torch/csrc/jit/pybind_utils.h"
-
 
 namespace torch  { namespace jit {
 
@@ -207,7 +206,7 @@ void initJITBindings(PyObject *module) {
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
   initBatchTensorBindings(module);
-  registerPythonInterpreterOps();
+  initRegisterBatchOpsBindings(module);
 }
 
 }}

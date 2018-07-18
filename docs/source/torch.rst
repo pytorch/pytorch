@@ -169,6 +169,7 @@ Pointwise Ops
 .. autofunction:: cosh
 .. autofunction:: div
 .. autofunction:: erf
+.. autofunction:: erfc
 .. autofunction:: erfinv
 .. autofunction:: exp
 .. autofunction:: expm1
@@ -222,6 +223,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isinf
 .. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
@@ -253,6 +255,7 @@ Other Operations
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flip
 .. autofunction:: histc
 .. autofunction:: renorm
 .. autofunction:: trace
@@ -288,6 +291,7 @@ BLAS and LAPACK Operations
 .. autofunction:: mv
 .. autofunction:: orgqr
 .. autofunction:: ormqr
+.. autofunction:: pinverse
 .. autofunction:: potrf
 .. autofunction:: potri
 .. autofunction:: potrs

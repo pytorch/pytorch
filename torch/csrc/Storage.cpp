@@ -13,9 +13,9 @@
 // See Note [TH abstraction violation]
 //  - Used to get at the allocator associated with a storage
 #include <TH/THStorage.hpp>
+#include <torch/csrc/finalizer.h>
 #include <libshm.h>
 #include "THP.h"
-#include "allocators.h"
 #include "copy_utils.h"
 #include "DynamicTypes.h"
 
@@ -34,10 +34,10 @@
 template<>
 void THPPointer<THStorage>::free() {
   if (ptr) {
-    if (ptr->backend == at::kCPU) {
+    if (ptr->data_ptr.device().is_cpu()) {
       THStorage_free(ptr);
     } else {
-      AT_ASSERT(ptr->backend == at::kCUDA);
+      AT_ASSERT(ptr->data_ptr.device().is_cuda());
 #ifdef USE_CUDA
       THCStorage_free(at::globalContext().lazyInitCUDA(), ptr);
 #else

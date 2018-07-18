@@ -102,6 +102,16 @@
 - func: addr_out(Tensor result, Tensor self, Tensor vec1, Tensor vec2, *, Scalar beta=1, Scalar alpha=1) -> Tensor
   variants: function
 
+- func: all(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
+- func: all_out(Tensor result, Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+  variants: function
+
+- func: any(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+
+- func: any_out(Tensor result, Tensor self, int64_t dim, bool keepdim=false) -> Tensor
+  variants: function
+
 - func: arange(Scalar start, Scalar end, TensorOptions options={}) -> Tensor
   variants: function
 
@@ -451,8 +461,8 @@
 - func: embedding_dense_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
   dispatch:
-    CPU: embedding_backward_cpu
-    CUDA: embedding_backward_cuda
+    CPU: embedding_dense_backward_cpu
+    CUDA: embedding_dense_backward_cuda
 
 - func: embedding_renorm_(Tensor self, IndexTensor indices, double max_norm, double norm_type) -> Tensor
   variants: function
@@ -463,23 +473,35 @@
 - func: embedding_sparse_backward(Tensor grad, IndexTensor indices, int64_t num_weights, int64_t padding_idx, bool scale_grad_by_freq) -> Tensor
   variants: function
 
+# NOTE [ embedding_bag Native Functions ]
+# The `_embedding_bag.*` variants assume that input tensors except for `weight`,
+# e.g. `indices` and `offsets` (and `offset2bag`), are contiguous.
+# We really only need to enforce this for `_embedding_bag` (the forward) because
+# the backward inputs are the same as forward ones.
+# The above `embedding_bag` wrapper is created to achieve this, e.g.,
+# applying indices = indices.contiguous().
+# The backward functions apply a check that these input tensors are contiguous.
+
 - func: embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor, Tensor)
   variants: function
-  dispatch:
-    CPU: embedding_bag_cpu
-    CUDA: embedding_bag_cuda
 
-- func: embedding_bag_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse) -> Tensor
-  variants: function
-
-- func: embedding_bag_sparse_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
-  variants: function
-
-- func: embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+- func: _embedding_bag(Tensor weight, IndexTensor indices, IndexTensor offsets, bool scale_grad_by_freq=false, int64_t mode=0, bool sparse=false) -> (Tensor, Tensor, Tensor, Tensor)
   variants: function
   dispatch:
-    CPU: embedding_bag_backward_cpu
-    CUDA: embedding_bag_backward_cuda
+    CPU: _embedding_bag_cpu
+    CUDA: _embedding_bag_cuda
+
+- func: _embedding_bag_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode, bool sparse) -> Tensor
+  variants: function
+
+- func: _embedding_bag_sparse_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+
+- func: _embedding_bag_dense_backward(Tensor grad, IndexTensor indices, IndexTensor offsets, IndexTensor offset2bag, IndexTensor bag_size, IndexTensor maximum_indices, int64_t num_weights, bool scale_grad_by_freq, int64_t mode) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _embedding_bag_dense_backward_cpu
+    CUDA: _embedding_bag_dense_backward_cuda
 
 - func: empty(IntList size, TensorOptions options={}) -> Tensor
   variants: function
@@ -509,6 +531,19 @@
   dispatch:
     CPU: _erf_out_cpu
     CUDA: _erf_out_cuda
+
+- func: erfc(Tensor self) -> Tensor
+
+- func: erfc_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _erfc__cpu
+    CUDA: _erfc__cuda
+
+- func: erfc_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _erfc_out_cpu
+    CUDA: _erfc_out_cuda
 
 - func: exp(Tensor self) -> Tensor
 
@@ -598,6 +633,9 @@
 - func: full(Type dtype, IntList size, Scalar fill_value) -> Tensor
   variants: function
   deprecated: true
+
+- func: grid_sampler(Tensor input, Tensor grid, int64_t padding_mode) -> Tensor
+  variants: function
 
 - func: hann_window(int64_t window_length, TensorOptions options={}) -> Tensor
   variants: function
@@ -702,6 +740,11 @@
 
 - func: is_sparse(Tensor self) -> bool
   device_guard: false
+
+- func: kthvalue(Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: kthvalue_out(Tensor values, Tensor indices, Tensor self, int64_t k, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
 
 - func: layer_norm(Tensor input, IntList normalized_shape, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enable=True) -> Tensor
   variants: function
@@ -819,6 +862,11 @@
 - func: matmul_out(Tensor result, Tensor self, Tensor other) -> Tensor
   variants: function
 
+- func: max(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: max_out(Tensor max, Tensor max_values, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: max_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
 - func: max_pool1d_with_indices(Tensor self, IntList[1] kernel_size, IntList[1] stride={}, IntList[1] padding=0, IntList[1] dilation=1, bool ceil_mode=false) -> (Tensor, Tensor)
@@ -853,18 +901,28 @@
 - func: mean_out(Tensor result, Tensor self, int64_t dim, *, ScalarType dtype) -> Tensor
   variants: function
 
+- func: median(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: median_out(Tensor values, Tensor indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
+- func: min(Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: min_out(Tensor min, Tensor min_indices, Tensor self, int64_t dim, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: min_values(Tensor self, int64_t dim, bool keepdim=false) -> Tensor
 
-- func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation) -> Tensor
+- func: mkldnn_convolution(Tensor self, Tensor weight, Tensor? bias, IntList padding, IntList stride, IntList dilation, int64_t groups) -> Tensor
   variants: function
 
-- func: mkldnn_convolution_backward_input(IntList self_size, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, bool bias_defined) -> Tensor
+- func: mkldnn_convolution_backward_input(IntList self_size, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined) -> Tensor
   variants: function
 
-- func: mkldnn_convolution_backward_weights(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, bool bias_defined) -> (Tensor, Tensor)
+- func: mkldnn_convolution_backward_weights(IntList weight_size, Tensor grad_output, Tensor self, IntList padding, IntList stride, IntList dilation, int64_t groups, bool bias_defined) -> (Tensor, Tensor)
   variants: function
 
-- func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
+- func: mkldnn_convolution_backward(Tensor self, Tensor grad_output, Tensor weight, IntList padding, IntList stride, IntList dilation, int64_t groups, std::array<bool,3> output_mask) -> (Tensor, Tensor, Tensor)
   variants: function
 
 - func: miopen_batch_norm(Tensor input, Tensor weight, Tensor? bias, Tensor? running_mean, Tensor? running_var, bool training, double exponential_average_factor, double epsilon) -> (Tensor, Tensor, Tensor)
@@ -910,6 +968,11 @@
 - func: mm_out(Tensor result, Tensor self, Tensor mat2) -> Tensor
   variants: function
 
+- func: mode(Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+
+- func: mode_out(Tensor values, Tensor indices, Tensor self, int64_t dim=-1, bool keepdim=false) -> (Tensor, Tensor)
+  variants: function
+
 - func: mv(Tensor self, Tensor vec) -> Tensor
 
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
@@ -940,6 +1003,8 @@
   variants: method  # This is method-only to match the previous tensor API. In the future we could make this a function too.
 
 - func: pin_memory(Tensor self) -> Tensor
+
+- func: pinverse(Tensor self, double rcond=1e-15) -> Tensor
 
 - func: rand(IntList size, *, TensorOptions options={}) -> Tensor
   variants: function
@@ -1135,6 +1200,19 @@
 - func: selu_(Tensor self) -> Tensor
   variants: function
 
+- func: sigmoid(Tensor self) -> Tensor
+
+- func: sigmoid_(Tensor self) -> Tensor
+  dispatch:
+    CPU: _sigmoid__cpu
+    CUDA: _sigmoid__cuda
+
+- func: sigmoid_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _sigmoid_out_cpu
+    CUDA: _sigmoid_out_cuda
+
 - func: sin(Tensor self) -> Tensor
 
 - func: sin_(Tensor self) -> Tensor
@@ -1265,6 +1343,13 @@
     CPU: _sqrt_out_cpu
     CUDA: _sqrt_out_cuda
 
+- func: std(Tensor self, bool unbiased=true) -> Tensor
+
+- func: std(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+
+- func: std_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+  variants: function
+
 # FIXME: These could be combined as optional<ScalarType> but for https://github.com/pytorch/pytorch/issues/6593.
 - func: prod(Tensor self, *, ScalarType dtype) -> Tensor
 
@@ -1374,6 +1459,13 @@
 - func: unsqueeze_(Tensor self, int64_t dim) -> Tensor
   variants: method
 
+- func: var(Tensor self, bool unbiased=true) -> Tensor
+
+- func: var(Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+
+- func: var_out(Tensor result, Tensor self, int64_t dim, bool unbiased=true, bool keepdim=false) -> Tensor
+  variants: function
+
 - func: view_as(Tensor self, Tensor other) -> Tensor
   variants: method
 
@@ -1429,6 +1521,15 @@
 
 - func: norm(Tensor self, Scalar p=2) -> Tensor
   variants: method, function
+
+- func: norm(Tensor self, Scalar p, int64_t dim, bool keepdim=false) -> Tensor
+  python_default_init:
+    p: 2
+
+- func: norm_out(Tensor result, Tensor self, Scalar p, int64_t dim, bool keepdim=false) -> Tensor
+  variants: function
+  python_default_init:
+    p: 2
 
 - func: native_clone(Tensor self) -> Tensor
   variants: function
@@ -1832,6 +1933,10 @@
     - function
   device_guard: False
 
+- func: unbind(Tensor self, int64_t dim=0) -> TensorList
+  variants:
+    - method
+    - function
 
 - func: native_get_device(Tensor self) -> int64_t
   variants: function
@@ -1841,3 +1946,6 @@
 
 - func: get_device(Tensor self) -> int64_t
   device_guard: False
+
+- func: meshgrid(TensorList tensors) -> TensorList
+  variants: function

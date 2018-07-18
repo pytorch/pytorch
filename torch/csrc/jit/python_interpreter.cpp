@@ -1,14 +1,12 @@
 #include "torch/csrc/python_headers.h"
 #include "torch/csrc/jit/interpreter.h"
-#include "torch/csrc/jit/python_interpreter.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/aten_dispatch.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
@@ -25,9 +23,11 @@ namespace py = pybind11;
 
 namespace torch { namespace jit {
 
-Operation createPythonOperation(PythonOp* op) {
+namespace {
+
+Operation createPythonOperation(Node* op_) {
+  PythonOp* op = static_cast<PythonOp*>(op_);
   py::function func = py::reinterpret_borrow<py::function>(py::handle(op->pyobj.get()));
-  JIT_ASSERT(!hasHandleOutput(op));
   size_t num_inputs = 0;
   for(auto arg_type : op->cconv) {
     if(arg_type == 't')
@@ -44,7 +44,7 @@ Operation createPythonOperation(PythonOp* op) {
         py_inputs[i] = py::reinterpret_borrow<py::object>(
             op->scalar_args[next_scalar++].get());
       } else if (arg_type == 't') {
-        auto var = peek(stack, next_tensor, num_inputs);
+        auto var = std::move(peek(stack, next_tensor, num_inputs)).toTensor();
         py_inputs[i] =
             py::reinterpret_steal<py::object>(THPVariable_Wrap(var));
         next_tensor++;
@@ -85,15 +85,9 @@ Operation createPythonOperation(PythonOp* op) {
   };
 }
 
-at::optional<Operation> lookupOp(Node* n) {
-  if(n->kind() == prim::PythonOp) {
-    return createPythonOperation(static_cast<PythonOp*>(n));
-  }
-  return at::nullopt;
-}
 
-void registerPythonInterpreterOps() {
-  addInterpreterOpHandler(lookupOp);
-}
+RegisterOperators reg({
+  Operator(prim::PythonOp, createPythonOperation)
+});
 
-}}
+}}} // torch::jit::anon

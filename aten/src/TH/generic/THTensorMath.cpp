@@ -2826,7 +2826,10 @@ void THTensor_(onesLike)(THTensor *r_, THTensor *input)
 
 void THTensor_(diag)(THTensor *r_, THTensor *t, int k)
 {
-  THArgCheck(!t->is_empty() && (THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2), 1, "non-empty matrix or a vector expected");
+#ifndef USE_TH_SIZE_ZERO_DIM
+  AT_ASSERT(!t->is_empty())
+#endif
+  THArgCheck(THTensor_(nDimension)(t) == 1 || THTensor_(nDimension)(t) == 2, 1, "matrix or a vector expected");
 
   if(THTensor_(nDimension)(t) == 1)
   {
@@ -3653,7 +3656,10 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
         THTensor* input0 = inputs[j];
         real* input0_data = THStorage_(data)(input0->storage) + input0->storageOffset;
         int64_t input0_size = THTensor_(nElement)(input0);
-        memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
+        // C standard says you can't pass nullptrs to memcpy, even if the size is 0; ubsan checks this.
+        if (input0_size != 0) {
+          memcpy(result_data + offset, input0_data, input0_size*sizeof(real));
+        }
         offset += input0_size;
       }
     }
@@ -4064,6 +4070,7 @@ LAB_IMPLEMENT_BASIC_FUNCTION(log10,TH_MATH_NAME(log10))
 LAB_IMPLEMENT_BASIC_FUNCTION(log1p,TH_MATH_NAME(log1p))
 LAB_IMPLEMENT_BASIC_FUNCTION(log2,TH_MATH_NAME(log2))
 LAB_IMPLEMENT_BASIC_FUNCTION(erf,TH_MATH_NAME(erf))
+LAB_IMPLEMENT_BASIC_FUNCTION(erfc,TH_MATH_NAME(erfc))
 LAB_IMPLEMENT_BASIC_FUNCTION(erfinv,TH_erfinv)
 LAB_IMPLEMENT_BASIC_FUNCTION(ceil,TH_MATH_NAME(ceil))
 LAB_IMPLEMENT_BASIC_FUNCTION(floor,TH_MATH_NAME(floor))
@@ -4344,7 +4351,6 @@ accreal THTensor_(dist)(THTensor *tensor, THTensor *src, real value)
 
 accreal THTensor_(meanall)(THTensor *tensor)
 {
-  THArgCheck(tensor->_dim() > 0, 1, "empty Tensor");
   return THTensor_(sumall)(tensor)/THTensor_(nElement)(tensor);
 }
 
@@ -4353,7 +4359,7 @@ accreal THTensor_(varall)(THTensor *tensor, int biased)
   accreal mean = THTensor_(meanall)(tensor);
   accreal sum = 0;
   TH_TENSOR_APPLY(real, tensor, sum += (*tensor_data - mean)*(*tensor_data - mean););
-  sum /= THTensor_(nElement)(tensor) - (biased ? 0 : 1);
+  sum /= std::max<int64_t>(0, THTensor_(nElement)(tensor) - (biased ? 0 : 1));
   return sum;
 }
 
@@ -4366,13 +4372,15 @@ void THTensor_(linspace)(THTensor *r_, real a, real b, int64_t n)
 {
   real i = 0;
 
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);
   }
 
-  if(n == 1) {
+  if (n == 0) {
+  } else if (n == 1) {
     THTensor_(set1d)(r_, 0, a);
   } else {
      TH_TENSOR_APPLY(real, r_,
@@ -4386,13 +4394,15 @@ void THTensor_(logspace)(THTensor *r_, real a, real b, int64_t n)
 {
   real i = 0;
 
-  THArgCheck(n > 1 || (n == 1 && (a == b)), 3, "invalid number of points");
+  // NumPy allows you to pass different points even if n <= 1 -- should we?
+  THArgCheck(n > 1 || ((n == 0 || n == 1) && (a == b)), 3, "invalid number of points");
 
   if (THTensor_(nElement)(r_) != n) {
     THTensor_(resize1d)(r_, n);
   }
 
-  if(n == 1) {
+  if (n == 0) {
+  } else if (n == 1) {
     THTensor_(set1d)(r_, 0, TH_MATH_NAME(pow)(10.0, a));
   } else {
     TH_TENSOR_APPLY(real, r_,

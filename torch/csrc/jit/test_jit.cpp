@@ -17,6 +17,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
@@ -35,6 +36,8 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/module.h"
+#include "torch/csrc/jit/ivalue.h"
+
 #include "onnx/onnx_pb.h"
 
 
@@ -287,7 +290,7 @@ void internedStringsTests () {
   REQUIRE(Symbol::aten("What2") == symstart+2);
   REQUIRE(Symbol::aten("What") == symstart+1);
   REQUIRE(Symbol::aten("What2") == symstart+2);
-  REQUIRE(Symbol(SymbolNamespace::aten, symstart+2).toUnqualString() == std::string("What2"));
+  REQUIRE(Symbol(symstart+2).toUnqualString() == std::string("What2"));
 }
 
 void fromQualStringTests() {
@@ -296,7 +299,13 @@ void fromQualStringTests() {
   REQUIRE(Symbol::fromQualString("onnx::LSTM") == Symbol::onnx("LSTM"));
   REQUIRE(Symbol::fromQualString("attr::value") == Symbol::attr("value"));
   REQUIRE(Symbol::fromQualString("scope::") == Symbol::scope(""));
-  auto bad_inputs = {"scope", "foo::bar", "prim:Param", "::", ":", ""};
+  REQUIRE(Symbol::fromQualString("::").toUnqualString() == std::string(""));
+  REQUIRE(Symbol::fromQualString("::").ns().toQualString() == std::string("namespaces::"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").toUnqualString() == std::string("param"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns().toUnqualString() == std::string("new_ns"));
+  REQUIRE(Symbol::fromQualString("new_ns::param").ns() == Symbol::fromQualString("namespaces::new_ns"));
+
+  auto bad_inputs = {"scope", ":", ""};
   for (auto input : bad_inputs) {
     try {
       Symbol::fromQualString(input);
@@ -432,8 +441,12 @@ std::shared_ptr<Graph> build_lstm_stages() {
 }
 
 void runOneStage(InterpreterState & interp, const std::vector<at::Tensor> & inputs, std::vector<at::Tensor> & outputs) {
-  outputs = inputs;
-  interp.runOneStage(outputs);
+  std::vector<IValue> stack(inputs.begin(), inputs.end());
+  interp.runOneStage(stack);
+  outputs.clear();
+  for(auto & ivalue : stack) {
+    outputs.push_back(std::move(ivalue).toTensor());
+  }
 }
 
 void interpTest() {
@@ -530,7 +543,7 @@ variable_list get_grad_outputs(const variable_list& vars) {
 std::shared_ptr<Graph> trace(const ADTestSpec& test, const variable_list& vars_in) {
   std::shared_ptr<tracer::TracingState> state;
   variable_list trace_vars_in;
-  std::tie(state, trace_vars_in) = tracer::enter(vars_in, 1);
+  std::tie(state, trace_vars_in) = tracer::enter(vars_in);
   auto trace_vars_out = test(trace_vars_in);
   tracer::exit(trace_vars_out);
   return state->graph;
@@ -871,7 +884,7 @@ const static auto cf_examples = R"JIT(
 void testControlFlow() {
   script::Module cu;
   script::defineMethodsInModule(cu, cf_examples, torch::jit::script::Resolver(), nullptr);
-  auto run = [&](const std::string & name, std::vector<at::Tensor> stack) {
+  auto run = [&](const std::string & name, std::vector<IValue> stack) {
     auto graph = cu.get_method(name).graph();
     Code code(graph);
     InterpreterState interp(code);
@@ -879,8 +892,8 @@ void testControlFlow() {
     return stack;
   };
 
-  auto L = [](int64_t l) { return autograd::make_variable(at::Scalar(l).toTensor()); };
-  auto V = [](at::Tensor t) { return at::Scalar(t).toLong(); };
+  auto L = [](int64_t l) { return IValue(autograd::make_variable(at::Scalar(l).toTensor())); };
+  auto V = [](IValue t) { return at::Scalar(std::move(t).toTensor()).toLong(); };
   auto run_binary = [&](const std::string & name, int64_t a, int64_t b) {
     return V(run(name, {L(a), L(b)})[0]);
   };
@@ -891,6 +904,50 @@ void testControlFlow() {
   REQUIRE(256 == run_binary("while_test",2,0));
 }
 
+void testIValue() {
+  Shared<IntList> foo = IntList::create({3, 4, 5});
+  JIT_ASSERT(foo->use_count() == 1);
+  IValue bar(foo);
+  JIT_ASSERT(foo->use_count() == 2);
+  auto baz = bar;
+  JIT_ASSERT(foo->use_count() == 3);
+  auto foo2 = std::move(bar);
+  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(foo2.isIntList());
+  JIT_ASSERT(bar.isNone());
+  foo2 = IValue(4.0);
+  JIT_ASSERT(foo2.isDouble());
+  JIT_ASSERT(foo2.toDouble() == 4.0);
+  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(baz.toIntList()->elements().equals({3,4,5}));
+
+  auto move_it = std::move(baz).toIntList();
+  JIT_ASSERT(foo->use_count() == 2);
+  JIT_ASSERT(baz.isNone());
+  IValue i(4);
+  JIT_ASSERT(i.isInt() && i.toInt() == 4);
+  IValue dlist(DoubleList::create({3.5}));
+  JIT_ASSERT(
+      dlist.isDoubleList() &&
+      std::move(dlist).toDoubleList()->elements().equals({3.5}));
+  JIT_ASSERT(dlist.isNone());
+  dlist = IValue(DoubleList::create({3.4}));
+  JIT_ASSERT(dlist.toDoubleList()->elements().equals({3.4}));
+  IValue the_list(Tuple::create({IValue(3.4), IValue(4), IValue(foo)}));
+  JIT_ASSERT(foo->use_count() == 3);
+  JIT_ASSERT(the_list.isTuple());
+  auto first = std::move(the_list).toTuple()->elements().at(1);
+  JIT_ASSERT(first.toInt() == 4);
+  at::Tensor tv = at::rand({3,4});
+  IValue ten(tv);
+  JIT_ASSERT(tv.get()->use_count() == 2);
+  auto ten2 = ten;
+  JIT_ASSERT(tv.get()->use_count() == 3);
+  JIT_ASSERT(ten2.toTensor().equal(ten.toTensor()));
+  std::move(ten2).toTensor();
+  JIT_ASSERT(tv.get()->use_count() == 2);
+}
+
 void testProto() {
   ::ONNX_NAMESPACE::ModelProto proto;
   proto.set_producer_name("foo");
@@ -898,6 +955,7 @@ void testProto() {
 
 std::string runJITCPPTests() {
   std::stringstream out;
+  testIValue();
   testControlFlow();
   testGraphExecutor();
   testBlocks(out);

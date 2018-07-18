@@ -466,7 +466,9 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
   if(!src)
     src = self;
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(!src->is_empty(), 1, "cannot unfold an empty tensor");
+#endif
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck(size <= src->size[dimension], 3, "out of range");
   THArgCheck(step > 0, 4, "invalid step");
@@ -617,9 +619,10 @@ int THTensor_(isTransposed)(const THTensor *self)
 
 int THTensor_(isContiguous)(const THTensor *self)
 {
+  if (self->is_empty()) return 1;
   int64_t z = 1;
   int d;
-  for(d = self->_dim()-1; d >= 0; d--)
+  for(d = self->dim()-1; d >= 0; d--)
   {
     if(self->size[d] != 1)
     {

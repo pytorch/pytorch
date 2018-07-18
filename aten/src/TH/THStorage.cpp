@@ -14,26 +14,47 @@
 #include "generic/THStorageCopy.cpp"
 #include "THGenerateHalfType.h"
 
+// Free a non-weak pointer to THStorage
 void THStorage_free(THStorage *storage) {
-  AT_ASSERT(storage->backend == at::kCPU);
-
-  if(!storage)
+  if (!storage) {
     return;
+  }
 
-  if((storage->flag & TH_STORAGE_REFCOUNTED) && (storage->refcount.load() > 0))
-  {
-    if(--storage->refcount == 0)
-    {
-      if(storage->flag & TH_STORAGE_FREEMEM) {
-        static_cast<THAllocator*>(storage->allocatorVoidPtr)->free(storage->allocatorContext, storage->data_ptr);
+  if (storage->flag & TH_STORAGE_REFCOUNTED) {
+    if (--storage->refcount == 0) {
+      if (storage->finalizer) {
+        (*storage->finalizer)();
       }
-      if(storage->flag & TH_STORAGE_VIEW) {
-        THStorage_free(storage->view);
-      }
-      storage->refcount.~atomic<int>();
-      THFree(storage);
+      storage->finalizer.~unique_ptr<THFinalizer>();
+      storage->data_ptr.~DataPtr();
+      THStorage_weakFree(storage);
     }
   }
+}
+
+// Manually retains a weak reference
+void THStorage_weakRetain(THStorage *weak_storage) {
+  weak_storage->weakcount++;
+}
+
+// Releases a weak reference
+void THStorage_weakFree(THStorage *weak_storage) {
+  if (--weak_storage->weakcount == 0) {
+    weak_storage->refcount.~atomic<int>();
+    weak_storage->weakcount.~atomic<int>();
+    THFree(weak_storage);
+  }
+}
+
+// Given a weak reference, returns a strong reference to a storage (which must
+// be freed when done) or null if the storage is already dead.
+THStorage* THStorage_weakLock(THStorage *weak_storage) {
+  for (;;) {
+    int refcount = weak_storage->refcount.load();
+    if (refcount == 0) return nullptr;
+    if (weak_storage->refcount.compare_exchange_strong(refcount, refcount + 1)) break;
+  }
+  return weak_storage;
 }
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
@@ -77,22 +98,131 @@ THStorage* THStorage_new(at::ScalarType scalar_type)
 
 THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
 {
-  return THStorage_newWithAllocator(scalar_type, size, &THDefaultAllocator, nullptr);
+  return THStorage_newWithAllocator(scalar_type, size, getTHDefaultAllocator());
 }
 
 THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
-                                      THAllocator *allocator,
-                                      void *allocatorContext)
+                                      at::Allocator *allocator)
 {
   THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->backend = at::kCPU;
   storage->scalar_type = scalar_type;
-  storage->data_ptr = allocator->malloc(allocatorContext, at::elementSize(scalar_type)*size);
+  new (&storage->data_ptr) at::DataPtr(allocator->allocate(at::elementSize(scalar_type)*size));
   storage->size = size;
   new (&storage->refcount) std::atomic<int>(1);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE | TH_STORAGE_FREEMEM;
-  storage->allocatorVoidPtr = allocator;
-  storage->allocatorContext = allocatorContext;
-  storage->device = INT_MIN;  // device is not meaningful on CPU
+  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
+  storage->allocator = allocator;
   return storage;
+}
+
+ptrdiff_t THStorage_size(const THStorage *self)
+{
+  return self->size;
+}
+
+size_t THStorage_elementSize(const THStorage *self)
+{
+  return at::elementSize(self->scalar_type);
+}
+
+THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags)
+{
+  size_t actual_size = -1;
+  THStorage *storage = THStorage_newWithDataAndAllocator(scalar_type,
+                                                         THMapAllocator::makeDataPtr(
+                                                            filename,
+                                                            flags,
+                                                            size * at::elementSize(scalar_type),
+                                                            &actual_size),
+                                                         size,
+                                                         /* allocator */ nullptr);
+
+  if (size <= 0) {
+    storage->size = actual_size/THStorage_elementSize(storage);
+  }
+
+  THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
+
+  return storage;
+}
+
+void THStorage_setFlag(THStorage *storage, const char flag)
+{
+  storage->flag |= flag;
+}
+
+void THStorage_clearFlag(THStorage *storage, const char flag)
+{
+  storage->flag &= ~flag;
+}
+
+void THStorage_retain(THStorage *storage)
+{
+  if (storage && (storage->flag & TH_STORAGE_REFCOUNTED)) {
+    ++storage->refcount;
+  }
+}
+
+/*
+// I don't think you should ever call this
+THStorage* THStorage_newWithData(at::ScalarType scalar_type, std::unique_ptr<at::BoundDeleter> data, ptrdiff_t size)
+{
+  return THStorage_newWithDataAndAllocator(scalar_type, data, size,
+                                           getTHDefaultAllocator());
+}
+*/
+
+THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
+                                             at::DataPtr&& data, ptrdiff_t size,
+                                             THAllocator* allocator) {
+  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
+  storage->scalar_type = scalar_type;
+  new (&storage->data_ptr) at::DataPtr(std::move(data));
+  storage->size = size;
+  new (&storage->refcount) std::atomic<int>(1);
+  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
+  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
+  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
+  storage->allocator = allocator;
+  return storage;
+}
+
+void THStorage_resize(THStorage *storage, ptrdiff_t size)
+{
+  if (storage->flag & TH_STORAGE_RESIZABLE)
+  {
+    /* case when the allocator does not have a realloc defined */
+    at::DataPtr old_data;
+    std::swap(old_data, storage->data_ptr);
+    ptrdiff_t old_size = storage->size;
+    if (size != 0) {
+      storage->data_ptr = storage->allocator->allocate(at::elementSize(storage->scalar_type)*size);
+    }
+    storage->size = size;
+    if (old_data != nullptr) {
+      ptrdiff_t copy_size = old_size;
+      if (storage->size < copy_size) {
+        copy_size = storage->size;
+      }
+      if (copy_size > 0) {
+        memcpy(storage->data_ptr.get(), old_data.get(), at::elementSize(storage->scalar_type)*copy_size);
+      }
+    }
+  } else {
+    THError("Trying to resize storage that is not resizable");
+  }
+}
+
+void THStorage_swap(THStorage *storage1, THStorage *storage2)
+{
+#define SWAP(val) { std::swap(storage1->val, storage2->val); }
+    SWAP(scalar_type);
+    SWAP(data_ptr);
+    SWAP(size);
+    // don't swap refcount!
+    SWAP(flag);
+    SWAP(allocator);
+    SWAP(finalizer);
+#undef SWAP
 }

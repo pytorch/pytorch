@@ -1,12 +1,12 @@
 #pragma once
 
-#include "CUDAUtils.hpp"
-#include "NCCLUtils.hpp"
-#include "ProcessGroup.hpp"
-#include "Store.hpp"
-
 #include <mutex>
 #include <unordered_map>
+
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/NCCLUtils.hpp>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
 
 // forward declaration
 struct THCState;
@@ -60,7 +60,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   class WorkNCCL : public ProcessGroup::Work {
    public:
     // Constructor takes a list of CUDA devices
-    WorkNCCL(const std::vector<int>& devices);
+    WorkNCCL(const std::vector<at::Device>& devices);
     virtual ~WorkNCCL();
 
     // Checks if request has completed. In this specific case of NCCL, it checks
@@ -88,9 +88,9 @@ class ProcessGroupNCCL : public ProcessGroup {
 
    protected:
     // The cached list of CUDA devices to operate on
-    std::vector<int> devices_;
-    // The CUDA events that are used to track this workitem on
-    // multiple CUDA devices
+    std::vector<at::Device> devices_;
+
+    // The CUDA events tracking this work item on multiple CUDA devices
     std::vector<CUDAEvent> cudaEvents_;
 
     friend class ProcessGroupNCCL;
@@ -117,7 +117,7 @@ class ProcessGroupNCCL : public ProcessGroup {
   // a new set of NCCL communicators as a cache entry
   std::vector<std::shared_ptr<NCCLComm>>& getNCCLComm(
       const std::string& devicesKey,
-      const std::vector<int>& devices);
+      const std::vector<at::Device>& devices);
 
   // Tensor checker helper
   void tensorCheckHelper(

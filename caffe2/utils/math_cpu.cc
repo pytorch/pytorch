@@ -11,6 +11,7 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 #include <algorithm>
@@ -552,6 +553,12 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, vsTan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tan, vdTan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, vsAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, vdAtan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sinh, vsSinh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sinh, vdSinh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cosh, vsCosh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cosh, vdCosh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tanh, vsTanh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tanh, vdTanh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
@@ -632,6 +639,17 @@ DELEGATE_SINCOS_FUNCTION(float)
 DELEGATE_SINCOS_FUNCTION(double)
 #undef DELEGATE_SINCOS_FUNCTION
 
+#define DELEGATE_TANH_FUNCTION(T)                                             \
+  template <>                                                                 \
+  void Tanh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) {      \
+    EigenVectorMap<T>(Y, N) = T(1) -                                          \
+        ((ConstEigenVectorArrayMap<T>(X, N) * T(2)).exp() + T(1)).inverse() * \
+            T(2);                                                             \
+  }
+DELEGATE_TANH_FUNCTION(float)
+DELEGATE_TANH_FUNCTION(double)
+#undef DELEGATE_TANH_FUNCTION
+
 #define DELEGATE_CBRT_FUNCTION(T)                                        \
   template <>                                                            \
   void Cbrt<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
@@ -649,6 +667,26 @@ DELEGATE_CBRT_FUNCTION(double)
   }
 DELEGATE_POWX_FUNCTION(float)
 #undef DELEGATE_POWX_FUNCTION
+
+#define DELEGATE_SINH_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Sinh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    ConstEigenVectorArrayMap<T> X_arr(X, N);                             \
+    EigenVectorMap<T>(Y, N) = (X_arr.exp() - (-X_arr).exp()) / 2;        \
+  }
+DELEGATE_SINH_FUNCTION(float)
+DELEGATE_SINH_FUNCTION(double)
+#undef DELEGATE_SINH_FUNCTION
+
+#define DELEGATE_COSH_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cosh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    ConstEigenVectorArrayMap<T> X_arr(X, N);                             \
+    EigenVectorMap<T>(Y, N) = (X_arr.exp() + (-X_arr).exp()) / 2;        \
+  }
+DELEGATE_COSH_FUNCTION(float)
+DELEGATE_COSH_FUNCTION(double)
+#undef DELEGATE_COSH_FUNCTION
 
 #endif // CAFFE2_USE_MKL
 
@@ -897,6 +935,61 @@ CAFFE2_SPECIALIZED_REDUCE_SUM(double)
   }
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
 #undef CAFFE2_SPECIALIZED_REDUCE_MEAN
+
+#define CAFFE2_SPECIALIZED_REDUCE_L1(T)                         \
+  template <>                                                   \
+  void ReduceL1<T, CPUContext>(                                 \
+      const int num_dims,                                       \
+      const int* dims,                                          \
+      const int num_axes,                                       \
+      const int* axes,                                          \
+      const T* X,                                               \
+      T* Y,                                                     \
+      CPUContext* context) {                                    \
+    ReduceTensor(                                               \
+        num_dims,                                               \
+        dims,                                                   \
+        num_axes,                                               \
+        axes,                                                   \
+        [](const T& a, const T& b) { return a + std::abs(b); }, \
+        T(0),                                                   \
+        X,                                                      \
+        Y,                                                      \
+        context);                                               \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L1(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L1
+
+#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                             \
+  template <>                                                       \
+  void ReduceL2<T, CPUContext>(                                     \
+      const int num_dims,                                           \
+      const int* dims,                                              \
+      const int num_axes,                                           \
+      const int* axes,                                              \
+      const T* X,                                                   \
+      T* Y,                                                         \
+      CPUContext* context) {                                        \
+    ReduceTensor(                                                   \
+        num_dims,                                                   \
+        dims,                                                       \
+        num_axes,                                                   \
+        axes,                                                       \
+        [](const T& a, const T& b) { return a + b * b; },           \
+        T(0),                                                       \
+        X,                                                          \
+        Y,                                                          \
+        context);                                                   \
+    std::vector<int> Y_dims(dims, dims + num_dims);                 \
+    for (int i = 0; i < num_axes; ++i) {                            \
+      Y_dims[axes[i]] = 1;                                          \
+    }                                                               \
+    const int Y_size = std::accumulate(                             \
+        Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>()); \
+    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                     \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L2(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L2
 
 namespace {
 

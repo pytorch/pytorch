@@ -11,11 +11,11 @@
 
 namespace torch { namespace autograd {
 
-auto Error::apply(const variable_list& grad_outputs) -> variable_list {
+auto Error::apply(variable_list&& grad_outputs) -> variable_list {
   throw std::runtime_error(msg);
 }
 
-auto DelayedError::apply(const variable_list& inputs) -> variable_list {
+auto DelayedError::apply(variable_list&& inputs) -> variable_list {
   tensor_list outputs;
   outputs.reserve(inputs.size());
   for (auto& var : inputs) {

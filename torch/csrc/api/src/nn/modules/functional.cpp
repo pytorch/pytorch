@@ -10,9 +10,6 @@ namespace nn {
 FunctionalImpl::FunctionalImpl(std::function<Tensor(Tensor)> function)
     : function_(std::move(function)) {}
 
-FunctionalImpl::FunctionalImpl(BoundFunction bound_function)
-    : function_(std::move(bound_function.function_)) {}
-
 void FunctionalImpl::reset() {}
 
 Tensor FunctionalImpl::forward(Tensor input) {

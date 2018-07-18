@@ -2,6 +2,7 @@
 
 #include "caffe2/utils/math.h"
 
+#include <cstring>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -329,6 +330,9 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sin, sinf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Asin, asinf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tan, tanf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Atan, atanf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sinh, sinhf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Cosh, coshf)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Tanh, tanhf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Abs, fabsf)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqr, utils::Square<float>)
 DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Sqrt, sqrtf)

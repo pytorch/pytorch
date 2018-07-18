@@ -8,9 +8,9 @@ __all__ = [
     'argmin',
     'btrifact',
     'btriunpack',
+    'isinf',
     'isnan',
     'split',
-    'unbind',
     'unique',
 ]
 
@@ -30,7 +30,7 @@ def split(tensor, split_size_or_sections, dim=0):
     Arguments:
         tensor (Tensor): tensor to split.
         split_size_or_sections (int) or (list(int)): size of a single chunk or
-        list of sizes for each chunk
+            list of sizes for each chunk
         dim (int): dimension along which to split the tensor.
     """
     # Overwriting reason:
@@ -87,18 +87,6 @@ def btrifact(A, info=None, pivot=True):
     return A.btrifact(info, pivot)
 
 
-def unbind(tensor, dim=0):
-    r"""Removes a tensor dimension.
-
-    Returns a tuple of all slices along a given dimension, already without it.
-
-    Arguments:
-        tensor (Tensor): the tensor to unbind
-        dim (int): dimension to remove
-    """
-    return tuple(tensor.select(dim, i) for i in range(tensor.size(dim)))
-
-
 def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     r"""Unpacks the data and pivots from a batched LU factorization (btrifact) of a tensor.
 
@@ -148,6 +136,25 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
     return P, L, U
 
 
+def isinf(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `+/-INF` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of `+/-INF` elements and 0 otherwise
+
+    Example::
+
+        >>> torch.isinf(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([ 0,  1,  0,  1,  0], dtype=torch.uint8)
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return tensor.abs() == float('inf')
+
+
 def isnan(tensor):
     r"""Returns a new tensor with boolean elements representing if each element is `NaN` or not.
 
@@ -163,7 +170,7 @@ def isnan(tensor):
         tensor([ 0,  1,  0], dtype=torch.uint8)
     """
     if not isinstance(tensor, torch.Tensor):
-        raise ValueError("The argument is not a tensor")
+        raise ValueError("The argument is not a tensor", str(tensor))
     return tensor != tensor
 
 

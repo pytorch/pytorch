@@ -12,9 +12,9 @@
 // Forward declare these CUDA types here to avoid including CUDA headers in
 // ATen headers, which would make ATen always require CUDA to build.
 struct THCState;
+struct cudaDeviceProp;
 struct CUstream_st;
 typedef struct CUstream_st* cudaStream_t;
-struct cudaDeviceProp;
 
 #ifndef __HIP_PLATFORM_HCC__
 // pyHIPIFY rewrites this as:
@@ -188,6 +188,8 @@ struct AT_API DynamicCUDAInterface {
   static void (*set_device)(int32_t);
   static void (*get_device)(int32_t*);
   static void (*unchecked_set_device)(int32_t);
+  static void (*cuda_stream_create_with_priority)(cudaStream_t*, int32_t, int32_t);
+  static void (*cuda_stream_destroy)(cudaStream_t);
 };
 } // namespace detail
 } // namespace at

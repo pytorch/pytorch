@@ -55,8 +55,10 @@ Tensor batch_norm(
 
   if (use_cudnn && eps >= detail::getCUDAHooks().batchnormMinEpsilonCuDNN()) {
     return std::get<0>(at::cudnn_batch_norm(
-                        input, weight, bias,
-                        running_mean, running_var,
+                        input.contiguous(), weight.contiguous(),
+                        bias.contiguous(),
+                        running_mean.defined() ? running_mean.contiguous() : running_mean,
+                        running_var.defined() ? running_var.contiguous() : running_var,
                         training, momentum, eps));
   }
 
@@ -77,7 +79,7 @@ Tensor batch_norm(
   }
 
   return at::thnn_batch_norm(
-            input, weight, bias,
+            input.contiguous(), weight, bias,
             running_mean, running_var, training, momentum, eps);
 }
 

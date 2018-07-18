@@ -395,7 +395,6 @@ NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
 
 /// NeuralNetData specific helpers.
 bool hasProducer(NNGraph::NodeRef n);
-bool hasProducer(NNGraph::NodeRef n);
 NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
 bool hasConsumer(NNGraph::NodeRef n);
 std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);

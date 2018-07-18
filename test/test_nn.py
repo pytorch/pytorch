@@ -100,7 +100,7 @@ class PackedSequenceTest(TestCase):
         """Create ordered list of random sequences"""
         seqs = [tensor_type(random.randint(1, self.max_length))
                 for _ in range(self.batch_size)]
-        seqs = [s.random_() for s in seqs]
+        seqs = [s.random_(-128, 128) for s in seqs]
         ordered = sorted(seqs, key=len, reverse=True)
         return ordered
 
@@ -510,8 +510,6 @@ class TestNN(NNTestCase):
         params = []
         d_params = []
         for p in module.parameters():
-            if p.grad is None:
-                p._grad = torch.zeros_like(p)
             params.append(p)
             d_params.append(p.grad)
         return params, d_params
@@ -1112,6 +1110,91 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+    def test_ModuleDict(self):
+        modules = OrderedDict([
+            ('act', nn.ReLU()),
+            ('conv', nn.Conv2d(10, 10, 5)),
+            ('fc', nn.Linear(5, 5)),
+        ])
+
+        module_dict = nn.ModuleDict(modules)
+
+        def check():
+            self.assertEqual(len(module_dict), len(modules))
+            for k1, m2 in zip(modules, module_dict.children()):
+                self.assertIs(modules[k1], m2)
+            for k1, k2 in zip(modules, module_dict):
+                self.assertIs(modules[k1], module_dict[k2])
+            for k in module_dict:
+                self.assertIs(module_dict[k], modules[k])
+            for k in module_dict.keys():
+                self.assertIs(module_dict[k], modules[k])
+            for k, v in module_dict.items():
+                self.assertIs(modules[k], v)
+            for k1, m2 in zip(modules, module_dict.values()):
+                self.assertIs(modules[k1], m2)
+            for k in modules.keys():
+                self.assertTrue(k in module_dict)
+        check()
+
+        modules['conv'] = nn.Conv2d(3, 4, 3)
+        module_dict['conv'] = modules['conv']
+        check()
+
+        next_modules = [
+            ('fc2', nn.Linear(5, 5)),
+            ('act', nn.Sigmoid()),
+        ]
+        modules.update(next_modules)
+        module_dict.update(next_modules)
+        check()
+
+        next_modules = OrderedDict([
+            ('fc3', nn.Linear(5, 5)),
+            ('act2', nn.Sigmoid()),
+        ])
+        modules.update(next_modules)
+        module_dict.update(next_modules)
+        check()
+
+        next_modules = {
+            'fc4': nn.Linear(5, 5),
+            'act3': nn.Sigmoid()
+        }
+        modules.update(sorted(next_modules.items()))
+        module_dict.update(next_modules)
+        check()
+
+        del module_dict['fc']
+        del modules['fc']
+        check()
+
+        with self.assertRaises(TypeError):
+            module_dict.update(nn.ReLU())
+
+        with self.assertRaises(TypeError):
+            module_dict.update([nn.ReLU()])
+
+        with self.assertRaises(ValueError):
+            module_dict.update([[nn.ReLU()]])
+
+        with self.assertRaises(TypeError):
+            module_dict[1] = nn.ReLU()
+
+        s = nn.Sequential(modules)
+        module_dict = nn.ModuleDict(s.named_children())
+        check()
+
+        c = module_dict.pop('conv')
+        self.assertIs(c, modules['conv'])
+        modules.pop('conv')
+        check()
+
+        module_dict.clear()
+        self.assertEqual(len(module_dict), 0)
+        modules.clear()
+        check()
+
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(10, 10))
@@ -1174,6 +1257,88 @@ class TestNN(NNTestCase):
         parameters = list(s.parameters())
         param_list = nn.ParameterList()
         param_list.extend(s.parameters())
+        check()
+
+    def test_ParameterDict(self):
+        parameters = OrderedDict([
+            ('p1', Parameter(torch.randn(10, 10))),
+            ('p2', Parameter(torch.randn(10, 10))),
+            ('p3', Parameter(torch.randn(10, 10))),
+        ])
+
+        parameter_dict = nn.ParameterDict(parameters)
+
+        def check():
+            self.assertEqual(len(parameter_dict), len(parameters))
+            for k1, m2 in zip(parameters, parameter_dict.parameters()):
+                self.assertIs(parameters[k1], m2)
+            for k1, k2 in zip(parameters, parameter_dict):
+                self.assertIs(parameters[k1], parameter_dict[k2])
+            for k in parameter_dict:
+                self.assertIs(parameter_dict[k], parameters[k])
+            for k in parameter_dict.keys():
+                self.assertIs(parameter_dict[k], parameters[k])
+            for k, v in parameter_dict.items():
+                self.assertIs(v, parameters[k])
+            for k1, m2 in zip(parameters, parameter_dict.values()):
+                self.assertIs(parameters[k1], m2)
+            for k in parameters.keys():
+                self.assertTrue(k in parameter_dict)
+
+        check()
+
+        parameters['p4'] = Parameter(torch.randn(10, 10))
+        parameter_dict['p4'] = parameters['p4']
+        check()
+
+        next_parameters = [
+            ('p5', Parameter(torch.randn(10, 10))),
+            ('p2', Parameter(torch.randn(10, 10))),
+        ]
+        parameters.update(next_parameters)
+        parameter_dict.update(next_parameters)
+        check()
+
+        next_parameters = OrderedDict([
+            ('p6', Parameter(torch.randn(10, 10))),
+            ('p5', Parameter(torch.randn(10, 10))),
+        ])
+        parameters.update(next_parameters)
+        parameter_dict.update(next_parameters)
+        check()
+
+        next_parameters = {
+            'p8': Parameter(torch.randn(10, 10)),
+            'p7': Parameter(torch.randn(10, 10))
+        }
+        parameters.update(sorted(next_parameters.items()))
+        parameter_dict.update(next_parameters)
+        check()
+
+        del parameter_dict['p3']
+        del parameters['p3']
+        check()
+
+        with self.assertRaises(TypeError):
+            parameter_dict.update(1)
+
+        with self.assertRaises(TypeError):
+            parameter_dict.update([1])
+
+        with self.assertRaises(ValueError):
+            parameter_dict.update(Parameter(torch.randn(10, 10)))
+
+        with self.assertRaises(TypeError):
+            parameter_dict[1] = Parameter(torch.randn(10, 10))
+
+        p_pop = parameter_dict.pop('p4')
+        self.assertIs(p_pop, parameters['p4'])
+        parameters.pop('p4')
+        check()
+
+        parameter_dict.clear()
+        self.assertEqual(len(parameter_dict), 0)
+        parameters.clear()
         check()
 
     def test_add_module(self):
@@ -4742,6 +4907,13 @@ class TestNN(NNTestCase):
             if TEST_CUDA:
                 test_cpu_against_cuda(N, C, H, W, padding_mode)
 
+                # test channels >1024, which doesn't work on cudnn 7102 and further
+                N, C, H, W = 1, 1025, 3, 3
+                self.assertTrue(gradcheck(
+                    lambda inp, grid: F.grid_sample(inp, grid, padding_mode=padding_mode),
+                    (input, grid)))
+                test_cpu_against_cuda(N, C, H, W, padding_mode)
+
     def test_grid_sample_3d(self):
         def test_cpu_against_cuda(N, C, D, H, W, padding_mode):
             def test_shape(N, C, ID, IH, IW, D, H, W, padding_mode):
@@ -4858,13 +5030,16 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='linear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(1, 1, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, requires_grad=True)
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), (input,))
+                input = torch.randn(1, 1, 2, requires_grad=True)
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), (input,))
 
     def test_upsamplingLinear1d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='linear', align_corners=False)
@@ -4891,13 +5066,16 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='bilinear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2, 2)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, 2, requires_grad=True)
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
+                input = torch.randn(1, 1, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
@@ -4920,17 +5098,20 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='trilinear', align_corners=align_corners)
 
-            m = nn.Upsample(size=4, **kwargs)
-            in_t = torch.ones(1, 1, 2, 2, 2)
-            out_t = m(Variable(in_t))
-            self.assertEqual(torch.ones(1, 1, 4, 4, 4), out_t.data)
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                m = nn.Upsample(scale_factor=scale_factor, **kwargs)
+                in_t = torch.ones(1, 1, 2, 2, 2)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(1, 1, out_size, out_size, out_size), out_t.data)
 
-            input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
-            self.assertEqual(
-                F.upsample(input, (4, 4, 4), **kwargs),
-                F.upsample(input, scale_factor=2, **kwargs))
-            gradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
-            gradgradcheck(lambda x: F.upsample(x, 4, **kwargs), [input])
+                input = torch.randn(1, 1, 2, 2, 2, requires_grad=True)
+                self.assertEqual(
+                    F.upsample(input, (out_size, out_size, out_size), **kwargs),
+                    F.upsample(input, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
+                gradgradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
     def test_upsamplingTrilinear3d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='trilinear', align_corners=False)
@@ -4939,6 +5120,50 @@ class TestNN(NNTestCase):
         out_t_9 = m(in_t_9)
         out_t_5 = m(in_t_9[:, :, :5, :5, :5])
         self.assertEqual(out_t_9[:, :, :15, :15, :15], out_t_5)
+
+    def test_interpolate(self):
+        def _test_interpolate_helper(in_t, scale_factor, layer):
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                dim = len(in_t.shape) - 2
+                out_shape = [1, 1] + [out_size] * dim
+                out_t = m(in_t)
+                self.assertEqual(torch.ones(out_shape), out_t)
+
+                self.assertEqual(
+                    F.interpolate(in_t, (out_size,) * dim, **kwargs),
+                    F.interpolate(in_t, scale_factor=scale_factor, **kwargs))
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+                gradgradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [in_t])
+
+        def _make_input(dim):
+            size = [1, 1]
+            size += [2] * dim
+            return torch.ones(size, requires_grad=True)
+
+        device_list = ['cpu']
+        if TEST_CUDA:
+            device_list.append('cuda')
+
+        for device in device_list:
+            for scale_factor in [0.5, 1.5, 2]:
+                for mode in ['nearest', 'area']:
+                    kwargs = dict(mode=mode)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    for input in [_make_input(1), _make_input(2), _make_input(3)]:
+                        _test_interpolate_helper(input, scale_factor, m)
+
+                for align_corners in [True, False]:
+                    kwargs = dict(mode='linear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(1), scale_factor, m)
+
+                    kwargs = dict(mode='bilinear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(2), scale_factor, m)
+
+                    kwargs = dict(mode='trilinear', align_corners=align_corners)
+                    m = nn.Upsample(scale_factor=scale_factor, **kwargs).to(device)
+                    _test_interpolate_helper(_make_input(3), scale_factor, m)
 
     def test_linear_broadcasting(self):
         m = nn.Linear(5, 8)
@@ -5244,6 +5469,57 @@ class TestNN(NNTestCase):
     def test_grad_conv3d_weight(self):
         self.run_grad_conv_test(F.conv3d, F.grad.conv3d_weight, 3, 'weight')
 
+    def test_fold_invalid_arg(self):
+        # input wrong dimension
+
+        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3))
+        with self.assertRaisesRegex(NotImplementedError, r"Only 3D input Tensors are supported"):
+            fold(torch.randn(1, 5))
+
+        # input.size(1) not divisible by \prod(kernel_size)
+
+        fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3))
+        with self.assertRaisesRegex(RuntimeError, r"be divisible by the product of kernel_size"):
+            fold(torch.randn(1, 5, 9))
+
+        with self.assertRaisesRegex(RuntimeError, r"be divisible by the product of kernel_size"):
+            fold(torch.randn(1, 19, 9))
+
+        # input.size(2) not matching the total number of sliding blocks
+
+        with self.assertRaisesRegex(RuntimeError, r"match the calculated number of sliding blocks"):
+            fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3))
+            fold(torch.randn(1, 6, 10))
+
+        with self.assertRaisesRegex(RuntimeError, r"match the calculated number of sliding blocks"):
+            fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3), stride=(2, 2))
+            fold(torch.randn(1, 6, 5))
+
+        with self.assertRaisesRegex(RuntimeError, r"match the calculated number of sliding blocks"):
+            fold = nn.Fold(output_size=(4, 5), kernel_size=(2, 3), stride=(2, 2), dilation=(1, 2), padding=(2, 0))
+            fold(torch.randn(1, 6, 5))  # should be 4 * 1 = 4 sliding blocks
+
+    def test_unfold_invalid_arg(self):
+        # input wrong dimension
+
+        unfold = nn.Unfold(kernel_size=(2, 3))
+        with self.assertRaisesRegex(NotImplementedError, r"Only 4D input Tensors are supported"):
+            unfold(torch.randn(1, 5, 2))
+
+        # calculated output shape is too small
+
+        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+            unfold = nn.Unfold(kernel_size=(2, 3))
+            unfold(torch.randn(1, 2, 2, 2))
+
+        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+            unfold = nn.Unfold(kernel_size=(5, 3), padding=(1, 1))
+            unfold(torch.randn(1, 2, 2, 3))
+
+        with self.assertRaisesRegex(RuntimeError, r"too small \(non-positive\)"):
+            unfold = nn.Unfold(kernel_size=(1, 3), padding=(1, 1), dilation=(1, 2))
+            unfold(torch.randn(1, 2, 2, 2))
+
     def test_adaptive_log_softmax(self):
         # args validation
         with self.assertRaises(ValueError):
@@ -5256,14 +5532,14 @@ class TestNN(NNTestCase):
             _ = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 25], div_value=2.)
 
         # input shapes
-        with self.assertRaisesRegex(RuntimeError, "Input and target should have the same size"):
+        with self.assertRaisesRegex(RuntimeError, r"Input and target should have the same size"):
             asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
             x = torch.randn(2, 16)
             y = torch.tensor([0, 5, 10])
             asfm(x, y)
 
         # out-of-bound targets
-        with self.assertRaisesRegex(RuntimeError, "Target values should be in"):
+        with self.assertRaisesRegex(RuntimeError, r"Target values should be in"):
             asfm = nn.AdaptiveLogSoftmaxWithLoss(16, 20, [5, 10, 15], div_value=2.)
             x = torch.randn(2, 16)
             y = torch.tensor([0, 20])
@@ -5830,6 +6106,15 @@ new_criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
         check_sum_reduction=True,
         desc='scalar'
+    ),
+    dict(
+        module_name='MSELoss',
+        input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
+        target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
+        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
+                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+        check_forward_only=True,
+        desc='prec',
     ),
     dict(
         module_name='BCELoss',
@@ -7136,16 +7421,33 @@ new_module_tests = [
     dict(
         module_name='Embedding',
         constructor_args=(4, 3),
-        input_fn=lambda: torch.randperm(2).repeat(1, 2),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
     ),
     dict(
         module_name='EmbeddingBag',
         constructor_args=(4, 3),
-        input_fn=lambda:torch.randperm(2).repeat(1, 2),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
         jacobian_input=False,
         check_gradgrad=False,
+        desc='mean',
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3, None, 2, False, 'sum'),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+        jacobian_input=False,
+        check_gradgrad=False,
+        desc='sum',
+    ),
+    dict(
+        module_name='EmbeddingBag',
+        constructor_args=(4, 3, None, 2, False, 'max'),
+        input_fn=lambda: torch.empty(2, 3, dtype=torch.long).random_(4),
+        jacobian_input=False,
+        check_gradgrad=False,
+        desc='max',
     ),
     dict(
         fullname='EmbeddingBag_sparse',
