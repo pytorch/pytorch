@@ -1016,8 +1016,9 @@ def add_static_casts(directory, extensions, KernelTemplateParams, hipify_caffe2=
                             # Here the template value will be resolved from <real> to <Dtype>.
                             if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                                 kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
-                            full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
-                                                       lambda x: kernel_name_with_template, full_new_kernel_launch)
+                            if not hipify_caffe2:
+                                full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
+                                                                lambda x: kernel_name_with_template, full_new_kernel_launch)
 
                             # Replace Launch
                             new_output_source = new_output_source.replace(full_old_kernel_launch, full_new_kernel_launch)
