@@ -40,12 +40,22 @@ real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 
 THCStorage* THCStorage_(new)(THCState *state)
 {
-  return THCStorage_new(state, at::CTypeToScalarType<real>::to());
+  THStorage* storage = new THStorage(
+      at::CTypeToScalarType<real>::to(),
+      0,
+      state->cudaDeviceAllocator,
+      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
-  return THCStorage_newWithSize(state, at::CTypeToScalarType<real>::to(), size);
+  THStorage* storage = new THStorage(
+      at::CTypeToScalarType<real>::to(),
+      size,
+      state->cudaDeviceAllocator,
+      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
@@ -100,9 +110,17 @@ THCStorage* THCStorage_(newWithMapping)(THCState *state, const char *fileName, p
 }
 
 THCStorage* THCStorage_(newWithDataAndAllocator)(
-  THCState *state, at::DataPtr&& data, ptrdiff_t size,
-  at::Allocator *allocator) {
-  return THCStorage_newWithDataAndAllocator(state, at::CTypeToScalarType<real>::to(), std::move(data), size, allocator);
+    THCState* state,
+    at::DataPtr&& data,
+    ptrdiff_t size,
+    at::Allocator* allocator) {
+  THStorage* storage = new THStorage(
+      at::CTypeToScalarType<real>::to(),
+      size,
+      std::move(data),
+      allocator,
+      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+  return storage;
 }
 
 void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag)

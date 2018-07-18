@@ -18,14 +18,6 @@ struct CTypeToScalarType<__half> : public CTypeToScalarType<Half> {};
 
 }
 
-THC_API THCStorage* THCStorage_new(THCState *state, at::ScalarType scalar_type);
-THC_API THCStorage* THCStorage_newWithSize(THCState *state, at::ScalarType scalar_type, ptrdiff_t size);
-
-THC_API THCStorage* THCStorage_newWithAllocator(THCState *state,
-                                        at::ScalarType scalar_type,
-                                        ptrdiff_t size,
-                                        at::Allocator* allocator);
-
 THC_API void THCStorage_retain(THCState *state, THCStorage *storage);
 
 THC_API void THCStorage_resize(THCState *state, THCStorage *storage, ptrdiff_t size);
