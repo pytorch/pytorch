@@ -121,8 +121,8 @@ struct RNNOptions {
 
 class RNNImpl : public detail::RNNImplBase<RNNImpl> {
  public:
-  template <typename... Ts>
-  explicit RNNImpl(Ts&&... ts) : RNNImpl(RNNOptions(std::forward<Ts>(ts)...)) {}
+  RNNImpl(int64_t input_size, int64_t hidden_size)
+      : RNNImpl(RNNOptions(input_size, hidden_size)) {}
   explicit RNNImpl(RNNOptions options);
 
   RNNOptions options;
@@ -140,9 +140,8 @@ using LSTMOptions = detail::RNNOptionsBase;
 
 class LSTMImpl : public detail::RNNImplBase<LSTMImpl> {
  public:
-  template <typename... Ts>
-  explicit LSTMImpl(Ts&&... ts)
-      : LSTMImpl(LSTMOptions(std::forward<Ts>(ts)...)) {}
+  LSTMImpl(int64_t input_size, int64_t hidden_size)
+      : LSTMImpl(LSTMOptions(input_size, hidden_size)) {}
   explicit LSTMImpl(LSTMOptions options);
 
  private:
@@ -157,8 +156,8 @@ using GRUOptions = detail::RNNOptionsBase;
 
 class GRUImpl : public detail::RNNImplBase<GRUImpl> {
  public:
-  template <typename... Ts>
-  explicit GRUImpl(Ts&&... ts) : GRUImpl(GRUOptions(std::forward<Ts>(ts)...)) {}
+  GRUImpl(int64_t input_size, int64_t hidden_size)
+      : GRUImpl(GRUOptions(input_size, hidden_size)) {}
   explicit GRUImpl(GRUOptions options);
 
  private:
