@@ -22,6 +22,7 @@ ignore_file_list = ["depthwise_3x3_conv_op.cu",
                     "top_k_radix_selection.cuh",
                     "top_k_heap_selection.cuh",
                     "pool_op_cudnn.cu",
+                    "roi_align_op_gpu_test.cc",
                     "max_pool_with_index.cu"]  # REVIST THIS FILE
 
 # Execute the Hipify Script.
