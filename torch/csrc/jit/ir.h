@@ -400,6 +400,11 @@ public:
   at::optional<IValue> get(Symbol name);
   Value* getValue(Symbol name);
 
+  // Returns true if the value of input name is statically known
+  bool knows(Symbol name) {
+    return static_cast<bool>(get(name));
+  }
+
   // Graphs
 
   // Note [Topological invariant]
@@ -655,6 +660,14 @@ public:
   T* expect() {
     JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", T::Kind.toDisplayString(), kind().toDisplayString());
     return static_cast<T*>(this);
+  }
+
+  // XXX: this function is meant to be used with string literals only!
+  bool matches(const char *signature_literal);
+
+  const FunctionSchema& schema() {
+    if (!schema_) findSchema();
+    return *schema_;
   }
 
   virtual ~Node() {}

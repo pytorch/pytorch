@@ -227,11 +227,37 @@ using OperatorMap = std::unordered_map<Symbol, std::vector<std::shared_ptr<Opera
 struct OperatorRegistry  {
   OperatorMap operators;
   std::mutex lock;
+  // TODO: comment
+  std::unordered_map<std::string, std::shared_ptr<Operator>> operators_by_sig;
+  std::unordered_map<const char *, std::shared_ptr<Operator>> operators_by_sig_literal;
   void registerOperator(Operator&& op){
     std::lock_guard<std::mutex> guard(lock);
+
     Symbol sym = Symbol::fromQualString(op.schema.name);
-    operators[sym].push_back(std::make_shared<Operator>(std::move(op)));
+    auto op_ptr = std::make_shared<Operator>(std::move(op));
+
+    operators[sym].push_back(op_ptr);
+
+    std::ostringstream s;
+    s << op.schema;
+    operators_by_sig[s.str()] = op_ptr;
   }
+
+  Operator& lookupByLiteral(const char * name) {
+    auto it = operators_by_sig_literal.find(name);
+    if (it == operators_by_sig_literal.end()) {
+      auto op_ptr_it = operators_by_sig.find(name);
+      if (op_ptr_it == operators_by_sig.end()) {
+        for (auto & entry : operators_by_sig) {
+          std::cout << entry.first << std::endl;
+        }
+      }
+      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
+      it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
+    }
+    return *it->second;
+  }
+
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
     std::lock_guard<std::mutex> guard(lock);
     static std::vector<std::shared_ptr<Operator>> empty;
@@ -242,19 +268,23 @@ struct OperatorRegistry  {
   }
 };
 
-OperatorRegistry& getRegsitry() {
+OperatorRegistry& getRegistry() {
   static OperatorRegistry r;
   return r;
 }
 
-}
+} // anonymous namespace
 
 void registerOperator(Operator&& op) {
-  getRegsitry().registerOperator(std::move(op));
+  getRegistry().registerOperator(std::move(op));
 }
 
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
-  return getRegsitry().getOperators(name);
+  return getRegistry().getOperators(name);
+}
+
+Operator& sig(const char *signature) {
+  return getRegistry().lookupByLiteral(signature);
 }
 
 FunctionSchema parseSchema(const std::string& schema) {
@@ -293,7 +323,10 @@ bool typeMatches(TypePtr actual, TypePtr formal) {
   return false;
 }
 
-bool Operator::matchesNode(Node* node) const {
+bool Operator::matches(Node* node) const {
+  if (node->kind().toQualString() != schema.name) {
+    return false;
+  }
   size_t attributes_size = node->numAttributes();
   size_t attributes_seen = 0;
   auto inputs_size = node->inputs().size();
@@ -351,7 +384,7 @@ bool Operator::matchesNode(Node* node) const {
 std::shared_ptr<Operator> findOperatorFor(Node* node) {
   const auto& candidates = getAllOperatorsFor(node->kind());
   for(const auto& candidate : candidates) {
-    if(candidate->matchesNode(node)) {
+    if(candidate->matches(node)) {
       return candidate;
     }
   }
