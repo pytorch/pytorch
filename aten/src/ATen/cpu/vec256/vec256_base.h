@@ -163,7 +163,7 @@ public:
   Vec256<T> reciprocal() const {
     return map([](T x) { return (T)(1) / x; });
   }
-  Vec256<T> rsqrt() const {
+  Vec256<T> rsqrt() const __ubsan_ignore_float_divide_by_zero__ {
     return map([](T x) { return 1 / std::sqrt(x); });
   }
 };
