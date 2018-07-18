@@ -481,8 +481,11 @@ class TestCreatePlan(test_util.TestCase):
 
         self.assertEqual(len(plan.Steps()), 1)
         self.assertEqual(len(test_plan.Steps()), 1)
+        self.assertEqual(len(plan.Proto().network), 9)
+        self.assertEqual(len(test_plan.Proto().network), 9)
+        self.assertEqual(len(plan.Proto().execution_step), 1)
+        self.assertEqual(len(test_plan.Proto().execution_step), 1)
         self.assertEqual(plan.Steps()[0].Name(), test_plan.Steps()[0].Name())
-
         self.assertEqual(len(plan.Nets()), len(test_plan.Nets()))
         for idx in range(0, len(plan.Nets())):
             # When we create Net for test_plan, we will end up with new Net
