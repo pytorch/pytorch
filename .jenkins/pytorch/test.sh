@@ -9,11 +9,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  echo "Skipping ROCm tests for now"
-  exit 0
-fi
-
 # JIT C++ extensions require ninja.
 git clone https://github.com/ninja-build/ninja --quiet
 pushd ninja
