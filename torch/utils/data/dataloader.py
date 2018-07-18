@@ -111,17 +111,12 @@ def _worker_loop(dataset, index_queue, data_queue, collate_fn, seed, init_fn, wo
             del samples
 
 
-def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
+def _worker_manager_loop(in_queue, out_queue, pin_memory, device_id):
     if pin_memory:
         torch.cuda.set_device(device_id)
 
     while True:
-        try:
-            r = in_queue.get()
-        except Exception:
-            if done_event.is_set():
-                return
-            raise
+        r = in_queue.get()
         if r is None:
             break
         if isinstance(r[1], ExceptionWrapper):
@@ -242,7 +237,6 @@ class _DataLoaderIter(object):
         self.num_workers = loader.num_workers
         self.pin_memory = loader.pin_memory and torch.cuda.is_available()
         self.timeout = loader.timeout
-        self.done_event = threading.Event()
 
         self.sample_iter = iter(self.batch_sampler)
 
@@ -277,7 +271,7 @@ class _DataLoaderIter(object):
                     maybe_device_id = None
                 self.worker_manager_thread = threading.Thread(
                     target=_worker_manager_loop,
-                    args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
+                    args=(self.worker_result_queue, self.data_queue, self.pin_memory,
                           maybe_device_id))
                 self.worker_manager_thread.daemon = True
                 self.worker_manager_thread.start()
@@ -369,24 +363,10 @@ class _DataLoaderIter(object):
         try:
             if not self.shutdown:
                 self.shutdown = True
-                self.done_event.set()
                 for q in self.index_queues:
+                    q.shutdown()
                     q.put(None)
-                # if some workers are waiting to put, make place for them
-                try:
-                    while not self.worker_result_queue.empty():
-                        self.worker_result_queue.get()
-                except (FileNotFoundError, ImportError):
-                    # Many weird errors can happen here due to Python
-                    # shutting down. These are more like obscure Python bugs.
-                    # FileNotFoundError can happen when we rebuild the fd
-                    # fetched from the queue but the socket is already closed
-                    # from the worker side.
-                    # ImportError can happen when the unpickler loads the
-                    # resource from `get`.
-                    pass
-                # done_event should be sufficient to exit worker_manager_thread,
-                # but be safe here and put another None
+                self.worker_result_queue.shutdown()
                 self.worker_result_queue.put(None)
         finally:
             # removes pids no matter what
