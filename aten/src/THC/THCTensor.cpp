@@ -182,7 +182,7 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
       THError("Tensor: invalid null storage");
     }
     auto scalar_type = self->storage->scalar_type;
-    THCStorage_free(state, self->storage);
+    THStorage_free(self->storage);
 
     if(storage)
     {

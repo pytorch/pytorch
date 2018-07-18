@@ -8,49 +8,6 @@
 #include "generic/THCStorage.cpp"
 #include "THCGenerateAllTypes.h"
 
-THCStorage* THCStorage_new(THCState *state, at::ScalarType scalar_type)
-{
-  return THCStorage_newWithSize(state, scalar_type, 0);
-}
-
-THCStorage* THCStorage_newWithSize(THCState *state, at::ScalarType scalar_type, ptrdiff_t size)
-{
-  return THCStorage_newWithAllocator(
-    state, scalar_type, size,
-    state->cudaDeviceAllocator);
-}
-
-THCStorage* THCStorage_newWithAllocator(THCState *state,
-                                        at::ScalarType scalar_type,
-                                        ptrdiff_t size,
-                                        at::Allocator* allocator)
-{
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  memset(storage, 0, sizeof(THCStorage));
-  new (&storage->refcount) std::atomic<int>(1);
-  new (&storage->weakcount) std::atomic<int>(1);
-  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->scalar_type = scalar_type;
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
-  storage->allocator = allocator;
-  storage->size = size;
-
-  at::DataPtr ptr;
-  try {
-    ptr = allocator->allocate(size * at::elementSize(scalar_type));
-  } catch(...) {
-    free(storage);
-    throw;
-  }
-  new (&storage->data_ptr) at::DataPtr(std::move(ptr));
-  return storage;
-}
-
-void THCStorage_free(THCState *state, THCStorage *storage)
-{
-  THStorage_free(storage);
-}
-
 void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 {
   THArgCheck(size >= 0, 2, "invalid size");
@@ -94,18 +51,13 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
   return storage->data_ptr.device().index();
 }
 
-THCStorage* THCStorage_newWithDataAndAllocator(
-  THCState *state, at::ScalarType scalar_type, at::DataPtr&& data, ptrdiff_t size,
-  at::Allocator *allocator) {
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  memset(storage, 0, sizeof(THCStorage));
-  storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::DataPtr(std::move(data));
-  storage->size = size;
-  new (&storage->refcount) std::atomic<int>(1);
-  new (&storage->weakcount) std::atomic<int>(1);
-  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
-  storage->allocator = allocator;
+THC_API THCStorage* THCStorage_new(
+    THCState* state,
+    at::ScalarType scalar_type) {
+  THStorage* storage = new THStorage(
+      scalar_type,
+      0,
+      state->cudaDeviceAllocator,
+      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
   return storage;
 }
