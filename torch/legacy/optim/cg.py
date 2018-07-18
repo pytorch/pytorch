@@ -1,10 +1,11 @@
 import math
 
 INFINITY = float('inf')
+NAN = float('nan')
 
 
 def sqrt_nothrow(x):
-    return math.sqrt(x) if x >= 0 else float('nan')
+    return math.sqrt(x) if x >= 0 else NAN
 
 
 def cg(opfunc, x, config, state=None):
@@ -145,7 +146,7 @@ def cg(opfunc, x, config, state=None):
             A = 6 * (f2 - f3) / z3 + 3 * (d2 + d3)
             B = 3 * (f3 - f2) - z3 * (d3 + 2 * d2)
             _denom = (B + sqrt_nothrow(B * B - A * d2 * z3 * z3))
-            z2 = -d2 * z3 * z3 / _denom if _denom != 0 else float('nan')
+            z2 = -d2 * z3 * z3 / _denom if _denom != 0 else NAN
 
             if z2 != z2 or z2 == INFINITY or z2 == -INFINITY or z2 < 0:
                 if limit < -0.5:

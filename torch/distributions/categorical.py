@@ -1,4 +1,5 @@
 import torch
+from torch._six import nan
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.utils import probs_to_logits, logits_to_probs, lazy_property, broadcast_all
@@ -72,11 +73,11 @@ class Categorical(Distribution):
 
     @property
     def mean(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     @property
     def variance(self):
-        return self.probs.new_tensor(float('nan')).expand(self._extended_shape())
+        return self.probs.new_tensor(nan).expand(self._extended_shape())
 
     def sample(self, sample_shape=torch.Size()):
         sample_shape = self._extended_shape(sample_shape)
