@@ -21,7 +21,7 @@ IF(C_AVX2_FOUND)
 ENDIF(C_AVX2_FOUND)
 
 SET(hdr
-  THGeneral.h THHalf.h THAllocator.h THSize.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h THMath.h
+  THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h THMath.h
   THLapack.h THLogAdd.h THRandom.h THVector.h )
 
 set(ATen_TH_SRCS
@@ -86,6 +86,7 @@ INSTALL(FILES
   THMemoryFile.h
   THRandom.h
   THSize.h
+  THStorage.h
   THStorageFunctions.h
   THTensor.h
   THTensorApply.h
