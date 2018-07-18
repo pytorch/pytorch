@@ -9,6 +9,7 @@ __all__ = [
     'argmin',
     'btrifact',
     'btriunpack',
+    'isfinite',
     'isinf',
     'isnan',
     'split',
@@ -136,6 +137,25 @@ def btriunpack(LU_data, LU_pivots, unpack_data=True, unpack_pivots=True):
         P = None
 
     return P, L, U
+
+
+def isfinite(tensor):
+    r"""Returns a new tensor with boolean elements representing if each element is `Finite` or not.
+
+    Arguments:
+        tensor (Tensor): A tensor to check
+
+    Returns:
+        Tensor: A ``torch.ByteTensor`` containing a 1 at each location of finite elements and 0 otherwise
+
+    Example::
+
+        >>> torch.isfinite(torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')]))
+        tensor([ 1,  0,  1,  0,  0], dtype=torch.uint8)
+    """
+    if not isinstance(tensor, torch.Tensor):
+        raise ValueError("The argument is not a tensor", str(tensor))
+    return (tensor == tensor) & (tensor.abs() != float('inf'))
 
 
 def isinf(tensor):
