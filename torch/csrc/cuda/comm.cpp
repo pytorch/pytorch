@@ -2,7 +2,6 @@
 
 #include <torch/csrc/cuda/device_set.h>
 #include <torch/csrc/utils/tensor_flatten.h>
-#include <torch/csrc/utils/auto_stream.h>
 
 #ifdef USE_NCCL
 #include <torch/csrc/cuda/nccl.h>
@@ -159,12 +158,12 @@ std::vector<at::Tensor> scatter(
     const auto device_index = static_cast<int32_t>(devices[chunk]);
     if (streams) {
       AT_CHECK(
-          THCStream_device((*streams)[chunk]) == device_index,
+          (*streams)[chunk].device() == device_index,
           "Expected the device associated with the stream at index ",
-          chunk, " (was ", THCStream_device((*streams)[chunk]), ") ",
+          chunk, " (was ", (*streams)[chunk].device(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(CUDAStream((*streams)[chunk], /*retain=*/true));
+      cuda_guard.set_stream((*streams)[chunk]);
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::kCUDA, device_index}, /*non_blocking=*/true);
