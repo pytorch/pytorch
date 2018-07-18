@@ -4671,13 +4671,17 @@ class TestTorch(TestCase):
         self.assertEqual(neqs.long().sum(), xne.long().sum(), 0)
         self.assertEqual(x.nelement(), all.long().sum())
 
-    def test_isnan(self):
-        x = torch.Tensor([1, float('nan'), 2])
-        self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
+    def test_isfinite(self):
+        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan'), -10])
+        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
 
     def test_isinf(self):
         x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')])
         self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
+
+    def test_isnan(self):
+        x = torch.Tensor([1, float('nan'), 2])
+        self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
     def test_RNGState(self):
         state = torch.get_rng_state()
