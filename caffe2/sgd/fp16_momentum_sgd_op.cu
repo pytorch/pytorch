@@ -5,6 +5,12 @@
 
 namespace caffe2 {
 namespace {
+
+#ifdef __HIPCC__
+typedef __half half;
+typedef __half2 half2;
+#endif
+
 __global__ void FP16MomentumSGDKernel(
     int N,
     const half2* g,
