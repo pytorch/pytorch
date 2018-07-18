@@ -135,6 +135,30 @@ void check_exact_values(
   }
 }
 
+TEST_CASE("Optim/BasicInterface") {
+  struct MyOptimizer : Optimizer {
+    using Optimizer::Optimizer;
+    void step() override {}
+  };
+  std::vector<torch::Tensor> parameters = {
+      torch::ones({2, 3}), torch::zeros({2, 3}), torch::rand({2, 3})};
+  {
+    MyOptimizer optimizer(parameters);
+    REQUIRE(optimizer.size() == parameters.size());
+  }
+  {
+    MyOptimizer optimizer;
+    REQUIRE(optimizer.size() == 0);
+    optimizer.add_parameters(parameters);
+    REQUIRE(optimizer.size() == parameters.size());
+  }
+  {
+    Linear linear(3, 4);
+    MyOptimizer optimizer(linear->parameters());
+    REQUIRE(optimizer.size() == linear->parameters().size());
+  }
+}
+
 TEST_CASE("Optim/XORConvergence/SGD") {
   REQUIRE(test_optimizer_xor<SGD>(
       SGDOptions(0.1).momentum(0.9).nesterov(true).weight_decay(1e-6)));

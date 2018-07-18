@@ -718,6 +718,11 @@
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
 
+- func: inverse(Tensor self) -> Tensor
+
+- func: inverse_out(Tensor result, Tensor self) -> Tensor
+  variants: function
+
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
@@ -1096,6 +1101,9 @@
 
 - func: reshape(Tensor self, IntList shape) -> Tensor
 
+- func: reshape_as(Tensor self, Tensor other) -> Tensor
+  variants: method
+
 - func: RoiPooling2d_forward(Tensor input, Tensor rois, int64_t pooledHeight, int64_t pooledWidth, double spatialScale) -> (Tensor, Tensor)
   variants: function
   dispatch:
@@ -1250,9 +1258,14 @@
 - func: stack_out(Tensor result, TensorList tensors, int64_t dim=0) -> Tensor
   variants: function
 
-- func: stft(Tensor self, int64_t frame_length, int64_t hop, int64_t fft_size, bool normalized=false, bool onesided=true, Tensor? window={}, int64_t pad_end=0) -> Tensor
+# The signature is designed to be consistent with librosa except that it is
+# missing the `pad_mode` and `center` arguments, which are taken care of at
+# `torch.functional.py`. They shall be moved here once we have mapping between
+# Python strings and C++ Enum in codegen.
+- func: stft(Tensor self, int64_t n_fft, int64_t hop_length, int64_t win_length, Tensor? window={}, bool normalized=false, bool onesided=true) -> Tensor
   python_default_init:
-    fft_size: frame_length
+    hop_length: n_fft >> 2
+    win_length: n_fft
 
 - func: stride(Tensor self, int64_t dim) -> int64_t
   device_guard: false

@@ -39,7 +39,8 @@ kernel_pointwise_flip_apply2(const cuda::detail::TensorInfo<scalar_t, IndexType>
 
 template <typename scalar_t>
 __global__
-void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int64_t* flip_dims, int64_t flip_dims_size, int64_t* strides, int64_t* strides_contiguous, int64_t* shape, int64_t total_dims) {
+void flip_cuda_kernel(scalar_t* in_tensor, scalar_t* out_tensor, int64_t N, int64_t* flip_dims, int64_t flip_dims_size,
+                      int64_t* strides, int64_t* strides_contiguous, int64_t* shape, int64_t total_dims) {
 
   int64_t linear_index = blockIdx.x * blockDim.x + threadIdx.x;
   if (linear_index >= N) {
@@ -99,18 +100,22 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
 
   auto out_tensor = at::empty_like(in_tensor);
 
-  // stride_contiguous is the stride of non-contiguous tensor after called contiguous(), it is used to compute indices for each element in non-contiguous tensor
+  // stride_contiguous is the stride of non-contiguous tensor after calling contiguous(),
+  // it is used to compute indices for each element in non-contiguous tensor
   Tensor stride_contiguous = at::zeros({total_dims}, kLong);
   int64_t* stride_contiguous_d = stride_contiguous.data<int64_t>();
-  int64_t tmp = N;
-  for (int64_t i = 0; i < total_dims; i++) {
-    tmp = tmp / shape[i];
-    stride_contiguous_d[i] = tmp;
+  for (int64_t i = total_dims - 1; i >= 0; i--) {
+    if (i == total_dims - 1) {
+      stride_contiguous_d[i] = 1;
+    } else {
+      stride_contiguous_d[i] = std::max<int64_t>(shape[i+1], 1) * stride_contiguous_d[i + 1];
+    }
   }
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
     flip_cuda_kernel<<<dim_grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(
-      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size, strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
+      in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size,
+      strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
   });
 
   return out_tensor;
