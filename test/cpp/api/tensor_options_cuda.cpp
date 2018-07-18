@@ -111,3 +111,18 @@ TEST_CASE("DeviceGuardOptionsGuardInteraction", "[cuda]") {
     }
   }
 }
+
+TEST_CASE("DeviceGuardIsMovable", "[cuda]") {
+  DeviceGuard first(1);
+  REQUIRE(first.original_index() == 0);
+  REQUIRE(first.last_index() == 1);
+  DeviceGuard second(std::move(first));
+  REQUIRE(second.original_index() == 0);
+  REQUIRE(second.last_index() == 1);
+  REQUIRE(first.original_index() == -1);
+  DeviceGuard third;
+  third = std::move(second);
+  REQUIRE(third.original_index() == 0);
+  REQUIRE(third.last_index() == 1);
+  REQUIRE(second.original_index() == -1);
+}
