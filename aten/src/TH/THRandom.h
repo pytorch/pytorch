@@ -1,7 +1,7 @@
 #ifndef TH_RANDOM_INC
 #define TH_RANDOM_INC
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #define _MERSENNE_STATE_N 624
 #define _MERSENNE_STATE_M 397
