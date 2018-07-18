@@ -2105,16 +2105,23 @@ class TestAutograd(TestCase):
             self.assertTrue(hasattr(x, key))
 
     def test_as_strided(self):
-        # The test cases in this function should **not** resize storage because
-        # it may include nan in input and cause numerical Jacobian to have NaN.
 
-        def test(x, repro_fn, size, strides, offset=None):
-            def closure(x):
-                if repro_fn is not None:
-                    x = repro_fn(x)
-                return x.as_strided(*args)
-
+        def test(x, prepro_fn, size, strides, offset=None):
             x = x.to(torch.double).detach().requires_grad_()
+
+            # Check that forward will **not** resize storage because it may
+            # cause NaN in output and fail numerical Jacobian check consequently
+            with torch.no_grad():
+                y = prepro_fn(x) if prepro_fn is not None else x
+                max_offset = sum((si - 1) * st for si, st in zip(size, strides))
+                max_offset += offset if offset is not None else y.storage_offset()
+                assert max_offset < len(y.storage()), "test case resizes storage"
+
+            def closure(x):
+                if prepro_fn is not None:
+                    x = prepro_fn(x)
+                return x.as_strided(size, strides, offset)
+
             gradcheck(closure, [x])
             gradgradcheck(closure, [x])
 
