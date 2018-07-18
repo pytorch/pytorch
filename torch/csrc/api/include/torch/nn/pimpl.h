@@ -42,12 +42,12 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// else produces a static error. NOTE: This uses the behavior of template
   /// classes in C++ that constructors (or any methods) are only compiled when
   /// actually used.
-  ModuleHolder()  {
+  ModuleHolder() : impl_(default_construct()) {
     static_assert(
         std::is_default_constructible<Contained>::value,
         "You are trying to default construct a module which has "
         "no default constructor. Use = nullptr to give it the empty state "
-        "(like an empty std::shared_ptr).");
+        "(e.g. `Linear linear = nullptr;` instead of `Linear linear;`).");
   }
 
   /// Constructs the `ModuleHolder` with an empty contained value. Access to
@@ -135,7 +135,7 @@ class ModuleHolder : torch::detail::ModuleHolderIndicator {
   /// } else {
   ///   return nullptr;
   /// }
-  /// In C++11, we use SFINAE instead of `if contexpr`.
+  /// In C++11, we use SFINAE instead of `if constexpr`.
 
   template <
       typename T = Contained,
