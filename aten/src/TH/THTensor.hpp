@@ -81,10 +81,12 @@ struct THTensor
 #include "THGenerateAllTypes.h"
 
 inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
+  AT_ASSERT(static_cast<int64_t>(tensor->size.size()) == tensor->dim_);
   return tensor->size.data();
 }
 
 inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
+  AT_ASSERT(static_cast<int64_t>(tensor->stride.size()) == tensor->dim_);
   return tensor->stride.data();
 }
 
