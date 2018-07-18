@@ -58,7 +58,7 @@ class Queue(multiprocessing.queues.Queue):
     def shutdown(self):
         with self.sig_shutdown.get_lock():
             with self.put_lock and self.get_lock:
-                self.shutdown.value = 1
+                self.sig_shutdown.value = 1
 
     def is_shutdown(self):
         with self.sig_shutdown.get_lock():
