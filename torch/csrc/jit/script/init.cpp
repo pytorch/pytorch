@@ -387,13 +387,6 @@ void initJitScriptBindings(PyObject* module) {
     for (auto ret_type : return_types) {
       returns.push_back(Argument("", ret_type));
     }
-    // if (auto *tuple_return_type = return_type->cast<TupleType>()) {
-    //   for (auto elmt : tuple_return_type->elements()) {
-    //     returns.push_back(Argument("", elmt));
-    //   }
-    // } else {
-    //   returns.push_back(Argument("", return_type));
-    // }
 
     return TypedDef(def, FunctionSchema("", arguments, returns));
   });
