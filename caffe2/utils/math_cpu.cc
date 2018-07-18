@@ -1714,31 +1714,101 @@ DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
-template <>
-void RandUniform<float, CPUContext>(
-    const size_t n,
-    const float a,
-    const float b,
-    float* r,
-    CPUContext* context) {
-  std::uniform_real_distribution<float> distribution(a, b);
-  for (size_t i = 0; i < n; ++i) {
-    r[i] = distribution(context->RandGenerator());
+#define CAFFE2_RAND_UNIFORM_REAL(T)                                      \
+  template <>                                                            \
+  void RandUniform<T, CPUContext>(                                       \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    std::uniform_real_distribution<T> distribution(a, b);                \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = distribution(context->RandGenerator());                     \
+    }                                                                    \
   }
-}
+CAFFE2_RAND_UNIFORM_REAL(float);
+CAFFE2_RAND_UNIFORM_REAL(double);
+#undef CAFFE2_RAND_UNIFORM_REAL
 
-template <>
-void RandUniform<int, CPUContext>(
-    const size_t n,
-    const int a,
-    const int b,
-    int* r,
-    CPUContext* context) {
-  std::uniform_int_distribution<int> distribution(a, b);
-  for (size_t i = 0; i < n; ++i) {
-    r[i] = distribution(context->RandGenerator());
+#define CAFFE2_RAND_UNIFORM_CHAR(T)                                        \
+  template <>                                                              \
+  void RandUniform<T, CPUContext>(                                         \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) {   \
+    std::uniform_int_distribution<short> distribution((short)a, (short)b); \
+    for (size_t i = 0; i < n; ++i) {                                       \
+      r[i] = static_cast<T>(distribution(context->RandGenerator()));       \
+    }                                                                      \
   }
-}
+CAFFE2_RAND_UNIFORM_CHAR(int8_t);
+CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
+#undef CAFFE2_RAND_UNIFORM_CHAR
+
+#define CAFFE2_RAND_UNIFORM_INT(T)                                       \
+  template <>                                                            \
+  void RandUniform<T, CPUContext>(                                       \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    std::uniform_int_distribution<T> distribution(a, b);                 \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = distribution(context->RandGenerator());                     \
+    }                                                                    \
+  }
+
+CAFFE2_RAND_UNIFORM_INT(int16_t);
+CAFFE2_RAND_UNIFORM_INT(int32_t);
+CAFFE2_RAND_UNIFORM_INT(int64_t);
+CAFFE2_RAND_UNIFORM_INT(uint16_t);
+CAFFE2_RAND_UNIFORM_INT(uint32_t);
+CAFFE2_RAND_UNIFORM_INT(uint64_t);
+#undef CAFFE2_RAND_UNIFORM_INT
+
+// This is not uniformly distributed between a and b.
+// It takes advantage of normal distribution to generate numbers
+// with mean = sum / n.
+// Ideally the algorithm should be generating n numbers between 0 and 1,
+// sum them up as scaled_sum, and use sum / scaled_sum to adjust the values
+// to between a and b.
+// The algorithm is non-trivial given the adjustment would be different towards
+// each value.
+#define CAFFE2_RAND_FIXED_SUM(T)                                        \
+  template <>                                                           \
+  void RandFixedSum<T, CPUContext>(                                     \
+      const size_t n,                                                   \
+      const T a,                                                        \
+      const T b,                                                        \
+      const T sum,                                                      \
+      T* r,                                                             \
+      CPUContext* context) {                                            \
+    CAFFE_ENFORCE_GE(a, 0);                                             \
+    CAFFE_ENFORCE_GE(sum / (double)n, a);                               \
+    CAFFE_ENFORCE_LE(sum / (double)n, b);                               \
+    T current_sum = 0;                                                  \
+    for (size_t i = 0; i < n - 1; ++i) {                                \
+      auto remaining_numbers = n - 1 - i;                               \
+      double mean = (sum - current_sum) / remaining_numbers;            \
+      double stdev = std::min(mean - a, b - mean);                      \
+      std::normal_distribution<double> distribution{mean, stdev / 4.0}; \
+      T value = distribution(context->RandGenerator());                 \
+      auto remaining_sum = sum - current_sum - value;                   \
+      if (value < a || remaining_sum > b * remaining_numbers) {         \
+        value = a;                                                      \
+      } else if (value > b || remaining_sum < a * remaining_numbers) {  \
+        value = b;                                                      \
+      }                                                                 \
+      r[i] = value;                                                     \
+      CAFFE_ENFORCE(a <= value && value <= b);                          \
+      current_sum += value;                                             \
+    }                                                                   \
+    r[n - 1] = sum - current_sum;                                       \
+    CAFFE_ENFORCE(a <= r[n - 1] && r[n - 1] <= b);                      \
+  }
+CAFFE2_RAND_FIXED_SUM(float);
+CAFFE2_RAND_FIXED_SUM(double);
+CAFFE2_RAND_FIXED_SUM(int8_t);
+CAFFE2_RAND_FIXED_SUM(int16_t);
+CAFFE2_RAND_FIXED_SUM(int32_t);
+CAFFE2_RAND_FIXED_SUM(int64_t);
+CAFFE2_RAND_FIXED_SUM(uint8_t);
+CAFFE2_RAND_FIXED_SUM(uint16_t);
+CAFFE2_RAND_FIXED_SUM(uint32_t);
+CAFFE2_RAND_FIXED_SUM(uint64_t);
+#undef CAFFE2_RAND_FIXED_SUM
 
 #define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                      \
   template <>                                                          \
