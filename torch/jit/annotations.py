@@ -59,7 +59,7 @@ _eval_env = {
 }
 
 
-def get_signature(fn, _n_arguments=None, _n_binders=None):
+def get_signature(fn):
     # Python 3.5 adds support for the nice annotation syntax, so try that first.
     if PY35:
         sig = try_real_annotations(fn)
@@ -75,10 +75,32 @@ def get_signature(fn, _n_arguments=None, _n_binders=None):
     # This might happen both because we failed to get the source of fn, or
     # because it didn't have any annotations.
     if type_line is None:
-        # return default_signature(fn, source, _n_arguments, _n_binders)
         return None
 
     return parse_type_line(type_line)
+
+
+# This is essentially a weaker form of get_signature(), where we don't care if
+# we have the types, we just care that we can figure out how many parameters
+# a function takes.
+def get_num_params(fn):
+    try:
+        source = dedent(inspect.getsource(fn))
+    except:
+        return None
+    if source is None:
+        return None
+    py_ast = ast.parse(source)
+    if len(py_ast.body) != 1 or not isinstance(py_ast.body[0], ast.FunctionDef):
+        raise RuntimeError("expected a single top-level function")
+    py_def = py_ast.body[0]
+    if py_def.args.vararg is not None:
+        return None
+    else:
+        num_params = len(py_def.args.args)
+        if inspect.ismethod(fn):
+            num_params = num_params - 1
+        return num_params
 
 
 def flatten_return_type(type):

@@ -51,11 +51,23 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
 
   std::tuple<std::vector<TypePtr>, std::vector<TypePtr>> getArgumentTypes(size_t n_args, size_t n_binders) {
     auto annotations = py::module::import("torch.jit.annotations");
-    auto signature = annotations.attr("get_signature")(self, n_args, n_binders);
+    auto signature = annotations.attr("get_signature")(self);
     if (!signature.is_none()) {
       return py::cast<std::pair<std::vector<TypePtr>, std::vector<TypePtr>>>(signature);
     } else {
-      // Default signature
+      // Create a default signature using what information we have
+
+      // First see if we can introspect the number of function parameters
+      // irrespective of the presence of explicit type annotations
+      auto num_params = annotations.attr("get_num_params")(self);
+      if (!num_params.is_none()) {
+        // Return a signature with the correct number of params according to the
+        // Python function. The error handling in call() will catch any mismatch
+        // later.
+        n_args = py::cast<size_t>(num_params);
+      }
+      // Construct the default signature: all arguments and returns will be
+      // DynamicType
       return std::make_pair(std::vector<TypePtr>(n_args, DynamicType::get()), std::vector<TypePtr>(n_binders, DynamicType::get()));
     }
   }
