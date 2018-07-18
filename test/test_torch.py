@@ -20,8 +20,8 @@ from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
 from common import TestCase, iter_indices, TEST_NUMPY, TEST_SCIPY, TEST_MKL, \
-    run_tests, download_file, skipIfNoLapack, suppress_warnings, IS_WINDOWS, \
-    PY3, NO_MULTIPROCESSING_SPAWN, skipIfNoZeroSize
+    TEST_LIBROSA, run_tests, download_file, skipIfNoLapack, suppress_warnings, \
+    IS_WINDOWS, PY3, NO_MULTIPROCESSING_SPAWN, skipIfNoZeroSize
 from multiprocessing.reduction import ForkingPickler
 
 if TEST_NUMPY:
@@ -29,6 +29,9 @@ if TEST_NUMPY:
 
 if TEST_SCIPY:
     from scipy import signal
+
+if TEST_LIBROSA:
+    import librosa
 
 SIZE = 100
 
@@ -1905,6 +1908,12 @@ class TestTorch(TestCase):
 
         self.assertRaises(TypeError, lambda: torch.device('other'))
         self.assertRaises(TypeError, lambda: torch.device('other:0'))
+
+        device_set = {'cpu', 'cpu:0', 'cuda', 'cuda:0', 'cuda:1', 'cuda:10', 'cuda:100'}
+        device_hash_set = set()
+        for device in list(device_set):
+            device_hash_set.add(hash(torch.device(device)))
+        self.assertEqual(len(device_set), len(device_hash_set))
 
     def test_tensor_device(self):
         def assertEqual(device_str, fn):
@@ -4455,106 +4464,61 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_stft(self, device='cpu'):
-        def naive_stft(x, frame_length, hop, fft_size=None, normalized=False,
-                       onesided=True, window=None, pad_end=0):
-            if fft_size is None:
-                fft_size = frame_length
-            x = x.clone()
+        if not TEST_LIBROSA:
+            raise unittest.SkipTest('librosa not found')
+
+        def librosa_stft(x, n_fft, hop_length, win_length, window, center):
             if window is None:
-                window = x.new_ones(frame_length)
+                window = np.ones(n_fft if win_length is None else win_length)
             else:
-                window = window.clone()
+                window = window.cpu().numpy()
             input_1d = x.dim() == 1
             if input_1d:
                 x = x.view(1, -1)
-            batch = x.size(0)
-            if pad_end > 0:
-                x_pad = x.new(batch, pad_end).fill_(0)
-                x = torch.cat([x, x_pad], 1)
-            length = x.size(1)
-            if TEST_NUMPY and TEST_SCIPY:
-                sp_result = signal.stft(
-                    x,
-                    nperseg=frame_length,
-                    noverlap=frame_length - hop,
-                    window=window,
-                    nfft=fft_size,
-                    return_onesided=onesided,
-                    boundary=None,
-                    padded=False,
-                )[2].transpose((0, 2, 1)) * np.abs(window.sum().item())
-                result = torch.Tensor(np.stack([sp_result.real, sp_result.imag], -1))
-            else:
-                if onesided:
-                    return_size = int(fft_size / 2) + 1
-                else:
-                    return_size = fft_size
-                result = x.new(batch, int((length - frame_length) / float(hop)) + 1, return_size, 2)
-                for w in range(return_size):  # freq
-                    radians = torch.arange(float(frame_length)) * w * 2 * math.pi / fft_size
-                    radians = radians.type_as(x)
-                    re_kernel = radians.cos().mul_(window)
-                    im_kernel = -radians.sin().mul_(window)
-                    for b in range(batch):
-                        for i, t in enumerate(range(0, length - frame_length + 1, hop)):
-                            seg = x[b, t:(t + frame_length)]
-                            re = seg.dot(re_kernel)
-                            im = seg.dot(im_kernel)
-                            result[b, i, w, 0] = re
-                            result[b, i, w, 1] = im
-            if normalized:
-                result /= frame_length ** 0.5
+            result = []
+            for xi in x:
+                ri = librosa.stft(xi.cpu().numpy(), n_fft, hop_length, win_length, window, center=center)
+                result.append(torch.from_numpy(np.stack([ri.real, ri.imag], -1)))
+            result = torch.stack(result, 0)
             if input_1d:
                 result = result[0]
             return result
 
-        def _test(sizes, frame_length, hop, fft_size=None, normalized=False,
-                  onesided=True, window_sizes=None, pad_end=0, expected_error=None):
+        def _test(sizes, n_fft, hop_length=None, win_length=None, win_sizes=None,
+                  center=True, expected_error=None):
             x = torch.randn(*sizes, device=device)
-            if window_sizes is not None:
-                window = torch.randn(*window_sizes, device=device)
+            if win_sizes is not None:
+                window = torch.randn(*win_sizes, device=device)
             else:
                 window = None
             if expected_error is None:
-                result = x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end)
-                ref_result = naive_stft(x, frame_length, hop, fft_size, normalized, onesided, window, pad_end)
-                self.assertEqual(result.data, ref_result, 7e-6, 'stft result')
+                result = x.stft(n_fft, hop_length, win_length, window, center=center)
+                ref_result = librosa_stft(x, n_fft, hop_length, win_length, window, center)
+                self.assertEqual(result, ref_result, 7e-6, 'stft comparison against librosa')
             else:
                 self.assertRaises(expected_error,
-                                  lambda: x.stft(frame_length, hop, fft_size, normalized, onesided, window, pad_end))
+                                  lambda: x.stft(n_fft, hop_length, win_length, window, center=center))
 
-        _test((2, 5), 4, 2, pad_end=1)
-        _test((4, 150), 90, 45, pad_end=0)
-        _test((10,), 7, 2, pad_end=0)
-        _test((10, 4000), 1024, 512, pad_end=0)
+        for center in [True, False]:
+            _test((10,), 7, center=center)
+            _test((10, 4000), 1024, center=center)
 
-        _test((2, 5), 4, 2, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, window_sizes=(1024,), pad_end=0)
+            _test((10,), 7, 2, center=center)
+            _test((10, 4000), 1024, 512, center=center)
 
-        _test((2, 5), 4, 2, fft_size=5, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, window_sizes=(1024,), pad_end=0)
+            _test((10,), 7, 2, win_sizes=(7,), center=center)
+            _test((10, 4000), 1024, 512, win_sizes=(1024,), center=center)
 
-        _test((2, 5), 4, 2, fft_size=5, onesided=False, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, onesided=False, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, onesided=False, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, onesided=False, window_sizes=(1024,), pad_end=0)
-
-        _test((2, 5), 4, 2, fft_size=5, normalized=True, onesided=False, window_sizes=(4,), pad_end=1)
-        _test((4, 150), 90, 45, fft_size=100, normalized=True, onesided=False, window_sizes=(90,), pad_end=0)
-        _test((10,), 7, 2, fft_size=33, normalized=True, onesided=False, window_sizes=(7,), pad_end=0)
-        _test((10, 4000), 1024, 512, fft_size=1500, normalized=True, onesided=False, window_sizes=(1024,), pad_end=0)
+            # spectral oversample
+            _test((10,), 7, 2, win_length=5, center=center)
+            _test((10, 4000), 1024, 512, win_length=100, center=center)
 
         _test((10, 4, 2), 1, 1, expected_error=RuntimeError)
-        _test((10,), 11, 1, expected_error=RuntimeError)
-        _test((10,), 0, 1, pad_end=4, expected_error=RuntimeError)
-        _test((10,), 15, 1, pad_end=4, expected_error=RuntimeError)
-        _test((10,), 5, -4, expected_error=RuntimeError)
-        _test((10,), 5, 4, window_sizes=(11,), expected_error=RuntimeError)
-        _test((10,), 5, 4, window_sizes=(1, 1), expected_error=RuntimeError)
+        _test((10,), 11, 1, center=False, expected_error=RuntimeError)
+        _test((10,), -1, 1, expected_error=RuntimeError)
+        _test((10,), 3, win_length=5, expected_error=RuntimeError)
+        _test((10,), 5, 4, win_sizes=(11,), expected_error=RuntimeError)
+        _test((10,), 5, 4, win_sizes=(1, 1), expected_error=RuntimeError)
 
     def test_stft(self):
         self._test_stft(self)
@@ -4707,13 +4671,17 @@ class TestTorch(TestCase):
         self.assertEqual(neqs.long().sum(), xne.long().sum(), 0)
         self.assertEqual(x.nelement(), all.long().sum())
 
-    def test_isnan(self):
-        x = torch.Tensor([1, float('nan'), 2])
-        self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
+    def test_isfinite(self):
+        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan'), -10])
+        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
 
     def test_isinf(self):
         x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')])
         self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
+
+    def test_isnan(self):
+        x = torch.Tensor([1, float('nan'), 2])
+        self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
     def test_RNGState(self):
         state = torch.get_rng_state()
@@ -6031,6 +5999,11 @@ class TestTorch(TestCase):
             self.assertEqual(empty.reshape([1, -1]).shape, (0,))
         self.assertRaises(RuntimeError, lambda: empty.reshape(1))
 
+        x = torch.randn(3, 3)
+        self.assertEqual(x.data_ptr(), x.reshape_as(torch.rand(9)).data_ptr())
+        self.assertEqual(x.data_ptr(), x.reshape_as(torch.rand(1, 9, 1)).data_ptr())
+        self.assertRaises(RuntimeError, lambda: x.reshape_as(torch.rand(10)))
+
     @skipIfNoZeroSize
     def test_empty_reshape(self):
         x = torch.randn(0, 6)
@@ -6105,6 +6078,230 @@ class TestTorch(TestCase):
             # how split handles that case generally (when no 0s are involved).
             self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 1, dim=0)])
             self.assertEqual([(0, 1, 3, 0)], [z.shape for z in torch.split(x, 0, dim=0)])
+
+    # functions that operate over a dimension but don't reduce.
+    @skipIfNoZeroSize
+    def test_dim_function_empty(self):
+        # FIXME: enable CUDA tests.
+        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            shape = (0, 1, 2, 0)
+            x = torch.randn(shape, device=device)
+
+            # size stride
+            self.assertEqual(0, x.size(3))
+            self.assertEqual(2, x.size(2))
+            self.assertEqual(2, x.stride(0))
+            self.assertEqual(1, x.stride(2))
+
+            self.assertEqual(x, torch.nn.functional.glu(x, 0))
+            self.assertEqual((0, 1, 1, 0), torch.nn.functional.glu(x, 2).shape)
+
+            # softmax, logsoftmax
+            self.assertEqual(x, torch.nn.functional.softmax(x, 0))
+            self.assertEqual(x, torch.nn.functional.softmax(x, 2))
+
+            self.assertEqual(x, torch.nn.functional.log_softmax(x, 0))
+            self.assertEqual(x, torch.nn.functional.log_softmax(x, 2))
+
+            # cumsum, cumprod
+            self.assertEqual(shape, torch.cumsum(x, 0).shape)
+            self.assertEqual(shape, torch.cumsum(x, 2).shape)
+            self.assertEqual(shape, torch.cumprod(x, 0).shape)
+            self.assertEqual(shape, torch.cumprod(x, 2).shape)
+
+            # flip
+            self.assertEqual(x, x.flip(0))
+            self.assertEqual(x, x.flip(2))
+
+            # unbind
+            self.assertEqual((), x.unbind(0))
+            self.assertEqual((torch.empty((0, 1, 0), device=device), torch.empty((0, 1, 0), device=device)),
+                             x.unbind(2))
+
+            # cross
+            y = torch.randn((0, 1, 3, 0), device=device)
+            self.assertEqual(y.shape, torch.cross(y, y).shape)
+
+            # renorm
+            self.assertEqual(shape, torch.renorm(x, 1, 0, 5).shape)
+            self.assertEqual(shape, torch.renorm(x, 1, 2, 5).shape)
+
+            # sort
+            self.assertEqual([shape, shape], [z.shape for z in torch.sort(x, dim=0)])
+            self.assertEqual([shape, shape], [z.shape for z in torch.sort(x, dim=2)])
+
+            # topk
+            self.assertEqual([shape, shape], [z.shape for z in torch.topk(x, 0, dim=0)])
+            self.assertEqual([(0, 1, 1, 0), (0, 1, 1, 0)], [z.shape for z in torch.topk(x, 1, dim=2)])
+
+            y = torch.randn((2, 3, 4), device=device)
+            self.assertEqual([(2, 3, 0), (2, 3, 0)], [z.shape for z in torch.topk(y, 0)])
+
+            # gather
+            self.assertEqual(shape, torch.gather(x, 0, torch.empty(shape, dtype=torch.int64)).shape)
+            self.assertEqual(shape, torch.gather(x, 2, torch.empty(shape, dtype=torch.int64)).shape)
+            larger_shape = (0, 1, 3, 0)
+            self.assertEqual(larger_shape, torch.gather(x, 2, torch.empty(larger_shape, dtype=torch.int64)).shape)
+            smaller_shape = (0, 1, 0, 0)
+            self.assertEqual(smaller_shape, torch.gather(x, 2, torch.empty(smaller_shape, dtype=torch.int64)).shape)
+            y = torch.randn((2, 3, 4), device=device)
+            self.assertEqual((0, 3, 4), torch.gather(y, 0, torch.empty((0, 3, 4), dtype=torch.int64)).shape)
+
+            # scatter, scatter_add
+            for dim in [0, 2]:
+                y = torch.randn(shape, device=device)
+                y_src = torch.randn(shape, device=device)
+                self.assertEqual(shape, y.scatter_(dim, torch.empty(shape, dtype=torch.int64), y_src).shape)
+                self.assertEqual(shape, y.scatter_add_(dim, torch.empty(shape, dtype=torch.int64), y_src).shape)
+
+            z = torch.randn((2, 3, 4), device=device)
+            z_src = torch.randn((2, 3, 4), device=device)
+            self.assertEqual(z, z.scatter_(2, torch.empty((2, 3, 0), dtype=torch.int64), z_src))
+            self.assertEqual(z, z.scatter_add_(2, torch.empty((2, 3, 0), dtype=torch.int64), z_src))
+
+            # index_fill, index_copy, index_add
+            c = x.clone()
+            ind_empty = torch.tensor([], dtype=torch.int64)
+            ind_01 = torch.tensor([0, 1], dtype=torch.int64)
+            self.assertEqual(c, c.index_fill_(0, ind_empty, -1))
+            self.assertEqual(c, c.index_fill_(2, ind_empty, -1))
+            self.assertEqual(c, c.index_fill_(2, torch.tensor([0, 1], dtype=torch.int64), -1))
+            self.assertEqual(c, c.index_copy_(0, ind_empty, torch.empty((0, 1, 2, 0), device=device)))
+            self.assertEqual(c, c.index_copy_(2, ind_empty, torch.empty((0, 1, 0, 0), device=device)))
+            self.assertEqual(c, c.index_copy_(2, ind_01, torch.empty((0, 1, 2, 0), device=device)))
+            self.assertEqual(c, c.index_add_(0, ind_empty, torch.empty((0, 1, 2, 0), device=device)))
+            self.assertEqual(c, c.index_add_(2, ind_empty, torch.empty((0, 1, 0, 0), device=device)))
+            self.assertEqual(c, c.index_add_(2, ind_01, torch.empty((0, 1, 2, 0), device=device)))
+
+            # index fill/copy/add non-empty
+            z = torch.randn((2, 3, 4), device=device)
+            self.assertEqual(z, z.index_fill_(0, ind_empty, -1))
+            z = torch.randn((2, 3, 4), device=device)
+            self.assertEqual(z, z.index_copy_(0, ind_empty, torch.empty((0, 3, 4), device=device)))
+            z = torch.randn((2, 3, 4), device=device)
+            self.assertEqual(z, z.index_add_(0, ind_empty, torch.empty((0, 3, 4), device=device)))
+
+            # index_select
+            self.assertEqual(x, x.index_select(0, ind_empty))
+            self.assertEqual((0, 1, 0, 0), x.index_select(2, ind_empty).shape)
+            self.assertEqual(x, x.index_select(2, ind_01))
+            z = torch.randn((2, 3, 4), device=device)  # non-empty
+            self.assertEqual((0, 3, 4), z.index_select(0, ind_empty).shape)
+
+    @skipIfNoZeroSize
+    def test_blas_empty(self):
+        # FIXME: enable CUDA tests.
+        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+
+            def fn(torchfn, *args):
+                return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
+                                      for shape in args))
+
+            # mm, addmm
+            self.assertEqual((0, 0), fn(torch.mm, (0, 0), (0, 0)).shape)
+            self.assertEqual((0, 5), fn(torch.mm, (0, 0), (0, 5)).shape)
+            self.assertEqual((5, 0), fn(torch.mm, (5, 0), (0, 0)).shape)
+            self.assertEqual((3, 0), fn(torch.mm, (3, 2), (2, 0)).shape)
+            self.assertEqual(torch.zeros((5, 6), device=device), fn(torch.mm, (5, 0), (0, 6)))
+
+            self.assertEqual((0, 0), fn(torch.addmm, (0, 0), (0, 0), (0, 0)).shape)
+            self.assertEqual((5, 6), fn(torch.addmm, (5, 6), (5, 0), (0, 6)).shape)
+
+            # mv, addmv
+            self.assertEqual((0,), fn(torch.mv, (0, 0), (0,)).shape)
+            self.assertEqual((0,), fn(torch.mv, (0, 2), (2,)).shape)
+            self.assertEqual(torch.zeros((3,), device=device), fn(torch.mv, (3, 0), (0,)))
+
+            self.assertEqual((0,), fn(torch.addmv, (0,), (0, 0), (0,)).shape)
+            self.assertEqual((3,), fn(torch.addmv, (3,), (3, 0), (0,)).shape)
+
+            # ger, addr
+            self.assertEqual((0, 0), fn(torch.ger, (0,), (0,)).shape)
+            self.assertEqual((5, 0), fn(torch.ger, (5,), (0,)).shape)
+            self.assertEqual((0, 4), fn(torch.ger, (0,), (4,)).shape)
+
+            self.assertEqual((0, 0), fn(torch.addr, (0, 0), (0,), (0,)).shape)
+            self.assertEqual((5, 0), fn(torch.addr, (5, 0), (5,), (0,)).shape)
+            self.assertEqual((0, 4), fn(torch.addr, (0, 4), (0,), (4,)).shape)
+
+            # bmm, baddbmm
+            self.assertEqual((0, 0, 0), fn(torch.bmm, (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((3, 0, 5), fn(torch.bmm, (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((0, 5, 6), fn(torch.bmm, (0, 5, 0), (0, 0, 6)).shape)
+            self.assertEqual(torch.zeros((3, 5, 6), device=device), fn(torch.bmm, (3, 5, 0), (3, 0, 6)))
+
+            self.assertEqual((0, 0, 0), fn(torch.baddbmm, (0, 0, 0), (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((3, 0, 5), fn(torch.baddbmm, (3, 0, 5), (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((0, 5, 6), fn(torch.baddbmm, (0, 5, 6), (0, 5, 0), (0, 0, 6)).shape)
+            self.assertEqual((3, 5, 6), fn(torch.baddbmm, (3, 5, 6), (3, 5, 0), (3, 0, 6)).shape)
+
+            # addbmm
+            self.assertEqual((0, 0), fn(torch.addbmm, (0, 0), (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((0, 5), fn(torch.addbmm, (0, 5), (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((5, 6), fn(torch.addbmm, (5, 6), (0, 5, 0), (0, 0, 6)).shape)
+
+            # matmul
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.matmul, (0,), (0,)))
+            self.assertEqual((0, 0), fn(torch.matmul, (0, 0), (0, 0)).shape)
+            self.assertEqual((0, 0, 0), fn(torch.matmul, (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((5, 0, 0), fn(torch.matmul, (5, 0, 0), (5, 0, 0)).shape)
+            self.assertEqual(torch.zeros((5, 3, 4), device=device), fn(torch.matmul, (5, 3, 0), (5, 0, 4)))
+
+            # dot
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
+
+    @skipIfNoZeroSize
+    @skipIfNoLapack
+    def test_lapack_empty(self):
+        # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
+        # The LAPACK functions themselves generally do NOT work with zero sized dimensions, although
+        # numpy/sci often has a direct wrapper (e.g. lu_factor) and a wrapper that "does the right thing"
+        # (e.g. lu).  We often name our functions identically to the lapack function, so it will take work
+        # to name / migrate-to better wrappers.
+
+        # FIXME: enable CUDA tests.
+        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+
+            def fn(torchfn, *args):
+                return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
+                                      for shape in args))
+
+            # inverse, pinverse
+            self.assertEqual((0, 0), fn(torch.inverse, (0, 0)).shape)
+            self.assertEqual((5, 0), fn(torch.pinverse, (0, 5)).shape)
+            self.assertEqual((0, 5), fn(torch.pinverse, (5, 0)).shape)
+            self.assertEqual((0, 0), fn(torch.pinverse, (0, 0)).shape)
+
+            # svd
+            self.assertRaises(RuntimeError, lambda: fn(torch.svd, (0, 0)))
+
+            # det, logdet, slogdet
+            self.assertEqual(torch.tensor(1., device=device), fn(torch.det, (0, 0)))
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.logdet, (0, 0)))
+            self.assertEqual((torch.tensor(1., device=device), torch.tensor(0., device=device)),
+                             fn(torch.slogdet, (0, 0)))
+
+            # eig, symeig
+            evalues, evectors = fn(torch.eig, (0, 0), True)
+            self.assertEqual([(0, 2), (0, 0)], [evalues.shape, evectors.shape])
+            evalues, evectors = fn(torch.symeig, (0, 0), True)
+            self.assertEqual([(0,), (0, 0)], [evalues.shape, evectors.shape])
+
+            # qr, gels
+            self.assertRaises(RuntimeError, lambda: torch.qr(torch.randn(0, 0)))
+            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0, 0), torch.randn(0, 0)))
+            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0,), torch.randn(0, 0)))
+
+            # btrifact
+            A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)

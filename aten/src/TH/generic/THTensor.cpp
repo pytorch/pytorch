@@ -61,34 +61,18 @@ real *THTensor_(data)(const THTensor *self)
     return NULL;
 }
 
-void THTensor_(setFlag)(THTensor *self, const char flag)
-{
-  self->flag |= flag;
-}
-
-void THTensor_(clearFlag)(THTensor *self, const char flag)
-{
-  self->flag &= ~flag;
-}
-
 /**** creation methods ****/
-
-static void THTensor_(rawInit)(THTensor *self);
-
 
 /* Empty init */
 THTensor *THTensor_(new)(void)
 {
-  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
-  THTensor_(rawInit)(self);
-  return self;
+  return new THTensor(THStorage_(new)());
 }
 
 /* Pointer-copy init */
 THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
-  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
-  THTensor_(rawInit)(self);
+  THTensor *self = new THTensor(THStorage_(new)());
   THTensor_(setStorageNd)(self,
                           tensor->storage,
                           tensor->storageOffset,
@@ -101,13 +85,12 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 /* Storage init */
 THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, THLongStorage *size, THLongStorage *stride)
 {
-  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
   if(size && stride) {
     THArgCheck(size->size == stride->size, 4, "inconsistent size");
   }
-
   AT_CHECK(size, "size must not be null");
-  THTensor_(rawInit)(self);
+
+  THTensor *self = new THTensor(THStorage_(new)());
 #ifdef DEBUG
   THAssert(size->size <= INT_MAX);
 #endif
@@ -123,8 +106,7 @@ THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset,
 
 THTensor *THTensor_(newWithStorageIntLists)(THStorage *storage, ptrdiff_t storageOffset, at::IntList sizes, at::IntList strides) {
   AT_CHECK(sizes.size() == strides.size(), "number of sizes and strides must match");
-  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
-  THTensor_(rawInit)(self);
+  THTensor *self = new THTensor(THStorage_(new)());
   THTensor_(setStorageNd)(self, storage, storageOffset, sizes.size(),
                           const_cast<int64_t*>(sizes.data()), const_cast<int64_t*>(strides.data()));
 
@@ -169,8 +151,7 @@ THTensor *THTensor_(newWithSize)(THLongStorage *size, THLongStorage *stride)
 }
 
 THTensor *THTensor_(newWithSizeIntList)(at::IntList sizes) {
-  THTensor *self = (THTensor *)THAlloc(sizeof(THTensor));
-  THTensor_(rawInit)(self);
+  THTensor *self = new THTensor(THStorage_(new)());
   THTensor_(resizeNd)(self, sizes.size(), const_cast<int64_t*>(sizes.data()), nullptr);
 
   return self;
@@ -418,8 +399,12 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   if(!src)
     src = self;
 
-#ifndef USE_TH_SCALAR
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(src->_dim() > 1, 1, "cannot select on a vector");
+#else
+#ifndef USE_TH_SCALAR
+  THArgCheck(src->dim() > 1, 1, "cannot select on a vector");
+#endif
 #endif
   THArgCheck((dimension >= 0) && (dimension < src->dim()), 2, "out of range");
   THArgCheck((sliceIndex >= 0) && (sliceIndex < src->size[dimension]), 3, "out of range");
@@ -441,8 +426,8 @@ void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dim
   if(!src)
     src = self;
 
-  THArgCheck( (dimension1 >= 0) && (dimension1 < src->_dim()), 1, "out of range");
-  THArgCheck( (dimension2 >= 0) && (dimension2 < src->_dim()), 2, "out of range");
+  THArgCheck( (dimension1 >= 0) && (dimension1 < src->dim()), 1, "out of range");
+  THArgCheck( (dimension2 >= 0) && (dimension2 < src->dim()), 2, "out of range");
 
   THTensor_(set)(self, src);
 
@@ -697,8 +682,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
 
 void THTensor_(retain)(THTensor *self)
 {
-  if(self->flag & TH_TENSOR_REFCOUNTED)
-    ++self->refcount;
+  ++self->refcount;
 }
 
 void THTensor_(free)(THTensor *self)
@@ -715,19 +699,6 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 }
 
 /*******************************************************************************/
-
-static void THTensor_(rawInit)(THTensor *self)
-{
-  new (&self->refcount) std::atomic<int>(1);
-  self->storage = THStorage_(new)();
-  self->storageOffset = 0;
-  self->size = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
-  self->stride = static_cast<int64_t *>(THAlloc(sizeof(int64_t)));
-  self->size[0] = 0;
-  self->stride[0] = 1;
-  self->dim_ = 1;
-  self->flag = TH_TENSOR_REFCOUNTED;
-}
 
 void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
 {

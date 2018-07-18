@@ -314,9 +314,15 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   int64_t *index_data;
   real *tensor_data, *src_data;
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(index->_dim() <= 1, 3, "Index is supposed to be an empty tensor or a vector");
   THArgCheck(dim < src->_dim(), 4, "Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
   THArgCheck(src->_dim() > 0, 2, "Source tensor is empty");
+#else
+  THArgCheck(index->dim() == 1, 3, "Index is supposed to be 1-dimensional");
+  THArgCheck(dim < src->dim(), 4, "Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+  //THArgCheck(src->dim() > 0, 2, "Source tensor is empty");
+#endif
 
   numel = THLongTensor_nElement(index);
 
@@ -336,7 +342,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
   {
     tensor_data = THTensor_(data)(tensor);
     src_data = THTensor_(data)(src);
-    ptrdiff_t rowsize = THTensor_(nElement)(src) / src->size[0];
+    ptrdiff_t rowsize = src->size[0] == 0 ? 1: THTensor_(nElement)(src) / src->size[0];
 
     // check that the indices are within range
     int64_t max = src->size[0] - 1 + TH_INDEX_BASE;
@@ -347,7 +353,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
       }
     }
 
-    if (src->_dim() == 1) {
+    if (src->dim() == 1) {
       #pragma omp parallel for if(numel > TH_OMP_OVERHEAD_THRESHOLD) private(i)
       for (i=0; i<numel; i++)
         tensor_data[i] = src_data[index_data[i] - TH_INDEX_BASE];
@@ -357,7 +363,7 @@ void THTensor_(indexSelect)(THTensor *tensor, THTensor *src, int dim, THLongTens
         memcpy(tensor_data + i*rowsize, src_data + (index_data[i] - TH_INDEX_BASE)*rowsize, rowsize*sizeof(real));
     }
   }
-  else if (src->_dim() == 1)
+  else if (src->dim() == 1)
   {
     for (i=0; i<numel; i++)
       THTensor_(set1d)(tensor,i,THTensor_(get1d)(src,index_data[i] - TH_INDEX_BASE));
@@ -392,7 +398,7 @@ void THTensor_(indexCopy)(THTensor *tensor, int dim, THLongTensor *index, THTens
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
 
-  if (tensor->_dim() > 1 )
+  if (tensor->dim() > 1 )
   {
     tSlice = THTensor_(new)();
     sSlice = THTensor_(new)();
@@ -513,14 +519,19 @@ void THTensor_(indexAdd)(THTensor *tensor, int dim, THLongTensor *index, THTenso
   int64_t *index_data;
 
   numel = THLongTensor_nElement(index);
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(index->_dim() == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < src->_dim(), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+#else
+  THArgCheck(index->dim() == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < src->dim(), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+#endif
   THArgCheck(numel == src->size[dim],4,"Number of indices should be equal to source:size(dim)");
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
 
-  if (tensor->_dim() > 1)
+  if (tensor->dim() > 1)
   {
     tSlice = THTensor_(new)();
     sSlice = THTensor_(new)();
@@ -554,15 +565,20 @@ void THTensor_(indexFill)(THTensor *tensor, int dim, THLongTensor *index, real v
   int64_t *index_data;
 
   numel = THLongTensor_nElement(index);
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(index->_dim() == 1, 3, "Index is supposed to be a vector");
   THArgCheck(dim < tensor->_dim(), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+#else
+  THArgCheck(index->dim() == 1, 3, "Index is supposed to be a vector");
+  THArgCheck(dim < tensor->dim(), 4,"Indexing dim %d is out of bounds of tensor", dim + TH_INDEX_BASE);
+#endif
 
   index = THLongTensor_newContiguous(index);
   index_data = THLongTensor_data(index);
 
   for (i=0; i<numel; i++)
   {
-    if (tensor->_dim() > 1)
+    if (tensor->dim() > 1)
     {
       tSlice = THTensor_(new)();
       THTensor_(select)(tSlice, tensor,dim,index_data[i] - TH_INDEX_BASE);
@@ -581,11 +597,11 @@ void THTensor_(gather)(THTensor *tensor, THTensor *src, int dim, THLongTensor *i
 {
   int64_t elems_per_row, i, idx;
 
-  THArgCheck(THLongTensor__nDimension(index) == THTensor_(_nDimension)(src), 4,
+  THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(src), 4,
              "Index tensor must have same dimensions as input tensor");
-  THArgCheck(dim >= 0 && dim < THTensor_(_nDimension)(tensor), 3,
+  THArgCheck(dim >= 0 && dim < THTensor_(nDimension)(tensor), 3,
              "Index dimension is out of bounds");
-  THArgCheck(THTensor_(_nDimension)(src) == THTensor_(_nDimension)(tensor), 2,
+  THArgCheck(THTensor_(nDimension)(src) == THTensor_(nDimension)(tensor), 2,
              "Input tensor must have same dimensions as output tensor");
 
   elems_per_row = THLongTensor_size(index, dim);
@@ -608,11 +624,19 @@ void THTensor_(scatter)(THTensor *tensor, int dim, THLongTensor *index, THTensor
 {
   int64_t elems_per_row, i, idx;
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(dim < THTensor_(_nDimension)(tensor), 2, "Index dimension is out of bounds");
   THArgCheck(THLongTensor__nDimension(index) == THTensor_(_nDimension)(tensor), 3,
              "Index tensor must have same dimensions as output tensor");
   THArgCheck(THTensor_(_nDimension)(src) == THTensor_(_nDimension)(tensor), 4,
              "Input tensor must have same dimensions as output tensor");
+#else
+  THArgCheck(dim < THTensor_(nDimension)(tensor), 2, "Index dimension is out of bounds");
+  THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(tensor), 3,
+             "Index tensor must have same dimensions as output tensor");
+  THArgCheck(THTensor_(nDimension)(src) == THTensor_(nDimension)(tensor), 4,
+             "Input tensor must have same dimensions as output tensor");
+#endif
 
   elems_per_row = THLongTensor_size(index, dim);
 
@@ -634,10 +658,10 @@ void THTensor_(scatterAdd)(THTensor *tensor, int dim, THLongTensor *index, THTen
 {
   int64_t elems_per_row, i, idx;
 
-  THArgCheck(dim < THTensor_(_nDimension)(tensor), 2, "Index dimension is out of bounds");
-  THArgCheck(THLongTensor__nDimension(index) == THTensor_(_nDimension)(tensor), 3,
+  THArgCheck(dim < THTensor_(nDimension)(tensor), 2, "Index dimension is out of bounds");
+  THArgCheck(THLongTensor_nDimension(index) == THTensor_(nDimension)(tensor), 3,
              "Index tensor must have same dimensions as output tensor");
-  THArgCheck(THTensor_(_nDimension)(src) == THTensor_(_nDimension)(tensor), 4,
+  THArgCheck(THTensor_(nDimension)(src) == THTensor_(nDimension)(tensor), 4,
              "Input tensor must have same dimensions as output tensor");
 
   elems_per_row = THLongTensor_size(index, dim);
@@ -1931,9 +1955,9 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
 
 void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *mat, THTensor *vec)
 {
-  if( (mat->_dim() != 2) || (vec->_dim() != 1) )
+  if( (mat->dim() != 2) || (vec->dim() != 1) )
     THError("matrix and vector expected, got %dD, %dD",
-      mat->_dim(), vec->_dim());
+      mat->dim(), vec->dim());
 
   if( mat->size[1] != vec->size[0] ) {
     THDescBuff bm = THTensor_(sizeDesc)(mat);
@@ -1941,8 +1965,8 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THError("size mismatch, %s, %s", bm.str, bv.str);
   }
 
-  if(t->_dim() != 1)
-    THError("vector expected, got t: %dD", t->_dim());
+  if(t->dim() != 1)
+    THError("vector expected, got t: %dD", t->dim());
 
   if(t->size[0] != mat->size[0]) {
     THDescBuff bt = THTensor_(sizeDesc)(t);
@@ -2037,8 +2061,8 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   int free_m1 = 0;
   int free_m2 = 0;
 
-  if( (m1->_dim() != 2) || (m2->_dim() != 2))
-    THError("matrices expected, got %dD, %dD tensors", m1->_dim(), m2->_dim());
+  if( (m1->dim() != 2) || (m2->dim() != 2))
+    THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
 
   if(m1->size[1] != m2->size[0]) {
     THDescBuff bm1 = THTensor_(sizeDesc)(m1);
@@ -2046,8 +2070,8 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
   }
 
-  if( t->_dim() != 2 )
-    THError("matrix expected, got %dD tensor for t", t->_dim());
+  if( t->dim() != 2 )
+    THError("matrix expected, got %dD tensor for t", t->dim());
 
   if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -2174,12 +2198,12 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
 void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *vec1, THTensor *vec2)
 {
-  if( (vec1->_dim() != 1) || (vec2->_dim() != 1) )
+  if( (vec1->dim() != 1) || (vec2->dim() != 1) )
     THError("vector and vector expected, got %dD, %dD tensors",
-        vec1->_dim(), vec2->_dim());
+        vec1->dim(), vec2->dim());
 
-  if(t->_dim() != 2)
-    THError("expected matrix, got %dD tensor for t", t->_dim());
+  if(t->dim() != 2)
+    THError("expected matrix, got %dD tensor for t", t->dim());
 
   if( (t->size[0] != vec1->size[0]) || (t->size[1] != vec2->size[0]) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -2236,8 +2260,8 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
 {
   int64_t batch;
 
-  THArgCheck(!batch1->is_empty() && THTensor_(nDimension)(batch1) == 3, 1, "expected non-empty 3D tensor");
-  THArgCheck(!batch2->is_empty() && THTensor_(nDimension)(batch2) == 3, 2, "expected non-empty 3D tensor");
+  THArgCheck(THTensor_(nDimension)(batch1) == 3, 1, "expected 3D tensor");
+  THArgCheck(THTensor_(nDimension)(batch2) == 3, 2, "expected 3D tensor");
   THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
              THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
@@ -2277,8 +2301,8 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
 {
   int64_t batch;
 
-  THArgCheck(THTensor_(_nDimension)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(_nDimension)(batch1));
-  THArgCheck(THTensor_(_nDimension)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(_nDimension)(batch2));
+  THArgCheck(THTensor_(nDimension)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(batch1));
+  THArgCheck(THTensor_(nDimension)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimension)(batch2));
   THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
              THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
@@ -2670,7 +2694,7 @@ void THTensor_(prod)(THTensor *r_, THTensor *t, int dimension, int keepdim)
 
 void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 {
-  THArgCheck(dimension >= 0 && dimension < THTensor_(_nDimension)(t), 2, "dimension %d out of range",
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   THTensor_(resizeAs)(r_, t);
@@ -2687,7 +2711,7 @@ void THTensor_(cumsum)(THTensor *r_, THTensor *t, int dimension)
 
 void THTensor_(cumprod)(THTensor *r_, THTensor *t, int dimension)
 {
-  THArgCheck(dimension >= 0 && dimension < THTensor_(_nDimension)(t), 2, "dimension %d out of range",
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
 
   THTensor_(resizeAs)(r_, t);
@@ -2745,11 +2769,11 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
 {
   int i;
 
-  if(THTensor_(_nDimension)(a) != THTensor_(_nDimension)(b))
+  if(THTensor_(nDimension)(a) != THTensor_(nDimension)(b))
     THError("inconsistent tensor dimension %dD, %dD",
-        THTensor_(_nDimension)(a), THTensor_(_nDimension)(b));
+        THTensor_(nDimension)(a), THTensor_(nDimension)(b));
 
-  for(i = 0; i < THTensor_(_nDimension)(a); i++)
+  for(i = 0; i < THTensor_(nDimension)(a); i++)
   {
     if(THTensor_(size)(a, i) != THTensor_(size)(b, i)) {
         THDescBuff ba = THTensor_(sizeDesc)(a);
@@ -2760,7 +2784,7 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
 
   if(dimension < 0)
   {
-    for(i = 0; i < THTensor_(_nDimension)(a); i++)
+    for(i = 0; i < THTensor_(nDimension)(a); i++)
     {
       if(THTensor_(size)(a, i) == 3)
       {
@@ -2774,7 +2798,7 @@ void THTensor_(cross)(THTensor *r_, THTensor *a, THTensor *b, int dimension)
     }
   }
 
-  THArgCheck(dimension >= 0 && dimension < THTensor_(_nDimension)(a), 3, "dimension %d out of range",
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(a), 3, "dimension %d out of range",
       dimension + TH_INDEX_BASE);
   THArgCheck(THTensor_(size)(a, dimension) == 3, 3, "dimension %d does not have size 3",
       dimension + TH_INDEX_BASE);
@@ -3169,7 +3193,7 @@ static void THTensor_(quicksortdescend)(real *arr, int64_t *idx, int64_t element
 
 void THTensor_(sort)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int dimension, int descendingOrder)
 {
-  THArgCheck(dimension >= 0 && dimension < THTensor_(_nDimension)(t), 2, "invalid dimension %d",
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(t), 2, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
 
   THTensor_(resizeAs)(rt_, t);
@@ -3430,11 +3454,19 @@ void THTensor_(median)(THTensor *values_, THLongTensor *indices_, THTensor *t, i
 
 void THTensor_(topk)(THTensor *rt_, THLongTensor *ri_, THTensor *t, int64_t k, int dim, int dir, int sorted)
 {
+#ifndef USE_TH_SIZE_ZERO_DIM
   int numDims = THTensor_(_nDimension)(t);
+#else
+  int numDims = THTensor_(nDimension)(t);
+#endif
   THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
 
   int64_t sliceSize = THTensor_(size)(t, dim);
+#ifndef USE_TH_SIZE_ZERO_DIM
   THArgCheck(k > 0 && k <= sliceSize, 2, "k not in range for dimension");
+#else
+  THArgCheck(k >= 0 && k <= sliceSize, 2, "k not in range for dimension");
+#endif
 
   THTensor *tmpResults = THTensor_(new)();
   THTensor_(resize1d)(tmpResults, sliceSize);
@@ -4291,11 +4323,11 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
   int i;
   THTensor *rowR, *rowS;
 
-  THArgCheck(dimension >= 0 && dimension < THTensor_(_nDimension)(src), 3, "invalid dimension %d",
+  THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(src), 3, "invalid dimension %d",
       dimension + TH_INDEX_BASE);
   THArgCheck(value > 0, 2, "non-positive-norm not supported");
-  THArgCheck(THTensor_(_nDimension)(src) > 1, 1, "need at least 2 dimensions, got %d dimensions",
-      THTensor_(_nDimension)(src));
+  THArgCheck(THTensor_(nDimension)(src) > 1, 1, "need at least 2 dimensions, got %d dimensions",
+      THTensor_(nDimension)(src));
 
   rowR = THTensor_(new)();
   rowS = THTensor_(new)();

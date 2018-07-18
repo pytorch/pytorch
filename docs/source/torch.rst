@@ -223,6 +223,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isfinite
 .. autofunction:: isinf
 .. autofunction:: isnan
 .. autofunction:: kthvalue

@@ -3130,7 +3130,7 @@
       default: S
 ]]
 [[
-  name: inverse
+  name: _getri
   cname: getri
   types:
     - Float

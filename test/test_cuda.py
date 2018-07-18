@@ -89,11 +89,7 @@ float_types_no_half = [
 
 
 def number(floating, integer, t):
-    name = type(t).__name__
-    if 'Double' in name or 'Float' in name or 'Half' in name:
-        return floating
-    else:
-        return integer
+    return floating if is_floating(t) else integer
 
 
 def cast_tensor(tensor, t):
@@ -480,6 +476,7 @@ custom_half_precision = {
     'add': 1e-2,
     'acos': 1e-3,
     'addbmm': 1e-1,
+    'addcdiv': 1e-2,
     'addcmul': 1e-2,
     'addmm': 1e-1,
     'addmv': 1e-2,
@@ -501,6 +498,7 @@ custom_half_precision = {
     'erfinv': 1e-3,
     'exp': 1e-2,
     'expm1': 1e-2,
+    'fill': 1e-3,
     'lerp': 1e-2,
     'lgamma': 1e-2,
     'log': 1e-2,
@@ -595,7 +593,7 @@ def compare_cpu_gpu(tensor_constructor, arg_constructor, fn, t, precision=1e-5):
         gpu_tensor = to_gpu(cpu_tensor)
         cpu_args = arg_constructor(t)
         gpu_args = [to_gpu(arg) for arg in cpu_args]
-        if t.__name__ == 'HalfTensor':
+        if is_half(t):
             cpu_tensor = cpu_tensor.float()
             cpu_args = [arg.float() if isinstance(arg, torch.Tensor) and is_half(arg) else arg for arg in cpu_args]
         cpu_result = getattr(cpu_tensor, fn)(*cpu_args)
@@ -1479,11 +1477,8 @@ class TestCuda(TestCase):
         os.dup2(os.open(os.devnull, os.O_WRONLY), sys.stderr.fileno())
 
     def _spawn_method(self, method, arg):
-        try:
-            mp.set_start_method('spawn')
-        except RuntimeError:
-            pass
-        with mp.Pool(1, initializer=self.mute) as pool:
+        ctx = mp.get_context("spawn")
+        with ctx.Pool(1, initializer=self.mute) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
                 if 'device-side assert triggered' not in str(e):
@@ -1912,7 +1907,7 @@ def generate_tests():
                 continue
 
             precision = custom_precision.get(name, TestCuda.precision)
-            if t == torch.HalfTensor:
+            if is_half(t):
                 precision = custom_half_precision.get(name, precision)
 
             for inplace in (True, False):
