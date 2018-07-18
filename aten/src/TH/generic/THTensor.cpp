@@ -42,14 +42,14 @@ int64_t THTensor_(stride)(const THTensor *self, int dim)
 THLongStorage *THTensor_(newSizeOf)(THTensor *self)
 {
   THLongStorage *size = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(size, self->size);
+  THLongStorage_rawCopy(size, THTensor_getSizePtr(self));
   return size;
 }
 
 THLongStorage *THTensor_(newStrideOf)(THTensor *self)
 {
   THLongStorage *stride = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(stride, self->stride);
+  THLongStorage_rawCopy(stride, THTensor_getStridePtr(self));
   return stride;
 }
 
@@ -77,8 +77,8 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
                           tensor->storage,
                           tensor->storageOffset,
                           tensor->dim(),
-                          tensor->size,
-                          tensor->stride);
+                          THTensor_getSizePtr(tensor),
+                          THTensor_getStridePtr(tensor));
   return self;
 }
 
@@ -229,8 +229,8 @@ THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
   ptrdiff_t numel = THTensor_(nElement)(tensor);
   THTensor *self = THTensor_(new)();
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
-  auto stride = THTensor_compute_stride(at::IntList(tensor->size, tensor->dim()),
-                                        at::IntList(tensor->stride, tensor->dim()),
+  auto stride = THTensor_compute_stride(tensor->sizes(),
+                                        tensor->strides(),
                                         at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
@@ -260,7 +260,7 @@ void THTensor_(resize)(THTensor *self, THLongStorage *size, THLongStorage *strid
 void THTensor_(resizeAs)(THTensor *self, THTensor *src)
 {
   if(!THTensor_(isSameSizeAs)(self, src))
-    THTensor_(resizeNd)(self, src->dim(), src->size, NULL);
+    THTensor_(resizeNd)(self, src->dim(), THTensor_getSizePtr(src), NULL);
 }
 
 void THTensor_(resize1d)(THTensor *tensor, int64_t size0)
@@ -300,8 +300,8 @@ void THTensor_(set)(THTensor *self, THTensor *src)
                             src->storage,
                             src->storageOffset,
                             src->dim(),
-                            src->size,
-                            src->stride);
+                            THTensor_getSizePtr(src),
+                            THTensor_getStridePtr(src));
 }
 
 void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_)
@@ -416,7 +416,7 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
     self->size[d] = self->size[d+1];
     self->stride[d] = self->stride[d+1];
   }
-  self->dim_--;
+  THTensor_resizeDim(self, self->dim_ - 1);
 }
 
 void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dimension2)
@@ -444,8 +444,6 @@ void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dim
 
 void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t size, int64_t step)
 {
-  int64_t *newSize;
-  int64_t *newStride;
   int d;
 
   if(!src)
@@ -460,8 +458,8 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
 
   THTensor_(set)(self, src);
 
-  newSize = (int64_t *)THAlloc(sizeof(int64_t)*(self->dim()+1));
-  newStride = (int64_t *)THAlloc(sizeof(int64_t)*(self->dim()+1));
+  std::vector<int64_t> newSize(/* size */ self->dim()+1);
+  std::vector<int64_t> newStride(/* size */ self->dim()+1);
 
   newSize[self->dim()] = size;
   newStride[self->dim()] = self->stride[dimension];
@@ -479,12 +477,7 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
     }
   }
 
-  THFree(self->size);
-  THFree(self->stride);
-
-  self->size = newSize;
-  self->stride = newStride;
-  self->dim_++;
+  THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
 }
 
 /* we have to handle the case where the result is a number */
@@ -520,7 +513,7 @@ void THTensor_(squeeze)(THTensor *self, THTensor *src)
     ndim = 1;
   }
 #endif
-  self->dim_ = ndim;
+  THTensor_resizeDim(self, ndim);
 }
 
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
@@ -545,7 +538,7 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
       self->size[d] = self->size[d+1];
       self->stride[d] = self->stride[d+1];
     }
-    self->dim_--;
+    THTensor_resizeDim(self, self->dim_ - 1);
   }
 }
 
@@ -563,9 +556,7 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_(set)(self, src);
 
-  self->size = (int64_t*)THRealloc(self->size, sizeof(int64_t)*(self->dim()+1));
-  self->stride = (int64_t*)THRealloc(self->stride, sizeof(int64_t)*(self->dim()+1));
-  self->dim_++;
+  THTensor_resizeDim(self, self->dim() + 1);
   for (d = self->dim()-1; d > dimension; d--) {
     self->size[d] = self->size[d-1];
     self->stride[d] = self->stride[d-1];
@@ -769,9 +760,7 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
 
   if(nDimension != self->dim())
   {
-    self->size = (int64_t *)THRealloc(self->size, sizeof(int64_t)*nDimension);
-    self->stride = (int64_t *)THRealloc(self->stride, sizeof(int64_t)*nDimension);
-    self->dim_ = nDimension;
+    THTensor_resizeDim(self, nDimension);
   }
 
   totalSize = 1;

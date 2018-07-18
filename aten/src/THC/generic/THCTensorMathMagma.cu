@@ -434,7 +434,7 @@ THC_API void THCTensor_(getri)(THCState *state, THCTensor *ra_, THCTensor *a)
 
   // input
   THCTensor *input = THCTensor_(newColumnMajor)(state, a, a);
-  THCTensor_(resizeNd)(state, ra_, 2, input->size, input->stride);
+  THCTensor_(resizeNd)(state, ra_, 2, THTensor_getSizePtr(input), THTensor_getStridePtr(input));
 
   real *matrices1[1] = { THCTensor_(data)(state, input) };
   real *matrices2[1] = { THCTensor_(data)(state, ra_) };
