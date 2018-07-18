@@ -134,7 +134,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
   totalSize = 1;
   for(d = nDimension-1; d >= 0; d--)
   {
-    self->size[d] = size[d];
+    THTensor_setSizeAtDim(self, d, size[d]);
     if(stride && (stride[d] >= 0) ) {
       self->stride[d] = stride[d];
     } else {
@@ -219,7 +219,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
-      self->size[d] = self->size[d+1];
+      THTensor_setSizeAtDim(self, d, self->size[d+1]);
       self->stride[d] = self->stride[d+1];
     }
     THTensor_resizeDim(self, self->dim_ - 1);
@@ -242,7 +242,7 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
 
   THTensor_resizeDim(self, self->dim() + 1);
   for (d = self->dim()-1; d > dimension; d--) {
-    self->size[d] = self->size[d-1];
+    THTensor_setSizeAtDim(self, d, self->size[d-1]);
     self->stride[d] = self->stride[d-1];
   }
   if (dimension+1 < self->dim()) {
@@ -250,7 +250,7 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
   } else {
     self->stride[dimension] = 1;
   }
-  self->size[dimension] = 1;
+  THTensor_setSizeAtDim(self, dimension, 1);
 }
 
 bool THCTensor_isContiguous(THCState *state, const THCTensor *self) {

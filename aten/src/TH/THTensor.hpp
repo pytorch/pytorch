@@ -105,6 +105,10 @@ inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&&
   tensor->stride = std::move(new_stride);
 }
 
+inline void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size) {
+  tensor->size[dim] = new_size;
+}
+
 TH_API void THTensor_free(THTensor *self);
 at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
                                                            at::IntList newshape);

@@ -389,7 +389,7 @@ void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension, int64_t fir
   if(firstIndex > 0)
     self->storageOffset += firstIndex*self->stride[dimension];
 
-  self->size[dimension] = size;
+  THTensor_setSizeAtDim(self, dimension, size);
 }
 
 void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sliceIndex)
@@ -413,7 +413,7 @@ void THTensor_(select)(THTensor *self, THTensor *src, int dimension, int64_t sli
   THTensor_(narrow)(self, NULL, dimension, sliceIndex, 1);
   for(d = dimension; d < self->dim()-1; d++)
   {
-    self->size[d] = self->size[d+1];
+    THTensor_setSizeAtDim(self, d, self->size[d+1]);
     self->stride[d] = self->stride[d+1];
   }
   THTensor_resizeDim(self, self->dim_ - 1);
@@ -438,8 +438,8 @@ void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1, int dim
   self->stride[dimension1] = self->stride[dimension2];
   self->stride[dimension2] = z;
   z = self->size[dimension1];
-  self->size[dimension1] = self->size[dimension2];
-  self->size[dimension2] = z;
+  THTensor_setSizeAtDim(self, dimension1, self->size[dimension2]);
+  THTensor_setSizeAtDim(self, dimension2, z);
 }
 
 void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t size, int64_t step)
@@ -497,7 +497,7 @@ void THTensor_(squeeze)(THTensor *self, THTensor *src)
     {
       if(d != ndim)
       {
-        self->size[ndim] = src->size[d];
+        THTensor_setSizeAtDim(self, ndim, src->size[d]);
         self->stride[ndim] = src->stride[d];
       }
       ndim++;
@@ -508,7 +508,7 @@ void THTensor_(squeeze)(THTensor *self, THTensor *src)
   /* right now, we do not handle 0-dimension tensors */
   if(ndim == 0 && src->dim() > 0)
   {
-    self->size[0] = 1;
+    THTensor_setSizeAtDim(self, 0, 1);
     self->stride[0] = 1;
     ndim = 1;
   }
@@ -535,7 +535,7 @@ void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
-      self->size[d] = self->size[d+1];
+      THTensor_setSizeAtDim(self, d, self->size[d+1]);
       self->stride[d] = self->stride[d+1];
     }
     THTensor_resizeDim(self, self->dim_ - 1);
@@ -558,7 +558,7 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
 
   THTensor_resizeDim(self, self->dim() + 1);
   for (d = self->dim()-1; d > dimension; d--) {
-    self->size[d] = self->size[d-1];
+    THTensor_setSizeAtDim(self, d, self->size[d-1]);
     self->stride[d] = self->stride[d-1];
   }
   if (dimension+1 < self->dim()) {
@@ -566,7 +566,7 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
   } else {
     self->stride[dimension] = 1;
   }
-  self->size[dimension] = 1;
+  THTensor_setSizeAtDim(self, dimension, 1);
 }
 
 int THTensor_(isTransposed)(const THTensor *self)
@@ -766,7 +766,7 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
   totalSize = 1;
   for(d = nDimension-1; d >= 0; d--)
   {
-    self->size[d] = size[d];
+    THTensor_setSizeAtDim(self, d, size[d]);
     if(stride && (stride[d] >= 0) ) {
       self->stride[d] = stride[d];
     } else {

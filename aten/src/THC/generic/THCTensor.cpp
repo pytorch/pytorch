@@ -379,7 +379,7 @@ void THCTensor_(narrow)(THCState *state, THCTensor *self, THCTensor *src, int di
   if(firstIndex > 0)
     self->storageOffset += firstIndex*self->stride[dimension];
 
-  self->size[dimension] = size;
+  THTensor_setSizeAtDim(self, dimension, size);
 }
 
 void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int dimension, int64_t sliceIndex)
@@ -403,7 +403,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
   THCTensor_(narrow)(state, self, NULL, dimension, sliceIndex, 1);
   for(d = dimension; d < self->dim()-1; d++)
   {
-    self->size[d] = self->size[d+1];
+    THTensor_setSizeAtDim(self, d, self->size[d+1]);
     self->stride[d] = self->stride[d+1];
   }
   THTensor_resizeDim(self, self->dim_ - 1);
@@ -428,8 +428,8 @@ void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int
   self->stride[dimension1] = self->stride[dimension2];
   self->stride[dimension2] = z;
   z = self->size[dimension1];
-  self->size[dimension1] = self->size[dimension2];
-  self->size[dimension2] = z;
+  THTensor_setSizeAtDim(self, dimension1, self->size[dimension2]);
+  THTensor_setSizeAtDim(self, dimension2, z);
 }
 
 void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int dimension, int64_t size, int64_t step)
@@ -487,7 +487,7 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
     {
       if(d != ndim)
       {
-        self->size[ndim] = src->size[d];
+        THTensor_setSizeAtDim(self, ndim, src->size[d]);
         self->stride[ndim] = src->stride[d];
       }
       ndim++;
@@ -498,7 +498,7 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
   /* right now, we do not handle 0-dimension tensors */
   if(ndim == 0 && src->dim() > 0)
   {
-    self->size[0] = 1;
+    THTensor_setSizeAtDim(self, 0, 1);
     self->stride[0] = 1;
     ndim = 1;
   }
