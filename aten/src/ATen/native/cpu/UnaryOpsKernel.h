@@ -34,6 +34,14 @@ extern DispatchStub<unary_fn> tanImpl;
 extern DispatchStub<unary_fn> tanhImpl;
 extern DispatchStub<unary_fn> truncImpl;
 
+extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&, Scalar&)>
+    clampImpl;
+extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&)> clampMinImpl;
+extern DispatchStub<void (*)(Tensor&, const Tensor&, Scalar&)> clampMaxImpl;
+
+extern DispatchStub<void (*)(Tensor&, Scalar&, Scalar&)> clamp_Impl;
+extern DispatchStub<void (*)(Tensor&, Scalar&)> clampMin_Impl;
+extern DispatchStub<void (*)(Tensor&, Scalar&)> clampMax_Impl;
 
 // Missing unary functions
 // digamma
@@ -45,7 +53,6 @@ extern DispatchStub<unary_fn> truncImpl;
 // frac
 // clone
 // contiguous
-// clamp/_min/_max
 // neg
 // reciprocal
 // sigmoid

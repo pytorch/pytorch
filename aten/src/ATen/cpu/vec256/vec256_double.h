@@ -42,24 +42,43 @@ public:
     }
     return b;
   }
-  static Vec256<double> loadu(const void* ptr, int64_t count = size) {
-    if (count == size)
+  static Vec256<double> loadu(const void* ptr, int64_t count = size, int64_t stride = 1) {
+    if (count == size && stride == 1)
       return _mm256_loadu_pd(reinterpret_cast<const double*>(ptr));
 
+// #ifdef __AVX2__
+//     if(count == size) {
+//       __m256i vindex = _mm256_set_epi64x(3 * stride, 2 * stride, 1 * stride, 0);
+//       return _mm256_i64gather_pd(reinterpret_cast<const double*>(ptr), vindex, 1);
+//     }
+// #endif
+
     __at_align32__ double tmp_values[size];
-    std::memcpy(
-        tmp_values,
-        reinterpret_cast<const double*>(ptr),
-        count * sizeof(double));
+    if (stride == 1) {
+      std::memcpy(
+          tmp_values,
+          reinterpret_cast<const double*>(ptr),
+          count * sizeof(double));
+    } else {
+      for (int64_t i = 0; i < count; i++) {
+        tmp_values[i] = reinterpret_cast<const double*>(ptr)[i * stride];
+      }
+    }
     return _mm256_load_pd(tmp_values);
   }
-  void store(void* ptr, int count = size) const {
-    if (count == size) {
+  void store(void* ptr, int64_t count = size, int64_t stride = 1) const {
+    if (count == size && stride == 1) {
       _mm256_storeu_pd(reinterpret_cast<double*>(ptr), values);
     } else {
       double tmp_values[size];
       _mm256_storeu_pd(reinterpret_cast<double*>(tmp_values), values);
-      std::memcpy(ptr, tmp_values, count * sizeof(double));
+      if (stride == 1) {
+        std::memcpy(ptr, tmp_values, count * sizeof(double));
+      } else {
+        for (int64_t i = 0; i < count; i++) {
+          reinterpret_cast<double*>(ptr)[i * stride] = tmp_values[i];
+        }
+      }
     }
   }
   const double& operator[](int idx) const  = delete;
@@ -176,6 +195,11 @@ Vec256<double> inline operator/(const Vec256<double>& a, const Vec256<double>& b
 template <>
 Vec256<double> inline max(const Vec256<double>& a, const Vec256<double>& b) {
   return _mm256_max_pd(a, b);
+}
+
+template <>
+Vec256<double> inline min(const Vec256<double>& a, const Vec256<double>& b) {
+  return _mm256_min_pd(a, b);
 }
 
 #endif
