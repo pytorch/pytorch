@@ -51,8 +51,12 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           at::Allocator* allocator)
 {
-  return THCStorage_newWithAllocator(state, at::CTypeToScalarType<real>::to(),
-                                     size, allocator);
+  THStorage* storage = new THStorage(
+      at::CTypeToScalarType<real>::to(),
+      size,
+      allocator,
+      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+  return storage;
 }
 
 THCStorage* THCStorage_(newWithSize1)(THCState *state, real data0)
@@ -118,6 +122,6 @@ void THCStorage_(retain)(THCState *state, THCStorage *self)
 
 void THCStorage_(free)(THCState *state, THCStorage *self)
 {
-  THStorage_free(state, self);
+  THStorage_free(self);
 }
 #endif
