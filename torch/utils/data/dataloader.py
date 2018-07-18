@@ -365,9 +365,7 @@ class _DataLoaderIter(object):
                 self.shutdown = True
                 for q in self.index_queues:
                     q.shutdown()
-                    q.put(None)
                 self.worker_result_queue.shutdown()
-                self.worker_result_queue.put(None)
         finally:
             # removes pids no matter what
             if self.worker_pids_set:

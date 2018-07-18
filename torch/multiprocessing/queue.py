@@ -43,7 +43,7 @@ class Queue(multiprocessing.queues.Queue):
             self._recv = self._reader.recv
 
         self.sig_shutdown = multiprocessing.Value('i', 0)
-        self.put_lock = multiprocessing.Lock()
+        self.put_lock = multiprocessing.RLock()
         self.get_lock = multiprocessing.Lock()
 
     def __setstate__(self, state):
@@ -56,9 +56,13 @@ class Queue(multiprocessing.queues.Queue):
                 (self.sig_shutdown, self.put_lock, self.get_lock))
 
     def shutdown(self):
+        if self.is_shutdown():
+            return
         with self.sig_shutdown.get_lock():
-            with self.put_lock and self.get_lock:
-                self.sig_shutdown.value = 1
+            with self.put_lock:
+                self.put(None)
+                with self.get_lock:
+                    self.sig_shutdown.value = 1
 
     def is_shutdown(self):
         with self.sig_shutdown.get_lock():
