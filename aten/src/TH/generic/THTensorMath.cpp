@@ -109,10 +109,7 @@
 #define TH_CHECK_SAME_SIZE(TENSOR1, TENSOR2) \
 { \
   if(!THTensor_(isSameSizeAs)(TENSOR1, TENSOR2)) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
-    THError("inconsistent tensor size, expected %s %s and %s %s to have the same size", \
-            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str); \
+    AT_ERROR("inconsistent tensor size, expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same size"); \
   } \
 }
 
@@ -141,11 +138,7 @@
     } \
   } \
   if (shape_check_flag == 1) { \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->_dim()); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->_dim()); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->_dim()); \
-    THError("Expected %s %s to be smaller size than %s %s and to be smaller than %s %s apart from dimension %d", \
-            #TENSOR3, T3buff.str, #TENSOR2, T2buff.str, #TENSOR1, T1buff.str, DIMENSION); \
+    AT_ERROR("Expected ", #TENSOR3, " ", TENSOR3->sizes(), " to be smaller size than ", #TENSOR2, " ", TENSOR2->sizes(), " and to be smaller than ", #TENSOR1, " ", TENSOR1->sizes(), " apart from dimension ", DIMENSION); \
   } \
 }
 

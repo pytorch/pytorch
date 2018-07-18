@@ -448,8 +448,8 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
 
   THCTensor_(set)(state, self, src);
 
-  std::vector<int64_t> newSize(/* size */ self->dim() + 1);
-  std::vector<int64_t> newStride(/* size */ self->dim() + 1);
+  std::vector<int64_t> newSize(self->dim() + 1);
+  std::vector<int64_t> newStride(self->dim() + 1);
 
   newSize[self->dim()] = size;
   newStride[self->dim()] = self->stride[dimension];
