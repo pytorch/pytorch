@@ -144,11 +144,11 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_
 }
 
 Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
-  return at::native::as_strided(self, size, stride, self.storage_offset());
+  return at::as_strided(self, size, stride, self.storage_offset());
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
-  return at::native::as_strided_(self, size, stride, self.storage_offset());
+  return at::as_strided_(self, size, stride, self.storage_offset());
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
