@@ -16,7 +16,7 @@ class NegativeBinomial(Distribution):
         total_count (float or Tensor): non-negative number of negative Bernoulli
             trials to stop, although the distribution is still valid for real
             valued count
-        probs (Tensor): Event probabilities of success in the open interval (0, 1)
+        probs (Tensor): Event probabilities of success in the half open interval [0, 1)
         logits (Tensor): Event log-odds for probabilities of success
     """
     arg_constraints = {'total_count': constraints.greater_than_eq(0),
