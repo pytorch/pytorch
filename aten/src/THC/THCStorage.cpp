@@ -51,18 +51,13 @@ int THCStorage_getDevice(THCState* state, const THCStorage* storage) {
   return storage->data_ptr.device().index();
 }
 
-THCStorage* THCStorage_newWithDataAndAllocator(
-  THCState *state, at::ScalarType scalar_type, at::DataPtr&& data, ptrdiff_t size,
-  at::Allocator *allocator) {
-  THCStorage *storage = (THCStorage*)THAlloc(sizeof(THCStorage));
-  memset(storage, 0, sizeof(THCStorage));
-  storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::DataPtr(std::move(data));
-  storage->size = size;
-  new (&storage->refcount) std::atomic<int>(1);
-  new (&storage->weakcount) std::atomic<int>(1);
-  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
-  storage->allocator = allocator;
+THC_API THCStorage* THCStorage_new(
+    THCState* state,
+    at::ScalarType scalar_type) {
+  THStorage* storage = new THStorage(
+      scalar_type,
+      0,
+      state->cudaDeviceAllocator,
+      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
   return storage;
 }
