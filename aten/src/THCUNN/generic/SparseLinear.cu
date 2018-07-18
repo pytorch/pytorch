@@ -4,17 +4,17 @@
 
 static bool THNN_(checkInput)(THCTensor* t)
 {
-  return !t->is_empty() && t->_dim() == 2 && t->size[1] == 3;
+  return !t->is_empty() && t->_dim() == 2 && t->size(1) == 3;
 }
 
 static bool THNN_(checkSize2D)(THCTensor* t, int64_t size0, int64_t size1)
 {
-  return !t->is_empty() && t->_dim() == 2 && t->size[0] == size0 && t->size[1] == size1;
+  return !t->is_empty() && t->_dim() == 2 && t->size(0) == size0 && t->size(1) == size1;
 }
 
 static bool THNN_(checkSize1D)(THCTensor* t, int64_t size0)
 {
-  return !t->is_empty() && t->_dim() == 1 && t->size[0] == size0;
+  return !t->is_empty() && t->_dim() == 1 && t->size(0) == size0;
 }
 
 static inline void THNN_(copyCudaFloatingType)(THCState *state, THCudaIntTensor *buf, THCTensor *t) {

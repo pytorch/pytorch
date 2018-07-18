@@ -103,15 +103,15 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   if (input->dim() == 4)
   {
     istrideB = input->stride[0];
-    sizeB = input->size[0];
+    sizeB = input->size(0);
     dimW++;
     dimH++;
   }
 
   /* sizes */
-  sizeD  = input->size[dimH-1];
-  isizeH = input->size[dimH];
-  isizeW = input->size[dimW];
+  sizeD  = input->size(dimH-1);
+  isizeH = input->size(dimH);
+  isizeW = input->size(dimW);
   /* strides */
   istrideD = input->stride[dimH-1];
   istrideH = input->stride[dimH];
@@ -223,17 +223,17 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   THTensor_(zero)(gradInput);
 
   if (input->dim() == 4) {
-    sizeB = input->size[0];
+    sizeB = input->size(0);
     dimW++;
     dimH++;
   }
 
   /* sizes */
-  sizeD  = input->size[dimH-1];
-  isizeH = input->size[dimH];
-  isizeW = input->size[dimW];
-  osizeH = gradOutput->size[dimH];
-  osizeW = gradOutput->size[dimW];
+  sizeD  = input->size(dimH-1);
+  isizeH = input->size(dimH);
+  isizeW = input->size(dimW);
+  osizeH = gradOutput->size(dimH);
+  osizeW = gradOutput->size(dimW);
 
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);

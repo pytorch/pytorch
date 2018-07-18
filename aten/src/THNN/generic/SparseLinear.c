@@ -11,22 +11,22 @@
 
 static bool THNN_(checkLegacyInput)(THTensor* t)
 {
-  return !t->is_empty() && t->dim() == 3 && t->size[2] == 2;
+  return !t->is_empty() && t->dim() == 3 && t->size(2) == 2;
 }
 
 static bool THNN_(checkInput)(THTensor* t)
 {
-  return!t->is_empty() && t->dim() == 2 && t->size[1] == 3;
+  return!t->is_empty() && t->dim() == 2 && t->size(1) == 3;
 }
 
 static bool THNN_(checkSize2D)(THTensor* t, int64_t size0, int64_t size1)
 {
-  return !t->is_empty() && t->dim() == 2 && t->size[0] == size0 && t->size[1] == size1;
+  return !t->is_empty() && t->dim() == 2 && t->size(0) == size0 && t->size(1) == size1;
 }
 
 static bool THNN_(checkSize1D)(THTensor* t, int64_t size0)
 {
-  return !t->is_empty() && t->dim() == 1 && t->size[0] == size0;
+  return !t->is_empty() && t->dim() == 1 && t->size(0) == size0;
 }
 
 static void THNN_(set1d)(THTensor *t, int64_t x0, real value) {
@@ -324,8 +324,8 @@ void THNN_(SparseLinear_updateParameters)(
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t i;
-  int64_t outDim = weight->size[0];
-  int64_t inDim = weight->size[1];
+  int64_t outDim = weight->size(0);
+  int64_t inDim = weight->size(1);
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -398,8 +398,8 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t h, i;
-  int64_t outDim = weight->size[0];
-  int64_t inDim = weight->size[1];
+  int64_t outDim = weight->size(0);
+  int64_t inDim = weight->size(1);
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -471,8 +471,8 @@ void THNN_(SparseLinear_zeroGradParameters)(
 {
   int64_t i, j;
 
-  int64_t outDim = gradWeight->size[0];
-  int64_t inDim = gradWeight->size[1];
+  int64_t outDim = gradWeight->size(0);
+  int64_t inDim = gradWeight->size(1);
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkInput)(lastInput), 4,
@@ -517,8 +517,8 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
 {
   int64_t h, i, j;
 
-  int64_t outDim = gradWeight->size[0];
-  int64_t inDim = gradWeight->size[1];
+  int64_t outDim = gradWeight->size(0);
+  int64_t inDim = gradWeight->size(1);
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkLegacyInput)(lastInput), 4,

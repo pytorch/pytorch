@@ -24,9 +24,9 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
                   "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (input->dim() == 3) {
-    int64_t sizeD  = input->size[0];
-    int64_t isizeH = input->size[1];
-    int64_t isizeW = input->size[2];
+    int64_t sizeD  = input->size(0);
+    int64_t isizeH = input->size(1);
+    int64_t isizeW = input->size(2);
 
     int64_t istrideD = input->stride[0];
     int64_t istrideH = input->stride[1];
@@ -55,10 +55,10 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
   } else {
     input = THCTensor_(newContiguous)(state, input);
-    int64_t sizeB  = input->size[0];
-    int64_t sizeD  = input->size[1];
-    int64_t isizeH = input->size[2];
-    int64_t isizeW = input->size[3];
+    int64_t sizeB  = input->size(0);
+    int64_t sizeD  = input->size(1);
+    int64_t isizeH = input->size(2);
+    int64_t isizeW = input->size(3);
 
     int64_t istrideD = input->stride[1];
     int64_t istrideH = input->stride[2];
@@ -107,12 +107,12 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
   if (input->dim() == 3) {
-    int64_t sizeD  = input->size[0];
-    int64_t isizeH = input->size[1];
-    int64_t isizeW = input->size[2];
+    int64_t sizeD  = input->size(0);
+    int64_t isizeH = input->size(1);
+    int64_t isizeW = input->size(2);
 
-    int64_t osizeH = gradOutput->size[1];
-    int64_t osizeW = gradOutput->size[2];
+    int64_t osizeH = gradOutput->size(1);
+    int64_t osizeW = gradOutput->size(2);
 
     //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 
@@ -145,13 +145,13 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t sizeB  = input->size[0];
-    int64_t sizeD  = input->size[1];
-    int64_t isizeH = input->size[2];
-    int64_t isizeW = input->size[3];
+    int64_t sizeB  = input->size(0);
+    int64_t sizeD  = input->size(1);
+    int64_t isizeH = input->size(2);
+    int64_t isizeW = input->size(3);
 
-    int64_t osizeH = gradOutput->size[2];
-    int64_t osizeW = gradOutput->size[3];
+    int64_t osizeH = gradOutput->size(2);
+    int64_t osizeW = gradOutput->size(3);
 
     //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 

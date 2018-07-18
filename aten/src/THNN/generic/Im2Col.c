@@ -57,7 +57,7 @@ void THNN_(Im2Col_updateOutput)(
   bool batched_input = true;
   if (input->dim() == 3) {
     batched_input = false;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
   }
 
   int batchSize    = THTensor_(size)(input, 0);
