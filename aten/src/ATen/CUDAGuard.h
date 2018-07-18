@@ -38,9 +38,7 @@ struct CUDAGuard {
   /// Move-constructs this `CUDAGuard` from another `CUDAGuard`. The
   /// moved-from `CUDAGuard` is modified such that its destruction has no
   /// effect (does not reset the stream or device).
-  CUDAGuard(CUDAGuard&& other) noexcept
-      : device_guard_(std::move(other.device_guard_)),
-        original_streams_(std::move(other.original_streams_)) {}
+  CUDAGuard(CUDAGuard&& other) noexcept = default;
 
   /// Move-assigns this `CUDAGuard` from another `CUDAGuard`. The
   /// moved-from `CUDAGuard` is modified such that its destruction has no
