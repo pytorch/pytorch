@@ -190,11 +190,15 @@ std::string valueName(Value * n) {
   return "n" + std::to_string(n->unique());
 }
 
- std::string scalarValue(const at::Tensor & t) {
+std::string scalarValue(const at::Tensor & t) {
   auto s =  at::Scalar(t);
-  return (s.isIntegral()) ?
-    std::to_string(s.toLong()) :
-    (std::to_string(s.toDouble()) + "f");
+  if (s.isIntegral()){ 
+    return std::to_string(s.toLong()); 
+  } else {
+     std::ostringstream out;
+     out << std::scientific << s.toDouble() << "f";
+     return out.str();
+  }
 }
 
 const char * scalarTypeName(at::ScalarType type) {
