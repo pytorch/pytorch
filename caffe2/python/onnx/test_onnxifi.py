@@ -33,7 +33,7 @@ def _print_net(net):
 
 
 class OnnxifiTest(TestCase):
-    #@unittest.skip("Need ONNXIFI backend support")
+    @unittest.skip("Need ONNXIFI backend support")
     def test_relu_graph(self):
         batch_size = 1
         X = np.random.randn(batch_size, 1, 3, 2).astype(np.float32)
@@ -56,7 +56,7 @@ class OnnxifiTest(TestCase):
         Y = workspace.FetchBlob("Y")
         np.testing.assert_almost_equal(Y, np.maximum(X, 0))
 
-    #@unittest.skip("Need ONNXIFI backend support")
+    @unittest.skip("Need ONNXIFI backend support")
     def test_conv_graph(self):
         X = np.array([[[[0., 1., 2., 3., 4.],  # (1, 1, 5, 5) input tensor
                         [5., 6., 7., 8., 9.],
@@ -170,6 +170,7 @@ class OnnxifiTransformTest(TestCase):
         pred_net.external_output[0] = new_tail
 
 
+    @unittest.skip("Need ONNXIFI backend support")
     def test_resnet50_core(self):
         N = 1
         warmup = 0
@@ -225,6 +226,7 @@ class OnnxifiTransformTest(TestCase):
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
         print("C2 runtime: {}s".format(c2_time))
+        np.set_printoptions(threshold=np.nan)
         with core.DeviceScope(cpu_device):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
