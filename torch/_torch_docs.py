@@ -4202,9 +4202,6 @@ dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
 `squeeze(input, 0)` leaves the tensor unchanged, but :func:`squeeze(input, 1)` will
 squeeze the tensor to the shape :math:`(A \times B)`.
 
-.. note:: As an exception to the above, a 1-dimensional tensor of size 1 will
-          not have its dimensions changed.
-
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
