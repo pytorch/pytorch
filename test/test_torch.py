@@ -1068,18 +1068,18 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_neg(self, cast):
-        float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
-        int_types = ['torch.IntTensor', 'torch.ShortTensor', 'torch.ByteTensor',
-                     'torch.CharTensor']
+        float_types = [torch.DoubleTensor, torch.FloatTensor, torch.LongTensor]
+        int_types = [torch.IntTensor, torch.ShortTensor, torch.ByteTensor,
+                     torch.CharTensor]
 
         for t in float_types + int_types:
             if t in float_types:
-                a = cast(torch.randn(100, 90).type(t))
+                a = cast(torch.randn(100, 90, dtype=t.dtype))
             else:
-                a = cast(torch.Tensor(100, 90).type(t).random_(-128, 128))
+                a = cast(torch.Tensor(100, 90, dtype=t.dtype).random_(-128, 128))
             zeros = cast(torch.Tensor().type(t)).resize_as_(a).zero_()
 
-            if t == 'torch.ByteTensor':
+            if t == torch.ByteTensor:
                 res_add = torch.add(zeros, a, alpha=255)
             else:
                 res_add = torch.add(zeros, a, alpha=-1)
