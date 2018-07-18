@@ -66,10 +66,10 @@ struct AT_API CUDAStream {
   ~CUDAStream() { detail::CUDAStream_free(internals_); }
 
   // Copy constructor
-  CUDAStream(const CUDAStream& other);
+  AT_API CUDAStream(const CUDAStream& other);
 
   // Move constructor
-  CUDAStream(CUDAStream&& other);  
+  AT_API CUDAStream(CUDAStream&& other);  
 
   // Assignment operator
   CUDAStream& operator=(CUDAStream other) {
