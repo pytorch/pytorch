@@ -1045,7 +1045,7 @@ def copy_files_to_hip_dirs(output_directory, project_directory, include_dirs):
                 dest_dir = os.path.join(project_directory, rel_path, "hip")
                 if not os.path.exists(dest_dir):
                     os.makedirs(dest_dir)
-                if file.endswith("hip.cc") or file.endswith("hip.h"):
+                if file.endswith("hip.cc") or file.endswith("hip.h") or file.endswith("hip_test.cc"):
                     dest_filepath = os.path.join(dest_dir, file)
                     if not os.path.exists(dest_filepath):
                         shutil.copyfile(os.path.join(dirpath, file), dest_filepath)
