@@ -68,8 +68,9 @@ struct THTensor
       return false;
     }
 
-    int64_t size(int64_t dim) const {
-      return sizes_[dim];
+    int64_t size(int64_t d) const {
+      d = at::maybe_wrap_dim(d, dim(), false);
+      return sizes_[d];
     }
 
     inline at::IntList sizes() {
