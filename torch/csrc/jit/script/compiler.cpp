@@ -1562,7 +1562,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
 }
 
 std::shared_ptr<Graph> compileFunction(TypedDef typed_def, const Resolver& resolver) {
-  Module m; //note: we don't use 'm' to execute so this setting is unused
+  Module m;
   defineMethodsInModule(m, {typed_def}, {resolver}, nullptr);
   return m.get_method(typed_def.def.name().name()).graph();
 }

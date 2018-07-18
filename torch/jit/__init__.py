@@ -350,6 +350,11 @@ def script(fn, optimize=True, _frames_up=0):
     graph = _jit_script_compile(typed_def, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
+    # TODO: refactor everything so we're not 1) creating a ScriptModule
+    # 2) Throwing everything away except for the graph 3) Creating a new
+    # ScriptModule and dumping that graph in 4) Re-populating the schema
+    # because it was lost doing the previous
+    mod.__getattr__('forward').set_arg_and_return_types(schema[0], schema[1])
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod

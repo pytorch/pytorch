@@ -4284,7 +4284,7 @@ def func(t):
             # type: (Tensor, Tuple[Tensor, Tensor, Tensor], Tuple[Tensor, Tuple[Tensor, Tensor]]) -> Tensor
             return x
 
-        # self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
+        self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
 
     def test_annotated_script_method(self):
         class SM(torch.jit.ScriptModule):
@@ -4295,7 +4295,7 @@ def func(t):
 
         sm = SM()
 
-        # self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
+        self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

@@ -534,7 +534,18 @@ void initJitScriptBindings(PyObject* module) {
     .def("params", &Method::params)
     .def("graph_for", [](Method& self, py::args args) {
       return self.graph_for(createVariableTensorList(args));
-    });
+    })
+    .def("set_arg_and_return_types", [](Method &self, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types) {
+      std::vector<Argument> arg_type_args, return_type_args;
+      for (TypePtr arg_type : arg_types) {
+        arg_type_args.push_back(Argument("", arg_type));
+      }
+      for (TypePtr return_type : return_types) {
+        return_type_args.push_back(Argument("", return_type));
+      }
+      self.setSchema(FunctionSchema("", arg_type_args, return_type_args));
+    })
+    .def("pretty_print_schema", &Method::prettyPrintSchema);
 
   m.def("_jit_script_compile", [](const TypedDef &typed_def, ResolutionCallback rcb) {
     return compileFunction(typed_def, pythonResolver(rcb));

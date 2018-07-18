@@ -1,0 +1,1 @@
+(Tensor , (Tensor, Tensor, Tensor) , (Tensor, (Tensor, Tensor)) ) -> (Tensor )
