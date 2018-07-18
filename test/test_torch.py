@@ -7492,7 +7492,7 @@ class TestTorch(TestCase):
         ]
 
         incorrect_byteorder = '>' if sys.byteorder == 'little' else '<'
-        incorrect_dtypes = map(lambda t: incorrect_byteorder + t, ['d', 'f', 'i'])
+        incorrect_dtypes = map(lambda t: incorrect_byteorder + t, ['d', 'f'])
 
         for dtype in correct_dtypes:
             array = np.array([1, 2, 3, 4], dtype=dtype)
