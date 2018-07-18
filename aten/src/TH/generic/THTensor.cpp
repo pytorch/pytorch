@@ -229,8 +229,8 @@ THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
   ptrdiff_t numel = THTensor_(nElement)(tensor);
   THTensor *self = THTensor_(new)();
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
-  auto stride = THTensor_compute_stride(at::IntList(THTensor_getSizePtr(tensor), tensor->dim()),
-                                        at::IntList(THTensor_getStridePtr(tensor), tensor->dim()),
+  auto stride = THTensor_compute_stride(tensor->sizes(),
+                                        tensor->strides(),
                                         at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
@@ -478,8 +478,6 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
   }
 
   THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
-
-  self->dim_++;
 }
 
 /* we have to handle the case where the result is a number */
@@ -515,7 +513,7 @@ void THTensor_(squeeze)(THTensor *self, THTensor *src)
     ndim = 1;
   }
 #endif
-  self->dim_ = ndim;
+  THTensor_resizeDim(self, ndim);
 }
 
 void THTensor_(squeeze1d)(THTensor *self, THTensor *src, int dimension)
@@ -559,7 +557,6 @@ void THTensor_(unsqueeze1d)(THTensor *self, THTensor *src, int dimension)
   THTensor_(set)(self, src);
 
   THTensor_resizeDim(self, self->dim() + 1);
-  self->dim_++;
   for (d = self->dim()-1; d > dimension; d--) {
     self->size[d] = self->size[d-1];
     self->stride[d] = self->stride[d-1];
@@ -764,7 +761,6 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
   if(nDimension != self->dim())
   {
     THTensor_resizeDim(self, nDimension);
-    self->dim_ = nDimension;
   }
 
   totalSize = 1;

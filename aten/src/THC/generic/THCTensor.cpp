@@ -218,8 +218,8 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage
   ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
   THCTensor *self = THCTensor_(new)(state);
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
-  auto stride = THTensor_compute_stride(at::IntList(THTensor_getSizePtr(tensor), tensor->dim()),
-                                        at::IntList(THTensor_getStridePtr(tensor), tensor->dim()),
+  auto stride = THTensor_compute_stride(tensor->sizes(),
+                                        tensor->strides(),
                                         at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
@@ -464,7 +464,6 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
   }
 
   THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
-  self->dim_++;
 }
 
 /* we have to handle the case where the result is a number */
@@ -499,7 +498,7 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
     self->stride[0] = 1;
     ndim = 1;
   }
-  self->dim_ = ndim;
+  THTensor_resizeDim(self, ndim);
 }
 #endif
 

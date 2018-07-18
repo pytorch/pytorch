@@ -1,6 +1,8 @@
 // included as 'TensorDenseOrSparse' in TensorDerived.cpp
 
 IntList ${Tensor}::strides() const {
+  // NB: THTensor doesn't agree with Tensor for scalars, so we
+  // have to construct a fresh IntList
   return IntList(THTensor_getStridePtr(tensor), dim());
 }
 Scalar ${Tensor}::localScalar() {
