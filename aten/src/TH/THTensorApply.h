@@ -37,7 +37,7 @@
   int TENSOR##_contiguous = ALLOW_CONTIGUOUS && DIM < 0; \
   TENSOR##_n = 1; \
   for(TENSOR##_i = 0; TENSOR##_i < TENSOR->dim(); TENSOR##_i++) \
-    TENSOR##_n *= TENSOR->size[TENSOR##_i]; \
+    TENSOR##_n *= TENSOR->size(TENSOR##_i); \
 \
   if(TENSOR->is_empty()) \
     TH_TENSOR_APPLY_hasFinished = 1; \
@@ -47,9 +47,9 @@
     TENSOR##_size = 1; \
     TENSOR##_stride = 1; \
     for(TENSOR##_i = TENSOR->_dim()-1; TENSOR##_i >= 0; TENSOR##_i--) { \
-      if(TENSOR->size[TENSOR##_i] != 1) { \
+      if(TENSOR->size(TENSOR##_i) != 1) { \
         if(TENSOR->stride[TENSOR##_i] == TENSOR##_size && TENSOR##_i != DIM) \
-          TENSOR##_size *= TENSOR->size[TENSOR##_i]; \
+          TENSOR##_size *= TENSOR->size(TENSOR##_i); \
         else{ \
           TENSOR##_contiguous = 0; \
           break; \
@@ -61,7 +61,7 @@
       TENSOR##_dim = 1; \
       for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; TENSOR##_i--) \
       { \
-        if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
+        if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size(TENSOR##_i+1) || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
           TENSOR##_dim++; \
       } \
       /* Allocate an array of 3*dim elements, where dim is the number of contiguous sections */ \
@@ -70,7 +70,7 @@
       TENSOR##_strides = TENSOR##_counter + 2*TENSOR##_dim; \
       TH_TENSOR_dim_index = TENSOR##_dim-1; \
       TENSOR##_dimOffset = (DIM == TENSOR->_dim()-1) ? &TENSOR##_i : &TENSOR##_counter[DIM]; \
-      TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR->_dim()-1]; \
+      TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR->_dim()-1); \
       TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR->_dim()-1]; \
       /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
       /* storage is given by storage_offset + (i * j), where i is the stride */ \
@@ -79,13 +79,13 @@
         TENSOR##_counter[TENSOR##_i] = 0; \
       } \
       for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; --TENSOR##_i) { \
-        if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
-          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i] * TENSOR##_sizes[TH_TENSOR_dim_index]; \
+        if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size(TENSOR##_i+1) && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
+          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR##_i) * TENSOR##_sizes[TH_TENSOR_dim_index]; \
           if (DIM != TENSOR->_dim()-1 && TENSOR##_i < DIM) \
             TENSOR##_dimOffset--; \
         } else { \
           --TH_TENSOR_dim_index; \
-          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i]; \
+          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR##_i); \
           TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR##_i]; \
         } \
       } \

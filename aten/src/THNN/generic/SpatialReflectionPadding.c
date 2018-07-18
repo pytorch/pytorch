@@ -72,16 +72,16 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THNNState *state,
 
   if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* input sizes */
-  nslices = input->size[dimslices];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
 
   AT_CHECK(pad_l < iwidth && pad_r < iwidth,
            "Argument #4: Padding size should be less than the corresponding input dimension, "
@@ -211,16 +211,16 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(THNNState *state,
 
   if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 

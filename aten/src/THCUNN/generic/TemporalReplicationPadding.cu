@@ -79,7 +79,7 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(
     planeDim++;
     dimw++;
   }
-  int iwidth = input->size[dimw];
+  int iwidth = input->size(dimw);
   int owidth  = iwidth + padL + padR;
 
   THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,

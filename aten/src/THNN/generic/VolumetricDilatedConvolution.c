@@ -24,7 +24,7 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
                   "non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
                   "expected for weight, but got: %s");
     if (bias != NULL) {
-      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[0]);
+      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size(0));
     }
   } else if (!weight_nullable) {
     THError("weight tensor is expected to be non-nullable");
@@ -44,9 +44,9 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
     dimw++;
   }
 
-  int64_t inputDepth  = input->size[dimd];
-  int64_t inputHeight  = input->size[dimh];
-  int64_t inputWidth   = input->size[dimw];
+  int64_t inputDepth  = input->size(dimd);
+  int64_t inputHeight  = input->size(dimh);
+  int64_t inputWidth   = input->size(dimw);
   int64_t outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
   int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
   int64_t outputWidth  = (inputWidth  + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
@@ -58,16 +58,16 @@ static inline void THNN_(VolumetricDilatedConvolution_shapeCheck)(
   }
 
   if (weight != NULL) {
-    int64_t nInputPlane = weight->size[1];
+    int64_t nInputPlane = weight->size(1);
     THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
   }
 
   if (gradOutput != NULL) {
     if (weight != NULL) {
-      int64_t nOutputPlane = weight->size[0];
+      int64_t nOutputPlane = weight->size(0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size[0];
+      int64_t nOutputPlane = bias->size(0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimd, outputDepth);
@@ -95,8 +95,8 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
         dilationT, dilationH, dilationW, 0);
 
   // Params:
-  int64_t nInputPlane = weight->size[1];
-  int64_t nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->size(1);
+  int64_t nOutputPlane = weight->size(0);
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
@@ -109,18 +109,18 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
-    THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
+    THTensor_(resize5d)(input, 1, input->size(0), input->size(1), input->size(2), input->size(3));
   }
 
-  int64_t inputDepth  = input->size[2];
-  int64_t inputHeight  = input->size[3];
-  int64_t inputWidth   = input->size[4];
+  int64_t inputDepth  = input->size(2);
+  int64_t inputHeight  = input->size(3);
+  int64_t inputWidth   = input->size(4);
   int64_t outputDepth  = (inputDepth  + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
   int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
   int64_t outputWidth  = (inputWidth  + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize5d)(output, batchSize, nOutputPlane, outputDepth, outputHeight, outputWidth);
@@ -133,7 +133,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
   if (ones->dim() != 3 ||
-      ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
+      ones->size(0)*ones->size(1)*ones->size(2) < outputDepth*outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize3d)(ones, outputDepth, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -182,7 +182,7 @@ void THNN_(VolumetricDilatedConvolution_updateOutput)(
 
     // M,N,K are dims of matrix A and B
     int64_t m = nOutputPlane;
-    int64_t n = columns->size[1];
+    int64_t n = columns->size(1);
     int64_t k = nInputPlane*kT*kH*kW;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
@@ -230,8 +230,8 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
         dilationT, dilationH, dilationW, 0);
 
   // Params
-  int64_t nInputPlane = weight->size[1];
-  int64_t nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->size(1);
+  int64_t nOutputPlane = weight->size(0);
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -242,19 +242,19 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
-    THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
-    THTensor_(resize5d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
+    THTensor_(resize5d)(input, 1, input->size(0), input->size(1), input->size(2), input->size(3));
+    THTensor_(resize5d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2), gradOutput->size(3));
   }
 
-  int64_t inputDepth  = input->size[2];
-  int64_t inputWidth   = input->size[4];
-  int64_t inputHeight  = input->size[3];
+  int64_t inputDepth  = input->size(2);
+  int64_t inputWidth   = input->size(4);
+  int64_t inputHeight  = input->size(3);
   int64_t outputDepth  = (inputDepth + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
   int64_t outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
   int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize5d)(gradInput, batchSize, nInputPlane, inputDepth, inputHeight, inputWidth);
@@ -275,7 +275,7 @@ void THNN_(VolumetricDilatedConvolution_updateGradInput)(
 
     // M,N,K are dims of matrix A and B
     int64_t m = nInputPlane*kT*kW*kH;
-    int64_t n = gradColumns->size[1];
+    int64_t n = gradColumns->size(1);
     int64_t k = nOutputPlane;
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
@@ -352,24 +352,24 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
   if (input->dim() == 4) {
     // Force batch
     is_batch = 0;
-    THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
-    THTensor_(resize5d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
+    THTensor_(resize5d)(input, 1, input->size(0), input->size(1), input->size(2), input->size(3));
+    THTensor_(resize5d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2), gradOutput->size(3));
   }
 
-  int64_t nInputPlane = input->size[1];
-  int64_t nOutputPlane = gradOutput->size[1];
-  int64_t inputDepth  = input->size[2];
-  int64_t inputWidth   = input->size[4];
-  int64_t inputHeight  = input->size[3];
+  int64_t nInputPlane = input->size(1);
+  int64_t nOutputPlane = gradOutput->size(1);
+  int64_t inputDepth  = input->size(2);
+  int64_t inputWidth   = input->size(4);
+  int64_t inputHeight  = input->size(3);
   int64_t outputDepth  = (inputDepth + 2*padT - (dilationT * (kT - 1) + 1)) / dT + 1;
   int64_t outputWidth  = (inputWidth + 2*padW - (dilationW * (kW - 1) + 1)) / dW + 1;
   int64_t outputHeight = (inputHeight + 2*padH - (dilationH * (kH - 1) + 1)) / dH + 1;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth) {
+  if (ones->dim() != 3 || ones->size(0)*ones->size(1)*ones->size(2) < outputDepth*outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize3d)(ones, outputDepth, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -405,7 +405,7 @@ void THNN_(VolumetricDilatedConvolution_accGradParameters)(
       // M,N,K are dims of matrix A and B
       int64_t m = nOutputPlane;
       int64_t n = nInputPlane*kT*kW*kH;
-      int64_t k = columns->size[1];
+      int64_t k = columns->size(1);
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
       THBlas_(gemm)(

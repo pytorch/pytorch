@@ -13,11 +13,11 @@
   { \
     if (TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
-    if (TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
+    if (TENSOR1->size(TH_TENSOR_DIM_APPLY_i) != TENSOR2->size(TH_TENSOR_DIM_APPLY_i)) { \
       shape_check_flag = 1; \
       break; \
     } \
-    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR3->size[TH_TENSOR_DIM_APPLY_i]) { \
+    if(TENSOR1->size(TH_TENSOR_DIM_APPLY_i) != TENSOR3->size(TH_TENSOR_DIM_APPLY_i)) { \
       shape_check_flag = 1; \
       break; \
     } \
@@ -62,15 +62,15 @@
 \
   TENSOR1##_data = (TENSOR1)->storage->data<TYPE1>()+(TENSOR1)->storageOffset; \
   TENSOR1##_stride = (TENSOR1)->stride[DIMENSION]; \
-  TENSOR1##_size = TENSOR1->size[DIMENSION]; \
+  TENSOR1##_size = TENSOR1->size(DIMENSION); \
 \
   TENSOR2##_data = (TENSOR2)->storage->data<TYPE2>()+(TENSOR2)->storageOffset; \
   TENSOR2##_stride = (TENSOR2)->stride[DIMENSION]; \
-  TENSOR2##_size = TENSOR2->size[DIMENSION]; \
+  TENSOR2##_size = TENSOR2->size(DIMENSION); \
 \
   TENSOR3##_data = (TENSOR3)->storage->data<TYPE3>()+(TENSOR3)->storageOffset; \
   TENSOR3##_stride = (TENSOR3)->stride[DIMENSION]; \
-  TENSOR3##_size = TENSOR3->size[DIMENSION]; \
+  TENSOR3##_size = TENSOR3->size(DIMENSION); \
 \
   while(!TH_TENSOR_DIM_APPLY_hasFinished) \
   { \
@@ -96,7 +96,7 @@
       TENSOR2##_data += TENSOR2->stride[TH_TENSOR_DIM_APPLY_i]; \
       TENSOR3##_data += TENSOR3->stride[TH_TENSOR_DIM_APPLY_i]; \
 \
-      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size[TH_TENSOR_DIM_APPLY_i]) \
+      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size(TH_TENSOR_DIM_APPLY_i)) \
       { \
         if(TH_TENSOR_DIM_APPLY_i == TENSOR1->dim()-1) \
         { \
@@ -155,7 +155,7 @@
   { \
     if(TH_TENSOR_DIM_APPLY_i == DIMENSION) \
       continue; \
-    if(TENSOR1->size[TH_TENSOR_DIM_APPLY_i] != TENSOR2->size[TH_TENSOR_DIM_APPLY_i]) { \
+    if(TENSOR1->size(TH_TENSOR_DIM_APPLY_i) != TENSOR2->size(TH_TENSOR_DIM_APPLY_i)) { \
       AT_ERROR("Expected ", #TENSOR1, " ", TENSOR1->sizes(), " and ", #TENSOR2, " ", TENSOR2->sizes(), " to have the same size in dimension ", DIMENSION); \
     }                                                                   \
   } \
@@ -169,11 +169,11 @@
 \
   TENSOR1##_data = (TENSOR1)->storage->data<TYPE1>()+(TENSOR1)->storageOffset; \
   TENSOR1##_stride = (TENSOR1)->stride[DIMENSION]; \
-  TENSOR1##_size = TENSOR1->size[DIMENSION]; \
+  TENSOR1##_size = TENSOR1->size(DIMENSION); \
 \
   TENSOR2##_data = (TENSOR2)->storage->data<TYPE2>()+(TENSOR2)->storageOffset; \
   TENSOR2##_stride = (TENSOR2)->stride[DIMENSION]; \
-  TENSOR2##_size = TENSOR2->size[DIMENSION]; \
+  TENSOR2##_size = TENSOR2->size(DIMENSION); \
 \
   while(!TH_TENSOR_DIM_APPLY_hasFinished) \
   { \
@@ -198,7 +198,7 @@
       TENSOR1##_data += TENSOR1->stride[TH_TENSOR_DIM_APPLY_i]; \
       TENSOR2##_data += TENSOR2->stride[TH_TENSOR_DIM_APPLY_i]; \
 \
-      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size[TH_TENSOR_DIM_APPLY_i]) \
+      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR1->size(TH_TENSOR_DIM_APPLY_i)) \
       { \
         if(TH_TENSOR_DIM_APPLY_i == TENSOR1->dim()-1) \
         { \
@@ -271,7 +271,7 @@
 \
   TENSOR##_data = (TENSOR)->storage->data<TYPE>()+(TENSOR)->storageOffset; \
   TENSOR##_stride = (TENSOR)->stride[DIMENSION]; \
-  TENSOR##_size = TENSOR->size[DIMENSION]; \
+  TENSOR##_size = TENSOR->size(DIMENSION); \
   /* Counter stores the indices into the Tensor at any time */ \
   TH_TENSOR_DIM_APPLY_counter = (int64_t*)THAlloc(sizeof(int64_t)*(TENSOR->_dim())); \
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR->_dim(); TH_TENSOR_DIM_APPLY_i++) \
@@ -304,7 +304,7 @@
       TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i]++; \
       TENSOR##_data += TENSOR->stride[TH_TENSOR_DIM_APPLY_i]; \
 \
-      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR->size[TH_TENSOR_DIM_APPLY_i]) \
+      if(TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] == TENSOR->size(TH_TENSOR_DIM_APPLY_i)) \
       { \
         /* Handled TENSOR_size(dim) iterations for DIM_APPLY_i. If this is the last dimension, exit */ \
         if(TH_TENSOR_DIM_APPLY_i == TENSOR->_dim()-1) \
