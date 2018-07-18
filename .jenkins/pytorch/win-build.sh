@@ -116,24 +116,22 @@ set DISTUTILS_USE_SDK=1
 
 set CMAKE_GENERATOR=Ninja
 
-REM if not "%USE_CUDA%"=="1" (
-REM   if "%REBUILD%"=="" (
-REM     set NO_CUDA=1
-REM     python setup.py install
-REM   )
-REM   if errorlevel 1 exit /b 1
-REM   if not errorlevel 0 exit /b 1
-REM )
+if not "%USE_CUDA%"=="1" (
+  if "%REBUILD%"=="" (
+    set NO_CUDA=1
+    python setup.py install
+  )
+  if errorlevel 1 exit /b 1
+  if not errorlevel 0 exit /b 1
+)
 
-REM if not "%USE_CUDA%"=="0" (
-REM   if "%REBUILD%"=="" (
-REM     sccache --show-stats
-REM     sccache --zero-stats
-REM     rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
-REM     copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
-REM   )
-
-  copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+if not "%USE_CUDA%"=="0" (
+  if "%REBUILD%"=="" (
+    sccache --show-stats
+    sccache --zero-stats
+    rd /s /q C:\\Jenkins\\Miniconda3\\Lib\\site-packages\\torch
+    copy %CD%\\tmp_bin\\sccache.exe tmp_bin\\nvcc.exe
+  )
 
   set CUDA_NVCC_EXECUTABLE=%CD%\\tmp_bin\\nvcc
 
