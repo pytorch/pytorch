@@ -79,13 +79,13 @@ private:
   std::unordered_map<std::string, IntListTrace> intlists;
 };
 
-inline bool isTracing() {
-  return static_cast<bool>(getTracingState());
-}
-
 // Retrieve or set the current tracing state. Returns a nullptr if tracing is disabled.
 const std::shared_ptr<TracingState>& getTracingState();
 void setTracingState(std::shared_ptr<TracingState> state);
+
+inline bool isTracing() {
+  return static_cast<bool>(getTracingState());
+}
 
 // Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
 // this node with an output variable, so that further operations involving this
@@ -152,7 +152,7 @@ inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
   if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
-  auto & state = std::make_shared<TracingState>();
+  auto state = std::make_shared<TracingState>();
   setTracingState(state);
   for (auto& input : inputs) {
     auto * value_state = state->value_map[input];
