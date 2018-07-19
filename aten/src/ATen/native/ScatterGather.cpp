@@ -1,8 +1,25 @@
+/*
+
+The broadcasting of `gather` works according to steps described below:
+Let's say we are doing a `t.gather(dim, index)`, the following will happen:
+1. Prepend 1s to the shape of either `t` or `index`, whichever have a smaller `.dim()`, to make it the same dimensions.
+2. For all dimensions except the one specified by `dim`, expand according to the standard rule of broadcasting.
+3. The dimension specified by `dim` of `t` and `index` are kept unchanged.
+
+The broadcasting of `scatter` works a bit more complicated than `gather`, as described below:
+Let's say we are doing a `t.scatter_(dim, index, src)`, the following will happen:
+1. Prepend 1s to the shape of `index` and/or `src` whichever have a smaller `.dim()` than `t`, to make them same dimensions.
+2. For all dimensions except the one specified by `dim`, expand `t`, `index`, and `src` according to the standard rule of broadcasting. The shape of `t` is not allowed to change, which means, if the standard broadcasting rule require `t` to be expanded, wes should raise a runtime error.
+3. For the dimension specified by `dim`, expand `index` and `src` according to the standard rule of broadcasting.
+
+*/
+
 #include "ATen/ATen.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/WrapDimUtils.h"
 
 #include <tuple>
+#include <algorithm>
 
 namespace at {
 namespace native{
@@ -12,7 +29,7 @@ namespace {
 std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntList tensor, IntList index, int64_t &dim) {
   auto dimsA = tensor.size();
   auto dimsB = index.size();
-  ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
+  ptrdiff_t ndim = std::max(dimsA, dimsB);
   dim = maybe_wrap_dim(dim, ndim);
   std::vector<int64_t> expandedSizesB(ndim);
   int64_t expandedSizeA = -1;
@@ -30,8 +47,8 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
     } else {
       AT_CHECK(
           sizeA == sizeB || sizeA == 1 || sizeB == 1,
-          "The size of tensor a (", sizeA,
-          ") must match the size of tensor b (", sizeB,
+          "The size of tensor (", sizeA,
+          ") must match the size of tensor index (", sizeB,
           ") at non-singleton dimension ", i);
 
       // 1s map to the other size (even 0).
@@ -44,7 +61,8 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
   return std::make_tuple(expandedSizesA, expandedSizesB);
 }
 
-inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, int64_t &dim) {
+inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name, int64_t &dim) {
+  check_defined({to_expand1, to_expand2}, api_name);
   if (to_expand1.sizes().equals(to_expand2.sizes())) {
     return std::make_tuple(to_expand1, to_expand2);
   }
@@ -56,20 +74,58 @@ inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand
       to_expand2.expand(expanded_size2, /*implicit=*/true));
 }
 
-inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name, int64_t &dim) {
-  check_defined({to_expand1, to_expand2}, api_name);
-  return gather_expand_outplace(to_expand1, to_expand2, dim);
+std::tuple<std::vector<int64_t>, std::vector<int64_t> > scatter_infer_size(IntList self, IntList index, IntList src, int64_t &dim) {
+  auto dimsA = tensor.size();
+  auto dimsB = index.size();
+  auto dimsC = index.size();
+  ptrdiff_t ndim = std::max({dimsA, dimsB, dimsC});
+  dim = maybe_wrap_dim(dim, ndim);
+  std::vector<int64_t> expandedSizesB(ndim);
+  std::vector<int64_t> expandedSizesC(ndim);
+
+  for (long i = ndim - 1; i >= 0; --i) {
+    long offset = ndim - 1 - i;
+    long dimA = dimsA - 1 - offset;
+    long dimB = dimsB - 1 - offset;
+    long dimC = dimsC - 1 - offset;
+    long sizeA = (dimA >= 0) ? tensor[dimA] : 1;
+    long sizeB = (dimB >= 0) ? index[dimB] : 1;
+    long sizeC = (dimC >= 0) ? src[dimC] : 1;
+
+    if (i == dim) {
+      AT_CHECK(
+          sizeB == sizeC || sizeB == 1 || sizeC == 1,
+          "The size of tensor index (", sizeB,
+          ") must match the size of tensor src (", sizeC,
+          ") at non-singleton dimension ", i);
+      expandedSizesB[i] = sizeB == 1 ? sizeC : sizeB;
+      expandedSizesC[i] = sizeC == 1 ? sizeB : sizeC;
+    } else {
+      AT_CHECK(
+          (sizeA == sizeB && sizeA == sizeC) ||
+          (sizeB == 1 && sizeA == sizeC) ||
+          (sizeC == 1 && sizeA == sizeB) ||
+          (sizeB == 1 && sizeC == 1),
+          "The size of tensor self (", sizeA,
+          "), tensor index (", sizeB,
+          "), and tensor src (", sizeB,
+          ") is not broadcastable at non-singleton dimension ", i);
+
+      expandedSizesB[i] = sizeB == 1 ? sizeA : sizeB;
+      expandedSizesC[i] = sizeC == 1 ? sizeA : sizeC;
+    }
+  }
+
+  return std::make_tuple(expandedSizesB, expandedSizesC);
 }
 
-inline Tensor broadcast_scatter(Tensor &self, const Tensor & index, const char *api_name, int64_t &dim) {
-  check_defined({self, index}, api_name);
-  std::vector<int64_t> b_self_sizes, b_index_sizes;
-  std::tie(b_self_sizes, b_index_sizes) = gather_infer_size(self.sizes(), index.sizes(), dim);
-  AT_CHECK(
-    self.sizes().equals(b_self_sizes) ||
-    (self.dim() == 0 && b_self_sizes.size() == 1 && b_self_sizes[0] == 1),
-    "Broadcasting of scatter_ should not change shape of self");
-  return index.expand(b_index_sizes, /*implicit=*/true);
+inline std::tuple<Tensor, Tensor> scatter_expand_outplace(const Tensor &self, const Tensor &index, const Tensor &src, const char *api_name, int64_t &dim) {
+  check_defined({self, index, src}, api_name);
+  std::vector<int64_t> expanded_size1, expanded_size2;
+  std::tie(expanded_size1, expanded_size2) = scatter_infer_size(self.sizes(), index.sizes(), src.sizes(), dim);
+  return std::make_tuple(
+      index.expand(expanded_size1, /*implicit=*/true), // see [expand implicit]
+      src.expand(expanded_size2, /*implicit=*/true));
 }
 
 } // namespace
@@ -88,18 +144,21 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  Tensor b_index = broadcast_scatter(self, index, "scatter_", dim);
-  return self._s_scatter_(dim, b_index, src);
+  Tensor b_index, b_src;
+  std::tie(b_index, b_src) = scatter_expand_outplace(self, index, src, "scatter_", dim);
+  return self._s_scatter_(dim, b_index, b_src);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
-  Tensor b_index = broadcast_scatter(self, index, "scatter_", dim);
-  return self._s_scatter_(dim, b_index, src);
+  Tensor b_index, b_src;
+  std::tie(b_index, b_src) = scatter_expand_outplace(self, index, src, "scatter_", dim);
+  return self._s_scatter_(dim, b_index, b_src);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
-  Tensor b_index = broadcast_scatter(self, index, "scatter_add_", dim);
-  return self._s_scatter_add_(dim, b_index, src);
+  Tensor b_index, b_src;
+  std::tie(b_index, b_src) = scatter_expand_outplace(self, index, src, "scatter_add_", dim);
+  return self._s_scatter_add_(dim, b_index, b_src);
 }
 
 }  // namespace native
