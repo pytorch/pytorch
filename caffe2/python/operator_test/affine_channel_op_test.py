@@ -32,17 +32,15 @@ class TestAffineChannelOp(hu.HypothesisTestCase):
 
     @given(N=st.integers(1, 5), C=st.integers(1, 5), H=st.integers(1, 5),
            W=st.integers(1, 5), order=st.sampled_from(["NCHW", "NHWC"]),
-           is_learnable=st.booleans(), engine=st.sampled_from(["", "CUDNN"]),
-           in_place=st.booleans(), **hu.gcs)
+           is_learnable=st.booleans(), in_place=st.booleans(), **hu.gcs)
     def test_affine_channel_2d(
-            self, N, C, H, W, order, is_learnable, engine, in_place, gc, dc):
+            self, N, C, H, W, order, is_learnable, in_place, gc, dc):
         op = core.CreateOperator(
             "AffineChannel",
             ["X", "scale", "bias"],
             ["X"] if in_place and not is_learnable else ["Y"],
             order=order,
             is_learnable=is_learnable,
-            engine=engine,
         )
 
         if order == "NCHW":
@@ -73,17 +71,15 @@ class TestAffineChannelOp(hu.HypothesisTestCase):
     @given(N=st.integers(1, 5), C=st.integers(1, 5), T=st.integers(1, 3),
            H=st.integers(1, 3), W=st.integers(1, 3),
            order=st.sampled_from(["NCHW", "NHWC"]), is_learnable=st.booleans(),
-           engine=st.sampled_from(["", "CUDNN"]), in_place=st.booleans(),
-           **hu.gcs)
+           in_place=st.booleans(), **hu.gcs)
     def test_affine_channel_3d(
-            self, N, C, T, H, W, order, is_learnable, engine, in_place, gc, dc):
+            self, N, C, T, H, W, order, is_learnable, in_place, gc, dc):
         op = core.CreateOperator(
             "AffineChannel",
             ["X", "scale", "bias"],
             ["X"] if in_place and not is_learnable else ["Y"],
             order=order,
             is_learnable=is_learnable,
-            engine=engine,
         )
 
         if order == "NCHW":

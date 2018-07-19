@@ -177,6 +177,7 @@ struct AT_API DynamicCUDAInterface {
   static void (*unchecked_set_device)(int32_t);
   static void (*cuda_stream_create_with_priority)(cudaStream_t*, int32_t, int32_t);
   static void (*cuda_stream_destroy)(cudaStream_t);
+  static void (*unchecked_cuda_stream_destroy)(cudaStream_t);
 };
 } // namespace detail
 } // namespace at

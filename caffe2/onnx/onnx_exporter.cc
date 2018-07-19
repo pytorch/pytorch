@@ -245,7 +245,8 @@ OnnxExporter::get_special_operators() const {
           {"LRN", &OnnxExporter::CreateLrnNodes},
           {"Reshape", &OnnxExporter::CreateReshapeNodes},
           {"Slice", &OnnxExporter::CreateSliceNodes},
-          {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes}};
+          {"ChannelShuffle", &OnnxExporter::CreateChannelShuffleNodes},
+          {"ResizeNearest", &OnnxExporter::CreateUpsampleNodes}};
   return kSpecialOperators;
 }
 
@@ -677,6 +678,41 @@ ConvertedResult OnnxExporter::CreateChannelShuffleNodes(
   const_tensors.emplace_back(CreateOnnxShapeTensor(dummy_, dims));
   nodes.emplace_back(MakeNode(
       "Reshape", {transpose_output, const_tensors.back().name()}, {y}));
+
+  return result;
+}
+
+ConvertedResult OnnxExporter::CreateUpsampleNodes(
+    const caffe2::OperatorDef& def,
+    const std::unordered_map<std::string, caffe2::TensorShape>& shapes) {
+  float width_scale = 1.0;
+  float height_scale = 1.0;
+  for (const auto& a : def.arg()) {
+    if (a.name() == "width_scale") {
+      width_scale = a.f();
+    } else if (a.name() == "height_scale") {
+      height_scale = a.f();
+    }
+  }
+  CAFFE_ENFORCE_GT(width_scale, 0);
+  CAFFE_ENFORCE_GT(height_scale, 0);
+
+  auto x = def.input(0);
+  const auto& x_shape = shapes.at(x);
+  CAFFE_ENFORCE_GE(x_shape.dims().size(), 2);
+
+  std::vector<float> scales(x_shape.dims().size(), 1.0);
+  scales[scales.size() - 2] = height_scale;
+  scales[scales.size() - 1] = width_scale;
+
+  ConvertedResult result;
+  auto& nodes = result.first;
+  std::vector<std::string> inputs(def.input().begin(), def.input().end());
+  std::vector<std::string> outputs(def.output().begin(), def.output().end());
+  auto node = MakeNode("Upsample", inputs, outputs, def.name());
+  node.add_attribute()->CopyFrom(MakeAttribute("scales", scales));
+  node.add_attribute()->CopyFrom(MakeAttribute("mode", "nearest"));
+  nodes.emplace_back(node);
 
   return result;
 }
