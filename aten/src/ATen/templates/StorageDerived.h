@@ -23,22 +23,14 @@ public:
     void * data, size_t size, const std::function<void(void*)> & deleter);
   ~${Storage}();
 
-  size_t elementSize() const override;
-  size_t size() const override;
-  virtual void* data() override;
-  virtual const void* data() const override;
-  void * unsafeGetTH(bool retain) const override;
+  size_t elementSize() const final;
 
-  void clear_flag(char flag) override;
-
-  Type& type() const override;
-  int getDevice() const override;
+  Type& type() const final;
   static const char * typeString();
 
 
 protected:
   friend struct ${Type};
-  THStorage *storage;
   Context* context;
 };
 
