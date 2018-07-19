@@ -1076,7 +1076,7 @@ class TestTorch(TestCase):
             if t in float_types:
                 a = cast(torch.randn(100, 90).type(t))
             else:
-                a = cast(torch.Tensor(100, 90, dtype=t.dtype).random_(-128, 128))
+                a = cast(torch.randint(-128, 128, (100, 90), dtype=t.dtype))
             zeros = cast(torch.Tensor().type(t)).resize_as_(a).zero_()
 
             if t == torch.ByteTensor:
