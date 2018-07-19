@@ -7,12 +7,12 @@
 /**** access methods ****/
 THStorage *THTensor_(storage)(const THTensor *self)
 {
-  return self->storage;
+  return THTensor_getStoragePtr(self);
 }
 
 ptrdiff_t THTensor_(storageOffset)(const THTensor *self)
 {
-  return self->storageOffset;
+  return self->storage_offset();
 }
 
 int THTensor_(nDimension)(const THTensor *self)
@@ -53,12 +53,8 @@ THLongStorage *THTensor_(newStrideOf)(THTensor *self)
   return stride;
 }
 
-real *THTensor_(data)(const THTensor *self)
-{
-  if(self->storage)
-    return (THStorage_(data)(self->storage)+self->storageOffset);
-  else
-    return NULL;
+real *THTensor_(data)(const THTensor *self) {
+  return self->data<real>();
 }
 
 /**** creation methods ****/
@@ -74,8 +70,8 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 {
   THTensor *self = new THTensor(THStorage_(new)());
   THTensor_(setStorageNd)(self,
-                          tensor->storage,
-                          tensor->storageOffset,
+                          THTensor_getStoragePtr(tensor),
+                          tensor->storage_offset(),
                           tensor->dim(),
                           THTensor_getSizePtr(tensor),
                           THTensor_getStridePtr(tensor));
@@ -238,7 +234,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
   auto stride_value = *stride;
   THLongStorage *new_stride = THLongStorage_newWithSize(stride_value.size());
   THLongStorage_rawCopy(new_stride, stride_value.data());
-  THTensor_(setStorage)(self, tensor->storage, tensor->storageOffset, inferred_size, new_stride);
+  THTensor_(setStorage)(self, THTensor_getStoragePtr(tensor), tensor->storage_offset(), inferred_size, new_stride);
   THLongStorage_free(inferred_size);
   THLongStorage_free(new_stride);
   return self;
@@ -673,7 +669,7 @@ ptrdiff_t THTensor_(nElement)(const THTensor *self)
 
 void THTensor_(retain)(THTensor *self)
 {
-  ++self->refcount;
+  self->retain();
 }
 
 void THTensor_(free)(THTensor *self)
@@ -711,7 +707,7 @@ void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t stora
   /* storageOffset */
   if(storageOffset < 0)
     THError("Tensor: invalid storage offset");
-  self->storageOffset = storageOffset;
+  THTensor_setStorageOffset(self, storageOffset);
 
   /* size and stride */
   THTensor_(resizeNd)(self, nDimension, size, stride);

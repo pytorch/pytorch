@@ -12,9 +12,9 @@
 struct THTensor
 {
     THTensor(THStorage* storage)
-      : refcount(1)
-      , storage(storage)
-      , storageOffset(0)
+      : refcount_(1)
+      , storage_(storage)
+      , storage_offset_(0)
       , sizes_{0}
       , strides_{1}
       , dim_(1)
@@ -26,12 +26,12 @@ struct THTensor
       }
     }
 
-    std::atomic<int> refcount;
+    std::atomic<int> refcount_;
 
     // Note: storage->size may be greater than the recorded size
     // of a tensor
-    THStorage *storage;
-    ptrdiff_t storageOffset;
+    THStorage *storage_;
+    ptrdiff_t storage_offset_;
 
     std::vector<int64_t> sizes_;
     std::vector<int64_t> strides_;
@@ -39,12 +39,12 @@ struct THTensor
 
     template <typename T>
     inline T * data() const {
-      return storage->data<T>() + storageOffset;
+      return storage->data<T>() + storage_offset_;
     }
 
     template <typename T>
     inline T * unsafe_data() const {
-      return storage->unsafe_data<T>() + storageOffset;
+      return storage->unsafe_data<T>() + storage_offset_;
     }
 
     // [NOTE: _dim() vs dim()]
@@ -56,6 +56,10 @@ struct THTensor
 
     inline int64_t dim() const {
       return dim_;
+    }
+
+    ptrdiff_t storage_offset() const {
+      return storage_offset_;
     }
 
     // represents that numel() == 0.
@@ -84,6 +88,16 @@ struct THTensor
 
     inline at::IntList strides() {
       return strides_;
+    }
+
+    void retain() {
+      ++refcount_;
+    }
+
+    void release() {
+      if(--refcount_ == 0) {
+        delete this;
+      }
     }
 };
 
@@ -118,6 +132,15 @@ inline void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size) {
 
 inline void THTensor_setStrideAtDim(THTensor* tensor, int dim, int64_t new_stride) {
   tensor->strides_[dim] = new_stride;
+}
+
+inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset) {
+  tensor->storage_offset_ = storage_offset;
+}
+
+// NB: Non-retaining
+inline THStorage* THTensor_getStoragePtr(THTensor* tensor) {
+  return tensor->storage_;
 }
 
 TH_API void THTensor_free(THTensor *self);
