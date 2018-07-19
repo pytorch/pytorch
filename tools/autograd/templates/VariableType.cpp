@@ -38,10 +38,14 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 // Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
 
+at::Tensor maybeUnwrapVar(const at::Tensor& t) {
+  return t.is_variable() ? Variable(t).data() : t;
+}
+
 // The overloaded accessors are convenient for the generated code (since we
 // don't want to make the codegen do the dispatch manually)
 static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
+static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, maybeUnwrapVar(v.toTensor())); }
 static void setattr(jit::Node* n, jit::Symbol name, SparseTensorRef s)     { n->t_(name, s.tref); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }

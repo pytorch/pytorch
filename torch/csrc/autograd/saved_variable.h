@@ -2,7 +2,6 @@
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/jit/tracer_state.h"
 
 #include <ATen/ATen.h>
 
@@ -44,7 +43,6 @@ class SavedVariable {
   // passed in to the unpack function when reconstructing the Variable.
   std::shared_ptr<Function> grad_fn_;
   std::weak_ptr<Function> grad_accumulator_;
-  std::unique_ptr<jit::tracer::ValueTracingState> tracing_state_;
   VariableVersion version_counter_;
 
   uint32_t saved_version_;
