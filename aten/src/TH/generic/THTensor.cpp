@@ -698,7 +698,6 @@ void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t stora
 
     if(storage)
     {
-      THTensor_setStoragePtrSteal();
       THTensor_stealAndSetStoragePtr(self, storage);
       THStorage_(retain)(THTensor_getStoragePtr(self));
     }

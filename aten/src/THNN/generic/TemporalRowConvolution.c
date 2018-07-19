@@ -148,7 +148,7 @@ static void THNN_(TemporalRowConvolution_updateOutput_frame)(
 	int64_t i;
 
 	THTensor *output3d = THTensor_(newWithStorage3d)(
-		output->storage, output->storage_offset(),
+		THTensor_getStoragePtr(output), output->storage_offset(),
 		inputFrameSize, -1,
 		1, -1,
 		nOutputFrame, -1);
@@ -261,7 +261,7 @@ static void THNN_(TemporalRowConvolution_updateGradInput_frame)(
 	int64_t nOutputFrame) {
 
 	THTensor *gradOutput3d = THTensor_(newWithStorage3d)(
-		gradOutput->storage, gradOutput->storage_offset(),
+		THTensor_getStoragePtr(gradOutput), gradOutput->storage_offset(),
 		inputFrameSize, -1,
 		1, -1,
 		nOutputFrame, -1);
@@ -372,7 +372,7 @@ static void THNN_(TemporalRowConvolution_accGradParameters_frame)(
 
 	int64_t i;
 	THTensor *gradOutput3d = THTensor_(newWithStorage3d)(
-		gradOutput->storage, gradOutput->storage_offset(),
+		THTensor_getStoragePtr(gradOutput), gradOutput->storage_offset(),
 		gradOutput->size(0), -1,
 		1, -1,
 		gradOutput->size(1), -1);

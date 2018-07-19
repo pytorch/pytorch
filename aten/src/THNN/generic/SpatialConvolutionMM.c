@@ -84,7 +84,7 @@ static THTensor* THNN_(newViewWeightMM2d)(THTensor *weight) {
     int64_t s1 = weight->size(0);
     int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3);
     THTensor *old_weight = weight;
-    weight = THTensor_(newWithStorage2d)(weight->storage, weight->storage_offset(),
+    weight = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(weight), weight->storage_offset(),
 					 s1, -1, s2, -1);
 	THTensor_(free)(old_weight);
   }
@@ -117,7 +117,7 @@ static void THNN_(SpatialConvolutionMM_updateOutput_frame)(
 		       nInputPlane, inputWidth, inputHeight,
 		       outputWidth, outputHeight);
 
-  output2d = THTensor_(newWithStorage2d)(output->storage, output->storage_offset(),
+  output2d = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(output), output->storage_offset(),
                                          nOutputPlane, -1,
                                          outputHeight*outputWidth, -1);
   if (bias) {
@@ -228,7 +228,7 @@ static void THNN_(SpatialConvolutionMM_updateGradInput_frame)(
           int padH)
 {
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)
-    (gradOutput->storage, gradOutput->storage_offset(),
+    (THTensor_getStoragePtr(gradOutput), gradOutput->storage_offset(),
      gradOutput->size(0), -1,
      gradOutput->size(1)*gradOutput->size(2), -1);
   THTensor_(addmm)(fgradInput, 0, fgradInput, 1, weight, gradOutput2d);
@@ -318,7 +318,7 @@ static void THNN_(SpatialConvolutionMM_accGradParameters_frame)(
 {
   int64_t i;
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)
-    (gradOutput->storage, gradOutput->storage_offset(),
+    (THTensor_getStoragePtr(gradOutput), gradOutput->storage_offset(),
      gradOutput->size(0), -1,
      gradOutput->size(1)*gradOutput->size(2), -1);
 

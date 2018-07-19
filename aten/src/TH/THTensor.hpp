@@ -21,8 +21,8 @@ struct THTensor
       {}
 
     ~THTensor() {
-      if (storage) {
-        THStorage_free(storage);
+      if (storage_) {
+        THStorage_free(storage_);
       }
     }
 
@@ -39,12 +39,12 @@ struct THTensor
 
     template <typename T>
     inline T * data() const {
-      return storage->data<T>() + storage_offset_;
+      return storage_->data<T>() + storage_offset_;
     }
 
     template <typename T>
     inline T * unsafe_data() const {
-      return storage->unsafe_data<T>() + storage_offset_;
+      return storage_->unsafe_data<T>() + storage_offset_;
     }
 
     // [NOTE: _dim() vs dim()]
@@ -139,7 +139,7 @@ inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset
 }
 
 // NB: Non-retaining
-inline THStorage* THTensor_getStoragePtr(THTensor* tensor) {
+inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   return tensor->storage_;
 }
 

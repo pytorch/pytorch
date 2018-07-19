@@ -116,7 +116,7 @@ static THTensor* THNN_(newViewWeight)(THTensor *weight)
     int64_t s1 = weight->size(0);
     int64_t s2 = weight->size(1) * weight->size(2) * weight->size(3) * weight->size(4);
     THTensor *old_weight = weight;
-    weight = THTensor_(newWithStorage2d)(weight->storage, weight->storage_offset(),
+    weight = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(weight), weight->storage_offset(),
 					 s1, -1, s2, -1);
     THTensor_(free)(old_weight);
   }
@@ -427,7 +427,7 @@ static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
   );
 
   output2d = THTensor_(newWithStorage2d)(
-    output->storage, output->storage_offset(), nOutputPlane, -1,
+    THTensor_getStoragePtr(output), output->storage_offset(), nOutputPlane, -1,
     outputDepth*outputHeight*outputWidth, -1
   );
 
@@ -570,7 +570,7 @@ static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
           int pH)
 {
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)(
-    gradOutput->storage, gradOutput->storage_offset(),
+    THTensor_getStoragePtr(gradOutput), gradOutput->storage_offset(),
     gradOutput->size(0), -1,
     gradOutput->size(1)*gradOutput->size(2)*gradOutput->size(3), -1
   );
@@ -676,7 +676,7 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
 {
   int64_t i;
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)(
-    gradOutput->storage, gradOutput->storage_offset(),
+    THTensor_getStoragePtr(gradOutput), gradOutput->storage_offset(),
     gradOutput->size(0), -1,
     gradOutput->size(1)*gradOutput->size(2)*gradOutput->size(3), -1
   );
