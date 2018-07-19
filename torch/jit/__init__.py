@@ -339,14 +339,18 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def script(fn, optimize=True, _frames_up=0):
-    rcb = createResolutionCallback(_frames_up + 1)
-    ast = get_jit_ast(fn)
+def _fn_to_typed_def(fn):
     schema = annotations.get_signature(fn)
+    ast = get_jit_ast(fn)
     if schema:
         typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1])
     else:
         typed_def = torch._C.TypedDef(ast)
+    return typed_def
+
+def script(fn, optimize=True, _frames_up=0):
+    rcb = createResolutionCallback(_frames_up + 1)
+    typed_def = _fn_to_typed_def(fn)
     graph = _jit_script_compile(typed_def, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
@@ -354,8 +358,7 @@ def script(fn, optimize=True, _frames_up=0):
     # 2) Throwing everything away except for the graph 3) Creating a new
     # ScriptModule and dumping that graph in 4) Re-populating the schema
     # because it was lost doing the previous
-    if schema:
-        mod.__getattr__('forward').set_arg_and_return_types(ast, schema[0], schema[1])
+    mod.__getattr__('forward').set_arg_and_return_types(typed_def)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
@@ -377,12 +380,7 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    schema = annotations.get_signature(fn)
-    ast = get_jit_ast(fn)
-    if schema:
-        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1])
-    else:
-        typed_def = torch._C.TypedDef(ast)
+    typed_def = _fn_to_typed_def(fn)
     return ScriptMethodStub(createResolutionCallback(frames_up=2), typed_def, fn)
 
 

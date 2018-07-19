@@ -532,16 +532,18 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args) {
       return self.graph_for(createVariableTensorList(args));
     })
-    .def("set_arg_and_return_types", [](Method &self, Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types) {
+    .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def) {
       std::vector<Argument> arg_type_args, return_type_args;
       size_t i = 0;
-      for (TypePtr arg_type : arg_types) {
-        arg_type_args.push_back(Argument(def.params()[i++].ident().name(), arg_type));
+      if (typed_def.schema) {
+        for (const auto &arg_type : typed_def.schema->arguments) {
+          arg_type_args.push_back(Argument(typed_def.def.params()[i++].ident().name(), arg_type.type));
+        }
+        for (const auto &return_type : typed_def.schema->returns) {
+          return_type_args.push_back(Argument("", return_type.type));
+        }
+        self.setSchema(FunctionSchema(self.name(), arg_type_args, return_type_args));
       }
-      for (TypePtr return_type : return_types) {
-        return_type_args.push_back(Argument("", return_type));
-      }
-      self.setSchema(FunctionSchema(self.name(), arg_type_args, return_type_args));
     })
     .def("pretty_print_schema", &Method::prettyPrintSchema);
 
