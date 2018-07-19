@@ -170,7 +170,7 @@ size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
 ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
 )");
 
-void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, bool last_is_cont) {
+static void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, bool last_is_cont) {
   TemplateEnv env;
   env.s("tensor",tensor);
   out << format("IndexType ${tensor}_offset = 0;\n",env);
@@ -187,20 +187,11 @@ void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, b
   }
 }
 
-std::string valueName(Value * n) {
+static std::string valueName(Value * n) {
   return "n" + std::to_string(n->unique());
 }
 
-std::string valueNameOrConstant(Value * n) {
-  if (auto value = constant_as<double>(n)) {
-    std::ostringstream s;
-    s << std::scientific << *value;
-    return s.str();
-  }
-  return "n" + std::to_string(n->unique());
-}
-
- std::string scalarValue(const at::Tensor & t) {
+static std::string scalarValue(const at::Tensor & t) {
   auto s =  at::Scalar(t);
   if (s.isIntegral()){
     return std::to_string(s.toLong());
@@ -211,7 +202,7 @@ std::string valueNameOrConstant(Value * n) {
   }
 }
 
-const char * scalarTypeName(at::ScalarType type) {
+static const char * scalarTypeName(at::ScalarType type) {
   if (type == at::ScalarType::Half) {
     return "half";
   }
@@ -301,7 +292,7 @@ std::string encodeRHS(Node * n) {
   TemplateEnv env;
   size_t i = 0;
   for(auto in : n->inputs()) {
-    env.s(std::to_string(i++), valueNameOrConstant(in));
+    env.s(std::to_string(i++), valueName(in));
   }
   // TODO (apaszke): remove once we get rid of attributes
   // ops like div have a / b or a / 2 with the constant having the attribute other

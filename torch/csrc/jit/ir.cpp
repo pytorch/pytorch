@@ -596,22 +596,10 @@ template<>
 double getattr<double>(Node *n, Symbol name) { return n->f(name); }
 
 template<>
-std::string getattr<std::string>(Node *n, Symbol name) { return n->s(name); }
-
-template<>
 at::Tensor getattr<at::Tensor>(Node *n, Symbol name) { return n->t(name); }
 
 template<>
 std::vector<int64_t> getattr<std::vector<int64_t>>(Node *n, Symbol name) { return n->is(name); }
-
-template<>
-std::vector<double> getattr<std::vector<double>>(Node *n, Symbol name) { return n->fs(name); }
-
-template<>
-std::vector<std::string> getattr<std::vector<std::string>>(Node *n, Symbol name) { return n->ss(name); }
-
-template<>
-std::vector<at::Tensor> getattr<std::vector<at::Tensor>>(Node *n, Symbol name) { return n->ts(name); }
 
 } // anonymous namespace
 

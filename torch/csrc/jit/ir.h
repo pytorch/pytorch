@@ -178,11 +178,7 @@ private:
   std::string unique_name_;
   TypePtr type_;
 public:
-  Value* setType(const TypePtr type) {
-    JIT_ASSERT(type);
-    type_ = type;
-    return this;
-  }
+  Value* setType(const TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
     setType(std::make_shared<TensorType>(output));
   }
@@ -1138,6 +1134,15 @@ inline Value::Value(Node * node_, size_t offset_)
   stage_(node_->graph_->new_node_stage_),
   type_(DynamicType::get()) {
   node_->graph_->all_values.emplace(this);
+}
+
+Value* Value::setType(const TypePtr type) {
+  JIT_ASSERT(type);
+  type_ = type;
+  for (Use & use : uses_) {
+    use.user->schema_ = nullptr;
+  }
+  return this;
 }
 
 inline Graph * Value::owningGraph() {
