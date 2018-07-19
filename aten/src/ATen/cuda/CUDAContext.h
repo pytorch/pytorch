@@ -5,8 +5,6 @@
 #include "ATen/cuda/Exceptions.h"
 #include "ATen/ATenGeneral.h"
 
-#include "THC/THCGeneral.h"
-
 #include <cstdint>
 
 #include "cuda_runtime_api.h"
@@ -47,13 +45,9 @@ AT_API inline int64_t current_device() {
   return cur_device;
 }
 
-AT_API inline cudaDeviceProp* getCurrentDeviceProperties() {
-  return THCState_getCurrentDeviceProperties(at::globalContext().getTHCState());
-}
+AT_API cudaDeviceProp* getCurrentDeviceProperties();
 
-AT_API inline cudaDeviceProp* getDeviceProperties(int64_t device) {
-  return THCState_getDeviceProperties(at::globalContext().getTHCState(), (int)device);
-}
+AT_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
 /* Streams */
 AT_API inline CUDAStream createCUDAStream() {
@@ -97,9 +91,7 @@ AT_API inline void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStr
 
 /* Handles */
 #ifndef __HIP_PLATFORM_HCC__
-  AT_API inline cusparseHandle_t getCurrentCUDASparseHandle() {
-    return THCState_getCurrentSparseHandle(at::globalContext().getTHCState());
-  }
+  AT_API cusparseHandle_t getCurrentCUDASparseHandle();
 #endif
 
 
