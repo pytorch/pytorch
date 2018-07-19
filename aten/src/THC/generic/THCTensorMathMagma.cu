@@ -12,7 +12,7 @@ static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, real *src,
   int64_t stride[1] = { 1 };
   THCTensor_(resizeNd)(state, self, 1, size, stride);
   size_t len = k * sizeof(real);
-  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, self->storage) + self->storageOffset, src, len, cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, self->storage) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
 }
 
 static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, real *src, int m, int n)
@@ -21,7 +21,7 @@ static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, real *src,
   int64_t stride[2] = { 1, m };
   THCTensor_(resizeNd)(state, self, 2, size, stride);
   size_t len = m * n * sizeof(real);
-  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, self->storage) + self->storageOffset, src, len, cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, self->storage) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
 }
 
 static void THCTensor_(copyTensor2d)(THCState *state, real *dst, THCTensor *self)
@@ -30,7 +30,7 @@ static void THCTensor_(copyTensor2d)(THCState *state, real *dst, THCTensor *self
   size_t len = THCTensor_(nElement)(state, self)*sizeof(real);
   THCTensor *temp = THCTensor_(newTranspose)(state, self, 0, 1);
   THCTensor *selfc = THCTensor_(newContiguous)(state, temp);
-  THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, selfc->storage) + selfc->storageOffset, len, cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, selfc->storage) + selfc->storage_offset(), len, cudaMemcpyDeviceToHost));
   THCTensor_(free)(state, temp);
   THCTensor_(free)(state, selfc);
 }
@@ -289,8 +289,8 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   {
     THCTensor_(resize2d)(state, re_, 2, n);
     THCTensor *re = THCTensor_(newContiguous)(state, re_);
-    THCudaCheck(cudaMemcpy(THCStorage_(data)(state, re->storage) + re->storageOffset, wr, n*sizeof(real), cudaMemcpyHostToDevice));
-    THCudaCheck(cudaMemcpy(THCStorage_(data)(state, re->storage) + re->storageOffset + n, wi, n*sizeof(real), cudaMemcpyHostToDevice));
+    THCudaCheck(cudaMemcpy(THCStorage_(data)(state, re->storage) + re->storage_offset(), wr, n*sizeof(real), cudaMemcpyHostToDevice));
+    THCudaCheck(cudaMemcpy(THCStorage_(data)(state, re->storage) + re->storage_offset() + n, wi, n*sizeof(real), cudaMemcpyHostToDevice));
     THCTensor_(freeCopyTo)(state, re, re_);
     THCTensor_(transpose)(state, re_, NULL, 0, 1);
   }

@@ -143,6 +143,11 @@ inline THStorage* THTensor_getStoragePtr(THTensor* tensor) {
   return tensor->storage_;
 }
 
+// NB: Steals ownership of storage
+inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
+  tensor->storage_ = storage;
+}
+
 TH_API void THTensor_free(THTensor *self);
 at::optional<std::vector<int64_t>> THTensor_compute_stride(at::IntList oldshape, at::IntList oldstride,
                                                            at::IntList newshape);

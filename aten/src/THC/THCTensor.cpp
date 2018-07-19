@@ -148,13 +148,13 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
     totalSize += (self->size(d)-1)*self->stride(d);
   }
 
-  if(totalSize+self->storageOffset > 0)
+  if(totalSize+self->storage_offset() > 0)
   {
     if(!self->storage) {
       THError("Tensor: invalid null storage");
     }
-    if(totalSize+self->storageOffset > self->storage->size) {
-      THCStorage_resize(state, self->storage, totalSize+self->storageOffset);
+    if(totalSize+self->storage_offset() > self->storage->size) {
+      THCStorage_resize(state, self->storage, totalSize+self->storage_offset());
     }
   }
 }
@@ -165,7 +165,7 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
     THCTensor_setStorageNd(state,
                            self,
                            src->storage,
-                           src->storageOffset,
+                           src->storage_offset(),
                            src->dim(),
                            THTensor_getSizePtr(src),
                            THTensor_getStridePtr(src));
@@ -192,9 +192,10 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
   }
 
   /* storageOffset */
-  if(storageOffset < 0)
+  if (storageOffset < 0) {
     THError("Tensor: invalid storage offset");
-  self->storageOffset = storageOffset;
+  }
+  THTensor_setStorageOffset(self, storageOffset);
 
   /* size and stride */
   THCTensor_resizeNd(state, self, nDimension, size, stride);
