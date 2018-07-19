@@ -50,9 +50,7 @@ ${Storage}::${Storage}(Context* context,
     ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
 }
 
-${Storage}::~${Storage}() {
-  ${THStorage}_free(${state,} storage);
-}
+${Storage}::~${Storage}() { }
 
 size_t ${Storage}::elementSize() const {
   return sizeof(${ScalarType});
