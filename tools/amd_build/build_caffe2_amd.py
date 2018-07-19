@@ -5,34 +5,38 @@ import sys
 import subprocess
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
-proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), "caffe2")
+proj_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)))
 
-include_dirs = ["operators",
-                "sgd",
-                "image",
-                "transforms",
-                "video",
-                "distributed"]
+includes = [
+    "caffe2/operators/*",
+    "caffe2/sgd/*",
+    "caffe2/image/*",
+    "caffe2/transforms/*",
+    "caffe2/video/*",
+    "caffe2/distributed/*",
+]
 
-output_dir = os.path.join(os.path.dirname(os.path.dirname(amd_build_dir)), ".caffe2_hip")
+ignores = [
+    "caffe2/operators/depthwise_3x3_conv_op.cu",
+    "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
+    "caffe2/operators/top_k.cu",
+    "caffe2/operators/top_k_radix_selection.cuh",
+    "caffe2/operators/top_k_heap_selection.cuh",
+    "caffe2/operators/pool_op_cudnn.cu",
+    "caffe2/operators/roi_align_op_gpu_test.cc",
+    "caffe2/operators/max_pool_with_index.cu",
+    '**/hip/**',
+]
 
-file_extensions = ['cc', 'cu', 'h', 'cuh']
-
-ignore_file_list = ["depthwise_3x3_conv_op.cu",
-                    "depthwise_3x3_conv_op_cudnn.cu",
-                    "top_k.cu",
-                    "top_k_radix_selection.cuh",
-                    "top_k_heap_selection.cuh",
-                    "pool_op_cudnn.cu",
-                    "roi_align_op_gpu_test.cc",
-                    "max_pool_with_index.cu"]  # REVIST THIS FILE
+file_extensions = ['.cc', '.cu', '.h', '.cuh']
 
 # Execute the Hipify Script.
-args = ["--project-directory", proj_dir,
-        "--output-directory", output_dir,
-        "--include-dirs"] + include_dirs + \
+args = [
+    "--project-directory", proj_dir,
+    "--output-directory", proj_dir,
+    "--includes"] + includes + \
     ["--extensions"] + file_extensions + \
-    ["--ignore_files"] + ignore_file_list + \
+    ["--ignores"] + ignores + \
     ["--hipify_caffe2", "True"] + \
     ["--add-static-casts", "True"]
 
