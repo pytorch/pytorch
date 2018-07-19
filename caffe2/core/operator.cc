@@ -70,8 +70,8 @@ PerOpEnginePrefType& g_per_op_engine_pref() {
 }
 
 GlobalEnginePrefType& g_global_engine_pref() {
-  static auto* g_global_engine_pref_ =
-      new GlobalEnginePrefType{{DeviceType::CUDA, {"CUDNN"}}};
+  static auto* g_global_engine_pref_ = new GlobalEnginePrefType{
+      {DeviceType::CUDA, {"CUDNN"}}, {DeviceType::HIP, {"MIOPEN"}}};
   return *g_global_engine_pref_;
 }
 
