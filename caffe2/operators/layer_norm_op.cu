@@ -116,7 +116,7 @@ bool LayerNormOp<CUDAContext>::DoRunWithType<float>() {
     mean->CopyFrom(input);
     mean->Resize(stats_dims);
     math::Set<float, CUDAContext>(
-        left, std::sqrt(epsilon_), stdev->mutable_data<float>(), &context_);
+        left, sqrtf(epsilon_), stdev->mutable_data<float>(), &context_);
   } else {
     // Calculate row-wise means
     // First stage: sum up feature vectors
