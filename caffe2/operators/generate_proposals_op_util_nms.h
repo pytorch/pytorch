@@ -4,12 +4,13 @@
 #include <vector>
 
 #include "caffe2/core/logging.h"
+#include "caffe2/core/macros.h"
 #include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
-#if defined(CV_MAJOR_VERSION) && (CV_MAJOR_VERSION >= 3)
+#ifdef CAFFE2_USE_OPENCV
 #include <opencv2/opencv.hpp>
-#endif // CV_MAJOR_VERSION >= 3
+#endif // CAFFE2_USE_OPENCV
 
 namespace caffe2 {
 namespace utils {
