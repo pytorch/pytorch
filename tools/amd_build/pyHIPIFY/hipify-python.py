@@ -654,13 +654,14 @@ def is_caffe2_gpu_file(filepath):
 def preprocessor(filepath, stats, hipify_caffe2):
     """ Executes the CUDA -> HIP conversion on the specified file. """
     fin_path = filepath
+    with open(fin_path, 'r') as fin:
+        output_source = fin.read()
+
     fout_path = get_hip_file_path(filepath, hipify_caffe2)
     if not os.path.exists(os.path.dirname(fout_path)):
         os.makedirs(os.path.dirname(fout_path))
 
-    with open(fin_path, 'r') as fin, open(fout_path, 'w') as fout:
-        output_source = fin.read()
-
+    with open(fout_path, 'w') as fout:
         # Perform type, method, constant replacements
         for mapping in CUDA_TO_HIP_MAPPINGS:
             for cuda_type, value in mapping.items():
