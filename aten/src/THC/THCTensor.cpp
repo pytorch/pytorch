@@ -294,9 +294,8 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
 }
 
 void THCTensor_retain(THCState *state, THCTensor *self) {
-  self->refcount++;
+  self->retain();
 }
-
 
 void THCTensor_free(THCState *state, THCTensor *self) {
   THTensor_free(self);
