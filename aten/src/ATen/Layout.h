@@ -2,6 +2,8 @@
 
 #include <ATen/ScalarType.h>
 
+#include <iostream>
+
 namespace at {
 enum class Layout { Strided, Sparse };
 
@@ -18,3 +20,7 @@ inline Layout layout_from_backend(Backend backend) {
   }
 }
 } // namespace at
+
+inline std::ostream& operator<<(std::ostream& stream, at::Layout layout) {
+  return stream << ((layout == at::kStrided) ? "Strided" : "Sparse");
+}
