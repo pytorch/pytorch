@@ -115,12 +115,12 @@ static void EnsureNoTuples(Block* block) {
 }
 
 void LowerTuples(std::shared_ptr<Graph>& graph) {
-  // for(auto input : graph->inputs()) {
-  //   JIT_ASSERTM(input->type()->kind() != TypeKind::TupleType, "tuples cannot be inputs to the graph");
-  // }
-  // for(auto output : graph->outputs()) {
-  //   JIT_ASSERTM(output->type()->kind() != TypeKind::TupleType, "tuples cannot be outputs to the graph");
-  // }
+  for(auto input : graph->inputs()) {
+    JIT_ASSERTM(input->type()->kind() != TypeKind::TupleType, "tuples cannot be inputs to the graph");
+  }
+  for(auto output : graph->outputs()) {
+    JIT_ASSERTM(output->type()->kind() != TypeKind::TupleType, "tuples cannot be outputs to the graph");
+  }
   LowerTuples(graph->block());
   EliminateDeadCode(graph);
   EnsureNoTuples(graph->block());

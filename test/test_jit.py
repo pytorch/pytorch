@@ -4278,6 +4278,7 @@ def func(t):
 
         self.assertExpected(str(test_index_put.graph))
 
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_annotated_script_fn(self):
         @torch.jit.script
         def foo(x, y, z):
@@ -4286,6 +4287,7 @@ def func(t):
 
         self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
 
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_annotated_script_method(self):
         class SM(torch.jit.ScriptModule):
             @torch.jit.script_method
@@ -4312,6 +4314,20 @@ def func(t):
             def tuple_arg(x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor
                 return x + 1
+
+    @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
+    def test_inline_and_run_annotated_script_fn(self):
+        @torch.jit.script
+        def to_inline(x, y):
+            # type: (Tuple[Tensor, Tensor], Tensor) -> Tensor
+            return y
+
+        @torch.jit.script
+        def some_func(x):
+            return to_inline((x, x), x)
+
+        some_func(torch.rand(3, 4))
+
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
