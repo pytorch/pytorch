@@ -91,7 +91,9 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
-    CAFFE_ENFORCE(tensor_descriptor.dimensions != 0, MakeString(tensor_descriptor.name, " has 0 dim"));
+    CAFFE_ENFORCE(
+        tensor_descriptor.dimensions != 0,
+        MakeString(tensor_descriptor.name, " has 0 dim"));
     output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = output_shapes_.back().data();
     tensor_descriptor.buffer =

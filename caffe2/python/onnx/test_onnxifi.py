@@ -181,16 +181,15 @@ class OnnxifiTransformTest(TestCase):
         input_blob_dims = (N, 3, 224, 224)
         input_name = "real_data"
 
-        device_option = core.DeviceOption(caffe2_pb2.CUDA, 0)
+        device_option = core.DeviceOption(caffe2_pb2.CPU, 0)
         init_net.device_option.CopyFrom(device_option)
         pred_net.device_option.CopyFrom(device_option)
         for op in pred_net.op:
             op.device_option.CopyFrom(device_option)
-            op.engine = 'CUDNN'
         net_outputs = pred_net.external_output
         Y_c2 = None
         data =  np.random.randn(*input_blob_dims).astype(np.float32)
-        c2_time = 1
+        c2_time = 0
         workspace.SwitchWorkspace("gpu_test", True)
         with core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
@@ -208,9 +207,7 @@ class OnnxifiTransformTest(TestCase):
         workspace.ResetWorkspace()
 
         # Fill the workspace with the weights
-        cpu_device = core.DeviceOption(caffe2_pb2.CPU, 0)
-        init_net.device_option.CopyFrom(cpu_device)
-        with core.DeviceScope(cpu_device):
+        with core.DeviceScope(device_option):
             workspace.RunNetOnce(init_net)
 
         # Cut the graph
@@ -219,15 +216,13 @@ class OnnxifiTransformTest(TestCase):
                                           {input_name: input_blob_dims})
         del init_net, pred_net
         pred_net_cut.device_option.CopyFrom(device_option)
-        for op in pred_net_cut.op:
-            op.device_option.CopyFrom(cpu_device)
         #_print_net(pred_net_cut)
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
         print("C2 runtime: {}s".format(c2_time))
         np.set_printoptions(threshold=np.nan)
-        with core.DeviceScope(cpu_device):
+        with core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
             end = time.time()
