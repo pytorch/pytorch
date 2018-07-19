@@ -377,7 +377,7 @@ void THCTensor_(narrow)(THCState *state, THCTensor *self, THCTensor *src, int di
   THCTensor_(set)(state, self, src);
 
   if (firstIndex > 0) {
-    THTensor_setStorageOffset(self, firstIndex*self->stride(dimension));
+    THTensor_setStorageOffset(self, self->storage_offset() + firstIndex*self->stride(dimension));
   }
 
   THTensor_setSizeAtDim(self, dimension, size);
