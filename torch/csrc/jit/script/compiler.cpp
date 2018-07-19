@@ -785,7 +785,7 @@ struct to_ir {
         TypePtr type = DynamicType::get();
         if (typed_def.schema) {
           type = typed_def.schema->returns[return_type_idx].type;
-          if (r->type() != type) {
+          if (!r->type()->isSubtypeOf(*type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
               << " but is actually of type " << r->type()->str();

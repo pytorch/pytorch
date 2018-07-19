@@ -381,14 +381,15 @@ void initJitScriptBindings(PyObject* module) {
 
   m.def("_pack_typed_def", [](Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types) {
     std::vector<Argument> arguments, returns;
+    size_t i = 0;
     for (auto arg_type : arg_types) {
-      arguments.push_back(Argument("", arg_type));
+      arguments.push_back(Argument(def.params()[i++].ident().name(), arg_type));
     }
     for (auto ret_type : return_types) {
       returns.push_back(Argument("", ret_type));
     }
 
-    return TypedDef(def, FunctionSchema("", arguments, returns));
+    return TypedDef(def, FunctionSchema(def.name().name(), arguments, returns));
   });
 
   // torch.jit.ScriptModule is a subclass of this C++ object.
@@ -528,10 +529,11 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args) {
       return self.graph_for(createVariableTensorList(args));
     })
-    .def("set_arg_and_return_types", [](Method &self, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types) {
+    .def("set_arg_and_return_types", [](Method &self, Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types) {
       std::vector<Argument> arg_type_args, return_type_args;
+      size_t i = 0;
       for (TypePtr arg_type : arg_types) {
-        arg_type_args.push_back(Argument("", arg_type));
+        arg_type_args.push_back(Argument(def.params()[i++].ident().name(), arg_type));
       }
       for (TypePtr return_type : return_types) {
         return_type_args.push_back(Argument("", return_type));
