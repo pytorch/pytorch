@@ -221,8 +221,8 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     (input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, adjH, adjW, 0);
 
-  int nInputPlane = THTensor_(size)(weight,0);
-  int nOutputPlane = THTensor_(size)(weight,1);
+  int64_t nInputPlane = THTensor_(size)(weight,0);
+  int64_t nOutputPlane = THTensor_(size)(weight,1);
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -328,7 +328,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, adjH, adjW, 1);
 
-  int nOutputPlane;
+  int64_t nOutputPlane;
   if (gradWeight) {
     nOutputPlane = THTensor_(size)(gradWeight, 1);
   } else if (gradBias) {
