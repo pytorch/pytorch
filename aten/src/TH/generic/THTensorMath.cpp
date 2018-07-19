@@ -1955,9 +1955,9 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
 
 void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *mat, THTensor *vec)
 {
-  if( (mat->_dim() != 2) || (vec->_dim() != 1) )
+  if( (mat->dim() != 2) || (vec->dim() != 1) )
     THError("matrix and vector expected, got %dD, %dD",
-      mat->_dim(), vec->_dim());
+      mat->dim(), vec->dim());
 
   if( mat->size[1] != vec->size[0] ) {
     THDescBuff bm = THTensor_(sizeDesc)(mat);
@@ -1965,8 +1965,8 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THError("size mismatch, %s, %s", bm.str, bv.str);
   }
 
-  if(t->_dim() != 1)
-    THError("vector expected, got t: %dD", t->_dim());
+  if(t->dim() != 1)
+    THError("vector expected, got t: %dD", t->dim());
 
   if(t->size[0] != mat->size[0]) {
     THDescBuff bt = THTensor_(sizeDesc)(t);
@@ -2061,8 +2061,8 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   int free_m1 = 0;
   int free_m2 = 0;
 
-  if( (m1->_dim() != 2) || (m2->_dim() != 2))
-    THError("matrices expected, got %dD, %dD tensors", m1->_dim(), m2->_dim());
+  if( (m1->dim() != 2) || (m2->dim() != 2))
+    THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
 
   if(m1->size[1] != m2->size[0]) {
     THDescBuff bm1 = THTensor_(sizeDesc)(m1);
@@ -2070,8 +2070,8 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
   }
 
-  if( t->_dim() != 2 )
-    THError("matrix expected, got %dD tensor for t", t->_dim());
+  if( t->dim() != 2 )
+    THError("matrix expected, got %dD tensor for t", t->dim());
 
   if( (t->size[0] != m1->size[0]) || (t->size[1] != m2->size[1]) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -2198,12 +2198,12 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
 void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *vec1, THTensor *vec2)
 {
-  if( (vec1->_dim() != 1) || (vec2->_dim() != 1) )
+  if( (vec1->dim() != 1) || (vec2->dim() != 1) )
     THError("vector and vector expected, got %dD, %dD tensors",
-        vec1->_dim(), vec2->_dim());
+        vec1->dim(), vec2->dim());
 
-  if(t->_dim() != 2)
-    THError("expected matrix, got %dD tensor for t", t->_dim());
+  if(t->dim() != 2)
+    THError("expected matrix, got %dD tensor for t", t->dim());
 
   if( (t->size[0] != vec1->size[0]) || (t->size[1] != vec2->size[0]) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -2260,8 +2260,8 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
 {
   int64_t batch;
 
-  THArgCheck(!batch1->is_empty() && THTensor_(nDimension)(batch1) == 3, 1, "expected non-empty 3D tensor");
-  THArgCheck(!batch2->is_empty() && THTensor_(nDimension)(batch2) == 3, 2, "expected non-empty 3D tensor");
+  THArgCheck(THTensor_(nDimension)(batch1) == 3, 1, "expected 3D tensor");
+  THArgCheck(THTensor_(nDimension)(batch2) == 3, 2, "expected 3D tensor");
   THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
              THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
@@ -2301,8 +2301,8 @@ void THTensor_(baddbmm)(THTensor *result, real beta, THTensor *t, real alpha, TH
 {
   int64_t batch;
 
-  THArgCheck(THTensor_(_nDimension)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(_nDimension)(batch1));
-  THArgCheck(THTensor_(_nDimension)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(_nDimension)(batch2));
+  THArgCheck(THTensor_(nDimension)(batch1) == 3, 1, "expected 3D tensor, got %dD", THTensor_(nDimension)(batch1));
+  THArgCheck(THTensor_(nDimension)(batch2) == 3, 2, "expected 3D tensor, got %dD", THTensor_(nDimension)(batch2));
   THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
              THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));

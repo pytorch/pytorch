@@ -1,4 +1,4 @@
-#include <TH/THStorage.h>
+#include <TH/THStorageFunctions.h>
 #include <cstdint>
 #include <unordered_map>
 #include <memory>

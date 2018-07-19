@@ -16,6 +16,7 @@ import gzip
 from torch._utils_internal import get_file_path, get_file_path_2
 from torch.utils.dlpack import from_dlpack, to_dlpack
 from torch._utils import _rebuild_tensor
+from torch._six import inf, nan
 from itertools import product, combinations
 from functools import reduce
 from torch import multiprocessing as mp
@@ -87,6 +88,60 @@ class BytesIOContext(io.BytesIO):
 
 
 class TestTorch(TestCase):
+    def _check_sum_dim(tensors, dim):
+        for tensor in tensors:
+            expected = tensor.numpy().sum(dim)
+            actual = tensor.sum(dim)
+            self.assertEqual(expected.shape, actual.shape)
+            if actual.dtype == torch.float:
+                self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
+            else:
+                self.assertTrue(np.allclose(expected, actual.numpy()))
+
+    def _make_tensors(self, shape, val_range=(-100, 100), use_floating=True, use_integral=True):
+        float_types = [torch.double,
+                       torch.float]
+        int_types = [torch.int64,
+                     torch.int32,
+                     torch.int16]
+
+        def make_contiguous(shape, dtype):
+            if dtype in float_types:
+                val = torch.randn(shape, dtype=dtype)
+                val = val * ((val_range[1] - val_range[0]) / (math.pi * 2.0))
+                val = val + ((val_range[1] - val_range[0]) / 2.0)
+                val = torch.clamp(val, min=val_range[0], max=val_range[1])
+                return val
+            result = torch.zeros(shape, dtype=dtype)
+            result.apply_(lambda x: random.randint(val_range[0], val_range[1]))
+            return result
+
+        def make_non_contiguous(shape, dtype):
+            contig = make_contiguous(shape, dtype)
+            non_contig = torch.empty(shape + (2, 2), dtype=dtype)[..., 0]
+            non_contig = non_contig.select(-1, -1)
+            non_contig.copy_(contig)
+            self.assertFalse(non_contig.is_contiguous())
+            return non_contig
+
+        def make_contiguous_slice(size, dtype):
+            contig = make_contiguous((1, size), dtype)
+            non_contig = contig[:1, 1:size - 1]
+            self.assertTrue(non_contig.is_contiguous())
+            return contig
+
+        types = []
+        if use_floating:
+            types += float_types
+        if use_integral:
+            types += int_types
+        tensors = {"cont": [], "noncont": [], "slice": []}
+        for dtype in types:
+            tensors["cont"].append(make_contiguous(shape, dtype))
+            tensors["noncont"].append(make_non_contiguous(shape, dtype))
+            tensors["slice"].append(make_contiguous_slice(sum(list(shape)), dtype))
+
+        return tensors
 
     def test_dot(self):
         types = {
@@ -241,17 +296,17 @@ class TestTorch(TestCase):
         self.assertTrue(torch.allclose(x, y, rtol=0.01, atol=0.0))
         self.assertFalse(torch.allclose(x, y))
         self.assertTrue(torch.allclose(torch.tensor([0.0]), torch.tensor([1e-8])))
-        x = torch.tensor([2.0, 3.0, float('nan')])
-        y = torch.tensor([2.01, 3.01, float('nan')])
+        x = torch.tensor([2.0, 3.0, nan])
+        y = torch.tensor([2.01, 3.01, nan])
         self.assertFalse(torch.allclose(x, y, rtol=1e-2))
         self.assertTrue(torch.allclose(x, y, rtol=1e-2, equal_nan=True))
         self.assertFalse(torch.allclose(x, y, rtol=1e-3, equal_nan=True))
-        inf = torch.tensor([float('inf')])
-        self.assertTrue(torch.allclose(inf, inf))
-        self.assertTrue(torch.allclose(-inf, -inf))
-        self.assertFalse(torch.allclose(inf, -inf))
-        self.assertFalse(torch.allclose(inf, torch.tensor([1e20])))
-        self.assertFalse(torch.allclose(-inf, torch.tensor([-1e20])))
+        inf_t = torch.tensor([inf])
+        self.assertTrue(torch.allclose(inf_t, inf_t))
+        self.assertTrue(torch.allclose(-inf_t, -inf_t))
+        self.assertFalse(torch.allclose(inf_t, -inf_t))
+        self.assertFalse(torch.allclose(inf_t, torch.tensor([1e20])))
+        self.assertFalse(torch.allclose(-inf_t, torch.tensor([-1e20])))
 
     def test_linear_algebra_scalar_raises(self):
         m = torch.randn(5, 5)
@@ -359,13 +414,13 @@ class TestTorch(TestCase):
             try:
                 return math.sinh(x)
             except OverflowError:
-                return float('inf') if x > 0 else float('-inf')
+                return inf if x > 0 else -inf
         self._test_math(torch.sinh, sinh)
 
     def test_lgamma(self):
         def lgamma(x):
             if x <= 0 and x == int(x):
-                return float('inf')
+                return inf
             return math.lgamma(x)
         self._test_math(torch.lgamma, lgamma)
 
@@ -392,14 +447,14 @@ class TestTorch(TestCase):
         # scipy 1.1.0 changed when it returns +/-inf vs. NaN
         def torch_digamma_without_inf(inp):
             res = torch.digamma(inp)
-            res[(res == float('-inf')) | (res == float('inf'))] = float('nan')
+            res[(res == -inf) | (res == inf)] = nan
             return res
 
         def scipy_digamma_without_inf(inp):
             res = digamma(inp)
             if np.isscalar(res):
-                return res if np.isfinite(res) else float('nan')
-            res[np.isinf(res)] = float('nan')
+                return res if np.isfinite(res) else nan
+            res[np.isinf(res)] = nan
             return res
 
         self._test_math(torch_digamma_without_inf, scipy_digamma_without_inf, self._digamma_input())
@@ -413,7 +468,7 @@ class TestTorch(TestCase):
                             self._digamma_input(test_poles=False))
 
     def test_asin(self):
-        self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else float('nan'))
+        self._test_math(torch.asin, lambda x: math.asin(x) if abs(x) <= 1 else nan)
 
     def test_cos(self):
         self._test_math_by_name('cos')
@@ -425,11 +480,11 @@ class TestTorch(TestCase):
             except OverflowError:
                 # Return inf on overflow.
                 # See http://en.cppreference.com/w/cpp/numeric/math/cosh
-                return float('inf')
+                return inf
         self._test_math(torch.cosh, cosh)
 
     def test_acos(self):
-        self._test_math(torch.acos, lambda x: math.acos(x) if abs(x) <= 1 else float('nan'))
+        self._test_math(torch.acos, lambda x: math.acos(x) if abs(x) <= 1 else nan)
 
     def test_tan(self):
         self._test_math_by_name('tan')
@@ -443,36 +498,36 @@ class TestTorch(TestCase):
     def test_log(self):
         def log(x):
             if x == 0:
-                return float('-inf')
+                return -inf
             elif x < 0:
-                return float('nan')
+                return nan
             return math.log(x)
         self._test_math(torch.log, log)
 
     def test_log10(self):
         def log10(x):
             if x == 0:
-                return float('-inf')
+                return -inf
             elif x < 0:
-                return float('nan')
+                return nan
             return math.log10(x)
         self._test_math(torch.log10, log10)
 
     def test_log1p(self):
         def log1p(x):
             if x == -1:
-                return float('-inf')
+                return -inf
             elif x < -1:
-                return float('nan')
+                return nan
             return math.log1p(x)
         self._test_math(torch.log1p, log1p)
 
     def test_log2(self):
         def log2(x):
             if x == 0:
-                return float('-inf')
+                return -inf
             elif x < 0:
-                return float('nan')
+                return nan
             try:
                 return math.log2(x)
             except AttributeError:
@@ -480,7 +535,7 @@ class TestTorch(TestCase):
         self._test_math(torch.log2, log2)
 
     def test_sqrt(self):
-        self._test_math(torch.sqrt, lambda x: math.sqrt(x) if x >= 0 else float('nan'))
+        self._test_math(torch.sqrt, lambda x: math.sqrt(x) if x >= 0 else nan)
 
     def test_erf(self):
         self._test_math_by_name('erf')
@@ -493,9 +548,9 @@ class TestTorch(TestCase):
             inputValues = torch.randn(4, 4, out=tensor()).clamp(-2., 2.)
             self.assertEqual(tensor(inputValues).erf().erfinv(), tensor(inputValues))
             # test inf
-            self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([float('-inf'), float('inf')])))
+            self.assertTrue(torch.equal(tensor([-1, 1]).erfinv(), tensor([-inf, inf])))
             # test nan
-            self.assertEqual(tensor([-2, 2]).erfinv(), tensor([float('nan'), float('nan')]))
+            self.assertEqual(tensor([-2, 2]).erfinv(), tensor([nan, nan]))
 
         checkType(torch.FloatTensor)
         checkType(torch.DoubleTensor)
@@ -505,7 +560,7 @@ class TestTorch(TestCase):
             try:
                 return math.exp(x)
             except OverflowError:
-                return float('inf')
+                return inf
         self._test_math(torch.exp, exp)
 
     def test_expm1(self):
@@ -513,7 +568,7 @@ class TestTorch(TestCase):
             try:
                 return math.expm1(x)
             except OverflowError:
-                return float('inf')
+                return inf
         self._test_math(torch.expm1, expm1)
 
     def test_floor(self):
@@ -525,9 +580,9 @@ class TestTorch(TestCase):
     def test_rsqrt(self):
         def rsqrt(x):
             if x == 0:
-                return float('inf')
+                return inf
             elif x < 0:
-                return float('nan')
+                return nan
             return 1.0 / math.sqrt(x)
 
         self._test_math(torch.rsqrt, rsqrt)
@@ -615,7 +670,7 @@ class TestTorch(TestCase):
         # NaNs
         for index in (0, 4, 99):
             m1 = torch.randn(100)
-            m1[index] = float('nan')
+            m1[index] = nan
             res1val, res1ind = torch.max(m1, 0)
             self.assertTrue(math.isnan(res1val))
             self.assertEqual(res1ind, index)
@@ -633,14 +688,14 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, float('inf')]:
+        for p in [0, 1, 2, 3, 4, inf]:
             res = x.norm(p).item()
             expected = np.linalg.norm(xn, p)
             self.assertEqual(res, expected, "full reduction failed for {}-norm".format(p))
         # one dimension
         x = torch.randn(5, 5, device=device)
         xn = x.cpu().numpy()
-        for p in [0, 1, 2, 3, 4, float('inf')]:
+        for p in [0, 1, 2, 3, 4, inf]:
             res = x.norm(p, 1).cpu().numpy()
             expected = np.linalg.norm(xn, p, 1)
             self.assertEqual(res.shape, expected.shape)
@@ -808,10 +863,10 @@ class TestTorch(TestCase):
             ('prod', lambda *args, **kwargs: torch.prod(*args, **kwargs), 1),
             ('sum', lambda *args, **kwargs: torch.sum(*args, **kwargs), 0),
             ('norm', lambda *args, **kwargs: torch.norm(*args, p=2, **kwargs), 0),
-            ('mean', lambda *args, **kwargs: torch.mean(*args, **kwargs), float('nan')),
-            ('var', lambda *args, **kwargs: torch.var(*args, **kwargs), float('nan')),
-            ('std', lambda *args, **kwargs: torch.std(*args, **kwargs), float('nan')),
-            ('logsumexp', lambda *args, **kwargs: torch.logsumexp(*args, **kwargs), float('-inf')),
+            ('mean', lambda *args, **kwargs: torch.mean(*args, **kwargs), nan),
+            ('var', lambda *args, **kwargs: torch.var(*args, **kwargs), nan),
+            ('std', lambda *args, **kwargs: torch.std(*args, **kwargs), nan),
+            ('logsumexp', lambda *args, **kwargs: torch.logsumexp(*args, **kwargs), -inf),
         ]
 
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
@@ -878,8 +933,8 @@ class TestTorch(TestCase):
     def test_logsumexp(self):
         from scipy.special import logsumexp
         a = torch.randn(5, 4)
-        a[0, 0] = float('inf')
-        a[1, :] = float('-inf')
+        a[0, 0] = inf
+        a[1, :] = -inf
         actual = a.logsumexp(1)
         expected = logsumexp(a.numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
@@ -1540,7 +1595,7 @@ class TestTorch(TestCase):
         self._test_cop(torch.mul, lambda x, y: x * y)
 
     def test_cpow(self):
-        self._test_cop(torch.pow, lambda x, y: float('nan') if x < 0 else math.pow(x, y))
+        self._test_cop(torch.pow, lambda x, y: nan if x < 0 else math.pow(x, y))
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_einsum(self):
@@ -1618,65 +1673,32 @@ class TestTorch(TestCase):
 
     @unittest.skipIf(not TEST_NUMPY, 'Numpy not found')
     def test_sum_dim(self):
-        def check_sum_dim(tensors, dim):
-            for tensor in tensors:
-                expected = tensor.numpy().sum(dim)
-                actual = tensor.sum(dim)
-                self.assertEqual(expected.shape, actual.shape)
-                if actual.dtype == torch.float:
-                    self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
-                else:
-                    self.assertTrue(np.allclose(expected, actual.numpy()))
+        def check_sum_dim(tensors_dict, dim):
+            for category, tensors in tensors_dict.items():
+                if category == "slice":
+                    dim = 0
+                for tensor in tensors:
+                    expected = tensor.numpy().sum(dim)
+                    actual = tensor.sum(dim)
+                    self.assertEqual(expected.shape, actual.shape)
+                    if actual.dtype == torch.float:
+                        self.assertTrue(np.allclose(expected, actual.numpy(), rtol=1e-03, atol=1e-05))
+                    else:
+                        self.assertTrue(np.allclose(expected, actual.numpy()))
 
-        float_types = [torch.double,
-                       torch.float]
-        int_types = [torch.int64,
-                     torch.int32,
-                     torch.int16]
+        float_types = [torch.double, torch.float]
+        int_types = [torch.int64, torch.int32, torch.int16]
 
-        def make_contiguous(shape, dtype):
-            if dtype in float_types:
-                return torch.randn(*shape, dtype=dtype)
-            result = torch.zeros(*shape, dtype=dtype)
-            result.apply_(lambda x: random.randint(-100, 100))
-            return result
-
-        def make_non_contiguous(shape, dtype):
-            contig = make_contiguous(shape, dtype)
-            non_contig = torch.empty(shape + (2,), dtype=dtype)[..., 0]
-            non_contig.copy_(contig)
-            self.assertFalse(non_contig.is_contiguous())
-            return non_contig
-
-        def make_tensors(*shape):
-            tensors = []
-            for dtype in float_types + int_types:
-                tensors.append(make_contiguous(shape, dtype))
-                tensors.append(make_non_contiguous(shape, dtype))
-            return tensors
-
-        check_sum_dim(make_tensors(5, 400000), 1)
-        check_sum_dim(make_tensors(3, 5, 7), 0)
-        check_sum_dim(make_tensors(3, 5, 7), 1)
-        check_sum_dim(make_tensors(3, 5, 7), 2)
-        check_sum_dim(make_tensors(100000), -1)
-        check_sum_dim(make_tensors(50, 50, 50), 0)
-        check_sum_dim(make_tensors(50, 50, 50), 1)
-        check_sum_dim(make_tensors(50, 50, 50), 2)
-        check_sum_dim(make_tensors(50, 50, 50), (1, 2))
-        check_sum_dim(make_tensors(50, 50, 50), (1, -1))
-
-        def make_contiguous_slice(size, dtype):
-            contig = make_contiguous((1, size), dtype)
-            non_contig = contig[:1, 1:size - 1]
-            self.assertTrue(non_contig.is_contiguous())
-            return contig
-
-        for dtype in float_types + int_types:
-            check_sum_dim(make_contiguous_slice(5, dtype), 0)
-            check_sum_dim(make_contiguous_slice(50, dtype), 0)
-            check_sum_dim(make_contiguous_slice(500, dtype), 0)
-            check_sum_dim(make_contiguous_slice(100000, dtype), 0)
+        check_sum_dim(self._make_tensors((5, 400000)), 1)
+        check_sum_dim(self._make_tensors((3, 5, 7)), 0)
+        check_sum_dim(self._make_tensors((3, 5, 7)), 1)
+        check_sum_dim(self._make_tensors((3, 5, 7)), 2)
+        check_sum_dim(self._make_tensors((100000, )), -1)
+        check_sum_dim(self._make_tensors((50, 50, 50)), 0)
+        check_sum_dim(self._make_tensors((50, 50, 50)), 1)
+        check_sum_dim(self._make_tensors((50, 50, 50)), 2)
+        check_sum_dim(self._make_tensors((50, 50, 50)), (1, 2))
+        check_sum_dim(self._make_tensors((50, 50, 50)), (1, -1))
 
     def test_sum_out(self):
         x = torch.rand(100, 100)
@@ -2416,7 +2438,7 @@ class TestTorch(TestCase):
         # full reduction
         x = torch.randn(5, 5)
         xn = x.numpy()
-        for p in [1, 2, 3, 4, float('inf')]:
+        for p in [1, 2, 3, 4, inf]:
             res = x.renorm(p, 1, 1)
             expected = x / x.norm(p, 0, keepdim=True).clamp(min=1)
             self.assertEqual(res.numpy(), expected.numpy(), "renorm failed for {}-norm".format(p))
@@ -2532,9 +2554,9 @@ class TestTorch(TestCase):
     def test_multinomial_invalid_probs(self):
         test_method = TestTorch._test_multinomial_invalid_probs
         self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
+        self._spawn_method(test_method, torch.Tensor([0, inf]))
+        self._spawn_method(test_method, torch.Tensor([0, -inf]))
+        self._spawn_method(test_method, torch.Tensor([0, nan]))
 
     @suppress_warnings
     def test_range(self):
@@ -4671,13 +4693,17 @@ class TestTorch(TestCase):
         self.assertEqual(neqs.long().sum(), xne.long().sum(), 0)
         self.assertEqual(x.nelement(), all.long().sum())
 
-    def test_isnan(self):
-        x = torch.Tensor([1, float('nan'), 2])
-        self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
+    def test_isfinite(self):
+        x = torch.Tensor([1, inf, 2, -inf, nan, -10])
+        self.assertEqual(torch.isfinite(x), torch.ByteTensor([1, 0, 1, 0, 0, 1]))
 
     def test_isinf(self):
-        x = torch.Tensor([1, float('inf'), 2, float('-inf'), float('nan')])
+        x = torch.Tensor([1, inf, 2, -inf, nan])
         self.assertEqual(torch.isinf(x), torch.ByteTensor([0, 1, 0, 1, 0]))
+
+    def test_isnan(self):
+        x = torch.Tensor([1, nan, 2])
+        self.assertEqual(torch.isnan(x), torch.ByteTensor([0, 1, 0]))
 
     def test_RNGState(self):
         state = torch.get_rng_state()
@@ -5864,25 +5890,30 @@ class TestTorch(TestCase):
         self.assertEqual(dst, dst2, 0)
 
     def test_abs(self):
-        size = 1000
-        max_val = 1000
-        original = torch.rand(size).mul(max_val)
-        # Tensor filled with values from {-1, 1}
-        switch = torch.rand(size).mul(2).floor().mul(2).add(-1)
+        def _test_abs(tensors_dict):
+            for category, tensors in tensors_dict.items():
+                for data in tensors:
+                    switch = torch.rand(data.size()).mul(2).floor().mul(2).add(-1).type(data.dtype)
+                    res = torch.mul(data, switch)
+                    self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
 
-        types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor',
-                 'torch.IntTensor', 'torch.ShortTensor']
-        for t in types:
-            data = original.type(t)
-            switch = switch.type(t)
-            res = torch.mul(data, switch)
-            # abs is used in assertEqual so we use the slow version instead
-            self.assertTensorsSlowEqual(res.abs(), data, 1e-16)
+        max_val = 1000
+        _test_abs(self._make_tensors((3, 4), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((3, 5, 7), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((2, 2, 5, 8, 2, 3), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((1000, ), val_range=(0, max_val)))
+        _test_abs(self._make_tensors((30, 30, 30), val_range=(0, max_val)))
 
         # Checking that the right abs function is called for LongTensor
         bignumber = 2 ^ 31 + 1
         res = torch.LongTensor((-bignumber,))
         self.assertGreater(res.abs()[0], 0)
+
+        # One of
+        rec = torch.randn(2, 2, 3, 7, 6, 2).type(torch.float64).clamp(0, 1)
+        val1 = rec.select(-1, -1).data[0][0][0].sum()
+        val2 = rec.select(-1, -1).data.abs()[0][0][0].sum()
+        self.assertEqual(val1, val2, 1e-8, 'absolute value')
 
     def test_hardshrink(self):
         data_original = torch.tensor([1, 0.5, 0.3, 0.6]).view(2, 2)
@@ -6213,6 +6244,120 @@ class TestTorch(TestCase):
             self.assertEqual(x, x.index_select(2, ind_01))
             z = torch.randn((2, 3, 4), device=device)  # non-empty
             self.assertEqual((0, 3, 4), z.index_select(0, ind_empty).shape)
+
+    @skipIfNoZeroSize
+    def test_blas_empty(self):
+        # FIXME: enable CUDA tests.
+        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+
+            def fn(torchfn, *args):
+                return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
+                                      for shape in args))
+
+            # mm, addmm
+            self.assertEqual((0, 0), fn(torch.mm, (0, 0), (0, 0)).shape)
+            self.assertEqual((0, 5), fn(torch.mm, (0, 0), (0, 5)).shape)
+            self.assertEqual((5, 0), fn(torch.mm, (5, 0), (0, 0)).shape)
+            self.assertEqual((3, 0), fn(torch.mm, (3, 2), (2, 0)).shape)
+            self.assertEqual(torch.zeros((5, 6), device=device), fn(torch.mm, (5, 0), (0, 6)))
+
+            self.assertEqual((0, 0), fn(torch.addmm, (0, 0), (0, 0), (0, 0)).shape)
+            self.assertEqual((5, 6), fn(torch.addmm, (5, 6), (5, 0), (0, 6)).shape)
+
+            # mv, addmv
+            self.assertEqual((0,), fn(torch.mv, (0, 0), (0,)).shape)
+            self.assertEqual((0,), fn(torch.mv, (0, 2), (2,)).shape)
+            self.assertEqual(torch.zeros((3,), device=device), fn(torch.mv, (3, 0), (0,)))
+
+            self.assertEqual((0,), fn(torch.addmv, (0,), (0, 0), (0,)).shape)
+            self.assertEqual((3,), fn(torch.addmv, (3,), (3, 0), (0,)).shape)
+
+            # ger, addr
+            self.assertEqual((0, 0), fn(torch.ger, (0,), (0,)).shape)
+            self.assertEqual((5, 0), fn(torch.ger, (5,), (0,)).shape)
+            self.assertEqual((0, 4), fn(torch.ger, (0,), (4,)).shape)
+
+            self.assertEqual((0, 0), fn(torch.addr, (0, 0), (0,), (0,)).shape)
+            self.assertEqual((5, 0), fn(torch.addr, (5, 0), (5,), (0,)).shape)
+            self.assertEqual((0, 4), fn(torch.addr, (0, 4), (0,), (4,)).shape)
+
+            # bmm, baddbmm
+            self.assertEqual((0, 0, 0), fn(torch.bmm, (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((3, 0, 5), fn(torch.bmm, (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((0, 5, 6), fn(torch.bmm, (0, 5, 0), (0, 0, 6)).shape)
+            self.assertEqual(torch.zeros((3, 5, 6), device=device), fn(torch.bmm, (3, 5, 0), (3, 0, 6)))
+
+            self.assertEqual((0, 0, 0), fn(torch.baddbmm, (0, 0, 0), (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((3, 0, 5), fn(torch.baddbmm, (3, 0, 5), (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((0, 5, 6), fn(torch.baddbmm, (0, 5, 6), (0, 5, 0), (0, 0, 6)).shape)
+            self.assertEqual((3, 5, 6), fn(torch.baddbmm, (3, 5, 6), (3, 5, 0), (3, 0, 6)).shape)
+
+            # addbmm
+            self.assertEqual((0, 0), fn(torch.addbmm, (0, 0), (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((0, 5), fn(torch.addbmm, (0, 5), (3, 0, 0), (3, 0, 5)).shape)
+            self.assertEqual((5, 6), fn(torch.addbmm, (5, 6), (0, 5, 0), (0, 0, 6)).shape)
+
+            # matmul
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.matmul, (0,), (0,)))
+            self.assertEqual((0, 0), fn(torch.matmul, (0, 0), (0, 0)).shape)
+            self.assertEqual((0, 0, 0), fn(torch.matmul, (0, 0, 0), (0, 0, 0)).shape)
+            self.assertEqual((5, 0, 0), fn(torch.matmul, (5, 0, 0), (5, 0, 0)).shape)
+            self.assertEqual(torch.zeros((5, 3, 4), device=device), fn(torch.matmul, (5, 3, 0), (5, 0, 4)))
+
+            # dot
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
+
+    @skipIfNoZeroSize
+    @skipIfNoLapack
+    def test_lapack_empty(self):
+        # FIXME: these are just a selection of LAPACK functions -- we need a general strategy here.
+        # The LAPACK functions themselves generally do NOT work with zero sized dimensions, although
+        # numpy/sci often has a direct wrapper (e.g. lu_factor) and a wrapper that "does the right thing"
+        # (e.g. lu).  We often name our functions identically to the lapack function, so it will take work
+        # to name / migrate-to better wrappers.
+
+        # FIXME: enable CUDA tests.
+        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+
+            def fn(torchfn, *args):
+                return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
+                                      for shape in args))
+
+            # inverse, pinverse
+            self.assertEqual((0, 0), fn(torch.inverse, (0, 0)).shape)
+            self.assertEqual((5, 0), fn(torch.pinverse, (0, 5)).shape)
+            self.assertEqual((0, 5), fn(torch.pinverse, (5, 0)).shape)
+            self.assertEqual((0, 0), fn(torch.pinverse, (0, 0)).shape)
+
+            # svd
+            self.assertRaises(RuntimeError, lambda: fn(torch.svd, (0, 0)))
+
+            # det, logdet, slogdet
+            self.assertEqual(torch.tensor(1., device=device), fn(torch.det, (0, 0)))
+            self.assertEqual(torch.tensor(0., device=device), fn(torch.logdet, (0, 0)))
+            self.assertEqual((torch.tensor(1., device=device), torch.tensor(0., device=device)),
+                             fn(torch.slogdet, (0, 0)))
+
+            # eig, symeig
+            evalues, evectors = fn(torch.eig, (0, 0), True)
+            self.assertEqual([(0, 2), (0, 0)], [evalues.shape, evectors.shape])
+            evalues, evectors = fn(torch.symeig, (0, 0), True)
+            self.assertEqual([(0,), (0, 0)], [evalues.shape, evectors.shape])
+
+            # qr, gels
+            self.assertRaises(RuntimeError, lambda: torch.qr(torch.randn(0, 0)))
+            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0, 0), torch.randn(0, 0)))
+            self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0,), torch.randn(0, 0)))
+
+            # btrifact
+            A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)
@@ -7329,7 +7474,7 @@ class TestTorch(TestCase):
         self.assertExpected(str(x), subname='negint')
 
         # test inf and nan
-        x = torch.tensor([4, float('inf'), 1.5, float('-inf'), 0, float('nan'), 1])
+        x = torch.tensor([4, inf, 1.5, -inf, 0, nan, 1])
         self.assertEqual(x.__repr__(), str(x))
         self.assertExpected(str(x), subname='nonfinite')
 

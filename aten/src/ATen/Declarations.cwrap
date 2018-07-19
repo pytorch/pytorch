@@ -2479,21 +2479,7 @@
         - THTensor* other
 ]]
 [[
-  name: clamp
-  cname: clamp
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-    - real max
-]]
-[[
-  name: clamp_
+  name: _th_clamp_
   cname: clamp
   variants:
     - method
@@ -2506,20 +2492,7 @@
     - real max
 ]]
 [[
-  name: clamp_min
-  cname: cmaxValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-]]
-[[
-  name: clamp_min_
+  name: _th_clamp_min_
   cname: cmaxValue
   variants:
     - method
@@ -2531,20 +2504,7 @@
     - real min
 ]]
 [[
-  name: clamp_max
-  cname: cminValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real max
-]]
-[[
-  name: clamp_max_
+  name: _th_clamp_max_
   cname: cminValue
   variants:
     - method
@@ -3130,7 +3090,7 @@
       default: S
 ]]
 [[
-  name: inverse
+  name: _getri
   cname: getri
   types:
     - Float

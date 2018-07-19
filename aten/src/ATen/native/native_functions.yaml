@@ -246,6 +246,45 @@
 
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
+- func: clamp(Tensor self, Scalar min, Scalar max) -> Tensor
+
+- func: clamp_(Tensor self, Scalar min, Scalar max) -> Tensor
+  dispatch:
+    CPU: _clamp__cpu
+    CUDA: _clamp__cuda
+
+- func: clamp_out(Tensor result, Tensor self, Scalar min, Scalar max) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _clamp_out_cpu
+    CUDA: _clamp_out_cuda
+
+- func: clamp_max(Tensor self, Scalar max) -> Tensor
+
+- func: clamp_max_(Tensor self, Scalar max) -> Tensor
+  dispatch:
+    CPU: _clamp_max__cpu
+    CUDA: _clamp_max__cuda
+
+- func: clamp_max_out(Tensor result, Tensor self, Scalar max) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _clamp_max_out_cpu
+    CUDA: _clamp_max_out_cuda
+
+- func: clamp_min(Tensor self, Scalar min) -> Tensor
+
+- func: clamp_min_(Tensor self, Scalar min) -> Tensor
+  dispatch:
+    CPU: _clamp_min__cpu
+    CUDA: _clamp_min__cuda
+
+- func: clamp_min_out(Tensor result, Tensor self, Scalar min) -> Tensor
+  variants: function
+  dispatch:
+    CPU: _clamp_min_out_cpu
+    CUDA: _clamp_min_out_cuda
+
 - func: cudnn_is_acceptable(Tensor self) -> bool
   variants: function
   device_guard: false
@@ -717,6 +756,11 @@
 - func: index_put(Tensor self, TensorList indices, Tensor values) -> Tensor
 
 - func: index_put_(Tensor self, TensorList indices, Tensor values) -> Tensor
+
+- func: inverse(Tensor self) -> Tensor
+
+- func: inverse_out(Tensor result, Tensor self) -> Tensor
+  variants: function
 
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 

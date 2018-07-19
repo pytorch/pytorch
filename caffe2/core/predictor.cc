@@ -71,13 +71,13 @@ Predictor::Predictor(const MetaNetDef& def, Workspace* parent, bool run_init)
   const auto& inputs =
       getBlobs(def, PredictorConsts::default_instance().inputs_blob_type());
   for (const auto& input : inputs) {
-    inputNames_.insert(input);
+    config_.input_names.emplace_back(input);
   }
 
   const auto& outputs =
       getBlobs(def, PredictorConsts::default_instance().outputs_blob_type());
   for (const auto& output : outputs) {
-    outputNames_.emplace_back(output);
+    config_.output_names.emplace_back(output);
   }
 }
 
@@ -87,19 +87,19 @@ Predictor::Predictor(
     Workspace* parent,
     bool run_init,
     int optimization)
-    : run_net_(run_net), ws_(parent) {
-
+    : ws_(parent) {
+  config_.predict_net = std::make_shared<NetDef>(run_net);
   if (run_init) {
     CAFFE_ENFORCE(ws_.RunNetOnce(init_net));
   }
 #if CAFFE2_MOBILE
   GlobalInit();
 #endif
-
+  auto predict_net = config_.predict_net;
   if (optimization) {
 #ifdef CAFFE2_OPTIMIZER
     try {
-      run_net_ = opt::optimize(run_net_, &ws_, optimization);
+      *predict_net = opt::optimize(*predict_net, &ws_, optimization);
     } catch (const std::exception& e) {
       LOG(WARNING) << "Optimization pass failed: " << e.what();
     }
@@ -112,45 +112,52 @@ Predictor::Predictor(
   const auto& initialized_vec = ws_.Blobs();
   const std::unordered_set<std::string> initialized{initialized_vec.begin(),
                                                     initialized_vec.end()};
-  for (const auto& name : run_net.external_input()) {
+  for (const auto& name : predict_net->external_input()) {
     if (!initialized.count(name)) {
       auto* blob = ws_.CreateBlob(name);
       blob->template GetMutable<TensorCPU>();
     }
   }
 
-  CAFFE_ENFORCE(ws_.CreateNet(run_net));
+  CAFFE_ENFORCE(ws_.CreateNet(predict_net));
 }
 
 bool Predictor::run(const TensorVector& inputs, TensorVector* outputs) {
-  CAFFE_ENFORCE(inputs.size() <= (unsigned)run_net_.external_input_size());
+  CAFFE_ENFORCE(
+      inputs.size() <=
+      static_cast<unsigned>(config_.predict_net->external_input_size()));
   for (size_t i = 0; i < inputs.size(); ++i) {
-    shareInputTensor(&ws_, run_net_.external_input(i), inputs[i]);
+    shareInputTensor(&ws_, config_.predict_net->external_input(i), inputs[i]);
   }
 
-  if (!ws_.RunNet(run_net_.name())) {
+  if (!ws_.RunNet(config_.predict_net->name())) {
     return false;
   }
 
-  outputs->resize(run_net_.external_output_size());
+  outputs->resize(config_.predict_net->external_output_size());
   for (size_t i = 0; i < outputs->size(); ++i) {
-    (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
+    (*outputs)[i] =
+        extractOutputTensor(&ws_, config_.predict_net->external_output(i));
   }
   return true;
 }
 
 bool Predictor::run_map_workspace(const TensorMap& inputs) {
-  if (!inputNames_.empty()) {
-    CAFFE_ENFORCE_EQ(inputs.size(), inputNames_.size());
+  if (!config_.input_names.empty()) {
+    CAFFE_ENFORCE_EQ(inputs.size(), input_names().size());
   }
   for (auto input : inputs) {
-    if (!inputNames_.empty()) {
-      CAFFE_ENFORCE_GT(inputNames_.count(input.first), 0);
+    if (!input_names().empty()) {
+      CAFFE_ENFORCE(
+          std::find(input_names().begin(), input_names().end(), input.first) !=
+              input_names().end(),
+          "Input can't be found: ",
+          input.first);
     }
     shareInputTensor(&ws_, input.first, input.second);
   }
 
-  return ws_.RunNet(run_net_.name());
+  return ws_.RunNet(config_.predict_net->name());
 }
 
 bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
@@ -158,9 +165,10 @@ bool Predictor::run_map(const TensorMap& inputs, TensorVector* outputs) {
     return false;
   }
 
-  outputs->resize(run_net_.external_output_size());
+  outputs->resize(config_.predict_net->external_output_size());
   for (size_t i = 0; i < outputs->size(); ++i) {
-    (*outputs)[i] = extractOutputTensor(&ws_, run_net_.external_output(i));
+    (*outputs)[i] =
+        extractOutputTensor(&ws_, config_.predict_net->external_output(i));
   }
   return true;
 }
@@ -170,8 +178,8 @@ bool Predictor::run_map_outputs(const TensorMap& inputs, TensorMap* outputs) {
     return false;
   }
 
-  outputs->reserve(outputNames_.size());
-  for (const std::string& outputName : outputNames_) {
+  outputs->reserve(output_names().size());
+  for (const std::string& outputName : output_names()) {
     (*outputs)[outputName] = extractOutputTensor(&ws_, outputName);
   }
   return true;

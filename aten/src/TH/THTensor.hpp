@@ -4,7 +4,7 @@
 // read Note [TH abstraction violation]
 
 #include "THTensor.h"
-#include "THStorage.hpp"
+#include "THStorageFunctions.hpp"
 
 #include <atomic>
 #include <ATen/ATen.h>
