@@ -114,8 +114,8 @@ For Example::
     RuntimeError: The size of self (4) must match the size of tensor index (7) at non-singleton dimension 2.
 
 The broadcasting semantics for scatter works the same way as the in-place semantics except that:
-- The dimension specified by :attr:`dim` of :attr:`index` and :attr:`src` must match like in the general
-  rule, but these two do not need to match with :attr:`self`.
+- The dimension specified by :attr:`dim` of :attr:`src` must expandable to that of :attr:`index`,
+  that is, they are either the same or :attr:`src` be 1. These two do not need to match with :attr:`self`.
 - Dimensions except :attr:`dim` of :attr:`self`, :attr:`index`, and :attr:`src` must match like in the
   general rule.
 - Although :attr:`self` is not allowed to change shape, if :attr:`self` is a Scalar and :attr:`index` and
@@ -129,6 +129,12 @@ For Example::
     >>> z=torch.empty(  3,4,1)
     >>> (x.scatter_(0, y, z)).size()
     torch.Size([5, 3, 4, 1])
+
+    >>> x=torch.empty(5,3,4,1)
+    >>> y=torch.zeros(  3,1,1, dtype=torch.long)
+    >>> z=torch.empty(6,3,4,1)
+    >>> (x.scatter_(0, y, z)).size()
+    RuntimeError: The size of tensor index (1) must match the size of tensor src (6) at non-singleton dimension 0
 
     >>> x=torch.empty(5,3,4,1)
     >>> y=torch.zeros(6,3,1,1, dtype=torch.long)

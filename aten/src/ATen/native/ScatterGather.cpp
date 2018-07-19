@@ -2,15 +2,25 @@
 
 The broadcasting of `gather` works according to steps described below:
 Let's say we are doing a `t.gather(dim, index)`, the following will happen:
-1. Prepend 1s to the shape of either `t` or `index`, whichever have a smaller `.dim()`, to make it the same dimensions.
-2. For all dimensions except the one specified by `dim`, expand according to the standard rule of broadcasting.
+1. Prepend 1s to the shape of either `t` or `index`, whichever have a smaller
+   `.dim()`, to make it the same dimensions.
+2. For all dimensions except the one specified by `dim`, expand according to
+   the standard rule of broadcasting.
 3. The dimension specified by `dim` of `t` and `index` are kept unchanged.
 
-The broadcasting of `scatter` works a bit more complicated than `gather`, as described below:
+The broadcasting of `scatter` works a bit more complicated than `gather`, as
+described below:
 Let's say we are doing a `t.scatter_(dim, index, src)`, the following will happen:
-1. Prepend 1s to the shape of `index` and/or `src` whichever have a smaller `.dim()` than `t`, to make them same dimensions.
-2. For all dimensions except the one specified by `dim`, expand `t`, `index`, and `src` according to the standard rule of broadcasting. The shape of `t` is not allowed to change, which means, if the standard broadcasting rule require `t` to be expanded, wes should raise a runtime error.
-3. For the dimension specified by `dim`, expand `index` and `src` according to the standard rule of broadcasting.
+1. Prepend 1s to the shape of `index` and/or `src` whichever have a smaller
+   `.dim()` than `t`, to make them same dimensions.
+2. For all dimensions except the one specified by `dim`, expand `t`, `index`,
+   and `src` according to the standard rule of broadcasting. The shape of `t`
+   is not allowed to change, which means, if the standard broadcasting rule
+   require `t` to be expanded, wes should raise a runtime error.
+3. For the dimension specified by `dim`, expand `src` to `index` according to
+   the standard rule of broadcasting. Note that `index` will not expand at this
+   dimension since `scatter` requires all the values in a row along the this
+   dimension must be unique.
 
 */
 
@@ -94,11 +104,11 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > scatter_infer_size(IntLi
 
     if (i == dim) {
       AT_CHECK(
-          sizeB == sizeC || sizeB == 1 || sizeC == 1,
+          sizeB == sizeC || sizeC == 1,
           "The size of tensor index (", sizeB,
           ") must match the size of tensor src (", sizeC,
           ") at non-singleton dimension ", i);
-      expandedSizesB[i] = sizeB == 1 ? sizeC : sizeB;
+      expandedSizesB[i] = sizeB;
       expandedSizesC[i] = sizeC == 1 ? sizeB : sizeC;
     } else {
       AT_CHECK(

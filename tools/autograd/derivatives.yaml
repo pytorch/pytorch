@@ -594,14 +594,14 @@
 - name: rsqrt(Tensor self)
   self: -0.5 * grad * result.pow(3)
 
-- name: scatter_(Tensor self, int64_t dim, Tensor index, Tensor src)
+- name: _s_scatter_(Tensor self, int64_t dim, Tensor index, Tensor src)
   self: grad.clone().scatter_(dim, index, 0)
   src: grad.gather(dim, index)
 
-- name: scatter_(Tensor self, int64_t dim, Tensor index, Scalar value)
+- name: _s_scatter_(Tensor self, int64_t dim, Tensor index, Scalar value)
   self: grad.clone().scatter_(dim, index, 0)
 
-- name: scatter_add_(Tensor self, int64_t dim, Tensor index, Tensor src)
+- name: _s_scatter_add_(Tensor self, int64_t dim, Tensor index, Tensor src)
   self: grad
   src: grad.gather(dim, index)
 
