@@ -9,9 +9,9 @@
 
 static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
-      int nBatch, int nChannels,
-      int inputHeight, int inputWidth,
-      int outputHeight, int outputWidth) {
+      int64_t nBatch, int64_t nChannels,
+      int64_t inputHeight, int64_t inputWidth,
+      int64_t outputHeight, int64_t outputWidth) {
   THArgCheck(inputHeight > 0 && inputWidth > 0
 	     && outputHeight > 0 && outputWidth > 0, 2,
 	     "input and output sizes should be greater than 0,"
@@ -34,14 +34,14 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
     THNNState *state,
     THTensor *input,
     THTensor *output,
-    int outputHeight,
-    int outputWidth,
+    int64_t outputHeight,
+    int64_t outputWidth,
     bool align_corners){
 
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputHeight = THTensor_(size)(input, 2);
-  int inputWidth = THTensor_(size)(input, 3);
+  int64_t nbatch = THTensor_(size)(input, 0);
+  int64_t channels = THTensor_(size)(input, 1);
+  int64_t inputHeight = THTensor_(size)(input, 2);
+  int64_t inputWidth = THTensor_(size)(input, 3);
 
   THNN_(SpatialUpSamplingBilinear_shapeCheck)
     (input, NULL,
@@ -61,13 +61,13 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   THAssert(inputHeight > 0 && inputWidth > 0 && outputHeight > 0 && outputWidth > 0);
   // special case: just copy
   if (inputHeight == outputHeight && inputWidth == outputWidth) {
-    for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const int h1 = h2;
-      for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const int w1 = w2;
+    for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+      const int64_t h1 = h2;
+      for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+        const int64_t w1 = w2;
         const real* pos1 = &idata[h1 * inputWidth + w1];
         real* pos2 = &odata[h2 * outputWidth + w2];
-        for (int c = 0; c < channels; ++c) {
+        for (int64_t c = 0; c < channels; ++c) {
           pos2[0] = pos1[0];
           pos1 += inputWidth * inputHeight;
           pos2 += outputWidth * outputHeight;
@@ -79,21 +79,21 @@ void THNN_(SpatialUpSamplingBilinear_updateOutput)(
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  for (int h2 = 0; h2 < outputHeight; ++h2) {
+  for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
     const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
-    const int h1 = h1r;
-    const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
+    const int64_t h1 = h1r;
+    const int64_t h1p = (h1 < inputHeight - 1) ? 1 : 0;
     const real h1lambda = h1r - h1;
     const real h0lambda = (real)1. - h1lambda;
-    for (int w2 = 0; w2 < outputWidth; ++w2) {
+    for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
       const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
-      const int w1 = w1r;
-      const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
+      const int64_t w1 = w1r;
+      const int64_t w1p = (w1 < inputWidth - 1) ? 1 : 0;
       const real w1lambda = w1r - w1;
       const real w0lambda = (real)1. - w1lambda;
       const real* pos1 = &idata[h1 * inputWidth + w1];
       real* pos2 = &odata[h2 * outputWidth + w2];
-      for (int c = 0; c < channels; ++c) {
+      for (int64_t c = 0; c < channels; ++c) {
         pos2[0] = h0lambda * (w0lambda * pos1[0]+ w1lambda * pos1[w1p])
                   + h1lambda * (w0lambda * pos1[h1p * inputWidth]
                   + w1lambda * pos1[h1p * inputWidth + w1p]);
@@ -109,12 +109,12 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
     THNNState *state,
     THTensor *gradOutput,
     THTensor *gradInput,
-    int nbatch,
-    int channels,
-    int inputHeight,
-    int inputWidth,
-    int outputHeight,
-    int outputWidth,
+    int64_t nbatch,
+    int64_t channels,
+    int64_t inputHeight,
+    int64_t inputWidth,
+    int64_t outputHeight,
+    int64_t outputWidth,
     bool align_corners){
 
   THNN_(SpatialUpSamplingBilinear_shapeCheck)
@@ -132,13 +132,13 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
 
   // special case: same-size matching grids
   if (inputHeight == outputHeight && inputWidth == outputWidth) {
-    for (int h2 = 0; h2 < outputHeight; ++h2) {
-      const int h1 = h2;
-      for (int w2 = 0; w2 < outputWidth; ++w2) {
-        const int w1 = w2;
+    for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
+      const int64_t h1 = h2;
+      for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
+        const int64_t w1 = w2;
         real* pos1 = &data1[h1 * inputWidth + w1];
         const real* pos2 = &data2[h2 * outputWidth + w2];
-        for (int c = 0; c < channels; ++c) {
+        for (int64_t c = 0; c < channels; ++c) {
           pos1[0] += pos2[0];
           pos1 += inputWidth * inputHeight;
           pos2 += outputWidth * outputHeight;
@@ -150,21 +150,21 @@ void THNN_(SpatialUpSamplingBilinear_updateGradInput)(
   }
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  for (int h2 = 0; h2 < outputHeight; ++h2) {
+  for (int64_t h2 = 0; h2 < outputHeight; ++h2) {
     const accreal h1r = linear_upsampling_compute_source_index<accreal>(rheight, h2, align_corners);
-    const int h1 = h1r;
-    const int h1p = (h1 < inputHeight - 1) ? 1 : 0;
+    const int64_t h1 = h1r;
+    const int64_t h1p = (h1 < inputHeight - 1) ? 1 : 0;
     const real h1lambda = h1r - h1;
     const real h0lambda = (real)1. - h1lambda;
-    for (int w2 = 0; w2 < outputWidth; ++w2) {
+    for (int64_t w2 = 0; w2 < outputWidth; ++w2) {
       const accreal w1r = linear_upsampling_compute_source_index<accreal>(rwidth, w2, align_corners);
-      const int w1 = w1r;
-      const int w1p = (w1 < inputWidth - 1) ? 1 : 0;
+      const int64_t w1 = w1r;
+      const int64_t w1p = (w1 < inputWidth - 1) ? 1 : 0;
       const real w1lambda = w1r - w1;
       const real w0lambda = (real)1. - w1lambda;
       real* pos1 = &data1[h1 * inputWidth + w1];
       const real* pos2 = &data2[h2 * outputWidth + w2];
-      for (int c = 0; c < channels; ++c) {
+      for (int64_t c = 0; c < channels; ++c) {
         pos1[0] += h0lambda * w0lambda * pos2[0];
         pos1[w1p] += h0lambda * w1lambda * pos2[0];
         pos1[h1p * inputWidth] += h1lambda * w0lambda * pos2[0];

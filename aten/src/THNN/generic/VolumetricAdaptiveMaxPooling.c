@@ -2,8 +2,8 @@
 #define TH_GENERIC_FILE "generic/VolumetricAdaptiveMaxPooling.c"
 #else
 
-#define START_IND(a,b,c) (int)floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
+#define START_IND(a,b,c) (int64_t)floor((float)(a * c) / b)
+#define END_IND(a,b,c) (int64_t)ceil((float)((a + 1) * c) / b)
 // #define START_IND(a,b,c) a * c / b
 // #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 
@@ -91,14 +91,14 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateOutput)(
           THTensor *input,
           THTensor *output,
           THIndexTensor *indices,
-          int osizeT,
-          int osizeW,
-          int osizeH)
+          int64_t osizeT,
+          int64_t osizeW,
+          int64_t osizeH)
 {
-  int dimD = 0;
-  int dimT = 1;
-  int dimH = 2;
-  int dimW = 3;
+  int64_t dimD = 0;
+  int64_t dimT = 1;
+  int64_t dimH = 2;
+  int64_t dimW = 3;
   int64_t sizeB = 1;
   int64_t sizeD = 0;
   int64_t isizeT = 0;
@@ -230,10 +230,10 @@ void THNN_(VolumetricAdaptiveMaxPooling_updateGradInput)(
           THTensor *gradInput,
           THIndexTensor *indices)
 {
-  int dimD = 0;
-  int dimT = 1;
-  int dimH = 2;
-  int dimW = 3;
+  int64_t dimD = 0;
+  int64_t dimT = 1;
+  int64_t dimH = 2;
+  int64_t dimW = 3;
   int64_t sizeB = 1;
   int64_t sizeD;
   int64_t isizeT;

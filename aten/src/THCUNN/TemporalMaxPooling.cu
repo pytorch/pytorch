@@ -9,7 +9,7 @@
 #define TEMPORAL_MAX_POOLING_THREADS 1024
 
 template <typename Dtype>
-__global__ void cunn_TemporalMaxPooling_updateOutputKernel(Dtype *input, Dtype *output, THCIndex_t *indices, int input_w, int input_n, int output_w, int kW, int dW) {
+__global__ void cunn_TemporalMaxPooling_updateOutputKernel(Dtype *input, Dtype *output, THCIndex_t *indices, int64_t input_w, int64_t input_n, int64_t output_w, int64_t kW, int64_t dW) {
   // Block idx is the batch index, thread idx + block idx y * MAX_THREADS is the time index
   Dtype *input_data = input + blockIdx.x * input_w * input_n + (
       threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS) * input_n * dW;
@@ -18,9 +18,9 @@ __global__ void cunn_TemporalMaxPooling_updateOutputKernel(Dtype *input, Dtype *
   THCIndex_t *indices_data = indices + blockIdx.x * output_w * input_n + (
       threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS) * input_n;
 
-  int feat = 0;
-  int time = 0;
-  int max_time = input_n * kW;
+  int64_t feat = 0;
+  int64_t time = 0;
+  int64_t max_time = input_n * kW;
 
   Dtype max_value;
   THCIndex_t max_index = 0;
@@ -43,7 +43,7 @@ __global__ void cunn_TemporalMaxPooling_updateOutputKernel(Dtype *input, Dtype *
 }
 
 template <typename Dtype>
-__global__ void cunn_TemporalMaxPooling_updateGradInputKernel(Dtype *gradInput, Dtype *gradOutput, THCIndex_t *indices, int input_w, int input_n, int output_w, int kW, int dW) {
+__global__ void cunn_TemporalMaxPooling_updateGradInputKernel(Dtype *gradInput, Dtype *gradOutput, THCIndex_t *indices, int64_t input_w, int64_t input_n, int64_t output_w, int64_t kW, int64_t dW) {
   // Block idx is the batch index, thread idx + block idx y * MAX_THREADS is the time index
   Dtype *gradInput_data = gradInput + blockIdx.x * input_w * input_n + (
       threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS) * input_n * dW;
@@ -52,7 +52,7 @@ __global__ void cunn_TemporalMaxPooling_updateGradInputKernel(Dtype *gradInput, 
   THCIndex_t *indices_data = indices + blockIdx.x * output_w * input_n + (
       threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS) * input_n;
 
-  int feat = 0;
+  int64_t feat = 0;
 
   if (threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS < output_w) {
     // For all features
@@ -63,7 +63,7 @@ __global__ void cunn_TemporalMaxPooling_updateGradInputKernel(Dtype *gradInput, 
 }
 
 template <typename Dtype>
-__global__ void cunn_TemporalMaxPooling_updateGradInputKernelAtomic(Dtype *gradInput, Dtype *gradOutput, THCIndex_t *indices, int input_w, int input_n, int output_w, int kW, int dW) {
+__global__ void cunn_TemporalMaxPooling_updateGradInputKernelAtomic(Dtype *gradInput, Dtype *gradOutput, THCIndex_t *indices, int64_t input_w, int64_t input_n, int64_t output_w, int64_t kW, int64_t dW) {
   // Block idx is the batch index, thread idx + block idx y * MAX_THREADS is the time index
   Dtype *gradInput_data = gradInput + blockIdx.x * input_w * input_n + (
       threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS) * input_n * dW;
@@ -72,7 +72,7 @@ __global__ void cunn_TemporalMaxPooling_updateGradInputKernelAtomic(Dtype *gradI
   THCIndex_t *indices_data = indices + blockIdx.x * output_w * input_n + (
       threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS) * input_n;
 
-  int feat = 0;
+  int64_t feat = 0;
 
   if (threadIdx.x + blockIdx.y * TEMPORAL_MAX_POOLING_THREADS < output_w) {
     // For all features

@@ -7,9 +7,9 @@
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
                         (THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
-                         int nBatch, int nChannels,
-                         int inputWidth,
-                         int outputWidth) {
+                         int64_t nBatch, int64_t nChannels,
+                         int64_t inputWidth,
+                         int64_t outputWidth) {
   THArgCheck(inputWidth > 0 && outputWidth > 0, 2,
              "input and output sizes should be greater than 0,"
              " but got input (W: %d) output (W: %d)",
@@ -30,12 +30,12 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int outputWidth,
+           int64_t outputWidth,
            bool align_corners)
 {
-  int nbatch = THCTensor_(size)(state, input, 0);
-  int channels = THCTensor_(size)(state, input, 1);
-  int inputWidth = THCTensor_(size)(state, input, 2);
+  int64_t nbatch = THCTensor_(size)(state, input, 0);
+  int64_t channels = THCTensor_(size)(state, input, 1);
+  int64_t inputWidth = THCTensor_(size)(state, input, 2);
   THNN_(TemporalUpSamplingLinear_shapeCheck)
        (state, input, NULL,
         nbatch, channels,
@@ -51,8 +51,8 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
   THCDeviceTensor<real, 3> odata = toDeviceTensor<real, 3>(state, output);
   THAssert(inputWidth > 0 && outputWidth > 0);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  const int num_kernels = outputWidth;
-  const int num_threads =
+  const int64_t num_kernels = outputWidth;
+  const int64_t num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
@@ -65,10 +65,10 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
            THCState *state,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int nbatch,
-           int nchannels,
-           int inputWidth,
-           int outputWidth,
+           int64_t nbatch,
+           int64_t nchannels,
+           int64_t inputWidth,
+           int64_t outputWidth,
            bool align_corners)
 {
   THNN_(TemporalUpSamplingLinear_shapeCheck)
@@ -82,8 +82,8 @@ void THNN_(TemporalUpSamplingLinear_updateGradInput)(
   THCDeviceTensor<real, 3> data1 = toDeviceTensor<real, 3>(state, gradInput);
   THCDeviceTensor<real, 3> data2 = toDeviceTensor<real, 3>(state, gradOutput);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  const int num_kernels = outputWidth;
-  const int num_threads =
+  const int64_t num_kernels = outputWidth;
+  const int64_t num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel_backward<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),

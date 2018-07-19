@@ -15,8 +15,8 @@ void THNN_(ClassNLLCriterion_updateOutput)(
     THError("multi-target not supported");
   }
 
-  int n_dims = THCTensor_(nDimension)(state, input);
-  int n_classes = THCTensor_(size)(state, input, n_dims - 1);
+  int64_t n_dims = THCTensor_(nDimension)(state, input);
+  int64_t n_classes = THCTensor_(size)(state, input, n_dims - 1);
   ignore_index -= TH_INDEX_BASE;
 
   if (weights) {
@@ -131,8 +131,8 @@ void THNN_(ClassNLLCriterion_updateGradInput)(
     THError("multi-target not supported");
   }
 
-  int n_dims = THCTensor_(nDimension)(state, input);
-  int n_classes = THCTensor_(size)(state, input, n_dims - 1);
+  int64_t n_dims = THCTensor_(nDimension)(state, input);
+  int64_t n_classes = THCTensor_(size)(state, input, n_dims - 1);
 
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);

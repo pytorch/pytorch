@@ -7,9 +7,9 @@
 static inline void THNN_(TemporalUpSamplingNearest_shapeCheck)
                         (THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
-                         int nBatch, int nChannels,
-                         int inputWidth,
-                         int outputWidth) {
+                         int64_t nBatch, int64_t nChannels,
+                         int64_t inputWidth,
+                         int64_t outputWidth) {
   THArgCheck(inputWidth > 0 && outputWidth > 0, 2,
              "input and output sizes should be greater than 0,"
              " but got input (W: %d) output (W: %d)",
@@ -30,12 +30,12 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int outputWidth)
+           int64_t outputWidth)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
-  int nbatch = THCTensor_(size)(state, input, 0);
-  int channels = THCTensor_(size)(state, input, 1);
-  int inputWidth  = THCTensor_(size)(state, input, 2);
+  int64_t nbatch = THCTensor_(size)(state, input, 0);
+  int64_t channels = THCTensor_(size)(state, input, 1);
+  int64_t inputWidth  = THCTensor_(size)(state, input, 2);
 
   THNN_(TemporalUpSamplingNearest_shapeCheck)(state, input, NULL, nbatch, channels, inputWidth, outputWidth);
   THAssert(inputWidth > 0 && outputWidth > 0);
@@ -49,8 +49,8 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
   THCDeviceTensor<real, 3> idata = toDeviceTensor<real, 3>(state, input);
   THCDeviceTensor<real, 3> odata = toDeviceTensor<real, 3>(state, output);
 
-  const int num_kernels = outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int64_t num_kernels = outputWidth;
+  const int64_t num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   nearest_neighbor_3d_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads,
 	 0, stream>>>(num_kernels, idata, odata);
@@ -62,10 +62,10 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
            THCState *state,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int nbatch,
-           int nchannels,
-           int inputWidth,
-           int outputWidth)
+           int64_t nbatch,
+           int64_t nchannels,
+           int64_t inputWidth,
+           int64_t outputWidth)
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   THNN_(TemporalUpSamplingNearest_shapeCheck)(state, NULL, gradOutput, nbatch, nchannels, inputWidth, outputWidth);
@@ -76,8 +76,8 @@ void THNN_(TemporalUpSamplingNearest_updateGradInput)(
   THCDeviceTensor<real, 3> data1 = toDeviceTensor<real, 3>(state, gradInput);
   THCDeviceTensor<real, 3> data2 = toDeviceTensor<real, 3>(state, gradOutput);
 
-  const int num_kernels = outputWidth;
-  const int num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
+  const int64_t num_kernels = outputWidth;
+  const int64_t num_threads = THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
 
   nearest_neighbor_3d_kernel_backward<real, accreal> <<<THCCeilDiv(num_kernels, num_threads),

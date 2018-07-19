@@ -39,14 +39,14 @@ void THNN_(IndexLinear_updateOutput)(
           THTensor *weight,
           THTensor *bias,
           THTensor *normalizedValues,
-          int  train)
+          int64_t  train)
 {
   /* Retrieve all the dimensions of the problem */
   int64_t batchSize = THLongTensor_size(sizes, 0);
   int64_t keysSize = THLongTensor_size(keys, 0);
   int64_t outDim = THTensor_(size)(bias, 0);
   int64_t woutDim = THTensor_(size)(weight, 1);
-  int maxNormalize = woutDim - outDim;
+  int64_t maxNormalize = woutDim - outDim;
   int64_t* sizesData = THLongTensor_data(sizes);
   int64_t* cumSumSizesData = THLongTensor_data(cumSumSizes);
 
@@ -252,7 +252,7 @@ void THNN_(IndexLinear_updateParameters)(
   /* Retrieve all the dimensions of the problem */
   int64_t outDim = THTensor_(size)(bias, 0);
   int64_t woutDim = THTensor_(size)(weight, 1);
-  int maxNormalize = woutDim - outDim;
+  int64_t maxNormalize = woutDim - outDim;
   int64_t keysSize = THLongTensor_size(runningKeys, 0);
 
   /* Access the storage data/strides */
@@ -270,7 +270,7 @@ void THNN_(IndexLinear_updateParameters)(
   THArgCheck(THTensor_(isContiguous)(bias), 4, "gradBias vector must be contiguous");
   THArgCheck(THLongTensor_isContiguous(runningKeys), 5, "keys vector must be contiguous");
 
-  int j, k;
+  int64_t j, k;
 
   /* Update the bias first */
   THVector_(cadd)(biasData, biasData, gradBiasData, -learningRate, outDim);
@@ -398,7 +398,7 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
   int64_t batchSize = THLongTensor_size(sizes, 0);
   int64_t outDim = THTensor_(size)(bias, 0);
   int64_t woutDim = THTensor_(size)(weight, 1);
-  int maxNormalize = woutDim - outDim;
+  int64_t maxNormalize = woutDim - outDim;
   THArgCheck(THNN_(checkKeysValues)(keys, values), 1, "Keys and values should have the same number of elements");
 
   /* Access the storage data/strides */
@@ -417,7 +417,7 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
   THArgCheck(THTensor_(isContiguous)(weight), 7, "weight matrix must be contiguous");
   THArgCheck(THTensor_(isContiguous)(bias), 8, "bias matrix must be contiguous");
 
-  int i,j,k;
+  int64_t i,j,k;
 
   /* Separate cases: output dimension is == 1, or > 1
    * This allows for some optimizations.
@@ -629,7 +629,7 @@ void THNN_(IndexLinear_accGradParameters)(
   THArgCheck(THTensor_(isContiguous)(bias), 10, "bias vector must be contiguous");
   THArgCheck(THTensor_(isContiguous)(valuesBuffer), 11, "valuesBuffer must be contiguous");
 
-  int i,j,k;
+  int64_t i,j,k;
 
   /* Separate cases: output dimension is == 1, or > 1
    * This allows for some optimizations.

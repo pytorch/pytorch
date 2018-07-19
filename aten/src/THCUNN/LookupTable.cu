@@ -7,72 +7,72 @@
 #include "THCTensorSort.cuh"
 #include "../THC/THCTensorMathReduce.cuh"
 
-const int WARP_SIZE = 32;
+const int64_t WARP_SIZE = 32;
 
-template 
-  <typename Dtype, 
+template
+  <typename Dtype,
    typename Acctype>
 __global__ void cunn_LookupTable_accGradParametersKernelByFeature
-  (int64_t *indices, 
-   Dtype *grad, 
-   Dtype *grad_weight, 
-   Dtype scale, 
+  (int64_t *indices,
+   Dtype *grad,
+   Dtype *grad_weight,
+   Dtype scale,
    ptrdiff_t n,
-   int64_t stride, 
-   int padding_idx) 
+   int64_t stride,
+   int64_t padding_idx)
 {
   extern __shared__ char buf[];
   Acctype* smem = (Acctype*)buf;
   Acctype* my_s = smem + WARP_SIZE*threadIdx.y;
-  int* indices_batch = (int*)(buf + sizeof(Acctype)*WARP_SIZE*blockDim.y);
+  int64_t* indices_batch = (int64_t*)(buf + sizeof(Acctype)*WARP_SIZE*blockDim.y);
 
-  const int s = (int)stride; // OK to make int, we don't expect 2 billion+ embedding row size
+  const int64_t s = (int64_t)stride; // OK to make int64_t, we don't expect 2 billion+ embedding row size
 
-  const int f = threadIdx.x + blockIdx.x*blockDim.x; // feature_dim
+  const int64_t f = threadIdx.x + blockIdx.x*blockDim.x; // feature_dim
 
-  for(int batch_start = 0; batch_start < n; batch_start += blockDim.x*blockDim.y)
+  for(int64_t batch_start = 0; batch_start < n; batch_start += blockDim.x*blockDim.y)
   {
     // Entire block cooperates to load a batch of 1024 indices to process
-    int tid = threadIdx.x + threadIdx.y*blockDim.x;
+    int64_t tid = threadIdx.x + threadIdx.y*blockDim.x;
     if(batch_start + tid < n)
-      indices_batch[tid] = (int)(indices[batch_start + tid] - TH_INDEX_BASE);
-    
-    // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
-    for(int chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
-    {
-      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group 
-      // leaders are done with their accumulates before other warps start loading again.
-      __syncthreads();  
-  
-      int n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y; 
+      indices_batch[tid] = (int64_t)(indices[batch_start + tid] - TH_INDEX_BASE);
 
-      int src_row = chunk_start + threadIdx.y; 
-      int dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
-      
+    // Loop over the batch of <= 1024 loaded indices in chunks of blockDim.y = 32
+    for(int64_t chunk_start = batch_start; chunk_start < n; chunk_start += blockDim.y)
+    {
+      // This does double duty:  it makes sure indices_batch is ready, and it makes sure match-group
+      // leaders are done with their accumulates before other warps start loading again.
+      __syncthreads();
+
+      int64_t n_this_chunk = (n - chunk_start) < blockDim.y ? (n - chunk_start) : blockDim.y;
+
+      int64_t src_row = chunk_start + threadIdx.y;
+      int64_t dst_row = indices_batch[src_row - batch_start]; // This warp's target row in grad_weight
+
       // All warps load their smem segments with incoming grad data
       if(src_row < n && f < s && dst_row != padding_idx - TH_INDEX_BASE)
         my_s[threadIdx.x] =  ScalarConvert<Dtype, Acctype>::to(scale*grad[src_row*stride + f]);
-     
+
       __syncthreads();
-    
+
       // To ensure determinism, we can't just have each warp add its grad data to its dst_row.
       // We need to check if any other warps pulled grad data targeting dst_row.
-      // If so, we elect the first warp in each matching group as the leader. 
+      // If so, we elect the first warp in each matching group as the leader.
       // Each leader warp serializes the accumulates targeting dst_row in shared memory,
       // then finishes by adding the accumulated buffer to dst_row in grad_weight.
       if(dst_row != padding_idx - TH_INDEX_BASE && src_row < n) // Per-warp exit condition
       {
-        int match_found_this_thread = 
+        int64_t match_found_this_thread =
           (dst_row == indices_batch[chunk_start - batch_start + threadIdx.x]);
         if(threadIdx.x >= n_this_chunk)
           match_found_this_thread = 0;
-        unsigned int matchmask = WARP_BALLOT(match_found_this_thread);
+        unsigned int64_t matchmask = WARP_BALLOT(match_found_this_thread);
 
-        int first_remaining_peer = __ffs(matchmask) - 1;
+        int64_t first_remaining_peer = __ffs(matchmask) - 1;
 
         if(threadIdx.y == first_remaining_peer) // Nominate lowest-indexed warp as the leader
         {
-          matchmask ^= (1 << first_remaining_peer);   
+          matchmask ^= (1 << first_remaining_peer);
           while(matchmask)
           {
             first_remaining_peer = __ffs(matchmask) - 1;
@@ -90,9 +90,9 @@ __global__ void cunn_LookupTable_accGradParametersKernelByFeature
 template <typename Dtype, typename Acctype>
 __global__ void cunn_LookupTable_accGradParametersKernel(
   int64_t *input, int64_t *indices, Dtype *gradOutput, Dtype *gradWeight,
-  int64_t *count, Dtype defaultScale, ptrdiff_t numel, int64_t stride, int paddingValue) {
+  int64_t *count, Dtype defaultScale, ptrdiff_t numel, int64_t stride, int64_t paddingValue) {
 
-  int idx = blockIdx.x * 4 + threadIdx.y;
+  int64_t idx = blockIdx.x * 4 + threadIdx.y;
 
   // Each warp is responsible for an input into the LookupTable.
   // If the preceding input has the same as this input, then the warp
@@ -106,24 +106,24 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   // 8     <warp 4>
 
   // Number of values proceessed by each thread (grain size)
-  const int SZ = 4;
+  const int64_t SZ = 4;
 
   if (idx < numel
       && (idx == 0 || input[idx] != input[idx - 1])
       && input[idx] != paddingValue) {
     do {
-      const int startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
-      const int weightRow = ((int) input[idx] - TH_INDEX_BASE) * stride;
-      const int gradOutputRow = ((int) indices[idx] - TH_INDEX_BASE) * stride;
+      const int64_t startFeature = threadIdx.x + blockIdx.y * blockDim.x * SZ;
+      const int64_t weightRow = ((int64_t) input[idx] - TH_INDEX_BASE) * stride;
+      const int64_t gradOutputRow = ((int64_t) indices[idx] - TH_INDEX_BASE) * stride;
       const Acctype scale = count ? ScalarConvert<Dtype, Acctype>::to(defaultScale) / count[idx] : ScalarConvert<Dtype, Acctype>::to(defaultScale);
 
       Acctype gradient[SZ];
       Acctype weight[SZ];
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
+      for (int64_t ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * WARP_SIZE;
+        int64_t featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
           gradient[ii] = ScalarConvert<Dtype, Acctype>::to(gradOutput[gradOutputRow + featureDim]);
@@ -132,15 +132,15 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
       }
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
+      for (int64_t ii = 0; ii < SZ; ii++)
       {
         weight[ii] += gradient[ii] * scale;
       }
 
       #pragma unroll
-      for (int ii = 0; ii < SZ; ii++)
+      for (int64_t ii = 0; ii < SZ; ii++)
       {
-        int featureDim = startFeature + ii * WARP_SIZE;
+        int64_t featureDim = startFeature + ii * WARP_SIZE;
         if (featureDim < stride)
         {
           gradWeight[weightRow + featureDim] = ScalarConvert<Acctype, Dtype>::to(weight[ii]);
@@ -152,7 +152,7 @@ __global__ void cunn_LookupTable_accGradParametersKernel(
   }
 }
 
-template <typename DType, typename AccType, int Norm>
+template <typename DType, typename AccType, int64_t Norm>
 struct FastPow
 {
   __host__ __device__
@@ -183,12 +183,12 @@ struct FastPow<DType, AccType, 2>
 };
 
 /* Calculate norms of the rows of weight_ptr given by idx_ptr and capture them in norms */
-template <typename DType, typename AccType, typename IndexType, int Norm>
+template <typename DType, typename AccType, typename IndexType, int64_t Norm>
 __global__
-void calculate_norms_and_renorm(DType *weights, 
-                                THCIndex_t *indices, 
+void calculate_norms_and_renorm(DType *weights,
+                                THCIndex_t *indices,
                                 AccType normType,
-                                AccType maxNorm, 
+                                AccType maxNorm,
                                 IndexType dim)
 {
   // Some casting hacks since dynamic shared memory and templates don't work together:
@@ -198,7 +198,7 @@ void calculate_norms_and_renorm(DType *weights,
   IndexType tid = threadIdx.x;
   IndexType baseIndex = (indices[blockIdx.x] - TH_INDEX_BASE) * dim;
 
-  AccType accZero = ScalarConvert<int, AccType>::to(0);
+  AccType accZero = ScalarConvert<int64_t, AccType>::to(0);
   AccType v = accZero;
   for (IndexType i = tid; i < dim; i += blockDim.x) {
     v += FastPow<DType, AccType, Norm>::pow(weights[baseIndex + i], normType);
@@ -208,8 +208,8 @@ void calculate_norms_and_renorm(DType *weights,
         (sdata, blockDim.x, v, ReduceAdd<AccType>(), accZero);
 
   if (tid == 0) {
-    sdata[0] = std::pow(v, 
-        THCNumerics<AccType>::div(ScalarConvert<int, AccType>::to(1), normType)
+    sdata[0] = std::pow(v,
+        THCNumerics<AccType>::div(ScalarConvert<int64_t, AccType>::to(1), normType)
     );
   }
   __syncthreads();

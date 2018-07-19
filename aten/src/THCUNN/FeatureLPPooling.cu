@@ -16,19 +16,19 @@ namespace detail {
 /// a way such that the index is statically known, which preserves the
 /// compiler's ability to allocate the values to registers, as opposed
 /// to local memory.
-template <typename T, int N>
+template <typename T, int64_t N>
 struct RegisterUtils {
   /// Register shifting: move elements towards the beginning of the
   /// array (towards 0) by `Shift` places:
   /// arr[i] = arr[i + Shift]
   /// The `Shift` elements at the end are left unchanged.
-  template <int Shift>
+  template <int64_t Shift>
   __device__ __forceinline__ static void shiftLeft(T arr[N]) {
     // e.g., N = 5, Shift = 2:
     // 0 1 2 3 4 becomes =>
     // 2 3 4 3 4 (last are unchanged)
 #pragma unroll
-    for (int i = 0; i < N - Shift; ++i) {
+    for (int64_t i = 0; i < N - Shift; ++i) {
       arr[i] = arr[i + Shift];
     }
   }
@@ -36,31 +36,31 @@ struct RegisterUtils {
 
 template <typename T>
 __device__ __forceinline__
-int getDim1Point(const THCDeviceTensor<T, 4>& input) {
-  int threadPoint = blockIdx.x * blockDim.x + threadIdx.x;
+int64_t getDim1Point(const THCDeviceTensor<T, 4>& input) {
+  int64_t threadPoint = blockIdx.x * blockDim.x + threadIdx.x;
   return threadPoint / input.getSize(3);
 }
 
 template <typename T>
 __device__ __forceinline__
-int getDim2Point(const THCDeviceTensor<T, 4>& input) {
-  int threadPoint = blockIdx.x * blockDim.x + threadIdx.x;
+int64_t getDim2Point(const THCDeviceTensor<T, 4>& input) {
+  int64_t threadPoint = blockIdx.x * blockDim.x + threadIdx.x;
   return threadPoint % input.getSize(3);
 }
 
 __device__ __forceinline__
-int getStartOutputFeature() {
+int64_t getStartOutputFeature() {
   return blockIdx.y * OUTPUT_FEATURES_PER_THREAD;
 }
 
 template <typename T>
 __device__ __forceinline__
-int getEndOutputFeature(const THCDeviceTensor<T, 4>& output) {
+int64_t getEndOutputFeature(const THCDeviceTensor<T, 4>& output) {
   return min((blockIdx.y + 1) * OUTPUT_FEATURES_PER_THREAD, output.getSize(1));
 }
 
 __device__ __forceinline__
-int getBatch() {
+int64_t getBatch() {
   return blockIdx.z;
 }
 
@@ -105,8 +105,8 @@ __device__ __forceinline__ T powerGradN(const T in, const T power) {
 // Input is of the form:
 // [batch][feature dim][optional dim 1][optional dim 2]
 template <typename T,
-          int Width,
-          int Stride,
+          int64_t Width,
+          int64_t Stride,
           T (*PowerFunc)(T in, T power),
           T (*RootFunc)(T in, T power)>
 __global__ void
@@ -114,8 +114,8 @@ featureLPPoolingUpdateOutput(const THCDeviceTensor<T, 4> input,
                              THCDeviceTensor<T, 4> output,
                              T power) {
   // What non-feature points is this thread handling?
-  int dim1Point = getDim1Point(input);
-  int dim2Point = getDim2Point(input);
+  int64_t dim1Point = getDim1Point(input);
+  int64_t dim2Point = getDim2Point(input);
 
   if (dim1Point >= input.getSize(2) || dim2Point >= input.getSize(3)) {
     // This thread in the warp is out of bounds
@@ -123,12 +123,12 @@ featureLPPoolingUpdateOutput(const THCDeviceTensor<T, 4> input,
   }
 
   // What feature points is this thread handling?
-  int startOutputFeature = getStartOutputFeature();
-  int endOutputFeature = getEndOutputFeature(output);
-  int startInputFeature = startOutputFeature * Stride;
+  int64_t startOutputFeature = getStartOutputFeature();
+  int64_t endOutputFeature = getEndOutputFeature(output);
+  int64_t startInputFeature = startOutputFeature * Stride;
 
   // What batch points is this thread handling?
-  int batch = getBatch();
+  int64_t batch = getBatch();
 
   // If stride >= width, then there is no loaded data reuse.
   // If stride > 1 and stride < width, then shift by stride, since we
@@ -151,32 +151,32 @@ featureLPPoolingUpdateOutput(const THCDeviceTensor<T, 4> input,
   T in[Width];
 
 #pragma unroll
-  for (int i = 0; i < Width - Stride; ++i) {
+  for (int64_t i = 0; i < Width - Stride; ++i) {
     const T data =
       input[batch][startInputFeature + i][dim1Point][dim2Point];
     in[i] = PowerFunc(data, power);
   }
 
-  for (int outputFeature = startOutputFeature;
+  for (int64_t outputFeature = startOutputFeature;
        outputFeature < endOutputFeature;
        ++outputFeature) {
     // If Stride < Width, we're loading Stride new values starting at
     // Width - Stride
     // If Stride >= Width, we're loading Width new values starting at 0
     if (Stride < Width) {
-      int nextInputFeature = outputFeature * Stride + Width - Stride;
+      int64_t nextInputFeature = outputFeature * Stride + Width - Stride;
 
 #pragma unroll
-      for (int i = 0; i < Stride; ++i) {
+      for (int64_t i = 0; i < Stride; ++i) {
         const T data =
           input[batch][nextInputFeature + i][dim1Point][dim2Point];
         in[Width - Stride + i] = PowerFunc(data, power);
       }
     } else {
-      int nextInputFeature = outputFeature * Stride;
+      int64_t nextInputFeature = outputFeature * Stride;
 
 #pragma unroll
-      for (int i = 0; i < Width; ++i) {
+      for (int64_t i = 0; i < Width; ++i) {
         T data = input[batch][nextInputFeature + i][dim1Point][dim2Point];
         in[i] = PowerFunc(data, power);
       }
@@ -184,7 +184,7 @@ featureLPPoolingUpdateOutput(const THCDeviceTensor<T, 4> input,
 
     // Calculate the new output feature
     T val = ScalarConvert<int, T>::to(0);
-    for (int i = 0; i < Width; ++i) {
+    for (int64_t i = 0; i < Width; ++i) {
       val = THCNumerics<T>::add(val, in[i]);
     }
 
@@ -208,8 +208,8 @@ featureLPPoolingUpdateOutput(const THCDeviceTensor<T, 4> input,
 //
 // PowerGradFunc implements x^(p - 1)
 template <typename T,
-          int Width,
-          int Stride,
+          int64_t Width,
+          int64_t Stride,
           T (*PowerGradFunc)(T in, T arg)>
 __global__ void
 featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
@@ -218,8 +218,8 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
                                 THCDeviceTensor<T, 4> gradInput,
                                 T power) {
   // What non-feature points is this thread handling?
-  int dim1Point = getDim1Point(input);
-  int dim2Point = getDim2Point(input);
+  int64_t dim1Point = getDim1Point(input);
+  int64_t dim2Point = getDim2Point(input);
 
   if (dim1Point >= input.getSize(2) || dim2Point >= input.getSize(3)) {
     // This thread in the warp is out of bounds
@@ -227,16 +227,16 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
   }
 
   // What feature points is this thread handling? [start, end)
-  int startOutputFeature = getStartOutputFeature();
-  int endOutputFeature = getEndOutputFeature(output);
+  int64_t startOutputFeature = getStartOutputFeature();
+  int64_t endOutputFeature = getEndOutputFeature(output);
 
   // What is the first input point that the output features depend
   // upon? [start, end)
-  int startInputFeature = startOutputFeature * Stride;
-  int endInputFeature = endOutputFeature * Stride;
+  int64_t startInputFeature = startOutputFeature * Stride;
+  int64_t endInputFeature = endOutputFeature * Stride;
 
   // What batch points is this thread handling?
-  int batch = getBatch();
+  int64_t batch = getBatch();
 
   // atomicAdd into gradInput is slow, avoid it where possible.
   // We can do this because there is a range of gradInput elements
@@ -267,7 +267,7 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
   // exclusiveStartInputFeature is the first input feature that we can
   // write into exclusively; the one right before it overlaps with
   // updates from a previous thread and thus has to use atomicAdd.
-  int exclusiveStartInputFeature =
+  int64_t exclusiveStartInputFeature =
     startInputFeature == 0 ?
     // no thread is before ourselves
     0 :
@@ -277,7 +277,7 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
   // Similarly, exclusiveEndInputFeature is the last input feature
   // that we can write into exclusively, since we might be overlapping
   // with the following thread
-  int exclusiveEndInputFeature =
+  int64_t exclusiveEndInputFeature =
     endOutputFeature == output.getSize(1) ?
     // no thread is after ourselves
     endInputFeature + (Width - 1) * Stride :
@@ -288,11 +288,11 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
   // transform them
   T in[Width];
 #pragma unroll
-  for (int i = 0; i < Width - Stride; ++i) {
+  for (int64_t i = 0; i < Width - Stride; ++i) {
     in[i] = input[batch][startInputFeature + i][dim1Point][dim2Point];
   }
 
-  for (int outputFeature = startOutputFeature;
+  for (int64_t outputFeature = startOutputFeature;
        outputFeature < endOutputFeature;
        ++outputFeature) {
     // As with updateOutput load the subsequent input elements that we
@@ -302,18 +302,18 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
     // Width - Stride
     // If Stride >= Width, we're loading Width new values starting at 0
     if (Stride < Width) {
-      int nextInputFeature = outputFeature * Stride + Width - Stride;
+      int64_t nextInputFeature = outputFeature * Stride + Width - Stride;
 
 #pragma unroll
-      for (int i = 0; i < Stride; ++i) {
+      for (int64_t i = 0; i < Stride; ++i) {
         in[Width - Stride + i] =
           input[batch][nextInputFeature + i][dim1Point][dim2Point];
       }
     } else {
-      int nextInputFeature = outputFeature * Stride;
+      int64_t nextInputFeature = outputFeature * Stride;
 
 #pragma unroll
-      for (int i = 0; i < Width; ++i) {
+      for (int64_t i = 0; i < Width; ++i) {
         in[i] = input[batch][nextInputFeature + i][dim1Point][dim2Point];
       }
     }
@@ -330,15 +330,15 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
       continue;
     }
 
-    int curStartInputFeature = outputFeature * Stride;
-    int curEndInputFeature = outputFeature * Stride + Width - 1;
+    int64_t curStartInputFeature = outputFeature * Stride;
+    int64_t curEndInputFeature = outputFeature * Stride + Width - 1;
 
     if (curStartInputFeature >= exclusiveStartInputFeature &&
         curEndInputFeature < exclusiveEndInputFeature) {
       // This thread is exclusively responsible for updating these
       // input points, so we need not make the addition atomic
-      for (int i = 0; i < Width; ++i) {
-        int inputFeature = outputFeature * Stride + i;
+      for (int64_t i = 0; i < Width; ++i) {
+        int64_t inputFeature = outputFeature * Stride + i;
 
         // Calculate grad * (x_i / f(x_is))^(p - 1)
         const T val = THCNumerics<T>::mul(
@@ -352,8 +352,8 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
     } else {
       // Handle start and end boundary cases: potential overlap with
       // other threads
-      for (int i = 0; i < Width; ++i) {
-        int inputFeature = outputFeature * Stride + i;
+      for (int64_t i = 0; i < Width; ++i) {
+        int64_t inputFeature = outputFeature * Stride + i;
 
         // Calculate grad * (x_i / f(x_is))^(p - 1)
         T val = THCNumerics<T>::mul(
@@ -384,7 +384,7 @@ featureLPPoolingUpdateGradInput(const THCDeviceTensor<T, 4> gradOutput,
 
 } // namespace detail
 
-inline int lpPoolingOutputSize(int inputSize, int width, int stride) {
+inline int64_t lpPoolingOutputSize(int64_t inputSize, int64_t width, int64_t stride) {
   return ((inputSize - width) / stride) + 1;
 }
 
@@ -393,13 +393,13 @@ bool
 runFeatureLPPoolingUpdateOutput(THCState* state,
                                 const THCDeviceTensor<T, 4>& input,
                                 THCDeviceTensor<T, 4>& output,
-                                float power, int width, int stride) {
+                                float power, int64_t width, int64_t stride) {
   cudaStream_t stream =
     THCState_getCurrentStream(state);
   const cudaDeviceProp* deviceProperties =
     THCState_getCurrentDeviceProperties(state);
 
-  int outputFeatures = ((input.getSize(1) - width) / stride) + 1;
+  int64_t outputFeatures = ((input.getSize(1) - width) / stride) + 1;
 
   THAssert(input.getSize(0) == output.getSize(0));
   THAssert(outputFeatures == output.getSize(1));
@@ -412,17 +412,17 @@ runFeatureLPPoolingUpdateOutput(THCState* state,
   THAssert(stride >= 1);
 
   // Split non-features among threads and grid x
-  int totalNonFeatureSize = input.getSize(2) * input.getSize(3);
-  int numWarps =
+  int64_t totalNonFeatureSize = input.getSize(2) * input.getSize(3);
+  int64_t numWarps =
     min(THCCeilDiv(totalNonFeatureSize, deviceProperties->warpSize),
         MAX_WARPS_PER_RUN);
-  int blockSize = deviceProperties->warpSize * numWarps;
+  int64_t blockSize = deviceProperties->warpSize * numWarps;
 
   // Split non-features among grid x
-  int nonFeatureSizeBlocks = THCCeilDiv(totalNonFeatureSize, blockSize);
+  int64_t nonFeatureSizeBlocks = THCCeilDiv(totalNonFeatureSize, blockSize);
 
   // Split features among grid y, up to a maximum number of features per thread
-  int featureBlocks = THCCeilDiv(outputFeatures, OUTPUT_FEATURES_PER_THREAD);
+  int64_t featureBlocks = THCCeilDiv(outputFeatures, OUTPUT_FEATURES_PER_THREAD);
 
   // Split batch among grid z.
   dim3 grid(nonFeatureSizeBlocks, featureBlocks, input.getSize(0));
@@ -522,18 +522,18 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
                                    const THCDeviceTensor<T, 4>& input,
                                    const THCDeviceTensor<T, 4>& output,
                                    THCDeviceTensor<T, 4>& gradInput,
-                                   float power, int width, int stride) {
+                                   float power, int64_t width, int64_t stride) {
   cudaStream_t stream =
     THCState_getCurrentStream(state);
   const cudaDeviceProp* deviceProperties =
     THCState_getCurrentDeviceProperties(state);
 
-  for (int i = 0; i < 4; ++i) {
+  for (int64_t i = 0; i < 4; ++i) {
     THAssert(gradOutput.getSize(i) == output.getSize(i));
     THAssert(gradInput.getSize(i) == input.getSize(i));
   }
 
-  int outputFeatures = ((input.getSize(1) - width) / stride) + 1;
+  int64_t outputFeatures = ((input.getSize(1) - width) / stride) + 1;
 
   THAssert(gradInput.getSize(0) == gradOutput.getSize(0));
   THAssert(outputFeatures == gradOutput.getSize(1));
@@ -550,17 +550,17 @@ runFeatureLPPoolingUpdateGradInput(THCState* state,
   gradInput.zero(stream);
 
   // Split non-features among threads and grid x
-  int totalNonFeatureSize = input.getSize(2) * input.getSize(3);
-  int numWarps =
+  int64_t totalNonFeatureSize = input.getSize(2) * input.getSize(3);
+  int64_t numWarps =
     min(THCCeilDiv(totalNonFeatureSize, deviceProperties->warpSize),
         MAX_WARPS_PER_RUN);
-  int blockSize = deviceProperties->warpSize * numWarps;
+  int64_t blockSize = deviceProperties->warpSize * numWarps;
 
   // Split non-features among grid x
-  int nonFeatureSizeBlocks = THCCeilDiv(totalNonFeatureSize, blockSize);
+  int64_t nonFeatureSizeBlocks = THCCeilDiv(totalNonFeatureSize, blockSize);
 
   // Split features among grid y, up to a maximum number of features per thread
-  int featureBlocks = THCCeilDiv(outputFeatures, OUTPUT_FEATURES_PER_THREAD);
+  int64_t featureBlocks = THCCeilDiv(outputFeatures, OUTPUT_FEATURES_PER_THREAD);
 
   // Split batch among grid z.
   dim3 grid(nonFeatureSizeBlocks, featureBlocks, input.getSize(0));

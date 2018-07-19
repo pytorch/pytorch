@@ -9,7 +9,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
           THIndexTensor *target,
           THTensor *output,
           int64_t reduction,
-          int p,
+          int64_t p,
           THTensor *weights,
           accreal margin_)
 {
@@ -123,7 +123,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           int64_t reduction,
-          int p,
+          int64_t p,
           THTensor *weights,
           accreal margin_)
 {

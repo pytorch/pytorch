@@ -5,17 +5,17 @@
 static inline void THNN_(TemporalConvolution_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
-                         int kW,
-                         int dW,
-                         int *inputFrameSize) {
+                         int64_t kW,
+                         int64_t dW,
+                         int64_t *inputFrameSize) {
 
   THArgCheck(kW > 0, 9,
              "kernel size should be greater than zero, but got kW: %d", kW);
   THArgCheck(dW > 0, 11,
              "stride should be greater than zero, but got dW: %d", dW);
 
-  int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
+  int64_t dimS = 0; // sequence dimension
+  int64_t dimF = 1; // feature dimension
 
   if (input->dim() == 3)
   {
@@ -40,16 +40,16 @@ void THNN_(TemporalConvolution_updateOutput)(
           THTensor *output,
           THTensor *weight,
           THTensor *bias,
-          int kW,
-          int dW,
-          int inputFrameSize,
-          int outputFrameSize)
+          int64_t kW,
+          int64_t dW,
+          int64_t inputFrameSize,
+          int64_t outputFrameSize)
 {
   THTensor *outputWindow, *inputWindow;
-  int nInputFrame, nOutputFrame;
+  int64_t nInputFrame, nOutputFrame;
   int64_t k, i;
 
-  int dimS = 0; // sequence dimension
+  int64_t dimS = 0; // sequence dimension
 
   if (input->dim() == 3)
   {
@@ -108,7 +108,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   {
     THTensor *outputSample = THTensor_(new)();
     THTensor *inputSample = THTensor_(new)();
-    int nBatchFrame = input->size[0];
+    int64_t nBatchFrame = input->size[0];
 
     THTensor_(resize3d)(output,
                         nBatchFrame,
@@ -168,8 +168,8 @@ void THNN_(TemporalConvolution_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THTensor *weight,
-          int kW,
-          int dW)
+          int64_t kW,
+          int64_t dW)
 {
   int64_t nInputFrame;
   int64_t nOutputFrame;
@@ -178,7 +178,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   THTensor *gradInputWindow;
   int64_t k, i;
 
-  int dimS = 0; // sequence dimension
+  int64_t dimS = 0; // sequence dimension
 
   if (gradOutput->dim() == 3)
   {
@@ -227,13 +227,13 @@ void THNN_(TemporalConvolution_updateGradInput)(
   {
     THTensor *gradOutputSample = THTensor_(new)();
     THTensor *gradInputSample = THTensor_(new)();
-    int nBatchFrame = input->size[0];
+    int64_t nBatchFrame = input->size[0];
 
     for(i = 0; i < nBatchFrame; i++)
     {
       THTensor_(select)(gradOutputSample, gradOutput, 0, i);
       THTensor_(select)(gradInputSample, gradInput, 0, i);
-      int nOutputSampleFrame = nOutputFrame;
+      int64_t nOutputSampleFrame = nOutputFrame;
 
       /* ouch */
       for(k = 0; nOutputSampleFrame > 0; k++)
@@ -273,8 +273,8 @@ void THNN_(TemporalConvolution_accGradParameters)(
           THTensor *gradOutput,
           THTensor *gradWeight,
           THTensor *gradBias,
-          int kW,
-          int dW,
+          int64_t kW,
+          int64_t dW,
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
@@ -285,7 +285,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
   THTensor *inputWindow;
   int64_t k, i;
 
-  int dimS = 0; // sequence dimension
+  int64_t dimS = 0; // sequence dimension
 
   if (gradOutput->dim() == 3)
   {
@@ -339,13 +339,13 @@ void THNN_(TemporalConvolution_accGradParameters)(
   {
     THTensor *gradOutputSample = THTensor_(new)();
     THTensor *inputSample = THTensor_(new)();
-    int nBatchFrame = input->size[0];
+    int64_t nBatchFrame = input->size[0];
 
     for(i = 0; i < nBatchFrame; i++)
     {
       THTensor_(select)(gradOutputSample, gradOutput, 0, i);
       THTensor_(select)(inputSample, input, 0, i);
-      int nOutputSampleFrame = nOutputFrame;
+      int64_t nOutputSampleFrame = nOutputFrame;
 
       /* bias first */
       for(k = 0; k < nOutputFrame; k++)

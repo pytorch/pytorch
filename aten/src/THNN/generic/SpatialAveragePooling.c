@@ -4,7 +4,7 @@
 
 static inline void THNN_(SpatialAveragePooling_shapeCheck)(
 	THTensor *input, THTensor *gradOutput,
-	int kH, int kW, int dH, int dW, int padH, int padW,
+	int64_t kH, int64_t kW, int64_t dH, int64_t dW, int64_t padH, int64_t padW,
 	bool ceil_mode) {
 
   THArgCheck(kW > 0 && kH > 0, 5,
@@ -12,10 +12,10 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
 
   if (ndim == 4) {
     dimf++;
@@ -74,21 +74,21 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int kW,
-          int kH,
-          int dW,
-          int dH,
-          int padW,
-          int padH,
+          int64_t kW,
+          int64_t kH,
+          int64_t dW,
+          int64_t dH,
+          int64_t padW,
+          int64_t padH,
           bool ceil_mode,
           bool count_include_pad)
 {
   real *output_data;
   real *input_data;
 
-  int dimw = 2;
-  int dimh = 1;
-  int dimc = 0;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t dimc = 0;
   int64_t nbatch = 1;
 
   int64_t inputWidth;
@@ -166,7 +166,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
           int64_t wstart = xx * dW - padW;
           int64_t hend = fminf(hstart + kH, inputHeight + padH);
           int64_t wend = fminf(wstart + kW, inputWidth + padW);
-          int pool_size = (hend - hstart) * (wend - wstart);
+          int64_t pool_size = (hend - hstart) * (wend - wstart);
           hstart = fmaxf(hstart, 0);
           wstart = fmaxf(wstart, 0);
           hend = fminf(hend, inputHeight);
@@ -174,7 +174,7 @@ void THNN_(SpatialAveragePooling_updateOutput)(
 
           real sum = 0;
 
-          int divide_factor;
+          int64_t divide_factor;
           if(count_include_pad)
             divide_factor = pool_size;
           else
@@ -201,18 +201,18 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           THTensor *input,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int kW,
-          int kH,
-          int dW,
-          int dH,
-          int padW,
-          int padH,
+          int64_t kW,
+          int64_t kH,
+          int64_t dW,
+          int64_t dH,
+          int64_t padW,
+          int64_t padH,
           bool ceil_mode,
           bool count_include_pad)
 {
-  int dimw = 2;
-  int dimh = 1;
-  int dimc = 0;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t dimc = 0;
   int64_t nbatch = 1;
   int64_t ndim = 3;
 
@@ -298,7 +298,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
           int64_t wstart = xx * dW - padW;
           int64_t hend = fminf(hstart + kH, inputHeight + padH);
           int64_t wend = fminf(wstart + kW, inputWidth + padW);
-          int pool_size = (hend - hstart) * (wend - wstart);
+          int64_t pool_size = (hend - hstart) * (wend - wstart);
           hstart = fmaxf(hstart, 0);
           wstart = fmaxf(wstart, 0);
           hend = fminf(hend, inputHeight);
@@ -306,7 +306,7 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
 
           real z = *ptr_gradOutput++;
 
-          int divide_factor;
+          int64_t divide_factor;
           if(count_include_pad)
             divide_factor = pool_size;
           else

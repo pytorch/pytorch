@@ -6,15 +6,15 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
                          THTensor *input,
                          THTensor *gradOutput,
                          THTensor *weight,
-                         int kW, int kH) {
+                         int64_t kW, int64_t kH) {
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
                   "3D or 4D input tensor expected but got: %s");
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
 
-  int nInputPlane = THTensor_(size)(weight, 0);
+  int64_t nInputPlane = THTensor_(size)(weight, 0);
 
-  int dimw = 2;
-  int dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
 
   int64_t inputWidth;
   int64_t inputHeight;
@@ -37,8 +37,8 @@ void THNN_(SpatialSubSampling_updateOutput)(
     THTensor *output,
     THTensor *weight,
     THTensor *bias,
-    int kW, int kH,
-    int dW, int dH)
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH)
 {
   THArgCheck(!bias || THTensor_(isContiguous)(bias), 5, "bias must be contiguous");
 
@@ -47,8 +47,8 @@ void THNN_(SpatialSubSampling_updateOutput)(
   real *output_data;
   real *input_data;
 
-  int dimw = 2;
-  int dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
   int64_t nbatch = 1;
 
   int64_t inputWidth;
@@ -56,7 +56,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
   int64_t outputWidth;
   int64_t outputHeight;
 
-  int nInputPlane = THTensor_(size)(weight,0);
+  int64_t nInputPlane = THTensor_(size)(weight,0);
 
   int64_t k;
 
@@ -129,13 +129,13 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     THTensor *gradOutput,
     THTensor *gradInput,
     THTensor *weight,
-    int kW, int kH,
-    int dW, int dH)
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH)
 {
   THNN_(SpatialSubSampling_shapeCheck)(input, gradOutput, weight, kW, kH);
 
-  int dimw = 2;
-  int dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
   int64_t nbatch = 1;
 
   int64_t inputWidth;
@@ -143,7 +143,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
   int64_t outputWidth;
   int64_t outputHeight;
 
-  int nInputPlane = THTensor_(size)(weight,0);
+  int64_t nInputPlane = THTensor_(size)(weight,0);
 
   real *weight_data;
   real *gradOutput_data;
@@ -211,8 +211,8 @@ void THNN_(SpatialSubSampling_accGradParameters)(
     THTensor *gradOutput,
     THTensor *gradWeight,
     THTensor *gradBias,
-    int kW, int kH,
-    int dW, int dH,
+    int64_t kW, int64_t kH,
+    int64_t dW, int64_t dH,
     accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
@@ -227,7 +227,7 @@ void THNN_(SpatialSubSampling_accGradParameters)(
   int64_t outputWidth;
   int64_t outputHeight;
 
-  int nInputPlane = THTensor_(size)(gradWeight,0);
+  int64_t nInputPlane = THTensor_(size)(gradWeight,0);
 
   real *gradWeight_data;
   real *gradBias_data;

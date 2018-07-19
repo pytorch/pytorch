@@ -10,10 +10,10 @@ void THNN_(SpatialFullConvolution_updateOutput)(
            THCTensor *bias,
            THCTensor *columns,
            THCTensor *ones,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
-           int adjW, int adjH)
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
+           int64_t adjW, int64_t adjH)
 {
   THNN_(SpatialFullDilatedConvolution_updateOutput)(
       state, input, output, weight, bias, columns, ones,
@@ -27,10 +27,10 @@ void THNN_(SpatialFullConvolution_updateGradInput)(
            THCTensor *gradInput,
            THCTensor *weight,
            THCTensor *gradColumns,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
-           int adjW, int adjH)
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
+           int64_t adjW, int64_t adjH)
 {
   THNN_(SpatialFullDilatedConvolution_updateGradInput)(
       state, input, gradOutput, gradInput, weight, gradColumns,
@@ -46,10 +46,10 @@ void THNN_(SpatialFullConvolution_accGradParameters)(
            THCTensor *gradBias,
            THCTensor *columns,
            THCTensor *ones,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
-           int adjW, int adjH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
+           int64_t adjW, int64_t adjH,
            accreal scale_)
 {
   THNN_(SpatialFullDilatedConvolution_accGradParameters)(

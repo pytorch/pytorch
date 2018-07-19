@@ -7,16 +7,16 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
                          THTensor *input,
                          THTensor *gradOutput,
                          THIndexTensor *indices,
-                         int kT, int kW, int kH,
-                         int dT, int dW, int dH,
-                         int pT, int pW, int pH,
-                         int dilationT, int dilationW, int dilationH,
+                         int64_t kT, int64_t kW, int64_t kH,
+                         int64_t dT, int64_t dW, int64_t dH,
+                         int64_t pT, int64_t pW, int64_t pH,
+                         int64_t dilationT, int64_t dilationW, int64_t dilationH,
                          bool ceilMode) {
-  int ndim = input->dim();
-  int dimN = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t ndim = input->dim();
+  int64_t dimN = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
   int64_t nslices;
   int64_t itime;
   int64_t iheight;
@@ -57,15 +57,15 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
   iwidth  = input->size[dimw];
   if (ceilMode)
   {
-    otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
+    otime = (int64_t)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
+    oheight = (int64_t)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
+    owidth  = (int64_t)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
   }
   else
   {
-    otime = (int)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
+    otime = (int64_t)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
+    oheight = (int64_t)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
+    owidth  = (int64_t)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
   }
 
   if (pT || pW || pH)
@@ -108,18 +108,18 @@ static void THNN_(VolumetricDilatedMaxPooling_updateOutput_frame)(
           int64_t otime,
           int64_t owidth,
           int64_t oheight,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int dilationT,
-          int dilationW,
-          int dilationH)
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
+          int64_t dilationT,
+          int64_t dilationW,
+          int64_t dilationH)
 {
   int64_t k;
 #pragma omp parallel for private(k)
@@ -195,18 +195,18 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
           THTensor *input,
           THTensor *output,
           THIndexTensor *indices,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int dilationT,
-          int dilationW,
-          int dilationH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
+          int64_t dilationT,
+          int64_t dilationW,
+          int64_t dilationH,
           bool ceilMode)
 {
   int64_t nslices;
@@ -221,10 +221,10 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   THIndex_t *indices_data;
 
 
-  int dimN = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimN = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (input->dim() == 5)
   {
@@ -247,15 +247,15 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   iwidth  = input->size[dimw];
   if (ceilMode)
   {
-    otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
+    otime = (int64_t)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
+    oheight = (int64_t)(ceil((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
+    owidth  = (int64_t)(ceil((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
   }
   else
   {
-    otime = (int)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
-    oheight = (int)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
-    owidth  = (int)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
+    otime = (int64_t)(floor((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
+    oheight = (int64_t)(floor((float)(iheight - (dilationH * (kH - 1) + 1) + 2*pH) / dH)) + 1;
+    owidth  = (int64_t)(floor((float)(iwidth  - (dilationW * (kW - 1) + 1) + 2*pW) / dW)) + 1;
   }
 
   if (pT || pW || pH)
@@ -345,15 +345,15 @@ static void THNN_(VolumetricDilatedMaxPooling_updateGradInput_frame)(
           int64_t otime,
           int64_t owidth,
           int64_t oheight,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int dilationT,
-          int dilationW,
-          int dilationH)
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
+          int64_t dilationT,
+          int64_t dilationW,
+          int64_t dilationH)
 {
   int64_t k;
 #pragma omp parallel for private(k)
@@ -391,35 +391,35 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
           THTensor *gradOutput,
           THTensor *gradInput,
           THIndexTensor *indices,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
-          int dilationT,
-          int dilationW,
-          int dilationH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
+          int64_t dilationT,
+          int64_t dilationW,
+          int64_t dilationH,
           bool ceilMode)
 {
-  int nslices;
-  int itime;
-  int iheight;
-  int iwidth;
-  int otime;
-  int oheight;
-  int owidth;
+  int64_t nslices;
+  int64_t itime;
+  int64_t iheight;
+  int64_t iwidth;
+  int64_t otime;
+  int64_t oheight;
+  int64_t owidth;
   real *gradInput_data;
   real *gradOutput_data;
   THIndex_t *indices_data;
 
-  int dimN = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimN = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
         state, input, gradOutput, indices,

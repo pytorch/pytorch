@@ -6,7 +6,7 @@ void THNN_(GatedLinear_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int dim)
+           int64_t dim)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
 
@@ -37,7 +37,7 @@ void THNN_(GatedLinear_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int dim)
+           int64_t dim)
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   dim = dim - TH_INDEX_BASE;

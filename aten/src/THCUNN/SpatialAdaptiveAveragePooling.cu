@@ -4,8 +4,8 @@
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
 
-#define START_IND(a,b,c) (int)floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
+#define START_IND(a,b,c) (int64_t)floor((float)(a * c) / b)
+#define END_IND(a,b,c) (int64_t)ceil((float)((a + 1) * c) / b)
 // #define START_IND(a,b,c) a * c / b
 // #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 
@@ -22,46 +22,46 @@
  */
  template <typename T>
 __global__ void adaptiveaveragepool(T *input, T *output,
-                        int isizeH, int isizeW,
-                        int osizeH, int osizeW,
+                        int64_t isizeH, int64_t isizeW,
+                        int64_t osizeH, int64_t osizeW,
                         int64_t istrideD, int64_t istrideH, int64_t istrideW)
 {
   // iterators on output pixels
-  int oh, ow;
+  int64_t oh, ow;
 
   // select input/output plane based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
 
   output = output + o_plane*osizeH*osizeW;
   input = input + i_plane*istrideD;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
-  int oendH = osizeH;
-  const int ostepH = blockDim.y*gridDim.y;
+  int64_t ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t oendH = osizeH;
+  const int64_t ostepH = blockDim.y*gridDim.y;
 
-  int ostartW = threadIdx.x;
-  int oendW = osizeW;
-  const int ostepW = blockDim.x;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW = osizeW;
+  const int64_t ostepW = blockDim.x;
 
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = START_IND(oh, osizeH, isizeH);
-    int iendH   = END_IND(oh, osizeH, isizeH);
-    int kH = iendH - istartH;
+    int64_t istartH = START_IND(oh, osizeH, isizeH);
+    int64_t iendH   = END_IND(oh, osizeH, isizeH);
+    int64_t kH = iendH - istartH;
 
     for(ow = ostartW; ow < oendW; ow += ostepW) {
 
-      int istartW = START_IND(ow, osizeW, isizeW);
-      int iendW   = END_IND(ow, osizeW, isizeW);
-      int kW = iendW - istartW;
+      int64_t istartW = START_IND(ow, osizeW, isizeW);
+      int64_t iendW   = END_IND(ow, osizeW, isizeW);
+      int64_t kW = iendW - istartW;
 
       // Compute the average pooling over corresponding input pixels
       T *ptr_input = input + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output + oh*osizeW + ow;
       T sum = ScalarConvert<int, T>::to(0);
-      int ih, iw;
+      int64_t ih, iw;
       for(ih = 0; ih < kH; ++ih) {
         for(iw = 0; iw < kW; ++iw) {
           T val = ptr_input[iw*istrideW];
@@ -82,46 +82,46 @@ __global__ void adaptiveaveragepool(T *input, T *output,
  template <typename T>
 __global__ void adaptiveaveragegradinput(
   T *gradInput, T *gradOutput,
-  int isizeH, int isizeW, int osizeH, int osizeW
+  int64_t isizeH, int64_t isizeW, int64_t osizeH, int64_t osizeW
 )
 {
   // iterators on input pixels
-  int ih, iw;
+  int64_t ih, iw;
 
   // select input/output plane based on thread/block ID
-  int i_plane = blockIdx.x;
-  int o_plane = i_plane;
+  int64_t i_plane = blockIdx.x;
+  int64_t o_plane = i_plane;
 
   gradOutput = gradOutput + o_plane*osizeH*osizeW;
   gradInput = gradInput + i_plane*isizeH*isizeW;
 
-  int istartH = blockDim.y*blockIdx.y + threadIdx.y;
-  int iendH = isizeH;
-  int istepH = blockDim.y*gridDim.y;
+  int64_t istartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t iendH = isizeH;
+  int64_t istepH = blockDim.y*gridDim.y;
 
-  int istartW = threadIdx.x;
-  int iendW = isizeW;
-  int istepW = blockDim.x;
+  int64_t istartW = threadIdx.x;
+  int64_t iendW = isizeW;
+  int64_t istepW = blockDim.x;
 
   // compute gradInput
   for(ih = istartH; ih < iendH; ih += istepH) {
 
-    int ostartH = START_IND(ih, isizeH, osizeH);
-    int oendH   = END_IND(ih, isizeH, osizeH);
+    int64_t ostartH = START_IND(ih, isizeH, osizeH);
+    int64_t oendH   = END_IND(ih, isizeH, osizeH);
 
     for(iw = istartW; iw < iendW; iw += istepW) {
 
-      int ostartW = START_IND(iw, isizeW, osizeW);
-      int oendW   = END_IND(iw, isizeW, osizeW);
+      int64_t ostartW = START_IND(iw, isizeW, osizeW);
+      int64_t oendW   = END_IND(iw, isizeW, osizeW);
 
       // Compute the gradients over corresponding output pixels
       T *ptr_gradInput = gradInput + ih*isizeW + iw;
 
-      int oh, ow;
+      int64_t oh, ow;
       for(oh = ostartH; oh < oendH; ++oh) {
-        int kH = START_IND(oh, osizeH, isizeH) - END_IND(oh, osizeH, isizeH);
+        int64_t kH = START_IND(oh, osizeH, isizeH) - END_IND(oh, osizeH, isizeH);
         for(ow = ostartW; ow < oendW; ++ow) {
-          int kW = START_IND(ow, osizeW, isizeW) - END_IND(ow, osizeW, isizeW);
+          int64_t kW = START_IND(ow, osizeW, isizeW) - END_IND(ow, osizeW, isizeW);
           T grad_delta = gradOutput[ow + oh*osizeW] / kH / kW;
           *ptr_gradInput += grad_delta;
         }
@@ -138,46 +138,46 @@ __global__ void adaptiveaveragegradinput(
  template <typename T>
 __global__ void atomicadaptiveaveragegradinput(
   T *gradInput, T *gradOutput,
-  int isizeH, int isizeW, int osizeH, int osizeW
+  int64_t isizeH, int64_t isizeW, int64_t osizeH, int64_t osizeW
 )
 {
   // iterators on output indices
-  int oh, ow;
+  int64_t oh, ow;
 
   // select input/output plane based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
 
   gradOutput = gradOutput + o_plane*osizeW*osizeH;
   gradInput = gradInput + i_plane*isizeW*isizeH;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
-  int oendH = osizeH;
-  int ostepH = blockDim.y*gridDim.y;
+  int64_t ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t oendH = osizeH;
+  int64_t ostepH = blockDim.y*gridDim.y;
 
-  int ostartW = threadIdx.x;
-  int oendW = osizeW;
-  int ostepW = blockDim.x;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW = osizeW;
+  int64_t ostepW = blockDim.x;
 
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = START_IND(oh, osizeH, isizeH);
-    int iendH   = END_IND(oh, osizeH, isizeH);
-    int kH = iendH - istartH;
+    int64_t istartH = START_IND(oh, osizeH, isizeH);
+    int64_t iendH   = END_IND(oh, osizeH, isizeH);
+    int64_t kH = iendH - istartH;
 
     for(ow = ostartW; ow < oendW; ow += ostepW) {
 
-      int istartW = START_IND(ow, osizeW, isizeW);
-      int iendW   = END_IND(ow, osizeW, isizeW);
-      int kW = iendW - istartW;
+      int64_t istartW = START_IND(ow, osizeW, isizeW);
+      int64_t iendW   = END_IND(ow, osizeW, isizeW);
+      int64_t kW = iendW - istartW;
 
       // Compute the gradients for over corresponding input pixels
       T *ptr_gradInput = gradInput + istartH*isizeW + istartW;
       T *ptr_gradOutput = gradOutput + oh*osizeW + ow;
       T grad_delta = *ptr_gradOutput / kW / kH;
 
-      int ih, iw;
+      int64_t ih, iw;
       for(ih = 0; ih < kH; ++ih) {
         for(iw = 0; iw < kW; ++iw) {
           // atomic add since different threads could update same variable

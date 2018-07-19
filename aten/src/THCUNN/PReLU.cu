@@ -23,12 +23,12 @@ struct PReLUUpdateOutput
 };
 
 template <typename T>
-__global__ void preluForward(T *output, const T *input, const T *weight, int n, int nElemsPerSample, int mapSize)
+__global__ void preluForward(T *output, const T *input, const T *weight, int64_t n, int64_t nElemsPerSample, int64_t mapSize)
 {
   CUDA_KERNEL_LOOP(i, n)
   {
-    int positionInSample = i % nElemsPerSample;
-    int mapNumber = positionInSample / mapSize;
+    int64_t positionInSample = i % nElemsPerSample;
+    int64_t mapNumber = positionInSample / mapSize;
     output[i] = input[i] > 0 ? input[i] : input[i] * weight[mapNumber];
   }
 }
@@ -54,12 +54,12 @@ __global__ void preluBackward(
   const T *input,
   const T *weight,
   const T *gradOutput,
-  int n, int nElemsPerSample, int mapSize)
+  int64_t n, int64_t nElemsPerSample, int64_t mapSize)
 {
   CUDA_KERNEL_LOOP(i, n)
   {
-    int positionInSample = i % nElemsPerSample;
-    int mapNumber = positionInSample / mapSize;
+    int64_t positionInSample = i % nElemsPerSample;
+    int64_t mapNumber = positionInSample / mapSize;
     gradInput[i] = input[i] > 0 ? gradOutput[i] : gradOutput[i] * weight[mapNumber];
   }
 }

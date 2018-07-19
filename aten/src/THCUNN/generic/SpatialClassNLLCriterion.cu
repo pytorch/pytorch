@@ -104,9 +104,9 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
 
   THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
   THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
-  int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
+  int64_t blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
-  int total_blocks = blocks_per_sample * batch_size;
+  int64_t total_blocks = blocks_per_sample * batch_size;
 
   THCTensor_(fill)(state, output, ScalarConvert<int, real>::to(0));
   THCTensor_(fill)(state, total_weight, ScalarConvert<int, real>::to(0));
@@ -204,9 +204,9 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
 
   THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
   THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
-  int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
+  int64_t blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
-  int total_blocks = blocks_per_sample * batch_size;
+  int64_t total_blocks = blocks_per_sample * batch_size;
 
   cunn_SpatialClassNLLCriterion_updateGradInput_kernel
     <<<total_blocks, CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(

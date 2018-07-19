@@ -10,22 +10,22 @@ __global__ void
 #if __CUDA_ARCH__ >= 320
 __launch_bounds__(CUDA_NUM_THREADS)
 #endif
-LRNFillScale(const int nthreads, const Dtype* const in,
-    const int num, const int channels, const int height,
-    const int width, const int size, const Dtype alpha_over_size,
+LRNFillScale(const int64_t nthreads, const Dtype* const in,
+    const int64_t num, const int64_t channels, const int64_t height,
+    const int64_t width, const int64_t size, const Dtype alpha_over_size,
     const Dtype k, Dtype* const scale) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     // find out the local offset
-    const int w = index % width;
-    const int h = (index / width) % height;
-    const int n = index / width / height;
-    const int offset = (n * channels * height + h) * width + w;
-    const int step = height * width;
+    const int64_t w = index % width;
+    const int64_t h = (index / width) % height;
+    const int64_t n = index / width / height;
+    const int64_t offset = (n * channels * height + h) * width + w;
+    const int64_t step = height * width;
     const Dtype* const in_off = in + offset;
     Dtype* const scale_off = scale + offset;
-    int head = 0;
-    const int pre_pad = (size - 1) / 2;
-    const int post_pad = size - pre_pad - 1;
+    int64_t head = 0;
+    const int64_t pre_pad = (size - 1) / 2;
+    const int64_t post_pad = size - pre_pad - 1;
     Acctype accum_scale = Acctype(0);
     // fill the scale at [n, :, h, w]
     // accumulate values
@@ -56,7 +56,7 @@ LRNFillScale(const int nthreads, const Dtype* const in,
 }
 
 template <typename Dtype>
-__global__ void LRNComputeOutput(const int nthreads, const Dtype* in,
+__global__ void LRNComputeOutput(const int64_t nthreads, const Dtype* in,
     const Dtype* scale, const Dtype negative_beta, Dtype* out) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     out[index] = in[index] * pow(scale[index], negative_beta);
@@ -64,27 +64,27 @@ __global__ void LRNComputeOutput(const int nthreads, const Dtype* in,
 }
 
 template <typename Dtype, typename Acctype>
-__global__ void LRNComputeDiff(const int nthreads,
+__global__ void LRNComputeDiff(const int64_t nthreads,
     const Dtype* const bottom_data, const Dtype* const top_data,
     const Dtype* const scale, const Dtype* const top_diff,
-    const int num, const int channels, const int height,
-    const int width, const int size, const Dtype negative_beta,
+    const int64_t num, const int64_t channels, const int64_t height,
+    const int64_t width, const int64_t size, const Dtype negative_beta,
     const Dtype cache_ratio, Dtype* const bottom_diff) {
   CUDA_KERNEL_LOOP(index, nthreads) {
     // find out the local offset
-    const int w = index % width;
-    const int h = (index / width) % height;
-    const int n = index / width / height;
-    const int offset = (n * channels * height + h) * width + w;
-    const int step = height * width;
+    const int64_t w = index % width;
+    const int64_t h = (index / width) % height;
+    const int64_t n = index / width / height;
+    const int64_t offset = (n * channels * height + h) * width + w;
+    const int64_t step = height * width;
     const Dtype* const bottom_off = bottom_data + offset;
     const Dtype* const top_off = top_data + offset;
     const Dtype* const scale_off = scale + offset;
     const Dtype* const top_diff_off = top_diff + offset;
     Dtype* const bottom_diff_off = bottom_diff + offset;
-    int head = 0;
-    const int pre_pad = size - (size + 1) / 2;
-    const int post_pad = size - pre_pad - 1;
+    int64_t head = 0;
+    const int64_t pre_pad = size - (size + 1) / 2;
+    const int64_t post_pad = size - pre_pad - 1;
     Acctype accum_ratio = Acctype(0);
     // accumulate values
     while (head < post_pad && head < channels) {

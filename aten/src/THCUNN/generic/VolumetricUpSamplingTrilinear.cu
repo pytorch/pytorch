@@ -7,9 +7,9 @@
 static inline void THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
                         (THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
-                         int nBatch, int nChannels,
-                         int inputDepth, int inputHeight, int inputWidth,
-                         int outputDepth, int outputHeight, int outputWidth) {
+                         int64_t nBatch, int64_t nChannels,
+                         int64_t inputDepth, int64_t inputHeight, int64_t inputWidth,
+                         int64_t outputDepth, int64_t outputHeight, int64_t outputWidth) {
   THArgCheck(inputDepth > 0 && inputHeight > 0 && inputWidth > 0
              && outputDepth && outputHeight > 0 && outputWidth > 0, 2,
              "input and output sizes should be greater than 0,"
@@ -33,16 +33,16 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int outputDepth,
-           int outputHeight,
-           int outputWidth,
+           int64_t outputDepth,
+           int64_t outputHeight,
+           int64_t outputWidth,
            bool align_corners)
 {
-  int nbatch = THCTensor_(size)(state, input, 0);
-  int channels = THCTensor_(size)(state, input, 1);
-  int inputDepth = THCTensor_(size)(state, input, 2);
-  int inputHeight = THCTensor_(size)(state, input, 3);
-  int inputWidth = THCTensor_(size)(state, input, 4);
+  int64_t nbatch = THCTensor_(size)(state, input, 0);
+  int64_t channels = THCTensor_(size)(state, input, 1);
+  int64_t inputDepth = THCTensor_(size)(state, input, 2);
+  int64_t inputHeight = THCTensor_(size)(state, input, 3);
+  int64_t inputWidth = THCTensor_(size)(state, input, 4);
   THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
        (state, input, NULL,
         nbatch, channels,
@@ -61,8 +61,8 @@ void THNN_(VolumetricUpSamplingTrilinear_updateOutput)(
   const accreal rdepth = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  const int num_kernels = outputDepth * outputHeight * outputWidth;
-  const int num_threads =
+  const int64_t num_kernels = outputDepth * outputHeight * outputWidth;
+  const int64_t num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel<real, accreal> <<<THCCeilDiv(num_kernels, num_threads), num_threads ,
@@ -75,14 +75,14 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
            THCState *state,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int nbatch,
-           int nchannels,
-           int inputDepth,
-           int inputHeight,
-           int inputWidth,
-           int outputDepth,
-           int outputHeight,
-           int outputWidth,
+           int64_t nbatch,
+           int64_t nchannels,
+           int64_t inputDepth,
+           int64_t inputHeight,
+           int64_t inputWidth,
+           int64_t outputDepth,
+           int64_t outputHeight,
+           int64_t outputWidth,
            bool align_corners)
 {
   THNN_(VolumetricUpSamplingTrilinear_shapeCheck)
@@ -99,8 +99,8 @@ void THNN_(VolumetricUpSamplingTrilinear_updateGradInput)(
   const accreal rdepth = linear_upsampling_compute_scale<accreal>(inputDepth, outputDepth, align_corners);
   const accreal rheight = linear_upsampling_compute_scale<accreal>(inputHeight, outputHeight, align_corners);
   const accreal rwidth = linear_upsampling_compute_scale<accreal>(inputWidth, outputWidth, align_corners);
-  const int num_kernels = outputDepth * outputHeight * outputWidth;
-  const int num_threads =
+  const int64_t num_kernels = outputDepth * outputHeight * outputWidth;
+  const int64_t num_threads =
     THCState_getCurrentDeviceProperties(state)->maxThreadsPerBlock;
   cudaStream_t stream = THCState_getCurrentStream(state);
   caffe_gpu_interp2_kernel_backward<real ,accreal> <<<THCCeilDiv(num_kernels, num_threads),

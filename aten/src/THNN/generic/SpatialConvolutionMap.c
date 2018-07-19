@@ -4,8 +4,8 @@
 
 void THNN_(SpatialConvolutionMap_updateOutput)(
   THNNState *state, THTensor *input, THTensor *output, THTensor *weight, THTensor *bias,
-  THTensor *connTable, int nInputPlane, int nOutputPlane,
-  int dW, int dH)
+  THTensor *connTable, int64_t nInputPlane, int64_t nOutputPlane,
+  int64_t dW, int64_t dH)
 {
   THArgCheck(
     weight != NULL && !weight->is_empty() && weight->dim() == 3
@@ -13,9 +13,9 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
     "non-empty 3D weight tensor expected (connTable:size(%d) x kH x kW)", TH_INDEX_BASE
   );
 
-  int dimw = 2;
-  int dimh = 1;
-  int dimc = 0;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
+  int64_t dimc = 0;
   int64_t nbatch = 1;
 
   THArgCheck(!input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, "non-empty 3D or 4D(batch mode) tensor expected");
@@ -73,12 +73,12 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
         ptr_output[j] = z;
 
       /* convolve all maps */
-      int nweight = connTable->size[0];
+      int64_t nweight = connTable->size[0];
       for (k = 0; k < nweight; k++)
       {
         /* get offsets for input/output */
-        int o = (int)connTable_data[k*2+1] - TH_INDEX_BASE;
-        int i = (int)connTable_data[k*2+0] - TH_INDEX_BASE;
+        int64_t o = (int64_t)connTable_data[k*2+1] - TH_INDEX_BASE;
+        int64_t i = (int64_t)connTable_data[k*2+0] - TH_INDEX_BASE;
 
         if (o == p)
         {
@@ -105,8 +105,8 @@ void THNN_(SpatialConvolutionMap_updateOutput)(
 
 void THNN_(SpatialConvolutionMap_updateGradInput)(
   THNNState *state, THTensor *input, THTensor *gradOutput, THTensor *gradInput, THTensor *weight, THTensor *bias,
-  THTensor *connTable, int nInputPlane, int nOutputPlane,
-  int dW, int dH)
+  THTensor *connTable, int64_t nInputPlane, int64_t nOutputPlane,
+  int64_t dW, int64_t dH)
 {
   THArgCheck(
     weight != NULL && !weight->is_empty() && weight->dim() == 3
@@ -115,8 +115,8 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
   );
 
   /* and dims */
-  int dimw = 2;
-  int dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
   int64_t nbatch = 1;
   if (input->dim() == 4)
   {
@@ -157,11 +157,11 @@ void THNN_(SpatialConvolutionMap_updateGradInput)(
     {
       int64_t k;
       /* backward all */
-      int nkernel = connTable->size[0];
+      int64_t nkernel = connTable->size[0];
       for (k = 0; k < nkernel; k++)
       {
-        int o = (int)connTable_data[k*2+1] - TH_INDEX_BASE;
-        int i = (int)connTable_data[k*2+0] - TH_INDEX_BASE;
+        int64_t o = (int64_t)connTable_data[k*2+1] - TH_INDEX_BASE;
+        int64_t i = (int64_t)connTable_data[k*2+0] - TH_INDEX_BASE;
         if (i == p)
         {
           /* gradient to input */
@@ -189,9 +189,9 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
           THTensor *gradWeight,
           THTensor *gradBias,
           THTensor *connTable,
-          int nInputPlane,
-          int nOutputPlane,
-          int dW, int dH,
+          int64_t nInputPlane,
+          int64_t nOutputPlane,
+          int64_t dW, int64_t dH,
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
@@ -202,8 +202,8 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
   );
 
   /* and dims */
-  int dimw = 2;
-  int dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
   int64_t nbatch = 1;
   if (input->dim() == 4)
   {
@@ -248,15 +248,15 @@ void THNN_(SpatialConvolutionMap_accGradParameters)(
   }
 
   /* gradients wrt weight */
-  const int nkernel = connTable->size[0];
+  const int64_t nkernel = connTable->size[0];
 #pragma omp parallel for private(k)
   for (k = 0; k < nkernel; k++)
   {
     int64_t m;
     for (m = 0; m < nbatch; m++)
     {
-      int o = (int)THTensor_(get2d)(connTable,k,1) - TH_INDEX_BASE;
-      int i = (int)THTensor_(get2d)(connTable,k,0) - TH_INDEX_BASE;
+      int64_t o = (int64_t)THTensor_(get2d)(connTable,k,1) - TH_INDEX_BASE;
+      int64_t i = (int64_t)THTensor_(get2d)(connTable,k,0) - TH_INDEX_BASE;
 
       /* gradient to kernel */
       THTensor_(validXCorr2DRevptr)(

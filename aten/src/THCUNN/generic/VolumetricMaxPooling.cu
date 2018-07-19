@@ -7,9 +7,9 @@ void THNN_(VolumetricMaxPooling_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            THCIndexTensor *indices,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
            bool ceilMode)
 {
   THNN_(VolumetricDilatedMaxPooling_updateOutput)(
@@ -25,9 +25,9 @@ void THNN_(VolumetricMaxPooling_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCIndexTensor *indices,
-           int kT, int kW, int kH,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
+           int64_t kT, int64_t kW, int64_t kH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
            bool ceilMode)
 {
   THNN_(VolumetricDilatedMaxPooling_updateGradInput)(

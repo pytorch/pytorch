@@ -10,9 +10,9 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int osizeT,
-           int osizeW,
-           int osizeH)
+           int64_t osizeT,
+           int64_t osizeW,
+           int64_t osizeH)
 {
   THCUNN_assertSameGPU(state, 2, input, output);
 
@@ -66,7 +66,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateOutput)(
   int64_t offsetZ = 0;
   dim3 threads(32, 8);
   // each H*W plane is processed by blocksH thread blocks
-  int blocksH = max((int)(16L / totalZ), 1);
+  int64_t blocksH = max((int64_t)(16L / totalZ), 1);
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
     cunn_VolumetricAdaptiveAveragePooling_updateOutput_kernel
@@ -132,7 +132,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   if (input->dim() == 4) {
     totalZ = atomic ? sizeD * osizeT : sizeD * isizeT;
   } else {
-    int sizeB = input->size[0];
+    int64_t sizeB = input->size[0];
     totalZ = atomic ? sizeB * sizeD * osizeT : sizeB * sizeD * isizeT;
   }
 
@@ -142,7 +142,7 @@ void THNN_(VolumetricAdaptiveAveragePooling_updateGradInput)(
   int64_t offsetZ = 0;
   dim3 threads(32, 8);
   // each H*W plane is processed by blocksH thread blocks
-  int blocksH = max((int)(16L / totalZ), 1);
+  int64_t blocksH = max((int64_t)(16L / totalZ), 1);
   while (totalZ > 0) {
     dim3 blocks(totalZ > 65535 ? 65535 : totalZ, blocksH);
 

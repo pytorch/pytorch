@@ -6,8 +6,8 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
                          THCState *state,
                          THCTensor *input, THCTensor *gradOutput,
                          THCTensor *weight, THCTensor *bias,
-                         int kH, int kW, int dH,
-                         int dW, int padH, int padW,
+                         int64_t kH, int64_t kW, int64_t dH,
+                         int64_t dW, int64_t padH, int64_t padW,
                          int64_t inputHeight, int64_t inputWidth,
                          int64_t outputHeight, int64_t outputWidth) {
 
@@ -16,10 +16,10 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
 
   if (ndim == 4) {
     dimf++;
@@ -77,9 +77,9 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
            THCTensor *bias,
            THCTensor *finput,
            THCTensor *fgradInput,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
            int64_t inputWidth, int64_t inputHeight,
            int64_t outputWidth, int64_t outputHeight)
 {
@@ -97,7 +97,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
   int64_t nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
   int64_t nOutputPlane = THCTensor_(size)(state,weight,1);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (input->dim() == 3) {
     // Force batch
     batch = 0;
@@ -119,7 +119,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
   THCTensor *output_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     THCTensor *finput3d, *output3d;
     THCTensor *wslice = THCTensor_(new)(state);
     THCTensor *islice = THCTensor_(new)(state);
@@ -189,9 +189,9 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
            THCTensor *weight,
            THCTensor *finput,
            THCTensor *fgradInput,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
            int64_t inputWidth, int64_t inputHeight,
            int64_t outputWidth, int64_t outputHeight)
 {
@@ -210,7 +210,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   int64_t nInputPlane = THCTensor_(size)(state,weight,2)/(kW*kH);
   int64_t nOutputPlane = THCTensor_(size)(state,weight,1);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (input->dim() == 3) {
     // Force batch
     batch = 0;
@@ -236,7 +236,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   THCTensor_(transpose)(state, tweight, weight, 1, 2);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     THCTensor *gradOutput3d, *fgradInput3d;
     THCTensor *wslice = THCTensor_(new)(state);
     THCTensor *gislice = THCTensor_(new)(state);
@@ -305,9 +305,9 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
            THCTensor *gradBias,
            THCTensor *finput,
            THCTensor *fgradInput,
-           int kW, int kH,
-           int dW, int dH,
-           int padW, int padH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
+           int64_t padW, int64_t padH,
            int64_t inputWidth, int64_t inputHeight,
            int64_t outputWidth, int64_t outputHeight,
            accreal scale_)
@@ -330,7 +330,7 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
   int64_t nInputPlane = THCTensor_(size)(state,gradWeight,2)/(kW*kH);
   int64_t nOutputPlane = THCTensor_(size)(state,gradWeight,1);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (input->dim() == 3) {
     // Force batch
     batch = 0;
@@ -347,7 +347,7 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++) {
+  for (int64_t elt = 0; elt < batchSize; elt ++) {
     THCTensor *gradOutput3d, *finput3d;
     THCTensor *gwslice = THCTensor_(new)(state);
     THCTensor *islice = THCTensor_(new)(state);

@@ -9,7 +9,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
            THCIndexTensor *target,
            THCTensor *output,
            int64_t reduction,
-           int p,
+           int64_t p,
            THCTensor *weights,
            accreal margin_)
 {
@@ -51,7 +51,7 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   }
   else if (input->dim() == 2)
   {
-    int nframe = input->size[0];
+    int64_t nframe = input->size[0];
     THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe), 3,
                "inconsistent target size");
     dim3 blocks(input->size[0]);
@@ -137,7 +137,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            int64_t reduction,
-           int p,
+           int64_t p,
            THCTensor *weights,
            accreal margin_)
 {
@@ -186,7 +186,7 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   }
   else if (input->dim() == 2)
   {
-    int nframe = gradInput->size[0];
+    int64_t nframe = gradInput->size[0];
     THArgCheck(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe), 3,
                "inconsistent target size");
     dim3 blocks(gradInput->size[0]);

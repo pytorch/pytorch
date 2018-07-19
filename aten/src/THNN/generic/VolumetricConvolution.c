@@ -10,21 +10,21 @@ void THNN_(VolumetricConvolution_updateOutput)(
           THTensor *bias,
           THTensor *finput,     // only used by cuda impl
           THTensor *fgradInput, // only used by cuda impl
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH)
 {
   THArgCheck(pT != 0 || pW != 0 || pH != 0, 9, "padding not supported by CPU backend");   // sharing signature with CUDA version
 
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
 		"non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (input->dim() == 5)
   {
@@ -104,12 +104,12 @@ void THNN_(VolumetricConvolution_updateGradInput)(
           THTensor *gradInput,
           THTensor *weight,
           THTensor *finput, // only used by cuda impl
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH)
 {
   THArgCheck(pT != 0 || pW != 0 || pH != 0, 9, "padding not supported by CPU backend");   // sharing signature with CUDA version
 
@@ -117,13 +117,13 @@ void THNN_(VolumetricConvolution_updateGradInput)(
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for weight, but got: %s");
 
-  int nOutputPlane = (int)weight->size[0];
+  int64_t nOutputPlane = (int64_t)weight->size[0];
 
   THNN_ARGCHECK(!gradOutput->is_empty() && (gradOutput->dim() == 4 || gradOutput->dim() == 5), 3,
 		gradOutput,
 		"non-empty 4D or 5D (batch mode) tensor expected for gradOutput, but got: %s");
 
-  int dimPlane = 0;
+  int64_t dimPlane = 0;
   if (gradOutput->dim() == 5)
   {
     dimPlane++;
@@ -172,12 +172,12 @@ void THNN_(VolumetricConvolution_accGradParameters)(
           THTensor *gradBias,
           THTensor *finput,     // only used by cuda impl
           THTensor *fgradInput, // only used by cuda impl
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
@@ -187,7 +187,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for gradWeight, but got: %s");
 
-  int nOutputPlane = (int)gradWeight->size[0];
+  int64_t nOutputPlane = (int64_t)gradWeight->size[0];
   if (gradBias) {
     THArgCheck(!gradBias->is_empty() && gradBias->dim() == 1 && gradBias->size[0] == nOutputPlane, 5,
       "gradBias tensor has wrong size"
@@ -197,7 +197,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   int64_t k;
   real *gradBias_data;
   THTensor *gradOutSlice;
-  int dimPlane = 0;
+  int64_t dimPlane = 0;
   if (gradOutput->dim() == 5)
   {
     dimPlane++;

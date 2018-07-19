@@ -10,16 +10,16 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
                          THTensor *gradOutput,
                          THTensor *weight,
                          THTensor *bias,
-                         int kT,
-                         int kW,
-                         int kH,
-                         int dT,
-                         int dW,
-                         int dH,
-                         int pT,
-                         int pW,
-                         int pH,
-                         int weight_nullable) {
+                         int64_t kT,
+                         int64_t kW,
+                         int64_t kH,
+                         int64_t dT,
+                         int64_t dW,
+                         int64_t dH,
+                         int64_t pT,
+                         int64_t pW,
+                         int64_t pH,
+                         int64_t weight_nullable) {
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
                 "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 8,
@@ -37,11 +37,11 @@ static void inline THNN_(VolumetricConvolutionMM_shapeCheck)(
     THError("weight tensor is expected to be non-nullable");
   }
 
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   if (ndim == 5)
   {
@@ -131,15 +131,15 @@ static THTensor* THNN_(newViewWeight)(THTensor *weight)
 static void THNN_(unfolded_acc_vol)(
           THTensor *finput,
           THTensor *input,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
           int64_t nInputPlane,
           int64_t inputDepth,
           int64_t inputWidth,
@@ -151,7 +151,7 @@ static void THNN_(unfolded_acc_vol)(
   real *input_data = THTensor_(data)(input);
   real *finput_data = THTensor_(data)(finput);
 #ifdef _OPENMP
-  int inOmp = omp_in_parallel();
+  int64_t inOmp = omp_in_parallel();
   #pragma omp parallel if (!inOmp) firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, nInputPlane, inputHeight, inputWidth, inputDepth)
   {
     size_t num_threads = omp_get_num_threads();
@@ -263,11 +263,11 @@ static void THNN_(unfolded_acc_vol)(
     remained /= outputHeight;
     int64_t d_out = remained % outputDepth;
     remained /= outputDepth;
-    int k = remained % kW;
+    int64_t k = remained % kW;
     remained /= kW;
-    int j = remained % kH;
+    int64_t j = remained % kH;
     remained /= kH;
-    int i = remained % kT;
+    int64_t i = remained % kT;
     int64_t nip = remained / kT;
 
     int64_t d = d_out * dT - pT + i;
@@ -284,15 +284,15 @@ static void THNN_(unfolded_acc_vol)(
 static void THNN_(unfolded_copy_vol)(
           THTensor *finput,
           THTensor *input,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
           int64_t nInputPlane,
           int64_t inputDepth,
           int64_t inputWidth,
@@ -305,7 +305,7 @@ static void THNN_(unfolded_copy_vol)(
   real *finput_data = THTensor_(data)(finput);
 
 #ifdef _OPENMP
-  int inOmp = omp_in_parallel();
+  int64_t inOmp = omp_in_parallel();
   #pragma omp parallel if (!inOmp) firstprivate(finput_data, input_data, outputWidth, outputHeight, outputDepth, kW, kH, kT, dW, dH, dT, pW, pH, pT, nInputPlane, inputHeight, inputWidth, inputDepth)
   {
     size_t num_threads = omp_get_num_threads();
@@ -321,11 +321,11 @@ static void THNN_(unfolded_copy_vol)(
     remained /= outputHeight;
     int64_t d_out = remained % outputDepth;
     remained /= outputDepth;
-    int k = remained % kW;
+    int64_t k = remained % kW;
     remained /= kW;
-    int j = remained % kH;
+    int64_t j = remained % kH;
     remained /= kH;
-    int i = remained % kT;
+    int64_t i = remained % kT;
     int64_t nip = remained / kT;
 #else
     int64_t line_seg_len = nInputPlane*kT*kH*kW*outputDepth*outputWidth*outputHeight;
@@ -333,9 +333,9 @@ static void THNN_(unfolded_copy_vol)(
     int64_t w_out = 0;
     int64_t h_out = 0;
     int64_t d_out = 0;
-    int i = 0;
-    int j = 0;
-    int k = 0;
+    int64_t i = 0;
+    int64_t j = 0;
+    int64_t k = 0;
     int64_t nip = 0;
 #endif
 
@@ -395,15 +395,15 @@ static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
           THTensor *weight,
           THTensor *bias,
           THTensor *finput,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH,
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH,
           int64_t nInputPlane,
           int64_t inputDepth,
           int64_t inputWidth,
@@ -457,20 +457,20 @@ void THNN_(VolumetricConvolutionMM_updateOutput)(
           THTensor *bias,
           THTensor *finput,
           THTensor *fgradInput, // unused
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH)
 {
-  int dimf = 0;
-  int dimt = 1;
-  int dimh = 2;
-  int dimw = 3;
+  int64_t dimf = 0;
+  int64_t dimt = 1;
+  int64_t dimh = 2;
+  int64_t dimw = 3;
 
   int64_t nInputPlane;
   int64_t inputDepth;
@@ -559,15 +559,15 @@ static void THNN_(VolumetricConvolutionMM_updateGradInput_frame)(
           THTensor *gradOutput,
           THTensor *weight,
           THTensor *fgradInput,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH)
 {
   THTensor *gradOutput2d = THTensor_(newWithStorage2d)(
     gradOutput->storage, gradOutput->storageOffset,
@@ -598,15 +598,15 @@ void THNN_(VolumetricConvolutionMM_updateGradInput)(
           THTensor *weight,
           THTensor *finput,
           THTensor *fgradInput,
-          int kT,
-          int kW,
-          int kH,
-          int dT,
-          int dW,
-          int dH,
-          int pT,
-          int pW,
-          int pH)
+          int64_t kT,
+          int64_t kW,
+          int64_t kH,
+          int64_t dT,
+          int64_t dW,
+          int64_t dH,
+          int64_t pT,
+          int64_t pW,
+          int64_t pH)
 {
   THNN_(VolumetricConvolutionMM_shapeCheck)(
         state, input, gradOutput, weight, NULL,
@@ -712,9 +712,9 @@ void THNN_(VolumetricConvolutionMM_accGradParameters)(
           THTensor *gradBias,
           THTensor *finput,
           THTensor *fgradInput,
-          int kT, int kW, int kH,
-          int dT, int dW, int dH,
-          int pT, int pW, int pH,
+          int64_t kT, int64_t kW, int64_t kH,
+          int64_t dT, int64_t dW, int64_t dH,
+          int64_t pT, int64_t pW, int64_t pH,
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);

@@ -7,7 +7,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            THCIndexTensor *indices,
-           int owidth, int oheight)
+           int64_t owidth, int64_t oheight)
 {
   THCUNN_assertSameGPU(state, 3, input, output, indices);
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
@@ -35,7 +35,7 @@ void THNN_(SpatialMaxUnpooling_updateOutput)(
   THCTensor_(resize4d)(state, output, batchSize, nInputPlane, oheight, owidth);
   THCTensor_(zero)(state, output);
 
-  int count = THCTensor_(nElement)(state, input);
+  int64_t count = THCTensor_(nElement)(state, input);
 
   MaxUnpoolForward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count, THCTensor_(data)(state, input), THCIndexTensor_(data)(state, indices),
@@ -55,14 +55,14 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCIndexTensor *indices,
-           int owidth, int oheight)
+           int64_t owidth, int64_t oheight)
 {
   THCUNN_assertSameGPU(state, 4, input, gradOutput, indices, gradInput);
   THCUNN_check_shape_indices(state, indices, input);
 
   int64_t nInputCols, nInputRows, nInputPlane, batchSize;
-  int dimw = 2;
-  int dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimh = 1;
 
   if (input->dim() == 3) {
     nInputPlane = input->size[0];
@@ -88,7 +88,7 @@ void THNN_(SpatialMaxUnpooling_updateGradInput)(
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  int count = THCTensor_(nElement)(state, input);
+  int64_t count = THCTensor_(nElement)(state, input);
 
   MaxUnpoolBackward <<< GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state) >>>
       (count, THCTensor_(data)(state, gradOutput), THCIndexTensor_(data)(state, indices),

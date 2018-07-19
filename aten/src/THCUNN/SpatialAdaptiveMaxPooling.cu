@@ -6,8 +6,8 @@
 
 #define CUDA_MAX_THREADS 1024   // this is safe, in reality 256 is our limit
 
-#define START_IND(a,b,c) (int)floor((float)(a * c) / b)
-#define END_IND(a,b,c) (int)ceil((float)((a + 1) * c) / b)
+#define START_IND(a,b,c) (int64_t)floor((float)(a * c) / b)
+#define END_IND(a,b,c) (int64_t)ceil((float)((a + 1) * c) / b)
 // #define START_IND(a,b,c) a * c / b
 // #define END_IND(a,b,c)  (a + 1) * c / b + ((a + 1) * c % b > 0)?1:0
 
@@ -20,24 +20,24 @@
  */
  template <typename T>
 __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
-                        int isizeH, int isizeW,
-                        int osizeH, int osizeW,
+                        int64_t isizeH, int64_t isizeW,
+                        int64_t osizeH, int64_t osizeW,
                         int64_t istrideD, int64_t istrideH, int64_t istrideW)
 {
   // iterators
-  int oh, ow;
+  int64_t oh, ow;
 
   // compute offsets based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
 
-  int ostartW = threadIdx.x;
-  int oendW = osizeW;
-  const int ostepW = blockDim.x;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW = osizeW;
+  const int64_t ostepW = blockDim.x;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
-  int oendH = osizeH;
-  const int ostepH = blockDim.y*gridDim.y;
+  int64_t ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t oendH = osizeH;
+  const int64_t ostepH = blockDim.y*gridDim.y;
   // select input/output plane
   output = output + o_plane*osizeH*osizeW;
   input = input + i_plane*istrideD;
@@ -46,23 +46,23 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
   // For all output pixels...
   for(oh = ostartH; oh < oendH; oh += ostepH) {
 
-    int istartH = START_IND(oh, osizeH, isizeH);
-    int iendH   = END_IND(oh, osizeH, isizeH);
-    int kH = iendH - istartH;
+    int64_t istartH = START_IND(oh, osizeH, isizeH);
+    int64_t iendH   = END_IND(oh, osizeH, isizeH);
+    int64_t kH = iendH - istartH;
 
     for(ow = ostartW; ow < oendW; ow += ostepW) {
-      int istartW = START_IND(ow, osizeW, isizeW);
-      int iendW   = END_IND(ow, osizeW, isizeW);
+      int64_t istartW = START_IND(ow, osizeW, isizeW);
+      int64_t iendW   = END_IND(ow, osizeW, isizeW);
 
-      int kW = iendW - istartW;
+      int64_t kW = iendW - istartW;
 
       // Compute the mean of the input image...
       T *ptr_input = input + istartH*istrideH + istartW*istrideW;
       T *ptr_output = output + oh*osizeW + ow;
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
-      int argmax = -1;
+      int64_t argmax = -1;
       T max = THCNumerics<T>::min();
-      int ih, iw;
+      int64_t ih, iw;
       for(ih = 0; ih < kH; ih++) {
         for(iw = 0; iw < kW; iw++) {
           T val = ptr_input[iw*istrideW];
@@ -86,24 +86,24 @@ __global__ void adaptivemaxpool(T *input, T *output, THCIndex_t *indices,
  */
  template <typename T>
 __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *indices,
-                             int isizeH, int isizeW,
-                             int osizeH, int osizeW)
+                             int64_t isizeH, int64_t isizeW,
+                             int64_t osizeH, int64_t osizeW)
 {
   // iterators
-  int oh, ow;
+  int64_t oh, ow;
 
   // compute offsets based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
   //int k = blockIdx.x % sizeD;
 
-  int ostartW = threadIdx.x;
-  int oendW = osizeW;
-  int ostepW = blockDim.x;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW = osizeW;
+  int64_t ostepW = blockDim.x;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
-  int oendH = osizeH;
-  int ostepH = blockDim.y*gridDim.y;
+  int64_t ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t oendH = osizeH;
+  int64_t ostepH = blockDim.y*gridDim.y;
 
   // select input/output plane
   gradOutput = gradOutput + o_plane*osizeH*osizeW;
@@ -119,7 +119,7 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE;
+      int64_t argmax = (*ptr_ind) - TH_INDEX_BASE;
 
       gradInput[argmax] += z;
     }
@@ -134,23 +134,23 @@ __global__ void adaptivemaxgradinput(T *gradInput, T *gradOutput, THCIndex_t *in
  template <typename T>
 __global__ void atomicadaptivemaxgradinput(
   T *gradInput, T *gradOutput, THCIndex_t *indices,
-  int isizeH, int isizeW, int osizeH, int osizeW
+  int64_t isizeH, int64_t isizeW, int64_t osizeH, int64_t osizeW
 )
 {
   // iterators
-  int oh, ow;
+  int64_t oh, ow;
 
   // compute offsets based on thread/block ID
-  int o_plane = blockIdx.x;
-  int i_plane = o_plane;
+  int64_t o_plane = blockIdx.x;
+  int64_t i_plane = o_plane;
 
-  int ostartW = threadIdx.x;
-  int oendW = osizeW;
-  int ostepW = blockDim.x;
+  int64_t ostartW = threadIdx.x;
+  int64_t oendW = osizeW;
+  int64_t ostepW = blockDim.x;
 
-  int ostartH = blockDim.y*blockIdx.y + threadIdx.y;
-  int oendH = osizeH;
-  int ostepH = blockDim.y*gridDim.y;
+  int64_t ostartH = blockDim.y*blockIdx.y + threadIdx.y;
+  int64_t oendH = osizeH;
+  int64_t ostepH = blockDim.y*gridDim.y;
 
   // select input/output plane
   gradOutput = gradOutput + o_plane*osizeH*osizeW;
@@ -166,7 +166,7 @@ __global__ void atomicadaptivemaxgradinput(
       THCIndex_t *ptr_ind = indices + oh*osizeW + ow;
       T z = *ptr_gradOutput;
 
-      int argmax = (*ptr_ind) - TH_INDEX_BASE;
+      int64_t argmax = (*ptr_ind) - TH_INDEX_BASE;
 
       // atomic add since different threads could update same variable
       atomicAdd(&(gradInput[argmax]), z);

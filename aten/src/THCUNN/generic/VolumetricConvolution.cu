@@ -9,12 +9,12 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
                          THCTensor *weight,
                          THCTensor *gradWeight,
                          THCTensor *bias,
-                         int dT,
-                         int dW,
-                         int dH,
-                         int padT,
-                         int padW,
-                         int padH) {
+                         int64_t dT,
+                         int64_t dW,
+                         int64_t dH,
+                         int64_t padT,
+                         int64_t padW,
+                         int64_t padH) {
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 4 || input->dim() == 5), 2, input,
                   "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
   THArgCheck(!weight || THCTensor_(isContiguous)(state, weight), 4,
@@ -55,11 +55,11 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
 
   THArgCheck(kT > 0 && kW > 0 && kH > 0, 4,
              "kernel size should be greater than zero, but got kT: %d kH: %d kW: %d", kT, kH, kW);
-  int ndim = input->dim();
-  int dimf = 0;
-  int dimh = 1;
-  int dimw = 2;
-  int dimd = 3;
+  int64_t ndim = input->dim();
+  int64_t dimf = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimd = 3;
 
   if (ndim == 5)
   {
@@ -117,8 +117,8 @@ void THNN_(VolumetricConvolution_updateOutput)(
            THCTensor *bias,
            THCTensor *finput,
            THCTensor *fgradInput,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH)
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH)
 {
   THCTensor *columns = finput;
   THCTensor *ones = fgradInput;
@@ -128,13 +128,13 @@ void THNN_(VolumetricConvolution_updateOutput)(
         bias, dT, dW, dH, padT, padW, padH);
   input = THCTensor_(newContiguous)(state, input);
 
-  int nOutputPlane = (int)weight->size[0];
-  int nInputPlane  = (int)weight->size[1];
-  int kT           = (int)weight->size[2];
-  int kH           = (int)weight->size[3];
-  int kW           = (int)weight->size[4];
+  int64_t nOutputPlane = (int64_t)weight->size[0];
+  int64_t nInputPlane  = (int64_t)weight->size[1];
+  int64_t kT           = (int64_t)weight->size[2];
+  int64_t kH           = (int64_t)weight->size[3];
+  int64_t kW           = (int64_t)weight->size[4];
 
-  int batch = 1;
+  int64_t batch = 1;
   if (input->dim() == 4)
   {
     // Force batch
@@ -175,7 +175,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
   THCTensor *output_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++)
+  for (int64_t elt = 0; elt < batchSize; elt ++)
   {
     // Matrix mulitply per output:
     THCTensor_(select)(state, input_n, input, 0, elt);
@@ -263,8 +263,8 @@ void THNN_(VolumetricConvolution_updateGradInput)(
            THCTensor *gradInput,
            THCTensor *weight,
            THCTensor *finput,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH)
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH)
 {
 
   int64_t nOutputPlane = weight->size[0];
@@ -281,7 +281,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
         NULL, dT, dW, dH, padT, padW, padH);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (input->dim() == 4)
   {
     input = THCTensor_(newContiguous)(state, input);
@@ -312,7 +312,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++)
+  for (int64_t elt = 0; elt < batchSize; elt ++)
   {
     // Matrix mulitply per sample:
     THCTensor_(select)(state, gradInput_n, gradInput, 0, elt);
@@ -375,8 +375,8 @@ void THNN_(VolumetricConvolution_accGradParameters)(
            THCTensor *gradBias,
            THCTensor *finput,
            THCTensor *fgradInput,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH,
            accreal scale_)
 {
   real scale = ScalarConvert<accreal, real>::to(scale_);
@@ -387,16 +387,16 @@ void THNN_(VolumetricConvolution_accGradParameters)(
         state, input, gradOutput, NULL, gradWeight,
         gradBias, dT, dW, dH, padT, padW, padH);
 
-  int nOutputPlane = (int)gradWeight->size[0];
-  int nInputPlane  = (int)gradWeight->size[1];
-  int kT           = (int)gradWeight->size[2];
-  int kH           = (int)gradWeight->size[3];
-  int kW           = (int)gradWeight->size[4];
+  int64_t nOutputPlane = (int64_t)gradWeight->size[0];
+  int64_t nInputPlane  = (int64_t)gradWeight->size[1];
+  int64_t kT           = (int64_t)gradWeight->size[2];
+  int64_t kH           = (int64_t)gradWeight->size[3];
+  int64_t kW           = (int64_t)gradWeight->size[4];
 
   input = THCTensor_(newContiguous)(state, input);
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (input->dim() == 4)
   {
     // Force batch
@@ -431,7 +431,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; elt ++)
+  for (int64_t elt = 0; elt < batchSize; elt ++)
   {
     // Matrix mulitply per output:
     THCTensor_(select)(state, input_n, input, 0, elt);

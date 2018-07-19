@@ -73,24 +73,24 @@ __global__ void cunn_SpatialClassNLLCriterion_updateOutput_kernel(
           T *input,
           THCIndex_t *target,
           T *weights,
-          int size_average,
-          int batch_size,
-          int n_classes,
-          int map_nelem,
-          int blocks_per_sample,
+          int64_t size_average,
+          int64_t batch_size,
+          int64_t n_classes,
+          int64_t map_nelem,
+          int64_t blocks_per_sample,
           int64_t ignore_index)
 {
   __shared__ AccumT partial_sums[CUDA_NUM_THREADS];
 
-  int i, t;
+  int64_t i, t;
   T cur_weight;
   AccumT input_sum = 0;
   AccumT acc_weight = 0;
 
-  int sample = blockIdx.x / blocks_per_sample;
-  int toffset = sample * map_nelem;
-  int ioffset = sample * map_nelem * n_classes;
-  int step = blockDim.x * blocks_per_sample;
+  int64_t sample = blockIdx.x / blocks_per_sample;
+  int64_t toffset = sample * map_nelem;
+  int64_t ioffset = sample * map_nelem * n_classes;
+  int64_t step = blockDim.x * blocks_per_sample;
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
@@ -129,27 +129,27 @@ __global__ void cunn_SpatialClassNLLCriterion_updateGradInput_kernel(
           THCIndex_t *target,
           T *weights,
           T *total_weight,
-          int size_average,
-          int batch_size,
-          int n_classes,
-          int map_nelem,
-          int blocks_per_sample,
+          int64_t size_average,
+          int64_t batch_size,
+          int64_t n_classes,
+          int64_t map_nelem,
+          int64_t blocks_per_sample,
           int64_t ignore_index)
 {
   if (*total_weight <= 0)
     return;
 
-  int i, t;
+  int64_t i, t;
   T norm = size_average ? (ScalarConvert<int, T>::to(1) / *total_weight) : ScalarConvert<int, T>::to(1);
 
-  int sample = blockIdx.x / blocks_per_sample;
-  int step = blockDim.x * blocks_per_sample;
-  int toffset = sample * map_nelem;
-  int ioffset = sample * map_nelem * n_classes;
+  int64_t sample = blockIdx.x / blocks_per_sample;
+  int64_t step = blockDim.x * blocks_per_sample;
+  int64_t toffset = sample * map_nelem;
+  int64_t ioffset = sample * map_nelem * n_classes;
   for (i = (blockIdx.x % blocks_per_sample) * blockDim.x + threadIdx.x;
        i < map_nelem;
        i += step) {
-    t = (int)target[toffset + i] - TH_INDEX_BASE;
+    t = (int64_t)target[toffset + i] - TH_INDEX_BASE;
     if (t != ignore_index) {
       assert(t >= 0 && t < n_classes);
       gradInput[ioffset + i + map_nelem * t] = -(weights ? weights[t] : ScalarConvert<int, T>::to(1)) * norm * gradOutput[0];

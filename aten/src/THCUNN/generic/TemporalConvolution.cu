@@ -5,17 +5,17 @@
 static inline void THNN_(TemporalConvolution_shapeCheck)(
                          THCState *state,
                          THCTensor *input,
-                         int kW,
-                         int dW,
-                         int *inputFrameSize) {
+                         int64_t kW,
+                         int64_t dW,
+                         int64_t *inputFrameSize) {
 
   THArgCheck(kW > 0, 9,
              "kernel size should be greater than zero, but got kW: %d", kW);
   THArgCheck(dW > 0, 11,
              "stride should be greater than zero, but got dW: %d", dW);
 
-  int dimS = 0; // sequence dimension
-  int dimF = 1; // feature dimension
+  int64_t dimS = 0; // sequence dimension
+  int64_t dimF = 1; // feature dimension
 
   if (input->dim() == 3)
   {
@@ -40,15 +40,15 @@ void THNN_(TemporalConvolution_updateOutput)(
            THCTensor *output,
            THCTensor *weight,
            THCTensor *bias,
-           int kW, int dW,
-           int inputFrameSize,
-           int outputFrameSize) {
+           int64_t kW, int64_t dW,
+           int64_t inputFrameSize,
+           int64_t outputFrameSize) {
 
   THCTensor *outputWindow, *inputWindow;
-  int nInputFrame, nOutputFrame;
+  int64_t nInputFrame, nOutputFrame;
   int64_t k, i;
 
-  int dimS = 0; // sequence dimension
+  int64_t dimS = 0; // sequence dimension
 
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THNN_(TemporalConvolution_shapeCheck)
@@ -110,7 +110,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   {
     THCTensor *outputSample = THCTensor_(new)(state);
     THCTensor *inputSample = THCTensor_(new)(state);
-    int nBatchFrame = input->size[0];
+    int64_t nBatchFrame = input->size[0];
 
     THCTensor_(resize3d)(state, output,
                           nBatchFrame,
@@ -170,7 +170,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *weight,
-           int kW, int dW) {
+           int64_t kW, int64_t dW) {
 
   int64_t nInputFrame;
   int64_t nOutputFrame;
@@ -179,7 +179,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   THCTensor *gradInputWindow;
   int64_t k, i;
 
-  int dimS = 0; // sequence dimension
+  int64_t dimS = 0; // sequence dimension
 
   THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
   THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
@@ -277,7 +277,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
            THCTensor *gradOutput,
            THCTensor *gradWeight,
            THCTensor *gradBias,
-           int kW, int dW,
+           int64_t kW, int64_t dW,
            accreal scale_) {
 
   real scale = ScalarConvert<accreal, real>::to(scale_);
@@ -291,7 +291,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
   THNN_(TemporalConvolution_shapeCheck)
        (state, input, kW, dW, NULL);
 
-  int dimS = 0; // sequence dimension
+  int64_t dimS = 0; // sequence dimension
 
   if (gradOutput->dim() == 3)
   {

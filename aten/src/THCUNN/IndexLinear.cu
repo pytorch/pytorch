@@ -6,10 +6,10 @@
 #include "THCStorage.hpp"
 
 #define divup(a, b) ((a) + (b) - 1) / (b)
-const int THREADS_PER_BLOCK = 256;
-const int THREADS_X = 32;
-const int THREADS_Y = THREADS_PER_BLOCK / THREADS_X;
-const int REPEAT = 32;
+const int64_t THREADS_PER_BLOCK = 256;
+const int64_t THREADS_X = 32;
+const int64_t THREADS_Y = THREADS_PER_BLOCK / THREADS_X;
+const int64_t REPEAT = 32;
 const int64_t NNZ_PER_BLOCK_MAX = 1024;
 
 /* sign MACRO */
@@ -18,7 +18,7 @@ const int64_t NNZ_PER_BLOCK_MAX = 1024;
 #endif
 
 __device__ double atomicExch(double *address, double val) {
-  unsigned long long int* address_as_ull = (unsigned long long int*)address;
+  unsigned long long int64_t* address_as_ull = (unsigned long long int64_t*)address;
   unsigned long long res = atomicExch(address_as_ull, __double_as_longlong(val));
   return __longlong_as_double(res);
 }
@@ -37,8 +37,8 @@ void updateOutput(
     const Ty *bias,
     const int64_t weightStride,
     const int64_t keysOffset,
-    const int maxNormalize,
-    const int nnzPerBlock)
+    const int64_t maxNormalize,
+    const int64_t nnzPerBlock)
 {
     /*******************************************************
      * Adapted from the following file in arrayfire
@@ -153,7 +153,7 @@ void accGradWeight(
     const int64_t  gradWeightStride,
     const Ty scale,
     const Ty weightDecay,
-    const int maxNormalize)
+    const int64_t maxNormalize)
 {
     const int64_t bidy = blockIdx.y;
     const int64_t tidx = threadIdx.x;
@@ -224,9 +224,9 @@ void accGradBias(
     const Ty scale,
     const Ty weightDecay)
 {
-    const int tidx = threadIdx.x;
-    const int tidy = threadIdx.y;
-    const int tid = tidy * blockDim.x + tidx;
+    const int64_t tidx = threadIdx.x;
+    const int64_t tidy = threadIdx.y;
+    const int64_t tid = tidy * blockDim.x + tidx;
     const int64_t idx = blockIdx.x * blockDim.x + tidx;
 
 
@@ -244,7 +244,7 @@ void accGradBias(
     __syncthreads();
 
     // Perform reduction is performed along y.
-    for (int y = blockDim.y / 2; y >= 1; y /= 2) {
+    for (int64_t y = blockDim.y / 2; y >= 1; y /= 2) {
         if (tidy < y) {
             s_gradBiasVals[tid] += s_gradBiasVals[tid + y * blockDim.x];
         }
@@ -281,7 +281,7 @@ void updateWeight(
     const int64_t keysOffset,
     const Ty learningRate,
     const Ty weightDecay,
-    const int maxNormalize,
+    const int64_t maxNormalize,
     const int64_t batchId)
 {
     int64_t gidx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -350,7 +350,7 @@ void accUpdateWeight(
     const int64_t keysOffset,
     const Ty scale,
     const Ty weightDecay,
-    const int maxNormalize,
+    const int64_t maxNormalize,
     const int64_t batchId)
 {
     // Parallel along outDim.
@@ -415,7 +415,7 @@ void THNN_CudaHalfIndexLinear_updateOutput(
                   THCudaHalfTensor *weight,
                   THCudaHalfTensor *bias,
                   THCudaHalfTensor *normalizedValues,
-                  int   train) {
+                  int64_t   train) {
     THError("THCudaHalfTensor not supported with IndexLinear");
 }
 

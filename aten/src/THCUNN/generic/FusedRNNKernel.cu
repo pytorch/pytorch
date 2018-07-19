@@ -8,7 +8,7 @@
 #define TINFO TensorInfo<real, INDTYPE>
 
 //factor will be 3 for GRU and 4 for LSTM
-void THNN_(FusedRNNAssertSizes)(THCState *state, int factor, int count, ...)
+void THNN_(FusedRNNAssertSizes)(THCState *state, int64_t factor, int64_t count, ...)
 {
   va_list list;
   va_start(list, count);
@@ -24,7 +24,7 @@ void THNN_(FusedRNNAssertSizes)(THCState *state, int factor, int count, ...)
   THAssertMsg(THCTensor__nDimension(state, hidden) <= MAX_CUTORCH_DIMS,
               "Tensor dimension is too large.");
 
-  for (int arg=2; arg < count; ++arg){
+  for (int64_t arg=2; arg < count; ++arg){
     THCTensor *tens = va_arg(list, THCTensor*);
     THArgCheck(THCTensor_(nElement)(state, input) ==
                THCTensor_(nElement)(state, tens)*factor,
@@ -36,16 +36,16 @@ void THNN_(FusedRNNAssertSizes)(THCState *state, int factor, int count, ...)
   va_end(list);
 }
 
-int THNN_(minIndexType)(THCState *state, int count, ...)
+int64_t THNN_(minIndexType)(THCState *state, int64_t count, ...)
 {
   va_list list;
   va_start(list, count);
 
   THCTensor* tens = va_arg(list, THCTensor*);
-  int startDim = THCTensor__nDimension(state, tens);
+  int64_t startDim = THCTensor__nDimension(state, tens);
   bool canCollapse = THCTensor_(isContiguous)(state,tens);
 
-  for (int arg=1; arg < count; ++arg){
+  for (int64_t arg=1; arg < count; ++arg){
     tens = va_arg(list, THCTensor*);
     canCollapse = canCollapse && THCTensor_(isContiguous)(state, tens);
     if(THCTensor__nDimension(state, tens) != startDim){
@@ -58,12 +58,12 @@ int THNN_(minIndexType)(THCState *state, int count, ...)
   return startDim;
 }
 
-bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
+bool THNN_(canUse32BitIndexMath)(THCState *state, int64_t count, ...)
 {
   va_list list;
   va_start(list, count);
 
-  for (int arg=0; arg < count; ++arg){
+  for (int64_t arg=0; arg < count; ++arg){
     THCTensor *tens = va_arg(list, THCTensor*);
     if (!THCTensor_canUse32BitIndexMath(state, tens)){
       va_end(list);
@@ -80,7 +80,7 @@ bool THNN_(canUse32BitIndexMath)(THCState *state, int count, ...)
 #define H2F(input) ScalarConvert<real, accreal>::to(input)
 #define F2H(input) ScalarConvert<accreal, real>::to(input)
 
-template <typename T, typename IndexType, int Dims>
+template <typename T, typename IndexType, int64_t Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
@@ -158,7 +158,7 @@ THNN_(GRUForward)(TensorInfo<T, IndexType> Input,
     }
 }
 
-template <typename T, typename IndexType, int Dims>
+template <typename T, typename IndexType, int64_t Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
@@ -204,7 +204,7 @@ THNN_(GRUBackward)(TensorInfo<T, IndexType> gradInInput,
   }
 }
 
-template <typename T, typename IndexType, int Dims>
+template <typename T, typename IndexType, int64_t Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
@@ -297,7 +297,7 @@ __global__ void
     }
 }
 
-template <typename T, typename IndexType, int Dims>
+template <typename T, typename IndexType, int64_t Dims>
 #if __CUDA_ARCH__ >= 350
 __launch_bounds__(32 * 16, 4)
 #endif
@@ -423,7 +423,7 @@ void THNN_(LSTM_forw_ind_wrap)(
 {
   bool has_bias = (bias1!=NULL);
 
-  int maxDim;
+  int64_t maxDim;
   if(has_bias){
     THCUNN_assertSameGPU(state, 7, input, hidden, bias1, bias2, hy, cy, cx);
     maxDim = THNN_(minIndexType)
@@ -438,7 +438,7 @@ void THNN_(LSTM_forw_ind_wrap)(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  int curDevice = -1;
+  int64_t curDevice = -1;
   cudaGetDevice(&curDevice);
   THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
           "Could not get grid size for pointwise apply.");
@@ -526,14 +526,14 @@ void THNN_(LSTM_back_ind_wrap)(
    THCTensor *gradOutputCell,
    THCTensor *gradInputCx)
 {
-  int maxDim = THNN_(minIndexType)
+  int64_t maxDim = THNN_(minIndexType)
     (state, 7, storage, gradInGates, cx, cy,
      gradOutput, gradOutputCell, gradInputCx);
   ptrdiff_t totalElements = THCTensor_nElement(state, gradOutput);
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  int curDevice = -1;
+  int64_t curDevice = -1;
   cudaGetDevice(&curDevice);
   THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
               "Could not get grid size for pointwise apply");
@@ -606,7 +606,7 @@ void THNN_(GRU_forw_ind_wrap)(
    THCTensor *storage)
 {
   bool has_bias = (bias1!=NULL);
-  int maxDim;
+  int64_t maxDim;
 
   if(has_bias){
     THCUNN_assertSameGPU
@@ -624,7 +624,7 @@ void THNN_(GRU_forw_ind_wrap)(
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  int curDevice = -1;
+  int64_t curDevice = -1;
   cudaGetDevice(&curDevice);
   THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
               "Could not get grid size for pointwise apply.");
@@ -717,13 +717,13 @@ void THNN_(GRU_back_ind_wrap)(
    THCTensor *storage)
 {
 
-  int maxDim = THNN_(minIndexType)(state, 5, gradInInput, gradInHidden, gradOutput,
+  int64_t maxDim = THNN_(minIndexType)(state, 5, gradInInput, gradInHidden, gradOutput,
                                    gradInputHx, storage);
   ptrdiff_t totalElements = THCTensor_nElement(state, gradOutput);
 
   const dim3 block = getApplyBlock();
   dim3 grid;
-  int curDevice = -1;
+  int64_t curDevice = -1;
   cudaGetDevice(&curDevice);
   THAssertMsg(getApplyGrid(state, totalElements, grid, curDevice),
           "Could not get grid size for pointwise apply");

@@ -4,7 +4,7 @@
 
 static inline void THNN_(TemporalRowConvolution_shapeCheck)(
     THCState *state, THCTensor *input, THCTensor *gradOutput, THCTensor *weight,
-    THCTensor *bias, int kW, int dW, int padW) {
+    THCTensor *bias, int64_t kW, int64_t dW, int64_t padW) {
 
   THArgCheck(kW > 0, 5,
              "kernel size should be greater than zero, but got kW: %d", kW);
@@ -17,9 +17,9 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
     THCUNN_check_dim_size(state, bias, 1, 0, weight->size[0]);
   }
 
-  int ndim = input->dim();
-  int dimF = 0; // feature dimension
-  int dimS = 1; // sequence dimension
+  int64_t ndim = input->dim();
+  int64_t dimF = 0; // feature dimension
+  int64_t dimS = 1; // sequence dimension
 
   if (ndim == 3) {
     ++dimF;
@@ -49,8 +49,8 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
 
 void THNN_(TemporalRowConvolution_updateOutput)(
     THCState *state, THCTensor *input, THCTensor *output, THCTensor *weight,
-    THCTensor *bias, THCTensor *finput, THCTensor *fgradInput, int kW, int dW,
-    int padW, bool featFirst) {
+    THCTensor *bias, THCTensor *finput, THCTensor *fgradInput, int64_t kW, int64_t dW,
+    int64_t padW, bool featFirst) {
 
   // aliases
   THCTensor *columns = finput;
@@ -66,7 +66,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5, "bias must be contiguous");
 
   // reshape weight if necessary
-  int ndim = input->dim();
+  int64_t ndim = input->dim();
 
   THCTensor *tinput;
 
@@ -80,7 +80,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   THNN_(TemporalRowConvolution_shapeCheck)
   (state, input, NULL, weight, bias, kW, dW, padW);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (ndim == 2) {
     // Force batch
     batch = 0;
@@ -115,7 +115,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   THCTensor *output_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; ++elt) {
+  for (int64_t elt = 0; elt < batchSize; ++elt) {
     // Matrix multiply per output:
     THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, output_n, output, 0, elt);
@@ -185,7 +185,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
 void THNN_(TemporalRowConvolution_updateGradInput)(
     THCState *state, THCTensor *input, THCTensor *gradOutput,
     THCTensor *gradInput, THCTensor *weight, THCTensor *finput,
-    THCTensor *fgradInput, int kW, int dW, int padW, bool featFirst) {
+    THCTensor *fgradInput, int64_t kW, int64_t dW, int64_t padW, bool featFirst) {
 
   // aliases
   THCTensor *gradColumns = finput;
@@ -195,7 +195,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 
   THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
 
-  int ndim = input->dim();
+  int64_t ndim = input->dim();
 
   THCTensor *tinput, *tgradOutput;
 
@@ -214,7 +214,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
   THNN_(TemporalRowConvolution_shapeCheck)
   (state, input, gradOutput, weight, NULL, kW, dW, padW);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (ndim == 2) {
     // Force batch
     batch = 0;
@@ -245,7 +245,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
   THCTensor *tweight = THCTensor_(new)(state);
   THCTensor_(transpose)(state, tweight, weight, 1, 2);
 
-  for (int elt = 0; elt < batchSize; ++elt) {
+  for (int64_t elt = 0; elt < batchSize; ++elt) {
     // Matrix multiply per sample:
     THCTensor_(select)(state, gradInput_n, gradInput, 0, elt);
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
@@ -296,7 +296,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
 void THNN_(TemporalRowConvolution_accGradParameters)(
     THCState *state, THCTensor *input, THCTensor *gradOutput,
     THCTensor *gradWeight, THCTensor *gradBias, THCTensor *finput,
-    THCTensor *fgradInput, int kW, int dW, int padW, bool featFirst,
+    THCTensor *fgradInput, int64_t kW, int64_t dW, int64_t padW, bool featFirst,
     accreal scale_) {
 
   real scale = ScalarConvert<accreal, real>::to(scale_);
@@ -309,7 +309,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
     THCUNN_assertSameGPU(state, 2, gradWeight, gradBias);
   }
 
-  int ndim = input->dim();
+  int64_t ndim = input->dim();
 
   THCTensor *tinput, *tgradOutput;
 
@@ -327,7 +327,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
   THNN_(TemporalRowConvolution_shapeCheck)
   (state, input, gradOutput, gradWeight, gradBias, kW, dW, padW);
 
-  int batch = 1;
+  int64_t batch = 1;
   if (ndim == 2) {
     // Force batch
     batch = 0;
@@ -359,7 +359,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
   THCTensor *gradOutput_n = THCTensor_(new)(state);
 
   // For each elt in batch, do:
-  for (int elt = 0; elt < batchSize; ++elt) {
+  for (int64_t elt = 0; elt < batchSize; ++elt) {
     // Matrix multiply per output
     THCTensor_(select)(state, input_n, input, 0, elt);
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);

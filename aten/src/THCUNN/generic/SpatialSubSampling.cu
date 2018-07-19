@@ -9,15 +9,15 @@ static inline void THNN_(SpatialSubSampling_shapeCheck)(
                          THCTensor *input,
                          THCTensor *gradOutput,
                          THCTensor *weight,
-                         int kW, int kH) {
+                         int64_t kW, int64_t kH) {
   THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
                   "non-empty 3D or 4D input tensor expected but got: %s");
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int64_t nInputPlane = THCTensor_(size)(state, weight, 0);
 
-  int dimc = 2;
-  int dimr = 1;
-  int dimp = 0;
+  int64_t dimc = 2;
+  int64_t dimr = 1;
+  int64_t dimp = 0;
 
   if (input->dim() == 4) {
     dimc++;
@@ -37,15 +37,15 @@ void THNN_(SpatialSubSampling_updateOutput)(
            THCTensor *output,
            THCTensor *weight,
            THCTensor *bias,
-           int kW, int kH,
-           int dW, int dH)
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH)
 {
   real *weight_data = THCTensor_(data)(state, weight);
   real *bias_data = THCTensor_(data)(state, bias);
   real *output_data;
   real *input_data;
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int64_t nInputPlane = THCTensor_(size)(state, weight, 0);
 
   THCUNN_assertSameGPU(state, 4, input, output, weight, bias);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, NULL, weight, kW, kH);
@@ -63,7 +63,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
     output_data = THCTensor_(data)(state, output);
 
     // cuda blocks & threads:
-    int yblocks = (int)(16L / nInputPlane);
+    int64_t yblocks = (int64_t)(16L / nInputPlane);
     yblocks = yblocks < 1 ? 1 : yblocks;
     dim3 blocks(nInputPlane,yblocks);
     dim3 threads(32,8);
@@ -87,7 +87,7 @@ void THNN_(SpatialSubSampling_updateOutput)(
     output_data = THCTensor_(data)(state, output);
 
     // cuda blocks & threads:
-    int yblocks = (int)(16L / nInputPlane);
+    int64_t yblocks = (int64_t)(16L / nInputPlane);
     yblocks = yblocks < 1 ? 1 : yblocks;
     dim3 blocks(nInputPlane*nbatch,yblocks);
     dim3 threads(32,8);
@@ -110,13 +110,13 @@ void THNN_(SpatialSubSampling_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCTensor *weight,
-           int kW, int kH,
-           int dW, int dH)
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH)
 {
   THCUNN_assertSameGPU(state, 4, input, gradOutput, weight, gradInput);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, gradOutput, weight, kW, kH);
 
-  int nInputPlane = THCTensor_(size)(state, weight, 0);
+  int64_t nInputPlane = THCTensor_(size)(state, weight, 0);
 
   if (input->dim() == 3) {
     int64_t nInputCols = input->size[2];
@@ -132,7 +132,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     gradInput_data = THCTensor_(data)(state, gradInput);
 
     // cuda blocks & threads:
-    int yblocks = (int)(16L / nInputPlane);
+    int64_t yblocks = (int64_t)(16L / nInputPlane);
     yblocks = yblocks < 1 ? 1 : yblocks;
     dim3 blocks(nInputPlane,yblocks);
     dim3 threads(32,8);
@@ -163,7 +163,7 @@ void THNN_(SpatialSubSampling_updateGradInput)(
     gradInput_data = THCTensor_(data)(state, gradInput);
 
     // cuda blocks & threads:
-    int yblocks = (int)(16L / nInputPlane);
+    int64_t yblocks = (int64_t)(16L / nInputPlane);
     yblocks = yblocks < 1 ? 1 : yblocks;
     dim3 blocks(nInputPlane*nbatch,yblocks);
     dim3 threads(32,8);
@@ -189,14 +189,14 @@ void THNN_(SpatialSubSampling_accGradParameters)(
            THCTensor *gradOutput,
            THCTensor *gradWeight,
            THCTensor *gradBias,
-           int kW, int kH,
-           int dW, int dH,
+           int64_t kW, int64_t kH,
+           int64_t dW, int64_t dH,
            accreal scale)
 {
   THCUNN_assertSameGPU(state, 4, input, gradOutput, gradWeight, gradBias);
   THNN_(SpatialSubSampling_shapeCheck)(state, input, gradOutput, gradWeight, kW, kH);
 
-  int nInputPlane = THCTensor_(size)(state, gradWeight, 0);
+  int64_t nInputPlane = THCTensor_(size)(state, gradWeight, 0);
 
   if (input->dim() == 3) {
     int64_t nInputCols = input->size[2];

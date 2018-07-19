@@ -7,16 +7,16 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
                          THCTensor *input,
                          THCTensor *gradOutput,
                          THCIndexTensor *indices,
-                         int oT,
-                         int oW,
-                         int oH,
-                         int dT,
-                         int dW,
-                         int dH,
-                         int pT,
-                         int pW,
-                         int pH) {
-  int inputSlices = 0;
+                         int64_t oT,
+                         int64_t oW,
+                         int64_t oH,
+                         int64_t dT,
+                         int64_t dW,
+                         int64_t dH,
+                         int64_t pT,
+                         int64_t pW,
+                         int64_t pH) {
+  int64_t inputSlices = 0;
 
   THCUNN_check_shape_indices(state, indices, input);
 
@@ -38,10 +38,10 @@ static inline void THNN_(VolumetricMaxUnpooling_shapeCheck)(
              input->sizes());
   }
 
-  int dimw = 3;
-  int dimh = 2;
-  int dimt = 1;
-  int dimn = 0;
+  int64_t dimw = 3;
+  int64_t dimh = 2;
+  int64_t dimt = 1;
+  int64_t dimn = 0;
   if (input->dim() == 5)
   {
     dimt++;
@@ -67,15 +67,15 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            THCIndexTensor *indices,
-           int outputTime, int outputWidth, int outputHeight,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH)
+           int64_t outputTime, int64_t outputWidth, int64_t outputHeight,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH)
 {
-  int batchSize = 0;
-  int inputSlices = 0;
-  int inputTime = 0;
-  int inputHeight = 0;
-  int inputWidth = 0;
+  int64_t batchSize = 0;
+  int64_t inputSlices = 0;
+  int64_t inputTime = 0;
+  int64_t inputHeight = 0;
+  int64_t inputWidth = 0;
 
   THNN_(VolumetricMaxUnpooling_shapeCheck)(
         state, input, NULL, indices,
@@ -83,7 +83,7 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 3, input, indices, output);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int64_t fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
   if (THCTensor_(nDimension)(state, input) == 4)
   {
     /* sizes */
@@ -145,13 +145,13 @@ void THNN_(VolumetricMaxUnpooling_updateOutput)(
   cudaInput  = toDeviceTensor<real, 4>(state, input);
   cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
-  int totalZ = inputTime * inputSlices * batchSize;
-  int offsetZ = 0;
+  int64_t totalZ = inputTime * inputSlices * batchSize;
+  int64_t offsetZ = 0;
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(THCCeilDiv(inputWidth, static_cast<int>(block.x)),
-              THCCeilDiv(inputHeight, static_cast<int>(block.y)),
+    dim3 grid(THCCeilDiv(inputWidth, static_cast<int64_t>(block.x)),
+              THCCeilDiv(inputHeight, static_cast<int64_t>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     cuda_VolumetricMaxUnpooling_updateOutput<<<grid, block,
@@ -176,15 +176,15 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
            THCTensor *gradOutput,
            THCTensor *gradInput,
            THCIndexTensor *indices,
-           int outputTime, int outputWidth, int outputHeight,
-           int dT, int dW, int dH,
-           int padT, int padW, int padH)
+           int64_t outputTime, int64_t outputWidth, int64_t outputHeight,
+           int64_t dT, int64_t dW, int64_t dH,
+           int64_t padT, int64_t padW, int64_t padH)
 {
-  int batchSize = 0;
-  int inputSlices = 0;
-  int inputTime = 0;
-  int inputHeight = 0;
-  int inputWidth = 0;
+  int64_t batchSize = 0;
+  int64_t inputSlices = 0;
+  int64_t inputTime = 0;
+  int64_t inputHeight = 0;
+  int64_t inputWidth = 0;
 
   THNN_(VolumetricMaxUnpooling_shapeCheck)(
         state, input, gradOutput, indices,
@@ -192,7 +192,7 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
         dT, dW, dH, padT, padW, padH);
   THCUNN_assertSameGPU(state, 4, input, indices, gradOutput, gradInput);
 
-  int fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
+  int64_t fiveDimensionalInput = THCTensor_(nDimension)(state, input) == 5;
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
@@ -239,13 +239,13 @@ void THNN_(VolumetricMaxUnpooling_updateGradInput)(
   cudaGradInput  = toDeviceTensor<real, 4>(state, gradInput);
   cudaIndices = toDeviceTensor<THCIndex_t, 4>(state, indices);
 
-  int totalZ = inputTime * inputSlices * batchSize;
-  int offsetZ = 0;
+  int64_t totalZ = inputTime * inputSlices * batchSize;
+  int64_t offsetZ = 0;
   dim3 block(32, 8);
 
   while (totalZ > 0) {
-    dim3 grid(THCCeilDiv(inputWidth, static_cast<int>(block.x)),
-              THCCeilDiv(inputHeight, static_cast<int>(block.y)),
+    dim3 grid(THCCeilDiv(inputWidth, static_cast<int64_t>(block.x)),
+              THCCeilDiv(inputHeight, static_cast<int64_t>(block.y)),
               totalZ > 65535 ? 65535 : totalZ);
 
     cuda_VolumetricMaxUnpooling_updateGradInput<<<grid, block,

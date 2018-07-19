@@ -11,8 +11,8 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
            THCTensor *input,
            THCTensor *output,
            THCIndexTensor *indices,
-           int osizeW,
-           int osizeH)
+           int64_t osizeW,
+           int64_t osizeH)
 {
   THCUNN_assertSameGPU(state, 3, input, output, indices);
 
@@ -41,7 +41,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     output_data = THCTensor_(data)(state, output);
 
     // cuda blocks & threads:
-    int blocksH = (int)(16L / sizeD);
+    int64_t blocksH = (int64_t)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
     dim3 blocks(sizeD, blocksH);
     dim3 threads(32, 8);
@@ -73,7 +73,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
     output_data = THCTensor_(data)(state, output);
 
     // cuda blocks & threads:
-    int blocksH = (int)(16L / sizeD);
+    int64_t blocksH = (int64_t)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
     dim3 blocks(sizeB*sizeD, blocksH);
     dim3 threads(32, 8);
@@ -124,7 +124,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     gradInput_data = THCTensor_(data)(state, gradInput);
 
     // cuda blocks & threads:
-    int blocksH = (int)(16L / sizeD);
+    int64_t blocksH = (int64_t)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
     dim3 blocks(sizeD, blocksH);
     dim3 threads(32, 8);
@@ -163,7 +163,7 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     gradInput_data = THCTensor_(data)(state, gradInput);
 
     // cuda blocks & threads:
-    int blocksH = (int)(16L / sizeD);
+    int64_t blocksH = (int64_t)(16L / sizeD);
     blocksH = blocksH < 1 ? 1 : blocksH;
     dim3 blocks(sizeB*sizeD, blocksH);
     dim3 threads(32, 8);

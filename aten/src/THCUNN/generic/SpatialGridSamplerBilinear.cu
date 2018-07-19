@@ -35,7 +35,7 @@ THC_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
     THCTensor *input,
     THCTensor *grid,
     THCTensor *output,
-    int padding_mode) {
+    int64_t padding_mode) {
 
   THCUNN_assertSameGPU(state, 3, input, grid, output);
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(state, input, grid, NULL);
@@ -53,7 +53,7 @@ THC_API void THNN_(SpatialGridSamplerBilinear_updateOutput)(
   THCDeviceTensor<real, 4> devGrid = toDeviceTensor<real, 4>(state, grid);
   THCDeviceTensor<real, 4> devOutput = toDeviceTensor<real, 4>(state, output);
 
-  int count = static_cast<int>(N*H*W);
+  int64_t count = static_cast<int64_t>(N*H*W);
   SpatialGridSamplerBilinear_updateOutput_kernel
     <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       count, devInput, devGrid, devOutput, padding_mode);
@@ -65,7 +65,7 @@ THC_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
     THCTensor *input, THCTensor *gradInput,
     THCTensor *grid, THCTensor *gradGrid,
     THCTensor *gradOutput,
-    int padding_mode) {
+    int64_t padding_mode) {
 
   THCUNN_assertSameGPU(state, 5, input, gradInput, grid, gradGrid, gradOutput);
   THNN_(SpatialGridSamplerBilinear_shapeCheck)(state, input, grid, gradOutput);
@@ -87,7 +87,7 @@ THC_API void THNN_(SpatialGridSamplerBilinear_updateGradInput)(
   THCDeviceTensor<real, 4> devGradGrid = toDeviceTensor<real, 4>(state, gradGrid);
   THCDeviceTensor<real, 4> devGradOutput = toDeviceTensor<real, 4>(state, gradOutput);
 
-  int count = static_cast<int>(N*H*W);
+  int64_t count = static_cast<int64_t>(N*H*W);
   SpatialGridSamplerBilinear_updateGradInput_kernel
     <<<GET_BLOCKS(count), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
       count, devInput, devGradInput, devGrid, devGradGrid, devGradOutput, padding_mode);

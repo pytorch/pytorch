@@ -7,10 +7,10 @@ static void THNN_(TemporalReplicationPadding_updateOutput_frame)(
   long nslices,
   long iwidth,
   long owidth,
-  int pad_l, int pad_r)
+  int64_t pad_l, int64_t pad_r)
 {
-  int iStartX = fmax(0, -pad_l);
-  int oStartX = fmax(0, pad_l);
+  int64_t iStartX = fmax(0, -pad_l);
+  int64_t oStartX = fmax(0, pad_l);
 
   long k, ip_x;
 #pragma omp parallel for private(k, ip_x)
@@ -37,10 +37,10 @@ static void THNN_(TemporalReplicationPadding_updateOutput_frame)(
 void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
                                                     THTensor *input,
                                                     THTensor *output,
-                                                    int pad_l, int pad_r)
+                                                    int64_t pad_l, int64_t pad_r)
 {
-  int dimw = 1;
-  int dimslices = 0;
+  int64_t dimw = 1;
+  int64_t dimslices = 0;
   long nbatch = 1;
   long nslices;
   long iwidth;
@@ -117,10 +117,10 @@ static void THNN_(TemporalReplicationPadding_updateGradInput_frame)(
   long nslices,
   long iwidth,
   long owidth,
-  int pad_l, int pad_r)
+  int64_t pad_l, int64_t pad_r)
 {
-  int iStartX = fmax(0, -pad_l);
-  int oStartX = fmax(0, pad_l);
+  int64_t iStartX = fmax(0, -pad_l);
+  int64_t oStartX = fmax(0, pad_l);
 
   long k, ip_x;
 #pragma omp parallel for private(k, ip_x)
@@ -148,10 +148,10 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
                                                        THTensor *input,
                                                        THTensor *gradOutput,
                                                        THTensor *gradInput,
-                                                       int pad_l, int pad_r)
+                                                       int64_t pad_l, int64_t pad_r)
 {
-  int dimw = 1;
-  int dimslices = 0;
+  int64_t dimw = 1;
+  int64_t dimslices = 0;
   long nbatch = 1;
   long nslices;
   long iwidth;

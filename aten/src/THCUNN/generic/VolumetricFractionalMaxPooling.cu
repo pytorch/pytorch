@@ -6,15 +6,15 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *output,
-           int outputT, int outputW, int outputH,
-           int poolSizeT, int poolSizeW, int poolSizeH,
+           int64_t outputT, int64_t outputW, int64_t outputH,
+           int64_t poolSizeT, int64_t poolSizeW, int64_t poolSizeH,
            THCIndexTensor *indices,
            THCTensor *randomSamples)
 {
-  int planeDim = 0;
-  int dimh = 1;
-  int dimw = 2;
-  int dimt = 3;
+  int64_t planeDim = 0;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimt = 3;
   int64_t numBatch = 1;
 
   int64_t numInputDims = THCTensor_(nDimension)(state, input);
@@ -72,7 +72,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
 
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int outputPlaneSize = devOutput.getSize(2) * devOutput.getSize(3) * devOutput.getSize(4);
+  int64_t outputPlaneSize = devOutput.getSize(2) * devOutput.getSize(3) * devOutput.getSize(4);
   dim3 grid(THCCeilDiv(outputPlaneSize, 128),
             devInput.getSize(1),
             devInput.getSize(0));
@@ -105,13 +105,13 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
            THCTensor *input,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           int outputT, int outputW, int outputH,
-           int poolSizeT, int poolSizeW, int poolSizeH,
+           int64_t outputT, int64_t outputW, int64_t outputH,
+           int64_t poolSizeT, int64_t poolSizeW, int64_t poolSizeH,
            THCIndexTensor *indices)
 {
-  int dimh = 1;
-  int dimw = 2;
-  int dimt = 3;
+  int64_t dimh = 1;
+  int64_t dimw = 2;
+  int64_t dimt = 3;
 
   int64_t numInputDims = THCTensor_(nDimension)(state, input);
   if (numInputDims == 5) {
@@ -153,7 +153,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
 
   // block is limited to 4 warps
   // grid handles overflow per each plane
-  int outputPlaneSize = devGradOutput.getSize(2) * devGradOutput.getSize(3) * devGradOutput.getSize(4);
+  int64_t outputPlaneSize = devGradOutput.getSize(2) * devGradOutput.getSize(3) * devGradOutput.getSize(4);
   dim3 grid(THCCeilDiv(outputPlaneSize, 128),
             devGradInput.getSize(1),
             devGradInput.getSize(0));
