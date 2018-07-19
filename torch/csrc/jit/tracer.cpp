@@ -22,6 +22,14 @@ thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
 
+const std::shared_ptr<TracingState>& getTracingState() {
+  return detail::tracing_state;
+}
+
+void setTracingState(std::shared_ptr<TracingState> state) {
+  detail::tracing_state = std::move(state);
+}
+
 TracingState::TracingState()
     : graph(new Graph()) {}
 

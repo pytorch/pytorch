@@ -42,13 +42,6 @@ struct TracingState : public std::enable_shared_from_this<TracingState> {
 };
 
 
-namespace detail {
-
-extern thread_local std::shared_ptr<TracingState> tracing_state;
-
-} // namespace detail
-
-
 // This is meant to be used as a thread local place, where we can store extra
 // info that gets lost when we call into ATen from Python bindings. One example
 // for when this happens is when we get an IntList argument with e.g. sizes for
@@ -87,20 +80,19 @@ private:
 };
 
 inline bool isTracing() {
-  return static_cast<bool>(detail::tracing_state);
+  return static_cast<bool>(getTracingState());
 }
 
-// Retrieve the current tracing state. Returns a nullptr if tracing is disabled.
-inline const std::shared_ptr<TracingState>& getTracingState() {
-  return detail::tracing_state;
-}
+// Retrieve or set the current tracing state. Returns a nullptr if tracing is disabled.
+const std::shared_ptr<TracingState>& getTracingState();
+void setTracingState(std::shared_ptr<TracingState> state);
 
 // Having finished adding a new 'node' to the graph IR 'setValueTrace' associates
 // this node with an output variable, so that further operations involving this
 // variable know which node in the IR to reference.
 inline void setValueTrace(const Variable& var, Value *value) {
   JIT_ASSERT(var.defined());
-  detail::tracing_state->value_map[var] = value;
+  getTracingState()->value_map[var] = value;
 }
 
 // Given a variable 'var', return the 'node' which represents the instruction
@@ -118,13 +110,13 @@ inline void setValueTrace(const Variable& var, Value *value) {
 // This is one of the cases where a Variable can be created inside of a trace, and
 // if we treat it as a constant, everything will work out.
 inline Value* getValueTrace(const Variable& var) {
-  auto &state = detail::tracing_state;
+  auto &state = getTracingState();
   if (!var.defined()) {
     Node *n = state->graph->createUndefined();
     return state->graph->appendNode(n)->output();
   }
 
-  auto & value_map = detail::tracing_state->value_map;
+  auto & value_map = getTracingState()->value_map;
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     Value *constant = state->graph->appendNode(state->graph->createConstant(var.data()))->output();
@@ -140,7 +132,7 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
     return state->graph->appendNode(n)->output();
   }
 
-  auto & value_map = detail::tracing_state->value_map;
+  auto & value_map = getTracingState()->value_map;
   auto it = value_map.find(var);
   if (it == value_map.end()) {
     std::ostringstream os;
@@ -157,10 +149,11 @@ inline Value* getOutputTrace(const std::shared_ptr<TracingState>& state, const V
 // will be treated as constants.
 inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
     variable_list inputs) {
-  if (detail::tracing_state) {
+  if (isTracing()) {
     AT_ERROR("Tracing can't be nested");
   }
-  auto & state = detail::tracing_state = std::make_shared<TracingState>();
+  auto & state = std::make_shared<TracingState>();
+  setTracingState(state);
   for (auto& input : inputs) {
     auto * value_state = state->value_map[input];
     if (value_state) {
@@ -178,18 +171,18 @@ inline std::pair<std::shared_ptr<TracingState>, variable_list> enter(
 // are the variables whose values will be computed upon subsequent
 // invocations of the trace.
 inline void exit(const variable_list& outputs) {
-  auto & state = detail::tracing_state;
+  auto & state = getTracingState();
   size_t i = 0;
   for (auto& output : outputs) {
     state->graph->registerOutput(getOutputTrace(state, output, i));
     i++;
   }
-  detail::tracing_state = nullptr;
+  setTracingState(nullptr);
 }
 
 // Abort tracing. Used to reset the state in case of errors.
 inline void abandon() {
-  detail::tracing_state = nullptr;
+  setTracingState(nullptr);
 }
 
 // Pre-recorded information about the trace before we actually carry
@@ -210,7 +203,7 @@ void setRecordSourceLocation(void (*v)(Node*));
 template<typename F>
 PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
   PreTraceInfo info;
-  auto & state = detail::tracing_state;
+  auto & state = getTracingState();
   auto & graph = state->graph;
 
   Node *n = ctor(state, *graph);
