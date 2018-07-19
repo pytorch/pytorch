@@ -10,6 +10,97 @@ std::list<std::shared_ptr<RangeEventList>> all_event_lists;
 thread_local std::shared_ptr<RangeEventList> event_list;
 thread_local int32_t thread_id;
 
+RangeEventList& getEventList() {
+  if (!event_list) {
+    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
+    event_list = std::make_shared<RangeEventList>();
+    thread_id = next_thread_id++;
+    all_event_lists.emplace_front(event_list);
+  }
+  return *event_list;
+}
+
+void mark(std::string name, bool include_cuda /* = true */) {
+  if (state == ProfilerState::NVTX) {
+#ifdef USE_CUDA
+    nvtxMarkA(name.c_str());
+#else
+    throw std::logic_error(
+        "mark called with NVTX tracing, but compiled without CUDA");
+#endif
+  } else {
+    getEventList().record(
+        EventKind::Mark,
+        std::move(name),
+        thread_id,
+        include_cuda && state == ProfilerState::CUDA);
+  }
+}
+
+void pushRange(std::string name) {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
+  if (state == ProfilerState::NVTX) {
+#ifdef USE_CUDA
+    nvtxRangePushA(name.c_str());
+#else
+    throw std::logic_error(
+        "pushRange called with NVTX tracing, but compiled without CUDA");
+#endif
+  } else {
+    getEventList().record(
+        EventKind::PushRange,
+        std::move(name),
+        thread_id,
+        state == ProfilerState::CUDA);
+  }
+}
+
+void popRange() {
+  if (state == ProfilerState::Disabled) {
+    return;
+  }
+  if (state == ProfilerState::NVTX) {
+#ifdef USE_CUDA
+    nvtxRangePop();
+#else
+    throw std::logic_error(
+        "popRange called with NVTX tracing, but compiled without CUDA");
+#endif
+  } else {
+    getEventList().record(
+        EventKind::PopRange,
+        std::string(),
+        thread_id,
+        state == ProfilerState::CUDA);
+  }
+}
+
+RecordFunction::RecordFunction(Function* fn) {
+  if (state == ProfilerState::Disabled)
+    return;
+  pushFunctionRange(fn);
+}
+
+RecordFunction::RecordFunction(std::string name) {
+  if (state == ProfilerState::Disabled)
+    return;
+  pushRange(std::move(name));
+}
+
+RecordFunction::RecordFunction(const char* name) {
+  if (state == ProfilerState::Disabled)
+    return;
+  pushRange(name);
+}
+
+RecordFunction::~RecordFunction() {
+  if (state == ProfilerState::Disabled)
+    return;
+  popRange();
+}
+
 void RecordFunction::pushFunctionRange(Function* fn) {
   pushRange(fn->name());
 }

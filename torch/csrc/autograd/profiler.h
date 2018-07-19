@@ -162,80 +162,19 @@ enum class ProfilerState {
     NVTX,  // only emit NVTX markers
 };
 
-extern ProfilerState state;
-extern uint32_t next_thread_id;
-extern std::mutex all_event_lists_mutex;
-extern std::list<std::shared_ptr<RangeEventList>> all_event_lists;
-
-extern thread_local std::shared_ptr<RangeEventList> event_list;
-extern thread_local int32_t thread_id;
-
-inline RangeEventList& getEventList() {
-  if (!event_list) {
-    std::lock_guard<std::mutex> guard(all_event_lists_mutex);
-    event_list = std::make_shared<RangeEventList>();
-    thread_id = next_thread_id++;
-    all_event_lists.emplace_front(event_list);
-  }
-  return *event_list;
-}
-
-inline void mark(std::string name, bool include_cuda = true) {
-  if (state == ProfilerState::NVTX) {
-#ifdef USE_CUDA
-    nvtxMarkA(name.c_str());
-#else
-    throw std::logic_error("mark called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::Mark, std::move(name), thread_id, include_cuda && state == ProfilerState::CUDA);
-  }
-}
-
-inline void pushRange(std::string name) {
-  if (state == ProfilerState::NVTX) {
-#ifdef USE_CUDA
-    nvtxRangePushA(name.c_str());
-#else
-    throw std::logic_error("pushRange called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::PushRange, std::move(name), thread_id, state == ProfilerState::CUDA);
-  }
-}
-
-inline void popRange() {
-  if (state == ProfilerState::NVTX) {
-#ifdef USE_CUDA
-    nvtxRangePop();
-#else
-    throw std::logic_error("popRange called with NVTX tracing, but compiled without CUDA");
-#endif
-  } else {
-    getEventList().record(EventKind::PopRange, std::string(), thread_id, state == ProfilerState::CUDA);
-  }
-}
+RangeEventList& getEventList();
+void mark(std::string name, bool include_cuda = true);
+void pushRange(std::string name);
+void popRange();
 
 struct RecordFunction {
-  explicit RecordFunction(Function *fn) {
-    if (state == ProfilerState::Disabled) return;
-    pushFunctionRange(fn);
-  }
+  explicit RecordFunction(Function* fn);
 
-  explicit RecordFunction(std::string name) {
-    if (state == ProfilerState::Disabled) return;
-    pushRange(std::move(name));
-  }
+  explicit RecordFunction(std::string name);
 
-  explicit RecordFunction(const char *name) {
-    if (state == ProfilerState::Disabled) return;
-    pushRange(name);
-  }
+  explicit RecordFunction(const char* name);
 
-  ~RecordFunction() {
-    if (state == ProfilerState::Disabled) return;
-    popRange();
-  }
+  ~RecordFunction();
 
   // Needed only because we don't have Function defined yet.
   void pushFunctionRange(Function *fn);

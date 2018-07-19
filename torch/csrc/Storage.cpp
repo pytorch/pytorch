@@ -12,7 +12,7 @@
 #include <TH/TH.h>
 // See Note [TH abstraction violation]
 //  - Used to get at the allocator associated with a storage
-#include <TH/THStorage.hpp>
+#include <TH/THStorageFunctions.hpp>
 #include <torch/csrc/finalizer.h>
 #include <libshm.h>
 #include "THP.h"
@@ -39,7 +39,7 @@ void THPPointer<THStorage>::free() {
     } else {
       AT_ASSERT(ptr->data_ptr.device().is_cuda());
 #ifdef USE_CUDA
-      THCStorage_free(at::globalContext().lazyInitCUDA(), ptr);
+      THStorage_free(ptr);
 #else
       AT_ERROR("Cannot free THCStorage when not built with CUDA");
 #endif

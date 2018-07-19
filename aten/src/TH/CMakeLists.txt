@@ -21,7 +21,7 @@ IF(C_AVX2_FOUND)
 ENDIF(C_AVX2_FOUND)
 
 SET(hdr
-  THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THTensor.h THTensorApply.h THBlas.h THMath.h
+  THGeneral.h THHalf.h THAllocator.h THSize.h THStorage.h THStorageFunctions.h THTensor.h THTensorApply.h THBlas.h THMath.h
   THLapack.h THLogAdd.h THRandom.h THVector.h )
 
 set(ATen_TH_SRCS
@@ -29,7 +29,8 @@ set(ATen_TH_SRCS
   ${CMAKE_CURRENT_SOURCE_DIR}/THHalf.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THAllocator.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THSize.cpp
-  ${CMAKE_CURRENT_SOURCE_DIR}/THStorage.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/THStorageClass.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/THStorageFunctions.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THTensor.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THBlas.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/THLapack.cpp
@@ -86,13 +87,15 @@ INSTALL(FILES
   THRandom.h
   THSize.h
   THStorage.h
+  THStorageFunctions.h
   THTensor.h
   THTensorApply.h
   THTensorDimApply.h
   THVector.h
   THHalf.h
   THTensor.hpp
-  THStorage.hpp
+  THStorageClass.hpp
+  THStorageFunctions.hpp
   THGenerator.hpp
   THTypeConversion.hpp
   DESTINATION "${ATEN_INSTALL_INCLUDE_SUBDIR}/TH")

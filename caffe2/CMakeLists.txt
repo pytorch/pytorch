@@ -53,6 +53,11 @@ if(BUILD_ATEN)
   ENDIF(USE_ROCM)
 endif()
 
+# ---[ Torch build
+if(BUILD_TORCH)
+  add_subdirectory(../torch torch)
+endif()
+
 # ---[ Caffe2 build
 if(BUILD_CAFFE2)
   # Note: the folders that are being commented out have not been properly
@@ -456,7 +461,8 @@ if(BUILD_CAFFE2)
     endif()
 
     if(USE_ROCM)
-      add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+      hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINKER_LANGUAGE HIP)
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "${HIP_HIPCC_FLAGS} -fvisibility=hidden")
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})

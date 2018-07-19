@@ -27,7 +27,7 @@ __global__ void FillValuesKernel(
     const size_t itemSize,
     const int* indices,
     char* const values[],
-    int valueSizes[],
+    int* valueSizes,
     char* dest) {
   CUDA_1D_KERNEL_LOOP(j, numMasks) {
     int k = 0;

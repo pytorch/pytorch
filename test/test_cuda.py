@@ -12,6 +12,7 @@ import torch
 import torch.cuda
 import torch.cuda.comm as comm
 from torch import multiprocessing as mp
+from torch._six import inf, nan
 
 from test_torch import TestTorch
 from common import TestCase, get_gpu_type, to_gpu, freeze_rng_state, run_tests, \
@@ -782,7 +783,7 @@ class TestCuda(TestCase):
             if not end0:
                 gen1_max_times = torch.LongTensor(1).random_(0, 3)[0]
             else:
-                gen1_max_times = float('inf')
+                gen1_max_times = inf
             t = 0
             while t < gen1_max_times and not end1:
                 end1 = advance(gen1, end1)
@@ -901,7 +902,7 @@ class TestCuda(TestCase):
                  (lambda x: x.max(0)[0], 'max_dim')]
         for f, name in tests:
             a = torch.arange(25.0).view(5, 5)
-            a[2, 2] = float('nan')
+            a[2, 2] = nan
             actual = f(a.cuda()).cpu()
             expected = f(a).cpu()
             self.assertEqual(torch.isnan(actual), torch.isnan(expected), 'nans for {}'.format(name))
@@ -1503,9 +1504,9 @@ class TestCuda(TestCase):
     def test_multinomial_invalid_probs_cuda(self):
         test_method = TestCuda._test_multinomial_invalid_probs_cuda
         self._spawn_method(test_method, torch.Tensor([0, -1]))
-        self._spawn_method(test_method, torch.Tensor([0, float('inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('-inf')]))
-        self._spawn_method(test_method, torch.Tensor([0, float('nan')]))
+        self._spawn_method(test_method, torch.Tensor([0, inf]))
+        self._spawn_method(test_method, torch.Tensor([0, -inf]))
+        self._spawn_method(test_method, torch.Tensor([0, nan]))
 
     def test_broadcast(self):
         TestTorch._test_broadcast(self, lambda t: t.cuda())
@@ -1686,7 +1687,6 @@ class TestCuda(TestCase):
         cpu_tensor = torch.tensor([-0.999999994, -1.999999994, -2.0000000111,
                                   -100.99999994, -1931.99999994, 0.000000111,
                                   -0.000000111, 0, -1, -2, -931])
-        nan = float('nan')
         expected_errors = torch.tensor([0, 0, 0, 0, 0, 0, 0, nan, nan, nan, nan])
         gpu_tensor = cpu_tensor.cuda()
         cpu_out = cpu_tensor.digamma()

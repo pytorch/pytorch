@@ -7,8 +7,6 @@
 #include <torch/csrc/cuda/nccl.h>
 #endif
 
-#include <torch/csrc/utils/auto_stream.h>
-
 #include <THC/THC.h>
 
 #include <ATen/ATen.h>
@@ -145,18 +143,20 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  auto* thc_state = at::globalContext().lazyInitCUDA();
+  at::CUDAGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
-    const int32_t device_index = devices[chunk];
-    // We must set the current device before setting the current stream.
-    const at::DeviceGuard device_guard({at::kCUDA, device_index});
-    const AutoStream stream_guard(
-        streams ? (*streams)[chunk]
-                : THCState_getStreamOnDevice(thc_state, device_index));
-    // Copy the chunk from its current device to its destination device, which
-    // we set as the default device above, thus specified as -1.
-    chunks[chunk] =
-        chunks[chunk].contiguous().to({at::kCUDA, -1}, /*non_blocking=*/true);
+    const auto device_index = static_cast<int32_t>(devices[chunk]);
+    if (streams) {
+      AT_CHECK(
+          THCStream_device((*streams)[chunk]) == device_index,
+          "Expected the device associated with the stream at index ",
+          chunk, " (was ", THCStream_device((*streams)[chunk]), ") ",
+          "to match the device supplied at that index ",
+          "(expected ", device_index, ")");
+      cuda_guard.set_stream(CUDAStream((*streams)[chunk], /*retain=*/true));
+    }
+    chunks[chunk] = chunks[chunk].contiguous().to(
+        {at::kCUDA, device_index}, /*non_blocking=*/true);
   }
   return chunks;
 }
@@ -165,7 +165,7 @@ at::Tensor gather(
     at::TensorList tensors,
     int64_t dim,
     at::optional<int32_t> destination_index) {
-  AT_ASSERT(!tensors.empty());
+  AT_CHECK(!tensors.empty(), "Expected at least one tensor to gather from");
   at::Tensor result;
   int64_t total_size = 0;
   auto& first = tensors.front();
