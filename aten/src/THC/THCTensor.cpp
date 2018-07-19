@@ -19,16 +19,16 @@ int THCTensor__nDimension(THCState *state, const THCTensor *self) {
 
 int64_t THCTensor_size(THCState *state, const THCTensor *self, int dim) {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "out of range");
-  return self->size[dim];
+  return self->size(dim);
 }
 
 int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim) {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "out of range");
-  return self->stride[dim];
+  return self->stride(dim);
 }
 THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self) {
   THLongStorage *size = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(size, self->size);
+  THLongStorage_rawCopy(size, THTensor_getSizePtr(self));
   return size;
 }
 
@@ -73,7 +73,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
     isSame = 1;
     for(d = 0; d < self->dim(); d++)
     {
-      if(self->size[d] != src->size[d])
+      if(self->size(d) != src->size(d))
       {
         isSame = 0;
         break;
@@ -82,7 +82,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
   }
 
   if(!isSame)
-    THCTensor_resizeNd(state, self, src->dim(), src->size, NULL);
+    THCTensor_resizeNd(state, self, src->dim(), THTensor_getSizePtr(src), NULL);
 }
 
 void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
@@ -108,12 +108,12 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
       AT_CHECK(size[d] > 0, "sizes must be non-negative");
     }
 #endif
-    if((self->dim() > d) && (size[d] != self->size[d])) {
+    if((self->dim() > d) && (size[d] != self->size(d))) {
       hascorrectsize = false;
     }
 
     // NB: this used to test that stride[d] was >= 0
-    if((self->dim() > d) && stride && (stride[d] != self->stride[d])) {
+    if((self->dim() > d) && stride && (stride[d] != self->stride(d))) {
       hascorrectsize = false;
     }
   }
@@ -128,26 +128,24 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
 
   if(nDimension != self->dim())
   {
-    self->size = (int64_t*)THRealloc(self->size, sizeof(int64_t)*nDimension);
-    self->stride = (int64_t*)THRealloc(self->stride, sizeof(int64_t)*nDimension);
-    self->dim_ = nDimension;
+    THTensor_resizeDim(self, nDimension);
   }
 
   totalSize = 1;
   for(d = nDimension-1; d >= 0; d--)
   {
-    self->size[d] = size[d];
+    THTensor_setSizeAtDim(self, d, size[d]);
     if(stride && (stride[d] >= 0) ) {
-      self->stride[d] = stride[d];
+      THTensor_setStrideAtDim(self, d, stride[d]);
     } else {
       if(d == nDimension-1) {
-        self->stride[d] = 1;
+        THTensor_setStrideAtDim(self, d, 1);
       } else {
         // Keep stride monotonically increasing to match NumPy.
-        self->stride[d] = std::max<int64_t>(self->size[d+1],1)*self->stride[d+1];
+        THTensor_setStrideAtDim(self, d, std::max<int64_t>(self->size(d+1),1)*self->stride(d+1));
       }
     }
-    totalSize += (self->size[d]-1)*self->stride[d];
+    totalSize += (self->size(d)-1)*self->stride(d);
   }
 
   if(totalSize+self->storageOffset > 0)
@@ -169,8 +167,8 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
                            src->storage,
                            src->storageOffset,
                            src->dim(),
-                           src->size,
-                           src->stride);
+                           THTensor_getSizePtr(src),
+                           THTensor_getStridePtr(src));
 }
 
 void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
@@ -214,17 +212,17 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
   THCTensor_set(state, self, src);
 
 #ifdef TH_SCALAR
-  if(src->size[dimension] == 1)
+  if(src->size(dimension) == 1)
 #else
-  if(src->size[dimension] == 1 && src->dim() > 1)
+  if(src->size(dimension) == 1 && src->dim() > 1)
 #endif
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
-      self->size[d] = self->size[d+1];
-      self->stride[d] = self->stride[d+1];
+      THTensor_setSizeAtDim(self, d, self->size(d+1));
+      THTensor_setStrideAtDim(self, d, self->stride(d+1));
     }
-    self->dim_--;
+    THTensor_resizeDim(self, self->dim_ - 1);
   }
 }
 
@@ -242,19 +240,17 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
 
   THCTensor_set(state, self, src);
 
-  self->size = (int64_t*)THRealloc(self->size, sizeof(int64_t)*(self->dim()+1));
-  self->stride = (int64_t*)THRealloc(self->stride, sizeof(int64_t)*(self->dim()+1));
-  self->dim_++;
+  THTensor_resizeDim(self, self->dim() + 1);
   for (d = self->dim()-1; d > dimension; d--) {
-    self->size[d] = self->size[d-1];
-    self->stride[d] = self->stride[d-1];
+    THTensor_setSizeAtDim(self, d, self->size(d-1));
+    THTensor_setStrideAtDim(self, d, self->stride(d-1));
   }
   if (dimension+1 < self->dim()) {
-    self->stride[dimension] = self->size[dimension+1] * self->stride[dimension+1];
+    THTensor_setStrideAtDim(self, dimension, self->size(dimension+1) * self->stride(dimension+1));
   } else {
-    self->stride[dimension] = 1;
+    THTensor_setStrideAtDim(self, dimension, 1);
   }
-  self->size[dimension] = 1;
+  THTensor_setSizeAtDim(self, dimension, 1);
 }
 
 bool THCTensor_isContiguous(THCState *state, const THCTensor *self) {
@@ -263,10 +259,10 @@ bool THCTensor_isContiguous(THCState *state, const THCTensor *self) {
   int d;
   for(d = self->dim()-1; d >= 0; d--)
   {
-    if(self->size[d] != 1)
+    if(self->size(d) != 1)
     {
-      if(self->stride[d] == z)
-        z *= self->size[d];
+      if(self->stride(d) == z)
+        z *= self->size(d);
       else
         return false;
     }
@@ -292,7 +288,7 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
     ptrdiff_t nElement = 1;
     int d;
     for(d = 0; d < self->_dim(); d++)
-      nElement *= self->size[d];
+      nElement *= self->size(d);
     return nElement;
   }
 }

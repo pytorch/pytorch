@@ -59,7 +59,7 @@ void THNN_(Im2Col_updateOutput)(
   bool batched_input = true;
   if (input->dim() == 3) {
     batched_input = false;
-    THCTensor_(resize4d)(state, input, 1, input->size[0], input->size[1], input->size[2]);
+    THCTensor_(resize4d)(state, input, 1, input->size(0), input->size(1), input->size(2));
   }
 
   int64_t batchSize    = THCTensor_(size)(state, input, 0);

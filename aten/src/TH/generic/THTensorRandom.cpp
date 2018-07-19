@@ -79,7 +79,7 @@ void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator
 #endif
   } else {
     intTensor = THIntTensor_new();
-    THIntTensor_resizeNd(intTensor, self->dim(), self->size, NULL);
+    THIntTensor_resizeNd(intTensor, self->dim(), THTensor_getSizePtr(self), nullptr);
     tmp = THIntTensor_data(intTensor);
   }
 
@@ -284,9 +284,9 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
       small = THLongTensor_fastGet1d(smaller, small_c-1);
 
       THLongTensor_fastSet1d(J, small, large);
-      q_data[large * q->stride[0]] -= 1.0 - THTensor_(fastGet1d)(q, small);
+      q_data[large * q->stride(0)] -= 1.0 - THTensor_(fastGet1d)(q, small);
 
-      if(q_data[large * q->stride[0]] < 1.0)
+      if(q_data[large * q->stride(0)] < 1.0)
         {
           THLongTensor_fastSet1d(smaller, small_c-1, large);
           large_c -= 1;
@@ -317,7 +317,7 @@ void THTensor_(multinomialAliasSetup)(THTensor *probs, THLongTensor *J, THTensor
     {
       for (i=0; i < inputsize; i++)
         {
-          q_data[i*q->stride[0]] /= q_max;
+          q_data[i*q->stride(0)] /= q_max;
         }
     }
   for (i=0; i < inputsize; i++)
@@ -399,7 +399,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     {
       val = THStorage_(get)( \
         prob_dist->storage, \
-        prob_dist->storageOffset+i*prob_dist->stride[0]+j*prob_dist->stride[1] \
+        prob_dist->storageOffset+i*prob_dist->stride(0)+j*prob_dist->stride(1) \
       );
       THArgCheckWithCleanup((val >= 0),
                             THCleanup(THDoubleTensor_free(cum_dist); if (start_dim == 1) THTensor_(squeeze1d)(prob_dist, prob_dist, 0);),
@@ -412,7 +412,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
       sum += val;
       THDoubleStorage_set(
         cum_dist->storage, \
-        cum_dist->storageOffset+j*cum_dist->stride[0], \
+        cum_dist->storageOffset+j*cum_dist->stride(0), \
         sum \
       );
     }
@@ -426,7 +426,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
     {
       for (j=0; j<n_categories; j++)
       {
-        THDoubleTensor_data(cum_dist)[j*cum_dist->stride[0]] /= sum;
+        THDoubleTensor_data(cum_dist)[j*cum_dist->stride(0)] /= sum;
       }
     }
 
@@ -442,14 +442,14 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
       double cum_prob;
       int sample_idx;
       /* Make sure the last cumulative distribution bucket sums to 1 */
-      THDoubleTensor_data(cum_dist)[(n_categories-1)*cum_dist->stride[0]] = 1;
+      THDoubleTensor_data(cum_dist)[(n_categories-1)*cum_dist->stride(0)] = 1;
 
       while(right_pointer - left_pointer > 0)
       {
           mid_pointer = left_pointer + (right_pointer - left_pointer) / 2;
           cum_prob = THDoubleStorage_get( \
             cum_dist->storage, \
-            cum_dist->storageOffset+mid_pointer*cum_dist->stride[0] \
+            cum_dist->storageOffset+mid_pointer*cum_dist->stride(0) \
           );
           if (cum_prob < uniform_sample)
           {
@@ -465,7 +465,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
        /* store in result tensor (will be incremented for lua compat by wrapper) */
       THLongStorage_set( \
         self->storage, \
-        self->storageOffset+i*self->stride[0]+j*self->stride[1], \
+        self->storageOffset+i*self->stride(0)+j*self->stride(1), \
         sample_idx \
       );
 
@@ -481,13 +481,13 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         {
           new_val = THDoubleStorage_get( \
             cum_dist->storage, \
-            cum_dist->storageOffset+(sample_idx-1)*cum_dist->stride[0] \
+            cum_dist->storageOffset+(sample_idx-1)*cum_dist->stride(0) \
           );
         }
         /* marginal cumulative mass (i.e. original probability) of sample */
         diff = THDoubleStorage_get( \
           cum_dist->storage, \
-          cum_dist->storageOffset+sample_idx*cum_dist->stride[0] \
+          cum_dist->storageOffset+sample_idx*cum_dist->stride(0) \
         ) - new_val;
         /* new sum of marginals is not one anymore... */
         sum = 1.0 - diff;
@@ -495,7 +495,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
         {
           new_val = THDoubleStorage_get( \
             cum_dist->storage, \
-            cum_dist->storageOffset+k*cum_dist->stride[0] \
+            cum_dist->storageOffset+k*cum_dist->stride(0) \
           );
           if (k >= sample_idx)
           {
@@ -506,7 +506,7 @@ void THTensor_(multinomial)(THLongTensor *self, THGenerator *_generator, THTenso
           new_val /= sum;
           THDoubleStorage_set( \
             cum_dist->storage, \
-            cum_dist->storageOffset+k*cum_dist->stride[0], \
+            cum_dist->storageOffset+k*cum_dist->stride(0), \
             new_val \
           );
         }

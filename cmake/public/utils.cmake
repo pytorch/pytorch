@@ -176,6 +176,7 @@ function(aten_compile_options libname)
     -Wextra
     -fexceptions
     -Wno-missing-field-initializers
+    -Wno-strict-overflow
     -Wno-type-limits
     -Wno-unused-parameter
     -Wno-unknown-warning-option
