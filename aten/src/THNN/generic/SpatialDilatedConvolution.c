@@ -220,8 +220,8 @@ void THNN_(SpatialDilatedConvolution_updateGradInput)(
      dilationH, dilationW, 0);
 
   // Params
-  int nInputPlane = weight->size[1];
-  int nOutputPlane = weight->size[0];
+  int64_t nInputPlane = weight->size[1];
+  int64_t nOutputPlane = weight->size[0];
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
