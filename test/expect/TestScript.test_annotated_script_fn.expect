@@ -1,1 +1,1 @@
-forward(Tensor , (Tensor, Tensor, Tensor) , (Tensor, (Tensor, Tensor)) ) -> (Tensor )
+forward(Tensor x, (Tensor, Tensor, Tensor) y, (Tensor, (Tensor, Tensor)) z) -> (Tensor )
