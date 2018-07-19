@@ -4313,7 +4313,6 @@ accreal THTensor_(normall)(THTensor *tensor, real value)
 
 void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, real maxnorm)
 {
-  int i;
   THTensor *rowR, *rowS;
 
   THArgCheck(dimension >= 0 && dimension < THTensor_(nDimension)(src), 3, "invalid dimension %d",
@@ -4327,7 +4326,7 @@ void THTensor_(renorm)(THTensor *res, THTensor *src, real value, int dimension, 
 
   THTensor_(resizeAs)(res, src);
 
-  for (i=0; i<src->size(dimension); i++)
+  for (int64_t i = 0; i < src->size(dimension); i++)
   {
     real norm = 0;
     real new_norm;
