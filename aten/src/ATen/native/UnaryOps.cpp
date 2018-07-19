@@ -46,7 +46,13 @@ Tensor clamp_min(const Tensor& self, Scalar min) {
 }
 
 Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
-  return _th_clamp_(self, min, max);
+  if (std::isnan(min.toFloat())) {
+    return _th_clamp_max_(self, max);
+  } else if (std::isnan(max.toFloat())) {
+    return _th_clamp_min_(self, min);
+  } else {
+    return _th_clamp_(self, min, max);
+  }
 }
 
 Tensor& _clamp_out_cpu(
@@ -56,7 +62,14 @@ Tensor& _clamp_out_cpu(
     Scalar max) {
   result.resize_(self.sizes());
   result.copy_(self);
-  return _th_clamp_(result, min, max);
+  if (std::isnan(min.toFloat())) {
+    _th_clamp_max_(result, max);
+  } else if (std::isnan(max.toFloat())) {
+    _th_clamp_min_(result, min);
+  } else {
+    _th_clamp_(result, min, max);
+  }
+  return result;
 }
 
 Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {

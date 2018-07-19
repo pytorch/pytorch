@@ -104,6 +104,9 @@ struct SchemaParser {
       case TK_FALSE:
         L.next();
         return false;
+      case TK_NONE:
+        L.next();
+        return at::Scalar(NAN);
       case TK_IDENT: {
         auto tok = L.next();
         auto text = tok.text();
@@ -160,11 +163,9 @@ struct SchemaParser {
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
-    if("None" == L.expect(TK_IDENT).text()) {
-      return at::Tensor();
-    } else {
-      throw ErrorReport(range) << "invalid tensor default value";
-    }
+  at::Tensor parseTensorDefault(const SourceRange& range) {
+    L.expect(TK_NONE);
+    return at::Tensor();
   }
   void parseDefaultValue(Argument& arg) {
     auto range = L.cur().range;

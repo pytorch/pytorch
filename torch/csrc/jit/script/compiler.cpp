@@ -1358,6 +1358,9 @@ private:
       case TK_FALSE: {
         return insertConstant(*graph, false, tree->range());
       } break;
+      case TK_NONE: {
+        return emitNone(tree->range());
+      } break;
       case TK_SLICE: {
         const auto slice = Slice(tree);
         return emitSlice(
@@ -1381,6 +1384,13 @@ private:
         throw ErrorReport(tree) << "NYI: " << tree;
         break;
     }
+  }
+
+  Value* emitNone(SourceRange range) {
+    auto& g = *method.graph();
+    return g.insertNode(
+        g.create(prim::None, {}, 1)->setSourceLocation(
+          std::make_shared<SourceRange>(range)))->output();
   }
 
   Value* emitConst(const Const& c) {

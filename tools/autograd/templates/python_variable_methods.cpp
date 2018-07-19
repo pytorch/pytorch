@@ -60,16 +60,6 @@ static Tensor dispatch_clamp(const Tensor & self, Scalar min, Scalar max) {
   DeviceGuard device_guard(self);
   return self.clamp(min, max);
 }
-static Tensor dispatch_clamp_min(const Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_min(min);
-}
-static Tensor dispatch_clamp_max(const Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_max(max);
-}
 
 static PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kwargs)
 {
@@ -80,12 +70,8 @@ static PyObject * THPVariable_clamp(PyObject* self, PyObject* args, PyObject* kw
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.isNone(0) && !r.isNone(1)) {
+  if (!r.isNone(0) || !r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.isNone(0)) {
-    return THPVariable_Wrap(dispatch_clamp_min(self_, r.scalar(0)));
-  } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_max(self_, r.scalar(1)));
   } else {
     throw std::runtime_error("At least one of 'min' or 'max' must not be None");
   }
@@ -97,16 +83,6 @@ static Tensor & dispatch_clamp_(Tensor & self, Scalar min, Scalar max) {
   DeviceGuard device_guard(self);
   return self.clamp_(min, max);
 }
-static Tensor & dispatch_clamp_min_(Tensor & self, Scalar min) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_min_(min);
-}
-static Tensor & dispatch_clamp_max_(Tensor & self, Scalar max) {
-  AutoNoGIL no_gil;
-  DeviceGuard device_guard(self);
-  return self.clamp_max_(max);
-}
 
 static PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* kwargs)
 {
@@ -117,12 +93,8 @@ static PyObject * THPVariable_clamp_(PyObject* self, PyObject* args, PyObject* k
   auto& self_ = reinterpret_cast<THPVariable*>(self)->cdata;
   ParsedArgs<2> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
-  if (!r.isNone(0) && !r.isNone(1)) {
+  if (!r.isNone(0) || !r.isNone(1)) {
     return THPVariable_Wrap(dispatch_clamp_(self_, r.scalar(0), r.scalar(1)));
-  } else if (!r.isNone(0)) {
-    return THPVariable_Wrap(dispatch_clamp_min_(self_, r.scalar(0)));
-  } else if (!r.isNone(1)) {
-    return THPVariable_Wrap(dispatch_clamp_max_(self_, r.scalar(1)));
   } else {
     throw std::runtime_error("At least one of 'min' or 'max' must not be None");
   }

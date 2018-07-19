@@ -1629,6 +1629,7 @@ class TestScript(JitTestCase):
 
     def test_python_frontend(self):
         def fn(x, y, z):
+            q = None
             q = x + y - z.sigmoid()
             print(q)
             w = -z
@@ -1861,6 +1862,23 @@ class TestScript(JitTestCase):
         inputs = self._make_scalar_vars([0], torch.int64)
 
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
+
+    def test_script_None(self):
+        @torch.jit.script
+        def func(x):
+            output = None
+            output = x
+            return output
+
+        self.assertEqual(func(torch.rand(1, 2)).shape[1], 2)
+
+    def test_script_clamp_max(self):
+        @torch.jit.script
+        def test_script_clamp_max(x):
+            return torch.clamp(x, min=None, max=0.5)
+
+        input = torch.tensor([[0.3, 0.4], [0.5, 0.51]])
+        self.assertEqual(test_script_clamp_max(input)[1][1], 0.5)
 
     def test_script_bool_constant(self):
         script = '''
@@ -4822,10 +4840,6 @@ EXCLUDE_TRACED = {
 
 # known to be failing in script
 EXCLUDE_SCRIPT = {
-    'test_clamp_max',
-    'test_clamp_max_scalar',
-    'test_clamp_min',
-    'test_clamp_min_scalar',
     # TODO: Fix var/std
     # there are two schemas for var (and std):
     # (1) var(Tensor, int, *, bool, bool, Tensor)
