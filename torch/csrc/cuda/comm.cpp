@@ -14,20 +14,7 @@
 #include <vector>
 
 namespace torch { namespace cuda {
-
 using namespace at;
-namespace {
-CUDAStream stream_or_default(
-    const at::optional<std::vector<at::CUDAStream>>& streams,
-    size_t stream_index,
-    size_t device_index) {
-  if (streams) {
-    return streams.value()[stream_index];
-  } else {
-    return at::globalContext().getCurrentCUDAStreamOnDevice(device_index);
-  }
-}
-} // namespace
 
 // Some operations can be performed more efficiently if we're handling tensors
 // of a single type only. Adding this logic directly in the loop makes it a bit
