@@ -5799,7 +5799,7 @@ class TestTorch(TestCase):
     
     def test_gather_broadcast(self):
         x = torch.randn(4, 5, 6, 1)
-        i1 = torch.randint(5, (1, 2, 6, 7))
+        i1 = torch.randint(5, (1, 2, 6, 7), dtype=torch.long)
         i2 = i1.squeeze()
         i_expand = i1.expand(4, 2, 6, 7)
         x_expand = x.expand(4, 5, 6, 7)
@@ -5813,7 +5813,7 @@ class TestTorch(TestCase):
     def test_scatter_broadcast(self):
         x = torch.randn(4, 2, 6, 1)
         y = torch.empty(4, 5, 6, 7)
-        i1 = torch.randint(5, (1, 2, 6, 7))
+        i1 = torch.randint(5, (1, 2, 6, 7), dtype=torch.long)
         i2 = i1.squeeze()
         i_expand = i1.expand(4, 2, 6, 7)
         x_expand = x.expand(4, 2, 6, 7)
