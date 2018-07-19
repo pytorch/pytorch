@@ -1754,10 +1754,8 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` should have same number of
-dimensions. It is also required that `index.size(d) <= src.size(d)` for all
-dimensions `d`, and that `index.size(d) <= self.size(d)` for all dimensions
-`d != dim`.
+The arguments do not have to match exactly, but they must be broadcastable. See:
+https://pytorch.org/docs/master/notes/broadcasting.html#scatter-and-gather
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
 between `0` and `(self.size(dim) -1)` inclusive, and all values in a row along

@@ -1652,6 +1652,9 @@ and :attr:`dim` :math:`= i`, then :attr:`index` must be an :math:`n`-dimensional
 size :math:`(x_0, x_1, ..., x_{i-1}, y, x_{i+1}, ..., x_{n-1})` where :math:`y \geq 1`
 and :attr:`out` will have the same size as :attr:`index`.
 
+The arguments do not have to match exactly, but they must be broadcastable. See:
+https://pytorch.org/docs/master/notes/broadcasting.html#scatter-and-gather
+
 Args:
     input (Tensor): the source tensor
     dim (int): the axis along which to index
