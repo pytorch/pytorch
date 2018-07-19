@@ -503,6 +503,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         v.value = createStack(graph, loc, unpacked_t)->setType(ListType::ofInts());
       }
 
+      if (v.value->node()->kind() == prim::None){
+        if (isNumberSubtype(arg.type))
+          v.value = createConstant(graph, loc, at::tensor(NAN));
+        else
+          v.value = graph.insertNode(graph.createUndefined())->output();
+      }
+
       // implicit conversion from Tensor to Python Number
       // FIXME: remove this when we support passing numbers into script fns
       if (isTensorSubtype(v.value) && isNumberSubtype(arg.type)) {
@@ -1520,6 +1527,9 @@ private:
       case TK_FALSE: {
         return emitBooleanConst(tree->range(), false);
       } break;
+      case TK_NONE: {
+        return emitNone(tree->range());
+      } break;
       case TK_SLICE: {
         const auto slice = Slice(tree);
         return emitSlice(
@@ -1573,6 +1583,12 @@ private:
 
   Value* emitBooleanConst(SourceRange range, bool val) {
     return createConstant(*graph, range, at::CPU(at::kByte).scalarTensor(val));
+  }
+
+  Value* emitNone(SourceRange range) {
+    //return createConstant(*graph, range, at::tensor(NAN));
+    auto n = emitNode(prim::None, range, {}, 1);
+    return n->output();
   }
 
   Value* emitConst(const Const& c) {

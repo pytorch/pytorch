@@ -18,6 +18,7 @@ _(ListType) \
 _(NumberType) \
 _(FloatType) \
 _(IntType) \
+_(NoneType) \
 
 enum class TypeKind {
 #define DEFINE_TYPE(T) T,
@@ -314,6 +315,24 @@ struct IntType : public Type {
     return *this == rhs || rhs.kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::IntType;
+  // global singleton
+  static TypePtr get();
+};
+
+// This node represents a Python int number value
+struct NoneType : public Type {
+  NoneType()
+  : Type(TypeKind::NoneType) {}
+  virtual bool operator==(const Type& rhs) const override {
+    return rhs.kind() == kind();
+  }
+  virtual std::string str() const override {
+    return "None";
+  }
+  virtual bool isSubtypeOf(const Type& rhs) const override {
+    return *this == rhs;
+  }
+  static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
   static TypePtr get();
 };
