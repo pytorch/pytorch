@@ -91,12 +91,10 @@ struct THTensor
 #include "THGenerateAllTypes.h"
 
 inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
-  AT_ASSERT(static_cast<int64_t>(tensor->sizes_.size()) == tensor->dim_);
   return tensor->sizes_.data();
 }
 
 inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
-  AT_ASSERT(static_cast<int64_t>(tensor->strides_.size()) == tensor->dim_);
   return tensor->strides_.data();
 }
 
@@ -109,7 +107,6 @@ inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
 }
 
 inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
-  AT_ASSERT(new_size.size() == new_stride.size());
   tensor->dim_ = new_size.size();
   tensor->sizes_ = std::move(new_size);
   tensor->strides_ = std::move(new_stride);
