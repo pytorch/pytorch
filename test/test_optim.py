@@ -616,6 +616,16 @@ class TestLRScheduler(TestCase):
                              lr_lambda=[lambda x1: 0.9 ** x1, lambda x2: 0.8 ** x2])
         self._test(scheduler, targets, epochs)
 
+    def test_poly_lr(self):
+        epochs = 5
+        power = 0.9
+        self.opt.param_groups[0]['lr'] = 0.1
+        self.opt.param_groups[1]['lr'] = 0.01
+        targets = [0.1 * (1.0 - (x % epochs) / epochs) ** power,
+                   0.01 * (1.0 - (x % epochs) / epochs) ** power for x in range(epochs)]
+        scheduler = PolyLR(self.opt, max_epoch=30000, power=power)
+        self._test(scheduler, targets, epochs)
+
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):
             scheduler.step(epoch)
