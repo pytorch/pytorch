@@ -29,13 +29,15 @@ struct Storage {
   const void* data() const {
     return storage->data_ptr.get();
   };
-  void* unsafeGetTH(bool retain) const {
-    if (retain) {
+  void* unsafeGetTH(bool retain_) const {
+    if (retain_) {
       THStorage_retain(storage);
     }
     return storage;
   }
-
+  void retain() {
+    THStorage_retain(storage);
+  }
   virtual Type & type() const = 0;
   int getDevice() const {
     return storage->data_ptr.device().index();
