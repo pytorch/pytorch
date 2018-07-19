@@ -3,7 +3,6 @@
 #include <ATen/Error.h>
 #include <ATen/ScalarType.h>
 #include <type_traits>
-#include <iostream>
 
 // Implements instruction set specific function dispatch.
 //
@@ -84,7 +83,7 @@ struct DispatchStub {
 
 namespace {
 
-template<typename FnPtr>
+template <typename FnPtr>
 struct RegisterDispatch {
   RegisterDispatch(DispatchStub<FnPtr>& stub, FnPtr value) {
 #if defined(__CUDACC__)
@@ -97,7 +96,7 @@ struct RegisterDispatch {
   }
 };
 
-}
+} // anonymous namespace
 
 #define REGISTER_DISPATCH(stub, fn) \
   static RegisterDispatch<decltype(fn)> stub ## __register(stub, fn);
