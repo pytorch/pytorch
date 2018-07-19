@@ -740,7 +740,7 @@ struct to_ir {
       // Record the type for the schema and set the Type on the Value*
       TypePtr arg_type = DynamicType::get();
       if (typed_def.schema) {
-        arg_type = typed_def.schema->arguments[arg_annotation_idx++].type;
+        arg_type = typed_def.schema->arguments.at(arg_annotation_idx++).type;
       }
       arguments.push_back({name, arg_type});
       new_input->setType(arg_type);
@@ -784,7 +784,7 @@ struct to_ir {
         }
         TypePtr type = DynamicType::get();
         if (typed_def.schema) {
-          type = typed_def.schema->returns[return_type_idx].type;
+          type = typed_def.schema->returns.at(return_type_idx).type;
           if (!r->type()->isSubtypeOf(*type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
@@ -1566,7 +1566,7 @@ void defineMethodsInModule(Module & m, const std::string& source, const Resolver
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
     // TODO: Function schema
-    definitions.push_back({Def(p.parseFunction()), at::nullopt});
+    definitions.emplace_back(Def(p.parseFunction()), at::nullopt);
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);

@@ -86,7 +86,7 @@ def get_signature(fn):
 def get_num_params(fn):
     try:
         source = dedent(inspect.getsource(fn))
-    except TypeError:
+    except (TypeError, IOError):
         return None
     if source is None:
         return None
@@ -95,6 +95,8 @@ def get_num_params(fn):
         raise RuntimeError("expected a single top-level function")
     py_def = py_ast.body[0]
     if py_def.args.vararg is not None:
+        return None
+    elif hasattr(py_def.args, 'kwonlyargs') and py_def.args.kwonlyargs is not None:
         return None
     else:
         num_params = len(py_def.args.args)
