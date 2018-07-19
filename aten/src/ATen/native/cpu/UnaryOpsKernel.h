@@ -1,8 +1,8 @@
 #pragma once
 
 #include <ATen/ATen.h>
+#include <ATen/native/DispatchStub.h>
 #include <stdexcept>
-#include "CapabilityDispatch.h"
 
 namespace at { namespace native {
 
