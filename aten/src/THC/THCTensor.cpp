@@ -153,7 +153,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
     if(!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    if(totalSize+self->storage_offset() > self->storage->size) {
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size) {
       THCStorage_resize(state, self->storage, totalSize+self->storage_offset());
     }
   }
@@ -179,7 +179,7 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
     if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = self->storage->scalar_type;
+    auto scalar_type = THTensor_getStoragePtr(self)->scalar_type;
     THStorage_free(THTensor_getStoragePtr(self));
 
     if(storage)
