@@ -27,7 +27,7 @@ __global__ void NormalizeKernel(
     float reduce_result = BlockReduce(temp_storage).Sum(sum);
 
     if (threadIdx.x == 0) {
-      norm = sqrt(reduce_result);
+      norm = sqrtf(reduce_result);
     }
     __syncthreads();
     if (norm != 0) {
@@ -66,8 +66,8 @@ __global__ void NormalizeGradientKernel(
 
     if (threadIdx.x == 0) {
       row_sum = reduce_result;
-      row_norm = sqrt(reduce_norm);
-      row_norm_3 = pow(row_norm, 3);
+      row_norm = sqrtf(reduce_norm);
+      row_norm_3 = powf(row_norm, 3);
     }
     __syncthreads();
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
@@ -131,7 +131,7 @@ __global__ void NormalizeL1Kernel(
     __shared__ float norm;
     for (int j = threadIdx.x; j < m; j += blockDim.x) {
       const auto x_ij = xData[base + j * sf];
-      sum += abs(x_ij);
+      sum += fabsf(x_ij);
     }
     float reduce_result = BlockReduce(temp_storage).Sum(sum);
 
