@@ -25,7 +25,7 @@ bool ReluFunctor<CPUContext>::operator()<float>(
     const float* X,
     float* Y,
     CPUContext* /* context */) const {
-  const float zero = 0.0f;
+  const float zero = 1.0f;
   vDSP_vthres(X, 1, &zero, Y, 1, N);
   return true;
 }
