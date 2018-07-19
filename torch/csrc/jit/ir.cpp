@@ -593,20 +593,39 @@ template Value* Graph::insertConstant(at::Scalar value);
 
 namespace {
 
+// Of course any sane person would define this thing as a templated function, but
+// it so happens that clang 3.8 has a pretty annoying bug which makes it complain that
+// specializations are redefinitions of themselves, and so here we are.
 template<typename T>
-T getattr(Node *n, Symbol name) = delete;
+struct getattr {};
 
 template<>
-int64_t getattr<int64_t>(Node *n, Symbol name) { return n->i(name); }
+struct getattr<int64_t> {
+  int64_t operator()(Node *n, Symbol name) {
+    return n->i(name);
+  }
+};
 
 template<>
-double getattr<double>(Node *n, Symbol name) { return n->f(name); }
+struct getattr<double> {
+  double operator()(Node *n, Symbol name) {
+    return n->f(name);
+  }
+};
 
 template<>
-at::Tensor getattr<at::Tensor>(Node *n, Symbol name) { return n->t(name); }
+struct getattr<at::Tensor> {
+  at::Tensor operator()(Node *n, Symbol name) {
+    return n->t(name);
+  }
+};
 
 template<>
-std::vector<int64_t> getattr<std::vector<int64_t>>(Node *n, Symbol name) { return n->is(name); }
+struct getattr<std::vector<int64_t>> {
+  std::vector<int64_t> operator()(Node *n, Symbol name) {
+    return n->is(name);
+  }
+};
 
 } // anonymous namespace
 
@@ -620,7 +639,7 @@ at::optional<T> Node::get(Symbol name) {
   if (hasAttributes()) {
     // If it has an attribute, then it is a constant. If it's missing, it means we're
     // doing an invalid lookup and it should throw anyway.
-    return getattr<T>(this, name);
+    return getattr<T>()(this, name);
   }
   auto inp = findInput(name);
   Node *producer = inp.first->node();
