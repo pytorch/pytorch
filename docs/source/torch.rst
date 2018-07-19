@@ -258,6 +258,8 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flip
 .. autofunction:: histc
+.. autofunction:: bincount
+.. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: trace
 .. autofunction:: tril
