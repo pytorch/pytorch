@@ -257,9 +257,9 @@ struct IValue {
   // prefer the directly named methods when you can,
   // since they are simpler to understand
   template<typename T>
-  T to() && = delete;
+  T to() &&;
   template<typename T>
-  T to() const & = delete;
+  T to() const &;
 
 private:
   template<typename T>

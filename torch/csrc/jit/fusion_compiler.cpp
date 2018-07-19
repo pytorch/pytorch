@@ -750,10 +750,15 @@ static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 // actually supports it or not, so we heuristically use the host
 // compiler to predict if the runtime compiler supports the option we
 // want.  This probably won't work if you're cross-compiling.
+// NB: -march=native is disabled because it has caused problems where
+// compiler and assembler do not agree on what native instruction they
+// understand for AVX512. When we need better CPU performance this
+// optimization can be re-enabled by tracking down the platforms where
+// this error occurs and only selectively disabling it.
 static const std::string compile_string =
   "\"${cxx}\" -O3 -g "
 #ifndef __PPC64__
-  "-march=native "
+//  "-march=native "
 #endif
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 
