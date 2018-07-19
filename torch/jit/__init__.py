@@ -348,6 +348,7 @@ def _fn_to_typed_def(fn):
         typed_def = torch._C.TypedDef(ast)
     return typed_def
 
+
 def script(fn, optimize=True, _frames_up=0):
     rcb = createResolutionCallback(_frames_up + 1)
     typed_def = _fn_to_typed_def(fn)

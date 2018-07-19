@@ -4327,7 +4327,6 @@ def func(t):
         some_func(torch.rand(3, 4))
 
 
-
 class TestEndToEndHybridFrontendModels(JitTestCase):
 
     def test_dcgan_models(self):
