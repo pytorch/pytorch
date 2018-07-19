@@ -1136,7 +1136,7 @@ inline Value::Value(Node * node_, size_t offset_)
   node_->graph_->all_values.emplace(this);
 }
 
-Value* Value::setType(const TypePtr type) {
+inline Value* Value::setType(const TypePtr type) {
   JIT_ASSERT(type);
   type_ = type;
   for (Use & use : uses_) {
