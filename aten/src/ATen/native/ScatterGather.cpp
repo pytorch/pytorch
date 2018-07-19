@@ -1,20 +1,20 @@
-// Returns unique elements of input tensor.
-
 #include "ATen/ATen.h"
-#include "ATen/Dispatch.h"
 #include "ATen/ExpandUtils.h"
+#include "ATen/WrapDimUtils.h"
 
 #include <tuple>
+#include <iostream>
 
 namespace at {
 namespace native{
 
 namespace {
 
-std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntList tensor, IntList indices, long dim) {
+std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntList tensor, IntList index, int64_t &dim) {
   auto dimsA = tensor.size();
-  auto dimsB = indices.size();
+  auto dimsB = index.size();
   ptrdiff_t ndim = dimsA > dimsB ? dimsA : dimsB;
+  dim = maybe_wrap_dim(dim, ndim);
   std::vector<int64_t> expandedSizesB(ndim);
   int64_t expandedSizeA = -1;
 
@@ -23,7 +23,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
     long dimA = dimsA - 1 - offset;
     long dimB = dimsB - 1 - offset;
     long sizeA = (dimA >= 0) ? tensor[dimA] : 1;
-    long sizeB = (dimB >= 0) ? indices[dimB] : 1;
+    long sizeB = (dimB >= 0) ? index[dimB] : 1;
 
     if (i == dim) {
       expandedSizeA = sizeA;
@@ -45,7 +45,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
   return std::make_tuple(expandedSizesA, expandedSizesB);
 }
 
-inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, long dim) {
+inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, int64_t &dim) {
   if (to_expand1.sizes().equals(to_expand2.sizes())) {
     return std::make_tuple(to_expand1, to_expand2);
   }
@@ -57,9 +57,17 @@ inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand
       to_expand2.expand(expanded_size2, /*implicit=*/true));
 }
 
-inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name, long dim) {
+inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name, int64_t &dim) {
   check_defined({to_expand1, to_expand2}, api_name);
   return gather_expand_outplace(to_expand1, to_expand2, dim);
+}
+
+inline Tensor broadcast_scatter(Tensor &self, const Tensor & index, const char *api_name, int64_t &dim) {
+  check_defined({self, index}, api_name);
+  std::vector<int64_t> b_self_sizes, b_index_sizes;
+  std::tie(b_self_sizes, b_index_sizes) = gather_infer_size(self.sizes(), index.sizes(), dim);
+  AT_CHECK(self.sizes().equals(b_self_sizes), "Broadcasting of scatter_ should not change shape of self");
+  return index.expand(b_index_sizes, /*implicit=*/true);
 }
 
 } // namespace
@@ -75,6 +83,21 @@ Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
   Tensor b_self, b_index;
   std::tie(b_self, b_index) = gather_expand_outplace(self, index, "gather", dim);
   return _s_gather(b_self, dim, b_index);
+}
+
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  Tensor b_index = broadcast_scatter(self, index, "scatter_", dim);
+  return self._s_scatter_(dim, b_index, src);
+}
+
+Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
+  Tensor b_index = broadcast_scatter(self, index, "scatter_", dim);
+  return self._s_scatter_(dim, b_index, src);
+}
+
+Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
+  Tensor b_index = broadcast_scatter(self, index, "scatter_add_", dim);
+  return self._s_scatter_add_(dim, b_index, src);
 }
 
 }  // namespace native

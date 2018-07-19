@@ -329,7 +329,7 @@
         - CONSTANT 1
 ]]
 [[
-  name: scatter_
+  name: _s_scatter_
   return: argument 0
   options:
     - cname: scatter
@@ -348,7 +348,7 @@
         - real value
 ]]
 [[
-  name: scatter_add_
+  name: _s_scatter_add_
   return: argument 0
   cname: scatterAdd
   arguments:

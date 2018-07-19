@@ -1924,3 +1924,12 @@
 
 - func: gather_out(Tensor result, Tensor self, int64_t dim, IndexTensor index) -> Tensor
   variants: function
+
+- func: scatter_(Tensor self, int64_t dim, IndexTensor index, Tensor src) -> Tensor
+  variants: method
+
+- func: scatter_(Tensor self, int64_t dim, IndexTensor index, Scalar value) -> Tensor
+  variants: method
+
+- func: scatter_add_(Tensor self, int64_t dim, IndexTensor index, Tensor src) -> Tensor
+  variants: method  
