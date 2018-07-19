@@ -644,6 +644,7 @@ else:
         '-std=c++11',
         '-Wall',
         '-Wextra',
+        '-Wno-strict-overflow',
         '-Wno-unused-parameter',
         '-Wno-missing-field-initializers',
         '-Wno-write-strings',

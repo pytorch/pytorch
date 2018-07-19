@@ -600,15 +600,15 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  nInputPlane = input->size[0];
-  istride0    = input->stride[0];
-  nInputRows  = input->size[1];
-  nInputCols  = input->size[2];
+  nInputPlane = input->size(0);
+  istride0    = input->stride(0);
+  nInputRows  = input->size(1);
+  nInputCols  = input->size(2);
 
-  kstride0 = kernel->stride[0];
-  nKernelPlane = kernel->size[0];
-  nKernelRows = kernel->size[1];
-  nKernelCols = kernel->size[2];
+  kstride0 = kernel->stride(0);
+  nKernelPlane = kernel->size(0);
+  nKernelRows = kernel->size(1);
+  nKernelCols = kernel->size(2);
 
   THArgCheck(nInputRows >= nKernelRows && nInputCols >= nKernelCols , 2, "covn2DRevger : Input image is smaller than kernel");
 
@@ -627,7 +627,7 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
     /*THTensor_(zero)(r_);*/
 
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]*r_->size[1]; k++)
+    for (k = 0; k < r_->size(0)*r_->size(1); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -639,7 +639,7 @@ void THTensor_(conv2DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   {
     /*THTensor_(mul)(r_, beta);*/
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]*r_->size[1]; k++)
+    for (k = 0; k < r_->size(0)*r_->size(1); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -706,21 +706,21 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
-  istride1    = input->stride[1];
-  nbatch      = input->size[0];
-  nInputPlane = input->size[1];
-  nInputRows  = input->size[2];
-  nInputCols  = input->size[3];
+  istride0    = input->stride(0);
+  istride1    = input->stride(1);
+  nbatch      = input->size(0);
+  nInputPlane = input->size(1);
+  nInputRows  = input->size(2);
+  nInputCols  = input->size(3);
 
-  kstride0 = kernel->stride[0];
-  kstride1 = kernel->stride[1];
-  nKernelPlane = kernel->size[1];
-  nKernelRows = kernel->size[2];
-  nKernelCols = kernel->size[3];
+  kstride0 = kernel->stride(0);
+  kstride1 = kernel->stride(1);
+  nKernelPlane = kernel->size(1);
+  nKernelRows = kernel->size(2);
+  nKernelCols = kernel->size(3);
 
   THArgCheck(nInputRows >= nKernelRows && nInputCols >= nKernelCols , 2, "conv2DRevger : Input image is smaller than kernel");
-  THArgCheck(kernel->size[0] == input->size[0] , 2, "conv2DRevger : Input batch and kernel batch is not same size");
+  THArgCheck(kernel->size(0) == input->size(0) , 2, "conv2DRevger : Input batch and kernel batch is not same size");
 
   nOutputRows = nInputRows - (nKernelRows - 1) * srow;
   nOutputCols = nInputCols - (nKernelCols - 1) * scol;
@@ -737,7 +737,7 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
     /*THTensor_(zero)(r_);*/
 
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]*r_->size[1]; k++)
+    for (k = 0; k < r_->size(0)*r_->size(1); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -749,7 +749,7 @@ void THTensor_(conv2DRevgerm)(THTensor *r_, real beta, real alpha, THTensor *t_,
   {
     /*THTensor_(mul)(r_, beta);*/
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]*r_->size[1]; k++)
+    for (k = 0; k < r_->size(0)*r_->size(1); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -820,15 +820,15 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  nInputPlane = input->size[0];
-  istride0    = input->stride[0];
-  nInputRows  = input->size[1];
-  nInputCols  = input->size[2];
+  nInputPlane = input->size(0);
+  istride0    = input->stride(0);
+  nInputRows  = input->size(1);
+  nInputCols  = input->size(2);
 
-  kstride0 = kernel->stride[0];
-  nKernelPlane = kernel->size[0];
-  nKernelRows = kernel->size[1];
-  nKernelCols = kernel->size[2];
+  kstride0 = kernel->stride(0);
+  nKernelPlane = kernel->size(0);
+  nKernelRows = kernel->size(1);
+  nKernelCols = kernel->size(2);
 
   THArgCheck((nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv2Dger : Input image is smaller than kernel");
 
@@ -851,7 +851,7 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   {
     /*THTensor_(zero)(r_);*/
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]*r_->size[1]; k++)
+    for (k = 0; k < r_->size(0)*r_->size(1); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -863,7 +863,7 @@ void THTensor_(conv2Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   {
     /*THTensor_(mul)(r_, beta);*/
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]*r_->size[1]; k++)
+    for (k = 0; k < r_->size(0)*r_->size(1); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -949,24 +949,24 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   THArgCheck(*xc == 'C' || *xc == 'X', 7, "type of convolution can 'X' or 'C'");
 
   input = THTensor_(newContiguous)(t_);
-  if (!(k_->stride[3] == 1) || !(k_->stride[2] == k_->size[3])) {
+  if (!(k_->stride(3) == 1) || !(k_->stride(2) == k_->size(3))) {
     kernel = THTensor_(newContiguous)(k_);
   } else {
     THTensor_(retain)(k_);
     kernel = k_;
   }
 
-  nInputPlane = input->size[0];
-  istride0    = input->stride[0];
-  nInputRows  = input->size[1];
-  nInputCols  = input->size[2];
+  nInputPlane = input->size(0);
+  istride0    = input->stride(0);
+  nInputRows  = input->size(1);
+  nInputCols  = input->size(2);
 
-  kstride0    = kernel->stride[0];
-  kstride1    = kernel->stride[1];
-  nKernelRows = kernel->size[2];
-  nKernelCols = kernel->size[3];
-  nOutputPlane = kernel->size[0];
-  THArgCheck(kernel->size[1] == nInputPlane, 2, "invalid number of input planes");
+  kstride0    = kernel->stride(0);
+  kstride1    = kernel->stride(1);
+  nKernelRows = kernel->size(2);
+  nKernelCols = kernel->size(3);
+  nOutputPlane = kernel->size(0);
+  THArgCheck(kernel->size(1) == nInputPlane, 2, "invalid number of input planes");
 
   THArgCheck( (nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv2Dmv : Input image is smaller than kernel");
 
@@ -989,7 +989,7 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   {
     /*THTensor_(zero)(r_);*/
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]; k++)
+    for (k = 0; k < r_->size(0); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -1001,7 +1001,7 @@ void THTensor_(conv2Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   {
     /*THTensor_(mul)(r_, beta);*/
 #pragma omp parallel for private(k)
-    for (k = 0; k < r_->size[0]; k++)
+    for (k = 0; k < r_->size(0); k++)
     {
       real* ptr_output = output_data + k*nOutputCols*nOutputRows;
       int64_t l;
@@ -1087,24 +1087,24 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   THArgCheck(*xc == 'C' || *xc == 'X', 7, "type of convolution can 'X' or 'C'");
 
   input = THTensor_(newContiguous)(t_);
-  if (!(k_->stride[3] == 1) || !(k_->stride[2] == k_->size[3])) {
+  if (!(k_->stride(3) == 1) || !(k_->stride(2) == k_->size(3))) {
     kernel = THTensor_(newContiguous)(k_);
   } else {
     THTensor_(retain)(k_);
     kernel = k_;
   }
 
-  nbatch = input->size[0];
-  nInputPlane = input->size[1];
-  nInputRows  = input->size[2];
-  nInputCols  = input->size[3];
+  nbatch = input->size(0);
+  nInputPlane = input->size(1);
+  nInputRows  = input->size(2);
+  nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
-  kstride1    = kernel->stride[1];
-  nKernelRows = kernel->size[2];
-  nKernelCols = kernel->size[3];
-  nOutputPlane = kernel->size[0];
-  THArgCheck(kernel->size[1] == nInputPlane, 2, "invalid number of input planes");
+  kstride0    = kernel->stride(0);
+  kstride1    = kernel->stride(1);
+  nKernelRows = kernel->size(2);
+  nKernelCols = kernel->size(3);
+  nOutputPlane = kernel->size(0);
+  THArgCheck(kernel->size(1) == nInputPlane, 2, "invalid number of input planes");
 
   THArgCheck( (nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv2Dmv : Input image is smaller than kernel");
 
@@ -1127,10 +1127,10 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   {
     /*THTensor_(zero)(r_);*/
 #pragma omp parallel for private(p)
-    for (p=0; p < r_->size[0]; p++)
+    for (p=0; p < r_->size(0); p++)
     {
       int64_t k;
-      for (k = 0; k < r_->size[1]; k++)
+      for (k = 0; k < r_->size(1); k++)
       {
         real* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
         int64_t l;
@@ -1143,10 +1143,10 @@ void THTensor_(conv2Dmm)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   {
     /*THTensor_(mul)(r_, beta);*/
 #pragma omp parallel for private(p)
-    for(p=0; p < r_->size[0]; p++)
+    for(p=0; p < r_->size(0); p++)
     {
       int64_t k;
-      for (k = 0; k < r_->size[1]; k++)
+      for (k = 0; k < r_->size(1); k++)
       {
         real* ptr_output = output_data + p*nOutputPlane*nOutputRows*nOutputCols + k*nOutputCols*nOutputRows;
         int64_t l;
@@ -1236,10 +1236,10 @@ void THTensor_(conv2Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  nInputRows  = input->size[0];
-  nInputCols  = input->size[1];
-  nKernelRows = kernel->size[0];
-  nKernelCols = kernel->size[1];
+  nInputRows  = input->size(0);
+  nInputCols  = input->size(1);
+  nKernelRows = kernel->size(0);
+  nKernelCols = kernel->size(1);
 
   THArgCheck((nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv2Dmul : Input image is smaller than kernel");
 
@@ -1295,15 +1295,15 @@ void THTensor_(conv2Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
-  nInputPlane = input->size[0];
-  nInputRows  = input->size[1];
-  nInputCols  = input->size[2];
+  istride0    = input->stride(0);
+  nInputPlane = input->size(0);
+  nInputRows  = input->size(1);
+  nInputCols  = input->size(2);
 
-  kstride0    = kernel->stride[0];
-  nOutputPlane = kernel->size[0];
-  nKernelRows = kernel->size[1];
-  nKernelCols = kernel->size[2];
+  kstride0    = kernel->stride(0);
+  nOutputPlane = kernel->size(0);
+  nKernelRows = kernel->size(1);
+  nKernelCols = kernel->size(2);
 
   THArgCheck(nOutputPlane == nInputPlane, 2, "invalid number of input/kernel planes");
   THArgCheck( (nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv2Dcmul : Input image is smaller than kernel");
@@ -1374,15 +1374,15 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
-  nInputPlane = input->size[0];
-  nInputRows  = input->size[1];
-  nInputCols  = input->size[2];
+  istride0    = input->stride(0);
+  nInputPlane = input->size(0);
+  nInputRows  = input->size(1);
+  nInputCols  = input->size(2);
 
-  kstride0    = kernel->stride[0];
-  nOutputPlane = kernel->size[0];
-  nKernelRows = kernel->size[1];
-  nKernelCols = kernel->size[2];
+  kstride0    = kernel->stride(0);
+  nOutputPlane = kernel->size(0);
+  nKernelRows = kernel->size(1);
+  nKernelCols = kernel->size(2);
 
   THArgCheck(nOutputPlane == nInputPlane, 2, "invalid number of input/kernel planes");
   THArgCheck( (nInputRows >= nKernelRows && nInputCols >= nKernelCols)
@@ -1405,7 +1405,7 @@ void THTensor_(conv2Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   weight_data = THTensor_(data)(kernel);
   output_data = THTensor_(data)(r_);
 
-  nmaps = map->size[0];
+  nmaps = map->size(0);
 
   for(k = 0; k < nmaps; k++)
   {
@@ -1462,17 +1462,17 @@ void THTensor_(conv3DRevger)(THTensor *r_, real beta, real alpha, THTensor *t_, 
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  nInputPlane = input->size[0];
-  istride0    = input->stride[0];
-  nInputDepth = input->size[1];
-  nInputRows  = input->size[2];
-  nInputCols  = input->size[3];
+  nInputPlane = input->size(0);
+  istride0    = input->stride(0);
+  nInputDepth = input->size(1);
+  nInputRows  = input->size(2);
+  nInputCols  = input->size(3);
 
-  kstride0 = kernel->stride[0];
-  nKernelPlane = kernel->size[0];
-  nKernelDepth= kernel->size[1];
-  nKernelRows = kernel->size[2];
-  nKernelCols = kernel->size[3];
+  kstride0 = kernel->stride(0);
+  nKernelPlane = kernel->size(0);
+  nKernelDepth= kernel->size(1);
+  nKernelRows = kernel->size(2);
+  nKernelCols = kernel->size(3);
 
   THArgCheck(nInputDepth >= nKernelDepth && nInputRows >= nKernelRows && nInputCols >= nKernelCols , 2, "conv3DRevger : Input image is smaller than kernel");
 
@@ -1550,17 +1550,17 @@ void THTensor_(conv3Dger)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  nInputPlane = input->size[0];
-  istride0    = input->stride[0];
-  nInputDepth = input->size[1];
-  nInputRows  = input->size[2];
-  nInputCols  = input->size[3];
+  nInputPlane = input->size(0);
+  istride0    = input->stride(0);
+  nInputDepth = input->size(1);
+  nInputRows  = input->size(2);
+  nInputCols  = input->size(3);
 
-  kstride0     = kernel->stride[0];
-  nKernelPlane = kernel->size[0];
-  nKernelDepth = kernel->size[1];
-  nKernelRows  = kernel->size[2];
-  nKernelCols  = kernel->size[3];
+  kstride0     = kernel->stride(0);
+  nKernelPlane = kernel->size(0);
+  nKernelDepth = kernel->size(1);
+  nKernelRows  = kernel->size(2);
+  nKernelCols  = kernel->size(3);
 
   THArgCheck((nInputDepth >= nKernelDepth
               && nInputRows >= nKernelRows
@@ -1639,26 +1639,26 @@ void THTensor_(conv3Dmv)(THTensor *r_, real beta, real alpha, THTensor *t_, THTe
   THArgCheck(*xc == 'C' || *xc == 'X', 8, "type of convolution can 'X' or 'C'");
 
   input = THTensor_(newContiguous)(t_);
-  if (!(k_->stride[4] == 1) || !(k_->stride[3] == k_->size[4])) {
+  if (!(k_->stride(4) == 1) || !(k_->stride(3) == k_->size(4))) {
     kernel = THTensor_(newContiguous)(k_);
   } else {
     THTensor_(retain)(k_);
     kernel = k_;
   }
 
-  nInputPlane = input->size[0];
-  istride0    = input->stride[0];
-  nInputDepth = input->size[1];
-  nInputRows  = input->size[2];
-  nInputCols  = input->size[3];
+  nInputPlane = input->size(0);
+  istride0    = input->stride(0);
+  nInputDepth = input->size(1);
+  nInputRows  = input->size(2);
+  nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
-  kstride1    = kernel->stride[1];
-  nKernelDepth = kernel->size[2];
-  nKernelRows = kernel->size[3];
-  nKernelCols = kernel->size[4];
-  nOutputPlane = kernel->size[0];
-  THArgCheck(kernel->size[1] == nInputPlane, 2, "invalid number of input planes");
+  kstride0    = kernel->stride(0);
+  kstride1    = kernel->stride(1);
+  nKernelDepth = kernel->size(2);
+  nKernelRows = kernel->size(3);
+  nKernelCols = kernel->size(4);
+  nOutputPlane = kernel->size(0);
+  THArgCheck(kernel->size(1) == nInputPlane, 2, "invalid number of input planes");
 
   THArgCheck( (nInputDepth >= nKernelDepth && nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv3Dmv : Input image is smaller than kernel");
 
@@ -1736,12 +1736,12 @@ void THTensor_(conv3Dmul)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  nInputDepth = input->size[0];
-  nInputRows  = input->size[1];
-  nInputCols  = input->size[2];
-  nKernelDepth = kernel->size[0];
-  nKernelRows = kernel->size[1];
-  nKernelCols = kernel->size[2];
+  nInputDepth = input->size(0);
+  nInputRows  = input->size(1);
+  nInputCols  = input->size(2);
+  nKernelDepth = kernel->size(0);
+  nKernelRows = kernel->size(1);
+  nKernelCols = kernel->size(2);
 
   THArgCheck((nInputDepth >= nKernelDepth && nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv3Dmul : Input image is smaller than kernel");
 
@@ -1802,17 +1802,17 @@ void THTensor_(conv3Dcmul)(THTensor *r_, real beta, real alpha, THTensor *t_, TH
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
-  nInputPlane = input->size[0];
-  nInputDepth = input->size[1];
-  nInputRows  = input->size[2];
-  nInputCols  = input->size[3];
+  istride0    = input->stride(0);
+  nInputPlane = input->size(0);
+  nInputDepth = input->size(1);
+  nInputRows  = input->size(2);
+  nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
-  nOutputPlane = kernel->size[0];
-  nKernelDepth = kernel->size[1];
-  nKernelRows = kernel->size[2];
-  nKernelCols = kernel->size[3];
+  kstride0    = kernel->stride(0);
+  nOutputPlane = kernel->size(0);
+  nKernelDepth = kernel->size(1);
+  nKernelRows = kernel->size(2);
+  nKernelCols = kernel->size(3);
 
   THArgCheck(nOutputPlane == nInputPlane, 2, "invalid number of input/kernel planes");
   THArgCheck( (nInputDepth >= nKernelDepth && nInputRows >= nKernelRows && nInputCols >= nKernelCols) || *vf == 'F', 2, "conv3Dcmul : Input image is smaller than kernel");
@@ -1889,17 +1889,17 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   input = THTensor_(newContiguous)(t_);
   kernel = THTensor_(newContiguous)(k_);
 
-  istride0    = input->stride[0];
-  nInputPlane = input->size[0];
-  nInputDepth = input->size[1];
-  nInputRows  = input->size[2];
-  nInputCols  = input->size[3];
+  istride0    = input->stride(0);
+  nInputPlane = input->size(0);
+  nInputDepth = input->size(1);
+  nInputRows  = input->size(2);
+  nInputCols  = input->size(3);
 
-  kstride0    = kernel->stride[0];
-  nOutputPlane = kernel->size[0];
-  nKernelDepth = kernel->size[1];
-  nKernelRows = kernel->size[2];
-  nKernelCols = kernel->size[3];
+  kstride0    = kernel->stride(0);
+  nOutputPlane = kernel->size(0);
+  nKernelDepth = kernel->size(1);
+  nKernelRows = kernel->size(2);
+  nKernelCols = kernel->size(3);
 
   THArgCheck(nOutputPlane == nInputPlane, 2, "invalid number of input/kernel planes");
   THArgCheck((nInputDepth >= nKernelDepth
@@ -1925,7 +1925,7 @@ void THTensor_(conv3Dmap)(THTensor *r_, real beta, real alpha, THTensor *t_, THT
   weight_data = THTensor_(data)(kernel);
   output_data = THTensor_(data)(r_);
 
-  nmaps = map->size[0];
+  nmaps = map->size(0);
 
   for(k = 0; k < nmaps; k++)
   {

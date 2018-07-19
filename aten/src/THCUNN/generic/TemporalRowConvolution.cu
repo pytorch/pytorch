@@ -14,7 +14,7 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
                   weight, "non-empty 2D or 3D weight tensor expected, but got: %s");
 
   if (bias != NULL) {
-    THCUNN_check_dim_size(state, bias, 1, 0, weight->size[0]);
+    THCUNN_check_dim_size(state, bias, 1, 0, weight->size(0));
   }
 
   int ndim = input->dim();
@@ -29,8 +29,8 @@ static inline void THNN_(TemporalRowConvolution_shapeCheck)(
   THCUNN_argCheck(state, !input->is_empty() && (ndim == 2 || ndim == 3), 1, input,
                   "non-empty 2D or 3D (batch mode) input tensor expected, but got :%s");
 
-  int64_t inputFrameSize = weight->size[0];
-  int64_t nInputFrame = input->size[dimS];
+  int64_t inputFrameSize = weight->size(0);
+  int64_t nInputFrame = input->size(dimS);
   int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
   if (nOutputFrame < 1) {
@@ -84,16 +84,16 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   if (ndim == 2) {
     // Force batch
     batch = 0;
-    THCTensor_(resize3d)(state, input, 1, input->size[0], input->size[1]);
+    THCTensor_(resize3d)(state, input, 1, input->size(0), input->size(1));
   }
 
   // Params:
-  int64_t inputFrameSize = weight->size[0];
-  int64_t nInputFrame = input->size[2];
+  int64_t inputFrameSize = weight->size(0);
+  int64_t nInputFrame = input->size(2);
   int64_t nOutputFrame = (nInputFrame + 2 * padW - kW) / dW + 1;
 
   // Batch size
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THCTensor_(resize3d)(state, output, batchSize, inputFrameSize, nOutputFrame);
@@ -104,7 +104,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever
   // gets increased and always contains ones.
-  if (ones->dim() != 2 || ones->size[0] * ones->size[1] < nOutputFrame) {
+  if (ones->dim() != 2 || ones->size(0) * ones->size(1) < nOutputFrame) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, 1, nOutputFrame);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));
@@ -218,18 +218,18 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
   if (ndim == 2) {
     // Force batch
     batch = 0;
-    THCTensor_(resize3d)(state, input, 1, input->size[0], input->size[1]);
-    THCTensor_(resize3d)(state, gradOutput, 1, gradOutput->size[0],
-                         gradOutput->size[1]);
+    THCTensor_(resize3d)(state, input, 1, input->size(0), input->size(1));
+    THCTensor_(resize3d)(state, gradOutput, 1, gradOutput->size(0),
+                         gradOutput->size(1));
   }
 
   // Params:
-  int64_t inputFrameSize = weight->size[0];
-  int64_t nInputFrame = input->size[2];
-  int64_t nOutputFrame = gradOutput->size[2];
+  int64_t inputFrameSize = weight->size(0);
+  int64_t nInputFrame = input->size(2);
+  int64_t nOutputFrame = gradOutput->size(2);
 
   // Batch size
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THCTensor_(resize3d)(state, gradInput, batchSize, inputFrameSize,
@@ -331,21 +331,21 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
   if (ndim == 2) {
     // Force batch
     batch = 0;
-    THCTensor_(resize3d)(state, input, 1, input->size[0], input->size[1]);
-    THCTensor_(resize3d)(state, gradOutput, 1, gradOutput->size[0],
-                         gradOutput->size[1]);
+    THCTensor_(resize3d)(state, input, 1, input->size(0), input->size(1));
+    THCTensor_(resize3d)(state, gradOutput, 1, gradOutput->size(0),
+                         gradOutput->size(1));
   }
 
   // Params:
-  int64_t inputFrameSize = gradWeight->size[0];
-  int64_t nInputFrame = input->size[2];
-  int64_t nOutputFrame = gradOutput->size[2];
+  int64_t inputFrameSize = gradWeight->size(0);
+  int64_t nInputFrame = input->size(2);
+  int64_t nOutputFrame = gradOutput->size(2);
 
   // Batch size
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->dim() != 2 || ones->size[0] * ones->size[1] < nOutputFrame) {
+  if (ones->dim() != 2 || ones->size(0) * ones->size(1) < nOutputFrame) {
     // Resize plane and fill with ones...
     THCTensor_(resize2d)(state, ones, 1, nOutputFrame);
     THCTensor_(fill)(state, ones, ScalarConvert<int, real>::to(1));

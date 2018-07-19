@@ -314,9 +314,9 @@ void THCTensor_(nonzero)(THCState* state, THCudaLongTensor *tensor,
       strided_tensor.begin(),
       strided_tensor.end(),
       stride_dim.begin(),
-      idx_functor(div, self->size[dim])
+      idx_functor(div, self->size(dim))
     );
-    div *= self->size[dim];
+    div *= self->size(dim);
   }
 
   THCudaLongTensor_resize2d(state, tensor, num_nonzeros, num_dim);

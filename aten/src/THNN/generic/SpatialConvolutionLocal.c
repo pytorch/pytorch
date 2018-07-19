@@ -29,8 +29,8 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
         "non-empty 3D or 4D input tensor expected but got: %s");
 
-  int64_t nInputPlane = weight->size[2] / (kH * kW);
-  int64_t nOutputPlane = weight->size[1];
+  int64_t nInputPlane = weight->size(2) / (kH * kW);
+  int64_t nOutputPlane = weight->size(1);
 
   if (bias != NULL) {
     THNN_CHECK_DIM_SIZE(bias, 3, 0, nOutputPlane);
@@ -53,9 +53,9 @@ static THTensor* THNN_(view_weight_local)(THTensor *_weight)
   AT_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6),
            "weight tensor should be (non-empty) 3D or 6D - got size: ", weight->sizes());
   if (weight->dim() == 6) {
-    int64_t s1 = weight->size[0] * weight->size[1];
-    int64_t s2 = weight->size[2];
-    int64_t s3 = weight->size[3] * weight->size[4] * weight->size[5];
+    int64_t s1 = weight->size(0) * weight->size(1);
+    int64_t s2 = weight->size(2);
+    int64_t s3 = weight->size(3) * weight->size(4) * weight->size(5);
     THTensor *old_weight = weight;
     weight = THTensor_(newWithStorage3d)(weight->storage,
                        weight->storageOffset,
@@ -140,7 +140,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
   }
   else
   {
-    int64_t T = input->size[0];
+    int64_t T = input->size(0);
     int64_t t;
 
     THTensor_(resize3d)(finput, T, kW*kH*nInputPlane, outputHeight*outputWidth);
@@ -243,7 +243,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   }
   else
   {
-    int64_t T = input->size[0];
+    int64_t T = input->size(0);
     int64_t t;
 
 #pragma omp parallel for private(t)
@@ -339,7 +339,7 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
   }
   else
   {
-    int64_t T = input->size[0];
+    int64_t T = input->size(0);
     int64_t t;
 
     for(t = 0; t < T; t++)

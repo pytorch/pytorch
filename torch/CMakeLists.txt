@@ -238,7 +238,7 @@ set_source_files_properties(
 
 if (MSVC)
 elseif ($ENV{WERROR})
-  target_compile_options(torch PRIVATE -Werror)
+  target_compile_options(torch PRIVATE -Werror -Wno-strict-overflow)
 endif()
 
 if (MSVC)

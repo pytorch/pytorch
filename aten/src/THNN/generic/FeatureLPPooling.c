@@ -24,9 +24,9 @@ static inline size_t flpGetOffset(FeatureLPPoolingSizes* s,
                            FEATURE_LP_SIZE_TYPE opt1,
                            FEATURE_LP_SIZE_TYPE opt2) {
   return s->stride[0] * batch +
-    s->stride[1] * feature +
-    s->stride[2] * opt1 +
-    s->stride[3] * opt2;
+         s->stride[1] * feature +
+         s->stride[2] * opt1 +
+         s->stride[3] * opt2;
 }
 
 static inline size_t flpOutputSize(FEATURE_LP_SIZE_TYPE inputSize,
