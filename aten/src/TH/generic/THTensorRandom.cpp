@@ -79,7 +79,7 @@ void THTensor_(iBernoulli_generate_copy)(THTensor *self, THGenerator *_generator
 #endif
   } else {
     intTensor = THIntTensor_new();
-    THIntTensor_resizeNd(intTensor, self->dim(), self->size, NULL);
+    THIntTensor_resizeNd(intTensor, self->dim(), THTensor_getSizePtr(self), nullptr);
     tmp = THIntTensor_data(intTensor);
   }
 

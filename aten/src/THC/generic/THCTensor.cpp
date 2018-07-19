@@ -41,7 +41,7 @@ THLongStorage *THCTensor_(newSizeOf)(THCState *state, THCTensor *self)
 THLongStorage *THCTensor_(newStrideOf)(THCState *state, THCTensor *self)
 {
   THLongStorage *stride = THLongStorage_newWithSize(self->dim());
-  THLongStorage_rawCopy(stride, self->stride);
+  THLongStorage_rawCopy(stride, THTensor_getStridePtr(self));
   return stride;
 }
 
@@ -70,8 +70,8 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
                            tensor->storage,
                            tensor->storageOffset,
                            tensor->dim(),
-                           tensor->size,
-                           tensor->stride);
+                           THTensor_getSizePtr(tensor),
+                           THTensor_getStridePtr(tensor));
   return self;
 }
 
@@ -218,8 +218,8 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage
   ptrdiff_t numel = THCTensor_(nElement)(state, tensor);
   THCTensor *self = THCTensor_(new)(state);
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
-  auto stride = THTensor_compute_stride(at::IntList(tensor->size, tensor->dim()),
-                                        at::IntList(tensor->stride, tensor->dim()),
+  auto stride = THTensor_compute_stride(tensor->sizes(),
+                                        tensor->strides(),
                                         at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
@@ -379,7 +379,7 @@ void THCTensor_(narrow)(THCState *state, THCTensor *self, THCTensor *src, int di
   if(firstIndex > 0)
     self->storageOffset += firstIndex*self->stride[dimension];
 
-  self->size[dimension] = size;
+  THTensor_setSizeAtDim(self, dimension, size);
 }
 
 void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int dimension, int64_t sliceIndex)
@@ -399,10 +399,10 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
   THCTensor_(narrow)(state, self, NULL, dimension, sliceIndex, 1);
   for(d = dimension; d < self->dim()-1; d++)
   {
-    self->size[d] = self->size[d+1];
+    THTensor_setSizeAtDim(self, d, self->size[d+1]);
     self->stride[d] = self->stride[d+1];
   }
-  self->dim_--;
+  THTensor_resizeDim(self, self->dim_ - 1);
 }
 
 void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int dimension1, int dimension2)
@@ -424,14 +424,12 @@ void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int
   self->stride[dimension1] = self->stride[dimension2];
   self->stride[dimension2] = z;
   z = self->size[dimension1];
-  self->size[dimension1] = self->size[dimension2];
-  self->size[dimension2] = z;
+  THTensor_setSizeAtDim(self, dimension1, self->size[dimension2]);
+  THTensor_setSizeAtDim(self, dimension2, z);
 }
 
 void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int dimension, int64_t size, int64_t step)
 {
-  int64_t *newSize;
-  int64_t *newStride;
   int d;
 
   if(!src)
@@ -446,8 +444,8 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
 
   THCTensor_(set)(state, self, src);
 
-  newSize = (int64_t*)THAlloc(sizeof(int64_t)*(self->dim()+1));
-  newStride = (int64_t*)THAlloc(sizeof(int64_t)*(self->dim()+1));
+  std::vector<int64_t> newSize(self->dim() + 1);
+  std::vector<int64_t> newStride(self->dim() + 1);
 
   newSize[self->dim()] = size;
   newStride[self->dim()] = self->stride[dimension];
@@ -465,12 +463,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
     }
   }
 
-  THFree(self->size);
-  THFree(self->stride);
-
-  self->size = newSize;
-  self->stride = newStride;
-  self->dim_++;
+  THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
 }
 
 /* we have to handle the case where the result is a number */
@@ -490,7 +483,7 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
     {
       if(d != ndim)
       {
-        self->size[ndim] = src->size[d];
+        THTensor_setSizeAtDim(self, ndim, src->size[d]);
         self->stride[ndim] = src->stride[d];
       }
       ndim++;
@@ -501,11 +494,11 @@ void THCTensor_(squeeze)(THCState *state, THCTensor *self, THCTensor *src)
   /* right now, we do not handle 0-dimension tensors */
   if(ndim == 0 && src->dim() > 0)
   {
-    self->size[0] = 1;
+    THTensor_setSizeAtDim(self, 0, 1);
     self->stride[0] = 1;
     ndim = 1;
   }
-  self->dim_ = ndim;
+  THTensor_resizeDim(self, ndim);
 }
 #endif
 
