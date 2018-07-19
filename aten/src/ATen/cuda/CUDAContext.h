@@ -33,61 +33,32 @@ manage their own state. There is only a single CUDA context/state.
 */
 
 /* Device info */
-AT_API inline int64_t getNumGPUs() {
-  int count;
-  AT_CUDA_CHECK(cudaGetDeviceCount(&count));
-  return count;
-}
+AT_API int64_t getNumGPUs();
 
-AT_API inline int64_t current_device() {
-  int cur_device;
-  AT_CUDA_CHECK(cudaGetDevice(&cur_device));
-  return cur_device;
-}
+AT_API int64_t current_device();
 
 AT_API cudaDeviceProp* getCurrentDeviceProperties();
 
 AT_API cudaDeviceProp* getDeviceProperties(int64_t device);
 
 /* Streams */
-AT_API inline CUDAStream createCUDAStream() {
-  return detail::CUDAStream_createAndRetainWithOptions(
-    CUDAStream::DEFAULT_FLAGS
-  , CUDAStream::DEFAULT_PRIORITY
-  );
-}
+AT_API CUDAStream createCUDAStream();
 
-AT_API inline CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority) {
-  return detail::CUDAStream_createAndRetainWithOptions(flags, priority);
-}
+AT_API CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority);
 
-AT_API inline CUDAStream getDefaultCUDAStream() {
-  return detail::CUDAStream_getDefaultStream();
-}
+AT_API CUDAStream getDefaultCUDAStream();
 
-AT_API inline CUDAStream getDefaultCUDAStreamOnDevice(int64_t device) {
-  return detail::CUDAStream_getDefaultStreamOnDevice(device);
-}
+AT_API CUDAStream getDefaultCUDAStreamOnDevice(int64_t device);
 
-AT_API inline CUDAStream getCurrentCUDAStream() {
-  return detail::CUDAStream_getAndRetainCurrentStream();
-}
+AT_API CUDAStream getCurrentCUDAStream();
 
-AT_API inline CUDAStream getCurrentCUDAStreamOnDevice(int64_t device) {
-  return detail::CUDAStream_getAndRetainCurrentStreamOnDevice(device);
-}
+AT_API CUDAStream getCurrentCUDAStreamOnDevice(int64_t device);
 
-AT_API inline void setCurrentCUDAStream(CUDAStream stream) {
-  return detail::CUDAStream_setStream(stream.internals());
-}
+AT_API void setCurrentCUDAStream(CUDAStream stream);
 
-AT_API inline void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) {
-  return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
-}
+AT_API void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream);
 
-AT_API inline void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) {
-  return detail::CUDAStream_uncheckedSetStreamOnDevice(device, stream.internals());
-}
+AT_API void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream);
 
 /* Handles */
 #ifndef __HIP_PLATFORM_HCC__
