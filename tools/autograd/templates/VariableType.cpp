@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/autograd/functions/utils.h"
 
 #include <array>
 #include <cstddef>
@@ -327,26 +328,6 @@ static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tens
   return tensors;
 }
 
-struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
-  bool out = false;
-  using IterArgs<ComputeRequiresGrad>::operator();
-  void operator()(const at::Tensor& tensor) {
-    const auto& var = static_cast<const Variable&>(tensor);
-    if (var.defined() && var.requires_grad()) {
-      out = true;
-    }
-  }
-  bool short_circuit() { return out; }
-};
-
-template<typename... Args>
-static bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
-  }
-  return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
-}
-
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
   auto& var = static_cast<const Variable&>(tensor);
   if (var.defined() && var.requires_grad()) {
@@ -387,20 +368,6 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
-      } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
-      }
-    }
-  }
-}
-
-static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn) {
-    for (auto& var : vars) {
-      if (var.defined()) {
-        // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
-        const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
       }
