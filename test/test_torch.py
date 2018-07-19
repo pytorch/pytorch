@@ -5796,6 +5796,33 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([0]).scatter_add_(0, b_, a), a_)
         self.assertEqual(torch.tensor([0]).scatter_add_(0, b, a_), a_)
         self.assertEqual(torch.tensor([0]).scatter_add_(0, b_, a_), a_)
+    
+    def test_gather_broadcast(self):
+        x = torch.randn(4, 5, 6, 1)
+        i1 = torch.randint(5, (1, 2, 6, 7))
+        i2 = i1.squeeze()
+        i_expand = i1.expand(4, 2, 6, 7)
+        x_expand = x.expand(4, 5, 6, 7)
+        expected = x_expand.gather(1, i_expand)
+        self.assertEqual(x.gather(1, i1), expected)
+        self.assertEqual(x.gather(1, i2), expected)
+        self.assertEqual(x.gather(1, i_expand), expected)
+        self.assertEqual(x_expand.gather(1, i1), expected)
+        self.assertEqual(x_expand.gather(1, i2), expected)
+
+    def test_scatter_broadcast(self):
+        x = torch.randn(4, 2, 6, 1)
+        y = torch.empty(4, 5, 6, 7)
+        i1 = torch.randint(5, (1, 2, 6, 7))
+        i2 = i1.squeeze()
+        i_expand = i1.expand(4, 2, 6, 7)
+        x_expand = x.expand(4, 2, 6, 7)
+        expected = y.clone().scatter_(1, i_expand, x_expand)
+        self.assertEqual(y.scatter_(1, i1, x), expected)
+        self.assertEqual(y.scatter_(1, i2, x), expected)
+        self.assertEqual(y.scatter_(1, i_expand, x), expected)
+        self.assertEqual(y.scatter_(1, i1, x_expand), expected)
+        self.assertEqual(y.scatter_(1, i2, x_expand), expected)
 
     @staticmethod
     def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True):
