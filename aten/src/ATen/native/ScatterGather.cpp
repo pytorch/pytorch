@@ -26,8 +26,8 @@ namespace native{
 
 namespace {
 
-std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntList tensor, IntList index, int64_t &dim) {
-  auto dimsA = tensor.size();
+std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntList self, IntList index, int64_t &dim) {
+  auto dimsA = self.size();
   auto dimsB = index.size();
   ptrdiff_t ndim = std::max(dimsA, dimsB);
   dim = maybe_wrap_dim(dim, ndim);
@@ -38,7 +38,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
     long offset = ndim - 1 - i;
     long dimA = dimsA - 1 - offset;
     long dimB = dimsB - 1 - offset;
-    long sizeA = (dimA >= 0) ? tensor[dimA] : 1;
+    long sizeA = (dimA >= 0) ? self[dimA] : 1;
     long sizeB = (dimB >= 0) ? index[dimB] : 1;
 
     if (i == dim) {
@@ -47,7 +47,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
     } else {
       AT_CHECK(
           sizeA == sizeB || sizeA == 1 || sizeB == 1,
-          "The size of tensor (", sizeA,
+          "The size of self (", sizeA,
           ") must match the size of tensor index (", sizeB,
           ") at non-singleton dimension ", i);
 
@@ -75,9 +75,9 @@ inline std::tuple<Tensor, Tensor> gather_expand(const Tensor &to_expand1, const 
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t> > scatter_infer_size(IntList self, IntList index, IntList src, int64_t &dim) {
-  auto dimsA = tensor.size();
+  auto dimsA = self.size();
   auto dimsB = index.size();
-  auto dimsC = index.size();
+  auto dimsC = src.size();
   ptrdiff_t ndim = std::max({dimsA, dimsB, dimsC});
   dim = maybe_wrap_dim(dim, ndim);
   std::vector<int64_t> expandedSizesB(ndim);
@@ -88,7 +88,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > scatter_infer_size(IntLi
     long dimA = dimsA - 1 - offset;
     long dimB = dimsB - 1 - offset;
     long dimC = dimsC - 1 - offset;
-    long sizeA = (dimA >= 0) ? tensor[dimA] : 1;
+    long sizeA = (dimA >= 0) ? self[dimA] : 1;
     long sizeB = (dimB >= 0) ? index[dimB] : 1;
     long sizeC = (dimC >= 0) ? src[dimC] : 1;
 
