@@ -2106,5 +2106,29 @@ PYTORCH_SPECIFIC_MAPPINGS = {
     "define MAX_NUM_BLOCKS 200": ("define MAX_NUM_BLOCKS 64", API_PYTORCH),
 }
 
+CAFFE2_SPECIFIC_MAPPINGS = {
+     "CUDA" :("HIP", API_CAFFE2),
+     "REGISTER_CUDA_OPERATOR" : ("REGISTER_HIP_OPERATOR", API_CAFFE2),
+     "cuda_stream" : ("hip_stream", API_CAFFE2),
+     "context_gpu" : ("hip/context_hip", API_CAFFE2),
+     "common_gpu"  : ("hip/common_hip", API_CAFFE2),
+     "mixed_utils" : ("hip/mixed_utils_hip", API_CAFFE2),
+     "operator_fallback_gpu" : ("hip/operator_fallback_hip", API_CAFFE2),
+     "recurrent_network_executor_gpu" : ("hip/recurrent_network_executor_hip", API_CAFFE2),
+     "max_pool_with_index_gpu": ("hip/max_pool_with_index_hip", API_CAFFE2),
+     "CUDA_1D_KERNEL_LOOP" : ("HIP_1D_KERNEL_LOOP", API_CAFFE2),
+     "CUDAContext" : ("HIPContext", API_CAFFE2),
+     "CAFFE_CUDA_NUM_THREADS" : ("CAFFE_HIP_NUM_THREADS", API_CAFFE2),
+     "HasCudaGPU" : ("HasHipGPU", API_CAFFE2),
+     "__expf" : ("expf", API_CAFFE2),
+     "CUBLAS_ENFORCE" : ("ROCBLAS_ENFORCE", API_CAFFE2),
+     "cublas_handle" : ("rocblas_handle", API_CAFFE2),
+     "CURAND_ENFORCE" :("HIPRAND_ENFORCE", API_CAFFE2),
+     "curandGenerateUniform" : ("hiprandGenerateUniform", API_CAFFE2),
+     "curand_generator" : ("hiprand_generator", API_CAFFE2),
+     "set_cuda_gpu_id" : ("set_hip_gpu_id", API_CAFFE2),
+     "CaffeCudaGetDevice" : ("CaffeHipGetDevice", API_CAFFE2),
+}
+
 CUDA_TO_HIP_MAPPINGS = [CUDA_TYPE_NAME_MAP, CUDA_IDENTIFIER_MAP,
-                        CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, PYTORCH_SPECIFIC_MAPPINGS]
+                        CUDA_INCLUDE_MAP, CUDA_SPARSE_MAP, PYTORCH_SPECIFIC_MAPPINGS, CAFFE2_SPECIFIC_MAPPINGS]

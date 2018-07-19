@@ -251,7 +251,8 @@ def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
 
 cpu_do = caffe2_pb2.DeviceOption()
 gpu_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
-device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
+device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else []) + ([hip_do] if workspace.has_hip_support else [])
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
     [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
