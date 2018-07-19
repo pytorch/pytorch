@@ -578,6 +578,13 @@ Value* Graph::insertConstant(T value) {
   return n->output();
 }
 
+// This is necessary, because integral literals are of type int by default,
+// and will dispatch to this function.
+template<>
+Value * Graph::insertConstant(int value) {
+  return insertConstant(static_cast<int64_t>(value));
+}
+
 template Value* Graph::insertConstant(int64_t value);
 template Value* Graph::insertConstant(double value);
 template Value* Graph::insertConstant(at::Tensor value);
