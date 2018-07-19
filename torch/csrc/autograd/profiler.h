@@ -17,6 +17,7 @@
 #include "ATen/ATen.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #ifdef USE_CUDA
+#include "ATen/cuda/CUDAContext.h"
 #include <cuda_runtime.h>
 #endif
 
@@ -51,7 +52,7 @@ struct Event {
     if(record_cuda) {
       TORCH_CUDA_CHECK(cudaGetDevice(&device_));
       TORCH_CUDA_CHECK(cudaEventCreate(&event));
-      auto stream = at::globalContext().getCurrentCUDAStream();
+      auto stream = at::cuda::getCurrentCUDAStream();
       cpu_ns_ = getTime();
       TORCH_CUDA_CHECK(cudaEventRecord(event, stream));
     } else {

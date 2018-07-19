@@ -10,6 +10,8 @@
 #include <THC/THC.h>
 
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAGuard.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/optional.h>
 
 #include <cstddef>
@@ -143,7 +145,7 @@ std::vector<at::Tensor> scatter(
   } else {
     chunks = tensor.chunk(/*chunks=*/devices.size(), /*dim=*/dim);
   }
-  at::CUDAGuard cuda_guard;
+  at::cuda::CUDAGuard cuda_guard;
   for (size_t chunk = 0; chunk < chunks.size(); ++chunk) {
     const auto device_index = static_cast<int32_t>(devices[chunk]);
     if (streams) {
@@ -153,7 +155,7 @@ std::vector<at::Tensor> scatter(
           chunk, " (was ", THCStream_device((*streams)[chunk]), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(CUDAStream((*streams)[chunk], /*retain=*/true));
+      cuda_guard.set_stream(at::cuda::CUDAStream((*streams)[chunk], /*retain=*/true));
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::kCUDA, device_index}, /*non_blocking=*/true);
