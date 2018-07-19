@@ -5,9 +5,9 @@
 #ifdef WITH_MPI
 #include "data_channels/DataChannelMPI.hpp"
 #endif // WITH_MPI
-#if defined(WITH_CUDA) && defined(WITH_DISTRIBUTED_NCCL)
+#if defined(USE_CUDA) && defined(USE_DISTRIBUTED_NCCL)
 #include "data_channels/DataChannelNccl.hpp"
-#endif // WITH_DISTRIBUTED_NCCL
+#endif // USE_DISTRIBUTED_NCCL
 #include "data_channels/DataChannelTCP.hpp"
 
 #include <algorithm>
@@ -43,7 +43,7 @@ DataChannel* DataChannel::newChannel(THDChannelType type, std::string init_metho
       );
 
     case THDChannelNccl:
-#if defined(WITH_CUDA) && defined(WITH_DISTRIBUTED_NCCL)
+#if defined(USE_CUDA) && defined(USE_DISTRIBUTED_NCCL)
       return new DataChannelNccl(GET_CONFIG);
 #endif
       throw std::runtime_error(
@@ -76,7 +76,7 @@ DataChannel::Group::Group(std::vector<rank_type> ranks, rank_type max_rank)
   }
 
   _new2old.reserve(ranks.size());
-  for (std::size_t i = 0; i < ranks.size(); ++i) {
+  for (size_t i = 0; i < ranks.size(); ++i) {
     _new2old.push_back(ranks[i]);
     _old2new.insert({ranks[i], i});
   }

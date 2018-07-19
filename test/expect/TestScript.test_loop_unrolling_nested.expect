@@ -1,0 +1,44 @@
+graph(%x : Dynamic) {
+  %y.1 : Dynamic = ^FIXME_zerol()()
+  %2 : int = prim::Constant[value={10}]()
+  %3 : Byte() = prim::Constant[value={1}]()
+  %y : Dynamic = prim::Loop(%2, %3, %y.1)
+    block0(%i : Dynamic, %6 : Dynamic) {
+      %7 : Byte() = prim::Constant[value={1}]()
+      %8 : Long() = prim::Constant[value={0}]()
+      %9 : Dynamic = aten::div[other={8}](%x)
+      %10 : Dynamic = aten::mul[other={8}](%9)
+      %11 : Dynamic = aten::sub[alpha={1}](%x, %10)
+      %12 : Dynamic, %y.4 : Dynamic = prim::Loop(%9, %7, %8, %6)
+        block0(%j.1 : Dynamic, %15 : Dynamic, %16 : Dynamic) {
+          %y.13 : Dynamic = aten::add[alpha={1}](%16, %15)
+          %18 : Dynamic = aten::add[alpha={1}, other={1}](%15)
+          %y.6 : Dynamic = aten::add[alpha={1}](%y.13, %18)
+          %20 : Dynamic = aten::add[alpha={1}, other={1}](%18)
+          %y.7 : Dynamic = aten::add[alpha={1}](%y.6, %20)
+          %22 : Dynamic = aten::add[alpha={1}, other={1}](%20)
+          %y.8 : Dynamic = aten::add[alpha={1}](%y.7, %22)
+          %24 : Dynamic = aten::add[alpha={1}, other={1}](%22)
+          %y.9 : Dynamic = aten::add[alpha={1}](%y.8, %24)
+          %26 : Dynamic = aten::add[alpha={1}, other={1}](%24)
+          %y.10 : Dynamic = aten::add[alpha={1}](%y.9, %26)
+          %28 : Dynamic = aten::add[alpha={1}, other={1}](%26)
+          %y.11 : Dynamic = aten::add[alpha={1}](%y.10, %28)
+          %30 : Dynamic = aten::add[alpha={1}, other={1}](%28)
+          %y.12 : Dynamic = aten::add[alpha={1}](%y.11, %30)
+          %32 : Byte() = prim::Constant[value={1}]()
+          %33 : Dynamic = aten::add[alpha={1}, other={1}](%30)
+          -> (%32, %33, %y.12)
+        }
+      %34 : Dynamic, %y.3 : Dynamic = prim::Loop(%11, %7, %12, %y.4)
+        block0(%j : Dynamic, %37 : Dynamic, %38 : Dynamic) {
+          %y.5 : Dynamic = aten::add[alpha={1}](%38, %37)
+          %40 : Byte() = prim::Constant[value={1}]()
+          %41 : Dynamic = aten::add[alpha={1}, other={1}](%37)
+          -> (%40, %41, %y.5)
+        }
+      %42 : Byte() = prim::Constant[value={1}]()
+      -> (%42, %y.3)
+    }
+  return (%y);
+}

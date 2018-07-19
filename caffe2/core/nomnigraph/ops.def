@@ -1,0 +1,98 @@
+macro - CONV_ATTRS
+- KernelShape : vector<int>
+- Pads : vector<int> : {0, 0}
+- Strides : vector<int> : {1, 1}
+- Group : int : 1
+- Dilations: vector<int> : {1, 1}
+endmacro
+
+macro - POOL_ATTRS
+- KernelShape : vector<int>
+- Pads : vector<int> : {0, 0}
+- Strides : vector<int> : {1, 1}
+endmacro
+
+Relu
+
+Conv
+- CONV_ATTRS
+
+ConvRelu : Conv
+- CONV_ATTRS
+
+ConvTranspose
+- CONV_ATTRS
+
+AveragePool
+- POOL_ATTRS
+
+AveragePoolRelu : AveragePool
+- POOL_ATTRS
+
+MaxPool
+- POOL_ATTRS
+
+MaxPoolRelu : MaxPool
+- POOL_ATTRS
+
+Sum
+
+SumRelu : Sum
+
+Send
+- Destination : string
+
+Receive
+- Source : string
+
+BatchNormalization
+- Epsilon : float : 1e-5f
+- Momentum : float : 0.9f
+- Spatial : bool : true
+- IsTest : bool : false
+
+
+FC
+GivenTensorFill
+Concat
+- Axis : int : -1
+- AddAxis : bool : false
+Softmax
+ChannelShuffle
+Add
+Reshape
+Flatten
+
+CopyToOpenCL
+CopyFromOpenCL
+
+NCHW2NHWC
+NHWC2NCHW
+
+Int8Quantize
+Int8Dequantize
+Int8AveragePool : AveragePool
+Int8Conv : Conv
+Int8ConvTranspose : ConvTranspose
+Int8FC : FC
+Int8MaxPool : MaxPool
+Int8Relu : Relu
+Int8GivenTensorFill : GivenTensorFill
+Int8Concat : Concat
+Int8Softmax : Softmax
+Int8ChannelShuffle : ChannelShuffle
+Int8Sum : Sum
+Int8Add : Add
+Int8Reshape : Reshape
+Int8Flatten : Flatten
+Int8ConvRelu : ConvRelu
+Int8SumRelu : SumRelu
+Int8AveragePoolRelu : AveragePoolRelu
+Int8MaxPoolRelu : MaxPoolRelu
+
+BatchMatMul
+- TransA : bool : false
+- TransB : bool : true
+- Broadcast: bool : false
+BatchGather
+ConcatBatchMatMulBatchGatherOp

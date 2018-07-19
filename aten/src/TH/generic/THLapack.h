@@ -22,19 +22,19 @@ TH_API void THLapack_(getri)(int n, real *a, int lda, int *ipiv, real *work, int
 
 /* Positive Definite matrices */
 /* Cholesky factorization */
-void THLapack_(potrf)(char uplo, int n, real *a, int lda, int *info);
+TH_API void THLapack_(potrf)(char uplo, int n, real *a, int lda, int *info);
 /* Matrix inverse based on Cholesky factorization */
-void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info);
+TH_API void THLapack_(potri)(char uplo, int n, real *a, int lda, int *info);
 /* Solve A*X = B with a symmetric positive definite matrix A using the Cholesky factorization */
-void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int ldb, int *info);
+TH_API void THLapack_(potrs)(char uplo, int n, int nrhs, real *a, int lda, real *b, int ldb, int *info);
 /* Cholesky factorization with complete pivoting. */
-void THLapack_(pstrf)(char uplo, int n, real *a, int lda, int *piv, int *rank, real tol, real *work, int *info);
+TH_API void THLapack_(pstrf)(char uplo, int n, real *a, int lda, int *piv, int *rank, real tol, real *work, int *info);
 
 /* QR decomposition */
-void THLapack_(geqrf)(int m, int n, real *a, int lda, real *tau, real *work, int lwork, int *info);
+TH_API void THLapack_(geqrf)(int m, int n, real *a, int lda, real *tau, real *work, int lwork, int *info);
 /* Build Q from output of geqrf */
-void THLapack_(orgqr)(int m, int n, int k, real *a, int lda, real *tau, real *work, int lwork, int *info);
+TH_API void THLapack_(orgqr)(int m, int n, int k, real *a, int lda, real *tau, real *work, int lwork, int *info);
 /* Multiply Q with a matrix from output of geqrf */
-void THLapack_(ormqr)(char side, char trans, int m, int n, int k, real *a, int lda, real *tau, real *c, int ldc, real *work, int lwork, int *info);
+TH_API void THLapack_(ormqr)(char side, char trans, int m, int n, int k, real *a, int lda, real *tau, real *c, int ldc, real *work, int lwork, int *info);
 
 #endif

@@ -19,7 +19,7 @@ class Index(Module):
         t = input[0]
         index = input[1]
 
-        gradInput = self.gradInput[0]  # no gradient for the index variable
+        gradInput = self.gradInput[0]  # no gradient for the index tensor
         gradInput.resize_as_(t).zero_()
         gradInput.index_add_(self.dimension, index, gradOutput)
         return self.gradInput

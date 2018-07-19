@@ -19,13 +19,13 @@ void THNN_(ELU_updateOutput)(
 
   if (inplace)
   {
-    THC_pointwiseApply1(state, input, ELUupdateOutputIP_functor<real>(negcoef, poscoef));
+    THC_pointwiseApply1<real>(state, input, ELUupdateOutputIP_functor<real>(negcoef, poscoef));
     THCTensor_(set)(state, output, input);
   }
   else
   {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply2(state, output, input, ELUupdateOutput_functor<real>(negcoef, poscoef));
+    THC_pointwiseApply2<real, real>(state, output, input, ELUupdateOutput_functor<real>(negcoef, poscoef));
   }
 }
 
@@ -44,7 +44,7 @@ void THNN_(ELU_updateGradInput)(
   THCUNN_assertSameGPU(state, 3, output, gradOutput, gradInput);
 
   THCTensor_(resizeAs)(state, gradInput, output);
-  THC_pointwiseApply3(state, gradInput, output, gradOutput, ELUupdateGradInput_functor<real>(negcoef, poscoef));
+  THC_pointwiseApply3<real, real, real>(state, gradInput, output, gradOutput, ELUupdateGradInput_functor<real>(negcoef, poscoef));
 }
 
 #endif

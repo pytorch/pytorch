@@ -18,19 +18,35 @@ static inline void THNN_(Col2Im_shapeCheck)(
              "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
   int ndim = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, ndim == 2 || ndim == 3, 2, input,
-                  "2D or 3D input tensor expected but got %s");
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 2 || ndim == 3), 2, input,
+                  "Expected non-empty 2D or 3D input tensor, but got input of shape %s");
 
-  int batch_dim = (ndim == 4) ? 0 : -1;
-  long nInputPlane  = input->size[batch_dim + 1];
-  long inputLength  = input->size[batch_dim + 2];
+  int batch_dim = (ndim == 3) ? 0 : -1;
+  int64_t nInputPlane  = input->size[batch_dim + 1];
 
-  long nOutputPlane = nInputPlane / (kW * kH);
+  if (nInputPlane % (kW * kH) != 0) {
+    THError("Expected size of input's dimension 1 to be divisible by the "
+            "product of kernel_size, but got input.size(1)=%lld and "
+            "kernel_size=(%d, %d).", (long long) nInputPlane, kH, kW);
+  }
+
+  int64_t inputLength  = input->size[batch_dim + 2];
+  int64_t nBlocksH = 1 + (outputHeight + 2 * padH - dH * (kH - 1) - 1) / sH;
+  int64_t nBlocksW = 1 + ( outputWidth + 2 * padW - dW * (kW - 1) - 1) / sW;
+
+  if (inputLength != (nBlocksH * nBlocksW)) {
+    THError("Given output_size=(%d, %d), kernel_size=(%d, %d), "
+            "dilation=(%d, %d), padding=(%d, %d), stride=(%d, %d), expected "
+            "size of input's dimension 2 to match the calculated number of "
+            "sliding blocks %lld * %lld = %lld, but got input.size(2)=%lld.",
+            outputHeight, outputWidth, kH, kW, dH, dW, padH, padW, sH, sW,
+            (long long) nBlocksH, (long long) nBlocksW,
+            (long long) (nBlocksH * nBlocksW), (long long) inputLength);
+  }
 
   if (outputWidth < 1 || outputHeight < 1) {
-    THError("Given input size: (%lld x %lld). "
-            "Calculated output size: (%lld x %d x %d). Output size is too small",
-            (long long)nInputPlane, (long long)inputLength, (long long)nOutputPlane, outputHeight, outputWidth);
+    THError("Expected output spatial size to be positive, but got: output_size=(%d, %d).",
+            outputHeight, outputWidth);
   }
 }
 
@@ -50,15 +66,15 @@ void THNN_(Col2Im_updateOutput)(
                            kH, kW, dH, dW, padH, padW, sH, sW);
 
   bool batched_input = true;
-  if (input->nDimension == 2) {
+  if (input->dim() == 2) {
       // Force batch
       batched_input = false;
       THCTensor_(resize3d)(state, input, 1, input->size[0], input->size[1]);
   }
 
-  long batchSize = input->size[0];
-  long nInputPlane = input->size[1];
-  long nOutputPlane = nInputPlane / (kW * kH);
+  int64_t batchSize = input->size[0];
+  int64_t nInputPlane = input->size[1];
+  int64_t nOutputPlane = nInputPlane / (kW * kH);
 
   input = THCTensor_(newContiguous)(state, input);
 

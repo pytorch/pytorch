@@ -1,56 +1,56 @@
 #pragma once
+
 #include <ATen/ATen.h>
-#include <ATen/Parallel.h>
 #include <stdexcept>
 #include "CapabilityDispatch.h"
 
 namespace at { namespace native {
 
-template <CPUCapability C>
-struct ceilImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct floorImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct roundImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct truncImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
-template <CPUCapability C>
-struct sqrtImplC {
-  static void function(Tensor& result, const Tensor& self);
-};
+using unary_fn = void(*)(Tensor&, const Tensor&);
+
+extern DispatchStub<unary_fn> absImpl;
+extern DispatchStub<unary_fn> acosImpl;
+extern DispatchStub<unary_fn> asinImpl;
+extern DispatchStub<unary_fn> atanImpl;
+extern DispatchStub<unary_fn> ceilImpl;
+extern DispatchStub<unary_fn> cosImpl;
+// extern DispatchStub<unary_fn> coshImpl;
+extern DispatchStub<unary_fn> erfImpl;
+extern DispatchStub<unary_fn> erfcImpl;
+extern DispatchStub<unary_fn> expImpl;
+extern DispatchStub<unary_fn> expm1Impl;
+extern DispatchStub<unary_fn> floorImpl;
+extern DispatchStub<unary_fn> logImpl;
+extern DispatchStub<unary_fn> log10Impl;
+extern DispatchStub<unary_fn> log1pImpl;
+extern DispatchStub<unary_fn> log2Impl;
+extern DispatchStub<unary_fn> roundImpl;
+extern DispatchStub<unary_fn> rsqrtImpl;
+extern DispatchStub<unary_fn> sigmoidImpl;
+extern DispatchStub<unary_fn> sinImpl;
+// extern DispatchStub<unary_fn> sinhImpl;
+extern DispatchStub<unary_fn> sqrtImpl;
+extern DispatchStub<unary_fn> tanImpl;
+extern DispatchStub<unary_fn> tanhImpl;
+extern DispatchStub<unary_fn> truncImpl;
+
 
 // Missing unary functions
-// TODO: Add generic apply function for contiguous and non-contiguous tensors
-// The goal here is to move more ops entirely into ATen and take advantage of
-// automatic vectorization with file-specific flags
-// acos
-// asin
-// atan
-// cos
-// cosh
 // digamma
-// erf
-// erfinv
-// exp
-// expm1
-// frac
 // lgamma
-// log1p
-// log
-// rsqrt
+
+// TODO: See below
+// erfinv
+// fill
+// frac
+// clone
+// contiguous
+// clamp/_min/_max
+// neg
+// reciprocal
 // sigmoid
-// sin
-// sinh
-// tan
-// tanh
-// trunc
+// sign
+// zero
+
 
 }} // namespace at::native

@@ -1,4 +1,4 @@
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 
 #include <stdbool.h>
 #include <unordered_map>
@@ -8,7 +8,7 @@
 #include <TH/TH.h>
 #include <ATen/ATen.h>
 #include <THC/THCCachingAllocator.h>
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
 #include <nccl.h>
 #endif
 
@@ -62,30 +62,6 @@ PyObject * THCPModule_getDeviceCount_wrap(PyObject *self)
     ndevice = 0;
   }
   return PyLong_FromLong(ndevice);
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_getDeviceName_wrap(PyObject *self, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceName");
-  long device = THPUtils_unpackLong(arg);
-
-  cudaDeviceProp prop;
-  THCudaCheck(cudaGetDeviceProperties(&prop, device));
-  return THPUtils_packString(prop.name);
-  END_HANDLE_TH_ERRORS
-}
-
-PyObject * THCPModule_getDeviceCapability_wrap(PyObject *self, PyObject *arg)
-{
-  HANDLE_TH_ERRORS
-  THPUtils_assert(THPUtils_checkLong(arg), "invalid argument to getDeviceCapability");
-  long device = THPUtils_unpackLong(arg);
-
-  cudaDeviceProp prop;
-  THCudaCheck(cudaGetDeviceProperties(&prop, device));
-  return Py_BuildValue("(ii)", prop.major, prop.minor);
   END_HANDLE_TH_ERRORS
 }
 
@@ -265,8 +241,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  auto device_allocator = THCState_getDeviceAllocator(state);
-  THCudaCheck(device_allocator->emptyCache(device_allocator->state));
+  THCCachingAllocator_emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -389,7 +364,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
 #include "python_nccl.h"
 
 void THCPModule_useNccl()
@@ -413,8 +388,6 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_setDevice",   (PyCFunction)THCPModule_setDevice_wrap,   METH_O,       NULL},
   {"_cuda_getDevice",   (PyCFunction)THCPModule_getDevice_wrap,   METH_NOARGS,  NULL},
   {"_cuda_getDeviceCount", (PyCFunction)THCPModule_getDeviceCount_wrap, METH_NOARGS, NULL},
-  {"_cuda_getDeviceName", (PyCFunction)THCPModule_getDeviceName_wrap, METH_O,   NULL},
-  {"_cuda_getDeviceCapability", (PyCFunction)THCPModule_getDeviceCapability_wrap, METH_O,   NULL},
   {"_cuda_getCurrentStream", (PyCFunction)THCPModule_getCurrentStream_wrap, METH_NOARGS, NULL},
   {"_cuda_getCurrentBlasHandle", (PyCFunction)THCPModule_getCurrentBlasHandle_wrap, METH_NOARGS, NULL},
   {"_cuda_setStream",    (PyCFunction)THCPModule_setStream_wrap,  METH_O, NULL},
@@ -438,7 +411,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  NULL},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  NULL},
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   {"_nccl_version", (PyCFunction)THCPModule_nccl_version, METH_NOARGS, NULL},
   {"_nccl_unique_id", (PyCFunction)THCPModule_nccl_unique_id, METH_NOARGS, NULL},
   {"_nccl_init_rank", (PyCFunction)THCPModule_nccl_init_rank, METH_VARARGS, NULL},

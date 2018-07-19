@@ -188,7 +188,7 @@ static void tensorCatArray(rpc::RPCMessage& raw_message) {
   at::Tensor result = unpackRetrieveTensor(raw_message);
   int numInputs = unpackInteger(raw_message);
   std::vector<at::Tensor> inputs(numInputs);
-  for (std::size_t i = 0; i < numInputs; i++)
+  for (size_t i = 0; i < numInputs; i++)
     inputs[i] = unpackRetrieveTensor(raw_message);
   int dimension = unpackInteger(raw_message);
   finalize(raw_message);
@@ -302,7 +302,9 @@ TENSOR_IMPLEMENT_LOGICAL(Ne,ne)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Abs,abs)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Sigmoid,sigmoid)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log,log)
+TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log10,log10)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log1p,log1p)
+TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Log2,log2)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Exp,exp)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Expm1,expm1)
 TENSOR_IMPLEMENT_POINTWISE_FUNCTION(Cos,cos)
@@ -554,7 +556,7 @@ static void tensorRand(rpc::RPCMessage& raw_message) {
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::rand_out(r, sizeRef, _generator);
   THLongStorage_free(size);
 }
@@ -564,7 +566,7 @@ static void tensorRandn(rpc::RPCMessage& raw_message) {
   at::Generator *_generator = unpackRetrieveGenerator(raw_message);
   THLongStorage *size = unpackTHLongStorage(raw_message);
   finalize(raw_message);
-  at::ArrayRef<int64_t> sizeRef(size->data, size->size);
+  at::ArrayRef<int64_t> sizeRef(THLongStorage_data(size), THLongStorage_size(size));
   at::randn_out(r, sizeRef, _generator);
   THLongStorage_free(size);
 }
@@ -589,7 +591,7 @@ static void tensorHistc(rpc::RPCMessage& raw_message) {
   }
 }
 
-static void tensorLogicalall(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAndAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
@@ -597,10 +599,28 @@ static void tensorLogicalall(rpc::RPCMessage& raw_message) {
   sendValueToMaster(response);
 }
 
-static void tensorLogicalany(rpc::RPCMessage& raw_message) {
+static void tensorLogicalAnyAll(rpc::RPCMessage& raw_message) {
   at::Tensor tensor = unpackRetrieveTensor(raw_message);
   finalize(raw_message);
 
   int64_t response = tensor.any().toCLong();
   sendValueToMaster(response);
+}
+
+static void tensorLogicalAnd(rpc::RPCMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
+  finalize(raw_message);
+  at::all_out(tensor, src, dimension, keepdim);
+}
+
+static void tensorLogicalAny(rpc::RPCMessage& raw_message) {
+  at::Tensor tensor = unpackRetrieveTensor(raw_message);
+  at::Tensor src = unpackRetrieveTensor(raw_message);
+  int dimension = unpackInteger(raw_message);
+  int keepdim = unpackInteger(raw_message);
+  finalize(raw_message);
+  at::any_out(tensor, src, dimension, keepdim);
 }

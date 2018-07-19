@@ -2,10 +2,25 @@ from .module import Module
 from .. import functional as F
 
 
-class Dropout(Module):
+class _DropoutNd(Module):
+
+    def __init__(self, p=0.5, inplace=False):
+        super(_DropoutNd, self).__init__()
+        if p < 0 or p > 1:
+            raise ValueError("dropout probability has to be between 0 and 1, "
+                             "but got {}".format(p))
+        self.p = p
+        self.inplace = inplace
+
+    def extra_repr(self):
+        inplace_str = ', inplace' if self.inplace else ''
+        return 'p={}{}'.format(self.p, inplace_str)
+
+
+class Dropout(_DropoutNd):
     r"""During training, randomly zeroes some of the elements of the input
-    tensor with probability *p* using samples from a bernoulli distribution.
-    The elements to zero are randomized on every forward call.
+    tensor with probability :attr:`p` using samples from a Bernoulli
+    distribution. The elements to zero are randomized on every forward call.
 
     This has proven to be an effective technique for regularization and
     preventing the co-adaptation of neurons as described in the paper
@@ -34,25 +49,11 @@ class Dropout(Module):
         detectors: https://arxiv.org/abs/1207.0580
     """
 
-    def __init__(self, p=0.5, inplace=False):
-        super(Dropout, self).__init__()
-        if p < 0 or p > 1:
-            raise ValueError("dropout probability has to be between 0 and 1, "
-                             "but got {}".format(p))
-        self.p = p
-        self.inplace = inplace
-
     def forward(self, input):
         return F.dropout(input, self.p, self.training, self.inplace)
 
-    def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + 'p=' + str(self.p) \
-            + inplace_str + ')'
 
-
-class Dropout2d(Module):
+class Dropout2d(_DropoutNd):
     r"""Randomly zeroes whole channels of the input tensor.
     The channels to zero-out are randomized on every forward call.
 
@@ -87,25 +88,11 @@ class Dropout2d(Module):
        http://arxiv.org/abs/1411.4280
     """
 
-    def __init__(self, p=0.5, inplace=False):
-        super(Dropout2d, self).__init__()
-        if p < 0 or p > 1:
-            raise ValueError("dropout probability has to be between 0 and 1, "
-                             "but got {}".format(p))
-        self.p = p
-        self.inplace = inplace
-
     def forward(self, input):
         return F.dropout2d(input, self.p, self.training, self.inplace)
 
-    def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + 'p=' + str(self.p) \
-            + inplace_str + ')'
 
-
-class Dropout3d(Module):
+class Dropout3d(_DropoutNd):
     r"""Randomly zeroes whole channels of the input tensor.
     The channels to zero are randomized on every forward call.
 
@@ -140,25 +127,11 @@ class Dropout3d(Module):
        http://arxiv.org/abs/1411.4280
     """
 
-    def __init__(self, p=0.5, inplace=False):
-        super(Dropout3d, self).__init__()
-        if p < 0 or p > 1:
-            raise ValueError("dropout probability has to be between 0 and 1, "
-                             "but got {}".format(p))
-        self.p = p
-        self.inplace = inplace
-
     def forward(self, input):
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
-    def __repr__(self):
-        inplace_str = ', inplace' if self.inplace else ''
-        return self.__class__.__name__ + '(' \
-            + 'p=' + str(self.p) \
-            + inplace_str + ')'
 
-
-class AlphaDropout(Module):
+class AlphaDropout(_DropoutNd):
     r"""Applies Alpha Dropout over the input.
 
     Alpha Dropout is a type of Dropout that maintains the self-normalizing
@@ -180,6 +153,8 @@ class AlphaDropout(Module):
 
     Args:
         p (float): probability of an element to be dropped. Default: 0.5
+        inplace (bool, optional): If set to ``True``, will do this operation
+            in-place
 
     Shape:
         - Input: `Any`. Input can be of any shape
@@ -194,16 +169,11 @@ class AlphaDropout(Module):
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
-    def __init__(self, p=0.5):
-        super(AlphaDropout, self).__init__()
-        if p < 0 or p > 1:
-            raise ValueError("dropout probability has to be between 0 and 1, "
-                             "but got {}".format(p))
-        self.p = p
-
     def forward(self, input):
         return F.alpha_dropout(input, self.p, self.training)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'p=' + str(self.p) + ')'
+
+class FeatureAlphaDropout(_DropoutNd):
+
+    def forward(self, input):
+        return F.feature_alpha_dropout(input, self.p, self.training)

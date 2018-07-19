@@ -2,24 +2,21 @@
 #define THC_GENERIC_FILE "generic/BCECriterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(BCECriterion_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           bool sizeAverage,
-           THCTensor *weights,
-           bool reduce)
+           int64_t reduction,
+           THCTensor *weights)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_nElement(state, input, weights);
   THCUNN_assertSameGPU(state, 3, input, target, weights);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply3(state, input, target, output,
+    THC_pointwiseApply3<real, real, real>(state, input, target, output,
         bce_updateOutput_no_reduce_functor<real, accreal>());
     if (weights) {
       THCTensor_(cmul)(state, output, output, weights);
@@ -32,7 +29,7 @@ void THNN_(BCECriterion_updateOutput)(
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);
-
+  THCThrustAllocator thrustAlloc(state);
   thrust::device_ptr<real> input_data(THCTensor_(data)(state, input));
   thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
 
@@ -41,6 +38,7 @@ void THNN_(BCECriterion_updateOutput)(
     weights = THCTensor_(newContiguous)(state, weights);
     thrust::device_ptr<real> weights_data(THCTensor_(data)(state, weights));
     sum = thrust::transform_reduce(
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data, target_data, weights_data)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data+size, target_data+size, weights_data+size)),
       bce_functor_weights<real, accreal>(),
@@ -50,6 +48,7 @@ void THNN_(BCECriterion_updateOutput)(
     THCTensor_(free)(state, weights);
   } else {
     sum = thrust::transform_reduce(
+      thrust::cuda::par(thrustAlloc).on(THCState_getCurrentStream(state)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data, target_data)),
       thrust::make_zip_iterator(thrust::make_tuple(input_data+size, target_data+size)),
       bce_functor<real, accreal>(),
@@ -58,7 +57,7 @@ void THNN_(BCECriterion_updateOutput)(
     );
   }
 
-  if (sizeAverage)
+  if (reduction == Reduction::ElementwiseMean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -73,9 +72,8 @@ void THNN_(BCECriterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
-           THCTensor *weights,
-           bool reduce)
+           int64_t reduction,
+           THCTensor *weights)
 {
   THCUNN_check_nElement(state, input, target);
   THCUNN_check_nElement(state, input, weights);
@@ -83,9 +81,9 @@ void THNN_(BCECriterion_updateGradInput)(
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCUNN_check_nElement(state, gradOutput, input);
-    THC_pointwiseApply3(state, input, target, gradInput,
+    THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
         bce_updateGradInput_no_reduce_functor<real, accreal>());
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     if (weights) {
@@ -97,7 +95,7 @@ void THNN_(BCECriterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  real norm = ScalarConvert<accreal, real>::to((sizeAverage ? accreal(1)/size : accreal(1)) * THCTensor_(get1d)(state, gradOutput, 0));
+  real norm = ScalarConvert<accreal, real>::to((reduction == Reduction::ElementwiseMean ? accreal(1)/size : accreal(1)) * THCTensor_(get1d)(state, gradOutput, 0));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

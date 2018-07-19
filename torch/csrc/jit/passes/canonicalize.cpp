@@ -4,7 +4,7 @@ namespace torch { namespace jit {
 
 // Canonicalize a graph, renumbering it so that all structurally equivalent
 // graphs have same numbers.
-void Canonicalize(std::shared_ptr<Graph>& graph) {
+std::shared_ptr<Graph> Canonicalize(const std::shared_ptr<Graph>& graph) {
   auto r = std::make_shared<Graph>(graph->scope_root());
   std::unordered_map<Value*, Value*> rn_env;
   auto rn_fn = [&](Value* v) { return rn_env.at(v); };
@@ -30,8 +30,7 @@ void Canonicalize(std::shared_ptr<Graph>& graph) {
   }
   r->setStage(graph->stage());
 
-  // NB: This could be easily adapted to give you a copy of a graph.
-  graph = r;
+  return r;
 
 }
 

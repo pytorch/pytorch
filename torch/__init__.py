@@ -8,9 +8,11 @@ It has a CUDA counterpart, that enables you to run your tensor computations
 on an NVIDIA GPU with compute capability >= 3.0.
 """
 
+import os
 import sys
 import platform
 from ._utils import _import_dotted_name
+from ._utils_internal import get_file_path, prepare_multiprocessing_environment
 from .version import __version__
 from ._six import string_classes as _string_classes
 
@@ -22,7 +24,7 @@ __all__ = [
     'DoubleStorage', 'FloatStorage', 'LongStorage', 'IntStorage',
     'ShortStorage', 'CharStorage', 'ByteStorage',
     'DoubleTensor', 'FloatTensor', 'LongTensor', 'IntTensor',
-    'ShortTensor', 'CharTensor', 'ByteTensor',
+    'ShortTensor', 'CharTensor', 'ByteTensor', 'Tensor',
 ]
 
 ################################################################################
@@ -129,49 +131,49 @@ def is_storage(obj):
 
 
 def set_default_tensor_type(t):
-    r"""Sets the default ``torch.Tensor`` type to type :attr:`t`.
+    r"""Sets the default ``torch.Tensor`` type to floating point tensor type
+    :attr:`t`. This type will also be used as default floating point type for
+    type inference in :func:`torch.tensor`.
+
+    The default floating point tensor type is initially ``torch.FloatTensor``.
 
     Args:
-        t (type or string): the tensor type or its name
+        t (type or string): the floating point tensor type or its name
 
     Example::
 
-        >>> torch.set_default_tensor_type("torch.FloatTensor")
-        >>> torch.Tensor([1.2, 3])
-
-         1.2000
-         3.0000
-        [torch.FloatTensor of size (2,)]
-
-        >>> torch.set_default_tensor_type(torch.double)
-        >>> torch.Tensor([1.2, 3])
-
-         1.2000
-         3.0000
-        [torch.DoubleTensor of size (2,)]
-
-        >>> torch.set_default_tensor_type(torch.cuda.uint8)
-        >>> torch.Tensor([2, 3])
-
-         2
-         3
-        [torch.cuda.ByteTensor of size (2,) (GPU 0)]
-
-        >>> torch.set_default_tensor_type(torch.cuda.LongTensor)
-        >>> torch.Tensor([3, 4])
-
-         3
-         4
-        [torch.cuda.LongTensor of size (2,) (GPU 0)]
+        >>> torch.tensor([1.2, 3]).dtype    # initial default for floating point is torch.float32
+        torch.float32
+        >>> torch.set_default_tensor_type(torch.DoubleTensor)
+        >>> torch.tensor([1.2, 3]).dtype    # a new floating point tensor
+        torch.float64
 
     """
-    if isinstance(t, globals()['dtype']):
-        _C._set_default_tensor_type(t)
-    else:
-        if not isinstance(t, _string_classes):
-            raise ValueError("t must be a string or a dtype, but got: {}".format(repr(t)))
-        Tensor = _import_dotted_name(t)
-        _C._set_default_tensor_type(Tensor)
+    if isinstance(t, _string_classes):
+        t = _import_dotted_name(t)
+    _C._set_default_tensor_type(t)
+
+
+def set_default_dtype(d):
+    r"""Sets the default floating point dtype to :attr:`d`. This type will be
+    used as default floating point type for type inference in
+    :func:`torch.tensor`.
+
+    The default floating point dtype is initially ``torch.float32``.
+
+    Args:
+        d (:class:`torch.dtype`): the floating point dtype to make the default
+
+    Example::
+
+        >>> torch.tensor([1.2, 3]).dtype           # initial default for floating point is torch.float32
+        torch.float32
+        >>> torch.set_default_dtype(torch.float64)
+        >>> torch.tensor([1.2, 3]).dtype           # a new floating point tensor
+        torch.float64
+
+    """
+    _C._set_default_dtype(d)
 
 from .random import set_rng_state, get_rng_state, manual_seed, initial_seed
 from .serialization import save, load
@@ -181,6 +183,7 @@ from ._tensor_str import set_printoptions
 # Define Storage and Tensor classes
 ################################################################################
 
+from .tensor import Tensor
 from .storage import _StorageBase
 
 
@@ -232,8 +235,8 @@ _tensor_classes = set()
 def manager_path():
     if platform.system() == 'Windows':
         return b""
-    import os
-    path = os.path.join(os.path.abspath(os.path.dirname(__file__)), 'lib', 'torch_shm_manager')
+    path = get_file_path('torch', 'lib', 'torch_shm_manager')
+    prepare_multiprocessing_environment(get_file_path('torch'))
     if not os.path.exists(path):
         raise RuntimeError("Unable to find torch_shm_manager at " + path)
     return path.encode('utf-8')
@@ -245,7 +248,6 @@ del manager_path
 
 for name in dir(_C._VariableFunctions):
     globals()[name] = getattr(_C._VariableFunctions, name)
-
 
 ################################################################################
 # Import interface functions defined in Python
@@ -283,6 +285,8 @@ import torch.jit
 import torch.random
 import torch.distributions
 import torch.testing
+import torch.backends.cuda
+import torch.backends.mkl
 from torch.autograd import no_grad, enable_grad, set_grad_enabled
 
 _C._init_names(list(torch._storage_classes))

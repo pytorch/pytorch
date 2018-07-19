@@ -14,13 +14,13 @@ ByteArray::ByteArray()
   : _data()
 {}
 
-ByteArray::ByteArray(std::size_t size)
+ByteArray::ByteArray(size_t size)
   : ByteArray()
 {
   _data.reserve(size);
 }
 
-ByteArray::ByteArray(const char* arr, std::size_t size)
+ByteArray::ByteArray(const char* arr, size_t size)
   : _data(arr, arr + size)
 {}
 
@@ -35,7 +35,7 @@ ByteArray::ByteArray(const ByteArray& arr)
 
 ByteArray::~ByteArray() {}
 
-ByteArray& ByteArray::append(const char* arr, std::size_t size) {
+ByteArray& ByteArray::append(const char* arr, size_t size) {
   _data.append(arr, arr + size);
   return *this;
 }
@@ -44,7 +44,7 @@ const char* ByteArray::data() const {
   return _data.data();
 }
 
-std::size_t ByteArray::length() const {
+size_t ByteArray::length() const {
   return _data.size();
 }
 

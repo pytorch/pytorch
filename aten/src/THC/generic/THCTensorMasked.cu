@@ -12,8 +12,8 @@ THCTensor_(maskedFill)(THCState* state,
              THCudaByteTensor_nElement(state, mask),
              2, "sizes do not match");
 
-  if (!THC_pointwiseApply2(state, tensor, mask,
-                           TensorMaskedFillOp<real, unsigned char>(value))) {
+  if (!THC_pointwiseApply2<real, uint8_t>(state, tensor, mask,
+                                          TensorMaskedFillOp<real, unsigned char>(value))) {
     THArgCheck(false, 2, CUTORCH_DIM_WARNING);
   }
 
@@ -88,7 +88,7 @@ THCTensor_(maskedCopy)(THCState* state,
 
   // update `tensor` where `mask` == 1 but pull from `src` at
   // maskPrefixSum
-  bool status = THC_pointwiseApply3(
+  bool status = THC_pointwiseApply3<real, uint8_t, int64_t>(
     state, tensor, mask, maskPrefixSum,
     TensorMaskedCopyOp<real, unsigned char, int64_t>(
       THCTensor_(data)(state, contigSrc)));
@@ -158,7 +158,7 @@ THCTensor_(maskedSelect)(THCState* state,
     maskPrefixSumData);
 
   // Then copy over the masked elements at their desired output index
-  bool status = THC_pointwiseApply3(
+  bool status = THC_pointwiseApply3<uint8_t, int64_t, real>(
     state, mask, maskPrefixSum,
     src, TensorMaskedSelectOp<real, unsigned char, int64_t>(
       THCTensor_(data)(state, tensor)));

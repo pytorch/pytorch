@@ -9,12 +9,12 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
                          int pleft, int pright,
                          int ptop, int pbottom,
                          int pfront, int pback) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
   int numInputDims = THCTensor_(nDimension)(state, input);
 
-  THCUNN_argCheck(state, numInputDims == 4 || numInputDims == 5, 2, input,
-    "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 4 || numInputDims == 5), 2, input,
+    "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   int planeDim = 0;
   int dimd = 1;
@@ -40,7 +40,7 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
              idepth, iheight, iwidth, odepth, oheight, owidth);
 
   if (gradOutput != NULL) {
-    THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutput),
+    THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutput),
                3, "output gradient tensor must fit into 32-bit index math");
 
     THArgCheck(numPlanes == THCTensor_(size)(state, gradOutput, planeDim), 3,

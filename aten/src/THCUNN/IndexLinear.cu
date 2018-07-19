@@ -2,6 +2,8 @@
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
+#include "THCTensor.hpp"
+#include "THCStorage.hpp"
 
 #define divup(a, b) ((a) + (b) - 1) / (b)
 const int THREADS_PER_BLOCK = 256;

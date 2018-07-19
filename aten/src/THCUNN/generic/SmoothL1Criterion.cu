@@ -2,15 +2,12 @@
 #define THC_GENERIC_FILE "generic/SmoothL1Criterion.cu"
 #else
 
-#include "THCApply.cuh"
-
 void THNN_(SmoothL1Criterion_updateOutput)(
            THCState *state,
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
@@ -19,9 +16,9 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     "input and target need to have the same number of elements"
   );
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
-    THC_pointwiseApply3(state, input, target, output,
+    THC_pointwiseApply3<real, real, real>(state, input, target, output,
                         smoothl1_updateOutput_no_reduce_functor<real>());
     return;
   }
@@ -44,7 +41,7 @@ void THNN_(SmoothL1Criterion_updateOutput)(
     thrust::plus<accreal>(), smoothl1_functor<real, accreal>()
   );
 
-  if (sizeAverage)
+  if (reduction == Reduction::ElementwiseMean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -59,8 +56,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 4, input, target, gradInput, gradOutput);
@@ -71,9 +67,9 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCUNN_check_shape(state, gradOutput, input);
-    THC_pointwiseApply3(state, input, target, gradInput,
+    THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
                         smoothl1_updateGradInput_no_reduce_functor<real>());
     THCTensor_(cmul)(state, gradInput, gradInput, gradOutput);
     return;
@@ -82,7 +78,7 @@ void THNN_(SmoothL1Criterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  real norm = ScalarConvert<accreal, real>::to(sizeAverage ? accreal(1)/size : accreal(1));
+  real norm = ScalarConvert<accreal, real>::to(reduction == Reduction::ElementwiseMean ? accreal(1)/size : accreal(1));
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

@@ -16,13 +16,13 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   int inputHeight;
   int inputWidth;
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimN = 0;
   int dimt = 1;
   int dimh = 2;
   int dimw = 3;
 
-  if (input->nDimension == 5)
+  if (input->dim() == 5)
   {
     dimN++;
     dimt++;
@@ -30,7 +30,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
     dimw++;
   }
 
-  if (THCTensor_(nDimension)(state, input) == 4)
+  if (!input->is_empty() && THCTensor_(nDimension)(state, input) == 4)
   {
     THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
                && input->size[dimt] >= kT, 2,
@@ -45,7 +45,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
     inputHeight = THCTensor_(size)(state, input, 2);
     inputWidth  = THCTensor_(size)(state, input, 3);
   }
-  else if (THCTensor_(nDimension)(state, input) == 5)
+  else if (!input->is_empty() && THCTensor_(nDimension)(state, input) == 5)
   {
     THArgCheck(input->size[dimw] >= kW && input->size[dimh] >= kH
                && input->size[dimt] >= kT, 2,
@@ -62,7 +62,7 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
   }
   else
   {
-    THArgError(2, "4D or 5D tensor expected, but got: %d", input->nDimension);
+    AT_ERROR("non-empty 4D or 5D tensor expected, but got size: ", input->sizes());
   }
 
   // The second argument is the index of padH.

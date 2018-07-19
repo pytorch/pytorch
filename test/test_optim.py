@@ -3,6 +3,7 @@ import unittest
 import functools
 from copy import deepcopy
 import torch
+from torch._six import inf
 import torch.optim as optim
 import torch.legacy.optim as old_optim
 import torch.nn.functional as F
@@ -10,7 +11,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
-from common import TestCase, run_tests
+from common import TestCase, run_tests, TEST_WITH_UBSAN
 
 
 def rosenbrock(tensor):
@@ -260,6 +261,10 @@ class TestOptim(TestCase):
                 self._build_params_dict_single(weight, bias, lr=1e-2),
                 lr=1e-3)
         )
+        self._test_basic_cases(
+            lambda weight, bias: optim.SGD(
+                self._build_params_dict_single(weight, bias, lr=1e-2))
+        )
         with self.assertRaisesRegex(ValueError, "Invalid momentum value: -0.5"):
             optim.SGD(None, lr=1e-2, momentum=-0.5)
 
@@ -345,6 +350,10 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
         )
         self._test_basic_cases(
+            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1,
+                                               initial_accumulator_value=0.1)
+        )
+        self._test_basic_cases(
             lambda weight, bias: optim.Adagrad(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
@@ -371,10 +380,10 @@ class TestOptim(TestCase):
             wrap_old_fn(old_optim.adamax, learningRate=1e-1, beta1=0.95, beta2=0.998)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-1)
+            lambda weight, bias: optim.Adamax([weight, bias], lr=1e-1)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
+            lambda weight, bias: optim.Adamax(
                 self._build_params_dict(weight, bias, lr=1e-2),
                 lr=1e-1)
         )
@@ -395,10 +404,10 @@ class TestOptim(TestCase):
             wrap_old_fn(old_optim.rmsprop, learningRate=1e-2, alpha=0.95)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad([weight, bias], lr=1e-2)
+            lambda weight, bias: optim.RMSprop([weight, bias], lr=1e-2)
         )
         self._test_basic_cases(
-            lambda weight, bias: optim.Adagrad(
+            lambda weight, bias: optim.RMSprop(
                 self._build_params_dict(weight, bias, lr=1e-3),
                 lr=1e-2)
         )
@@ -466,6 +475,19 @@ class TestOptim(TestCase):
             lambda weight, bias: optim.LBFGS([weight, bias]),
             ignore_multidevice=True
         )
+
+    @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
+    def test_lbfgs_return_type(self):
+        params = [torch.randn(10, 5), torch.randn(10)]
+        opt1 = optim.LBFGS(params, 0.01, tolerance_grad=inf)
+        opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-inf)
+
+        def closure():
+            return torch.Tensor([10])
+
+        res1 = opt1.step(closure)
+        res2 = opt2.step(closure)
+        self.assertEqual(type(res1), type(res2))
 
     def test_invalid_param_type(self):
         with self.assertRaises(TypeError):
@@ -623,8 +645,52 @@ class TestLRScheduler(TestCase):
         self.opt.param_groups[1]['lr'] = 0.01
         targets = [0.1 * (1.0 - (x % epochs) / epochs) ** power,
                    0.01 * (1.0 - (x % epochs) / epochs) ** power for x in range(epochs)]
-        scheduler = PolyLR(self.opt, max_epoch=30000, power=power)
+        scheduler = PolyLR(self.opt, max_epoch=5, power=power)
         self._test(scheduler, targets, epochs)
+
+    def test_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: StepLR(self.opt, gamma=0.1, step_size=3),
+            lambda: StepLR(self.opt, gamma=0.01 / 2, step_size=1))
+
+    def test_multi_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: MultiStepLR(self.opt, gamma=0.1, milestones=[2, 5, 9]),
+            lambda: MultiStepLR(self.opt, gamma=0.01, milestones=[1, 4, 6]))
+
+    def test_exp_step_lr_state_dict(self):
+        self._check_scheduler_state_dict(
+            lambda: ExponentialLR(self.opt, gamma=0.1),
+            lambda: ExponentialLR(self.opt, gamma=0.01))
+
+    def test_cosine_lr_state_dict(self):
+        epochs = 10
+        eta_min = 1e-10
+        self._check_scheduler_state_dict(
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs, eta_min=eta_min),
+            lambda: CosineAnnealingLR(self.opt, T_max=epochs // 2, eta_min=eta_min / 2),
+            epochs=epochs)
+
+    def test_reduce_lr_on_plateau_state_dict(self):
+        scheduler = ReduceLROnPlateau(self.opt, mode='min', factor=0.1, patience=2)
+        for score in [1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 5.0, 3.0, 2.0, 1.0]:
+            scheduler.step(score)
+        scheduler_copy = ReduceLROnPlateau(self.opt, mode='max', factor=0.5, patience=10)
+        scheduler_copy.load_state_dict(scheduler.state_dict())
+        for key in scheduler.__dict__.keys():
+            if key not in {'optimizer', 'is_better'}:
+                self.assertEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key], allow_inf=True)                
+
+    def _check_scheduler_state_dict(self, constr, constr2, epochs=10):
+        scheduler = constr()
+        for _ in range(epochs):
+            scheduler.step()
+        scheduler_copy = constr2()
+        scheduler_copy.load_state_dict(scheduler.state_dict())
+        for key in scheduler.__dict__.keys():
+            if key != 'optimizer':
+                self.assertAlmostEqual(scheduler.__dict__[key], scheduler_copy.__dict__[key])
+        self.assertAlmostEqual(scheduler.get_lr(), scheduler_copy.get_lr())
 
     def _test(self, scheduler, targets, epochs=10):
         for epoch in range(epochs):

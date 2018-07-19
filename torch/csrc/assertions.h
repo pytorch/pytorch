@@ -2,17 +2,18 @@
 
 #include <exception>
 #include <string>
+#include "THP_export.h"
 
 namespace torch {
 
 struct assert_error final : public std::exception {
   const std::string msg;
   explicit assert_error(const std::string& msg) : msg(msg) {}
-  virtual const char* what() const noexcept { return msg.c_str(); }
+  const char* what() const noexcept override { return msg.c_str(); }
 };
 
 [[noreturn]]
-void barf(const char *fmt, ...);
+THP_CLASS void barf(const char *fmt, ...);
 
 } // namespace torch
 

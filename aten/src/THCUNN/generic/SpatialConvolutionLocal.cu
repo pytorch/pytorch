@@ -16,7 +16,7 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 11,
              "stride should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = input->nDimension;
+  int ndim = input->dim();
   int dimf = 0;
   int dimh = 1;
   int dimw = 2;
@@ -27,8 +27,8 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
     dimw++;
   }
 
-  THCUNN_argCheck(state, ndim == 3 || ndim == 4, 2, input,
-                  "3D or 4D input tensor expected but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
+                  "non-empty 3D or 4D input tensor expected but got: %s");
 
   int64_t nInputPlane = weight->size[2] / (kH * kW);
   int64_t nOutputPlane = weight->size[1];
@@ -53,9 +53,9 @@ static THCTensor* THNN_(view_weight_local)(
                  THCTensor *_weight)
 {
   THCTensor *weight = THCTensor_(newContiguous)(state, _weight);
-  THArgCheck(weight->nDimension == 3 || weight->nDimension == 6, 4,
-            "weight tensor should be 3D or 6D - got %dD", weight->nDimension);
-  if (weight->nDimension == 6) {
+  AT_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6), 4,
+           "weight tensor should be (non-empty) 3D or 6D - got size: ", weight->sizes());
+  if (weight->dim() == 6) {
     int64_t s1 = weight->size[0] * weight->size[1];
     int64_t s2 = weight->size[2];
     int64_t s3 = weight->size[3] * weight->size[4] * weight->size[5];
@@ -98,7 +98,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
   int64_t nOutputPlane = THCTensor_(size)(state,weight,1);
 
   int batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     batch = 0;
     THCTensor_(resize4d)(state, input, 1, nInputPlane, inputHeight, inputWidth);
@@ -211,7 +211,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   int64_t nOutputPlane = THCTensor_(size)(state,weight,1);
 
   int batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     batch = 0;
     THCTensor_(resize4d)(state, input, 1, nInputPlane, inputHeight, inputWidth);
@@ -331,7 +331,7 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
   int64_t nOutputPlane = THCTensor_(size)(state,gradWeight,1);
 
   int batch = 1;
-  if (input->nDimension == 3) {
+  if (input->dim() == 3) {
     // Force batch
     batch = 0;
     THCTensor_(resize4d)(state, input, 1, nInputPlane, inputHeight, inputWidth);

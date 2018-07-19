@@ -1,6 +1,3 @@
-#ifndef NO_PYTHON
-#include <Python.h>
-#endif
 #include "ir.h"
 
 #include "torch/csrc/autograd/function.h"
@@ -14,111 +11,9 @@
 #include <algorithm>
 #include <string>
 
-#ifndef NO_PYTHON
-#include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/python_strings.h"
-#include "pybind11/pybind11.h"
-
-namespace py = pybind11;
-
-namespace torch { namespace jit {
-
-std::string getPythonName(const PyObject* obj, bool is_legacy) {
-  AutoGIL gil;
-  if (is_legacy) {
-    return std::string(obj->ob_type->tp_name);
-  } else {
-    // NB: hypothetically __name__ could mutate the Python
-    // object in a externally visible way. Please don't!
-    auto wobj = const_cast<PyObject*>(obj);
-    THPObjectPtr name{PyObject_GetAttrString(wobj, "__name__")};
-    return THPUtils_unpackString(name.get());
-  }
-}
-
-std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
-  AutoGIL gil;
-  auto pyobj = py::handle(const_cast<PyObject*>(obj.get()));
-  if (py::isinstance<py::tuple>(pyobj)) {
-    // This special-case for printing tuples handles a problem where
-    // str((2L, 3L)) outputs "(2L, 3L)" in Python 2 but "(2, 3)"
-    // in Python 3.  In order to suppress the L-suffix, we must
-    // manually print the string ourselves, calling str() on the
-    // sub-elements.
-    //
-    // This is a fairly fragile fix (What if you have nested tuples
-    // in tuples? What if you have dictionaries?) but it seems to hit
-    // the cases that are triggered in practice in onnx-pytorch.  Revisit
-    // this code if this is not the case.
-    //
-    // By the way, one non-solution for this problem is to monkeypatch
-    // tuple.__str__; this doesn't work because Python doesn't allow
-    // monkeypatching methods of built-in types.
-    auto pytuple = pyobj.cast<py::tuple>();
-    out << "(";
-    size_t i = 0;
-    for (auto& o : pytuple) {
-      if (i > 0) {
-        out << ", ";
-      }
-      THPObjectPtr str(py::str(o).release().ptr());
-      out << THPUtils_unpackString(str.get());
-      i++;
-    }
-    if (i == 1) {
-      out << ",";
-    }
-    out << ")";
-    return out;
-  } else {
-    return out << THPUtils_unpackString(py::str(pyobj).ptr());
-  }
-}
-
-std::string PythonOp::name() const {
-  return getPythonName(pyobj.get(),is_legacy);
-}
-
-void PythonOp::cloneFrom(Node * other_) {
-  Node::cloneFrom(other_);
-  auto other = other_->cast<PythonOp>();
-  this->cconv = other->cconv;
-  this->is_legacy = other->is_legacy;
-  Py_INCREF(other->pyobj.get());
-  this->pyobj = THPObjectPtr(other->pyobj.get());
-  this->var_flags = other->var_flags;
-  for(auto & sa : other->scalar_args) {
-    Py_INCREF(sa.get());
-    this->scalar_args.emplace_back(sa.get());
-  }
-  this->tracing_autograd_python_function =
-      other->tracing_autograd_python_function;
-}
-
-}} // namespace torch::jit
-
-#else
-
-namespace torch { namespace jit {
-
-std::ostream& printPyObject(std::ostream & out, const THPObjectPtr& obj) {
-  throw std::runtime_error("Trying to print Python object from a C++ build");
-}
-
-std::string PythonOp::name() const {
-  throw std::runtime_error("Trying to call PythonOp::name from a C++ build");
-  return std::string();
-}
-
-}} // namespace torch::jit
-
-#endif
-
-
 namespace torch { namespace jit {
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol CppOp::Kind;
 constexpr Symbol PythonOp::Kind;
 
 constexpr int max_tensor_display_size = 10;
@@ -142,10 +37,6 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
     printValueRef(out, n);
   }
   return out;
-}
-
-std::string CppOp::name() const {
-  return fn->name();
 }
 
 struct const_value_list_with_types {
@@ -187,11 +78,13 @@ void printPrimList(std::ostream & out, const std::vector<T> & items) {
   }
   out << "]";
 }
-void printAttributes(std::ostream & out, const Node * n) {
+void printAttributes(std::ostream & out, const Node * n, bool ignore_subgraph=false) {
   out << "[";
   auto names = n->attributeNames();
   int i = 0;
   for(auto name : names) {
+    if (ignore_subgraph && name == attr::Subgraph)
+      continue;
     if(i++ > 0)
       out << ", ";
     // TODO: debugging mode to see the qualifier.  We definitely
@@ -270,24 +163,14 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   out << " = ";
   IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
-    out << "(";
-    int i = 0;
-    for (auto& scalar : value->scalar_args) {
-      if (i++ > 0)
-        out << ", ";
-      printPyObject(out, scalar);
-    }
-    out << ")";
-  IR_ELSEIFM_CONST(CppOp)
-    out << "CppOp[" << value->name() << "]";
+    value->writeScalars(out);
   IR_ELSE()
-    if(n->hasAttribute(attr::Subgraph)) {
-      if(groups) {
-        out << n->kind().toQualString() << "_" << groups->size();
-        groups->push_back(n);
-      } else {
-        out << n->kind().toQualString() << "[" << *n->g(attr::Subgraph) << "]";
+    if(n->hasAttribute(attr::Subgraph) && groups) {
+      out << n->kind().toQualString() << "_" << groups->size();
+      if (n->numAttributes() > 1) {
+        printAttributes(out, n, /*ignore_subgraph=*/true);
       }
+      groups->push_back(n);
     } else {
       out << n->kind().toQualString();
       if(n->hasAttributes()) {
@@ -399,10 +282,6 @@ void Node::lint() const {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
-      // Handle invariant
-      if (i != inputs_.size() - 1) {
-        JIT_ASSERT(input->type()->kind() != TypeKind::HandleType);
-      }
       i++;
     }
   }
@@ -431,7 +310,7 @@ void Node::lint() const {
   IR_ELSEIF(Param)
     JIT_ASSERT(inputs_.size() == 0);
   IR_ELSEIFM_CONST(PythonOp)
-    std::size_t n_scalars = 0, n_tensors = 0;
+    size_t n_scalars = 0, n_tensors = 0;
     for (auto c : value->cconv) {
       if (c == 's') {
         n_scalars++;
@@ -444,8 +323,6 @@ void Node::lint() const {
     }
     JIT_ASSERT(n_scalars == value->scalar_args.size());
     JIT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIFM_CONST(CppOp)
-    // TODO: add invariants
   IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
@@ -644,6 +521,62 @@ std::shared_ptr<Graph> Graph::copy() {
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
+}
+
+Value* Value::setUniqueName(const std::string & name) {
+  if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
+    throw std::runtime_error("names may not be integers: " + name);
+  }
+
+  auto & names = node()->owningGraph()->unique_names_;
+
+  // clear any old name from the map
+  if(hasUniqueName()) {
+    names.erase(unique_name_);
+    unique_name_ = "";
+  }
+
+  // allow "" to clear the uniquename
+  if(name == "")
+    return this;
+
+  // if someone else has this name, then rename the other value
+  auto old_owner_of_name = names.find(name);
+  if(old_owner_of_name != names.end()) {
+    size_t suffix = 1;
+    std::string name_base = name;
+    auto last_dot_pos = name.find_last_of('.');
+    if (last_dot_pos != std::string::npos && last_dot_pos + 1 != name.size()) {
+      if (name.find_first_not_of("0123456789", last_dot_pos + 1) == std::string::npos) {
+        suffix = std::stoll(name.substr(last_dot_pos + 1));
+        name_base = name.substr(0, last_dot_pos);
+      }
+    }
+    std::string replacement_name;
+    do {
+      std::stringstream ss;
+      ss << name_base << "." << suffix++;
+      replacement_name = ss.str();
+    } while(names.count(replacement_name) > 0);
+    old_owner_of_name->second->setUniqueName(replacement_name);
+  }
+
+  names[name] = this;
+  unique_name_ = name;
+  return this;
+}
+
+PythonOp* defaultAllocPythonOp(Graph*g) {
+  throw std::runtime_error("Trying to allocate a Python object without python bindings loaded");
+}
+std::atomic<decltype(&defaultAllocPythonOp)> alloc_python_op;
+
+// patched in when python bindings are loaded
+PythonOp* allocPythonOp(Graph* g) {
+  return alloc_python_op.load()(g);
+}
+void setAllocPythonOp(PythonOp* (*v)(Graph* g)) {
+  alloc_python_op.store(v);
 }
 
 }} // namespace torch::jit

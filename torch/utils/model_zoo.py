@@ -9,7 +9,7 @@ import tempfile
 
 try:
     from requests.utils import urlparse
-    import requests.get as urlopen
+    from requests import get as urlopen
     requests_available = True
 except ImportError:
     requests_available = False
@@ -39,7 +39,7 @@ def load_url(url, model_dir=None, map_location=None, progress=True):
 
     The default value of `model_dir` is ``$TORCH_HOME/models`` where
     ``$TORCH_HOME`` defaults to ``~/.torch``. The default directory can be
-    overriden with the ``$TORCH_MODEL_ZOO`` environment variable.
+    overridden with the ``$TORCH_MODEL_ZOO`` environment variable.
 
     Args:
         url (string): URL of the object to download
@@ -67,11 +67,12 @@ def load_url(url, model_dir=None, map_location=None, progress=True):
 
 
 def _download_url_to_file(url, dst, hash_prefix, progress):
-    u = urlopen(url)
     if requests_available:
+        u = urlopen(url, stream=True)
         file_size = int(u.headers["Content-Length"])
         u = u.raw
     else:
+        u = urlopen(url)
         meta = u.info()
         if hasattr(meta, 'getheaders'):
             file_size = int(meta.getheaders("Content-Length")[0])
@@ -80,21 +81,24 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
 
     f = tempfile.NamedTemporaryFile(delete=False)
     try:
-        sha256 = hashlib.sha256()
+        if hash_prefix is not None:
+            sha256 = hashlib.sha256()
         with tqdm(total=file_size, disable=not progress) as pbar:
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:
                     break
                 f.write(buffer)
-                sha256.update(buffer)
+                if hash_prefix is not None:
+                    sha256.update(buffer)
                 pbar.update(len(buffer))
 
         f.close()
-        digest = sha256.hexdigest()
-        if digest[:len(hash_prefix)] != hash_prefix:
-            raise RuntimeError('invalid hash value (expected "{}", got "{}")'
-                               .format(hash_prefix, digest))
+        if hash_prefix is not None:
+            digest = sha256.hexdigest()
+            if digest[:len(hash_prefix)] != hash_prefix:
+                raise RuntimeError('invalid hash value (expected "{}", got "{}")'
+                                   .format(hash_prefix, digest))
         shutil.move(f.name, dst)
     finally:
         f.close()

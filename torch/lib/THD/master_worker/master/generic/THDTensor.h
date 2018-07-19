@@ -10,7 +10,7 @@ typedef struct {
   THDStorage *storage;
   ptrdiff_t storageOffset;
 
-  int refcount;
+  std::atomic<int> refcount;
   char flag;
 
   // Additional fields

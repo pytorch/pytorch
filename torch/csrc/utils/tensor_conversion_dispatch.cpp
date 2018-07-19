@@ -1,24 +1,29 @@
+#include <Python.h>
+
 #include "tensor_conversion_dispatch.h"
 
 #include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/utils/cuda_lazy_init.h"
+
+#include <ATen/DeviceGuard.h>
+
+#include <cstddef>
 
 namespace torch { namespace utils {
 
-at::Tensor dispatch_type_conversion(const at::Tensor & self, const at::Type & type) {
-  int64_t device = self.is_cuda() ? self.get_device() : -1;
-  return dispatch_type_conversion(self, type, device, false);
-}
-
-at::Tensor dispatch_type_conversion(const at::Tensor & self, const at::Type & type,
-                                    int device, bool non_blocking) {
+at::Tensor dispatch_type_conversion(
+    const at::Tensor & self,
+    const at::Type & type,
+    at::optional<int32_t> device_index,
+    bool non_blocking) {
   if (type.is_cuda()) {
     torch::utils::cuda_lazy_init();
   }
   AutoNoGIL no_gil;
-  AutoGPU auto_gpu(device);
-  int64_t tensor_device = self.is_cuda() ? self.get_device() : -1;
+
+  const int32_t tensor_device = self.is_cuda() ? self.get_device() : -1;
+  at::DeviceGuard device_guard(device_index.value_or(tensor_device));
+
   if (self.is_cuda() && type.is_cuda() && tensor_device != at::current_device()) {
     // copy if the devices are different even if the types are the same
     return type.copy(self, non_blocking);
@@ -37,7 +42,7 @@ at::Tensor dispatch_type_conversion(const at::Tensor & self, const at::Type & ty
   switch (type.scalarType()) {
 #define DEFINE_CAST_DISPATCH(_1, n, _2)   \
   case at::ScalarType::n: {               \
-    return self._cast_##_1(non_blocking); \
+    return self._cast_##n(non_blocking); \
   } break;
     AT_FORALL_SCALAR_TYPES(DEFINE_CAST_DISPATCH)
 #undef DEFINE_CAST_DISPATCH

@@ -1,0 +1,172 @@
+ir_version: 3
+producer_name: "pytorch"
+producer_version: "0.3"
+graph {
+  node {
+    input: "0"
+    input: "1"
+    input: "2"
+    input: "3"
+    input: "4"
+    output: "6"
+    output: "7"
+    output: "8"
+    output: "batch_norm_dead_output-9"
+    output: "batch_norm_dead_output-10"
+    op_type: "BatchNormalization"
+    attribute {
+      name: "epsilon"
+      f: 9.99999974737875e-06
+      type: FLOAT
+    }
+    attribute {
+      name: "is_test"
+      i: 0
+      type: INT
+    }
+    attribute {
+      name: "momentum"
+      f: 0.899999976158142
+      type: FLOAT
+    }
+  }
+  name: "torch-jit-export"
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "1"
+    raw_data: "\330=\221>|\037(?"
+  }
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "2"
+    raw_data: "\000\000\000\000\000\000\000\000"
+  }
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "3"
+    raw_data: "\315\314\314=\315\314\314="
+  }
+  initializer {
+    dims: 2
+    data_type: FLOAT
+    name: "4"
+    raw_data: "fff?fff?"
+  }
+  initializer {
+    data_type: INT64
+    name: "5"
+    raw_data: "\001\000\000\000\000\000\000\000"
+  }
+  input {
+    name: "0"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "1"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "2"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "3"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "4"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+  input {
+    name: "5"
+    type {
+      tensor_type {
+        elem_type: INT64
+        shape {
+        }
+      }
+    }
+  }
+  output {
+    name: "6"
+    type {
+      tensor_type {
+        elem_type: FLOAT
+        shape {
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+          dim {
+            dim_value: 2
+          }
+        }
+      }
+    }
+  }
+}
+opset_import {
+  version: 6
+}

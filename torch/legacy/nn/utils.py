@@ -23,7 +23,7 @@ def recursiveType(param, type, tensorCache={}):
             param[i] = recursiveType(p, type, tensorCache)
     elif isinstance(param, Module) or isinstance(param, Criterion):
         param.type(type, tensorCache)
-    elif torch.is_tensor(param):
+    elif isinstance(param, torch.Tensor):
         if param.type() != type:
             key = param._cdata
             if key in tensorCache:
@@ -56,8 +56,8 @@ def recursiveResizeAs(t1, t2):
         for i, _ in enumerate(t2):
             t1[i], t2[i] = recursiveResizeAs(t1[i], t2[i])
         t1 = t1[:len(t2)]
-    elif torch.is_tensor(t2):
-        t1 = t1 if torch.is_tensor(t1) else t2.new()
+    elif isinstance(t2, torch.Tensor):
+        t1 = t1 if isinstance(t1, torch.Tensor) else t2.new()
         t1.resize_as_(t2)
     else:
         raise RuntimeError("Expecting nested tensors or tables. Got " +
@@ -68,7 +68,7 @@ def recursiveResizeAs(t1, t2):
 def recursiveFill(t2, val):
     if isinstance(t2, list):
         t2 = [recursiveFill(x, val) for x in t2]
-    elif torch.is_tensor(t2):
+    elif isinstance(t2, torch.Tensor):
         t2.fill_(val)
     else:
         raise RuntimeError("expecting tensor or table thereof. Got " +
@@ -84,7 +84,7 @@ def recursiveAdd(t1, val=1, t2=None):
         t1 = t1 if isinstance(t1, list) else [t1]
         for i, _ in enumerate(t2):
             t1[i], t2[i] = recursiveAdd(t1[i], val, t2[i])
-    elif torch.is_tensor(t1) and torch.is_tensor(t2):
+    elif isinstance(t1, torch.Tensor) and isinstance(t2, torch.Tensor):
         t1.add_(val, t2)
     else:
         raise RuntimeError("expecting nested tensors or tables. Got " +
@@ -97,8 +97,8 @@ def recursiveCopy(t1, t2):
         t1 = t1 if isinstance(t1, list) else [t1]
         for i, _ in enumerate(t2):
             t1[i], t2[i] = recursiveCopy(t1[i], t2[i])
-    elif torch.is_tensor(t2):
-        t1 = t1 if torch.is_tensor(t1) else t2.new()
+    elif isinstance(t2, torch.Tensor):
+        t1 = t1 if isinstance(t1, torch.Tensor) else t2.new()
         t1.resize_as_(t2).copy_(t2)
     else:
         raise RuntimeError("expecting nested tensors or tables. Got " +
@@ -113,7 +113,7 @@ def addSingletondimension(*args):
         return t.unsqueeze(dim)
     else:
         view, t, dim = args
-        assert torch.is_tensor(view)
+        assert isinstance(view, torch.Tensor)
         view.set_(t)
         return view.unsqueeze_(dim)
 
@@ -142,7 +142,7 @@ def clear(self, *args):
         if not hasattr(self, f):
             return
         attr = getattr(self, f)
-        if torch.is_tensor(attr):
+        if isinstance(attr, torch.Tensor):
             attr.set_()
         elif isinstance(attr, list):
             del attr[:]

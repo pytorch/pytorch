@@ -34,13 +34,25 @@ Containers
 .. autoclass:: ModuleList
     :members:
 
+:hidden:`ModuleDict`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleDict
+    :members:
+
 :hidden:`ParameterList`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ParameterList
     :members:
 
-Convolution Layers
+:hidden:`ParameterDict`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterDict
+    :members:
+
+Convolution layers
 ----------------------------------
 
 :hidden:`Conv1d`
@@ -80,8 +92,20 @@ Convolution Layers
 .. autoclass:: ConvTranspose3d
     :members:
 
+:hidden:`Unfold`
+~~~~~~~~~~~~~~~~
 
-Pooling Layers
+.. autoclass:: Unfold
+    :members:
+
+:hidden:`Fold`
+~~~~~~~~~~~~~~
+
+.. autoclass:: Fold
+    :members:
+
+
+Pooling layers
 ----------------------------------
 
 :hidden:`MaxPool1d`
@@ -193,13 +217,25 @@ Pooling Layers
     :members:
 
 
-Padding Layers
+Padding layers
 --------------
+
+:hidden:`ReflectionPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReflectionPad1d
+    :members:
 
 :hidden:`ReflectionPad2d`
 ~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ReflectionPad2d
+    :members:
+
+:hidden:`ReplicationPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ReplicationPad1d
     :members:
 
 :hidden:`ReplicationPad2d`
@@ -220,15 +256,27 @@ Padding Layers
 .. autoclass:: ZeroPad2d
     :members:
 
+:hidden:`ConstantPad1d`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ConstantPad1d
+    :members:
+
 :hidden:`ConstantPad2d`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ConstantPad2d
     :members:
 
+:hidden:`ConstantPad3d`
+~~~~~~~~~~~~~~~~~~~~~~~
 
-Non-linear Activations (weighed sum+nonlinearity)
--------------------------------------------------
+.. autoclass:: ConstantPad3d
+    :members:
+
+
+Non-linear activations (weighted sum, nonlinearity)
+---------------------------------------------------
 
 :hidden:`ELU`
 ~~~~~~~~~~~~~
@@ -332,7 +380,7 @@ Non-linear Activations (weighed sum+nonlinearity)
 .. autoclass:: Threshold
     :members:
 
-Non-linear Activations (Other)
+Non-linear activations (other)
 ------------------------------
 
 :hidden:`Softmin`
@@ -359,6 +407,12 @@ Non-linear Activations (Other)
 .. autoclass:: LogSoftmax
     :members:
 
+:hidden:`AdaptiveLogSoftmaxWithLoss`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: AdaptiveLogSoftmaxWithLoss
+    :members:
+
 Normalization layers
 ----------------------------------
 
@@ -378,6 +432,12 @@ Normalization layers
 ~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: BatchNorm3d
+    :members:
+
+:hidden:`GroupNorm`
+~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: GroupNorm
     :members:
 
 :hidden:`InstanceNorm1d`
@@ -676,10 +736,25 @@ DataParallel layers (multi-GPU, distributed)
 Utilities
 ---------
 
-:hidden:`clip_grad_norm`
-~~~~~~~~~~~~~~~~~~~~~~~~
+:hidden:`clip_grad_norm_`
+~~~~~~~~~~~~~~~~~~~~~~~~~
 
-.. autofunction:: torch.nn.utils.clip_grad_norm
+.. autofunction:: torch.nn.utils.clip_grad_norm_
+
+:hidden:`clip_grad_value_`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.clip_grad_value_
+
+:hidden:`parameters_to_vector`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.parameters_to_vector
+
+:hidden:`vector_to_parameters`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.vector_to_parameters
 
 :hidden:`weight_norm`
 ~~~~~~~~~~~~~~~~~~~~~
@@ -690,6 +765,16 @@ Utilities
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: torch.nn.utils.remove_weight_norm
+
+:hidden:`spectral_norm`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.spectral_norm
+
+:hidden:`remove_spectral_norm`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.utils.remove_spectral_norm
 
 
 .. currentmodule:: torch.nn.utils.rnn
@@ -761,6 +846,16 @@ Convolution functions
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: conv_transpose3d
+
+:hidden:`unfold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: unfold
+
+:hidden:`fold`
+~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: fold
 
 Pooling functions
 ----------------------------------
@@ -951,6 +1046,11 @@ Non-linear activation functions
 
 .. autofunction:: softshrink
 
+:hidden:`gumbel_softmax`
+~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: gumbel_softmax
+
 :hidden:`log_softmax`
 ~~~~~~~~~~~~~~~~~~~~~
 
@@ -1024,6 +1124,19 @@ Dropout functions
 ~~~~~~~~~~~~~~~~~~~
 
 .. autofunction:: dropout3d
+
+Sparse functions
+----------------------------------
+
+:hidden:`embedding`
+~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: embedding
+
+:hidden:`embedding_bag`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: embedding_bag
 
 Distance functions
 ----------------------------------
@@ -1140,6 +1253,11 @@ Vision functions
 
 .. autofunction:: pad
 
+:hidden:`interpolate`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: interpolate
+
 :hidden:`upsample`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -1165,20 +1283,28 @@ Vision functions
 
 .. autofunction:: affine_grid
 
+DataParallel functions (multi-GPU, distributed)
+-----------------------------------------------
+
+:hidden:`data_parallel`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autofunction:: torch.nn.parallel.data_parallel
+
 
 torch.nn.init
 =============
 
 .. currentmodule:: torch.nn.init
 .. autofunction:: calculate_gain
-.. autofunction:: uniform
-.. autofunction:: normal
-.. autofunction:: constant
-.. autofunction:: eye
-.. autofunction:: dirac
-.. autofunction:: xavier_uniform
-.. autofunction:: xavier_normal
-.. autofunction:: kaiming_uniform
-.. autofunction:: kaiming_normal
-.. autofunction:: orthogonal
-.. autofunction:: sparse
+.. autofunction:: uniform_
+.. autofunction:: normal_
+.. autofunction:: constant_
+.. autofunction:: eye_
+.. autofunction:: dirac_
+.. autofunction:: xavier_uniform_
+.. autofunction:: xavier_normal_
+.. autofunction:: kaiming_uniform_
+.. autofunction:: kaiming_normal_
+.. autofunction:: orthogonal_
+.. autofunction:: sparse_

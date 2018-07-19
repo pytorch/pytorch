@@ -52,8 +52,8 @@ __global__ void SpatialGridSamplerBilinear_updateOutput_kernel(
     Dtype iy = grid[n][h][w][1];
 
     // normalize ix, iy from [-1, 1] to [0, IH-1] & [0, IW-1]
-    ix = ScalarConvert<float,Dtype>::to(((ix + 1) / 2) * (IW-1));
-    iy = ScalarConvert<float,Dtype>::to(((iy + 1) / 2) * (IH-1));
+    ix = ScalarConvert<float,Dtype>::to(((ix + 1.f) / 2) * (IW-1));
+    iy = ScalarConvert<float,Dtype>::to(((iy + 1.f) / 2) * (IH-1));
 
     // get NE, NW, SE, SW pixel values from (x, y)
     int ix_nw = floor(ScalarConvert<Dtype,float>::to(ix));
@@ -134,8 +134,8 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
     Dtype giy = ScalarConvert<int,Dtype>::to(0);
 
     // normalize ix, iy from [-1, 1] to [0, H-1] & [0, W-1]
-    ix = ScalarConvert<float,Dtype>::to(((ix + 1) / 2) * (IW-1));
-    iy = ScalarConvert<float,Dtype>::to(((iy + 1) / 2) * (IH-1));;
+    ix = ScalarConvert<float,Dtype>::to(((ix + 1.f) / 2) * (IW-1));
+    iy = ScalarConvert<float,Dtype>::to(((iy + 1.f) / 2) * (IH-1));;
 
     // get NE, NW, SE, SW pixel values from (x, y)
     int ix_nw = floor(ScalarConvert<Dtype,float>::to(ix));

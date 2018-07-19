@@ -122,8 +122,8 @@ struct Tensor : public detail::TensorBase {
   int64_t storage_offset() const;
   Tensor & resize_(IntList size);
   int64_t numel() const;
-  Tensor & set_(Storage & storage);
-  Tensor & set_(Storage & sourceStorage, int64_t storage_offset, IntList size, IntList stride={});
+  Tensor & set_(Storage & source);
+  Tensor & set_(Storage & source, int64_t storage_offset, IntList size, IntList stride={});
   Tensor & set_(const Tensor & source);
   Tensor & set_();
   Tensor & fill_(Scalar value);
@@ -252,6 +252,8 @@ struct Tensor : public detail::TensorBase {
   Tensor tanh() const;
   Tensor & erf_();
   Tensor erf() const;
+  Tensor & erfc_();
+  Tensor erfc() const;
   Tensor & erfinv_();
   Tensor erfinv() const;
   Tensor & sqrt_();

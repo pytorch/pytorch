@@ -17,13 +17,13 @@ static inline void THNN_(TemporalConvolution_shapeCheck)(
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
-  THCUNN_argCheck(state, input->nDimension == 2 || input->nDimension == 3, 2, input,
-                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+                  "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
   if (inputFrameSize != NULL) {
     THArgCheck(input->size[dimF] == *inputFrameSize, 2,
                "invalid input frame size. Got: %d, Expected: %d",
@@ -56,7 +56,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   THArgCheck(THCTensor_(isContiguous)(state, weight), 4, "weight must be contiguous");
   THArgCheck(!bias || THCTensor_(isContiguous)(state, bias), 5, "bias must be contiguous");
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
   }
@@ -68,7 +68,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   nInputFrame = input->size[dimS];
   nOutputFrame = (nInputFrame - kW) / dW + 1;
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     THCTensor_(resize2d)(state, output,
                           nOutputFrame,
@@ -189,7 +189,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   THNN_(TemporalConvolution_shapeCheck)
        (state, input, kW, dW, NULL);
 
-  if (gradOutput->nDimension == 3)
+  if (gradOutput->dim() == 3)
   {
     dimS = 1;
   }
@@ -205,7 +205,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);
 
-  if (gradOutput->nDimension == 2)
+  if (gradOutput->dim() == 2)
   {
     /* ouch */
     for(k = 0; nOutputFrame > 0; k++)
@@ -293,7 +293,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
 
   int dimS = 0; // sequence dimension
 
-  if (gradOutput->nDimension == 3)
+  if (gradOutput->dim() == 3)
   {
     dimS = 1;
   }
@@ -307,7 +307,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
   gradOutputWindow = THCTensor_(new)(state);
   inputWindow = THCTensor_(new)(state);
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     /* bias first */
     for(k = 0; k < nOutputFrame; k++)

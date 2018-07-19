@@ -207,14 +207,14 @@ private:
    *      cached communicator will be destroyed and a new one with the new
    *      device string will be built
    */
-  std::unordered_map<THDGroup, std::string> _groupDevices;
+  std::unordered_map<THDGroup, std::vector<std::string> > _groupDevices;
 
   /**
    * NCCL resources for for each THDGroup including:
    * NCCL communicator for the current group
    * Cuda Events for all GPUs for NCCL operations of the current group
    */
-  std::unordered_map<THDGroup, NcclResources> _groupNcclResources;
+  std::unordered_map<THDGroup, std::vector<NcclResources> > _groupNcclResources;
 
   // Existing groups
   std::unordered_map<THDGroup, DataChannel::Group> _groups;

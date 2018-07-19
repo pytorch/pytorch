@@ -4,7 +4,7 @@
 
 namespace torch { namespace jit {
 
-void EliminateDeadCode(std::shared_ptr<Graph>& graph);
-void EliminateDeadCode(Block *block);
+void EliminateDeadCode(const std::shared_ptr<Graph>& graph);
+void EliminateDeadCode(Block *block, bool recurse=true);
 
 }}

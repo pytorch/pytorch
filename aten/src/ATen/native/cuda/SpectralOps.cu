@@ -1,40 +1,29 @@
 #include "ATen/ATen.h"
 #include "ATen/Config.h"
 #include "ATen/Dispatch.h"
+#include "ATen/Utils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/native/SpectralOpsUtils.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
-
-#include "ATen/cuda/AccumulateType.cuh"
-#include "ATen/cuda/CUDATensorMethods.cuh"
-#include "ATen/cuda/CUDATypeConversion.cuh"
-
-#include <THC/THCDeviceUtils.cuh>
-#include <THC/THCNumerics.cuh>
-#include <THC/THCTensorMathReduce.cuh>
+#include "ATen/native/cuda/CuFFTPlanCache.h"
 #include <THC/THCTensorSort.cuh>
 #include <THC/THCThrustAllocator.cuh>
-#include <THCUNN/THCHalfAutoNumerics.cuh>
 
 #include <thrust/execution_policy.h>
 #include <thrust/unique.h>
 #include <cufft.h>
 #include <cufftXt.h>
 #include <cmath>
-#include <numeric>
-#include <iostream>
 
 namespace at { namespace native {
 
-__forceinline__
-static bool is_pow_of_two(long long int  x) {
-  return (x & (x - 1)) == 0;
-}
+using namespace at::native::detail;
 
 // In real-to-complex transform, cuFFT only fills half of the values due to
 // conjugate symmetry. See native/SpectralUtils.h for more details.
 // The following structs are used to fill in the other half with symmetry in
 // case of real-to-complex transform with onesided=False flag.
+// See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
 
 // counting_iterator => index to fill
 struct cnt_to_dst_idx_functor : public thrust::unary_function<int64_t, int64_t>
@@ -63,7 +52,7 @@ template <typename scalar_t>
 struct dst_idx_to_src_functor : public thrust::unary_function<int64_t, scalar_t>
 {
   // output can have at most dim 5 (batch + 3 signal dim + real/imag)
-  int64_t sizes[5], strides[5];
+  int64_t sizes[max_rank + 2], strides[max_rank + 2];
   const int64_t signal_ndim;
   scalar_t *data;  // device ptr
 
@@ -119,179 +108,91 @@ static void _fft_fill_with_conjugate_symmetry_(Tensor& input,
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "_fft_fill_with_conjugate_symmetry_", [&] {
-    using cuda_scalar_t = cuda::type<scalar_t>;
-    typedef thrust::device_ptr<cuda_scalar_t> device_ptr;
+    typedef thrust::device_ptr<scalar_t> device_ptr;
     typedef thrust::counting_iterator<int64_t> counter;
     typedef thrust::transform_iterator<cnt_to_dst_idx_functor, counter> dst_idx_iterator;
     typedef thrust::permutation_iterator<device_ptr, dst_idx_iterator> dst_iterator;
-    typedef thrust::transform_iterator<dst_idx_to_src_functor<cuda_scalar_t>, dst_idx_iterator> src_iterator;
+    typedef thrust::transform_iterator<dst_idx_to_src_functor<scalar_t>, dst_idx_iterator> src_iterator;
 
     dst_idx_iterator dst_idxs(counter(0), cnt_to_dst_idx_functor(size_last_dim, last_dim_start_slice));
 
-    auto data = device_ptr(input.data<cuda_scalar_t>());
+    auto data = device_ptr(input.data<scalar_t>());
     dst_iterator dsts(data, dst_idxs);
-    src_iterator srcs(dst_idxs, dst_idx_to_src_functor<cuda_scalar_t>(input));
+    src_iterator srcs(dst_idxs, dst_idx_to_src_functor<scalar_t>(input));
     thrust::copy_n(policy, srcs, n, dsts);
   });
 }
 
-// cuFFT
-// Currently not utilizing multi GPUs so this potentially speed up.
-Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
-                  bool complex_input, bool complex_output,
-                  bool inverse, IntList checked_signal_sizes,
-                  bool normalized, bool onesided,
-                  IntList output_sizes) {
-  Tensor input = self;
+// NOTE [ cuFFT Embedded Strides ]
+//
+// cuFFT supports a subset of arbitrary strides via their "advanced data layout"
+// option (http://docs.nvidia.com/cuda/cufft/index.html#advanced-data-layout).
+// Specifically, these are tensors that can be viewed as subtensors resulted
+// from slicing a larger contiguous tensors. For such input tensors, let the
+// sizes of the enclosing tensor be `inembed`, and we can have in 3d case:
+//
+//     input[x, y, z] = input[((x * inembed[1] + y) * inembed[2] + z)]
+//
+// Above is the simplified formula ignoring the batch dimension. In fact, the
+// last dimension of the enclosing tensor doesn't have to be contiguous, i.e.,
+// it can be greater than 1. Then one can set the base stride for the enclosing
+// tensor with `istride`. Then we have
+//
+//     input[x, y, z] = input[((x * inembed[1] + y) * inembed[2] + z) * istride]
+//
+// For example, consider
+//
+//     enclosing = torch.zeros(6, 8, 10)  # contiguous
+//     input = enclosing[:4, 2:6, 6:]
+//     input.size()                       # [ 4,  4,  4]
+//     input.stride()                     # [80, 10,  1]
+//     # inembed = [6, 8, 10]
+//     input[2, 1, 3] = input[((2 * 8) + 1) * 10 + 3]   # using above formula
+//                    = input[173]
+//                    = input[2 * 80 + 1 * 10 + 1 * 3]  # using strides directly
+//
+// Generally, the embedded strides can be computed as
+//
+//     embed[i] = stride[i - 1] / stride[i].
+//
+// Note that the value of embed[0] isn't used to compute indices and doesn't
+// matter.
+//
+// Contrary to advanced data layout, simple layout means that *embeds have
+// unit-strides. In particular, unit-stride refers to that the input and output
+// tensors being contiguous, and that the strides at the innermost signal
+// dimension being unit (1) w.r.t. the corresponding data type.
 
-  bool is_half = input.type().scalarType() == ScalarType::Half;
-
-  if (is_half) {
-    // cuFFT on half requires compute capability of at least SM_53
-    auto dev_prop = at::globalContext().getCurrentDeviceProperties();
-    if (dev_prop->major < 5 || (dev_prop->major == 5 && dev_prop->minor < 3)) {
-      std::ostringstream ss;
-      ss << "cuFFT doesn't support signals of half type with compute "
-         << "capability less than SM_53, but the device containing input half "
-         << "tensor only has SM_" << dev_prop->major << dev_prop->minor;
-      throw std::runtime_error(ss.str());
-    }
+static inline Tensor _run_cufft(
+    const CuFFTConfig &config, Tensor& input, int64_t signal_ndim,
+    bool complex_input, bool complex_output, bool inverse,
+    IntList checked_signal_sizes, bool normalized, bool onesided,
+    IntList output_sizes, bool input_was_cloned
+) {
+  if (config.should_clone_input() && !input_was_cloned) {
+    input = input.clone();
   }
 
-  // cuFFT requires input and output data pointers to complex type aligned
-  // our allocated output tensor is always 256 bytes aligned so it is fine, but
-  // we need to check input tensor to make sure that it is not unaligned, e.g.
-  // from a slicing.
-  //
-  // cuFFT out-of-place complex-to-real transforms with non-unit strides may
-  // overwrite input.
-  //
-  // We need to clone the input tensor in these two cases.
-  auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
-  if ((reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0 ||
-      (complex_input && !complex_output && input.stride(signal_ndim) != 2))) {
-    input = self.clone();
-  }
+  auto& plan = config.plan();
+  auto& ctx = at::globalContext();
 
-  // check input batch size
-  long long int batch = input.size(0);
-
-  std::vector<long long int> signal_sizes(signal_ndim);
-
-  // cuFFT needs inembds and onembed, which are the sizes of enclosing tensor.
-  // inembds can be used to support non-contiguous in certain cases, the
-  // following loop does the check that if the input tensor can be viewed as
-  // enclosed in a larger tensor. If not, we need to .contiguous it.
-  std::vector<long long int> inembed(signal_ndim);
-
-  // check the input sizes and strides to see if we need to make it contiguous
-  bool need_contiguous = input.stride(signal_ndim) == 0;
-  if (complex_input) {
-    // Real/imag dimension must be like complex type. Need to make the input
-    // tensor conitugous if this dimension is not contiguous.
-    need_contiguous |= input.stride(-1) != 1;
-  } else if (is_half) {
-    // For half, base strides on the real part of real-to-complex and
-    // complex-to-real transforms are not supported. Since our output is always
-    // contiguous, only need to check real-to-complex case.
-    need_contiguous |= input.stride(signal_ndim) != 1;
-  }
-  // store last tensor stride to infer inembed array
-  // complex input's last dim is size 2 and contiguous
-  long long int ilast_stride = complex_input ? 2 : 1;
-   // for each signal dim from innermost to outermost
-  for (int64_t i = signal_ndim - 1; i >= 0; i--) {
-    long long int signal_size = checked_signal_sizes[i];
-    long long int istride = input.stride(i + 1);
-    if (is_half && !is_pow_of_two(signal_size)) {
-      std::ostringstream ss;
-      ss << "cuFFT doesn't support signals of half type with size that is not "
-         << "a power of two, but got a signal size of " << signal_size << " at"
-         << "signal dimension " << i;
-      throw std::runtime_error(ss.str());
-    }
-    signal_sizes[i] = signal_size;
-    if (!need_contiguous) {
-      // set the inembed for dim in last dimension
-      if (ilast_stride == 0) {
-        need_contiguous = istride != 0;
-        if (i < signal_ndim - 1) {
-          inembed[i + 1] = 0;
-        }
-      } else {
-        need_contiguous = istride % ilast_stride != 0;
-        if (i < signal_ndim - 1) {
-          inembed[i + 1] = istride / ilast_stride;
-        }
-      }
-      ilast_stride = istride;
-    }
-  }
-
-  need_contiguous |= (input.size(0) > 1 && input.stride(0) == 0);
-  if (need_contiguous) {
-    input = input.contiguous();
-    auto input_size = input.sizes();
-    // Copies new input sizes to inemed
-    std::copy(/* first signal dim */      input_size.begin() + 1,
-              /* after last signal dim */ input_size.begin() + signal_ndim + 1,
-              /* iterator to write */     inembed.begin());
-  }
-
-  // set idist (stride at batch dim)
-  long long int idist = complex_input ? input.stride(0) >> 1 : input.stride(0);
-  // Even if batch dimension is one and idist (stride(0)) doesn't matter,
-  // cuFFT errors if idist = 0. This is hack to make it succeed.
-  if (idist == 0 && batch == 1) {
-    idist = 1;
-  }
-  // set base_istride (stride at innermost dim of signal)
-  long long int base_istride = complex_input ? input.stride(signal_ndim) >> 1 : input.stride(signal_ndim);
-
-  // set output, odist, onembed, base_ostride
+  // set output
   auto output = input.type().tensor(output_sizes);
-  long long int odist = complex_output ? output.stride(0) >> 1 : output.stride(0);
-  std::vector<long long int> onembed(output_sizes.data() + 1, output_sizes.data() + signal_ndim + 1);
-  long long int base_ostride = 1;
-
-  CufftHandle plan;
-  size_t ws = 0;
-  cudaDataType itype, otype, exec_type;
-  if (input.type().scalarType() == ScalarType::Float) {
-    itype = complex_input ? CUDA_C_32F : CUDA_R_32F;
-    otype = complex_output ? CUDA_C_32F : CUDA_R_32F;
-    exec_type = CUDA_C_32F;
-  } else if (input.type().scalarType() == ScalarType::Double) {
-    itype = complex_input ? CUDA_C_64F : CUDA_R_64F;
-    otype = complex_output ? CUDA_C_64F : CUDA_R_64F;
-    exec_type = CUDA_C_64F;
-  } else if (input.type().scalarType() == ScalarType::Half) {
-    itype = complex_input ? CUDA_C_16F : CUDA_R_16F;
-    otype = complex_output ? CUDA_C_16F : CUDA_R_16F;
-    exec_type = CUDA_C_16F;
-  } else {
-    std::ostringstream ss;
-    ss << "cuFFT doesn't support tensor of type: "
-       << at::toString(input.type().scalarType());
-    throw std::runtime_error(ss.str());
-  }
-
-  // make plan
-  CUFFT_CHECK(cufftXtMakePlanMany(plan.get(), signal_ndim, signal_sizes.data(),
-    inembed.data(), base_istride, idist, itype, onembed.data(), base_ostride,
-    odist, otype, batch, &ws, exec_type));
 
   // set to current stream
-  CUFFT_CHECK(cufftSetStream(plan.get(), at::globalContext().getCurrentCUDAStream()));
+  CUFFT_CHECK(cufftSetStream(plan, ctx.getCurrentCUDAStream()));
+
+  auto ws = ctx.getType(at::Backend::CUDA, at::ScalarType::Byte).tensor({ config.workspace_size() });
+  CUFFT_CHECK(cufftSetWorkArea(plan, ws.data_ptr()));
 
   // run
-  CUFFT_CHECK(cufftXtExec(plan.get(), input.data_ptr(), output.data_ptr(),
+  CUFFT_CHECK(cufftXtExec(plan, input.data_ptr(), output.data_ptr(),
     inverse ? CUFFT_INVERSE : CUFFT_FORWARD));
 
   // rescale if needed by normalized flag or inverse transform
   auto size_last_signal_dim = checked_signal_sizes[signal_ndim - 1];
   if (normalized || inverse) {
-    auto signal_numel = std::accumulate(checked_signal_sizes.begin(), checked_signal_sizes.end(), 1, std::multiplies<int64_t>());
+    auto signal_numel = at::prod_intlist(checked_signal_sizes);
     double scale_denom;
     if (normalized) {
       scale_denom = std::sqrt(static_cast<double>(signal_numel));
@@ -312,6 +213,98 @@ Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
     _fft_fill_with_conjugate_symmetry_(output, size_last_signal_dim, start_slice);
   }
   return output;
+}
+
+// The cuFFT plan cache, defined in CuFFTUtils.h
+struct CuFFTParamsLRUCache plan_cache;
+std::mutex plan_cache_mutex;
+
+namespace detail {
+
+int64_t cufft_get_plan_cache_max_size_impl() {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  return plan_cache.max_size();
+}
+
+void cufft_set_plan_cache_max_size_impl(int64_t max_size) {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  plan_cache.resize(max_size);
+}
+
+int64_t cufft_get_plan_cache_size_impl() {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  return plan_cache.size();
+}
+
+void cufft_clear_plan_cache_impl() {
+  std::lock_guard<std::mutex> guard(plan_cache_mutex);
+  return plan_cache.clear();
+}
+
+} // namespace at::native::detail
+
+// cuFFT
+// Currently not utilizing multi GPUs so this can be potentially sped up.
+Tensor _fft_cufft(const Tensor& self, int64_t signal_ndim,
+                  bool complex_input, bool complex_output, bool inverse,
+                  IntList checked_signal_sizes, bool normalized, bool onesided,
+                  IntList output_sizes) {
+  Tensor input = self;
+  bool input_was_cloned = false;
+
+  // Slice when twosided complex-to-real. This is not always needed because we
+  // calculate the inembed. But it will benefit us in certain cases where we
+  // clone the input tensor.
+  //
+  // See NOTE [ cuFFT Embedded Strides ].
+  // See NOTE [ Fourier Transform Conjugate Symmetry ] in native/SpectralOpsUtils.h.
+  if (complex_input && !complex_output && !onesided) {
+    auto onesided_size = infer_ft_real_to_complex_onesided_size(checked_signal_sizes[signal_ndim - 1]);
+    input = input.narrow(signal_ndim, 0, onesided_size);
+  }
+
+  // cuFFT requires input and output data pointers to complex type aligned.
+  // Our allocated output tensor is always 256 bytes aligned so it is fine, but
+  // we need to check input tensor to make sure that it is not unaligned, e.g.,
+  // from a slicing.
+  auto complex_size_bytes = 2 * input.type().elementSizeInBytes();
+  if (reinterpret_cast<std::uintptr_t>(input.data_ptr()) % complex_size_bytes != 0) {
+    input = input.clone();
+    input_was_cloned = true;
+  }
+
+  // Now that we have done error check and data_ptr checks, we delegate all
+  // futher cuFFT parameter computation and plan creation to the helper class
+  // CuFFTConfig in CuFFTUtils.h.
+
+  // If plan caching is enabled, we check the cache. Note that this accesses
+  // plan_cache.max_size() and thus makes this function less functional.
+  // However, integrating additional arguments into the "public" level c++ APIs,
+  // e.g., irfft, is difficult as we have a long call sequence looking like
+  //   irfft --> _fft --> _fft_with_size --dispatching-to-> _fft_cufft
+
+  // This read is not locked for perf reason. Shouldn't matter too much because
+  // we check again after acquiring the lock.
+  if (plan_cache.max_size() > 0) {
+    CuFFTParams params;
+    setCuFFTParams(&params, input, signal_ndim, complex_input,
+      complex_output, checked_signal_sizes, onesided);
+    std::lock_guard<std::mutex> guard(plan_cache_mutex);
+    if (plan_cache.max_size() > 0) {  // check again after acquiring the lock
+      const CuFFTConfig &config = plan_cache.try_emplace_value(std::move(params),
+                                             input, signal_ndim, complex_input,
+                                             complex_output, checked_signal_sizes,
+                                             onesided, output_sizes);
+      return _run_cufft(config, input, signal_ndim, complex_input,
+                        complex_output, inverse, checked_signal_sizes, normalized,
+                        onesided, output_sizes, input_was_cloned);
+    }
+  }
+  CuFFTConfig config(input, signal_ndim, complex_input, complex_output,
+                     checked_signal_sizes, onesided, output_sizes);
+  return _run_cufft(config, input, signal_ndim, complex_input,
+                    complex_output, inverse, checked_signal_sizes, normalized,
+                    onesided, output_sizes, input_was_cloned);
 }
 
 }} // at::native

@@ -1,6 +1,6 @@
 #include "torch/csrc/autograd/python_cpp_function.h"
 
-#include <Python.h>
+#include "torch/csrc/python_headers.h"
 #include <memory>
 #include <stdio.h>
 #include <typeindex>
@@ -9,6 +9,7 @@
 #include "torch/csrc/autograd/python_function.h"
 #include "torch/csrc/autograd/python_variable.h"
 #include "torch/csrc/autograd/python_hook.h"
+#include "torch/csrc/autograd/python_anomaly_mode.h"
 #include "torch/csrc/utils/auto_gil.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/Exceptions.h"
@@ -26,6 +27,11 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
   }
 
   int num_inputs = PyTuple_GET_SIZE(args);
+  int num_inputs_required = ((THPCppFunction*)self)->cdata->num_inputs();
+  if (num_inputs != num_inputs_required) {
+    return PyErr_Format(PyExc_TypeError, "expected %d arguments, got %d instead",
+                        num_inputs_required, num_inputs);
+  }
   variable_list vars(num_inputs);
   for (int i = 0; i != num_inputs; ++i) {
     PyObject* arg = PyTuple_GET_ITEM(args, i);
@@ -42,7 +48,7 @@ PyObject* THPCppFunction_call(PyObject* self, PyObject* args, PyObject *kwargs)
 
   HANDLE_TH_ERRORS {
     AutoNoGIL nogil;
-    output = (*((THPCppFunction*)self)->cdata)(vars);
+    output = (*((THPCppFunction*)self)->cdata)(std::move(vars));
   }
   END_HANDLE_TH_ERRORS
 
@@ -113,6 +119,14 @@ PyObject* THPCppFunction_next_functions(THPCppFunction* self, PyObject* hook)
     PyTuple_SET_ITEM(py_functions.get(), i, tuple.release());
   }
   return py_functions.release();
+}
+
+PyObject* THPCppFunction_metadata(THPCppFunction *self, void *_unused)
+{
+  auto metadata = static_cast<PyAnomalyMetadata*>(self->cdata->metadata())->dict();
+
+  Py_INCREF(metadata);
+  return metadata;
 }
 
 PyObject* THPCppFunction_requires_grad(THPCppFunction* self) {

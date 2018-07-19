@@ -1,5 +1,7 @@
 #pragma once
 
+// ${generated_comment}
+
 $th_headers
 
 #include "ATen/Tensor.h"
@@ -21,6 +23,7 @@ public:
   virtual Scalar localScalar() override;
   virtual void * unsafeGetTH(bool retain) override;
   virtual std::unique_ptr<Storage> storage() override;
+  virtual void release_resources() override;
   static const char * typeString();
 
 //TODO(zach): sort of friend permissions later so this

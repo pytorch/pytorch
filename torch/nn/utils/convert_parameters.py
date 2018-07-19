@@ -1,12 +1,11 @@
 import torch
-from torch.autograd import Variable
 
 
 def parameters_to_vector(parameters):
     r"""Convert parameters to one vector
 
     Arguments:
-        parameters (Iterable[Variable]): an iterator of Variables that are the
+        parameters (Iterable[Tensor]): an iterator of Tensors that are the
             parameters of a model.
 
     Returns:
@@ -28,13 +27,13 @@ def vector_to_parameters(vec, parameters):
     r"""Convert one vector to the parameters
 
     Arguments:
-        vec (Variable): a single vector represents the parameters of a model.
-        parameters (Iterable[Variable]): an iterator of Variables that are the
+        vec (Tensor): a single vector represents the parameters of a model.
+        parameters (Iterable[Tensor]): an iterator of Tensors that are the
             parameters of a model.
     """
-    # Ensure vec of type Variable
-    if not isinstance(vec, Variable):
-        raise TypeError('expected torch.autograd.Variable, but got: {}'
+    # Ensure vec of type Tensor
+    if not isinstance(vec, torch.Tensor):
+        raise TypeError('expected torch.Tensor, but got: {}'
                         .format(torch.typename(vec)))
     # Flag for the device where the parameter is located
     param_device = None
@@ -61,7 +60,7 @@ def _check_param_device(param, old_param_device):
     e.g. parameters in different GPUs, or mixture of CPU/GPU.
 
     Arguments:
-        param ([Variable]): a Variable of a parameter of a model
+        param ([Tensor]): a Tensor of a parameter of a model
         old_param_device (int): the device where the first parameter of a
                                 model is allocated.
 

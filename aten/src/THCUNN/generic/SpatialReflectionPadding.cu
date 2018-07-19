@@ -7,7 +7,7 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
            THCTensor *output,
            int padL, int padR,
            int padT, int padB) {
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
              "input tensor must fit into 32-bit index math");
 
   int planeDim = 0;
@@ -16,8 +16,8 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
   int numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 3 || numInputDims == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s")
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 3 || numInputDims == 4), 2, input,
+                  "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 4) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -30,13 +30,13 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
   int inputH = THCTensor_(size)(state, input, dimh);
   int inputW = THCTensor_(size)(state, input, dimw);
 
-  THArgCheck(padL <= inputW && padR <= inputW, 4,
-             "Padding size should not exceed corresponding input dimension, "
+  THArgCheck(padL < inputW && padR < inputW, 4,
+             "Padding size should be less than the corresponding input dimension, "
              "but got: padding (%d, %d) at dimension %d of input %s",
              padL, padR, dimw, THCTensor_(sizeDesc)(state, input).str);
 
-  THArgCheck(padT <= inputH && padB <= inputH, 6,
-             "Padding size should not exceed corresponding input dimension, "
+  THArgCheck(padT < inputH && padB < inputH, 6,
+             "Padding size should be less than the corresponding input dimension, "
              "but got: padding (%d, %d) at dimension %d of input %s",
              padT, padB, dimh, THCTensor_(sizeDesc)(state, input).str);
 
@@ -82,9 +82,9 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(
            int padL, int padR,
            int padT, int padB) {
 
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, input), 2,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, input), 2,
                 "input tensor must fit into 32-bit index math");
-  THArgCheck(TensorUtils<THCTensor>::canUse32BitIndexMath(state, gradOutput), 3,
+  THArgCheck(THCTensor_canUse32BitIndexMath(state, gradOutput), 3,
                 "output gradient tensor must fit into 32-bit index math");
 
   int planeDim = 0;

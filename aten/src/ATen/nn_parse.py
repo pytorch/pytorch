@@ -66,7 +66,7 @@ def output_arguments(thnn_function):
     def is_output_arg(arg_name, func_name):
         if arg_name == 'output' and 'updateOutput' in cname:
             return True
-        if name in {'gradInput', 'gradWeight', 'gradBias'}:
+        if name in {'gradInput', 'gradWeight', 'gradBias', 'gradGrid'}:
             return True
         if arg_name == 'indices' and 'updateOutput' in cname and 'Unpool' not in cname:
             # indices is an output argument in pooling and an input in unpooling

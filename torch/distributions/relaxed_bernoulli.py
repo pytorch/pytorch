@@ -1,6 +1,5 @@
 import torch
 from numbers import Number
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.distribution import Distribution
 from torch.distributions.transformed_distribution import TransformedDistribution
@@ -16,7 +15,7 @@ class LogitRelaxedBernoulli(Distribution):
     Samples are logits of values in (0, 1). See [1] for more details.
 
     Args:
-        temperature (Tensor):
+        temperature (Tensor): relaxation temperature
         probs (Number, Tensor): the probabilty of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
 
@@ -83,17 +82,13 @@ class RelaxedBernoulli(TransformedDistribution):
 
     Example::
 
-        >>> m = RelaxedBernoulli(torch.Tensor([2.2]),
-                                 torch.Tensor([0.1, 0.2, 0.3, 0.99]))
+        >>> m = RelaxedBernoulli(torch.tensor([2.2]),
+                                 torch.tensor([0.1, 0.2, 0.3, 0.99]))
         >>> m.sample()
-         0.2951
-         0.3442
-         0.8918
-         0.9021
-        [torch.FloatTensor of size 4]
+        tensor([ 0.2951,  0.3442,  0.8918,  0.9021])
 
     Args:
-        temperature (Tensor):
+        temperature (Tensor): relaxation temperature
         probs (Number, Tensor): the probabilty of sampling `1`
         logits (Number, Tensor): the log-odds of sampling `1`
     """

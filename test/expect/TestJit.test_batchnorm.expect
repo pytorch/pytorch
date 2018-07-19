@@ -2,7 +2,8 @@ graph(%0 : Double(2, 2, 2, 2)
       %1 : Double(2)
       %2 : Double(2)
       %3 : Double(2)
-      %4 : Double(2)) {
-  %5 : Double(2, 2, 2, 2) = aten::batch_norm[training=1, momentum=0.1, eps=1e-05, cudnn_enabled=1](%0, %1, %2, %3, %4), scope: BatchNorm2d
-  return (%5);
+      %4 : Double(2)
+      %5 : Long()) {
+  %6 : Double(2, 2, 2, 2) = aten::batch_norm[training=1, momentum=0.1, eps=1e-05, cudnn_enabled=1](%0, %1, %2, %3, %4), scope: BatchNorm2d
+  return (%6);
 }

@@ -3,116 +3,147 @@
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
-#include "cpu/UnaryOpsKernel.h"
+
+#include "ATen/CPUApplyUtils.h"
+#include "ATen/Parallel.h"
+#include "ATen/native/cpu/UnaryOpsKernel.h"
 
 #include <algorithm>
+#include <cmath>
 #include <functional>
 #include <numeric>
 #include <vector>
 
 #include <map>
 
-namespace at { namespace native {
+// NOTE:
+// YOU ARE NOT OBLIGED TO USE THESE MACROS
+// If you're writing something more specialized, please don't try to make them
+// work for your case, but just write something new instead.
 
-using unary_type = void(Tensor&, const Tensor&);
-unary_type* ceilImpl = DispatchStub<unary_type>::init<ceilImplC, &ceilImpl>;
-unary_type* floorImpl = DispatchStub<unary_type>::init<floorImplC, &floorImpl>;
-unary_type* roundImpl = DispatchStub<unary_type>::init<roundImplC, &roundImpl>;
-unary_type* truncImpl = DispatchStub<unary_type>::init<truncImplC, &truncImpl>;
-unary_type* sqrtImpl = DispatchStub<unary_type>::init<sqrtImplC, &sqrtImpl>;
+namespace at {
+namespace native {
 
-// WRAP OPS #################################################################
-
-Tensor ceil(const Tensor& self) {
+Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
   Tensor result = self.type().tensor();
-  return at::ceil_out(result, self);
-}
-Tensor floor(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return at::floor_out(result, self);
-}
-Tensor round(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return at::round_out(result, self);
-}
-Tensor trunc(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return at::trunc_out(result, self);
-}
-Tensor sqrt(const Tensor& self) {
-  Tensor result = self.type().tensor();
-  return at::sqrt_out(result, self);
+  return clamp_out(result, self, min, max);
 }
 
-Tensor& ceil_(Tensor& self) {
-  return at::ceil_out(self, self);
-}
-Tensor& floor_(Tensor& self) {
-  return at::floor_out(self, self);
-}
-Tensor& round_(Tensor& self) {
-  return at::round_out(self, self);
-}
-Tensor& trunc_(Tensor& self) {
-  return at::trunc_out(self, self);
-}
-Tensor& sqrt_(Tensor& self) {
-  return at::sqrt_out(self, self);
+Tensor clamp_max(const Tensor& self, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_max_out(result, self, max);
 }
 
-// \WRAP OPS #################################################################
+Tensor clamp_min(const Tensor& self, Scalar min) {
+  Tensor result = self.type().tensor();
+  return clamp_min_out(result, self, min);
+}
 
-bool _unops_out_cpu(unary_type* f, Tensor& result, const Tensor& self) {
-  if (result.is_contiguous() && self.is_contiguous()) {
-    result.resize_(self.sizes());
-    f(result, self);
-    return true;
+Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
+  return _th_clamp_(self, min, max);
+}
+
+Tensor& _clamp_out_cpu(
+    Tensor& result,
+    const Tensor& self,
+    Scalar min,
+    Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_(result, min, max);
+}
+
+Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  return _th_clamp_max_(self, max);
+}
+
+Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_max_(result, max);
+}
+
+Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  return _th_clamp_min_(self, min);
+}
+
+Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_min_(result, min);
+}
+
+Tensor& fill_(Tensor& self, Scalar value) {
+  return self._fill_(value);
+}
+
+Tensor& fill_(Tensor& self, const Tensor& value) {
+  return self._fill_(value);
+}
+
+// NB: If you use this macro, you may also need to add a CUDA forwarding
+// stub in CUDAUnaryOps
+
+#define IMPLEMENT_UNARY_OP_VEC(op)                              \
+  Tensor op(const Tensor& self) {                               \
+    Tensor result = self.type().tensor();                       \
+    return at::op##_out(result, self);                          \
+  }                                                             \
+  Tensor& _##op##__cpu(Tensor& self_) {                         \
+    if (self_.numel() > 0) {                                    \
+      Tensor self = sort_strides(self_);                        \
+      op##Impl(self, self);                                     \
+    }                                                           \
+    return self_;                                               \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    result.resize_(self.sizes());                               \
+    if (result.numel() > 0) {                                   \
+      op##Impl(result, self);                                   \
+    }                                                           \
+    return result;                                              \
   }
-  return false;
-}
 
-// CPU OPS ###################################################################
+#define IMPLEMENT_UNARY_OP_TH(op)                               \
+  Tensor op(const Tensor& self) {                               \
+    Tensor result = self.type().tensor();                       \
+    return at::op##_out(result, self);                          \
+  }                                                             \
+  Tensor& _##op##__cpu(Tensor& self) {                          \
+    return at::op##_out(self, self);                            \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    result.resize_(self.sizes());                               \
+    return at::_##op##_out(result, self);                       \
+  }
 
-Tensor& _ceil_out_cpu(Tensor& result, const Tensor& self) {
-  return _unops_out_cpu(ceilImpl, result, self) ? result
-                                                : at::_ceil_out(result, self);
-}
-Tensor& _floor_out_cpu(Tensor& result, const Tensor& self) {
-  return _unops_out_cpu(floorImpl, result, self) ? result
-                                                 : at::_floor_out(result, self);
-}
-Tensor& _round_out_cpu(Tensor& result, const Tensor& self) {
-  return _unops_out_cpu(roundImpl, result, self) ? result
-                                                 : at::_round_out(result, self);
-}
-Tensor& _trunc_out_cpu(Tensor& result, const Tensor& self) {
-  return _unops_out_cpu(truncImpl, result, self) ? result
-                                                 : at::_trunc_out(result, self);
-}
-Tensor& _sqrt_out_cpu(Tensor& result, const Tensor& self) {
-  return _unops_out_cpu(sqrtImpl, result, self) ? result
-                                                : at::_sqrt_out(result, self);
-}
+// NB: Temp. defaulting to TH implementation of abs due to issues with Apple
 
-// \CPU OPS #################################################################
+IMPLEMENT_UNARY_OP_TH(abs)
+IMPLEMENT_UNARY_OP_VEC(acos)
+IMPLEMENT_UNARY_OP_VEC(asin)
+IMPLEMENT_UNARY_OP_VEC(atan)
+IMPLEMENT_UNARY_OP_VEC(ceil)
+IMPLEMENT_UNARY_OP_VEC(cos)
+IMPLEMENT_UNARY_OP_TH(cosh)
+IMPLEMENT_UNARY_OP_VEC(erf)
+IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC(exp)
+IMPLEMENT_UNARY_OP_VEC(expm1)
+IMPLEMENT_UNARY_OP_VEC(floor)
+IMPLEMENT_UNARY_OP_VEC(log)
+IMPLEMENT_UNARY_OP_VEC(log10)
+IMPLEMENT_UNARY_OP_VEC(log1p)
+IMPLEMENT_UNARY_OP_VEC(log2)
+IMPLEMENT_UNARY_OP_VEC(round)
+IMPLEMENT_UNARY_OP_VEC(rsqrt)
+IMPLEMENT_UNARY_OP_VEC(sigmoid)
+IMPLEMENT_UNARY_OP_VEC(sin)
+IMPLEMENT_UNARY_OP_TH(sinh)
+IMPLEMENT_UNARY_OP_VEC(sqrt)
+IMPLEMENT_UNARY_OP_VEC(tan)
+IMPLEMENT_UNARY_OP_VEC(tanh)
+IMPLEMENT_UNARY_OP_VEC(trunc)
 
-// CUDA OPS #################################################################
-
-Tensor& _ceil_out_cuda(Tensor& result, const Tensor& self) {
-  return at::_ceil_out(result, self);
 }
-Tensor& _floor_out_cuda(Tensor& result, const Tensor& self) {
-  return at::_floor_out(result, self);
-}
-Tensor& _round_out_cuda(Tensor& result, const Tensor& self) {
-  return at::_round_out(result, self);
-}
-Tensor& _trunc_out_cuda(Tensor& result, const Tensor& self) {
-  return at::_trunc_out(result, self);
-}
-Tensor& _sqrt_out_cuda(Tensor& result, const Tensor& self) {
-  return at::_sqrt_out(result, self);
-}
-
-// \CUDA OPS ################################################################
-}} // namespace at::native
+} // namespace at

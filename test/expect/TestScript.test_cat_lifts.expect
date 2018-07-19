@@ -1,0 +1,12 @@
+graph(%x : Dynamic) {
+  %1 : Dynamic = aten::cat[dim=1](%x, %x)
+  return (%1);
+}
+graph(%x : Dynamic) {
+  %1 : Dynamic = aten::cat[dim=1]()
+  return (%1);
+}
+graph(%x : Dynamic) {
+  %1 : Dynamic = aten::cat[dim=1](%x)
+  return (%1);
+}

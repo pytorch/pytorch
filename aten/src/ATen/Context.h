@@ -5,60 +5,138 @@
 #include "ATen/Generator.h"
 #include "ATen/Type.h"
 #include "ATen/Utils.h"
+#include "ATen/Error.h"
+#include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/CUDAStream.h"
 
 #include <memory>
 #include <mutex>
 #include <cstdint>
 
-// Forwarde declare these CUDA types here to avoid including CUDA headers in
-// ATen headers, which would make ATen always require CUDA to build.
-struct THCState;
-struct CUstream_st;
-typedef struct CUstream_st *cudaStream_t;
-struct cudaDeviceProp;
-
 namespace at {
+
+enum class IsVariable {
+  NotVariable,
+  Variable,
+  NumOptions
+};
 
 class AT_API Context {
 public:
   Context();
-  Type & getType(Backend p, ScalarType s) {
+  Type* getTypeRaw(Backend p, ScalarType s) {
+    return type_registry[static_cast<int>(p)][static_cast<int>(s)].get();
+  }
+  Type * getTypeOpt(Backend p, ScalarType s) {
     initCUDAIfNeeded(p);
-    auto & type = type_registry[static_cast<int>(p)][static_cast<int>(s)];
+    auto type = getTypeRaw(p, s);
 
     if(!type) {
       // there is only a single Undefined Type.
       if (p == Backend::Undefined || s == ScalarType::Undefined) {
-        auto & undef = type_registry[static_cast<int>(Backend::Undefined)][static_cast<int>(ScalarType::Undefined)];
-        if (undef) return *undef;
+        return getTypeRaw(Backend::Undefined, ScalarType::Undefined);
       }
-      runtime_error("%s%sType is not enabled.",toString(p),toString(s));
     }
+
+    return type;
+  }
+  Type & getType(Backend p, ScalarType s) {
+    auto* type = getTypeOpt(p, s);
+    if (!type) AT_ERROR(toString(p), toString(s), "Type is not enabled.");
     return *type;
   }
   Generator & defaultGenerator(Backend p) {
     initCUDAIfNeeded(p);
     auto & generator = generator_registry[static_cast<int>(p)];
     if(!generator)
-      runtime_error("%s backend type not enabled.",toString(p));
+      AT_ERROR(toString(p), " backend type not enabled.");
     return *generator;
   }
   bool hasMKL() const;
-  bool hasCUDA() const;
-  int64_t current_device() const;
+  bool hasCUDA() const {
+    return detail::getCUDAHooks().hasCUDA();
+  }
+  bool hasCuDNN() const {
+    return detail::getCUDAHooks().hasCuDNN();
+  }
+  int64_t current_device() const {
+    return detail::getCUDAHooks().current_device();
+  }
   // defined in header so that getType has ability to inline
   // call_once check. getType is called fairly frequently
   THCState* lazyInitCUDA() {
     std::call_once(thc_init,[&] {
-      doInitCUDA();
+      thc_state = detail::getCUDAHooks().initCUDA();
+      generator_registry[static_cast<int>(Backend::CUDA)] =
+        detail::getCUDAHooks().initCUDAGenerator(this);
+      detail::getCUDAHooks().registerCUDATypes(this);
     });
-    return thc_state;
+    return thc_state.get();
   }
 
-  cudaStream_t getCurrentCUDAStream() const;
-  cudaDeviceProp* getCurrentDeviceProperties() const;
-  cudaDeviceProp* getDeviceProperties(int device) const;
+  THCState* getTHCState() {
+    // AT_ASSERT(thc_state);
+    return thc_state.get();
+  }
 
+  CUDAStream createCUDAStream() const {
+    return detail::CUDAStream_createAndRetainWithOptions(
+      CUDAStream::DEFAULT_FLAGS
+    , CUDAStream::DEFAULT_PRIORITY
+    );
+  }
+
+  CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority) const {
+    return detail::CUDAStream_createAndRetainWithOptions(flags, priority);
+  }
+
+  CUDAStream getDefaultCUDAStream() const {
+    return detail::CUDAStream_getDefaultStream();
+  }
+
+  CUDAStream getDefaultCUDAStreamOnDevice(int64_t device) const {
+    return detail::CUDAStream_getDefaultStreamOnDevice(device);
+  }
+
+  CUDAStream getCurrentCUDAStream() const {
+    return detail::CUDAStream_getAndRetainCurrentStream();
+  }
+
+  CUDAStream getCurrentCUDAStreamOnDevice(int64_t device) const {
+    return detail::CUDAStream_getAndRetainCurrentStreamOnDevice(device);
+  }
+
+  void setCurrentCUDAStream(CUDAStream stream) const {
+    return detail::CUDAStream_setStream(stream.internals());
+  }
+
+  void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) const {
+    return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
+  }
+
+  void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream)
+      const {
+    return detail::CUDAStream_uncheckedSetStreamOnDevice(
+        device, stream.internals());
+  }
+
+#ifndef __HIP_PLATFORM_HCC__
+  cusparseHandle_t getCurrentCUDASparseHandle() const {
+    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
+  }
+#endif
+  cudaDeviceProp* getCurrentDeviceProperties() const {
+    return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
+  }
+  cudaDeviceProp* getDeviceProperties(int device) const {
+    return detail::getCUDAHooks().getDeviceProperties(thc_state.get(), device);
+  }
+  int getNumGPUs() const {
+    return detail::getCUDAHooks().getNumGPUs();
+  }
+  size_t freshTypeID() {
+    return next_id++;
+  }
   bool setFlushDenormal(bool on);
 
   // NB: This method is *purely* whether or not a user requested
@@ -71,24 +149,26 @@ public:
   void setBenchmarkCuDNN(bool);
   bool deterministicCuDNN() const;
   void setDeterministicCuDNN(bool);
-  ~Context();
   std::unique_ptr<Generator>
     generator_registry[static_cast<int>(Backend::NumOptions)];
+private:
+  // NB: type_registry has nullptr for all CUDA backends until
+  // CUDA initialization has occurred
   std::unique_ptr<Type> type_registry
     [static_cast<int>(Backend::NumOptions)]
     [static_cast<int>(ScalarType::NumOptions)];
-  // TODO: Consider making this private
-  THCState * thc_state;
-private:
   void initCUDAIfNeeded(Backend p) {
     if(p == Backend::CUDA)
       lazyInitCUDA();
   }
-  void doInitCUDA();
   std::once_flag thc_init;
   bool enabled_cudnn = true;
   bool deterministic_cudnn = false;
   bool benchmark_cudnn = false;
+  std::atomic<size_t> next_id;
+  std::unique_ptr<THCState, void(*)(THCState*)> thc_state;
+  friend struct Type;
+  friend void register_cuda_types(Context * context);
 };
 
 AT_API Context & globalContext();
@@ -117,6 +197,10 @@ static inline Type& CUDA(ScalarType s) {
 
 static inline bool hasCUDA() {
   return globalContext().hasCUDA();
+}
+
+static inline bool hasCuDNN() {
+  return globalContext().hasCuDNN();
 }
 
 static inline bool hasMKL() {

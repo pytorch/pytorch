@@ -14,13 +14,13 @@ std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward_cpu(
 {
   // Input is the output of the last convolutional layer in the Backbone network, so
   // it should be in the format of NCHW
-  AT_ASSERT(input.ndimension() == 4, "Input to RoI Pooling should be a NCHW Tensor");
+  AT_CHECK(input.ndimension() == 4, "Input to RoI Pooling should be a NCHW Tensor");
 
   // ROIs is the set of region proposals to process. It is a 2D Tensor where the first
   // dim is the # of proposals, and the second dim is the proposal itself in the form
   // [batch_index startW startH endW endH]
-  AT_ASSERT(rois.ndimension() == 2, "RoI Proposals should be a 2D Tensor, (batch_sz x proposals)");
-  AT_ASSERT(rois.size(1) == 5, "Proposals should be of the form [batch_index startW startH endW enH]");
+  AT_CHECK(rois.ndimension() == 2, "RoI Proposals should be a 2D Tensor, (batch_sz x proposals)");
+  AT_CHECK(rois.size(1) == 5, "Proposals should be of the form [batch_index startW startH endW enH]");
 
   auto proposals = rois.size(0);
   auto inputChannels = input.size(1);
@@ -36,8 +36,8 @@ std::tuple<at::Tensor, at::Tensor> RoiPooling2d_forward_cpu(
   // the argmaxes Tensor should be the same size as the output Tensor
   auto argmaxes = input.type().toScalarType(kInt).tensor({proposals, inputChannels, pooledHeight, pooledWidth});
 
-  AT_ASSERT(input.is_contiguous(), "input must be contiguous");
-  AT_ASSERT(rois.is_contiguous(), "rois must be contiguous");
+  AT_CHECK(input.is_contiguous(), "input must be contiguous");
+  AT_CHECK(rois.is_contiguous(), "rois must be contiguous");
 
   auto *rawInput = input.data<float>();
   auto inputChannelStride = inputHeight * inputWidth;

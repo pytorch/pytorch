@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
+#include "ATen/detail/CUDAHooksInterface.h"
 
 #include "ATen/Config.h"
 namespace at {
@@ -27,7 +28,7 @@ bool cudnn_is_acceptable(const Tensor& self) {
   if (!self.is_cuda()) return false;
   auto st = self.type().scalarType();
   if (!(st == kDouble || st == kFloat || st == kHalf)) return false;
-  if (!AT_CUDNN_ENABLED()) return false;
+  if (!detail::getCUDAHooks().compiledWithCuDNN()) return false;
   // NB: In the old Python code, there was also a test to see if the
   // cuDNN library was actually dynamically linked or not.  I'm not
   // sure if we can actually test this.

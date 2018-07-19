@@ -3,11 +3,10 @@ import numbers
 import weakref
 
 import torch
-from torch.autograd import Variable
 from torch.distributions import constraints
 from torch.distributions.utils import (_sum_rightmost, broadcast_all,
                                        lazy_property)
-from torch.nn.functional import pad, sigmoid
+from torch.nn.functional import pad
 
 __all__ = [
     'AbsTransform',
@@ -64,7 +63,7 @@ class Transform(object):
             the codomain. Transforms that are not bijective should at least
             maintain the weaker pseudoinverse properties
             ``t(t.inv(t(x)) == t(x)`` and ``t.inv(t(t.inv(y))) == t.inv(y)``.
-        sign (int or Variable): For bijective univariate transforms, this
+        sign (int or Tensor): For bijective univariate transforms, this
             should be +1 or -1 depending on whether transform is monotone
             increasing or decreasing.
         event_dim (int): Number of dimensions that are correlated together in
@@ -342,7 +341,7 @@ class SigmoidTransform(Transform):
         return isinstance(other, SigmoidTransform)
 
     def _call(self, x):
-        return sigmoid(x)
+        return torch.sigmoid(x)
 
     def _inverse(self, y):
         return y.log() - (-y).log1p()
@@ -373,8 +372,8 @@ class AffineTransform(Transform):
     Transform via the pointwise affine mapping :math:`y = \text{loc} + \text{scale} \times x`.
 
     Args:
-        loc (Tensor): Location parameter.
-        scale (Tensor): Scale parameter.
+        loc (Tensor or float): Location parameter.
+        scale (Tensor or float): Scale parameter.
         event_dim (int): Optional size of `event_shape`. This should be zero
             for univariate random variables, 1 for distributions over vectors,
             2 for distributions over matrices, etc.
@@ -385,20 +384,34 @@ class AffineTransform(Transform):
 
     def __init__(self, loc, scale, event_dim=0, cache_size=0):
         super(AffineTransform, self).__init__(cache_size=cache_size)
-        self.loc, self.scale = broadcast_all(loc, scale)
+        self.loc = loc
+        self.scale = scale
         self.event_dim = event_dim
 
     def __eq__(self, other):
         if not isinstance(other, AffineTransform):
             return False
-        if not (self.loc == other.loc).all().item():
-            return False
-        if not (self.scale == other.scale).all().item():
-            return False
+
+        if isinstance(self.loc, numbers.Number) and isinstance(other.loc, numbers.Number):
+            if self.loc != other.loc:
+                return False
+        else:
+            if not (self.loc == other.loc).all().item():
+                return False
+
+        if isinstance(self.scale, numbers.Number) and isinstance(other.scale, numbers.Number):
+            if self.scale != other.scale:
+                return False
+        else:
+            if not (self.scale == other.scale).all().item():
+                return False
+
         return True
 
     @property
     def sign(self):
+        if isinstance(self.scale, numbers.Number):
+            return 1 if self.scale > 0 else -1 if self.scale < 0 else 0
         return self.scale.sign()
 
     def _call(self, x):
@@ -408,8 +421,12 @@ class AffineTransform(Transform):
         return (y - self.loc) / self.scale
 
     def log_abs_det_jacobian(self, x, y):
-        result = torch.abs(self.scale).log()
         shape = x.shape
+        scale = self.scale
+        if isinstance(scale, numbers.Number):
+            result = x.new_empty(shape).fill_(math.log(abs(scale)))
+        else:
+            result = torch.abs(scale).log()
         if self.event_dim:
             result_size = result.size()[:-self.event_dim] + (-1,)
             result = result.view(result_size).sum(-1)
@@ -466,7 +483,7 @@ class StickBreakingTransform(Transform):
 
     def _call(self, x):
         offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
-        z = sigmoid(x - offset.log())
+        z = torch.sigmoid(x - offset.log())
         z_cumprod = (1 - z).cumprod(-1)
         y = pad(z, (0, 1), value=1) * pad(z_cumprod, (1, 0), value=1)
         return y
@@ -480,7 +497,7 @@ class StickBreakingTransform(Transform):
 
     def log_abs_det_jacobian(self, x, y):
         offset = (x.shape[-1] + 1) - x.new([1]).expand(x.shape).cumsum(-1)
-        z = sigmoid(x - offset.log())
+        z = torch.sigmoid(x - offset.log())
         detJ = ((1 - z).log() + y[..., :-1].log()).sum(-1)
         return detJ
 

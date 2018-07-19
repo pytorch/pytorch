@@ -5,20 +5,22 @@
 THC_API void THCTensor_(topk)(THCState* state,
                                THCTensor *topK,
                                THCudaLongTensor *indices,
-                               THCTensor *input,
+                               THCTensor *input_,
                                int64_t k, int dim, int dir, int sorted) {
-  THAssert(topK != NULL && indices != NULL && input != NULL);
-  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input));
-  THArgCheck(THCTensor_(nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  int64_t dims = THCudaLongTensor_nDimension(state, indices);
+  THAssert(topK != NULL && indices != NULL && input_ != NULL);
+  THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, topK, indices, input_));
+  THArgCheck(THCTensor_(_nDimension)(state, topK) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  int64_t dims = THCudaLongTensor__nDimension(state, indices);
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 3, CUTORCH_DIM_WARNING);
-  int numDims = THCTensor_(nDimension)(state, input);
+  int numDims = THCTensor_(_nDimension)(state, input_);
   THArgCheck(numDims <= MAX_CUTORCH_DIMS, 4, CUTORCH_DIM_WARNING);
 
   THArgCheck(dim >= 0 && dim < numDims, 6, "dim not in range");
 
-  int64_t sliceSize = THCTensor_(size)(state, input, dim);
+  int64_t sliceSize = THCTensor_(size)(state, input_, dim);
   THArgCheck(k > 0 && k <= sliceSize, 5, "k not in range for dimension");
+
+  THCTensor *input = THCTensor_(newContiguous)(state, input_);
 
   // Build the output size, which is the dim being selected set to
   // size k
@@ -64,11 +66,11 @@ THC_API void THCTensor_(topk)(THCState* state,
 
 #define RUN_T(INDEX_T)                                                  \
   TensorInfo<real, INDEX_T> inputInfo =                                 \
-    getTensorInfo<THCTensor, INDEX_T>(state, input);                    \
+    getTensorInfo<real, THCTensor, INDEX_T>(state, input);              \
   TensorInfo<real, INDEX_T> topKInfo =                                  \
-    getTensorInfo<THCTensor, INDEX_T>(state, topK);                     \
+    getTensorInfo<real, THCTensor, INDEX_T>(state, topK);               \
   TensorInfo<int64_t, INDEX_T> indicesInfo =                            \
-    getTensorInfo<THCudaLongTensor, INDEX_T>(state, indices);           \
+    getTensorInfo<int64_t, THCudaLongTensor, INDEX_T>(state, indices);  \
                                                                         \
   /* We use these structures solely to find the offset to */            \
   /* each slice we are operating on */                                  \
@@ -110,9 +112,9 @@ THC_API void THCTensor_(topk)(THCState* state,
 
   // Based on required index size, run the algorithm with the
   // appropriate index type
-  if (TensorUtils<THCTensor>::canUse32BitIndexMath(state, input) &&
-      TensorUtils<THCTensor>::canUse32BitIndexMath(state, topK) &&
-      TensorUtils<THCudaLongTensor>::canUse32BitIndexMath(state, indices)) {
+  if (THCTensor_canUse32BitIndexMath(state, input) &&
+      THCTensor_canUse32BitIndexMath(state, topK) &&
+      THCTensor_canUse32BitIndexMath(state, indices)) {
     RUN_T(uint32_t);
   } else {
     RUN_T(uint64_t);
@@ -154,6 +156,8 @@ THC_API void THCTensor_(topk)(THCState* state,
       THCudaLongTensor_free(state, sortedIndices);
     }
   }
+
+  THCudaLongTensor_free(state, input);
 
   THCudaCheck(cudaGetLastError());
 }

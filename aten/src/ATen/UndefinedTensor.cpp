@@ -1,5 +1,6 @@
 #include "ATen/UndefinedTensor.h"
 #include "ATen/Context.h"
+#include "ATen/Error.h"
 
 namespace at {
 
@@ -13,28 +14,28 @@ const char * UndefinedTensor::toString() const {
 }
 
 IntList UndefinedTensor::sizes() const {
-  runtime_error("sizes() called on undefined Tensor");
+  AT_ERROR("sizes() called on undefined Tensor");
 }
 
 int64_t UndefinedTensor::dim() const {
-  runtime_error("dim() called on undefined Tensor");
+  AT_ERROR("dim() called on undefined Tensor");
 }
 
 const char * UndefinedTensor::typeString() {
   return "UndefinedType";
 }
 void * UndefinedTensor::unsafeGetTH(bool retain) {
-  runtime_error("unsafeGetTH(bool retain) called on undefined Tensor");
+  AT_ERROR("unsafeGetTH(bool retain) called on undefined Tensor");
 }
 std::unique_ptr<Storage> UndefinedTensor::storage() {
-  runtime_error("storage() called on undefined Tensor");
+  AT_ERROR("storage() called on undefined Tensor");
 }
 
 IntList UndefinedTensor::strides() const {
-  runtime_error("strides() called on undefined Tensor");
+  AT_ERROR("strides() called on undefined Tensor");
 }
 Scalar UndefinedTensor::localScalar() {
-  runtime_error("localScalar() called on undefined Tensor");
+  AT_ERROR("localScalar() called on undefined Tensor");
 }
 
 UndefinedTensor UndefinedTensor::_singleton;

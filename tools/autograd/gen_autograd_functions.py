@@ -6,19 +6,14 @@
 #
 import re
 from .utils import nested_dict, CodeTemplate, write
-from .gen_autograd import VIEW_FUNCTIONS, template_path
+from .gen_autograd import VIEW_FUNCTIONS
 from .utils import IDENT_REGEX
-
-FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
-FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
-PY_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_functions.h')
-PY_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_functions.cpp')
 
 FUNCTION_DECLARATION = CodeTemplate("""\
 struct ${op} : public ${superclass} {
   using ${superclass}::${superclass};
-  variable_list apply(const variable_list& grads) override;
-  std::string name() override { return "${op}"; }
+  variable_list apply(variable_list&& grads) override;
+  std::string name() const override { return "${op}"; }
   void release_variables() override {
     ${release_variables}
   }
@@ -30,13 +25,13 @@ struct ${op} : public ${superclass} {
 
 WILL_RELEASE_VARIABLES = CodeTemplate("""\
 bool retain_variables = true;
-virtual void will_release_variables() override {
+void will_release_variables() override {
   retain_variables = false;
 }
 """)
 
 FUNCTION_DEFINITION = CodeTemplate("""\
-variable_list ${op}::apply(const variable_list& grads) {
+variable_list ${op}::apply(variable_list&& grads) {
   IndexRangeGenerator gen;
   ${compute_index_ranges}
   variable_list grad_inputs(gen.size());
@@ -63,6 +58,12 @@ if (should_compute_output({ ${name}_ix })) {
 }
 """)
 
+DERIVATIVE_MULTI_COPY_RANGE = CodeTemplate("""\
+  if (should_compute_output({ ${name}_ix })) {
+    copy_range(grad_inputs, ${name}_ix, std::get<${i}>(grad_result));
+  }
+""")
+
 DERIVATIVE_MULTI = CodeTemplate("""\
 if (should_compute_output({ ${idx_ranges} })) {
   ${grad_input_mask}
@@ -80,12 +81,18 @@ if (should_compute_output({ ${idx_ranges} })) {
 UNTRACEABLE_FUNCTIONS = VIEW_FUNCTIONS
 
 
-def gen_autograd_functions(out, autograd_functions):
+def gen_autograd_functions(out, autograd_functions, template_path):
     """Functions.h and Functions.cpp body
 
     These contain the auto-generated subclasses of torch::autograd::Function
     for each every differentiable torch function.
     """
+
+    FUNCTIONS_H = CodeTemplate.from_file(template_path + '/Functions.h')
+    FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/Functions.cpp')
+    PY_FUNCTIONS_H = CodeTemplate.from_file(template_path + '/python_functions.h')
+    PY_FUNCTIONS_CPP = CodeTemplate.from_file(template_path + '/python_functions.cpp')
+
     function_definitions = []
     function_declarations = []
     py_function_initializers = []
@@ -173,7 +180,7 @@ def process_function(func):
             idx_ranges = ', '.join("{}_ix".format(n) for n in var_names)
             copy_ranges = []
             for i, n in enumerate(var_names):
-                copy_ranges.append("copy_range(grad_inputs, {}_ix, std::get<{}>(grad_result));".format(n, i))
+                copy_ranges.append(DERIVATIVE_MULTI_COPY_RANGE.substitute(name=n, i=i))
             return DERIVATIVE_MULTI.substitute(
                 idx_ranges=idx_ranges, copy_ranges=copy_ranges,
                 derivative=formula,

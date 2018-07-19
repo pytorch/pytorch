@@ -13,11 +13,11 @@ using namespace at;
 
 TEST_CASE( "dlconvertor", "[cpu]" ) {
 
-  manual_seed(123);
+  manual_seed(123, at::Backend::CPU);
 
   INFO( "convert ATen to DLTensor" );
 
-  Tensor a = rand(CPU(at::kFloat), {3,4});
+  Tensor a = rand({3,4});
   DLManagedTensor* dlMTensor = toDLPack(a);
 
   INFO( "convert DLTensor to ATen" );
@@ -25,4 +25,3 @@ TEST_CASE( "dlconvertor", "[cpu]" ) {
 
   REQUIRE(a.equal(b));
 }
-

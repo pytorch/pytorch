@@ -66,7 +66,23 @@ def _cpu_deserialize(obj, location):
 
 def _cuda_deserialize(obj, location):
     if location.startswith('cuda'):
-        device = max(int(location[5:]), 0)
+        if location[5:] == '':
+            device = 0
+        else:
+            device = max(int(location[5:]), 0)
+
+        if not torch.cuda.is_available():
+            raise RuntimeError('Attempting to deserialize object on a CUDA '
+                               'device but torch.cuda.is_available() is False. '
+                               'If you are running on a CPU-only machine, '
+                               'please use torch.load with map_location=\'cpu\' '
+                               'to map your storages to the CPU.')
+        if device >= torch.cuda.device_count():
+            raise RuntimeError('Attempting to deserialize object on CUDA device '
+                               '{} but torch.cuda.device_count() is {}. Please use '
+                               'torch.load with map_location to map your storages '
+                               'to an existing device.'.format(
+                                   device, torch.cuda.device_count()))
         return obj.cuda(device)
 
 
@@ -121,14 +137,46 @@ def _with_file_like(f, mode, body):
             f.close()
 
 
-def _is_real_file(f):
-    """Checks if f is backed by a real file (has a fileno)"""
+def _is_compressed_file(f):
+    compress_modules = ['gzip']
+    try:
+        return f.__module__ in compress_modules
+    except AttributeError:
+        return False
+
+
+def _should_read_directly(f):
+    """
+    Checks if f is a file that should be read directly. It should be read
+    directly if it is backed by a real file (has a fileno) and is not a
+    a compressed file (e.g. gzip)
+    """
+    if _is_compressed_file(f):
+        return False
     try:
         return f.fileno() >= 0
     except io.UnsupportedOperation:
         return False
     except AttributeError:
         return False
+
+
+def _check_seekable(f):
+
+    def raise_err_msg(patterns, e):
+        for p in patterns:
+            if p in str(e):
+                msg = (str(e) + ". You can only torch.load from a file that is seekable." +
+                                " Please pre-load the data into a buffer like io.BytesIO and" +
+                                " try to load from it instead.")
+                raise type(e)(msg)
+        raise e
+
+    try:
+        f.seek(f.tell())
+        return True
+    except (io.UnsupportedOperation, AttributeError) as e:
+        raise_err_msg(["seek", "tell"], e)
 
 
 def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
@@ -152,7 +200,7 @@ def save(obj, f, pickle_module=pickle, pickle_protocol=DEFAULT_PROTOCOL):
 
     Example:
         >>> # Save to file
-        >>> x = torch.Tensor([0, 1, 2, 3, 4])
+        >>> x = torch.tensor([0, 1, 2, 3, 4])
         >>> torch.save(x, 'tensor.pt')
         >>> # Save to io.BytesIO buffer
         >>> buffer = io.BytesIO()
@@ -195,11 +243,13 @@ def _save(obj, f, pickle_module, pickle_protocol):
             return ('module', obj, source_file, source)
         elif torch.is_storage(obj):
             storage_type = normalize_storage_type(type(obj))
-            root, offset = obj._root_storage()
-            root_key = str(root._cdata)
+            # Offset is always 0, but we keep it for backwards compatibility
+            # with the old serialization format (which supported storage views)
+            offset = 0
+            obj_key = str(obj._cdata)
             location = location_tag(obj)
-            serialized_storages[root_key] = root
-            is_view = obj._cdata != root._cdata
+            serialized_storages[obj_key] = obj
+            is_view = obj._cdata != obj._cdata
             if is_view:
                 view_metadata = (str(obj._cdata), offset, obj.size())
             else:
@@ -207,9 +257,9 @@ def _save(obj, f, pickle_module, pickle_protocol):
 
             return ('storage',
                     storage_type,
-                    root_key,
+                    obj_key,
                     location,
-                    root.size(),
+                    obj.size(),
                     view_metadata)
 
         return None
@@ -235,7 +285,7 @@ def _save(obj, f, pickle_module, pickle_protocol):
     pickle_module.dump(serialized_storage_keys, f, protocol=pickle_protocol)
     f.flush()
     for key in serialized_storage_keys:
-        serialized_storages[key]._write_file(f, _is_real_file(f))
+        serialized_storages[key]._write_file(f, _should_read_directly(f))
 
 
 def load(f, map_location=None, pickle_module=pickle):
@@ -273,15 +323,20 @@ def load(f, map_location=None, pickle_module=pickle):
     Args:
         f: a file-like object (has to implement read, readline, tell, and seek),
             or a string containing a file name
-        map_location: a function, string or a dict specifying how to remap storage
+        map_location: a function, torch.device, string or a dict specifying how to remap storage
             locations
         pickle_module: module used for unpickling metadata and objects (has to
             match the pickle_module used to serialize file)
 
+    .. note::
+        When you call :meth:`torch.load()` on a file which contains GPU tensors, those tensors
+        will be loaded to GPU by default. You can call `torch.load(.., map_location='cpu')`
+        and then :meth:`load_state_dict` to avoid GPU RAM surge when loading a model checkpoint.
+
     Example:
         >>> torch.load('tensors.pt')
         # Load all tensors onto the CPU
-        >>> torch.load('tensors.pt', map_location='cpu')
+        >>> torch.load('tensors.pt', map_location=torch.device('cpu'))
         # Load all tensors onto the CPU, using a function
         >>> torch.load('tensors.pt', map_location=lambda storage, loc: storage)
         # Load all tensors onto GPU 1
@@ -318,6 +373,9 @@ def _load(f, map_location, pickle_module):
     elif isinstance(map_location, _string_classes):
         def restore_location(storage, location):
             return default_restore_location(storage, map_location)
+    elif isinstance(map_location, torch.device):
+        def restore_location(storage, location):
+            return default_restore_location(storage, str(map_location))
     else:
         def restore_location(storage, location):
             result = map_location(storage, location)
@@ -393,7 +451,20 @@ def _load(f, map_location, pickle_module):
                 storage_views = pickle_module.load(f)
                 for target_cdata, root_cdata, offset, size in storage_views:
                     root = deserialized_objects[root_cdata]
-                    deserialized_objects[target_cdata] = root[offset:offset + size]
+                    if offset != 0 or size != root.size():
+                        warnings.warn("Detected storage view in legacy serialized data: "
+                                      "storage views are no longer natively supported, so we are making "
+                                      "a copy of the data instead.  THIS IS A SEMANTIC CHANGE! "
+                                      "If you need aliasing, reserialize your model using "
+                                      "tensors that share storage.")
+
+                        tensor = torch._utils._rebuild_tensor(root, offset, (size,), (1,))
+                        obj = tensor.clone().storage()
+                    else:
+                        # NB: This line does not appear to be exercised by the
+                        # test suite.
+                        obj = root
+                    deserialized_objects[target_cdata] = obj
 
             tar.extract('tensors', path=tmpdir)
             with open(os.path.join(tmpdir, 'tensors'), 'rb', 0) as f:
@@ -446,8 +517,10 @@ def _load(f, map_location, pickle_module):
         else:
             raise RuntimeError("Unknown saved id type: %s" % saved_id[0])
 
-    f_is_real_file = _is_real_file(f)
-    if f_is_real_file and f.tell() == 0:
+    _check_seekable(f)
+    f_should_read_directly = _should_read_directly(f)
+
+    if f_should_read_directly and f.tell() == 0:
         # legacy_load requires that f has fileno()
         # only if offset is zero we can attempt the legacy tar file loader
         try:
@@ -470,10 +543,10 @@ def _load(f, map_location, pickle_module):
 
     deserialized_storage_keys = pickle_module.load(f)
 
-    offset = f.tell() if f_is_real_file else None
+    offset = f.tell() if f_should_read_directly else None
     for key in deserialized_storage_keys:
         assert key in deserialized_objects
-        deserialized_objects[key]._set_from_file(f, offset, f_is_real_file)
+        deserialized_objects[key]._set_from_file(f, offset, f_should_read_directly)
         offset = None
 
     return result

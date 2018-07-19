@@ -9,28 +9,31 @@ struct SizeAndStride {
   int64_t stride;
 };
 
-int compareSizeAndStride(const void* a, const void* b) {
+/* 
+ A comparator that will sort SizeAndStride structs by stride,
+ in ascending order.
+ */
+ int compareSizeAndStride(const void* a, const void* b) {
   const SizeAndStride* aS = (const SizeAndStride*) a;
   const SizeAndStride* bS = (const SizeAndStride*) b;
-
-  return aS->stride < bS->stride;
+  
+  if (aS->stride < bS->stride) return -1;
+  if (aS->stride == bS->stride) return 0;
+  return 1;
 }
 
-bool overlappingIndices(const Tensor& t) {
-  // In this function, we don't care about permutations of the
-  // size/stride arrays (transpositions).
-  // We order the size/stride arrays by stride, skipping dimensions
-  // of size 1. Strides of dimensions of size 1 don't matter, since
-  // there is only one addressing point in them.
-  // In this reordered view, the tensor is contiguous if
-  // stride[dim] == size[dim + 1] * stride[dim + 1] for all `dim`.
-  // The tensor has holes if
-  // stride[dim] > size[dim + 1] * stride[dim + 1] for one or more
-  // `dim`.
-  // The tensor has overlaps if
-  // stride[dim] < size[dim + 1] * stride[dim + 1] for one or more
-  // `dim`, or the innermost stride is 0.
-
+/*
+Returns false if there is no possibility that the tensor    
+has "overlapping" indices and true otherwise.               
+"Overlapping" indices are two+ valid indices that specify   
+the same offset within the tensor.                          
+The function does this by checking for a sufficient but not 
+necessary condition of no overlap. In particular, that      
+that there exists an ordering of the tensor's dimensions    
+that is nicely "nested," with each dimension contained      
+within the next one.                                        
+*/
+bool maybeOverlappingIndices(const Tensor& t) {
   /* Extract size/stride arrays; only consider size >1 dims. */
   SizeAndStride *info = (SizeAndStride *)alloca(sizeof(SizeAndStride) * t.dim());
   int dims = t.dim();
@@ -40,32 +43,29 @@ bool overlappingIndices(const Tensor& t) {
     if (size > 1) {
       info[nonSize1Dims].size = size;
       info[nonSize1Dims].stride = t.stride(i);
+
+      if (info[nonSize1Dims].stride < 1) {
+        return true;
+      }
+
       ++nonSize1Dims;
     }
   }
 
+  // Short-circuits if tensor is a single element.
   if (nonSize1Dims == 0) {
-    /* no overlap */
     return false;
   }
 
   /* Ascending order (innermost dimension in sorted view is at [0]) */
   qsort(info, nonSize1Dims, sizeof(SizeAndStride), compareSizeAndStride);
 
-  /* Base case: innermost dimension must have stride >= 1 */
-  if (info[nonSize1Dims - 1].stride < 1) {
-    return true;
-  }
+  for (int i = 0; i < (nonSize1Dims - 1); ++i) {                        
+    if (((info[i].size - 1) * info[i].stride) >= info[i + 1].stride) {  
+      return true;                                                      
+    }                                                                   
+  } 
 
-  /* Subsequent dimensions, if any */
-  for (int i = nonSize1Dims - 2; i >= 0; --i) {
-    if (info[i].stride < info[i + 1].size * info[i + 1].stride) {
-      /* There are overlaps */
-      return true;
-    }
-  }
-
-  /* Tensor has holes or is contiguous */
   return false;
 }
 

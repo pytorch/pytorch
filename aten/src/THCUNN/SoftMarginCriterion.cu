@@ -2,6 +2,7 @@
 #include "common.h"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
+#include "THCApply.cuh"
 
 #include <thrust/fill.h>
 #include <thrust/functional.h>
