@@ -151,7 +151,7 @@ Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
   Tensor b_index, b_src;
-  std::tie(b_index, b_src) = scatter_expand(self, index, src, "scatter_", dim);
+  std::tie(b_index, b_src) = scatter_expand(self, index, self.type().scalarTensor(src), "scatter_", dim);
   return self._s_scatter_(dim, b_index, b_src);
 }
 
