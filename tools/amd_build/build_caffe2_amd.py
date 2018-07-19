@@ -25,7 +25,7 @@ ignores = [
     "caffe2/operators/pool_op_cudnn.cu",
     "caffe2/operators/roi_align_op_gpu_test.cc",
     # elementwise ops test is failing
-    "caffe2/operators/elementwise_op_test.cc",
+    "caffe2/operators/elementwise_op_gpu_test.cc",
     '**/hip/**',
 ]
 
