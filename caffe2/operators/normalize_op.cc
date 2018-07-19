@@ -12,6 +12,7 @@ void NormalizeOp<T, Context>::DoNormalize(
     const int m,
     const int n,
     const int sf) {
+  const T kEps = 1e-12f;
   using InnerStride = Eigen::InnerStride<Eigen::Dynamic>;
   using StridedVec =
       Eigen::Map<Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
@@ -22,10 +23,9 @@ void NormalizeOp<T, Context>::DoNormalize(
     auto base = (i / sf) * sf * m + (i % sf);
     ConstStridedVec xVec(xData + base, 1, m, InnerStride(sf));
     auto norm = xVec.template lpNorm<2>();
-    if (norm != 0) {
-      StridedVec yVec(yData + base, 1, m, InnerStride(sf));
-      yVec = xVec / norm;
-    }
+    norm = std::max(norm, kEps);
+    StridedVec yVec(yData + base, 1, m, InnerStride(sf));
+    yVec = xVec / norm;
   }
 };
 
@@ -37,6 +37,7 @@ void NormalizeGradientOp<T, Context>::DoNormalize(
     const int m,
     const int n,
     const int sf) {
+  const T kEps = 1e-12f;
   using InnerStride = Eigen::InnerStride<Eigen::Dynamic>;
   using StridedVec =
       Eigen::Map<Eigen::Matrix<T, 1, Eigen::Dynamic>, 0, InnerStride>;
@@ -50,11 +51,10 @@ void NormalizeGradientOp<T, Context>::DoNormalize(
 
     auto row_sum = xVec.dot(gOutVec);
     auto row_norm = xVec.template lpNorm<2>();
+    row_norm = std::max(row_norm, kEps);
     auto row_norm_3 = pow(row_norm, 3);
-    if (row_norm != 0) {
-      StridedVec gInVec(gInData + base, 1, m, InnerStride(sf));
-      gInVec = (gOutVec / row_norm) - ((xVec / row_norm_3) * row_sum);
-    }
+    StridedVec gInVec(gInData + base, 1, m, InnerStride(sf));
+    gInVec = (gOutVec / row_norm) - ((xVec / row_norm_3) * row_sum);
   }
 };
 
