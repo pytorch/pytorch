@@ -888,13 +888,17 @@ class Caffe2Backend(Backend):
                 return cls._global_renamed_attrs[k]
             return k
         c2_op.arg.extend(onnx_node.attrs.caffe2(kmap=kmap))
-        if c2_op.type in cls._broadcast_operators:
-            already_broadcast = False
-            for arg in c2_op.arg:
-                if arg.name == 'broadcast':
-                    already_broadcast = True
-            if not already_broadcast:
-                c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
+
+        if opset_version < 7:
+            # onnx opset 7 and newest caffe2 have adopted full onnx broadcast semantics
+            # so we don't need this hack anymore
+            if c2_op.type in cls._broadcast_operators:
+                already_broadcast = False
+                for arg in c2_op.arg:
+                    if arg.name == 'broadcast':
+                        already_broadcast = True
+                if not already_broadcast:
+                    c2_op.arg.extend([caffe2.python.utils.MakeArgument('broadcast', 1)])
 
         return c2_op
 
