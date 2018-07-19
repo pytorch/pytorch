@@ -21,7 +21,7 @@ namespace nn {
 /// `clone()` method. We do not want to use this pattern in the base class,
 /// because then storing a module would always require templatizing it.
 template <typename Derived>
-class Cloneable : public Module {
+class Cloneable : public virtual Module {
  public:
   using Module::Module;
 
