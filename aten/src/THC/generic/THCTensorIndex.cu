@@ -19,14 +19,14 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
   ptrdiff_t dstSliceSize = 1;
   for (int d = 0; d < dstDims; d++) {
     if (d != dim) {
-      dstSliceSize *= dst->size[d];
+      dstSliceSize *= dst->size(d);
     }
   }
 
   if (src == nullptr) return dstSliceSize;
 
   THArgCheck(dim < srcDims, 3, "Indexing dim is out of bounds");
-  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size[dim], 4,
+  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size(dim), 4,
              "length of src.size[dim] is not equal to length of indices");
 
   ptrdiff_t srcSliceSize = 1;
@@ -36,8 +36,8 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
 
   for (int d = 0; d < srcDims; d++) {
     if (d != dim) {
-      srcSliceSize *= src->size[d];
-      if (!mismatch && dst->size[d] != src->size[d]) mismatch = true;
+      srcSliceSize *= src->size(d);
+      if (!mismatch && dst->size(d) != src->size(d)) mismatch = true;
     }
   }
 
@@ -224,7 +224,7 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THArgCheck(!(THCTensor_(_nDimension)(state, src) == 0 && THCudaLongTensor__nDimension(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
-  THCTensor_(resizeNd)(state, dst, index->dim(), index->size, NULL);
+  THCTensor_(resizeNd)(state, dst, index->dim(), THTensor_getSizePtr(index), NULL);
 
   // dispatchTakePut only handles non-empty tensors;
   if (index->_dim() > 0) {

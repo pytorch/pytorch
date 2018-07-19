@@ -26,13 +26,13 @@ void THNN_(MultiMarginCriterion_updateOutput)(
   if (input->dim() == 1)
   {
     nframe = 1;
-    dim = input->size[0];
+    dim = input->size(0);
   }
   else
   {
-    nframe = input->size[0];
-    dim = input->size[1];
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe),
+    nframe = input->size(0);
+    dim = input->size(1);
+    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
@@ -142,13 +142,13 @@ void THNN_(MultiMarginCriterion_updateGradInput)(
   if (input->dim() == 1)
   {
     nframe = 1;
-    dim = input->size[0];
+    dim = input->size(0);
   }
   else
   {
-    nframe = input->size[0];
-    dim = input->size[1];
-    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size[0] == nframe),
+    nframe = input->size(0);
+    dim = input->size(1);
+    AT_CHECK(!target->is_empty() && (target->dim() == 1) && (target->size(0) == nframe),
              "inconsistent target size, got: ", target->sizes());
   }
 
