@@ -2115,6 +2115,7 @@ CAFFE2_SPECIFIC_MAPPINGS = {
      "mixed_utils" : ("hip/mixed_utils_hip", API_CAFFE2),
      "operator_fallback_gpu" : ("hip/operator_fallback_hip", API_CAFFE2),
      "recurrent_network_executor_gpu" : ("hip/recurrent_network_executor_hip", API_CAFFE2),
+     "max_pool_with_index_gpu": ("hip/max_pool_with_index_hip", API_CAFFE2),
      "CUDA_1D_KERNEL_LOOP" : ("HIP_1D_KERNEL_LOOP", API_CAFFE2),
      "CUDAContext" : ("HIPContext", API_CAFFE2),
      "CAFFE_CUDA_NUM_THREADS" : ("CAFFE_HIP_NUM_THREADS", API_CAFFE2),
