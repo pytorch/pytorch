@@ -150,6 +150,10 @@ class TestOperators(TestCase):
         y = Variable(torch.DoubleTensor(1, 3), requires_grad=True)
         self.assertONNX(lambda x, y: x + y, (x, y))
 
+    def test_rsub(self):
+        x = Variable(torch.DoubleTensor(2, 3), requires_grad=True)
+        self.assertONNX(lambda x: 1 - x, (x,))
+
     def test_transpose(self):
         x = Variable(torch.Tensor([[0, 1], [2, 3]]), requires_grad=True)
         self.assertONNX(lambda x: x.transpose(0, 1).transpose(1, 0), x)

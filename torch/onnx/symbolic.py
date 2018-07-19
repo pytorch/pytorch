@@ -201,9 +201,12 @@ def add(g, self, other, alpha):
 def sub(g, self, other, alpha):
     if _scalar(alpha) != 1:
         return _unimplemented("sub", "alpha != 1")
-    # See Note [Pointwise by scalar]
+    # See Note [Pointwise by scalar]. Note that self or other may be scalars.
     other = _maybe_get_scalar(other)
-    return g.op("Sub", self, _if_scalar_type_as(g, other, self))
+    self = _maybe_get_scalar(self)
+    self = _if_scalar_type_as(g, self, other)
+    other = _if_scalar_type_as(g, other, self)
+    return g.op("Sub", self, other)
 
 
 def mul(g, self, other):
