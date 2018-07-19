@@ -1,6 +1,7 @@
 #pragma once
 
-#include <cpuinfo.h>
+#include <ATen/Error.h>
+#include <ATen/ScalarType.h>
 #include <type_traits>
 #include <iostream>
 
@@ -23,72 +24,82 @@
 //   REGISTER_DISPATCH(stub, &kernel);
 //
 // To call:
-//   stub(tensor);
+//   stub(kCPU, tensor);
 //
 
 namespace at {
 namespace native {
 
-enum class CPUCapability { DEFAULT, AVX, AVX2, NUM_OPTIONS };
+enum class CPUCapability {
+  DEFAULT = 0,
+  AVX = 1,
+  AVX2 = 2,
+  NUM_OPTIONS
+};
+
+CPUCapability get_cpu_capability();
 
 template <typename FnPtr>
 struct DispatchStub {
   static_assert(std::is_pointer<FnPtr>::value, "FnPtr should be a pointer type");
 
   template <typename... ArgTypes>
-  void operator()(ArgTypes... args) {
-    if (!dispatch_ptr) {
-      dispatch_ptr = choose_impl();
+  void operator()(Backend backend, ArgTypes... args) {
+    if (backend == Backend::CPU) {
+      if (!dispatch_ptr) {
+        dispatch_ptr = choose_cpu_impl();
+      }
+      (*dispatch_ptr)(args...);
+    } else if (backend == Backend::CUDA) {
+      AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
+      (*cuda_dispatch_ptr)(args...);
+    } else {
+      AT_ERROR("DispatchStub: unsupported backend", backend);
     }
-    (*dispatch_ptr)(args...);
   }
 
-  FnPtr choose_impl() {
-// Do not use cpuinfo on PowerPC as it shows confusing errors when run on ppc
-#ifndef __powerpc__
-    if (cpuinfo_initialize()) {
-      int avx2 = static_cast<int>(CPUCapability::AVX2);
-      if (!std::getenv("ATEN_DISABLE_AVX2") && cpuinfo_has_x86_avx2() &&
-          cpuinfo_has_x86_fma3() && table[avx2]) {
-        return table[avx2];
-      }
-      int avx = static_cast<int>(CPUCapability::AVX);
-      if (!std::getenv("ATEN_DISABLE_AVX") && cpuinfo_has_x86_avx() && table[avx]) {
-        return table[avx];
-      }
-    }
-#endif
+  FnPtr choose_cpu_impl() {
     int def = static_cast<int>(CPUCapability::DEFAULT);
+    int avx = static_cast<int>(CPUCapability::AVX);
+    int avx2 = static_cast<int>(CPUCapability::AVX2);
+
+    auto capability = static_cast<int>(get_cpu_capability());
+    if (capability >= avx2 && table[avx2]) {
+      return table[avx2];
+    }
+    if (capability >= avx && table[avx]) {
+      return table[avx];
+    }
     AT_ASSERTM(table[def], "DispatchStub: missing default kernel");
     return table[def];
   }
 
   FnPtr dispatch_ptr = nullptr;
+  FnPtr cuda_dispatch_ptr = nullptr;
   FnPtr table[static_cast<int>(CPUCapability::NUM_OPTIONS)];
 };
 
 
-#if defined(CPU_CAPABILITY)
+#if defined(CPU_CAPABILITY) || defined(__CUDACC__)
 
-constexpr CPUCapability CURRENT_CAPABILITY = CPUCapability::CPU_CAPABILITY;
+namespace {
 
-// Registers an implementation a kernel for the current CPU capability.
 template<typename FnPtr>
 struct RegisterDispatch {
   RegisterDispatch(DispatchStub<FnPtr>& stub, FnPtr value) {
-    stub.table[static_cast<int>(CURRENT_CAPABILITY)] = value;
+#if defined(__CUDACC__)
+    stub.cuda_dispatch_ptr = value;
+#else
+    int cap = static_cast<int>(CPUCapability::CPU_CAPABILITY);
+    AT_ASSERT(!stub.table[cap])
+    stub.table[cap] = value;
+#endif
   }
 };
 
-// We only define the stub once in the DEFAULT capability compilation
-#if defined(CPU_CAPABILITY_DEFAULT)
-#define _DEFINE_STUB(stub, fn) DispatchStub<decltype(fn)> stub
-#else
-#define _DEFINE_STUB(stub, fn)
-#endif
+}
 
 #define REGISTER_DISPATCH(stub, fn) \
-  _DEFINE_STUB(stub, fn); \
   static RegisterDispatch<decltype(fn)> stub ## __register(stub, fn);
 
 #endif
