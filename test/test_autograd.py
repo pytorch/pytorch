@@ -2106,13 +2106,22 @@ class TestAutograd(TestCase):
 
     def test_as_strided(self):
 
-        def test(x, repro_fn, *args):
-            def closure(x):
-                if repro_fn is not None:
-                    x = repro_fn(x)
-                return x.as_strided(*args)
-
+        def test(x, prepro_fn, size, strides, offset=None):
             x = x.to(torch.double).detach().requires_grad_()
+
+            # Check that forward will **not** resize storage because it may
+            # cause NaN in output and fail numerical Jacobian check consequently
+            with torch.no_grad():
+                y = prepro_fn(x) if prepro_fn is not None else x
+                max_offset = sum((si - 1) * st for si, st in zip(size, strides))
+                max_offset += offset if offset is not None else y.storage_offset()
+                assert max_offset < len(y.storage()), "test case resizes storage"
+
+            def closure(x):
+                if prepro_fn is not None:
+                    x = prepro_fn(x)
+                return x.as_strided(size, strides, offset)
+
             gradcheck(closure, [x])
             gradgradcheck(closure, [x])
 
@@ -2120,7 +2129,7 @@ class TestAutograd(TestCase):
         test(torch.arange(0, 25), lambda x: x.view(5, 5), [3, 3], [6, 2], 2)
 
         # test crazy stride at dim with size 1 case
-        test(torch.randn(10), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
+        test(torch.randn(12), None, [1, 2, 1, 5], [0, 5, 100, 1], 2)
 
         # test expand case
         test(torch.randn(5), None, [3, 3, 3], [0, 1, 0], 2)
