@@ -86,6 +86,68 @@ For Example::
     >>> (x.add_(y)).size()
     RuntimeError: The expanded size of the tensor (1) must match the existing size (7) at non-singleton dimension 2.
 
+Scatter and Gather
+------------------
+The semantics for scatter and gather is a bit complicated compared to the general cases.
+
+The broadcasting semantics for gather works the same way as the general semantics except that the dimension
+specified by the :attr:`dim` argument is not required to match and will be kept unchanged after broadcasting.
+
+For Example::
+
+    >>> x=torch.empty(5,3,4,1)
+    >>> y=torch.zeros(  3,1,1, dtype=torch.long)
+    >>> (x.gather(0, y)).size()
+    torch.Size([1, 3, 4, 1])
+    >>> (x.gather(1, y)).size()
+    torch.Size([5, 3, 4, 1])
+    >>> (x.gather(2, y)).size()
+    torch.Size([5, 3, 1, 1])
+    >>> (x.gather(3, y)).size()
+    torch.Size([5, 3, 4, 1])
+
+    >>> x=torch.empty(5,3,4,1)
+    >>> y=torch.zeros(  3,7,1, dtype=torch.long)
+    >>> (x.gather(2, y)).size()
+    torch.Size([5, 3, 7, 1])
+    >>> (x.gather(1, y)).size()
+    RuntimeError: The size of self (4) must match the size of tensor index (7) at non-singleton dimension 2.
+
+The broadcasting semantics for scatter works the same way as the in-place semantics except that:
+- The dimension specified by :attr:`dim` of :attr:`index` and :attr:`src` must match like in the general
+  rule, but these two do not need to match with :attr:`self`.
+- Dimensions except :attr:`dim` of :attr:`self`, :attr:`index`, and :attr:`src` must match like in the
+  general rule.
+- Although :attr:`self` is not allowed to change shape, if :attr:`self` is a Scalar and :attr:`index` and
+  :attr:`src` are either Scalar or tensor of shape ``[1]``, scatter would operate normally without need to
+  expand the shape of :attr:`self` to ``[1]``.
+
+For Example::
+
+    >>> x=torch.empty(5,3,4,1)
+    >>> y=torch.zeros(  3,1,1, dtype=torch.long)
+    >>> z=torch.empty(  3,4,1)
+    >>> (x.scatter_(0, y, z)).size()
+    torch.Size([5, 3, 4, 1])
+
+    >>> x=torch.empty(5,3,4,1)
+    >>> y=torch.zeros(6,3,1,1, dtype=torch.long)
+    >>> z=torch.empty(  3,4,1)
+    >>> (x.scatter_(0, y, z)).size()
+    torch.Size([5, 3, 4, 1])
+
+    >>> x=torch.empty(5,3,4,1)
+    >>> y=torch.zeros(6,3,1,1, dtype=torch.long)
+    >>> z=torch.empty(5,3,4,1)
+    >>> (x.scatter_(0, y, z)).size()
+    RuntimeError: The size of tensor index (6) must match the size of tensor src (5) at non-singleton dimension 0
+
+    >>> x=torch.empty([])
+    >>> y=torch.zeros(1, dtype=torch.long)
+    >>> z=torch.empty(1)
+    >>> (x.scatter_(0, y, z)).size()
+    torch.Size([])
+
 Backwards compatibility
 -----------------------
 Prior versions of PyTorch allowed certain pointwise functions to execute on tensors with different shapes,
