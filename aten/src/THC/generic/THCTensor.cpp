@@ -47,8 +47,8 @@ THLongStorage *THCTensor_(newStrideOf)(THCState *state, THCTensor *self)
 
 real *THCTensor_(data)(THCState *state, const THCTensor *self)
 {
-  if(self->storage)
-    return (THCStorage_(data)(state, self->storage)+self->storage_offset());
+  if(THTensor_getStoragePtr(self))
+    return (THCStorage_(data)(state, THTensor_getStoragePtr(self))+self->storage_offset());
   else
     return NULL;
 }

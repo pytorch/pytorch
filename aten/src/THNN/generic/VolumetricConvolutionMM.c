@@ -435,7 +435,7 @@ static void THNN_(VolumetricConvolutionMM_updateOutput_frame)(
       for (i = 0; i < nOutputPlane; i++)
       {
         THVector_(fill)(
-          THStorage_(data)(output->storage)+output->storage_offset()+output->stride(0)*i,
+          THStorage_(data)(THTensor_getStoragePtr(output))+output->storage_offset()+output->stride(0)*i,
           THTensor_(get1d)(bias, i),
           outputDepth*outputHeight*outputWidth
         );
@@ -693,11 +693,11 @@ static void THNN_(VolumetricConvolutionMM_accGradParameters_frame)(
     {
       int64_t k;
       real sum = 0;
-      real *data = THStorage_(data)(gradOutput2d->storage) + gradOutput2d->storage_offset() + i*gradOutput2d->stride(0);
+      real *data = THStorage_(data)(THTensor_getStoragePtr(gradOutput2d)) + gradOutput2d->storage_offset() + i*gradOutput2d->stride(0);
       for (k = 0; k < gradOutput2d->size(1); k++)
         sum += data[k];
 
-      (THStorage_(data)(gradBias->storage) + gradBias->storage_offset())[i] += scale * sum;
+      (THStorage_(data)(THTensor_getStoragePtr(gradBias)) + gradBias->storage_offset())[i] += scale * sum;
     }
   }
 

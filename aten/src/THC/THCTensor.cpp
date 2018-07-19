@@ -150,7 +150,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
 
   if(totalSize+self->storage_offset() > 0)
   {
-    if(!self->storage) {
+    if(!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
     if(totalSize+self->storage_offset() > self->storage->size) {
@@ -176,16 +176,16 @@ void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storag
   /* storage */
   if(self->storage != storage)
   {
-    if (!self->storage) {
+    if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
     auto scalar_type = self->storage->scalar_type;
-    THStorage_free(self->storage);
+    THStorage_free(THTensor_getStoragePtr(self));
 
     if(storage)
     {
       self->storage = storage;
-      THStorage_retain(self->storage);
+      THStorage_retain(THTensor_getStoragePtr(self));
     }
     else
       self->storage = THCStorage_new(state, scalar_type);
@@ -304,8 +304,8 @@ void THCTensor_free(THCState *state, THCTensor *self) {
 }
 
 int THCTensor_getDevice(THCState* state, const THCTensor* tensor) {
-  if (!tensor->storage) return -1;
-  return THCStorage_getDevice(state, tensor->storage);
+  if (!THTensor_getStoragePtr(tensor)) return -1;
+  return THCStorage_getDevice(state, THTensor_getStoragePtr(tensor));
 }
 
 bool THCTensor_allSameDevice(THCState* state, THCTensor ** inputs, int numInputs) {
