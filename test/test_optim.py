@@ -3,6 +3,7 @@ import unittest
 import functools
 from copy import deepcopy
 import torch
+from torch._six import inf
 import torch.optim as optim
 import torch.legacy.optim as old_optim
 import torch.nn.functional as F
@@ -10,7 +11,7 @@ from torch.optim import SGD
 from torch.autograd import Variable
 from torch import sparse
 from torch.optim.lr_scheduler import LambdaLR, StepLR, MultiStepLR, ExponentialLR, CosineAnnealingLR, ReduceLROnPlateau
-from common import TestCase, run_tests, TEST_WITH_UBSAN
+from common import TestCase, run_tests, TEST_WITH_UBSAN, BUILT_WITH_ROCM
 
 
 def rosenbrock(tensor):
@@ -437,6 +438,7 @@ class TestOptim(TestCase):
         with self.assertRaisesRegex(ValueError, "Invalid weight_decay value: -0.5"):
             optim.ASGD(None, lr=1e-2, weight_decay=-0.5)
 
+    @unittest.skipIf(BUILT_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_rprop(self):
         self._test_rosenbrock(
             lambda params: optim.Rprop(params, lr=1e-3),
@@ -478,8 +480,8 @@ class TestOptim(TestCase):
     @unittest.skipIf(TEST_WITH_UBSAN, "division-by-zero error with UBSAN")
     def test_lbfgs_return_type(self):
         params = [torch.randn(10, 5), torch.randn(10)]
-        opt1 = optim.LBFGS(params, 0.01, tolerance_grad=float('inf'))
-        opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-float('inf'))
+        opt1 = optim.LBFGS(params, 0.01, tolerance_grad=inf)
+        opt2 = optim.LBFGS(params, 0.01, tolerance_grad=-inf)
 
         def closure():
             return torch.Tensor([10])

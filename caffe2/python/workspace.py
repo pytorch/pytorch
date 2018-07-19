@@ -42,6 +42,7 @@ operator_tracebacks = defaultdict(dict)
 
 is_asan = C.is_asan
 has_gpu_support = C.has_gpu_support
+has_hip_support = C.has_hip_support
 if has_gpu_support:
     NumCudaDevices = C.num_cuda_devices
     GetCUDAVersion = C.get_cuda_version

@@ -30,6 +30,9 @@ public:
   DataPtr(void* data, void* ctx, DeleterFnPtr ctx_deleter, Device device)
     : ptr_(data, ctx, ctx_deleter), device_(device) {}
   void* operator->() const { return ptr_.get(); }
+  void clear() {
+    ptr_.clear();
+  }
   void* get() const { return ptr_.get(); }
   void* get_context() const { return ptr_.get_context(); }
   void* release_context() { return ptr_.release_context(); }

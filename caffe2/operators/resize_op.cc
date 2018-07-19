@@ -153,7 +153,8 @@ output_width = floor(input_width * width_scale)
 output_height = floor(output_height * height_scale)
 )DOC")
     .Input(0, "X", "Input tensor")
-    .Output(0, "Y", "Output tensor");
+    .Output(0, "Y", "Output tensor")
+    .InheritOnnxSchema("Upsample");
 
 // Input: dY, output: dX
 OPERATOR_SCHEMA(ResizeNearestGradient)

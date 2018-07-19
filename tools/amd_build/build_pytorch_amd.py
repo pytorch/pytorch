@@ -8,9 +8,9 @@ from functools import reduce
 
 amd_build_dir = os.path.dirname(os.path.realpath(__file__))
 proj_dir = os.path.dirname(os.path.dirname(amd_build_dir))
-include_dirs = [
-    "aten",
-    "torch"
+includes = [
+    "aten/*",
+    "torch/*"
 ]
 
 # List of operators currently disabled
@@ -63,9 +63,12 @@ for root, _directories, files in os.walk(os.path.join(proj_dir, "torch")):
 # Execute the Hipify Script.
 args = (["--project-directory", proj_dir] +
         ["--output-directory", proj_dir] +
-        ["--include-dirs"] + include_dirs +
+        ["--includes"] + includes +
         ["--yaml-settings", yaml_file] +
         ["--add-static-casts", "True"] +
         ["--show-progress", "False"])
 
-os.execv(os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py"), ['python'] + args)
+subprocess.check_call([
+    sys.executable,
+    os.path.join(amd_build_dir, "pyHIPIFY", "hipify-python.py")
+] + args)

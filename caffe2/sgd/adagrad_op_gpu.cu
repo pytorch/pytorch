@@ -1,5 +1,5 @@
 #include <cub/block/block_reduce.cuh>
-#include "adagrad_op.h"
+#include "caffe2/sgd/adagrad_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/utils/mixed_utils.h"
@@ -19,7 +19,7 @@ __global__ void AdagradUpdate(
   CUDA_1D_KERNEL_LOOP(i, N) {
     float gi = g[i];
     float hi = nh[i] = decay * h[i] + gi * gi;
-    nw[i] = w[i] + lr[0] * gi / (std::sqrt(hi) + epsilon);
+    nw[i] = w[i] + lr[0] * gi / (sqrtf(hi) + epsilon);
   }
 }
 
@@ -63,7 +63,7 @@ __global__ void SparseAdagradKernel(
         mixed_add(grad[gradIdx] * grad[gradIdx], param_mom[paramIdx]);
     mixed_store(&mom_new, &(param_mom[paramIdx]));
     float param_new = mixed_add(
-        LR * grad[gradIdx] / (sqrt(mom_new) + epsilon), param[paramIdx]);
+        LR * grad[gradIdx] / (sqrtf(mom_new) + epsilon), param[paramIdx]);
     mixed_store(&param_new, &(param[paramIdx]));
   }
 }
@@ -107,7 +107,7 @@ __global__ void RowWiseSparseAdagradKernel(
     }
     __syncthreads();
     // update param
-    float step = lr[0] / (std::sqrt(param_mom[index]) + epsilon);
+    float step = lr[0] / (sqrtf(param_mom[index]) + epsilon);
     for (int j = threadIdx.x; j < N; j += blockDim.x) {
       param[index * N + j] = param[index * N + j] + grad[i * N + j] * step;
     }

@@ -10,11 +10,12 @@ from collections import OrderedDict
 from itertools import product
 from operator import mul, itemgetter
 from functools import reduce, wraps
+from torch._six import inf, nan
 from torch.autograd.gradcheck import gradgradcheck, gradcheck
 from torch.autograd.function import once_differentiable
 from torch.autograd.profiler import profile
 from common import TEST_MKL, TestCase, run_tests, skipIfNoLapack, \
-    suppress_warnings, skipIfNoZeroSize
+    suppress_warnings, skipIfNoZeroSize, BUILT_WITH_ROCM
 from torch.autograd import Variable, Function, detect_anomaly
 from torch.autograd.function import InplaceFunction
 from torch.testing import make_non_contiguous, randn_like
@@ -1524,12 +1525,12 @@ class TestAutograd(TestCase):
         pyscalar = -12345.1
         f[0] = pyscalar
         self.assertEqual(float(f), pyscalar)
-        f[0] = float('nan')
+        f[0] = nan
         self.assertTrue(math.isnan(float(f)))
-        f[0] = float('inf')
-        self.assertEqual(float(f), float('inf'), allow_inf=True)
-        f[0] = float('-inf')
-        self.assertEqual(float(f), float('-inf'), allow_inf=True)
+        f[0] = inf
+        self.assertEqual(float(f), inf, allow_inf=True)
+        f[0] = -inf
+        self.assertEqual(float(f), -inf, allow_inf=True)
 
         # integral -> floating point
         # check we can convert something that loses precision
@@ -1539,11 +1540,11 @@ class TestAutograd(TestCase):
         self.assertEqual(float(l), float(pyscalar))
 
         # floating point -> integral
-        f[0] = float('nan')
+        f[0] = nan
         self.assertRaises(ValueError, lambda: integral_conv(f[0]))
-        f[0] = float('inf')
+        f[0] = inf
         self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
-        f[0] = float('-inf')
+        f[0] = -inf
         self.assertRaises(OverflowError, lambda: integral_conv(f[0]))
         f[0] = sys.float_info.max
         self.assertEqual(integral_conv(f), sys.float_info.max)
@@ -1558,9 +1559,9 @@ class TestAutograd(TestCase):
         test_nonzero(l, -2, True)
         test_nonzero(f, 0.0, False)
         test_nonzero(f, sys.float_info.min, True)
-        test_nonzero(f, float('nan'), bool(float('nan')))
-        test_nonzero(f, float('inf'), bool(float('inf')))
-        test_nonzero(f, float('-inf'), bool(float('-inf')))
+        test_nonzero(f, nan, bool(nan))
+        test_nonzero(f, inf, bool(inf))
+        test_nonzero(f, -inf, bool(-inf))
 
     def test_pyscalar_conversions(self):
         self._test_pyscalar_conversions(lambda x: x, lambda x: int(x))
@@ -1572,6 +1573,7 @@ class TestAutograd(TestCase):
                 self._test_pyscalar_conversions(lambda x: x.cuda(), lambda x: long(x))
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @unittest.skipIf(BUILT_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_pin_memory(self):
         x = torch.randn(2, 2, requires_grad=True)
         self.assertEqual(x, x.pin_memory())
@@ -2370,6 +2372,7 @@ class TestAutograd(TestCase):
                         f(dt)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @unittest.skipIf(BUILT_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_set_requires_grad_only_for_floats_cuda(self):
         self._test_set_requires_grad_only_for_floats(self, True)
 
@@ -2377,6 +2380,7 @@ class TestAutograd(TestCase):
         self._test_set_requires_grad_only_for_floats(self, False)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA unavailable")
+    @unittest.skipIf(BUILT_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_rnn_backward_to_input_but_not_parameters_cuda(self):
         # this checks whether it is possible to not require
         # weight parameters, but require inputs, see #7722
@@ -2825,7 +2829,7 @@ method_tests = [
     ('std', (S,), (0, True, True), 'keepdim_dim_1d', [0]),
     ('renorm', (S, S, S), (2, 1, 0.5), 'dim', [1]),
     ('renorm', (S, S, S), (1, 2, 3), 'norm_1'),
-    ('renorm', (S, S, S), (float('inf'), 2, 0.5), 'norm_inf'),
+    ('renorm', (S, S, S), (inf, 2, 0.5), 'norm_inf'),
     ('repeat', (S,), (2,), 'single_number'),
     ('repeat', (), (2, 3), 'scalar'),
     ('repeat', (2, 2), (3, 2)),
@@ -2917,7 +2921,7 @@ method_tests = [
     ('norm', (S, S), (0.5,), '0_5'),
     ('norm', (S, S), (1,), '1'),
     ('norm', (S, S), (3,), '3'),
-    ('norm', (S, S), (float('inf'),), 'inf'),
+    ('norm', (S, S), (inf,), 'inf'),
     ('norm', (S, S), (-1,), 'neg_1'),
     ('norm', (S, S), (-0.5,), 'neg_0_5'),
     ('norm', (S, S), (-1.5,), 'neg_1_5'),

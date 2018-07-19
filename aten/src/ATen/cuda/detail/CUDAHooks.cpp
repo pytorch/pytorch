@@ -64,15 +64,22 @@ void cuda_stream_destroy(cudaStream_t stream) {
   check_status(cudaStreamDestroy(stream));
 }
 
+void unchecked_cuda_stream_destroy(cudaStream_t stream) {
+  const auto return_code = cudaStreamDestroy(stream);
+  (void)return_code;
+}
+
 struct DynamicCUDAInterfaceSetter {
   DynamicCUDAInterfaceSetter() {
-    at::detail::DynamicCUDAInterface::set_device = set_device;
-    at::detail::DynamicCUDAInterface::get_device = get_device;
-    at::detail::DynamicCUDAInterface::unchecked_set_device =
-        unchecked_set_device;
-    at::detail::DynamicCUDAInterface::cuda_stream_create_with_priority = 
-      cuda_stream_create_with_priority;
-    at::detail::DynamicCUDAInterface::cuda_stream_destroy = cuda_stream_destroy;
+    using at::detail::DynamicCUDAInterface;
+    DynamicCUDAInterface::set_device = set_device;
+    DynamicCUDAInterface::get_device = get_device;
+    DynamicCUDAInterface::unchecked_set_device = unchecked_set_device;
+    DynamicCUDAInterface::cuda_stream_create_with_priority =
+        cuda_stream_create_with_priority;
+    DynamicCUDAInterface::cuda_stream_destroy = cuda_stream_destroy;
+    DynamicCUDAInterface::unchecked_cuda_stream_destroy =
+        unchecked_cuda_stream_destroy;
   }
 };
 

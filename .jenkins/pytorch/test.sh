@@ -9,11 +9,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
 echo "Testing pytorch"
 
-if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
-  echo "Skipping ROCm tests for now"
-  exit 0
-fi
-
 # JIT C++ extensions require ninja.
 git clone https://github.com/ninja-build/ninja --quiet
 pushd ninja
@@ -104,12 +99,12 @@ test_libtorch() {
      echo "Testing libtorch"
      CPP_BUILD="$PWD/../cpp-build"
      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       "$CPP_BUILD"/libtorch/bin/test_jit
+       "$CPP_BUILD"/caffe2/bin/test_jit
      else
-       "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
+       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
      python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-     OMP_NUM_THREADS=2 "$CPP_BUILD"/libtorch/bin/test_api
+     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }
 
