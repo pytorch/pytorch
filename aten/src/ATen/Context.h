@@ -7,17 +7,11 @@
 #include "ATen/Utils.h"
 #include "ATen/Error.h"
 #include "ATen/detail/CUDAHooksInterface.h"
+#include "ATen/CUDAStream.h"
 
 #include <memory>
 #include <mutex>
 #include <cstdint>
-
-// Forwarde declare these CUDA types here to avoid including CUDA headers in
-// ATen headers, which would make ATen always require CUDA to build.
-struct THCState;
-struct CUstream_st;
-typedef struct CUstream_st *cudaStream_t;
-struct cudaDeviceProp;
 
 namespace at {
 
@@ -85,12 +79,52 @@ public:
     return thc_state.get();
   }
 
-  cudaStream_t getCurrentCUDAStream() const {
-    return detail::getCUDAHooks().getCurrentCUDAStream(thc_state.get());
+  CUDAStream createCUDAStream() const {
+    return detail::CUDAStream_createAndRetainWithOptions(
+      CUDAStream::DEFAULT_FLAGS
+    , CUDAStream::DEFAULT_PRIORITY
+    );
   }
-  cudaStream_t getCurrentCUDAStreamOnDevice(int64_t device) const {
-    return detail::getCUDAHooks().getCurrentCUDAStreamOnDevice(thc_state.get(), device);
+
+  CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority) const {
+    return detail::CUDAStream_createAndRetainWithOptions(flags, priority);
   }
+
+  CUDAStream getDefaultCUDAStream() const {
+    return detail::CUDAStream_getDefaultStream();
+  }
+
+  CUDAStream getDefaultCUDAStreamOnDevice(int64_t device) const {
+    return detail::CUDAStream_getDefaultStreamOnDevice(device);
+  }
+
+  CUDAStream getCurrentCUDAStream() const {
+    return detail::CUDAStream_getAndRetainCurrentStream();
+  }
+
+  CUDAStream getCurrentCUDAStreamOnDevice(int64_t device) const {
+    return detail::CUDAStream_getAndRetainCurrentStreamOnDevice(device);
+  }
+
+  void setCurrentCUDAStream(CUDAStream stream) const {
+    return detail::CUDAStream_setStream(stream.internals());
+  }
+
+  void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) const {
+    return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
+  }
+
+  void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream)
+      const {
+    return detail::CUDAStream_uncheckedSetStreamOnDevice(
+        device, stream.internals());
+  }
+
+#ifndef __HIP_PLATFORM_HCC__
+  cusparseHandle_t getCurrentCUDASparseHandle() const {
+    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
+  }
+#endif
   cudaDeviceProp* getCurrentDeviceProperties() const {
     return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
   }

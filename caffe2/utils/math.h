@@ -17,9 +17,6 @@ extern "C" {
 #include "caffe2/core/types.h"
 #include "caffe2/utils/math_utils.h"
 
-#include "Eigen/Core"
-#include "Eigen/Dense"
-
 namespace caffe2 {
 
 template <class Context>
@@ -28,30 +25,6 @@ class Tensor;
 // An empty class as a placeholder for a math function that has no specific
 // engine specified.
 class DefaultEngine {};
-
-// Common Eigen types that we will often use
-template <typename T>
-using EigenMatrixMap =
-    Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using EigenArrayMap =
-    Eigen::Map<Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using EigenVectorMap = Eigen::Map<Eigen::Matrix<T, Eigen::Dynamic, 1>>;
-template <typename T>
-using EigenVectorArrayMap = Eigen::Map<Eigen::Array<T, Eigen::Dynamic, 1>>;
-template <typename T>
-using ConstEigenMatrixMap =
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using ConstEigenArrayMap =
-    Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, Eigen::Dynamic>>;
-template <typename T>
-using ConstEigenVectorMap =
-    Eigen::Map<const Eigen::Matrix<T, Eigen::Dynamic, 1>>;
-template <typename T>
-using ConstEigenVectorArrayMap =
-    Eigen::Map<const Eigen::Array<T, Eigen::Dynamic, 1>>;
 
 namespace math {
 
@@ -72,25 +45,31 @@ void Tan(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Atan(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Sinh(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Cosh(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void SinCos(const int N, const T* x, T* ys, T* yc, Context* context);
+template <typename T, class Context>
+void Tanh(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Abs(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
+void Sqr(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
 void Sqrt(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
-void InvSqrt(const int N, const T* x, T* y, Context* context);
+void Rsqrt(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
-void Sqr(const int N, const T* x, T* y, Context* context);
-
+void Cube(const int N, const T* x, T* y, Context* context);
+template <typename T, class Context>
+void Cbrt(const int N, const T* x, T* y, Context* context);
 template <typename T, class Context>
 void Neg(const int N, const T* x, T* y, Context* context);
-
 template <typename T, class Context>
 void Sign(const int N, const T* x, T* y, Context* context);
-
 template <typename T, class Context>
 void Not(const int N, const T* x, T* y, Context* context);
-
 template <typename T, class Context>
 void Powx(const int N, const T* a, const T b, T* y, Context* context);
 
@@ -232,6 +211,26 @@ void ReduceSum(
 
 template <typename T, class Context>
 void ReduceMean(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceL1(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceL2(
     const int num_dims,
     const int* dims,
     const int num_axes,
@@ -383,6 +382,17 @@ void Set(const size_t N, const T alpha, T* X, Context* context);
 
 template <typename T, class Context>
 void RandUniform(const size_t n, const T a, const T b, T* r, Context* context);
+
+// Generate n values that sum up to a fixed sum
+// and subject to a restriction a <= x <= b for each x generated
+template <typename T, class Context>
+void RandFixedSum(
+    const size_t n,
+    const T a,
+    const T b,
+    const T sum,
+    T* r,
+    Context* context);
 
 template <typename T, class Context>
 void RandUniformUnique(

@@ -8,7 +8,6 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/type_and_shape.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
@@ -102,9 +101,8 @@ struct Function : std::enable_shared_from_this<Function> {
     }
   }
 
-  explicit Function(
-      edge_list&& next_edges = edge_list())
-      : Function(next_sequence_nr_++, std::move(next_edges)) {}
+  explicit Function(edge_list&& next_edges = edge_list())
+      : Function(get_next_sequence_nr()++, std::move(next_edges)) {}
 
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
@@ -115,12 +113,9 @@ struct Function : std::enable_shared_from_this<Function> {
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
-  variable_list operator()(const variable_list& inputs) {
+  variable_list operator()(variable_list&& inputs) {
     profiler::RecordFunction rec(this);
-    if (jit::tracer::isTracingVar(inputs)) {
-      return traced_apply(inputs);
-    }
-    return apply(inputs);
+    return apply(std::move(inputs));
   }
 
   // Graph Connectivity API
@@ -225,11 +220,6 @@ struct Function : std::enable_shared_from_this<Function> {
     });
   }
 
-  jit::tracer::FunctionTracingState& tracing_state() noexcept {
-    // Dereferencing will create the `TracingState` if the pointer is empty.
-    return *tracing_state_;
-  }
-
   /// Returns the `PyObject` stored for this `Function` (for Python
   /// interaction).
   PyObject* pyobj() const noexcept {
@@ -244,12 +234,6 @@ struct Function : std::enable_shared_from_this<Function> {
   /// Returns the anomaly metadata stored for this `Function`.
   /// If none exist, creates a new empty one.
   AnomalyMetadata* metadata() noexcept;
-
-  /// Create a context edge for the JIT.
-  static void set_up_context_edge(
-      jit::Node* this_node,
-      const variable_list& inputs,
-      const variable_list& outputs);
 
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -322,12 +306,10 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
  protected:
-  /// Monotonically incrementing (thread local!) counter to supply sequence
-  /// numbers.
-  static thread_local uint64_t next_sequence_nr_;
+  static uint64_t& get_next_sequence_nr();
 
   /// Performs the `Function`'s actual operation.
-  virtual variable_list apply(const variable_list& inputs) = 0;
+  virtual variable_list apply(variable_list&& inputs) = 0;
 
   /// Calls `apply()`, but instruments it with tracing machinery.
   variable_list traced_apply(variable_list inputs);
@@ -341,7 +323,6 @@ struct Function : std::enable_shared_from_this<Function> {
   std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
-  auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state_;
   at::SmallVector<TypeAndShape, 2> input_metadata_;
 };
 

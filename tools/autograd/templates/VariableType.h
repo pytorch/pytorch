@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <cstdint> // for size_t
 #include <functional> // for function
 #include <memory> // for unique_ptr
@@ -28,7 +30,7 @@ using at::optional;
 
 void register_variable_type_for(at::Type* baseType);
 
-struct VariableType final : public at::Type {
+struct TORCH_API VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
@@ -38,7 +40,7 @@ struct VariableType final : public at::Type {
   virtual std::unique_ptr<at::Storage> storage() const override;
   virtual std::unique_ptr<at::Storage> storage(size_t size) const override;
   virtual std::unique_ptr<at::Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<at::Allocator> allocator) const override;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
   virtual std::unique_ptr<at::Generator> generator() const override;
   virtual const char * toString() const override;
   virtual at::TypeID ID() const override;

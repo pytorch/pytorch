@@ -1,24 +1,30 @@
 #include <torch/nn/modules/embedding.h>
 
-#include <torch/functions.h>
 #include <torch/tensor.h>
 
-#include <cstdint>
+#include <cstddef>
+#include <utility>
+#include <vector>
 
 namespace torch {
 namespace nn {
 
-Embedding::Embedding(int64_t count, int64_t dimension)
+EmbeddingOptions::EmbeddingOptions(int64_t count, int64_t dimension)
     : count_(count), dimension_(dimension) {}
 
-void Embedding::reset() {
-  table_ = register_parameter("table", torch::empty({count_, dimension_}));
-  table_.data().normal_(0, 1);
+EmbeddingImpl::EmbeddingImpl(EmbeddingOptions options)
+    : options(std::move(options)) {
+  reset();
 }
 
-std::vector<Variable> Embedding::forward(std::vector<Variable> input) {
-  return {at::embedding(table_, /*indices=*/input[0])};
+void EmbeddingImpl::reset() {
+  table = register_parameter(
+      "table", torch::empty({options.count_, options.dimension_}));
+  table.data().normal_(0, 1);
 }
 
+Tensor EmbeddingImpl::forward(Tensor input) {
+  return torch::embedding(table, /*indices=*/input);
+}
 } // namespace nn
 } // namespace torch

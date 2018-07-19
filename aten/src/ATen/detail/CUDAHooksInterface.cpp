@@ -27,11 +27,37 @@ void default_unchecked_set_device(int32_t) {
       "before CUDA library was loaded");
 }
 
+void default_cuda_stream_create_with_priority(cudaStream_t*, int32_t, int32_t) {
+  AT_ERROR(
+      "DynamicCUDAInterface::cuda_stream_create_with_priority called "
+      "before CUDA library was loaded");
+}
+
+void default_cuda_stream_destroy(cudaStream_t) {
+  AT_ERROR(
+      "DynamicCUDAInterface::cuda_stream_destroy called "
+      "before CUDA library was loaded");
+}
+
+void default_unchecked_cuda_stream_destroy(cudaStream_t) {
+  AT_ERROR(
+      "DynamicCUDAInterface::unchecked_cuda_stream_destroy called "
+      "before CUDA library was loaded");
+}
+
 // Default the static members of DynamicCUDAInterface.
 void (*DynamicCUDAInterface::set_device)(int32_t) = default_set_device;
 void (*DynamicCUDAInterface::get_device)(int32_t*) = default_get_device;
 void (*DynamicCUDAInterface::unchecked_set_device)(int32_t) =
     default_unchecked_set_device;
+void (*DynamicCUDAInterface::cuda_stream_create_with_priority)(
+    cudaStream_t*,
+    int32_t,
+    int32_t) = default_cuda_stream_create_with_priority;
+void (*DynamicCUDAInterface::cuda_stream_destroy)(cudaStream_t) =
+    default_cuda_stream_destroy;
+void (*DynamicCUDAInterface::unchecked_cuda_stream_destroy)(cudaStream_t) =
+    default_unchecked_cuda_stream_destroy;
 
 const CUDAHooksInterface& getCUDAHooks() {
   static std::unique_ptr<CUDAHooksInterface> cuda_hooks;

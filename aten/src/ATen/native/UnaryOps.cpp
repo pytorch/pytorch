@@ -24,6 +24,55 @@
 namespace at {
 namespace native {
 
+Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_out(result, self, min, max);
+}
+
+Tensor clamp_max(const Tensor& self, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_max_out(result, self, max);
+}
+
+Tensor clamp_min(const Tensor& self, Scalar min) {
+  Tensor result = self.type().tensor();
+  return clamp_min_out(result, self, min);
+}
+
+Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
+  return _th_clamp_(self, min, max);
+}
+
+Tensor& _clamp_out_cpu(
+    Tensor& result,
+    const Tensor& self,
+    Scalar min,
+    Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_(result, min, max);
+}
+
+Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  return _th_clamp_max_(self, max);
+}
+
+Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_max_(result, max);
+}
+
+Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  return _th_clamp_min_(self, min);
+}
+
+Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_min_(result, min);
+}
+
 Tensor& fill_(Tensor& self, Scalar value) {
   return self._fill_(value);
 }
@@ -35,7 +84,7 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
 // NB: If you use this macro, you may also need to add a CUDA forwarding
 // stub in CUDAUnaryOps
 
-#define IMPLEMENT_UNARY_OP_VEC(op, opfn)                        \
+#define IMPLEMENT_UNARY_OP_VEC(op)                              \
   Tensor op(const Tensor& self) {                               \
     Tensor result = self.type().tensor();                       \
     return at::op##_out(result, self);                          \
@@ -43,58 +92,82 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   Tensor& _##op##__cpu(Tensor& self_) {                         \
     if (self_.numel() > 0) {                                    \
       Tensor self = sort_strides(self_);                        \
-      if (self.is_contiguous()) {                               \
-        op##Impl(self, self);                                   \
-      } else {                                                  \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {       \
-          CPU_tensor_parallel_apply1<scalar_t>(                 \
-              self, [](scalar_t& y) { y = opfn(y); }, 2048);    \
-        });                                                     \
-      }                                                         \
+      op##Impl(kCPU, self, self);                               \
     }                                                           \
     return self_;                                               \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
     if (result.numel() > 0) {                                   \
-      if (result.is_contiguous() && self.is_contiguous()) {     \
-        op##Impl(result, self);                                 \
-      } else {                                                  \
-        AT_DISPATCH_FLOATING_TYPES(self.type(), op, [&] {       \
-          CPU_tensor_parallel_apply2<scalar_t, scalar_t>(       \
-              result,                                           \
-              self,                                             \
-              [](scalar_t& y, scalar_t& x) { y = opfn(x); },    \
-              2048);                                            \
-        });                                                     \
-      }                                                         \
+      op##Impl(kCPU, result, self);                             \
     }                                                           \
     return result;                                              \
   }
 
-IMPLEMENT_UNARY_OP_VEC(abs, std::abs)
-IMPLEMENT_UNARY_OP_VEC(acos, std::acos)
-IMPLEMENT_UNARY_OP_VEC(asin, std::asin)
-IMPLEMENT_UNARY_OP_VEC(atan, std::atan)
-IMPLEMENT_UNARY_OP_VEC(ceil, std::ceil)
-IMPLEMENT_UNARY_OP_VEC(cos, std::cos)
-IMPLEMENT_UNARY_OP_VEC(cosh, std::cosh)
-IMPLEMENT_UNARY_OP_VEC(erf, std::erf)
-IMPLEMENT_UNARY_OP_VEC(exp, std::exp)
-IMPLEMENT_UNARY_OP_VEC(expm1, std::expm1)
-IMPLEMENT_UNARY_OP_VEC(floor, std::floor)
-IMPLEMENT_UNARY_OP_VEC(log, std::log)
-IMPLEMENT_UNARY_OP_VEC(log10, std::log10)
-IMPLEMENT_UNARY_OP_VEC(log1p, std::log1p)
-IMPLEMENT_UNARY_OP_VEC(log2, std::log2)
-IMPLEMENT_UNARY_OP_VEC(round, std::round)
-IMPLEMENT_UNARY_OP_VEC(rsqrt, 1 / std::sqrt)
-IMPLEMENT_UNARY_OP_VEC(sin, std::sin)
-IMPLEMENT_UNARY_OP_VEC(sinh, std::sinh)
-IMPLEMENT_UNARY_OP_VEC(sqrt, std::sqrt)
-IMPLEMENT_UNARY_OP_VEC(tan, std::tan)
-IMPLEMENT_UNARY_OP_VEC(tanh, std::tanh)
-IMPLEMENT_UNARY_OP_VEC(trunc, std::trunc)
+#define IMPLEMENT_UNARY_OP_TH(op)                               \
+  Tensor op(const Tensor& self) {                               \
+    Tensor result = self.type().tensor();                       \
+    return at::op##_out(result, self);                          \
+  }                                                             \
+  Tensor& _##op##__cpu(Tensor& self) {                          \
+    return at::op##_out(self, self);                            \
+  }                                                             \
+  Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
+    result.resize_(self.sizes());                               \
+    return at::_##op##_out(result, self);                       \
+  }
+
+// NB: Temp. defaulting to TH implementation of abs due to issues with Apple
+
+IMPLEMENT_UNARY_OP_TH(abs)
+IMPLEMENT_UNARY_OP_VEC(acos)
+IMPLEMENT_UNARY_OP_VEC(asin)
+IMPLEMENT_UNARY_OP_VEC(atan)
+IMPLEMENT_UNARY_OP_VEC(ceil)
+IMPLEMENT_UNARY_OP_VEC(cos)
+IMPLEMENT_UNARY_OP_TH(cosh)
+IMPLEMENT_UNARY_OP_VEC(erf)
+IMPLEMENT_UNARY_OP_VEC(erfc)
+IMPLEMENT_UNARY_OP_VEC(exp)
+IMPLEMENT_UNARY_OP_VEC(expm1)
+IMPLEMENT_UNARY_OP_VEC(floor)
+IMPLEMENT_UNARY_OP_VEC(log)
+IMPLEMENT_UNARY_OP_VEC(log10)
+IMPLEMENT_UNARY_OP_VEC(log1p)
+IMPLEMENT_UNARY_OP_VEC(log2)
+IMPLEMENT_UNARY_OP_VEC(round)
+IMPLEMENT_UNARY_OP_VEC(rsqrt)
+IMPLEMENT_UNARY_OP_VEC(sigmoid)
+IMPLEMENT_UNARY_OP_VEC(sin)
+IMPLEMENT_UNARY_OP_TH(sinh)
+IMPLEMENT_UNARY_OP_VEC(sqrt)
+IMPLEMENT_UNARY_OP_VEC(tan)
+IMPLEMENT_UNARY_OP_VEC(tanh)
+IMPLEMENT_UNARY_OP_VEC(trunc)
+
+DispatchStub<unary_fn> absImpl;
+DispatchStub<unary_fn> acosImpl;
+DispatchStub<unary_fn> asinImpl;
+DispatchStub<unary_fn> atanImpl;
+DispatchStub<unary_fn> ceilImpl;
+DispatchStub<unary_fn> cosImpl;
+DispatchStub<unary_fn> erfImpl;
+DispatchStub<unary_fn> erfcImpl;
+DispatchStub<unary_fn> expImpl;
+DispatchStub<unary_fn> expm1Impl;
+DispatchStub<unary_fn> floorImpl;
+DispatchStub<unary_fn> logImpl;
+DispatchStub<unary_fn> log10Impl;
+DispatchStub<unary_fn> log1pImpl;
+DispatchStub<unary_fn> log2Impl;
+DispatchStub<unary_fn> roundImpl;
+DispatchStub<unary_fn> rsqrtImpl;
+DispatchStub<unary_fn> sigmoidImpl;
+DispatchStub<unary_fn> sinImpl;
+DispatchStub<unary_fn> sqrtImpl;
+DispatchStub<unary_fn> tanImpl;
+DispatchStub<unary_fn> tanhImpl;
+DispatchStub<unary_fn> truncImpl;
 
 }
 } // namespace at

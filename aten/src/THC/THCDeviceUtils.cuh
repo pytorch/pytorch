@@ -1,6 +1,7 @@
 #ifndef THC_DEVICE_UTILS_INC
 #define THC_DEVICE_UTILS_INC
 
+#include <cuda.h>
 /* The largest consecutive integer representable in float32 (2^24) */
 #define FLOAT32_MAX_CONSECUTIVE_INT 16777216.0f
 
@@ -52,6 +53,13 @@ __device__ __forceinline__ unsigned int WARP_BALLOT(int predicate, unsigned int 
 #endif
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+//To handle ambiguity, add a type double version.
+__device__ __forceinline__ double WARP_SHFL_XOR(double value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff) {
+  //(HIP doesn't support double)
+  return (double) __shfl_xor((float) value, laneMask, width);
+}
+#endif
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_XOR(T value, int laneMask, int width = warpSize, unsigned int mask = 0xffffffff)
 {
@@ -82,6 +90,14 @@ __device__ __forceinline__ T WARP_SHFL_UP(T value, unsigned int delta, int width
 #endif
 }
 
+#ifdef __HIP_PLATFORM_HCC__
+//To handle ambiguity, add a type double version.
+__device__ __forceinline__ double WARP_SHFL_DOWN(double value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
+{
+  //(HIP doesn't support double)
+  return (double) __shfl_down((float) value, delta, width);
+}
+#endif
 template <typename T>
 __device__ __forceinline__ T WARP_SHFL_DOWN(T value, unsigned int delta, int width = warpSize, unsigned int mask = 0xffffffff)
 {

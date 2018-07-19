@@ -15,12 +15,25 @@ inline __host__ __device__ T SquareCUDA(const T x) {
 }
 
 template <typename T>
+inline __device__ T typed_abs(T x);
+
+template <>
+inline __device__ float typed_abs(float x) {
+  return fabsf(x);
+}
+
+template <>
+inline __device__ double typed_abs(double x) {
+  return fabs(x);
+}
+
+template <typename T>
 __global__ void SoftsignCUDAKernel(const int N, const T* X, T* Y) {
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 350
-    Y[i] = __ldg(X + i) / (T(1) + abs(__ldg(X + i)));
+    Y[i] = __ldg(X + i) / (T(1) + typed_abs(__ldg(X + i)));
 #else
-    Y[i] = X[i] / (T(1) + abs(X[i]));
+    Y[i] = X[i] / (T(1) + typed_abs(X[i]));
 #endif
   }
 }
@@ -30,9 +43,9 @@ __global__ void
 SoftsignGradientCUDAKernel(const int N, const T* dY, const T* X, T* dX) {
   CUDA_1D_KERNEL_LOOP(i, N) {
 #if __CUDA_ARCH__ >= 350
-    dX[i] = __ldg(dY + i) / SquareCUDA(T(1) + abs(__ldg(X + i)));
+    dX[i] = __ldg(dY + i) / SquareCUDA(T(1) + typed_abs(__ldg(X + i)));
 #else
-    dX[i] = dY[i] / SquareCUDA(T(1) + abs(X[i]));
+    dX[i] = dY[i] / SquareCUDA(T(1) + typed_abs(X[i]));
 #endif
   }
 }
@@ -54,14 +67,14 @@ operator()(const int N, const T* X, T* Y, CUDAContext* context) const {
 template <>
 template <typename T>
 bool SoftsignGradientFunctor<CUDAContext>::Forward(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& /* X_dims */,
-    const T* dY,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& /* dY_dims */,
     const T* X,
+    const T* dY,
     T* dX,
     CUDAContext* context) const {
   const int size = std::accumulate(
-      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+      X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   SoftsignGradientCUDAKernel<T>
       <<<CAFFE_GET_BLOCKS(size),
          CAFFE_CUDA_NUM_THREADS,

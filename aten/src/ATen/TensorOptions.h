@@ -2,6 +2,7 @@
 
 #include <ATen/Context.h>
 #include <ATen/Device.h>
+#include <ATen/DeviceGuard.h>
 #include <ATen/Layout.h>
 #include <ATen/ScalarType.h>
 #include <ATen/Tensor.h>
@@ -19,17 +20,22 @@ namespace at {
 /// `type()` to return a variable type instead of a tensor type, such that
 /// variables are created inside factory methods, instead of tensors.
 struct TensorOptions {
-  /// Constructs the `TensorOptions` with valid defaults, which are:
-  /// - dtype: float
-  /// - device: CPU
-  /// - layout: strided
+  TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
+
+  /// Constructs the `TensorOptions` with defaults taken from the thread local
+  /// `TensorOptions` object if `use_thread_local_default_options`, else
+  /// defaults to:
+  /// - dtype: kFloat,
+  /// - device: kCPU,
+  /// - layout: kStrided,
   /// - requires_grad: false
-  TensorOptions() = default;
+  explicit TensorOptions(bool use_thread_local_default_options);
 
   /// Constructs the `TensorOptions` from the type of the given `Tensor`.
   /// If the `Tensor` has a CUDA type, the `device_index` will match that of the
-  /// tensor. See the constructor from `Type` for the semantics w.r.t. the
-  /// `type()` method.
+  /// tensor. The `requires_grad` property of the tensor is ignored and set to
+  /// false in the created `TensorOptions`.  See the constructor from `Type` for
+  /// the semantics w.r.t. the `type()` method.
   explicit TensorOptions(Tensor tensor, bool discard_runtime_type = false) {
     if (!discard_runtime_type) {
       type_ = &tensor.type();
@@ -84,6 +90,18 @@ struct TensorOptions {
     this->dtype(dtype);
   }
 
+  /// True if all elements of the `TensorOptions` match that of the other.
+  bool operator==(const TensorOptions& other) const noexcept {
+    return dtype_ == other.dtype_ && layout_ == other.layout_ &&
+        device_ == other.device_ && requires_grad_ == other.requires_grad_;
+  }
+
+  /// True if any of the elements of this `TensorOptions` do not match that of
+  /// the other.
+  bool operator!=(const TensorOptions& other) const noexcept {
+    return !(*this == other);
+  }
+
   /// Discards the runtime type stored if the `TensorOptions` was constructed
   /// from a `Tensor` or a `Type`. See the documentation of the constructor from
   /// a `Type` for implications on the behavior of the `type()` method on
@@ -93,13 +111,10 @@ struct TensorOptions {
     return *this;
   }
 
-  // NOTE: These methods are defined in TensorOptions.cpp because I get funny
-  // linker errors for their missing definition if they're defined in the
-  // header. Who knows why?
-
   /// Sets the device of the `TensorOptions`.
   TensorOptions& device(Device device) {
     device_ = std::move(device);
+    update_underlying_type();
     return *this;
   }
 
@@ -112,17 +127,19 @@ struct TensorOptions {
   /// Sets the dtype of the `TensorOptions`.
   TensorOptions& dtype(ScalarType dtype) {
     dtype_ = dtype;
+    update_underlying_type();
     return *this;
   }
 
   /// Sets the layout of the `TensorOptions`.
   TensorOptions& layout(Layout layout) {
     layout_ = layout;
+    update_underlying_type();
     return *this;
   }
 
   /// Sets the `requires_grad` property of the `TensorOptions`.
-  TensorOptions& requires_grad(bool requires_grad = true) {
+  TensorOptions& requires_grad(bool requires_grad) {
     requires_grad_ = requires_grad;
     return *this;
   }
@@ -157,16 +174,29 @@ struct TensorOptions {
     if (type_ != nullptr) {
       return *type_;
     }
+    return getType(backend(), dtype_);
+  }
+
+ private:
+  /// Updates any stored underlying type to the current construction axes.
+  void update_underlying_type() {
+    if (type_) {
+      type_ = &type_->toScalarType(dtype_).toBackend(backend());
+    }
+  }
+
+  // Resolves the ATen backend specified by the current construction axes.
+  Backend backend() const noexcept {
     Backend backend;
     if (device_.type() == Device::Type::CPU) {
       backend = (layout_ == kStrided) ? kCPU : kSparseCPU;
     } else {
       backend = (layout_ == kStrided) ? kCUDA : kSparseCUDA;
     }
-    return getType(backend, dtype_);
+    return backend;
   }
 
- protected:
+ private:
   ScalarType dtype_{kFloat};
   Device device_{Device::Type::CPU};
   Layout layout_{Layout::Strided};
@@ -204,5 +234,46 @@ inline TensorOptions device_index(int32_t device_index) {
 /// `requires_grad` set to the given one.
 inline TensorOptions requires_grad(bool requires_grad = true) {
   return TensorOptions().requires_grad(requires_grad);
+}
+
+/// From Tensor.h
+inline TensorOptions Tensor::options() const {
+  return TensorOptions(*this);
+}
+
+namespace detail {
+inline Tensor to(
+    const Tensor& tensor,
+    const TensorOptions& options,
+    bool non_blocking) {
+  // Don't copy if the options match.
+  if (tensor.options() == options) {
+    return tensor;
+  }
+  DeviceGuard guard(options.device());
+  return options.type().copy(tensor, non_blocking);
+}
+} // namespace detail
+
+inline Tensor Tensor::to(Device device, ScalarType dtype, bool non_blocking)
+    const {
+  if (this->device() == device && this->dtype() == dtype) {
+    return *this;
+  }
+  return detail::to(*this, options().device(device).dtype(dtype), non_blocking);
+}
+
+inline Tensor Tensor::to(ScalarType dtype, bool non_blocking) const {
+  if (this->dtype() == dtype) {
+    return *this;
+  }
+  return detail::to(*this, options().dtype(dtype), non_blocking);
+}
+
+inline Tensor Tensor::to(Device device, bool non_blocking) const {
+  if (this->device() == device) {
+    return *this;
+  }
+  return detail::to(*this, options().device(device), non_blocking);
 }
 } // namespace at

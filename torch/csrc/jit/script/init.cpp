@@ -6,6 +6,8 @@
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/python_tracer.h"
+#include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/passes/to_batch.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
 
@@ -37,8 +39,10 @@ static std::string typeString(py::handle h) {
   return py::str(h.get_type().attr("__name__"));
 }
 
-static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val) {
+static std::shared_ptr<SugaredValue> createConstant(SourceRange loc, Method& m, const at::Tensor& val, TypePtr typ=nullptr) {
   auto n = m.graph()->createConstant(val);
+  if(typ)
+    n->output()->setType(typ);
   n->setSourceLocation(std::make_shared<SourceRange>(loc));
   return std::make_shared<SimpleValue>(m.graph()->insertNode(n)->output());
 }
@@ -66,7 +70,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     for (size_t i = 0; i < arg_types.size(); ++i) {
       if (!inputs[i]->type()->isSubtypeOf(*arg_types[i]))
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
-                               << arg_types[i]->name() << ", but got " << inputs[i]->type()->name();
+                               << arg_types[i]->str() << ", but got " << inputs[i]->type()->str();
     }
     // We have to do this check here, because implementation of this function is tightly
     // coupled with the impl for PythonOp in the interpreter. Right now it assumes that
@@ -77,12 +81,25 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
       throw ErrorReport(loc) << "keyword arguments in Python calls aren't supported";
     Graph& g = *m.graph();
 
-    // this python object might be a @trace or @script stand-alone function
+    // this python object might be a @trace or @script function/module
     // if so, inline the graph rather than calling the python
-    if(py::isinstance<GraphExecutor>(self)) {
-      GraphExecutor& ge = py::cast<GraphExecutor&>(self);
-      ensureSizeMatches(loc, ge.graph()->inputs().size(), inputs.size(), "arguments");
-      return packOutputs(*m.graph(),inlineCallTo(*m.graph(), *ge.graph(), inputs));
+
+    if(py::isinstance<Module>(self)) {
+      Module& mod = py::cast<Module&>(self);
+      if (Method * forward = mod.find_method("forward")) {
+        // This code path should only get called for Modules that are really
+        // wrappers around pure script/traced functions. Modules with parameters
+        // should be submodules of the caller, and thus will be represented as
+        // ModuleValue and not go through here.
+        if (mod.get_parameters().size() != 0) {
+          throw ErrorReport(loc) << "Attempted to inline a Module with parameters. "
+            "Stateful modules to be inlined must be submodules of the callee.";
+        }
+        std::vector<torch::jit::NamedValue> named_inputs;
+        for (auto inp : inputs)
+          named_inputs.push_back(NamedValue(loc, "", inp));
+        return packOutputs(*m.graph(), m.emit_call_to(loc, *forward, named_inputs, {}));
+      }
     }
 
     // Release the function object so we can wrap it in a PythonOp
@@ -182,15 +199,15 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     } else if(THPDevice_Check(self.ptr())) {
       auto device = (THPDevice*) self.ptr();
       auto t = as_tensor({static_cast<int64_t>(device->device.type()), device->device.index()});
-      return createConstant(loc, m, t);
+      return createConstant(loc, m, t, ListType::ofInts());
     } else if(THPLayout_Check(self.ptr())) {
       auto layout = (THPLayout*) self.ptr();
       const auto v = static_cast<int64_t>(layout->layout);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v), IntType::get());
     } else if(THPDtype_Check(self.ptr())) {
       auto dtype = (THPDtype*)(self.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v));
+      return createConstant(loc, m, at::CPU(at::kLong).scalarTensor(v), IntType::get());
     }
     return std::make_shared<ConstantPythonValue>(self);
   }
@@ -314,20 +331,6 @@ private:
 };
 
 
-// TODO: dedup with other init
-
-// we cannot use the default py:cast<autograd::Variable> because it currently
-// unwraps the data tensor in the conversion process
-
-variable_tensor_list createVariableTensorList(py::tuple tuple, size_t reserve_extra_space = 0) {
-  variable_tensor_list result;
-  result.reserve(tuple.size() + reserve_extra_space);
-  for(auto e : tuple) {
-    result.push_back(py::cast<autograd::Variable>(e));
-  }
-  return result;
-}
-
 py::object unpackVariableTensorList(std::vector<at::Tensor> outputs) {
   // if we don't tell pybind these are variables it chokes on the
   // conversion.
@@ -352,6 +355,12 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
   for(const auto & sub : m.get_modules()) {
     gatherParametersAndBuffers(values, *sub->module);
   }
+}
+
+py::object runMethodFromPython(Method& m, py::args args) {
+  auto inputs = createVariableTensorList(args);
+  auto outputs = m.run(std::move(inputs));
+  return unpackVariableTensorList(std::move(outputs));
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -437,6 +446,14 @@ void initJitScriptBindings(PyObject* module) {
           return (*item)->name();
         });
       })
+      .def("_create_method_from_graph", [](
+        Module& self,
+        const std::string& name,
+        std::shared_ptr<Graph> graph
+      ){
+        std::vector<at::Tensor*> parameters;
+        self.create_method(name, std::move(graph), std::move(parameters));
+      })
       .def("_create_method_from_trace", [](
         Module& self,
         const std::string& name,
@@ -452,6 +469,21 @@ void initJitScriptBindings(PyObject* module) {
           }
           auto graph = tracer::createGraphByTracing(func, std::move(inputs), num_inputs);
           self.create_method(name, std::move(graph), std::move(parameters));
+      })
+      .def("graph_for", [](Module& self, py::args args) {
+        if (self.find_method("forward")) {
+          return self.get_method("forward").graph_for(createVariableTensorList(args));
+        }
+        throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
+      })
+      .def("forward", [](Module& self, py::args args) {
+        // We implement this in C++ to avoid incurring the pybind11 dispatch
+        // overhead twice: once to call into the method lookup for "forward"
+        // and once to actually invoke the method.
+        //
+        // There is a thin wrapper on top of this method in the C++ version of
+        // ScriptModule.
+        return runMethodFromPython(self.get_method("forward"), args);
       });
 
   py::class_<Method>(m, "ScriptMethod", py::dynamic_attr())
@@ -459,16 +491,17 @@ void initJitScriptBindings(PyObject* module) {
       return self.graph();
     })
     .def("__call__", [](Method& m, py::args args) -> py::object {
-      auto inputs = createVariableTensorList(args);
-      auto outputs = m.run(std::move(inputs));
-      return unpackVariableTensorList(std::move(outputs));
+      return runMethodFromPython(m, args);
     })
     .def_property_readonly("graph", [](Method& m) {
       return m.graph();
     })
     .def("propagate_shapes", &Method::propagate_shapes)
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
-    .def("params", &Method::params);
+    .def("params", &Method::params)
+    .def("graph_for", [](Method& self, py::args args) {
+      return self.graph_for(createVariableTensorList(args));
+    });
 
   m.def("_jit_script_compile", [](Def def, ResolutionCallback rcb) {
     return compileFunction(def, pythonResolver(rcb));

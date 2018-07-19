@@ -4,7 +4,7 @@
 
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
-#define TH_TENSOR_REFCOUNTED 1
+#define THCTensor THTensor
 
 // Struct definition moved to THTensor.hpp
 typedef struct THTensor THTensor;
@@ -23,15 +23,15 @@ typedef struct THTensor THTensor;
 /**** access methods ****/
 TH_API THStorage* THTensor_(storage)(const THTensor *self);
 TH_API ptrdiff_t THTensor_(storageOffset)(const THTensor *self);
+
+// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
 TH_API int THTensor_(nDimension)(const THTensor *self);
+TH_API int THTensor_(_nDimension)(const THTensor *self);
 TH_API int64_t THTensor_(size)(const THTensor *self, int dim);
 TH_API int64_t THTensor_(stride)(const THTensor *self, int dim);
 TH_API THLongStorage *THTensor_(newSizeOf)(THTensor *self);
 TH_API THLongStorage *THTensor_(newStrideOf)(THTensor *self);
 TH_API real *THTensor_(data)(const THTensor *self);
-
-TH_API void THTensor_(setFlag)(THTensor *self, const char flag);
-TH_API void THTensor_(clearFlag)(THTensor *self, const char flag);
 
 
 /**** creation methods ****/
@@ -81,8 +81,6 @@ TH_API void THTensor_(resize3d)(THTensor *tensor, int64_t size0_, int64_t size1_
 TH_API void THTensor_(resize4d)(THTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_);
 TH_API void THTensor_(resize5d)(THTensor *tensor, int64_t size0_, int64_t size1_, int64_t size2_, int64_t size3_, int64_t size4_);
 // Note: these are legacy resize functions that treat sizes as size->size == 0 and size->data<int64_t>() as being 0-terminated.
-TH_API void THTensor_(resizeLegacy)(THTensor *tensor, THLongStorage *size, THLongStorage *stride);
-TH_API void THTensor_(resizeNdLegacy)(THTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
 
 TH_API void THTensor_(set)(THTensor *self, THTensor *src);
 TH_API void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);

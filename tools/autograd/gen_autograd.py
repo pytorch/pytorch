@@ -16,7 +16,7 @@ from .utils import YamlLoader, split_name_params
 
 VIEW_FUNCTIONS = {
     'alias', 'as_strided', 'diagonal', 'expand', 'narrow', 'permute', 'select', 'slice',
-    'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view',
+    'squeeze', 't', 'transpose', 'unfold', 'unsqueeze', 'view', 'unbind',
 }
 
 # In principle this should live in derivatives.yaml, but I could not
@@ -45,6 +45,13 @@ def format_return_type(returns):
         return 'std::tuple<{}>'.format(','.join(return_types))
 
 
+def get_simple_type(arg):
+    simple_type = arg['type']
+    simple_type = simple_type.replace(' &', '').replace('const ', '')
+    simple_type = simple_type.replace('Generator *', 'Generator')
+    return simple_type
+
+
 def load_aten_declarations(path):
     with open(path, 'r') as f:
         declarations = yaml.load(f, Loader=YamlLoader)
@@ -54,11 +61,12 @@ def load_aten_declarations(path):
     for declaration in declarations:
         if declaration.get('deprecated'):
             continue
+
         for arg in declaration['arguments']:
-            simple_type = arg['type']
-            simple_type = simple_type.replace(' &', '').replace('const ', '')
-            simple_type = simple_type.replace('Generator *', 'Generator')
-            arg['simple_type'] = simple_type
+            arg['simple_type'] = get_simple_type(arg)
+        for ret in declaration['returns']:
+            ret['simple_type'] = get_simple_type(ret)
+
         declaration['formals'] = [arg['type'] + ' ' + arg['name']
                                   for arg in declaration['arguments']]
         declaration['args'] = [arg['name'] for arg in declaration['arguments']]

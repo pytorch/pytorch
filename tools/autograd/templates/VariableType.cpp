@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/autograd/functions/utils.h"
 
 #include <array>
 #include <cstddef>
@@ -125,8 +126,8 @@ std::unique_ptr<Storage> VariableType::storageFromBlob(void * data, int64_t size
 std::unique_ptr<Storage> VariableType::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   return baseType->unsafeStorageFromTH(th_pointer, retain);
 }
-std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const {
-  return baseType->storageWithAllocator(size, std::move(allocator));
+std::unique_ptr<Storage> VariableType::storageWithAllocator(int64_t size, Allocator* allocator) const {
+  return baseType->storageWithAllocator(size, allocator);
 }
 Tensor VariableType::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   return make_variable(baseType->unsafeTensorFromTH(th_pointer, retain), /*requires_grad=*/false);
@@ -316,24 +317,15 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
-struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
-  bool out = false;
-  using IterArgs<ComputeRequiresGrad>::operator();
-  void operator()(const at::Tensor& tensor) {
-    const auto& var = static_cast<const Variable&>(tensor);
-    if (var.defined() && var.requires_grad()) {
-      out = true;
-    }
+static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
   }
-  bool short_circuit() { return out; }
-};
-
-template<typename... Args>
-static bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_view(base_var, std::move(tensor));
   }
-  return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+  return tensors;
 }
 
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
@@ -383,20 +375,6 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
   }
 }
 
-static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn) {
-    for (auto& var : vars) {
-      if (var.defined()) {
-        // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
-        const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
-      } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
-      }
-    }
-  }
-}
-
 struct Flatten : IterArgs<Flatten> {
   Flatten(variable_list& out) : out(out) {}
   variable_list& out;
@@ -406,7 +384,7 @@ struct Flatten : IterArgs<Flatten> {
   }
 };
 
-template<typename... Args> inline variable_list flatten(Args&&... args) {
+template<typename... Args> inline variable_list flatten_tensor_args(Args&&... args) {
   variable_list out;
   out.reserve(count_tensors(std::forward<Args>(args)...));
   Flatten(out).apply(std::forward<Args>(args)...);

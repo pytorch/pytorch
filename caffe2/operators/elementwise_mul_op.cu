@@ -8,6 +8,7 @@
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/elementwise_ops_utils.h"
+#include "caffe2/utils/fixed_divisor.h"
 
 namespace caffe2 {
 
@@ -20,10 +21,10 @@ template <typename TGrad, typename TIn, int D>
 __global__ void ComputeMulGradientCUDAKernel(
     const int outer_size,
     const int inner_size,
-    const SimpleArray<int, D> Y_dims,
+    const SimpleArray<FixedDivisor<int>, D> Y_dims,
     const SimpleArray<int, D> Y_strides,
     const SimpleArray<int, D> W_strides,
-    const SimpleArray<int, D> X_dims,
+    const SimpleArray<FixedDivisor<int>, D> X_dims,
     const TGrad* dY,
     const TIn* W,
     TGrad* dX) {
@@ -36,17 +37,17 @@ __global__ void ComputeMulGradientCUDAKernel(
       int X_index_val = X_index;
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
-        Y_index += (X_index_val % X_dims.data[d]) * Y_strides.data[d];
-        X_index_val /= X_dims.data[d];
+        int r;
+        X_dims.data[d].DivMod(X_index_val, &X_index_val, &r);
+        Y_index += r * Y_strides.data[d];
       }
       int W_index = 0;
       int Y_index_val = Y_index;
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
-        W_index += W_strides.data[d] == 0
-            ? 0
-            : (Y_index_val % Y_dims.data[d]) * W_strides.data[d];
-        Y_index_val /= Y_dims.data[d];
+        int r;
+        Y_dims.data[d].DivMod(Y_index_val, &Y_index_val, &r);
+        W_index += r * W_strides.data[d];
       }
 #if __CUDA_ARCH__ >= 350
       sum += __ldg(dY + Y_index) * __ldg(W + W_index);
@@ -73,19 +74,19 @@ void ComputeMulGradientCUDAImpl(
     const TIn* W,
     TGrad* dX,
     CUDAContext* context) {
-  SimpleArray<int, D> Y_dims_arr;
+  SimpleArray<FixedDivisor<int>, D> Y_dims_arr;
   SimpleArray<int, D> Y_strides_arr;
   SimpleArray<int, D> W_strides_arr;
-  SimpleArray<int, D> X_dims_arr;
-  std::copy_n(Y_dims, D, Y_dims_arr.data);
+  SimpleArray<FixedDivisor<int>, D> X_dims_arr;
+  for (int i = 0; i < D; ++i) {
+    Y_dims_arr.data[i] = FixedDivisor<int>(Y_dims[i]);
+    X_dims_arr.data[i] = FixedDivisor<int>(Y_dims[X_axes[i]]);
+  }
   math::utils::ComputeTransposedStrides(D, Y_dims, X_axes, Y_strides_arr.data);
   int cur_stride = 1;
   for (int i = D - 1; i >= 0; --i) {
     W_strides_arr.data[i] = W_dims[i] == 1 ? 0 : cur_stride;
     cur_stride *= W_dims[i];
-  }
-  for (int i = 0; i < D; ++i) {
-    X_dims_arr.data[i] = Y_dims[X_axes[i]];
   }
   ComputeMulGradientCUDAKernel<TGrad, TIn, D>
       <<<std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS),
@@ -126,20 +127,24 @@ void ComputeMulGradientCUDA(
   for (int i = pivot; i < ndim; ++i) {
     inner_size *= Y_dims[X_transpose_axes[i]];
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      ndim,
-      ComputeMulGradientCUDAImpl,
-      TGrad,
-      TIn,
-      outer_size,
-      inner_size,
-      Y_dims.data(),
-      W_dims.data(),
-      X_transpose_axes.data(),
-      dY,
-      W,
-      dX,
-      context);
+  if (outer_size > 0 && inner_size > 0) {
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+        ndim,
+        ComputeMulGradientCUDAImpl,
+        TGrad,
+        TIn,
+        outer_size,
+        inner_size,
+        Y_dims.data(),
+        W_dims.data(),
+        X_transpose_axes.data(),
+        dY,
+        W,
+        dX,
+        context);
+  } else if (outer_size > 0) {
+    math::Set<TGrad, CUDAContext>(outer_size, TGrad(0), dX, context);
+  }
 }
 
 } // namespace

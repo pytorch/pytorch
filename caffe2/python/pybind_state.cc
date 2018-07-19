@@ -5,6 +5,7 @@
 
 #include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
@@ -21,6 +22,7 @@
 #include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
 #include "caffe2/opt/optimize_ideep.h"
+#include "caffe2/opt/passes.h"
 #include "caffe2/opt/sink.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
@@ -1432,6 +1434,12 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(raw_data);
     return GetNUMANode(raw_data);
   });
+  m.def("get_blob_size_bytes", [](const std::string& blob_name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* blob = gWorkspace->GetBlob(blob_name);
+    CAFFE_ENFORCE(blob);
+    return BlobStat::sizeBytes(*blob);
+  });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
     if (!schema) {
@@ -1481,17 +1489,56 @@ void addGlobalMethods(py::module& m) {
   CAFFE2_CPU_FEATURE_SUPPORT(avx2);
 
 #undef CAFFE2_CPU_FEATURE_SUPPORT
+  m.def("transform_exists", [](const std::string& transform_name) {
+    return OptimizationPassRegistry()->Has(transform_name);
+  });
+  m.def("workspace_transform_exists", [](const std::string& transform_name) {
+    return WorkspaceOptimizationPassRegistry()->Has(transform_name);
+  });
+  m.def("run_transform", [](const std::string& transform_name, py::bytes def) {
+    caffe2::NetDef proto;
+    CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+    auto nn = caffe2::convertToNNModule(proto);
+    auto pass = OptimizationPassRegistry()->Create(transform_name, &nn);
+
+    CAFFE_ENFORCE(pass, "Pass doesn't exist: ", transform_name);
+    pass->run();
+
+    auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+    std::string out;
+    new_proto.SerializeToString(&out);
+    return py::bytes(out);
+  });
+  m.def(
+      "run_workspace_transform",
+      [](const std::string& transform_name, py::bytes def) {
+        CAFFE_ENFORCE(gWorkspace);
+        caffe2::NetDef proto;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(def.cast<std::string>(), &proto));
+        auto nn = caffe2::convertToNNModule(proto);
+        auto pass = WorkspaceOptimizationPassRegistry()->Create(
+            transform_name, &nn, gWorkspace);
+
+        CAFFE_ENFORCE(pass, "Pass doesn't exist: ", transform_name);
+        pass->run();
+
+        auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
+        std::string out;
+        new_proto.SerializeToString(&out);
+        return py::bytes(out);
+      });
 
   // Transformations are exposed as functions here and wrapped
   // into a python interface in transformations.py
   // Prefix the transformation with transform_ to avoid clobbering the
   // function namespace.
-  m.def("transform_optimizeForIDEEP", [](py::bytes def) {
+  m.def("transform_optimizeForIDEEP", [](py::bytes def, bool training_mode) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
 
     auto nn = caffe2::convertToNNModule(proto);
-    opt::OptimizeForIdeep(&nn);
+    opt::OptimizeForIdeep(&nn, gWorkspace, training_mode);
     auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
 
     std::string out;

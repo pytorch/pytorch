@@ -296,8 +296,8 @@ def stack(g, *tensors, **kwargs):
     dim = kwargs.pop('dim')
     if kwargs:
         raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
-    if len(tensors) < 2:
-        raise RuntimeError("Expected at least two arguments to stack node")
+    if len(tensors) < 1:
+        raise RuntimeError("Expected at least one argument to stack node")
     unsqueezed = [g.op("Unsqueeze", t, axes_i=[dim]) for t in tensors]
     return g.op("Concat", *unsqueezed, axis_i=dim)
 
@@ -396,11 +396,11 @@ def softplus(g, self, beta, threshold):
     return g.op('Softplus', self)
 
 
-def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool1d", "ceil_mode")
+        return _unimplemented("max_pool1d_with_indices", "ceil_mode")
     if set(_single(dilation)) != {1}:
-        return _unimplemented("max_pool1d", "dilation")
+        return _unimplemented("max_pool1d_with_indices", "dilation")
     if stride is None:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -410,11 +410,11 @@ def max_pool1d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
-def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool2d", "ceil_mode")
+        return _unimplemented("max_pool2d_with_indices", "ceil_mode")
     if set(_pair(dilation)) != {1}:
-        return _unimplemented("max_pool2d", "dilation")
+        return _unimplemented("max_pool2d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -424,11 +424,11 @@ def max_pool2d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     return r, None
 
 
-def max_pool3d(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
     if ceil_mode:
-        return _unimplemented("max_pool3d", "ceil_mode")
+        return _unimplemented("max_pool3d_with_indices", "ceil_mode")
     if set(_triple(dilation)) != {1}:
-        return _unimplemented("max_pool3d", "dilation")
+        return _unimplemented("max_pool3d_with_indices", "dilation")
     if not stride:
         stride = kernel_size
     r = g.op("MaxPool", input,
@@ -487,9 +487,11 @@ replication_pad2d = replication_pad
 replication_pad3d = replication_pad
 
 
-def upsample_nearest2d(g, input, scale_factor):
-    return g.op("Upsample", input, width_scale_f=scale_factor,
-                height_scale_f=scale_factor, mode_s="nearest")
+def upsample_nearest2d(g, input, output_size):
+    return g.op("Upsample", input,
+                height_scale_f=float(output_size[-2]) / input.type().sizes()[-2],
+                width_scale_f=float(output_size[-1]) / input.type().sizes()[-1],
+                mode_s="nearest")
 
 
 def upsample_bilinear2d(g, input, output_size, align_corners):
@@ -599,6 +601,10 @@ def index_select(g, self, index, dim):
     return g.op("Gather", self, index, axis_i=dim)
 
 
+def index_put(g, *inputs, **kwargs):
+    return g.op("ATen", *inputs, operator_s='index_put', **kwargs)
+
+
 def type_as(g, self, other):
     if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
         return self
@@ -626,6 +632,14 @@ def pow(g, self, exponent):
 
 def clamp(g, self, min, max):
     return g.op("Clip", self, min_f=min, max_f=max)
+
+
+def clamp_min(g, self, min):
+    return g.op("Clip", self, min_f=min)
+
+
+def clamp_max(g, self, max):
+    return g.op("Clip", self, max_f=max)
 
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
@@ -672,6 +686,16 @@ def eq(g, self, other):
 
 def exp(g, self):
     return g.op("Exp", self)
+
+
+def norm(g, self, p, dim, keepdim):
+    if p == 1:
+        f = _reduce_op_symbolic("ReduceL1")
+    elif p == 2:
+        f = _reduce_op_symbolic("ReduceL2")
+    else:
+        raise RuntimeError("ONNX export only p-norms with p of 1 or 2")
+    return f(g, self, dim=dim, keepdim=keepdim)
 
 
 def conv_tbc(g, input, weight, bias, pad):
@@ -725,6 +749,10 @@ def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
+def hardtanh(g, self, min_val, max_val):
+    return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
 
 def alias(g, self):

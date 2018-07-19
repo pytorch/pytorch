@@ -6,15 +6,6 @@
 // rather than by name directly.  Someone should figure out a reasonable way to
 // rewrite these in more idiomatic ATen and move it into ATen proper.
 
-#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
-_(uint8_t,Byte,i) \
-_(int8_t,Char,i) \
-_(int16_t,Short,i) \
-_(int,Int,i) \
-_(int64_t,Long,i) \
-_(float,Float,d) \
-_(double,Double,d)
-
 template<typename T>
 inline void THBlas_axpy(int64_t n, T a, T *x, int64_t incx, T *y, int64_t incy);
 

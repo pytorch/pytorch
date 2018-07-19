@@ -190,11 +190,11 @@ bool THC_pointwiseApply1(THCState* state,
                          TensorTypeA* a,
                          const Op& op,
                          TensorArgType aType = ReadWrite) {
-  if (THCTensor_nDimension(state, a) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, a) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) == 0) {
+  if (THCTensor__nDimension(state, a) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -333,12 +333,12 @@ bool THC_pointwiseApply2(THCState* state,
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) > MAX_CUTORCH_DIMS ||
-      THCTensor_nDimension(state, b) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, a) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, b) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) == 0) {
+  if (THCTensor__nDimension(state, a) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }
@@ -527,13 +527,13 @@ bool THC_pointwiseApply3(THCState* state,
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) > MAX_CUTORCH_DIMS ||
-      THCTensor_nDimension(state, b) > MAX_CUTORCH_DIMS ||
-      THCTensor_nDimension(state, c) > MAX_CUTORCH_DIMS) {
+  if (THCTensor__nDimension(state, a) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, b) > MAX_CUTORCH_DIMS ||
+      THCTensor__nDimension(state, c) > MAX_CUTORCH_DIMS) {
     return false;
   }
 
-  if (THCTensor_nDimension(state, a) == 0) {
+  if (THCTensor__nDimension(state, a) == 0) {
     // Zero-dim tensor; do nothing
     return true;
   }

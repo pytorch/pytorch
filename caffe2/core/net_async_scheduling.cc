@@ -26,7 +26,6 @@ AsyncSchedulingNet::AsyncSchedulingNet(
 void AsyncSchedulingNet::reset() {
   AsyncNetBase::reset();
   processed_tasks_num_ = 0;
-  success_ = true;
 }
 
 void AsyncSchedulingNet::Wait() {
@@ -46,9 +45,7 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
       if (streams_per_gpu_ > 1) {
         stream_id = stream(task_id);
       }
-      try {
-        run(task_id, stream_id);
-      } catch (const std::exception& e) {
+      if (!run(task_id, stream_id)) {
         success_ = false;
       }
     }
@@ -123,6 +120,23 @@ void AsyncSchedulingNet::schedule(int task_id, bool run_inline) {
           } else {
             // we're ready to schedule a child
             schedule(child_id, use_dfs_scheduling_);
+          }
+        }
+      }
+    }
+
+    // In case of net's failure, make sure all pending tasks are finished
+    if (!success_) {
+      // Simple logic to capture all pending tasks - check all tasks
+      // at the end of each task in case of net's failure
+      for (auto tid = 0; tid < tasksNum(); ++tid) {
+        if (event(tid).Query() == EventStatus::EVENT_SCHEDULED) {
+          // SetFinished may throw, e.g. when we call it on already finished
+          // event, and in some other cases (CUDA)
+          try {
+            event(tid).SetFinished("Cancelled");
+          } catch (const EnforceNotMet&) {
+            // ignore
           }
         }
       }

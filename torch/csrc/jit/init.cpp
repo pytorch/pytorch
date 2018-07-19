@@ -9,6 +9,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/canonicalize.h"
@@ -17,11 +18,13 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
+#include "torch/csrc/jit/passes/to_batch.h"
+#include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/script/init.h"
 #include "torch/csrc/jit/script/python_tree_views.h"
-#include "torch/csrc/jit/python_interpreter.h"
-
+#include "torch/csrc/jit/batched/BatchTensor.h"
+#include "torch/csrc/jit/pybind_utils.h"
 
 namespace torch  { namespace jit {
 
@@ -37,18 +40,6 @@ bool loadPythonClasses() {
   //PyObject *jit_dict = PyModule_GetDict(jit_module);
 
   return true;
-}
-
-// we cannot use the default py:cast<autograd::Variable> because it currently
-// unwraps the data tensor in the conversion process
-// TODO: replace with bs type
-variable_tensor_list createVariableTensorList(py::tuple tuple, size_t reserve_extra_space = 0) {
-  variable_tensor_list result;
-  result.reserve(tuple.size() + reserve_extra_space);
-  for(auto e : tuple) {
-    result.push_back(py::cast<autograd::Variable>(e));
-  }
-  return result;
 }
 
 } // anonymous namespace
@@ -77,6 +68,7 @@ void initJITBindings(PyObject *module) {
      auto tensor_inputs = createVariableTensorList(inputs);
      PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
    })
+   .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_run_cpp_tests", [] {
      // We have to release the GIL inside this method, because if we happen to
@@ -94,7 +86,15 @@ void initJITBindings(PyObject *module) {
    })
    .def("_jit_pass_onnx_block", BlockToONNX)
    .def("_jit_pass_fixup_onnx_loops", FixupONNXLoops)
-   .def("_jit_pass_decompose_addmm", DecomposeAddmm);
+   .def("_jit_pass_decompose_addmm", DecomposeAddmm)
+    .def("_jit_pass_specialize_undef", specializeUndef)
+   .def("_jit_differentiate", [](Graph &g, const std::vector<bool>& requires_grad) {
+       // the python binding slightly differs in semantics
+       // it makes a copy of the input Graph, and works on that
+       // jit::differentiate mutates the input Graph
+       auto g_clone = g.copy();
+       return differentiate(g_clone, requires_grad);
+   });
 
   py::class_<ArgumentSpec>(m, "ArgumentSpec")
       .def("__repr__", [](ArgumentSpec& self) {
@@ -116,6 +116,29 @@ void initJITBindings(PyObject *module) {
     })
     .def_property_readonly("grad_executor", [](ExecutionPlanState& s) {
       return s.grad_executor.get();
+    });
+
+  py::class_<Gradient>(m, "Gradient")
+    .def_property_readonly("f", [](Gradient& m) {
+      return m.f;
+    })
+    .def_property_readonly("df", [](Gradient& m) {
+      return m.df;
+    })
+    .def_property_readonly("f_real_outputs", [](Gradient& m) {
+      return m.f_real_outputs;
+    })
+    .def_property_readonly("df_input_vjps", [](Gradient& m) {
+      return m.df_input_vjps;
+    })
+    .def_property_readonly("df_input_captured_inputs", [](Gradient& m) {
+      return m.df_input_captured_inputs;
+    })
+    .def_property_readonly("df_input_captured_outputs", [](Gradient& m) {
+      return m.df_input_captured_outputs;
+    })
+    .def_property_readonly("df_output_vjps", [](Gradient& m) {
+      return m.df_output_vjps;
     });
 
   py::class_<GraphExecutorState>(m, "GraphExecutorState")
@@ -182,7 +205,8 @@ void initJITBindings(PyObject *module) {
   tracer::initPythonTracerBindings(module);
   script::initTreeViewBindings(module);
   script::initJitScriptBindings(module);
-  registerPythonInterpreterOps();
+  initBatchTensorBindings(module);
+  initRegisterBatchOpsBindings(module);
 }
 
 }}

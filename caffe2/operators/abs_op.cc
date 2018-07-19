@@ -1,4 +1,5 @@
 #include "caffe2/operators/abs_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include <algorithm>
 #include <functional>
@@ -8,14 +9,14 @@ namespace caffe2 {
 template <>
 template <typename T>
 bool AbsGradientFunctor<CPUContext>::Forward(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& /* X_dims */,
-    const T* dY,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& /* dY_dims */,
     const T* X,
+    const T* dY,
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
-      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+      X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
   EigenVectorMap<T>(dX, size) =
@@ -78,7 +79,7 @@ Y: [0.3005476  1.551666   1.3591481  0.39191285 0.21866608]
 </details>
 
 )DOC")
-    .Input(0, "X", "*(type: Tensor<float\>)* Input tensor.")
+    .Input(0, "X", "*(type: Tensor<float>)* Input tensor.")
     .Output(
         0,
         "Y",
@@ -95,7 +96,7 @@ class GetAbsGradient : public GradientMakerBase {
     return SingleGradientDef(
         "AbsGradient",
         "",
-        std::vector<std::string>{GO(0), I(0)},
+        std::vector<std::string>{I(0), GO(0)},
         std::vector<std::string>{GI(0)});
   }
 };

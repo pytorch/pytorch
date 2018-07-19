@@ -9,8 +9,11 @@
 #include <cufft.h>
 #include <cufftXt.h>
 
-
 namespace at { namespace native {
+
+// This means that max dim is 3 + 2 = 5 with batch dimension and possible
+// complex dimension
+constexpr int max_rank = 3;
 
 static inline std::string _cudaGetErrorEnum(cufftResult error)
 {
@@ -62,23 +65,8 @@ static inline void CUFFT_CHECK(cufftResult error)
   if (error != CUFFT_SUCCESS) {
     std::ostringstream ss;
     ss << "cuFFT error: " << _cudaGetErrorEnum(error);
-    throw std::runtime_error(ss.str());
+    AT_ERROR(ss.str());
   }
 }
-
-class CufftHandle {
-public:
-  explicit CufftHandle() {
-    CUFFT_CHECK(cufftCreate(&raw_plan));
-  }
-
-  const cufftHandle &get() const { return raw_plan; }
-
-  ~CufftHandle() {
-    CUFFT_CHECK(cufftDestroy(raw_plan));
-  }
-private:
-  cufftHandle raw_plan;
-};
 
 }} // at::native

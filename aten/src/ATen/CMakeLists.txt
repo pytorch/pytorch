@@ -235,10 +235,6 @@ IF(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
       ${CUDA_curand_LIBRARY})
-
-      # Set necessary HIPCC/CXX Flags
-      SET(HIP_HCC_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
-      SET(CMAKE_CXX_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${CMAKE_CXX_FLAGS}")
   ENDIF()
 
   if(CUDNN_FOUND)
@@ -297,12 +293,12 @@ else()
 endif()
 
 if(USE_CUDA OR USE_ROCM)
+  set(ATen_CUDA_SRCS ${all_cuda_cpp})
   if(AT_LINK_STYLE STREQUAL "INTERFACE")
     # Source code can't be added to an interface library, so it is
     # passed back to be compiled into the containing library
     add_library(ATen_cuda INTERFACE)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
-    set(ATen_CUDA_SRCS ${all_cuda_cpp})
   else()
     # A hack to deal with cuda library dependencies and modern CMake: the
     # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
@@ -397,7 +393,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-FOREACH(HEADER ${base_h})
+FOREACH(HEADER ${base_h} ${cuda_h} ${cudnn_h})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
@@ -405,11 +401,6 @@ ENDFOREACH()
 FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   # NB: Assumed to be flat
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
-ENDFOREACH()
-FOREACH(HEADER ${cuda_h})
-  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
-  GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
-  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
 INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
@@ -441,7 +432,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
           ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
       target_include_directories(${test_name} SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-      target_link_libraries(${test_name} ATen_cpu ATen_cuda)
+      target_link_libraries(${test_name} -Wl,--no-as-needed ATen_cpu ATen_cuda)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       install(TARGETS ${test_name} DESTINATION test)
     endforeach()

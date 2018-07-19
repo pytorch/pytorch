@@ -39,7 +39,7 @@ struct GraphExecutor {
   // note: if not specified, symbolically_differentiable is computed from the graph.
   GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable);
   variable_tensor_list run(variable_tensor_list && inputs);
-  operator bool() const {
+  explicit operator bool() const {
     return pImpl != nullptr;
   }
   std::shared_ptr<Graph> graph() const;
@@ -48,5 +48,20 @@ struct GraphExecutor {
 private:
   std::shared_ptr<GraphExecutorImpl> pImpl;
 };
+
+// These passes need to run before it is valid to pass to the interpreter
+// regardless of whether sizes have been specialized or not.
+void runRequiredPasses(const std::shared_ptr<Graph>& g);
+
+// specialize 'graph' to the types, sizes, and other properties described in spec
+// this prepares the graph for execution, including running runRequiredPasses,
+// but the execution only remains valid for tensors whose properties match spec
+// otherwise running the graph will have undefined results.
+void specializeToSpec(const std::shared_ptr<Graph>& graph, const ArgumentSpec& spec);
+
+// apply standard optimizations. if graphMustSupportVariables=false then
+// then the passes are allowed to modify the graph in ways that make it no longer
+// work with tensors that have requires_grad=True
+void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables);
 
 }}

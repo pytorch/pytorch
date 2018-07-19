@@ -1,4 +1,5 @@
 #include "caffe2/operators/distance_op.h"
+#include "caffe2/utils/eigen_utils.h"
 
 namespace caffe2 {
 
@@ -223,10 +224,25 @@ bool DotProductOp<float, CPUContext>::RunOnDevice() {
   return true;
 }
 
+vector<TensorShape> TensorInferenceForDotProduct(
+    const OperatorDef& /* def */,
+    const vector<TensorShape>& in) {
+  CAFFE_ENFORCE_GT(in.size(), 0);
+
+  vector<TIndex> dims(1);
+  dims[0] = in[0].dims().size() > 0 ? in[0].dims(0) : 1;
+  return vector<TensorShape>{CreateTensorShape(dims, in[0].data_type())};
+}
+
 OpSchema::Cost CostInferenceForDotProduct(
     const OperatorDef& def,
     const vector<TensorShape>& in) {
-  struct OpSchema::Cost c = PointwiseCostInference<1>(def, in);
+  std::vector<TensorShape> out = TensorInferenceForDotProduct(def, in);
+  CAFFE_ENFORCE_GT(out.size(), 0);
+  CAFFE_ENFORCE_EQ(out[0].dims().size(), 1);
+
+  struct OpSchema::Cost c = PointwiseCostInference<2>(def, in);
+  c.bytes_written = out[0].dims(0) * sizeof(out[0].data_type());
   c.params_bytes = 0;
   return c;
 }
@@ -563,6 +579,7 @@ Z:
     .Input(0, "X", "*(type: Tensor`<float>`)* 1D or 2D input tensor.")
     .Input(1, "Y", "*(type: Tensor`<float>`)* 1D or 2D input tensor (must have the same shape as X).")
     .Output(0, "Z", "*(type: Tensor`<float>`)* 1D output tensor.")
+    .TensorInferenceFunction(TensorInferenceForDotProduct)
     .CostInferenceFunction(
         OpSchema::CostInferenceFunctionType(CostInferenceForDotProduct));
 

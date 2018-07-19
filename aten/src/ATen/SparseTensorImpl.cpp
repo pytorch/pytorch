@@ -43,7 +43,7 @@ int64_t SparseTensorImpl::dim() const {
 }
 Scalar SparseTensorImpl::localScalar() {
   int64_t n = numel();
-  AT_CHECK(n == 1, "localScalar() called on a Tensor with ", n, " elements");
+  AT_CHECK(n == 1, "a Tensor with ", n, " elements cannot be converted to Scalar");
   if (nnz_ == 0) return Scalar(0);
   if (coalesced_) return values_.pImpl->localScalar();
   // You have a non-coalesced scalar sparse tensor?!  Wow!  Have
@@ -62,9 +62,9 @@ void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tenso
   // dimensions at the moment
   bool empty = values.numel() == 0;
   AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");
-  AT_CHECK(indices.type().scalarType() == kLong);
-  AT_CHECK(indices.type().backend() == values.type().backend());
-  // TODO: test that device tensors are on is the same
+  AT_CHECK(indices.type().scalarType() == kLong, "indices must be an int64 tensor");
+  AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");
+  AT_CHECK(!indices.is_cuda() || indices.get_device() == values.get_device(), "device of indices (", indices.get_device(), ") must match device of values (", values.get_device(), ")");
   if (!empty) {
     AT_CHECK(indices.dim() == 2, "indices must be nDim x nnz");
     AT_CHECK(indices.size(1) == values.size(0), "indices and values must have same nnz");

@@ -335,11 +335,13 @@ Caffe2Backend::get_special_operators() const {
   const static std::
       unordered_map<std::string, Caffe2Backend::SpecialOpConverter>
           kSpecialOperators = {
+              {"ArgMax", &Caffe2Backend::CreateArgMaxMin},
+              {"ArgMin", &Caffe2Backend::CreateArgMaxMin},
               {"Cast", &Caffe2Backend::CreateCast},
               {"Constant", &Caffe2Backend::CreateConstant},
               {"Conv", &Caffe2Backend::CreateConvPoolOpBase},
-              {"AveragePool", &Caffe2Backend::CreateConvPoolOpBase},
-              {"GlobalAveragePool", &Caffe2Backend::CreateConvPoolOpBase},
+              {"AveragePool", &Caffe2Backend::CreatePadPool},
+              {"GlobalAveragePool", &Caffe2Backend::CreatePadPool},
               {"GlobalMaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"MaxPool", &Caffe2Backend::CreateConvPoolOpBase},
               {"Reshape", &Caffe2Backend::CreateReshape},
@@ -362,6 +364,17 @@ Caffe2Backend::get_special_operators() const {
 //============================
 // Special Operator Converters
 //============================
+
+Caffe2Ops Caffe2Backend::CreateArgMaxMin(
+    OnnxNode* onnx_node,
+    int opset_version) {
+  auto& attributes = onnx_node->attributes;
+  if (!attributes.HasAttribute("axis")) {
+    auto* attr = attributes.AddRewrittenAttribute("axis");
+    attr->set_i(0);
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+}
 
 Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
@@ -502,6 +515,63 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
   return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
+Caffe2Ops Caffe2Backend::CreatePadPool(OnnxNode* onnx_node, int opset_version) {
+  auto& node = onnx_node->node;
+  auto& attributes = onnx_node->attributes;
+  Caffe2Ops ret;
+  // Pad
+  bool padding = false;
+  const std::string pad_name = opset_version < 2 ? "paddings" : "pads";
+  const auto pad_input = dummy_->NewDummyName();
+  if (attributes.HasAttribute("count_include_pad") &&
+      attributes.HasAttribute(pad_name)) {
+    auto count_include_pad = attributes.get<int64_t>("count_include_pad", 0L);
+    ::google::protobuf::RepeatedField<::google::protobuf::int64> pads;
+    pads =
+        attributes
+            .get<::google::protobuf::RepeatedField<::google::protobuf::int64>>(
+                pad_name);
+    if (count_include_pad == 1 && pads.size() == 4 &&
+        !(pads.Get(0) == 0 && pads.Get(1) == 0 && pads.Get(2) == 0 &&
+          pads.Get(3) == 0)) {
+      padding = true;
+      attributes.remove(pad_name);
+      caffe2::Argument arg_pads;
+      arg_pads.add_ints(pads.Get(0));
+      arg_pads.add_ints(pads.Get(1));
+      arg_pads.add_ints(pads.Get(2));
+      arg_pads.add_ints(pads.Get(3));
+      arg_pads.set_name("pads");
+      auto* c2_op = ret.ops.Add();
+      BuildOperator(
+          c2_op, "PadImage", {node.input(0)}, {pad_input}, {arg_pads});
+    } else if (count_include_pad == 1) {
+      std::string str;
+      bool pads_flag = false;
+      str += "[";
+      for (const auto& i : pads) {
+        str += caffe2::to_string(i) + ",";
+        pads_flag = pads_flag || i > 0;
+      }
+      str += "]";
+      if (pads_flag == true) {
+        CAFFE_THROW(
+            "Caffe2 only supports padding 2D Tensor, whereas padding is ", str);
+      }
+    }
+  }
+  // Pool
+  auto c2_ops = Caffe2Backend::CreateConvPoolOpBase(onnx_node, opset_version);
+  auto* pool_op = c2_ops.ops.Mutable(0);
+  if (padding) {
+    pool_op->set_input(0, pad_input);
+  }
+  auto* c2_op = ret.ops.Add();
+  c2_op->CopyFrom(*pool_op);
+
+  return ret;
+}
+
 Caffe2Ops Caffe2Backend::CreateReshape(OnnxNode* onnx_node, int opset_version) {
   auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
   CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
@@ -608,15 +678,19 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     caffe2::Argument arg_trans_b;
     arg_trans_b.set_name("trans_b");
     arg_trans_b.set_i(trans_b);
-    caffe2::Argument arg_broadcast;
-    arg_broadcast.set_name("broadcast");
-    arg_broadcast.set_i(broadcast);
 
     auto* c2_op = ret.ops.Add();
     BuildOperator(
         c2_op, "MatMul", {input_a, input_b}, {ab}, {arg_trans_a, arg_trans_b});
     c2_op = ret.ops.Add();
-    BuildOperator(c2_op, "Add", {ab, input_c}, {output}, {arg_broadcast});
+    if (opset_version >= 7) {
+      BuildOperator(c2_op, "Add", {ab, input_c}, {output});
+    } else {
+      caffe2::Argument arg_broadcast;
+      arg_broadcast.set_name("broadcast");
+      arg_broadcast.set_i(broadcast);
+      BuildOperator(c2_op, "Add", {ab, input_c}, {output}, {arg_broadcast});
+    }
   }
 
   return ret;
@@ -854,9 +928,9 @@ Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     attributes.remove("consumed_inputs");
   }
 
-  if (opset_version > 6) {
+  if (opset_version >= 7) {
     auto& attributes = onnx_node->attributes;
-    auto* attr = attributes.AddRewrittenAttibute("is_test");
+    auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
   }
 
@@ -893,30 +967,32 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) {
   auto& attributes = onnx_node->attributes;
-  auto scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
-  if (scales.size() != 4) {
-    CAFFE_THROW("The scales argument should have size 4");
-  } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
-    CAFFE_THROW("The first two elements in the scales argument must be 1");
-  }
   attributes.remove("mode");
-  attributes.remove("scales");
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
-  auto* op = c2_op.ops.Mutable(0);
-  auto* c2_height = op->add_arg();
-  c2_height->set_name("height_scale");
-  c2_height->set_f(scales.Get(2));
-  auto* c2_width = op->add_arg();
-  c2_width->set_name("width_scale");
-  c2_width->set_f(scales.Get(3));
-
-  return c2_op;
+  if (opset_version >= 7) {
+    const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
+    if (scales.size() != 4) {
+      CAFFE_THROW("The scales argument should have size 4");
+    } else if (!AlmostEqual(scales.Get(0), 1) || !AlmostEqual(scales.Get(1), 1))  {
+      CAFFE_THROW("The first two elements in the scales argument must be 1");
+    }
+    attributes.remove("scales");
+    auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+    auto* op = c2_op.ops.Mutable(0);
+    auto* c2_height = op->add_arg();
+    c2_height->set_name("height_scale");
+    c2_height->set_f(scales.Get(2));
+    auto* c2_width = op->add_arg();
+    c2_width->set_name("width_scale");
+    c2_width->set_f(scales.Get(3));
+    return c2_op;
+  }
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
 }
 
 Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {
-  if (opset_version > 6) {
+  if (opset_version >= 7) {
     auto& attributes = onnx_node->attributes;
-    auto* attr = attributes.AddRewrittenAttibute("is_test");
+    auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
   }
 

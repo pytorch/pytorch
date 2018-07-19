@@ -176,6 +176,7 @@ In-place version of :meth:`~Tensor.acos`
 add_docstr_all('add',
                r"""
 add(value) -> Tensor
+add(value=1, other) -> Tensor
 
 See :func:`torch.add`
 """)
@@ -183,6 +184,7 @@ See :func:`torch.add`
 add_docstr_all('add_',
                r"""
 add_(value) -> Tensor
+add_(value=1, other) -> Tensor
 
 In-place version of :meth:`~Tensor.add`
 """)
@@ -715,6 +717,13 @@ erf() -> Tensor
 See :func:`torch.erf`
 """)
 
+add_docstr_all('erfc',
+               r"""
+erf() -> Tensor
+
+See :func:`torch.erfc`
+""")
+
 add_docstr_all('erfinv',
                r"""
 erfinv() -> Tensor
@@ -810,6 +819,13 @@ frac_() -> Tensor
 In-place version of :meth:`~Tensor.frac`
 """)
 
+add_docstr_all('flatten',
+               r"""
+flatten(input, start_dim=0, end_dim=-1) -> Tensor
+
+see :func:`torch.flatten`
+""")
+
 add_docstr_all('gather',
                r"""
 gather(dim, index) -> Tensor
@@ -869,6 +885,21 @@ add_docstr_all('gesv',
 gesv(A) -> Tensor, Tensor
 
 See :func:`torch.gesv`
+""")
+
+add_docstr_all('get_device',
+               r"""
+get_device(A) -> Device ordinal (Integer)
+
+For CUDA tensors, this function returns the device ordinal of the GPU on which the tensor resides.
+For CPU tensors, an error is thrown.
+
+Example::
+
+    >>> x = torch.randn(3, 4, 5, device='cuda:0')
+    >>> x.get_device()
+    0
+    >>> x.cpu().get_device()  # RuntimeError: get_device is not implemented for type torch.FloatTensor
 """)
 
 add_docstr_all('gt',
@@ -1635,6 +1666,20 @@ Args:
 See :func:`torch.reshape`
 """)
 
+add_docstr_all('reshape_as',
+               r"""
+reshape_as(other) -> Tensor
+
+Returns this tensor as the same shape as :attr:`other`.
+``self.reshape_as(other)`` is equivalent to ``self.reshape(other.sizes())``.
+
+Please see :meth:`~Tensor.reshape` for more information about ``reshape``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same shape
+        as :attr:`other`.
+""")
+
 add_docstr_all('resize_',
                r"""
 resize_(*sizes) -> Tensor
@@ -2376,6 +2421,20 @@ Example::
 
 """)
 
+add_docstr_all('view_as',
+               r"""
+view_as(other) -> Tensor
+
+View this tensor as the same size as :attr:`other`.
+``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
+
+Please see :meth:`~Tensor.view` for more information about ``view``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
+""")
+
 add_docstr_all('expand',
                r"""
 expand(*sizes) -> Tensor
@@ -2412,6 +2471,20 @@ Example::
     tensor([[ 1,  1,  1,  1],
             [ 2,  2,  2,  2],
             [ 3,  3,  3,  3]])
+""")
+
+add_docstr_all('expand_as',
+               r"""
+expand_as(other) -> Tensor
+
+Expand this tensor to the same size as :attr:`other`.
+``self.expand_as(other)`` is equivalent to ``self.expand(other.size())``.
+
+Please see :meth:`~Tensor.expand` for more information about ``expand``.
+
+Args:
+    other (:class:`torch.Tensor`): The result tensor has the same size
+        as :attr:`other`.
 """)
 
 add_docstr_all('zero_',
@@ -2497,4 +2570,18 @@ add_docstr_all('slogdet',
 slogdet() -> (Tensor, Tensor)
 
 See :func:`torch.slogdet`
+""")
+
+add_docstr_all('unbind',
+               r"""
+unbind(dim=0) -> seq
+
+See :func:`torch.unbind`
+""")
+
+add_docstr_all('pinverse',
+               r"""
+pinverse() -> Tensor
+
+See :func:`torch.pinverse`
 """)

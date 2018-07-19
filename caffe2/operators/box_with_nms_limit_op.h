@@ -29,7 +29,8 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
             OperatorBase::GetSingleArgument<float>("soft_nms_sigma", 0.5)),
         soft_nms_min_score_thres_(OperatorBase::GetSingleArgument<float>(
             "soft_nms_min_score_thres",
-            0.001)) {
+            0.001)),
+        rotated_(OperatorBase::GetSingleArgument<bool>("rotated", false)) {
     CAFFE_ENFORCE(
         soft_nms_method_str_ == "linear" || soft_nms_method_str_ == "gaussian",
         "Unexpected soft_nms_method");
@@ -56,6 +57,9 @@ class BoxWithNMSLimitOp final : public Operator<Context> {
   float soft_nms_sigma_ = 0.5;
   // Lower-bound on updated scores to discard boxes
   float soft_nms_min_score_thres_ = 0.001;
+  // Set for RRPN case to handle rotated boxes. Inputs should be in format
+  // [ctr_x, ctr_y, width, height, angle (in degrees)].
+  bool rotated_{false};
 };
 
 } // namespace caffe2

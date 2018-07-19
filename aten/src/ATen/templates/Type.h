@@ -13,6 +13,7 @@
 #include "ATen/Tensor.h"
 #include "ATen/Deprecated.h"
 #include "ATen/Layout.h"
+#include "THNN/Reduction.h"
 
 #include <array>
 #include <cstddef>
@@ -58,7 +59,7 @@ struct AT_API Type {
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const = 0;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, Allocator* allocator) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
@@ -85,8 +86,8 @@ struct AT_API Type {
 
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const;
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const;
-  Tensor tensorWithAllocator(IntList sizes, std::unique_ptr<Allocator> allocator) const;
-  Tensor tensorWithAllocator(IntList sizes, IntList strides, std::unique_ptr<Allocator> allocator) const;
+  Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const;
+  Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const;
   Tensor scalarTensor(Scalar s) const;
 
   bool operator==(const Type& other) const;

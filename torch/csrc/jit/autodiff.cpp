@@ -17,10 +17,10 @@ bool hasOneValuedAttribute(Node *n, torch::jit::Symbol name) {
 
 bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
-    aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
+    aten::add, aten::sub, aten::mul, prim::Constant,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
     aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as,
-    aten::relu, aten::exp
+    aten::relu, aten::exp, prim::AutogradAdd
   };
   // TODO: check this more generally via schema
   // This check ensures that the `alpha` and `beta` attributes on this addmm
@@ -34,6 +34,17 @@ bool isDifferentiable(Node * n) {
   if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
     return false;
   }
+
+  // linear blocks may appear as inputs to graph executors, but they are removed
+  // before differentiation occurs
+  if (n->kind() == prim::GradOf) {
+    auto body = n->blocks().at(0);
+    return std::all_of(
+        body->nodes().begin(),
+        body->nodes().end(),
+        static_cast<bool (*)(Node*)>(isDifferentiable));
+  }
+
   return differentiable_kinds.count(n->kind()) > 0;
 }
 
@@ -88,8 +99,6 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
       case prim::Constant:
         return {};
-      case prim::ReplaceIfUndef:
-        return {grads.at(0), grads.at(0)};
       case aten::sigmoid:
         return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
       case aten::tanh:
@@ -194,16 +203,9 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     throw std::runtime_error(std::string("don't support differentiation of `") +
                             node->kind().toDisplayString() + "`");
   };
-  const auto has_tensor_type = [](Value *v) { return v->isTensor(); };
   if (!isDifferentiable(node)) {
     throw std::runtime_error(std::string("differentiation of ") + node->kind().toDisplayString() + " "
                              "is not supported, or it is missing necessary type information");
-  }
-  if (!std::all_of(node->inputs().begin(), node->inputs().end(), has_tensor_type) ||
-      !std::all_of(node->outputs().begin(), node->outputs().end(), has_tensor_type)) {
-    throw std::runtime_error("differentiate should be called with a graph where every value "
-                             "has a type registered");
-
   }
   auto sym_grads = build_sym_grad(fmap<SymbolicVariable>(grad_values));
   return fmap(sym_grads, [](const SymbolicVariable &v) { return v.value(); });
@@ -230,30 +232,35 @@ static value_set findAllRequiresGradNodes(
   return requires_grad_set;
 }
 
-static Value* createZerosLike(Value *v) {
-  JIT_EXPECTM(v->isTensor(), "can't allocate zero gradient for a value without a type");
-  Graph *graph = v->owningGraph();
-  auto type = v->type()->expect<TensorType>();
-  at::DeviceGuard device_guard(type->device());
 
-  auto & at_type = type->device() == -1 ? at::CPU(type->scalarType()) : at::CUDA(type->scalarType());
-  auto zeros = at::zeros({}, at_type).expand(type->sizes());
-  Node *constant = graph->createConstant(zeros)
-                        ->i_(attr::is_zero, 1);
-  graph->insertNode(constant);
-  return constant->output();
-}
-
-// any vjp input may be undefined, and we need to potentially replace it
-// with a zero tensor of the right size if required.
-// this function inserts a guard into the graph that does this replacement.
-// ReplaceIfUndef(dv,c) replaces dv with c if dv is undef.
-// During Graph specialization these guards will get removed when
-// 'dv' is known to be undef, and the zeros will be propagated if possible.
-static Value* createUndefGuard(Value * dv, Value * alternative) {
-  Graph* graph = dv->owningGraph();
-  Node * n = graph->create(prim::ReplaceIfUndef, {dv, alternative});
-  return graph->insertNode(n)->output();
+// If we have a function y = f(x) with jacobian J, the backwards of f is dx = J^t dy.
+// Note that because the backwards always implements this matrix multiply,
+// we know that it maps an input vector of zeros to an output vector of zero
+// regardless of what operations it choses to do inside to actually implement
+// the matrix multiply (most use some optimized form and never generate J^t).
+// More generally, we know that all of the backward computations are linear and
+// can use this property to do more aggressive optimizations later.
+// It is ok to replace any backward function with known-zero inputs with something
+// that produces known-zero outputs. This function encloses each know-linear
+// backward function in a 'GradOf' sub-block so that we can perform optimizations
+// using this information. In particular, specializeUndef will observe if
+// all the inputs to the linear block are Undef, which the autograd uses to represent
+// zeros, and then propagate the undefs to the outputs of the block.
+static std::vector<Value*> linearGradientForNode(Node* node, ArrayRef<Value*> grad_values) {
+  auto & graph = *node->owningGraph();
+  auto linear = graph.insertNode(graph.create(prim::GradOf, {grad_values}, 0));
+  // to make reading gradient graphs easier, remember the name of the forward op
+  linear->s_(attr::name, node->kind().toDisplayString());
+  auto block = linear->addBlock();
+  {
+    WithInsertPoint guard(block);
+    auto results = gradientForNode(node, grad_values);
+    for(auto r : results) {
+      block->registerOutput(r);
+      linear->addOutput()->copyMetadata(r);
+    }
+  }
+  return linear->outputs();
 }
 
 struct ReverseDetails {
@@ -266,6 +273,16 @@ struct ReverseDetails {
   value_set requires_grad_set;
   Block * reverse_block;
 };
+
+// AutogradAdd is a special addition function that handles Undef
+// AutogradAdd(a, b) == a + b if defined(a) and defined(b)
+// AutogradAdd(Undef, b) == b
+// AutogradAdd(a, Undef) == a
+// AutogradAdd(Undef, Undef) == Undef
+static Value* createAutogradAdd(Value* a, Value* b) {
+  auto graph = a->owningGraph();
+  return graph->insertNode(graph->create(prim::AutogradAdd, {a, b}))->output();
+}
 
 // Before:
 //   - grad_desc has field f initialized to the original 0-stage graph
@@ -291,13 +308,14 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   const auto get_grad = [&](Value* v) -> Value* {
     auto it = grad_map.find(v);
     if (it == grad_map.end()) {
-      std::tie(it, std::ignore) = grad_map.emplace(v, createZerosLike(v));
+      auto undef = graph.insertNode(graph.createUndefined());
+      std::tie(it, std::ignore) = grad_map.emplace(v, undef->output());
     }
     return it->second;
   };
   const auto set_grad = [&](Value *x, Value *dx) {
     if (Value * prev_grad = grad_map[x]) {
-      grad_map[x] = toVar(prev_grad) + toVar(dx);
+      grad_map[x] = createAutogradAdd(prev_grad, dx);
     } else {
       grad_map[x] = dx;
     }
@@ -309,7 +327,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     if (!requires_grad(output))
       continue;
     Value * output_grad = reverse_block->addInput()->setType(output->type());
-    output_grad = createUndefGuard(output_grad, createZerosLike(output));
     set_grad(output, output_grad);
     grad_desc.df_input_vjps.push_back(i);
   }
@@ -319,7 +336,7 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     auto inputs = node->inputs();
     if (!outputRequiresGrad(node, requires_grad)) continue;
 
-    value_list grad_inputs = gradientForNode(node, fmap(node->outputs(), get_grad));
+    value_list grad_inputs = linearGradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
       set_grad(inputs[i], grad_inputs[i]);
@@ -335,45 +352,6 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     grad_desc.df_output_vjps.push_back(i);
   }
   return ReverseDetails(std::move(grad_map), std::move(requires_grad_set), reverse_block);
-}
-
-bool isZero(Value * v) {
-  auto n = v->node();
-  return n->kind() == prim::Constant &&
-    n->hasAttribute(attr::is_zero) &&
-    n->i(attr::is_zero);
-}
-
-// In the case where an input is routed to an output
-// return the (possibly undefined) input rather than
-// the value guarded by replaceIfUndef
-// this ensures that we do not produce a 0 tensor
-// when the autograd would produce None
-// graph(a) {
-//   b = replaceIfUndef(a,0);
-//   c = b + b
-//   return c, b; // will replace 'b' with 'a'
-// }
-// Also replace any known-to-be-zero outputs with Undef
-// for the same reason
-
-static void passthroughUndefs(std::shared_ptr<Graph> graph) {
-  bool changed = false;
-  for(size_t i = 0; i < graph->outputs().size(); i++) {
-      Value * v = graph->outputs()[i];
-      if(v->node()->kind() == prim::ReplaceIfUndef) {
-        graph->return_node()->replaceInput(i, v->node()->inputs()[0]);
-        changed = true;
-      } else if(isZero(v)) {
-        auto undef = graph->insertNode(graph->createUndefined());
-        graph->return_node()->replaceInput(i, undef->output());
-        changed = true;
-      }
-  }
-  // handle cases where replaceIfUndef or constants has become dead
-  if(changed)
-    EliminateDeadCode(graph);
-
 }
 
 // Takes a grad_desc.f returned from `addReverseInline` and splits off the
@@ -469,15 +447,10 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
     if (rev_info.requires_grad_set.count(tmp) == 0) continue;
     Value * tmp_vjp_in = reverse_block->addInput()->setType(tmp->type());
     Value * tmp_vjp_prev = rev_info.grad_map.at(tmp);
-    {
-      WithInsertPoint guard(tmp_vjp_prev->node());
-      auto zeroes = createZerosLike(tmp);
-      tmp_vjp_in = createUndefGuard(tmp_vjp_in, zeroes);
-    }
     // This is quite weird because we can't first make a sum and then replace all uses
     // of tmp_vjp_prev (that would replace its use in the sum too!), so we create an
     // incorrect sum that doesn't use prev vjp, replace uses, and fix the sum.
-    Value * new_vjp = toVar(tmp_vjp_in) + toVar(tmp_vjp_in);
+    Value * new_vjp = createAutogradAdd(tmp_vjp_in, tmp_vjp_in);
     new_vjp->node()->moveAfter(tmp_vjp_prev->node());
     tmp_vjp_prev->replaceAllUsesWith(new_vjp);
     new_vjp->node()->replaceInput(1, tmp_vjp_prev);
@@ -512,7 +485,7 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
   // Take ownership of the graph
   JIT_ASSERTM(_graph.use_count() == 1,
               "differentiate will mutate and destroy the graph, so it requires "
-              "graph.use_count() == 1");
+              "graph.use_count() == 1, but found %d", _graph.use_count());
   std::swap(_graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
@@ -526,7 +499,6 @@ Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& 
   // Fills in f, df, f_real_outputs, df_input_captures,
   // modifies df_input_vjps (new vjps are added for temporaries)
   lambdaLiftReverse(grad_desc, rev_info);
-  passthroughUndefs(grad_desc.df);
   return grad_desc;
 }
 

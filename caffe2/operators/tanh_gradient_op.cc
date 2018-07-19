@@ -1,5 +1,7 @@
 #include "caffe2/operators/tanh_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
+
 #include <algorithm>
 #include <functional>
 #include <string>
@@ -10,14 +12,14 @@ namespace caffe2 {
 template <>
 template <typename T>
 bool TanhGradientFunctor<CPUContext>::Forward(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& /* Y_dims */,
-    const T* dY,
+    const std::vector<int>& Y_dims,
+    const std::vector<int>& /* dY_dims */,
     const T* Y,
+    const T* dY,
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
-      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+      Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> Y_arr(Y, size);
   EigenVectorMap<T>(dX, size) = dY_arr * (1 - Y_arr * Y_arr);
@@ -39,7 +41,7 @@ class GetTanhGradient : public GradientMakerBase {
     return SingleGradientDef(
         "TanhGradient",
         "",
-        std::vector<std::string>{GO(0), O(0)},
+        std::vector<std::string>{O(0), GO(0)},
         std::vector<std::string>{GI(0)});
   }
 };

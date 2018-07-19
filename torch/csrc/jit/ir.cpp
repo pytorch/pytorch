@@ -14,7 +14,6 @@
 namespace torch { namespace jit {
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol CppOp::Kind;
 constexpr Symbol PythonOp::Kind;
 
 constexpr int max_tensor_display_size = 10;
@@ -38,10 +37,6 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
     printValueRef(out, n);
   }
   return out;
-}
-
-std::string CppOp::name() const {
-  return fn->name();
 }
 
 struct const_value_list_with_types {
@@ -169,8 +164,6 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
     value->writeScalars(out);
-  IR_ELSEIFM_CONST(CppOp)
-    out << "CppOp[" << value->name() << "]";
   IR_ELSE()
     if(n->hasAttribute(attr::Subgraph) && groups) {
       out << n->kind().toQualString() << "_" << groups->size();
@@ -289,10 +282,6 @@ void Node::lint() const {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
-      // Handle invariant
-      if (i != inputs_.size() - 1) {
-        JIT_ASSERT(input->type()->kind() != TypeKind::HandleType);
-      }
       i++;
     }
   }
@@ -334,8 +323,6 @@ void Node::lint() const {
     }
     JIT_ASSERT(n_scalars == value->scalar_args.size());
     JIT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIFM_CONST(CppOp)
-    // TODO: add invariants
   IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
@@ -536,7 +523,7 @@ std::shared_ptr<Graph> Graph::copy() {
   return new_g;
 }
 
-inline Value* Value::setUniqueName(const std::string & name) {
+Value* Value::setUniqueName(const std::string & name) {
   if (name.size() > 0 && name.find_first_not_of("0123456789") == std::string::npos) {
     throw std::runtime_error("names may not be integers: " + name);
   }

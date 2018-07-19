@@ -8,22 +8,7 @@
 
 namespace torch { namespace jit {
 
-namespace {
-
-bool hasHandleOutput(Node *node) {
-  auto last_output = node->outputs().back();
-  return last_output->isHandle();
-}
-
-bool hasUsedHandle(Node *node) {
-  if (!hasHandleOutput(node)) return false;
-  return node->outputs().back()->uses().size() > 0;
-}
-
-
-} // anonymous namespace
-
-// Transform PythonOps and Cpp Ops into Node's that match ONNX semantics.
+// Transform PythonOps into Nodes that match ONNX semantics.
 std::shared_ptr<Graph> ToONNX(std::shared_ptr<Graph>& graph, ::torch::onnx::OperatorExportTypes operator_export_type) {
   auto new_graph = std::make_shared<Graph>(graph->scope_root());
   std::unordered_map<Value*, Value*> env;
@@ -58,8 +43,7 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
   auto setOutputs = [&](const std::string& op_name, Node * node, const value_list & outputs) {
     auto old_outputs = node->outputs();
     // Count all outputs, excluding Handles
-    bool has_handle = hasHandleOutput(node);
-    auto num_old_outputs = old_outputs.size() - (has_handle ? 1 : 0);
+    auto num_old_outputs = old_outputs.size();
     if (outputs.size() != num_old_outputs) {
       std::ostringstream ss;
       ss << "symbolic for " << op_name << " produced an incorrect number of outputs (expected ";
@@ -90,10 +74,6 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
           throw std::runtime_error(ss.str());
         }
       }
-    }
-    if (has_handle) {
-      JIT_ASSERT(old_outputs.back()->uses().empty());
-      env[old_outputs.back()] = nullptr;
     }
   };
 
@@ -198,18 +178,9 @@ void BlockToONNX(Block* old_block, Block* new_block, ::torch::onnx::OperatorExpo
 
   // Finally, visit all nodes in the graph
   for (auto node : old_block->nodes()) {
-    if (hasUsedHandle(node)) {
-      // Nothing we can do here. The handle is used, so we'll need to capture the
-      // original state and can't do anything with this op (we don't know what the
-      // backward is).
-      cloneNode(node);
-      continue;
-    }
     // Needed so that symbolic calls create nodes with correct stages.
     auto stage_guard = ctx.block->owningGraph()->setStageTemporary(node->stage());
-    IR_IFM(node, CppOp)
-      cloneNode(node);
-    IR_ELSEIFM(PythonOp)
+    IR_IFM(node, PythonOp)
       callPySymbolicMethod(value);
     IR_ELSE()
       callPySymbolicFunction(node);

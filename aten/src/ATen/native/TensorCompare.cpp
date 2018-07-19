@@ -4,6 +4,7 @@
 #include "ATen/Error.h"
 #include "ATen/ExpandUtils.h"
 #include "ATen/NativeFunctions.h"
+#include "ReduceOpsUtils.h"
 
 namespace {
 template <typename scalar_t>
@@ -85,8 +86,108 @@ Tensor _s_where_cpu(const Tensor& condition, const Tensor& self, const Tensor& o
   return ret;
 }
 
+std::tuple<Tensor, Tensor> kthvalue(const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
+  Tensor values = self.type().tensor();
+  Tensor indices = self.type().toScalarType(kLong).tensor();
+  return at::native::kthvalue_out(values, indices, self, k, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> kthvalue_out(Tensor& values, Tensor& indices,
+                                           const Tensor& self, int64_t k, int64_t dim, bool keepdim) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "kthvalue only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "kthvalue")) {
+    AT_ASSERT(values.dim() == 0);
+    indices.resize_({}).fill_(0);
+    return std::forward_as_tuple(values, indices);
+  } else {
+    return at::_th_kthvalue_out(values, indices, self, k, dim, keepdim);
+  }
+}
+
+std::tuple<Tensor, Tensor> median(const Tensor& self, int64_t dim, bool keepdim) {
+  Tensor values = self.type().tensor();
+  Tensor indices = self.type().toScalarType(kLong).tensor();
+  return at::native::median_out(values, indices, self, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> median_out(Tensor& values, Tensor& indices,
+                                         const Tensor& self, int64_t dim, bool keepdim) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "median only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "median")) {
+    AT_ASSERT(values.dim() == 0);
+    indices.resize_({}).fill_(0);
+    return std::forward_as_tuple(values, indices);
+  } else {
+    return at::_th_median_out(values, indices, self, dim, keepdim);
+  }
+}
+
+std::tuple<Tensor, Tensor> mode(const Tensor& self, int64_t dim, bool keepdim) {
+  Tensor values = self.type().tensor();
+  Tensor indices = self.type().toScalarType(kLong).tensor();
+  return at::native::mode_out(values, indices, self, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> mode_out(Tensor& values, Tensor& indices,
+                                       const Tensor& self, int64_t dim, bool keepdim) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "mode only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial_no_ident(values, self, dim, keepdim, "mode")) {
+    AT_ASSERT(values.dim() == 0);
+    indices.resize_({}).fill_(0);
+    return std::forward_as_tuple(values, indices);
+  } else {
+    return at::_th_mode_out(values, indices, self, dim, keepdim);
+  }
+}
+
+std::tuple<Tensor, Tensor> max(const Tensor& self, int64_t dim, bool keepdim) {
+  Tensor max = self.type().tensor();
+  Tensor max_indices = self.type().toScalarType(kLong).tensor();
+  return at::native::max_out(max, max_indices, self, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> max_out(Tensor& max, Tensor& max_indices,
+                                      const Tensor& self, int64_t dim, bool keepdim) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "max only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial_no_ident(max, self, dim, keepdim, "max")) {
+    AT_ASSERT(max.dim() == 0);
+    max_indices.resize_({}).fill_(0);
+    return std::forward_as_tuple(max, max_indices);
+  } else {
+    return at::_th_max_out(max, max_indices, self, dim, keepdim);
+  }
+}
+
 Tensor max_values(const Tensor& self, int64_t dim, bool keepdim) {
   return std::get<0>(self.max(dim, keepdim));
+}
+
+std::tuple<Tensor, Tensor> min(const Tensor& self, int64_t dim, bool keepdim) {
+  Tensor min = self.type().tensor();
+  Tensor min_indices = self.type().toScalarType(kLong).tensor();
+  return at::native::min_out(min, min_indices, self, dim, keepdim);
+}
+
+std::tuple<Tensor &,Tensor &> min_out(Tensor& min, Tensor& min_indices,
+                                      const Tensor& self, int64_t dim, bool keepdim) {
+  AT_CHECK(self.type().backend() == Backend::CPU || self.type().backend() == Backend::CUDA,
+           "min only supports CPU AND CUDA backend, got: ", at::toString(self.type().backend()));
+  dim = maybe_wrap_dim(dim, self.dim());
+  if (_dimreduce_return_trivial_no_ident(min, self, dim, keepdim, "min")) {
+    AT_ASSERT(min.dim() == 0);
+    min_indices.resize_({}).fill_(0);
+    return std::forward_as_tuple(min, min_indices);
+  } else {
+    return at::_th_min_out(min, min_indices, self, dim, keepdim);
+  }
 }
 
 Tensor min_values(const Tensor& self, int64_t dim, bool keepdim) {

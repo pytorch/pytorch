@@ -1,5 +1,6 @@
 #include <array>
 #include "caffe2/core/operator.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {

@@ -189,9 +189,6 @@ public:
     JIT_ASSERT(type_ != nullptr);
     return type_;
   }
-  bool isHandle() const {
-    return type()->kind() == TypeKind::HandleType;
-  }
   bool isTensor() const {
     return type()->kind() == TypeKind::TensorType;
   }
@@ -978,7 +975,6 @@ public:
       THPObjectPtr&& pyobj,
       const std::string& cconv,
       pyobj_list&& scalar_args);
-  Node * createCppOp(const std::shared_ptr<torch::autograd::Function> & fn);
   // clone n, making a new node in _this_ graph.
   // use node_map to translate inputs of n to inputs of the cloned node
   // if copy_blocks is false, it will not recursively clone the nested blocks
@@ -1287,8 +1283,8 @@ struct PythonOp : public Node {
   std::vector<THPObjectPtr> scalar_args;
   virtual std::string name() const = 0;
   virtual void writeScalars(std::ostream& out) const = 0;
-  virtual void cloneFrom(Node * other_) override = 0;
-  virtual Node * allocNewInstance(Graph * g) override = 0;
+  void cloneFrom(Node * other_) override = 0;
+  Node * allocNewInstance(Graph * g) override = 0;
   // recover the autograd.Function instance, if this PythonOp's function
   // was originally SomeFunction.apply
   // used in ONNX for discovering symbolics
@@ -1308,33 +1304,6 @@ inline Node* Graph::createPythonOp(
       std::move(pyobj),
       cconv,
       std::move(scalar_args));
-}
-
-// A Cpp operator is an operator which dispatches directly to an autograd function.
-// TODO: These are not executable without reentrant engine.
-struct CppOp : public Node {
-  static constexpr Symbol Kind = prim::CppOp;
-  CppOp(Graph * g)
-  : Node(g,prim::CppOp) {}
-  std::shared_ptr<torch::autograd::Function> fn;
-  std::string name() const;
-  CppOp* init(std::shared_ptr<torch::autograd::Function> fn) {
-    JIT_ASSERT(fn);
-    this->fn = std::move(fn);
-    return this;
-  }
-  virtual Node * allocNewInstance(Graph * g) override {
-    return new CppOp(g);
-  }
-  virtual void cloneFrom(Node * other_) override {
-    Node::cloneFrom(other_);
-    auto other = other_->cast<CppOp>();
-    this->fn = other->fn;
-  }
-};
-inline Node * Graph::createCppOp(const std::shared_ptr<torch::autograd::Function> & fn) {
-  auto op = new CppOp(this);
-  return op->init(fn);
 }
 
 inline graph_node_list_iterator Node::iterator() {

@@ -5,17 +5,23 @@
 #include "torch/csrc/jit/autodiff.h"
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/tracer.h"
 #include "torch/csrc/jit/passes/batch_mm.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/jit/passes/create_autodiff_subgraphs.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/passes/erase_number_types.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/inplace_check.h"
 #include "torch/csrc/jit/passes/peephole.h"
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/decompose_addmm.h"
+#include "torch/csrc/jit/passes/specialize_undef.h"
 #include "torch/csrc/jit/passes/loop_unrolling.h"
+#include "torch/csrc/jit/passes/lower_grad_of.h"
+#include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/ivalue.h"
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
@@ -46,7 +52,7 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
   : graph(std::move(graph)) {
     captures.reserve(capture_size);
   }
-  virtual variable_list apply(const variable_list& inputs) override {
+  virtual variable_list apply(variable_list&& inputs) override {
     // TODO: expensive copies here to convert to/from tensor_list
     // TODO: because inputs is passed by const reference there is no
     // way to release tensors incrementally as this runs
@@ -67,6 +73,16 @@ private:
 };
 
 
+// helper to run interpreter on variables until we switch
+// everything to IValue
+inline variable_tensor_list runOneStage(const Code & code, variable_tensor_list inputs) {
+  std::vector<IValue> stack(inputs.begin(), inputs.end());
+  InterpreterState(code).runOneStage(stack);
+  return variable_tensor_list(fmap(stack, [](IValue& v) {
+    return std::move(v).toTensor();
+  }));
+}
+
 // an optimized way of executing the subgraph computed directly on
 // tensors rather than Variables.
 // This will unwrap Variables, run the plan, and re-wrap them.
@@ -85,8 +101,7 @@ struct ExecutionPlan {
     if(grad) {
       return runWithGrad(std::move(stack));
     }
-    InterpreterState(f).runOneStage(stack);
-    return stack;
+    return runOneStage(f, std::move(stack));
   }
   std::shared_ptr<Graph> get_graph() const {
     return graph;
@@ -108,14 +123,15 @@ struct ExecutionPlan {
   }
 
 private:
-  // inplace to avoid allocations
-  variable_tensor_list unwrapVariables(variable_tensor_list && list) const {
-    for(auto & v : list) {
-      v = v.defined() ? autograd::as_variable_ref(v).detach() : at::Tensor();
-    }
-    return std::move(list);
+  // note: should be inplace to avoid allocations, but we have to switch from
+  // a list of tensor to a list of ivalues
+  std::vector<IValue> unwrapVariables(variable_tensor_list && list) const {
+    return fmap(list, [](const Variable& v) -> IValue {
+      return v.defined() ? autograd::as_variable_ref(v).detach() : at::Tensor();
+    });
   }
-  // inplace to avoid allocations
+  // note: should be inplace to avoid allocations, but we have to switch from
+  // a list of tensor to a list of ivalues
   variable_tensor_list wrapTensors(tensor_list && list) const {
     for(auto & v : list) {
       v = autograd::make_variable(v, /*requires_grad=*/false);
@@ -147,7 +163,8 @@ private:
 
     auto stack = unwrapVariables(std::move(inputs));
     InterpreterState(f).runOneStage(stack);
-    variable_tensor_list outputs = std::move(stack);
+    variable_tensor_list outputs(
+        fmap(stack, [](IValue& v) { return std::move(v).toTensor(); }));
 
     // hookup the gradients for the output tensors that require gradients
     // to the inputs to our gradient function df
@@ -306,11 +323,7 @@ private:
 
   variable_tensor_list runFallback(variable_tensor_list inputs) {
     auto & fb = getOrCreateAutogradFallback();
-    InterpreterState state(fb);
-    auto stack = std::move(inputs);
-    state.runOneStage(stack);
-    // note: we never unwrapped inputs, because we want autograd to record the trace
-    return stack;
+    return runOneStage(fb, std::move(inputs));
   }
 
   static bool calcMayIntroduceGradient(Block* b) {
@@ -336,40 +349,7 @@ private:
     }
     return false;
   }
-  void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
 
-    // these optimizations must run in the presence of variables
-    // and when shape information is not statically known.
-    EliminateDeadCode(graph);
-    CheckInplace(graph);
-    EliminateCommonSubexpression(graph);
-
-    if (!graphMustSupportVariables) {
-      // These optimizations can introduce operators like FusionGroup that
-      // do not work on variables
-
-      // They also may assume that concrete sizes/strides are availiable
-      UnrollLoops(graph);
-
-      //TODO: create peephole optimizations that are safe to run
-      // when we are using variables, and when we do not know sizes.
-      PeepholeOptimize(graph);
-      // TODO: remove mandatory size checking in BatchMM, otherwise
-      // it works fine on variables.
-      BatchMM(graph);
-      FuseGraph(graph);
-    }
-  }
-  // we need to run some passes to ensure the graph will run correctly
-  // in the executor. These passes go here and are always run,
-  // regardless of the 'optimize' flag
-  void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
-    // implicit inserted expand nodes are not necessarily always valid
-    // when used inside script methods that might have unstable shapes
-    // we remove the implicitly created ones, and have shape analysis
-    // add valid expand nodes when the shapes are stable
-    RemoveExpands(g);
-  }
   const Code & getOrCreateAutogradFallback() {
     std::lock_guard<std::mutex> lock(compile_mutex);
     if(autograd_fallback) {
@@ -409,70 +389,11 @@ private:
     return false;
   }
 
-
-  // remove ReplaceIfUndef(v, replacement) nodes that consume inputs with 'v' if
-  // the input is defined, and 'replacement' if it is not.
-  // Note: this is a very limited pass. It looks at undefined inputs,
-  // and cleans up ReplaceIfUndef nodes inserted by autodiff.
-  void specializeUndef(Graph & g, const ArgumentSpec & spec) {
-    for(size_t i = 0; i < spec.size(); i++) {
-      std::vector<Value*> to_replace;
-      // do not edit in place, since it invalidates uses iterator
-      for(auto u : g.inputs()[i]->uses()) {
-        if(u.user->kind() == prim::ReplaceIfUndef) {
-          to_replace.push_back(u.user->output());
-        }
-      }
-      for(auto v : to_replace) {
-        // if it is defined, then we replace with 'v' if not,
-        // we replace with 'replacement' which is normally just a zero tensor
-        int idx = spec.tensorInfo(i).defined() ? 0 : 1;
-        v->replaceAllUsesWith(v->node()->inputs()[idx]);
-        v->node()->destroy();
-      }
-    }
-  }
-  // a + 0 -> a
-  // 0 + a -> a
-  void propagateZeros(Graph & g) {
-    for(auto it = g.nodes().begin(); it != g.nodes().end(); ++it) {
-      if(it->kind() == aten::add && it->inputs().size() == 2 && at::Scalar(it->t(attr::alpha)).toDouble() == 1.0) {
-        if(isZero(it->inputs()[0])) {
-          it->output()->replaceAllUsesWith(it->inputs()[1]);
-          it.destroyCurrent();
-        } else if(isZero(it->inputs()[1])) {
-          it->output()->replaceAllUsesWith(it->inputs()[0]);
-          it.destroyCurrent();
-        }
-      }
-    }
-  }
-  void specializeToSpec(std::shared_ptr<Graph> g, const ArgumentSpec & spec) {
-
-    // The following passes are specialized to clean up after autograd
-    // decisions to insert/remove undefs nodes and to work before
-    // we propagate input shapes.
-
-    // Decompose addmm nodes to add + mm, so expands can be inserted and
-    // gradients accumulated on the backward pass
-    //
-    // In the future, if we need more passes like this, we should convert this
-    // into a generic canonicalization pass.
-    DecomposeAddmm(g);
-    // clean up replaceIfUndef nodes
-    specializeUndef(*g, spec);
-    // clean up additions resulting from nodes that were in fact undefined
-    propagateZeros(*g);
-    // clean up dead constants from specialization
-    EliminateDeadCode(g);
-    // calculate all input shapes
-    PropagateInputShapes(*g, spec);
-  }
   ExecutionPlan compileSpec(const ArgumentSpec & spec) {
     auto graph_ = graph->copy();
-    runRequiredPasses(graph_);
 
     specializeToSpec(graph_, spec);
+
     if(!argumentSpecRequiresGradient(spec)) {
       runOptimization(graph_, /*graphMustSupportVariables=*/false);
       return ExecutionPlan(graph_);
@@ -550,6 +471,65 @@ std::shared_ptr<Graph> GraphExecutor::graphFor(const variable_tensor_list& input
 
 GraphExecutorState GraphExecutor::getDebugState() {
   return pImpl->getDebugState();
+}
+
+
+void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
+  LowerGradOf(*g);
+  // implicit inserted expand nodes are not necessarily always valid
+  // when used inside script methods that might have unstable shapes
+  // we remove the implicitly created ones, and have shape analysis
+  // add valid expand nodes when the shapes are stable
+  RemoveExpands(g);
+}
+
+void specializeToSpec(const std::shared_ptr<Graph>& graph_, const ArgumentSpec& spec) {
+  // clean up GradOf and AutogradAdd nodes
+  // this must be first because later passes do not know what GradOfs are
+  std::vector<bool> defined;
+  for(size_t i = 0; i < spec.size(); ++i) {
+    defined.push_back(spec.tensorInfo(i).defined());
+  }
+  specializeUndef(*graph_, defined);
+
+  // required passes shared with autograd fallback
+  runRequiredPasses(graph_);
+
+  // Decompose addmm nodes to add + mm, so expands can be inserted and
+  // gradients accumulated on the backward pass
+  //
+  // In the future, if we need more passes like this, we should convert this
+  // into a generic canonicalization pass.
+  DecomposeAddmm(graph_);
+  // clean up dead constants from specialization
+  EliminateDeadCode(graph_);
+  // calculate all input shapes
+  PropagateInputShapes(*graph_, spec);
+}
+
+void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {
+
+  // these optimizations must run in the presence of variables
+  // and when shape information is not statically known.
+  EliminateDeadCode(graph);
+  CheckInplace(graph);
+  EliminateCommonSubexpression(graph);
+
+  if (!graphMustSupportVariables) {
+    // These optimizations can introduce operators like FusionGroup that
+    // do not work on variables
+
+    // They also may assume that concrete sizes/strides are availiable
+    UnrollLoops(graph);
+
+    //TODO: create peephole optimizations that are safe to run
+    // when we are using variables, and when we do not know sizes.
+    PeepholeOptimize(graph);
+    // TODO: remove mandatory size checking in BatchMM, otherwise
+    // it works fine on variables.
+    BatchMM(graph);
+    FuseGraph(graph);
+  }
 }
 
 }}

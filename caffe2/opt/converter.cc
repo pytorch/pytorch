@@ -1,4 +1,6 @@
 #include "caffe2/opt/converter.h"
+#include "caffe2/core/logging.h"
+
 #include "nomnigraph/Graph/Algorithms.h"
 
 #include "nomnigraph/Support/Casting.h"
@@ -8,8 +10,54 @@ using namespace nom;
 
 namespace {
 
-std::map<std::string, caffe2::Argument>
-getArgumentsFromOperator(caffe2::OperatorDef op) {
+std::vector<int> getStrides(std::map<std::string, caffe2::Argument> argMap) {
+  std::vector<int> strides;
+  // TODO: include all the other ways of adding these args.
+  // e.g. strides, stride_h, etc.
+  if (argMap.count("stride")) {
+    CAFFE_ENFORCE(argMap["stride"].has_i(), "Invalid stride argument");
+    int stride = static_cast<int>(argMap["stride"].i());
+    strides = {stride, stride};
+  }
+  return strides;
+}
+
+std::vector<int> getPads(std::map<std::string, caffe2::Argument> argMap) {
+  std::vector<int> pads;
+  if (argMap.count("pad")) {
+    CAFFE_ENFORCE(argMap["pad"].has_i(), "Invalid pad argument");
+    int pad = static_cast<int>(argMap["pad"].i());
+    pads = {pad, pad, pad, pad};
+  }
+  return pads;
+}
+
+std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
+  std::vector<int> dilations;
+  if (argMap.count("dilation")) {
+    CAFFE_ENFORCE(argMap["dilation"].has_i(), "Invalid dilation argument");
+    int dilation = static_cast<int>(argMap["dilation"].i());
+    dilations = {dilation, dilation};
+  }
+  return dilations;
+}
+
+int getGroup(std::map<std::string, caffe2::Argument>& argMap) {
+  if (argMap.count("group")) {
+    CAFFE_ENFORCE(argMap["group"].has_i() && "Invalid group argument");
+    return static_cast<int>(argMap["group"].i());
+  }
+  return 1;
+}
+
+} // namespace
+
+namespace caffe2 {
+
+CAFFE_DEFINE_REGISTRY(ConverterRegistry, Converter);
+
+std::map<std::string, caffe2::Argument> Converter::getArgumentsFromOperator(
+    caffe2::OperatorDef op) {
   std::map<std::string, caffe2::Argument> argMap;
   for (auto arg : op.arg()) {
     argMap[arg.name()] = arg;
@@ -30,11 +78,21 @@ repr::NeuralNetOperator::NNLayout getLayout(std::map<std::string, caffe2::Argume
   return repr::NeuralNetOperator::NNLayout::Undefined;
 }
 
+OperatorDef Converter::convertToOperatorDef(
+    const nom::repr::NeuralNetOperator* nnOp) {
+  auto* annotation = nnOp->getAnnotation();
+  // Default to using the stored operator.
+  if (isa<Caffe2Annotation>(annotation)) {
+    return dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
+  }
+  CAFFE_THROW("TODO: Cannot yet instantiate OperatorDef from nomnigraph");
+}
+
 std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) {
   // There are literally three ways to define shapes in Conv in Caffe2
   std::vector<int> kernelShape;
   if (argMap.count("kernel")) {
-    assert(argMap["kernel"].has_i() && "Invalid kernel argument");
+    CAFFE_ENFORCE(argMap["kernel"].has_i(), "Invalid kernel argument");
     int kernel = static_cast<int>(argMap["kernel"].i());
     kernelShape = {kernel, kernel};
   } else if (argMap.count("kernels")) {
@@ -42,60 +100,22 @@ std::vector<int> getKernelShape(std::map<std::string, caffe2::Argument> argMap) 
       kernelShape.push_back(static_cast<int>(i));
     }
   } else if (argMap.count("kernel_h") && argMap.count("kernel_w")) {
-    assert(argMap["kernel_h"].has_i() && "Invalid kernel argument");
-    assert(argMap["kernel_w"].has_i() && "Invalid kernel argument");
+    CAFFE_ENFORCE(argMap["kernel_h"].has_i(), "Invalid kernel argument");
+    CAFFE_ENFORCE(argMap["kernel_w"].has_i(), "Invalid kernel argument");
     int kernelH = static_cast<int>(argMap["kernel_h"].i());
     int kernelW = static_cast<int>(argMap["kernel_w"].i());
     kernelShape = {kernelH, kernelW};
-  } else {
-    assert(0 && "Could not parse kernel argument");
   }
   return kernelShape;
 }
 
-std::vector<int> getStrides(std::map<std::string, caffe2::Argument> argMap) {
-  std::vector<int> strides;
-  // TODO: include all the other ways of adding these args.
-  // e.g. strides, stride_h, etc.
-  if (argMap.count("stride")) {
-    assert(argMap["stride"].has_i() && "Invalid stride argument");
-    int stride = static_cast<int>(argMap["stride"].i());
-    strides = {stride, stride};
-  }
-  return strides;
-}
+namespace {
 
-std::vector<int> getPads(std::map<std::string, caffe2::Argument> argMap) {
-  std::vector<int> pads;
-  if (argMap.count("pad")) {
-    assert(argMap["pad"].has_i() && "Invalid pad argument");
-    int pad = static_cast<int>(argMap["pad"].i());
-    pads = {pad, pad, pad, pad};
-  }
-  return pads;
-}
-
-std::vector<int> getDilations(std::map<std::string, caffe2::Argument> argMap) {
-  std::vector<int> dilations;
-  if (argMap.count("dilation")) {
-    assert(argMap["dilation"].has_i() && "Invalid dilation argument");
-    int dilation = static_cast<int>(argMap["dilation"].i());
-    dilations = {dilation, dilation};
-  }
-  return dilations;
-}
-
-} // namespace
-
-namespace caffe2 {
-
-std::unique_ptr<repr::NeuralNetOperator>
-convertToOperatorDef(caffe2::OperatorDef op) {
-  auto argMap = getArgumentsFromOperator(op);
-
-  std::unique_ptr<repr::NeuralNetOperator> nnOp;
-
-  if (op.type() == "Conv") {
+class ConvConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp;
+    auto argMap = getArgumentsFromOperator(op);
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::Conv>(kernelShape);
     auto c = dyn_cast<repr::Conv>(nnOp.get());
@@ -103,29 +123,130 @@ convertToOperatorDef(caffe2::OperatorDef op) {
     c->setStrides(getStrides(argMap));
     c->setPads(getPads(argMap));
     c->setDilations(getDilations(argMap));
+    c->setGroup(getGroup(argMap));
 
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op.type() == "Relu") {
-    nnOp = util::make_unique<repr::Relu>();
-  }
+  virtual ~ConvConverter() {}
+};
 
-  if (op.type() == "AveragePool") {
+REGISTER_CONVERTER(Conv, ConvConverter);
+
+TRIVIAL_CONVERTER(Relu);
+REGISTER_CONVERTER(Relu, ReluConverter);
+
+TRIVIAL_CONVERTER(Sum);
+REGISTER_CONVERTER(Sum, SumConverter);
+
+TRIVIAL_CONVERTER(BatchNormalization);
+REGISTER_CONVERTER(SpatialBN, BatchNormalizationConverter);
+
+TRIVIAL_CONVERTER(Flatten);
+REGISTER_CONVERTER(Flatten, FlattenConverter);
+
+TRIVIAL_CONVERTER(BatchGather);
+REGISTER_CONVERTER(BatchGather, BatchGatherConverter);
+
+class AveragePoolConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp;
+    auto argMap = getArgumentsFromOperator(op);
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::AveragePool>(kernelShape);
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op.type() == "MaxPool") {
+  virtual ~AveragePoolConverter() {}
+};
+REGISTER_CONVERTER(AveragePool, AveragePoolConverter);
+
+class MaxPoolConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp;
+    auto argMap = getArgumentsFromOperator(op);
     auto kernelShape = getKernelShape(argMap);
     nnOp = util::make_unique<repr::MaxPool>(kernelShape);
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op.type() == "Sum") {
-    nnOp = util::make_unique<repr::Sum>();
+  virtual ~MaxPoolConverter() {}
+};
+REGISTER_CONVERTER(MaxPool, MaxPoolConverter);
+
+class ConcatConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp =
+        util::make_unique<repr::Concat>();
+    auto argMap = getArgumentsFromOperator(op);
+
+    auto c = dyn_cast<repr::Concat>(nnOp.get());
+    if (argMap.count("axis")) {
+      CAFFE_ENFORCE(argMap["axis"].has_i(), "Invalid axis argument");
+      int axis = static_cast<int>(argMap["axis"].i());
+      c->setAxis(axis);
+    }
+    if (argMap.count("add_axis")) {
+      CAFFE_ENFORCE(argMap["add_axis"].has_i(), "Invalid add_axis argument");
+      int add_axis = static_cast<int>(argMap["add_axis"].i());
+      c->setAddAxis(!!add_axis);
+    }
+    return nnOp;
   }
+  // Does not override default converter to OperatorDef
 
-  if (op.type() == "SpatialBN") {
-    nnOp = util::make_unique<repr::BatchNormalization>();
+  virtual ~ConcatConverter() {}
+};
+REGISTER_CONVERTER(Concat, ConcatConverter);
+
+class BatchMatMulConverter : public Converter {
+  std::unique_ptr<nom::repr::NeuralNetOperator> convertToNeuralNetOperator(
+      const OperatorDef& op) override {
+    std::unique_ptr<repr::NeuralNetOperator> nnOp =
+        util::make_unique<repr::BatchMatMul>();
+    auto argMap = getArgumentsFromOperator(op);
+
+    auto c = dyn_cast<repr::BatchMatMul>(nnOp.get());
+    if (argMap.count("trans_a")) {
+      CAFFE_ENFORCE(argMap["trans_a"].has_i(), "Invalid axis argument");
+      int trans_a = static_cast<int>(argMap["trans_a"].i());
+      c->setTransA(!!trans_a);
+    }
+    if (argMap.count("trans_b")) {
+      CAFFE_ENFORCE(argMap["trans_b"].has_i(), "Invalid add_axis argument");
+      int trans_b = static_cast<int>(argMap["trans_b"].i());
+      c->setTransB(!!trans_b);
+    }
+    if (argMap.count("broadcast")) {
+      CAFFE_ENFORCE(argMap["broadcast"].has_i(), "Invalid add_axis argument");
+      int broadcast = static_cast<int>(argMap["broadcast"].i());
+      c->setBroadcast(!!broadcast);
+    }
+    return nnOp;
+  }
+  // Does not override default converter to OperatorDef
+
+  virtual ~BatchMatMulConverter() {}
+};
+REGISTER_CONVERTER(BatchMatMul, BatchMatMulConverter);
+
+} // namespace
+
+std::unique_ptr<repr::NeuralNetOperator> convertToNeuralNetOperator(
+    const caffe2::OperatorDef& op) {
+  auto argMap = Converter::getArgumentsFromOperator(op);
+
+  std::unique_ptr<repr::NeuralNetOperator> nnOp;
+
+  if (ConverterRegistry()->Has(op.type())) {
+    nnOp =
+        ConverterRegistry()->Create(op.type())->convertToNeuralNetOperator(op);
   }
 
   if (!nnOp) {
@@ -134,6 +255,17 @@ convertToOperatorDef(caffe2::OperatorDef op) {
 
   // Generic attributes associated with Ops here
   nnOp->setLayout(getLayout(argMap));
+
+  auto annotation = util::make_unique<Caffe2Annotation>();
+  annotation->setOperatorDef(op);
+
+  auto device_name = op.device_option().node_name();
+  if (device_name != "") {
+    annotation->setDevice(device_name);
+  }
+  annotation->setDeviceType(op.device_option().device_type());
+
+  nnOp->setAnnotation(std::move(annotation));
 
   return nnOp;
 }
@@ -147,7 +279,7 @@ void handleWhileOp(
     std::unordered_map<std::string, repr::NNGraph::NodeRef>& blobMap
 ) {
   opNode->resetData(util::make_unique<repr::While>());
-  auto argMap = getArgumentsFromOperator(op);
+  auto argMap = Converter::getArgumentsFromOperator(op);
   std::string bodyNetSerialized = argMap["body"].s();
   auto bodyNet = caffe2::NetDef();
   bodyNet.ParseFromString(bodyNetSerialized);
@@ -196,13 +328,13 @@ void handleWhileOp(
     }
   }
 
-  assert(rev_sorted.front().getNodes().size() == 1 &&
+  CAFFE_ENFORCE(rev_sorted.front().getNodes().size() == 1,
       "More than one exit node.");
-  assert(rev_sorted.back().getNodes().size() == 1 &&
+  CAFFE_ENFORCE(rev_sorted.back().getNodes().size() == 1,
       "More than one entry node.");
 
   auto exit_tensor = *(rev_sorted.front().getNodes().begin());
-  assert(isa<repr::NeuralNetData>(exit_tensor->data()) &&
+  CAFFE_ENFORCE(isa<repr::NeuralNetData>(exit_tensor->data()),
       "Exit node is not a tensor.");
 
   auto bodyNodes = bodyGraph.getMutableNodes();
@@ -326,24 +458,10 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
     if (op.type() == "While") {
       handleWhileOp(dfg, cfg, opNode, bbNode, op, blobMap);
     } else {
-      opNode->resetData(convertToOperatorDef(op));
+      opNode->resetData(convertToNeuralNetOperator(op));
       auto currentBasicBlock = bbNode->mutableData()->get();
       currentBasicBlock->pushInstructionNode(opNode);
     }
-    auto opRef = dyn_cast<repr::NeuralNetOperator>(opNode->data().get());
-
-    assert(opNode->data());
-
-    auto annotation = util::make_unique<Caffe2Annotation>();
-    annotation->setOperatorDef(&op);
-
-    auto device_name = op.device_option().node_name();
-    if (device_name != "") {
-      annotation->setDevice(device_name);
-    }
-
-    opRef->setAnnotation(std::move(annotation));
-
   }
 
   repr::NNModule module;
@@ -355,64 +473,28 @@ repr::NNModule convertToNNModule(caffe2::NetDef &net, std::unordered_map<std::st
   return module;
 }
 
-caffe2::OperatorDef convertToOperatorDef(repr::NNGraph::NodeRef instrNode) {
+caffe2::OperatorDef convertToOperatorDef(
+    const repr::NNGraph::NodeRef& instrNode) {
   auto *nnOp = repr::nn::get<repr::NeuralNetOperator>(instrNode);
   auto *annotation = nnOp->getAnnotation();
   caffe2::OperatorDef op;
 
-  if (!annotation) {
-    using NNKind = repr::NeuralNetOperator::NNKind;
-    switch (nnOp->getKind()) {
-      case NNKind::Send:
-      {
-        auto sendOp = dyn_cast<repr::Send>(nnOp);
-        op.set_type("Placeholder:Send");
-        {
-          auto arg = op.add_arg();
-          arg->set_name("dst_node");
-          arg->set_s(sendOp->getDestination());
-        }
-        {
-          auto out = repr::nn::getOutputs(instrNode).front();
-          auto t = repr::nn::get<repr::Data>(out);
-          auto arg = op.add_arg();
-          arg->set_name("callsite_id");
-          arg->set_i(t->getVersion());
-        }
-        break;
-      }
-      case NNKind::Receive:
-      {
-        auto recvOp = dyn_cast<repr::Receive>(nnOp);
-        op.set_type("Placeholder:Receive");
-        {
-          auto arg = op.add_arg();
-          arg->set_name("src_node");
-          arg->set_s(recvOp->getSource());
-        }
-        {
-          auto out = repr::nn::getOutputs(instrNode).front();
-          auto t = repr::nn::get<repr::Data>(out);
-          auto arg = op.add_arg();
-          arg->set_name("callsite_id");
-          arg->set_i(t->getVersion());
-        }
-        break;
-      }
-      default:
-        op.set_type(nnOp->getName());
-    }
+  if (ConverterRegistry()->Has(op.type())) {
+    op = ConverterRegistry()->Create(op.type())->convertToOperatorDef(nnOp);
+  } else if (!annotation) {
+    op.set_type(nnOp->getName());
   } else {
-    switch (annotation->getKind()) {
-      case repr::Annotation::AnnotationKind::Caffe2:
-        op = *dyn_cast<Caffe2Annotation>(annotation)->getOperatorDef();
-        break;
-      default:
-        op.set_type("__NOMNIGRAPH_CONVERSION_ERROR__");
-        assert(0 && "Couldn't convert operator annotation to Caffe2 operator def");
-        break;
+    if (isa<Caffe2Annotation>(annotation)) {
+      auto c2_annotation = dyn_cast<Caffe2Annotation>(annotation);
+      op = c2_annotation->getOperatorDef();
+      op.mutable_device_option()->set_device_type(
+          c2_annotation->getDeviceType());
+    } else {
+      CAFFE_THROW(
+          "Couldn't convert operator annotation to Caffe2 operator def");
     }
   }
+
   // We may have swapped out some of the edges.
   op.clear_input();
   op.clear_output();
@@ -436,7 +518,7 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
   // with the DFG
   for (const auto &bbNode : m.controlFlow.getMutableNodes()) {
     if (bbNode->getOutEdges().size() > 1) {
-      assert(0 && "Control flow not yet supported in Caffe2 converter.");
+      CAFFE_THROW("Control flow not yet supported in Caffe2 converter.");
     }
     auto bb = bbNode->data().get();
     for (const auto &instrNode : bb->getInstructions()) {
@@ -487,4 +569,4 @@ caffe2::NetDef convertToCaffe2Proto(repr::NNModule &m, const caffe2::NetDef& old
   return predictNet;
 }
 
-} // namespace caffe2 
+} // namespace caffe2

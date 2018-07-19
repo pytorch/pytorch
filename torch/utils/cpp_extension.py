@@ -303,6 +303,7 @@ def CppExtension(name, sources, *args, **kwargs):
 
         libraries = kwargs.get('libraries', [])
         libraries.append('caffe2')
+        libraries.append('torch')
         libraries.append('_C')
         kwargs['libraries'] = libraries
 
@@ -346,6 +347,7 @@ def CUDAExtension(name, sources, *args, **kwargs):
     libraries.append('cudart')
     if sys.platform == 'win32':
         libraries.append('caffe2')
+        libraries.append('torch')
         libraries.append('caffe2_gpu')
         libraries.append('_C')
     kwargs['libraries'] = libraries
@@ -416,7 +418,8 @@ def load(name,
          extra_ldflags=None,
          extra_include_paths=None,
          build_directory=None,
-         verbose=False):
+         verbose=False,
+         with_cuda=None):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT).
 
@@ -464,6 +467,11 @@ def load(name,
             to the build.
         build_directory: optional path to use as build workspace.
         verbose: If ``True``, turns on verbose logging of load steps.
+        with_cuda: Determines whether CUDA headers and libraries are added to
+            the build. If set to ``None`` (default), this value is
+            automatically determined based on the existence of ``.cu`` or
+            ``.cuh`` in ``sources``. Set it to `True`` to force CUDA headers
+            and libraries to be included.
 
     Returns:
         The loaded PyTorch extension as a Python module.
@@ -484,7 +492,8 @@ def load(name,
         extra_ldflags,
         extra_include_paths,
         build_directory or _get_build_directory(name, verbose),
-        verbose)
+        verbose,
+        with_cuda=with_cuda)
 
 
 def load_inline(name,
@@ -496,7 +505,8 @@ def load_inline(name,
                 extra_ldflags=None,
                 extra_include_paths=None,
                 build_directory=None,
-                verbose=False):
+                verbose=False,
+                with_cuda=None):
     '''
     Loads a PyTorch C++ extension just-in-time (JIT) from string sources.
 
@@ -538,6 +548,11 @@ def load_inline(name,
         functions: A list of function names for which to generate function
             bindings. If a dictionary is given, it should map function names to
             docstrings (which are otherwise just the function names).
+        with_cuda: Determines whether CUDA headers and libraries are added to
+            the build. If set to ``None`` (default), this value is
+            automatically determined based on whether ``cuda_sources`` is
+            provided. Set it to `True`` to force CUDA headers
+            and libraries to be included.
 
     Example:
         >>> from torch.utils.cpp_extension import load_inline
@@ -551,8 +566,6 @@ def load_inline(name,
                                  functions=['sin_add'])
     '''
     build_directory = build_directory or _get_build_directory(name, verbose)
-
-    source_files = []
 
     if isinstance(cpp_sources, str):
         cpp_sources = [cpp_sources]
@@ -606,7 +619,8 @@ def load_inline(name,
         extra_ldflags,
         extra_include_paths,
         build_directory,
-        verbose)
+        verbose,
+        with_cuda=with_cuda)
 
 
 def _jit_compile(name,
@@ -616,13 +630,15 @@ def _jit_compile(name,
                  extra_ldflags,
                  extra_include_paths,
                  build_directory,
-                 verbose):
+                 verbose,
+                 with_cuda=None):
     baton = FileBaton(os.path.join(build_directory, 'lock'))
     if baton.try_acquire():
         try:
             verify_ninja_availability()
             check_compiler_abi_compatibility(os.environ.get('CXX', 'c++'))
-            with_cuda = any(map(_is_cuda_file, sources))
+            if with_cuda is None:
+                with_cuda = any(map(_is_cuda_file, sources))
             extra_ldflags = _prepare_ldflags(
                 extra_ldflags or [],
                 with_cuda,
@@ -678,6 +694,7 @@ def _prepare_ldflags(extra_ldflags, with_cuda, verbose):
         lib_path = os.path.join(torch_path, 'lib')
 
         extra_ldflags.append('caffe2.lib')
+        extra_ldflags.append('torch.lib')
         if with_cuda:
             extra_ldflags.append('caffe2_gpu.lib')
         extra_ldflags.append('_C.lib')
@@ -829,7 +846,7 @@ def _write_ninja_file(path,
             '  command = "{}/link.exe" $in /nologo $ldflags /out:$out'.format(
                 cl_path))
     else:
-        link_rule.append('  command = $cxx $ldflags $in -o $out')
+        link_rule.append('  command = $cxx $in $ldflags -o $out')
 
     # Emit one build rule per source to enable incremental build.
     object_files = []
@@ -837,7 +854,7 @@ def _write_ninja_file(path,
     for source_file in sources:
         # '/path/to/file.cpp' -> 'file'
         file_name = os.path.splitext(os.path.basename(source_file))[0]
-        if _is_cuda_file(source_file):
+        if _is_cuda_file(source_file) and with_cuda:
             rule = 'cuda_compile'
             # Use a different object filename in case a C++ and CUDA file have
             # the same filename but different extension (.cpp vs. .cu).

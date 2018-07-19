@@ -82,7 +82,14 @@ def IsOperatorWithEngine(op_type, engine):
     return C.op_registry_key(op_type, engine) in _REGISTERED_OPERATORS
 
 
-def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None, numa_node_id=None):
+def DeviceOption(
+    device_type,
+    cuda_gpu_id=0,
+    random_seed=None,
+    node_name=None,
+    numa_node_id=None,
+    extra_info=None,
+):
     option = caffe2_pb2.DeviceOption()
     option.device_type = device_type
     option.cuda_gpu_id = cuda_gpu_id
@@ -93,6 +100,8 @@ def DeviceOption(device_type, cuda_gpu_id=0, random_seed=None, node_name=None, n
     if numa_node_id is not None:
         assert device_type == caffe2_pb2.CPU
         option.numa_node_id = numa_node_id
+    if extra_info is not None:
+        option.extra_info.extend(extra_info)
     return option
 
 
@@ -1709,7 +1718,7 @@ class Net(object):
             OrderedDict(inputs) if input_is_pair_list else
             OrderedDict(zip(inputs, inputs)))
         for output in outputs:
-            assert self.BlobIsDefined(output)
+            assert self.BlobIsDefined(output), "{} is not defined".format(output)
         input_names = {str(k): str(v) for k, v in viewitems(inputs)}
         output_names = [str(o) for o in outputs]
         proto = self._net
@@ -1871,6 +1880,9 @@ class Net(object):
         self._ExtendOps(grad_ops)
         return input_to_grad
 
+    def AddArgument(self, arg_name, arg_value):
+        self._net.arg.extend([utils.MakeArgument(arg_name, arg_value)])
+
     def AddExternalInput(self, *inputs):
         assert len(inputs) > 0
         refs = []
@@ -1889,7 +1901,7 @@ class Net(object):
     def AddExternalOutput(self, *outputs):
         for output in outputs:
             assert isinstance(output, BlobReference)
-            assert self.BlobIsDefined(output)
+            assert self.BlobIsDefined(output), "{} is not defined".format(output)
         for output in outputs:
             self.Proto().external_output.extend([str(output)])
 
@@ -1976,7 +1988,7 @@ class Net(object):
             'Tried to append to missing output record'
         )
         for blob in record.field_blobs():
-            assert self.BlobIsDefined(blob)
+            assert self.BlobIsDefined(blob), "{} is not defined".format(blob)
         for blob in record.field_blobs():
             self.AddExternalOutput(blob)
         self._output_record = self._output_record + schema.Struct(
@@ -2720,6 +2732,8 @@ class Plan(object):
         assert isinstance(plan_proto, caffe2_pb2.PlanDef)
         plan = Plan(plan_proto.name)
         plan._plan.CopyFrom(plan_proto)
+        del plan._plan.network[:]
+        del plan._plan.execution_step[:]
 
         net_obj_dict = {}
         net_proto_dict = {}

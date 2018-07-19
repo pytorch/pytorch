@@ -1,13 +1,15 @@
 #include "caffe2/operators/sigmoid_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
+
 namespace caffe2 {
 
 template <>
 template <typename T>
 bool SigmoidFunctor<CPUContext>::
 operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
-  ConstEigenVectorArrayMap<T> X_arr(X, N);
-  EigenVectorArrayMap<T>(Y, N) = 1. / (1. + (-X_arr).exp());
+  EigenVectorArrayMap<T>(Y, N) =
+      T(1) / (T(1) + (-ConstEigenVectorArrayMap<T>(X, N)).exp());
   return true;
 }
 
@@ -79,7 +81,7 @@ sigmoid: [0.8284105  0.57842743 0.85621804 0.80923885 0.10222916]
 OPERATOR_SCHEMA(SigmoidGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .AllowInplace({{0, 0}})
+    .AllowInplace({{1, 0}})
     .SetDoc(R"DOC(
 SigmoidGradient takes both Y and dY and uses this to update dX according to the
 chain rule and derivatives of the sigmoid function.
