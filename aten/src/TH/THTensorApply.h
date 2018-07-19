@@ -37,7 +37,7 @@
   int TENSOR##_contiguous = ALLOW_CONTIGUOUS && DIM < 0; \
   TENSOR##_n = 1; \
   for(TENSOR##_i = 0; TENSOR##_i < TENSOR->dim(); TENSOR##_i++) \
-    TENSOR##_n *= TENSOR->size[TENSOR##_i]; \
+    TENSOR##_n *= TENSOR->size(TENSOR##_i); \
 \
   if(TENSOR->is_empty()) \
     TH_TENSOR_APPLY_hasFinished = 1; \
@@ -47,9 +47,9 @@
     TENSOR##_size = 1; \
     TENSOR##_stride = 1; \
     for(TENSOR##_i = TENSOR->_dim()-1; TENSOR##_i >= 0; TENSOR##_i--) { \
-      if(TENSOR->size[TENSOR##_i] != 1) { \
-        if(TENSOR->stride[TENSOR##_i] == TENSOR##_size && TENSOR##_i != DIM) \
-          TENSOR##_size *= TENSOR->size[TENSOR##_i]; \
+      if(TENSOR->size(TENSOR##_i) != 1) { \
+        if(TENSOR->stride(TENSOR##_i) == TENSOR##_size && TENSOR##_i != DIM) \
+          TENSOR##_size *= TENSOR->size(TENSOR##_i); \
         else{ \
           TENSOR##_contiguous = 0; \
           break; \
@@ -61,7 +61,7 @@
       TENSOR##_dim = 1; \
       for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; TENSOR##_i--) \
       { \
-        if(TENSOR->stride[TENSOR##_i] != TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
+        if(TENSOR->stride(TENSOR##_i) != TENSOR->stride(TENSOR##_i+1) * TENSOR->size(TENSOR##_i+1) || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
           TENSOR##_dim++; \
       } \
       /* Allocate an array of 3*dim elements, where dim is the number of contiguous sections */ \
@@ -70,8 +70,8 @@
       TENSOR##_strides = TENSOR##_counter + 2*TENSOR##_dim; \
       TH_TENSOR_dim_index = TENSOR##_dim-1; \
       TENSOR##_dimOffset = (DIM == TENSOR->_dim()-1) ? &TENSOR##_i : &TENSOR##_counter[DIM]; \
-      TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR->_dim()-1]; \
-      TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR->_dim()-1]; \
+      TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR->_dim()-1); \
+      TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride(TENSOR->_dim()-1); \
       /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
       /* storage is given by storage_offset + (i * j), where i is the stride */ \
       /* vector and j is tensor_counter vector. This sets the starting position for the loop. */ \
@@ -79,14 +79,14 @@
         TENSOR##_counter[TENSOR##_i] = 0; \
       } \
       for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; --TENSOR##_i) { \
-        if (TENSOR->stride[TENSOR##_i] == TENSOR->stride[TENSOR##_i+1] * TENSOR->size[TENSOR##_i+1] && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
-          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i] * TENSOR##_sizes[TH_TENSOR_dim_index]; \
+        if (TENSOR->stride(TENSOR##_i) == TENSOR->stride(TENSOR##_i+1) * TENSOR->size(TENSOR##_i+1) && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
+          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR##_i) * TENSOR##_sizes[TH_TENSOR_dim_index]; \
           if (DIM != TENSOR->_dim()-1 && TENSOR##_i < DIM) \
             TENSOR##_dimOffset--; \
         } else { \
           --TH_TENSOR_dim_index; \
-          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size[TENSOR##_i]; \
-          TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride[TENSOR##_i]; \
+          TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR##_i); \
+          TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride(TENSOR##_i); \
         } \
       } \
       /* Size of the inner most section */ \
@@ -160,13 +160,12 @@
     elements_equal = 0;                                                 \
   }                                                                     \
   if (elements_equal == 0) {                                            \
-    THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-    THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
-    THDescBuff T3buff = _THSizeDesc(TENSOR3->size, TENSOR3->dim()); \
-    THError("inconsistent tensor size, expected %s %s, %s %s and %s %s to have the same " \
-            "number of elements, but got %d, %d and %d elements respectively", \
-            #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, #TENSOR3, T3buff.str, \
-            TENSOR1##_n, TENSOR2##_n, TENSOR3##_n);                     \
+    AT_ERROR("inconsistent tensor size, expected ",                     \
+            #TENSOR1, " ", TENSOR1->sizes(), ", ",                      \
+            #TENSOR2, " ", TENSOR2->sizes(), " and ",                   \
+            #TENSOR3, " ", TENSOR3->sizes(), " to have the same "       \
+            "number of elements, but got ", TENSOR1##_n, ", ",          \
+            TENSOR2##_n, " and ", TENSOR3##_n, " elements respectively"); \
   }                                                                     \
                                                                         \
   while(!TH_TENSOR_APPLY_hasFinished) \
@@ -199,11 +198,11 @@
   __TH_TENSOR_APPLYX_PREAMBLE(TYPE2, TENSOR2, DIM, 1) \
 \
     if(TENSOR1##_n != TENSOR2##_n) {                                    \
-      THDescBuff T1buff = _THSizeDesc(TENSOR1->size, TENSOR1->dim()); \
-      THDescBuff T2buff = _THSizeDesc(TENSOR2->size, TENSOR2->dim()); \
-      THError("inconsistent tensor size, expected %s %s and %s %s to have the same " \
-              "number of elements, but got %d and %d elements respectively", \
-              #TENSOR1, T1buff.str, #TENSOR2, T2buff.str, TENSOR1##_n, TENSOR2##_n); \
+      AT_ERROR("inconsistent tensor size, expected ",                   \
+      #TENSOR1, " ", TENSOR1->sizes(), " and ",                         \
+      #TENSOR2, " ", TENSOR2->sizes(),                                  \
+      " to have the same number of elements, but got ",                 \
+      TENSOR1##_n, " and ", TENSOR2##_n, " elements respectively");     \
     }                                                                   \
   while(!TH_TENSOR_APPLY_hasFinished) \
   { \
