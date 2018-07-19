@@ -61,7 +61,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
   return std::make_tuple(expandedSizesA, expandedSizesB);
 }
 
-inline std::tuple<Tensor, Tensor> gather_expand_outplace(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name, int64_t &dim) {
+inline std::tuple<Tensor, Tensor> gather_expand(const Tensor &to_expand1, const Tensor &to_expand2, const char *api_name, int64_t &dim) {
   check_defined({to_expand1, to_expand2}, api_name);
   if (to_expand1.sizes().equals(to_expand2.sizes())) {
     return std::make_tuple(to_expand1, to_expand2);
@@ -119,7 +119,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > scatter_infer_size(IntLi
   return std::make_tuple(expandedSizesB, expandedSizesC);
 }
 
-inline std::tuple<Tensor, Tensor> scatter_expand_outplace(const Tensor &self, const Tensor &index, const Tensor &src, const char *api_name, int64_t &dim) {
+inline std::tuple<Tensor, Tensor> scatter_expand(const Tensor &self, const Tensor &index, const Tensor &src, const char *api_name, int64_t &dim) {
   check_defined({self, index, src}, api_name);
   std::vector<int64_t> expanded_size1, expanded_size2;
   std::tie(expanded_size1, expanded_size2) = scatter_infer_size(self.sizes(), index.sizes(), src.sizes(), dim);
@@ -133,31 +133,31 @@ inline std::tuple<Tensor, Tensor> scatter_expand_outplace(const Tensor &self, co
 
 Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
   Tensor b_self, b_index;
-  std::tie(b_self, b_index) = gather_expand_outplace(self, index, "gather", dim);
+  std::tie(b_self, b_index) = gather_expand(self, index, "gather", dim);
   return _s_gather_out(result, b_self, dim, b_index);
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
   Tensor b_self, b_index;
-  std::tie(b_self, b_index) = gather_expand_outplace(self, index, "gather", dim);
+  std::tie(b_self, b_index) = gather_expand(self, index, "gather", dim);
   return _s_gather(b_self, dim, b_index);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
   Tensor b_index, b_src;
-  std::tie(b_index, b_src) = scatter_expand_outplace(self, index, src, "scatter_", dim);
+  std::tie(b_index, b_src) = scatter_expand(self, index, src, "scatter_", dim);
   return self._s_scatter_(dim, b_index, b_src);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, Scalar src) {
   Tensor b_index, b_src;
-  std::tie(b_index, b_src) = scatter_expand_outplace(self, index, src, "scatter_", dim);
+  std::tie(b_index, b_src) = scatter_expand(self, index, src, "scatter_", dim);
   return self._s_scatter_(dim, b_index, b_src);
 }
 
 Tensor & scatter_add_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {
   Tensor b_index, b_src;
-  std::tie(b_index, b_src) = scatter_expand_outplace(self, index, src, "scatter_add_", dim);
+  std::tie(b_index, b_src) = scatter_expand(self, index, src, "scatter_add_", dim);
   return self._s_scatter_add_(dim, b_index, b_src);
 }
 
