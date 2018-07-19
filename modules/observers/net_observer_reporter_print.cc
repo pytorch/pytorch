@@ -35,25 +35,22 @@ void NetObserverReporterPrint::report(
            {"unit", "us"},
            {"metric", "latency"}});
       if (p.second.flops > 0) {
-        caffe2_perf.push_back(
-            {{"type", p.first},
-             {"value", caffe2::to_string(p.second.flops)},
-             {"unit", "flop"},
-             {"metric", "flops"}});
+        caffe2_perf.push_back({{"type", p.first},
+                               {"value", caffe2::to_string(p.second.flops)},
+                               {"unit", "flop"},
+                               {"metric", "flops"}});
       }
       if (shape_str != "") {
-        caffe2_perf.push_back(
-            {{"type", p.first},
-             {"info_string", shape_str},
-             {"unit", ""},
-             {"metric", "tensor_shapes"}});
+        caffe2_perf.push_back({{"type", p.first},
+                               {"info_string", shape_str},
+                               {"unit", ""},
+                               {"metric", "tensor_shapes"}});
       }
       if (args_str != "") {
-        caffe2_perf.push_back(
-            {{"type", p.first},
-             {"info_string", args_str},
-             {"unit", ""},
-             {"metric", "op_args"}});
+        caffe2_perf.push_back({{"type", p.first},
+                               {"info_string", args_str},
+                               {"unit", ""},
+                               {"metric", "op_args"}});
       }
     }
   }
