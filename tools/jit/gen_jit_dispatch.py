@@ -133,6 +133,7 @@ CONSTRUCTOR = CodeTemplate("""\
   return Operation([=](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
     ${pos_assignments}
+    ${clone_args}
     ${call}
     drop(stack, ${num_dynamic_inputs});
     pack(stack, std::move(result));
@@ -152,6 +153,9 @@ Operator(
 def is_magic_method(api_name):
     return api_name.startswith('__') and api_name.endswith('__')
 
+def is_inplace(api_name):
+    return api_name.endswith('_') and not is_magic_method(api_name)
+
 
 blacklisted_types = {'SparseTensorRef', 'Storage', 'ScalarType', 'optional<ScalarType>', 'std::string', 'void*'}
 default_only_types = {'Generator'}
@@ -168,7 +172,7 @@ def is_jit_arg(i, arg):
     return True
 
 
-def is_jit_op(decl):
+def is_jit_op(decl, aten_decls_by_name):
     # We currently don't support functions that return nothing
     if all(r['type'] == 'void' for r in decl['returns']):
         return False
@@ -180,8 +184,13 @@ def is_jit_op(decl):
     if sum(arg['simple_type'] == 'TensorList' for arg in arguments) > 1:
         return False
 
-    return ((not decl['api_name'].endswith('_') or is_magic_method(decl['api_name'])) and
-            not decl['name'].endswith('_out') and
+    # We generally don't want to generate code for inplace functions, but some of them don't
+    # have any out-of-place counterparts, and we have no choice.
+    if is_inplace(decl['api_name']):
+        if uninplace_api_name(decl['api_name']) in aten_decls_by_name:
+            return False
+
+    return ((not decl['name'].endswith('_out')) and
             ('namespace' in decl['method_of'] or 'Tensor' in decl['method_of']) and
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['arguments'])) and
             all(is_jit_arg(i, arg) for i, arg in enumerate(decl['returns'])))
@@ -219,6 +228,7 @@ def gen_jit_dispatch(declarations, out, template_path):
         kw_assignments = []
         pos_assignments = []
         arguments = []
+        clone_args = []
 
         if has_tensorlist:
             kw_assignments.append('size_t varargs_length = node->inputs().size();')
@@ -232,6 +242,7 @@ def gen_jit_dispatch(declarations, out, template_path):
             static_inputs = sum(is_positional_arg)
             num_dynamic_inputs = static_inputs
 
+        inplace = is_inplace(decl['api_name'])
         real_inputs = 0
         for i, arg in enumerate(decl['arguments']):
             # This conditional allows us to process argument lists with a flattened argument list
@@ -267,7 +278,13 @@ def gen_jit_dispatch(declarations, out, template_path):
             elif arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
             elif is_tensor_arg(arg):
-                arguments.append('std::move(peek(stack, {}, {})).toTensor()'.format(real_inputs, view_length))
+                if inplace and arg['type'] == 'Tensor &':
+                    clone_args.append(
+                        'auto {} = peek(stack, {}, {}).toTensor().clone();'.format(
+                            arg['name'], real_inputs, view_length))
+                    arguments.append(arg['name'])
+                else:
+                    arguments.append('std::move(peek(stack, {}, {})).toTensor()'.format(real_inputs, view_length))
                 real_inputs += 1
             elif is_positional_arg[i]:
                 template_kwargs = dict(from_tensor=from_tensor(arg),
@@ -294,7 +311,8 @@ def gen_jit_dispatch(declarations, out, template_path):
         returns = decl['returns']
         all_scalars = all(r['dynamic_type'] != 'TensorList' for r in returns)
 
-        constructor = CONSTRUCTOR.substitute(name=decl['name'],
+        constructor = CONSTRUCTOR.substitute(name=uninplace_api_name(decl['name']),
+                                             clone_args=clone_args,
                                              call=[call],  # in an array so that substitute handles newlines correctly
                                              kw_assignments=kw_assignments,
                                              pos_assignments=pos_assignments,
@@ -363,7 +381,8 @@ def gen_jit_dispatch(declarations, out, template_path):
     } for name in ['sizes', 'strides', 'dim']]
     aten_decls = load_aten_declarations(declarations) + tensor_impl_methods
 
-    jit_decls = [d for d in aten_decls if is_jit_op(d)]
+    aten_decls_by_name = {d['api_name']: d for d in aten_decls}
+    jit_decls = [d for d in aten_decls if is_jit_op(d, aten_decls_by_name)]
 
     # add arguments dtype and device for functions like zeros
     for decl in jit_decls:
@@ -449,7 +468,7 @@ def signature(decl):
         ret_list = jit_type_of(decl['returns'][0])
     else:
         ret_list = '({})'.format(', '.join(jit_type_of(r) for r in decl['returns']))
-    return 'aten::{}({}) -> {}'.format(decl['name'], arg_list, ret_list)
+    return 'aten::{}({}) -> {}'.format(uninplace_api_name(decl['name']), arg_list, ret_list)
 
 
 def main():
