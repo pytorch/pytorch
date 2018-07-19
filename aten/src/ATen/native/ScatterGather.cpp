@@ -3,7 +3,6 @@
 #include "ATen/WrapDimUtils.h"
 
 #include <tuple>
-#include <iostream>
 
 namespace at {
 namespace native{
@@ -41,7 +40,7 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t> > gather_infer_size(IntLis
   }
 
   std::vector<int64_t> expandedSizesA(expandedSizesB);
-  expandedSizesA[dim] = expandedSizeA;
+  if (dim < ndim) expandedSizesA[dim] = expandedSizeA;
   return std::make_tuple(expandedSizesA, expandedSizesB);
 }
 
@@ -66,7 +65,10 @@ inline Tensor broadcast_scatter(Tensor &self, const Tensor & index, const char *
   check_defined({self, index}, api_name);
   std::vector<int64_t> b_self_sizes, b_index_sizes;
   std::tie(b_self_sizes, b_index_sizes) = gather_infer_size(self.sizes(), index.sizes(), dim);
-  AT_CHECK(self.sizes().equals(b_self_sizes), "Broadcasting of scatter_ should not change shape of self");
+  AT_CHECK(
+    self.sizes().equals(b_self_sizes) ||
+    (self.dim() == 0 && b_self_sizes.size() == 1 && b_self_sizes[0] == 1),
+    "Broadcasting of scatter_ should not change shape of self");
   return index.expand(b_index_sizes, /*implicit=*/true);
 }
 

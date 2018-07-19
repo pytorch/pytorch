@@ -5742,6 +5742,35 @@ class TestTorch(TestCase):
     def test_gather(self):
         self._test_gather(self, lambda t: t)
 
+    def test_scatter_gather_scalar(self):
+        a = torch.tensor(123)
+        a_ = torch.tensor([123])
+        b = torch.tensor(0)
+        b_ = torch.tensor([0])
+
+        self.assertEqual(a.gather(0,b), a)
+        self.assertEqual(a.gather(0,b_), a_)
+        self.assertEqual(a_.gather(0,b), a_)
+        self.assertEqual(a_.gather(0,b_), a_)
+
+        self.assertEqual(torch.tensor(0).scatter_(0,b,a), a)
+        self.assertEqual(torch.tensor(0).scatter_(0,b_,a), a)
+        self.assertEqual(torch.tensor(0).scatter_(0,b,a_), a)
+        self.assertEqual(torch.tensor(0).scatter_(0,b_,a_), a)
+        self.assertEqual(torch.tensor([0]).scatter_(0,b,a), a_)
+        self.assertEqual(torch.tensor([0]).scatter_(0,b_,a), a_)
+        self.assertEqual(torch.tensor([0]).scatter_(0,b,a_), a_)
+        self.assertEqual(torch.tensor([0]).scatter_(0,b_,a_), a_)
+
+        self.assertEqual(torch.tensor(0).scatter_add_(0,b,a), a)
+        self.assertEqual(torch.tensor(0).scatter_add_(0,b_,a), a)
+        self.assertEqual(torch.tensor(0).scatter_add_(0,b,a_), a)
+        self.assertEqual(torch.tensor(0).scatter_add_(0,b_,a_), a)
+        self.assertEqual(torch.tensor([0]).scatter_add_(0,b,a), a_)
+        self.assertEqual(torch.tensor([0]).scatter_add_(0,b_,a), a_)
+        self.assertEqual(torch.tensor([0]).scatter_add_(0,b,a_), a_)
+        self.assertEqual(torch.tensor([0]).scatter_add_(0,b_,a_), a_)
+
     @staticmethod
     def _test_scatter_base(self, cast, method, is_scalar=False, test_bounds=True):
         m, n, o = random.randint(10, 20), random.randint(10, 20), random.randint(10, 20)
