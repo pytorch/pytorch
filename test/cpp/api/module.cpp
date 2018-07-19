@@ -120,7 +120,7 @@ TEST_CASE("module/as") {
   REQUIRE(unit.as<AGIUnit>() == &unit);
 }
 
-TEST_CASE("module/conversions", "[cuda]") {
+TEST_CASE("module/conversions", "[multi-cuda]") {
   torch::manual_seed(0);
   Linear module(128, 64);
   SECTION("starts as float on CPU") {
