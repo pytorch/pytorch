@@ -4297,6 +4297,25 @@ def func(t):
 
         self.assertExpected(sm.__getattr__('forward').pretty_print_schema())
 
+    def test_annotated_script_fn_return_mismatch(self):
+        with self.assertRaisesRegex(RuntimeError, r"Return value at position 0 was annotated as "
+                                                  r"having type \(Tensor, Tensor\) but is "
+                                                  r"actually of type Tensor"):
+            @torch.jit.script
+            def return_tup(x):
+                # type: (Tensor) -> Tuple[Tuple[Tensor, Tensor], Tensor]
+                return x, x
+
+    def test_annotated_script_fn_arg_mismatch(self):
+        with self.assertRaisesRegex(RuntimeError, r"expected a Number or Tensor value but found a Tuple"):
+            @torch.jit.script
+            def tuple_arg(x):
+                # type: (Tuple[Tensor, Tensor]) -> Tensor
+                return x + 1
+
+
+
+
 
 class TestEndToEndHybridFrontendModels(JitTestCase):
 

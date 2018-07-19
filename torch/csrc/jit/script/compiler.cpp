@@ -733,12 +733,17 @@ struct to_ir {
     size_t arg_annotation_idx = 0;
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
+      // Add the input to the graph
+      Value *new_input = graph->addInput(name);
+      environment_stack->setVar((*it).ident().range(), name, new_input);
+
+      // Record the type for the schema and set the Type on the Value*
       TypePtr arg_type = DynamicType::get();
       if (typed_def.schema) {
         arg_type = typed_def.schema->arguments[arg_annotation_idx++].type;
       }
       arguments.push_back({name, arg_type});
-      environment_stack->setVar((*it).ident().range(), name, graph->addInput(name));
+      new_input->setType(arg_type);
     }
     // body
     auto stmts = def.statements();
@@ -779,7 +784,13 @@ struct to_ir {
         }
         TypePtr type = DynamicType::get();
         if (typed_def.schema) {
-          type = typed_def.schema->returns[return_type_idx++].type;
+          type = typed_def.schema->returns[return_type_idx].type;
+          if (r->type() != type) {
+            throw ErrorReport(return_stmt.range()) << "Return value at position "
+              << return_type_idx << " was annotated as having type " << type->str()
+              << " but is actually of type " << r->type()->str();
+          }
+          return_type_idx++;
         }
         returns.push_back({"", type});
       }
