@@ -135,12 +135,20 @@ Tensor expand_as(const Tensor& self, const Tensor& other) {
   return self.expand(other.sizes());
 }
 
+Tensor as_strided(const Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
+  return self.type().tensor().set_(*self.storage(), storage_offset, size, stride);
+}
+
+Tensor &as_strided_(Tensor& self, IntList size, IntList stride, int64_t storage_offset) {
+  return self.set_(*self.storage(), storage_offset, size, stride);
+}
+
 Tensor as_strided(const Tensor& self, IntList size, IntList stride) {
-  return self.as_strided(size, stride, self.storage_offset());
+  return at::as_strided(self, size, stride, self.storage_offset());
 }
 
 Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
-  return self.as_strided_(size, stride, self.storage_offset());
+  return at::as_strided_(self, size, stride, self.storage_offset());
 }
 
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
