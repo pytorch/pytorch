@@ -69,7 +69,7 @@ struct AT_API CUDAStream {
   AT_API CUDAStream(const CUDAStream& other);
 
   // Move constructor
-  AT_API CUDAStream(CUDAStream&& other);  
+  AT_API CUDAStream(CUDAStream&& other);
 
   // Assignment operator
   CUDAStream& operator=(CUDAStream other) {
