@@ -4278,7 +4278,6 @@ def func(t):
 
         self.assertExpected(str(test_index_put.graph))
 
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_annotated_script_fn(self):
         @torch.jit.script
         def foo(x, y, z):
@@ -4287,7 +4286,6 @@ def func(t):
 
         self.assertExpected(foo.__getattr__('forward').pretty_print_schema())
 
-    @unittest.skip('https://github.com/pytorch/pytorch/issues/9595')
     def test_annotated_script_method(self):
         class SM(torch.jit.ScriptModule):
             @torch.jit.script_method

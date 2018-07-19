@@ -96,7 +96,7 @@ def get_num_params(fn):
     py_def = py_ast.body[0]
     if py_def.args.vararg is not None:
         return None
-    elif hasattr(py_def.args, 'kwonlyargs') and py_def.args.kwonlyargs is not None:
+    elif hasattr(py_def.args, 'kwonlyargs') and len(py_def.args.kwonlyargs) > 0:
         return None
     else:
         num_params = len(py_def.args.args)
