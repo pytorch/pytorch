@@ -134,13 +134,13 @@ inline std::tuple<Tensor, Tensor> scatter_expand(const Tensor &self, const Tenso
 Tensor & gather_out(Tensor & result, const Tensor & self, int64_t dim, const Tensor & index) {
   Tensor b_self, b_index;
   std::tie(b_self, b_index) = gather_expand(self, index, "gather", dim);
-  return _s_gather_out(result, b_self, dim, b_index);
+  return at::_s_gather_out(result, b_self, dim, b_index);
 }
 
 Tensor gather(const Tensor & self, int64_t dim, const Tensor & index) {
   Tensor b_self, b_index;
   std::tie(b_self, b_index) = gather_expand(self, index, "gather", dim);
-  return _s_gather(b_self, dim, b_index);
+  return at::_s_gather(b_self, dim, b_index);
 }
 
 Tensor & scatter_(Tensor & self, int64_t dim, const Tensor & index, const Tensor & src) {

@@ -281,7 +281,7 @@
 - name: frac(Tensor self)
   self: grad
 
-- name: gather(Tensor self, int64_t dim, Tensor index)
+- name: _s_gather(Tensor self, int64_t dim, Tensor index)
   self: at::zeros(self.sizes(), grad.type()).scatter_add_(dim, index, grad)
 
 - name: ge_(Tensor self, Scalar other)

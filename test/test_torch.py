@@ -5796,7 +5796,7 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([0]).scatter_add_(0, b_, a), a_)
         self.assertEqual(torch.tensor([0]).scatter_add_(0, b, a_), a_)
         self.assertEqual(torch.tensor([0]).scatter_add_(0, b_, a_), a_)
-    
+
     def test_gather_broadcast(self):
         x = torch.randn(4, 5, 6, 1)
         i1 = torch.randint(5, (1, 2, 6, 7), dtype=torch.long)
