@@ -82,7 +82,11 @@ namespace detail {
     internals->is_destructible = true;
     internals->refcount = 1;
     internals->device = current_device();
-    AT_CUDA_CHECK(cudaStreamCreateWithPriority(&internals->stream, flags, priority));
+    #ifndef __HIP_PLATFORM_HCC__
+      AT_CUDA_CHECK(cudaStreamCreateWithPriority(&internals->stream, flags, priority));
+    #else 
+      AT_CUDA_CHECK(cudaStreamCreateWithFlags(&internals->stream, flags));
+    #endif // __HIP_PLATFORM_HCC__
     return internals;
   }
 
