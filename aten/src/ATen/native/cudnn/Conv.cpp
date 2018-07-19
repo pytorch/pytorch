@@ -2,6 +2,7 @@
 #include <ATen/NativeFunctions.h>
 #include <ATen/Config.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/cuda/Exceptions.h>
 
 #if !AT_CUDNN_ENABLED()
 
