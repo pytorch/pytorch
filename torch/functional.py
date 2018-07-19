@@ -8,6 +8,7 @@ import math
 __all__ = [
     'argmax',
     'argmin',
+    'argsort',
     'btrifact',
     'btriunpack',
     'broadcast_tensors',
@@ -426,3 +427,36 @@ def argmin(input, dim=None, keepdim=False):
     if dim is None:
         return torch._argmin(input.contiguous().view(-1), dim=0, keepdim=False)
     return torch._argmin(input, dim, keepdim)
+
+
+def argsort(input, dim=None, descending=False):
+    """Returns the indices that sort a tensor along a given dimension in ascending
+    order by value.
+
+    This is the second value returned by :meth:`torch.sort`.  See its documentation
+    for the exact semantics of this method.
+
+    Args:
+        input (Tensor): the input tensor
+        dim (int, optional): the dimension to sort along
+        descending (bool, optional): controls the sorting order (ascending or descending)
+
+    Example::
+
+        >>> a = torch.randn(4, 4)
+        >>> a
+        tensor([[ 0.0785,  1.5267, -0.8521,  0.4065],
+                [ 0.1598,  0.0788, -0.0745, -1.2700],
+                [ 1.2208,  1.0722, -0.7064,  1.2564],
+                [ 0.0669, -0.2318, -0.8229, -0.9280]])
+
+
+        >>> torch.argsort(a, dim=1)
+        tensor([[2, 0, 3, 1],
+                [3, 2, 1, 0],
+                [2, 1, 0, 3],
+                [3, 2, 1, 0]])
+    """
+    if dim is None:
+        return torch.sort(input, -1, descending)[1]
+    return torch.sort(input, dim, descending)[1]
