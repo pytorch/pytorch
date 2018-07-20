@@ -10,17 +10,17 @@ $extra_cuda_headers
 
 namespace at {
 
-${Storage}::${Storage}(Context* context):
-    Storage(${THStorage}_new(${state})), context(context) {}
+${Storage}::${Storage}():
+    Storage(${THStorage}_new(${state})) {}
 
-${Storage}::${Storage}(Context* context, THStorage* storage):
-    Storage(storage), context(context) {}
+${Storage}::${Storage}(THStorage* storage):
+    Storage(storage) {}
 
-${Storage}::${Storage}(Context* context, size_t storage_size)
-  : Storage(${THStorage}_newWithSize(${state,} storage_size)), context(context) {}
+${Storage}::${Storage}(size_t storage_size)
+  : Storage(${THStorage}_newWithSize(${state,} storage_size)) {}
 
-${Storage}::${Storage}(Context* context, size_t size, Allocator* allocator)
-  : Storage(nullptr), context(context) {
+${Storage}::${Storage}(size_t size, Allocator* allocator)
+  : Storage(nullptr) {
   storage = ${THStorage}_newWithAllocator(${state,} size, allocator);
   ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
 }
@@ -35,7 +35,7 @@ static int getPointerDevice(void* ptr) {
 }
 #endif
 
-${Storage}::${Storage}(Context* context,
+${Storage}::${Storage}(
   void * data, size_t size, const std::function<void(void*)> & deleter)
   : Storage(${THStorage}_newWithDataAndAllocator(${state,}
       InefficientStdFunctionContext::makeDataPtr(data, deleter,
@@ -46,7 +46,7 @@ ${Storage}::${Storage}(Context* context,
 #endif
        ), size,
      /* allocator */ nullptr
-    )), context(context) {
+    )) {
     ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
 }
 
@@ -57,7 +57,7 @@ size_t ${Storage}::elementSize() const {
 }
 
 Type& ${Storage}::type() const {
-  return context->getType(Backend::${Backend},ScalarType::${ScalarName});
+  return globalContext().getType(Backend::${Backend},ScalarType::${ScalarName});
 }
 
 const char * ${Storage}::typeString() {
