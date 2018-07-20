@@ -126,6 +126,7 @@ class OnnxifiTransformTest(TestCase):
                 deleteDirectory(model_dir)
                 exit(1)
 
+    # TODO: we need to modulize this function
     def _get_c2_model(self, model_name):
         model_dir = self._model_dir(model_name)
         if not os.path.exists(model_dir):
@@ -170,12 +171,11 @@ class OnnxifiTransformTest(TestCase):
         pred_net.external_output[0] = new_tail
 
 
-    @unittest.skip("Need ONNXIFI backend support")
+    #@unittest.skip("Need ONNXIFI backend support")
     def test_resnet50_core(self):
         N = 1
-        warmup = 0
         repeat = 1
-        print("Batch size: {}, repeat inference {} times, warmup {} times".format(N, repeat, warmup))
+        print("Batch size: {}, repeat inference {} times".format(N, repeat))
         init_net, pred_net, _  = self._get_c2_model('resnet50')
         self._add_head_tail(pred_net, 'real_data', 'real_softmax')
         input_blob_dims = (N, 3, 224, 224)
@@ -188,15 +188,13 @@ class OnnxifiTransformTest(TestCase):
             op.device_option.CopyFrom(device_option)
         net_outputs = pred_net.external_output
         Y_c2 = None
-        data =  np.random.randn(*input_blob_dims).astype(np.float32)
-        c2_time = 0
-        workspace.SwitchWorkspace("gpu_test", True)
+        data = np.random.randn(*input_blob_dims).astype(np.float32)
+        c2_time = 1
+        workspace.SwitchWorkspace("onnxifi_test", True)
         with core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.RunNetOnce(init_net)
             workspace.CreateNet(pred_net)
-            for _ in range(warmup):
-                workspace.RunNet(pred_net.name)
             start = time.time()
             for _ in range(repeat):
                 workspace.RunNet(pred_net.name)
@@ -215,21 +213,17 @@ class OnnxifiTransformTest(TestCase):
         pred_net_cut = onnxifi_caffe2_net(pred_net,
                                           {input_name: input_blob_dims})
         del init_net, pred_net
-        pred_net_cut.device_option.CopyFrom(device_option)
         #_print_net(pred_net_cut)
 
         Y_trt = None
         input_name = pred_net_cut.external_input[0]
         print("C2 runtime: {}s".format(c2_time))
-        np.set_printoptions(threshold=np.nan)
         with core.DeviceScope(device_option):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
             end = time.time()
             print("Conversion time: {:.2f}s".format(end -start))
 
-            for _ in range(warmup):
-                workspace.RunNet(pred_net_cut.name)
             start = time.time()
             for _ in range(repeat):
                 workspace.RunNet(pred_net_cut.name)

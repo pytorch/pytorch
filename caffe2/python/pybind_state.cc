@@ -1511,15 +1511,15 @@ void addGlobalMethods(py::module& m) {
     return py::bytes(out);
   });
   m.def(
-      "transform_onnxifi",
+      "onnxifi",
       [](const py::bytes& pred_net_str,
          const std::unordered_map<std::string, std::vector<int>>& shapes,
          bool debug_builder) -> py::bytes {
         caffe2::NetDef pred_net;
-        if (!ParseProtoFromLargeString(
-                pred_net_str.cast<std::string>(), &pred_net)) {
-          LOG(ERROR) << "broken pred_net protobuf";
-        }
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(
+                pred_net_str.cast<std::string>(), &pred_net),
+            "broken pred_net protobuf");
         std::unordered_map<std::string, TensorShape> tensor_shapes;
         for (const auto& it : shapes) {
           tensor_shapes.emplace(

@@ -22,9 +22,12 @@ std::unordered_map<std::string, TensorShape> InferShapes(
     NetDef* pred_net,
     CaffeMap<std::string, TensorShape>* shape_hints_ordered) {
   // Populate shapes from workplace
-  const std::vector<string>& ws_blobs = ws->Blobs();
+  const std::vector<std::string>& ws_blobs = ws->Blobs();
   for (const auto& s : ws_blobs) {
-    shape_hints_ordered->emplace(s, GetTensorShapeOfBlob(ws->GetBlob(s)));
+    auto shape = GetTensorShapeOfBlob(ws->GetBlob(s));
+    if (!shape.unknown_shape()) {
+      shape_hints_ordered->emplace(s, std::move(shape));
+    }
   }
 
   std::vector<NetDef*> nets;
@@ -134,7 +137,7 @@ OperatorDef OnnxifiTransformer::BuildOnnxifiOp(
         output_size_hint_arg->add_ints(d);
       }
 
-      LOG(INFO) << "Adding output hint: " << o;
+      VLOG(2) << "Adding output hint: " << o;
     }
   }
   return op;
@@ -326,7 +329,8 @@ void OnnxifiTransformer::Transform(
     // NB: this might not be a hard constraint as we can just export C2
     // domain specific ops to ONNX
     if (!schema || schema->onnx_schema().empty()) {
-      LOG(INFO) << "Cannot export c2 op " << op.type() << " to onnx";
+      LOG(INFO) << "Cannot export c2 op " << op.type()
+                << " to onnx as there is no corresponding ONNX schema.";
       return false;
     }
 

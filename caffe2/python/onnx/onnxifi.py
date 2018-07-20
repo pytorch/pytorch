@@ -53,7 +53,7 @@ def onnxifi_caffe2_net(
 
     for k,v in input_shapes.items():
         shape_hints[k] = v
-    pred_net_str = C.transform_onnxifi(pred_net.SerializeToString(),
+    pred_net_str = C.onnxifi(pred_net.SerializeToString(),
                                        shape_hints,
                                        debug)
     pred_net_cut = caffe2_pb2.NetDef()
