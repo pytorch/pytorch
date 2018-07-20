@@ -1,7 +1,6 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tracer_state.h"
 #include "torch/csrc/onnx/onnx.h"
 
 namespace torch { namespace jit {

@@ -444,7 +444,7 @@ void initPythonIRBindings(PyObject * module_) {
       return t.expect<TensorType>()->strides();
     })
     .def("contiguous",[](Type& t) {
-      return t.expect<TensorType>()->contiguous();
+      return std::static_pointer_cast<Type>(t.expect<TensorType>()->contiguous());
     })
     .def("scalarType",[](Type& t) {
       return at::toString(t.expect<TensorType>()->scalarType());
@@ -470,9 +470,6 @@ void initPythonIRBindings(PyObject * module_) {
           std::move(tensor), /*requires_grad=*/false));
     }
     return std::make_tuple(graph, variables);
-  });
-  m.def("_jit_is_tracing", [](const autograd::Variable& var) {
-    return tracer::isTracing(var);
   });
 }
 }}
