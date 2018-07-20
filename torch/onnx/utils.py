@@ -286,6 +286,27 @@ def _export(model, args, f, export_params=True, verbose=False, training=False,
     return torch_out
 
 
+def _export_module(module, f, operator_export_type=OperatorExportTypes.ONNX, export_type=ExportTypes.PROTOBUF_FILE):
+    # TODO: Don't allocate a in-memory string for the protobuf
+    from torch.onnx.symbolic import _onnx_opset_version
+
+    proto, storage_map = module.export(_onnx_opset_version, operator_export_type)
+
+    if export_type in [ExportTypes.ZIP_ARCHIVE, ExportTypes.COMPRESSED_ZIP_ARCHIVE]:
+        import zipfile
+        compression = zipfile.ZIP_DEFLATED \
+            if export_type == ExportTypes.COMPRESSED_ZIP_ARCHIVE \
+            else zipfile.ZIP_STORED
+        with zipfile.ZipFile(f, 'w', compression=compression) as z:
+            z.writestr('__MODEL_PROTO', proto)
+            for k, v in storage_map.items():
+                z.writestr(k, v)
+    elif export_type in [ExportTypes.DIRECTORY, ExportTypes.PROTOBUF_FILE]:
+        raise RuntimeError('Unsupported export type')
+    else:
+        raise RuntimeError('Unknown export type')
+
+
 def _set_input_and_output_names(graph, input_names, output_names):
     def set_names(node_list, name_list, descriptor):
         if name_list is None:

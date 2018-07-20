@@ -18,39 +18,46 @@ namespace {
 
 // IR graph construction
 
-at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto) {
+class JitDecoder {
+ protected:
+  std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto);
 
-  at::Tensor tensor;
+  void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
+                   std::unordered_map<std::string, Value*>& value_map);
 
-  switch(tensor_proto.data_type()) {
+  void buildBlocks(const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
+                   std::unordered_map<std::string, Value*>& value_map);
+
+  at::ScalarType onnxTypeToATenType(onnx_torch::TensorProto_DataType tensor_proto);
+
+  virtual at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto);
+};
+
+at::ScalarType JitDecoder::onnxTypeToATenType(onnx_torch::TensorProto_DataType onnx_type) {
+  switch(onnx_type) {
     case onnx_torch::TensorProto_DataType_UINT8:
-      tensor = at::CPU(at::kByte).tensor();
-      break;
+      return at::kByte;
     case onnx_torch::TensorProto_DataType_INT8:
-      tensor = at::CPU(at::kChar).tensor();
-      break;
+      return at::kChar;
     case onnx_torch::TensorProto_DataType_INT16:
-      tensor = at::CPU(at::kShort).tensor();
-      break;
+      return at::kShort;
     case onnx_torch::TensorProto_DataType_INT32:
-      tensor = at::CPU(at::kInt).tensor();
-      break;
+      return at::kInt;
     case onnx_torch::TensorProto_DataType_INT64:
-      tensor = at::CPU(at::kLong).tensor();
-      break;
+      return at::kLong;
     case onnx_torch::TensorProto_DataType_FLOAT16:
-      tensor = at::CPU(at::kHalf).tensor();
-      break;
+      return at::kHalf;
     case onnx_torch::TensorProto_DataType_FLOAT:
-      tensor = at::CPU(at::kFloat).tensor();
-      break;
+      return at::kFloat;
     case onnx_torch::TensorProto_DataType_DOUBLE:
-      tensor = at::CPU(at::kDouble).tensor();
-      break;
+      return at::kDouble;
     default:
       throw std::runtime_error("Unsupported data type");
   }
+}
 
+at::Tensor JitDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
+  at::Tensor tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor();
   tensor.resize_({tensor_proto.dims().begin(), tensor_proto.dims().end()});
 
   JIT_ASSERT(
@@ -59,22 +66,19 @@ at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto) {
       tensor_proto.raw_data().size());
 
   std::memcpy(tensor.data_ptr(), tensor_proto.raw_data().data(), tensor_proto.raw_data().size());
-
   return tensor;
 }
 
-void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
-                std::unordered_map<std::string, Value*>& value_map);
-
-void buildBlocks(const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
-                 std::unordered_map<std::string, Value*>& value_map) {
+void JitDecoder::buildBlocks(
+    const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
+    std::unordered_map<std::string, Value*>& value_map) {
   for (auto g_ : graphs_) {
     auto block = node->addBlock();
     buildBlock(g_, block, value_map);
   }
 }
 
-std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto) {
+std::shared_ptr<Graph> JitDecoder::buildGraph(const onnx_torch::GraphProto& graph_proto) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> value_map;
 
@@ -83,7 +87,7 @@ std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto) {
   return graph;
 }
 
-void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
+void JitDecoder::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map) {
 
   for (auto & input : graph_proto.input()) {
@@ -128,14 +132,18 @@ void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
           node->ss_(name, {attr.strings().begin(), attr.strings().end()});
           break;
         case onnx_torch::AttributeProto_AttributeType_TENSORS:
-          node->ts_(name, fmap(attr.tensors(), [](const onnx_torch::TensorProto& t) { return buildTensor(t); }));
+          node->ts_(name, fmap(attr.tensors(), [this](const onnx_torch::TensorProto& t) {
+                                                 return buildTensor(t);
+                                               }));
           break;
         case onnx_torch::AttributeProto_AttributeType_GRAPHS:
           if (attr.name() == "_blocks") {
             buildBlocks({attr.graphs().begin(), attr.graphs().end()}, node, value_map);
           }
           else {
-            node->gs_(name, fmap(attr.graphs(), [](const onnx_torch::GraphProto& g_) { return buildGraph(g_); }));
+            node->gs_(name, fmap(attr.graphs(), [this](const onnx_torch::GraphProto& g_) {
+                                                  return buildGraph(g_);
+                                                }));
           }
           break;
       }
@@ -159,67 +167,162 @@ void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
   }
 }
 
-std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto, std::vector<at::Tensor>& initializers) {
+class GraphDecoder : JitDecoder {
+ public:
+  std::shared_ptr<Graph> decode(const std::string& serialized_graph,
+                                std::vector<at::Tensor>& initializers);
+};
 
-  auto graph = buildGraph(graph_proto);
-
-  for (auto tensor_ : graph_proto.initializer()) {
-    initializers.push_back(buildTensor(tensor_));
-  }
-
-  return graph;
-}
-
-// TODO: this should be removed once we'll be able to serialize value types
-void reconstructOutputTypes(Block *b) {
-  for (Node * n : b->nodes()) {
-    if (n->kind() == prim::Constant) {
-      switch (n->kindOf(attr::value)) {
-        case AttributeKind::i:
-          n->output()->setType(IntType::get());
-          break;
-        case AttributeKind::f:
-          n->output()->setType(FloatType::get());
-          break;
-        case AttributeKind::is:
-          n->output()->setType(ListType::ofInts());
-          break;
-        case AttributeKind::t:
-          n->output()->setType(DynamicType::get());
-          break;
-        default:
-          throw std::runtime_error("Unsupported case in reconstructOutputTypes. File a bug report");
-      }
-    } else if (n->kind() == prim::ListConstruct && n->inputs().size() > 0) {
-      auto input_types = fmap(n->inputs(), [](Value *v) -> TypePtr {
-        return v->node()->kind() == prim::Constant ? v->type() : nullptr;
-      });
-      // Check that all types are equal
-      if (std::equal(std::next(input_types.begin()), input_types.end(), input_types.begin())) {
-        auto elem_type = input_types[0];
-        if (elem_type == IntType::get()) {
-          n->output()->setType(ListType::ofInts());
-        }
-      }
-    }
-    for (Block * b : n->blocks()) {
-      reconstructOutputTypes(b);
-    }
-  }
-}
-
-} // anonymous namespace
-
-std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
-                                     std::vector<at::Tensor>& initializers) {
+std::shared_ptr<Graph> GraphDecoder::decode(
+    const std::string& serialized_graph,
+    std::vector<at::Tensor>& initializers) {
   auto model_proto = onnx_torch::ModelProto();
   model_proto.ParseFromString(serialized_graph);
 
-  auto graph = buildGraph(model_proto.graph(), initializers);
-
-  reconstructOutputTypes(graph->block());
-
+  auto graph_proto = model_proto.graph();
+  auto graph = buildGraph(graph_proto);
+  for (auto &tensor_ : graph_proto.initializer()) {
+    initializers.push_back(buildTensor(tensor_));
+  }
   return graph;
+}
+
+class ModuleDecoder : JitDecoder {
+ public:
+  std::shared_ptr<script::Module> decode(
+      std::shared_ptr<script::Module> root_module,
+      const std::string& serialized_module,
+      const std::unordered_map<std::string, std::string>& storage_map);
+
+ private:
+  at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto);
+
+  at::Tensor buildParameter(const onnx_torch::TensorProto& tensor_proto);
+
+  at::Storage* getStorage(at::ScalarType type, std::string name);
+
+  std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
+      std::shared_ptr<script::Module> root_module,
+      const std::string fullname);
+
+  const std::unordered_map<std::string, std::string> *storage_export_map_;
+  std::unordered_map<std::string, std::unique_ptr<at::Storage>> storage_map_;
+};
+
+at::Tensor ModuleDecoder::buildParameter(const onnx_torch::TensorProto& tensor_proto) {
+  auto storage = getStorage(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
+  std::vector<int64_t> dims, strides;
+  std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
+  std::move(tensor_proto.int32_data().begin() + 3, tensor_proto.int32_data().end(), std::back_inserter(strides));
+  auto tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
+      *storage, tensor_proto.int64_data(2), dims, strides);
+  autograd::Variable var = autograd::make_variable(tensor, tensor_proto.int64_data(0));
+  return var;
+}
+
+at::Tensor ModuleDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
+  auto storage = getStorage(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
+  std::vector<int64_t> dims, strides;
+  std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
+  std::move(tensor_proto.int32_data().begin() + 1, tensor_proto.int32_data().end(), std::back_inserter(strides));
+  auto tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
+      *storage, tensor_proto.int64_data(0), dims, strides);
+  return tensor;
+}
+
+at::Storage* ModuleDecoder::getStorage(at::ScalarType type, std::string name) {
+  auto storage_it = storage_map_.find(name);
+  if (storage_it == storage_map_.end()) {
+    auto storage = at::CPU(type).storage();
+    auto string_it = storage_export_map_->find(name);
+    JIT_ASSERT(string_it != storage_export_map_->end());
+    storage->resize(string_it->second.size());
+    std::memcpy(storage->data(), string_it->second.data(), string_it->second.size());
+    storage_map_.insert(std::make_pair(name, std::move(storage)));
+  }
+  storage_it = storage_map_.find(name);
+  return storage_it->second.get();
+}
+
+// Given a full name of a parameter or method,
+// return the parent submodule and local name
+std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFullName(
+    std::shared_ptr<script::Module> root_module,
+    const std::string fullname) {
+  std::vector<std::string> vec;
+  std::stringstream ss(fullname);
+  std::string name;
+  while (std::getline(ss, name, '.')) {
+    vec.push_back(name);
+  }
+
+  std::shared_ptr<script::Module> curr = root_module;
+  for (size_t i = 0; i < vec.size() - 1; i++) {
+    if (curr->find_module(vec[i]) != nullptr) {
+      curr = curr->get_module(vec[i]);
+    } else {
+      curr->register_module(vec[i], std::make_shared<script::Module>());
+      curr = curr->get_module(vec[i]);
+    }
+  }
+  return std::make_pair(curr, vec.back());
+}
+
+std::shared_ptr<script::Module> ModuleDecoder::decode(
+    const std::shared_ptr<script::Module> root_module,
+    const std::string &serialized_module,
+    const std::unordered_map<std::string, std::string> &storage_export_map) {
+  auto model_proto = onnx_torch::ModelProto();
+  model_proto.ParseFromString(serialized_module);
+  auto graph_proto = model_proto.graph();
+
+  std::unordered_map<std::string, at::Tensor*> param_map;
+  storage_export_map_ = &storage_export_map;
+  storage_map_.clear();
+
+  for (auto &tensor_proto : graph_proto.initializer()) {
+    std::shared_ptr<script::Module> parent_module;
+    std::string name;
+    std::tie(parent_module, name) = parseFullName(root_module, tensor_proto.name());
+
+    auto param = buildParameter(tensor_proto);
+    parent_module->register_parameter(name, param, tensor_proto.int64_data(1));
+    param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
+  }
+
+  for (auto &node_proto : graph_proto.node()) {
+    std::shared_ptr<script::Module> parent_module;
+    std::string name;
+    std::tie(parent_module, name) = parseFullName(root_module, node_proto.name());
+
+    std::vector<at::Tensor*> member_inputs;
+    for (auto &param_name : node_proto.input()) {
+      member_inputs.push_back(param_map[param_name]);
+    }
+
+    auto graph = std::make_shared<Graph>();
+    std::unordered_map<std::string, Value*> value_map;
+    buildBlock(node_proto.attribute(0).g(), graph->block(), value_map);
+    parent_module->create_method(name, graph, member_inputs);
+  }
+
+  return root_module;
+}
+
+}  // namespace
+
+std::shared_ptr<Graph> ImportIRGraph(const std::string& serialized_graph,
+                                     std::vector<at::Tensor>& initializers) {
+  GraphDecoder decoder;
+  return decoder.decode(serialized_graph, initializers);
+}
+
+std::shared_ptr<script::Module> ImportIRModule(
+    const std::shared_ptr<script::Module> module,
+    const std::string& serialized_module,
+    const std::unordered_map<std::string, std::string>& storage_map) {
+  ModuleDecoder decoder;
+  return decoder.decode(module, serialized_module, storage_map);
 }
 
 }}

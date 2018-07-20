@@ -3603,6 +3603,41 @@ def func(t):
         self.assertEqual(1, foo3(a))
         self.assertEqual(2, foo3(b))
 
+    def test_script_module_export(self):
+        from torch.onnx import OperatorExportTypes, ExportTypes
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.param = torch.nn.Parameter(torch.rand(2, 2, dtype=torch.float))
+                self.param2 = torch.nn.Parameter(self.param.view(2, 2))
+
+            @torch.jit.script_method
+            def foo(self):
+                return torch.ones([2, 2])
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + torch.ones([2, 2]) + self.param + self.param2
+
+        m_orig = M()
+        m_import = torch.jit.ScriptModule()
+        m_export, storage_map = m_orig.export()
+        torch._C._jit_import_module(m_import, m_export, storage_map)
+
+        for m in [m_orig, m_import]:
+            input = torch.ones([2, 2], dtype=torch.float)
+            o = m(input)
+            self.assertEqual(o, input + torch.ones([2, 2], dtype=torch.float) + m.param + m.param2)
+
+        # test file export
+        import io
+        f = io.BytesIO()
+        torch.onnx._export_module(m_orig, f, OperatorExportTypes.RAW, ExportTypes.ZIP_ARCHIVE)
+        f.seek(0)
+        import zipfile
+        with zipfile.ZipFile(f, 'r', compression=zipfile.ZIP_STORED) as z:
+            self.assertExpected(str([file.filename for file in z.infolist()]))
+
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):

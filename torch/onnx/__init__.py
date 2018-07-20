@@ -20,6 +20,10 @@ def _export(*args, **kwargs):
     from torch.onnx import utils
     return utils._export(*args, **kwargs)
 
+def _export_module(*args, **kwargs):
+    from torch.onnx import utils
+    return utils._export_module(*args, **kwargs)
+
 
 def export(*args, **kwargs):
     from torch.onnx import utils
