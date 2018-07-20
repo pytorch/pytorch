@@ -1,6 +1,6 @@
 #pragma once
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 #include "THAllocator.h"
 
 #define THStorage_(NAME) TH_CONCAT_4(TH,Real,Storage_,NAME)
