@@ -60,7 +60,7 @@ std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* 
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new ${Tensor}(context,(${THTensor}*)(th_pointer)), false);
+  return Tensor(new ${Tensor}((${THTensor}*)(th_pointer)), false);
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
