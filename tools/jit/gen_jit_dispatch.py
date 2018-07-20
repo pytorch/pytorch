@@ -126,7 +126,7 @@ auto result = torch::${name}(
 CONSTRUCTOR = CodeTemplate("""\
 [](Node *node) {
   ${kw_assignments}
-  return Operation([=](Stack & stack) {
+  return Operation([${op_capture}](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
     ${call}
     drop(stack, ${num_dynamic_inputs});
@@ -223,9 +223,11 @@ def gen_jit_dispatch(declarations, out, template_path):
         # of inputs. If false, the argument comes from the constant attributes
         kw_assignments = []
         arguments = []
+        op_capture = ''
 
         if has_tensorlist:
             kw_assignments.append('size_t varargs_length = node->inputs().size();')
+            op_capture = '='
             # arguments look like: [tensor list], arg1, arg2, arg3
             # we use peek(<i>, static_inputs) to read the non-vararg inputs
             # from the end of the stack
@@ -278,6 +280,7 @@ def gen_jit_dispatch(declarations, out, template_path):
                 assign = "auto {} = {};".format(arg['name'], from_attribute(arg))
                 kw_assignments.append(assign)
                 arguments.append(arg['name'])
+                op_capture = '='
 
         call = get_invocation(decl, arguments, num_dynamic_inputs)
 
@@ -287,7 +290,8 @@ def gen_jit_dispatch(declarations, out, template_path):
         constructor = CONSTRUCTOR.substitute(name=decl['name'],
                                              call=call,
                                              kw_assignments=kw_assignments,
-                                             num_dynamic_inputs=num_dynamic_inputs)
+                                             num_dynamic_inputs=num_dynamic_inputs,
+                                             op_capture=op_capture)
         return constructor
 
     def emit_decl(decl):
