@@ -71,16 +71,16 @@ void THNN_(SpatialReplicationPadding_updateOutput)(THNNState *state,
 
   if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 
@@ -200,16 +200,16 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(THNNState *state,
 
   if (input->dim() == 4)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimh++;
     dimslices++;
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
   oheight = iheight + pad_t + pad_b;
   owidth  = iwidth + pad_l + pad_r;
 

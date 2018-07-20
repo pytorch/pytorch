@@ -13,9 +13,10 @@ namespace {
 #if defined(__AVX__) && !defined(_MSC_VER)
 
 template <> class Vec256<float> {
+private:
+  __m256 values;
 public:
   static constexpr int64_t size = 8;
-  __m256 values;
   Vec256() {}
   Vec256(__m256 v) : values(v) {}
   Vec256(float val) {
@@ -66,6 +67,8 @@ public:
       std::memcpy(ptr, tmp_values, count * sizeof(float));
     }
   }
+  const float& operator[](int idx) const  = delete;
+  float& operator[](int idx) = delete;
   Vec256<float> map(float (*f)(float)) const {
     __at_align32__ float tmp[8];
     store(tmp);
@@ -89,6 +92,9 @@ public:
   }
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));
+  }
+  Vec256<float> erfc() const {
+    return Vec256<float>(Sleef_erfcf8_u15(values));
   }
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));
@@ -126,6 +132,9 @@ public:
   Vec256<float> floor() const {
     return _mm256_floor_ps(values);
   }
+  Vec256<float> neg() const {
+    return _mm256_xor_ps(_mm256_set1_ps(-0.f), values);
+  }
   Vec256<float> round() const {
     return _mm256_round_ps(values, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
   }
@@ -140,6 +149,9 @@ public:
   }
   Vec256<float> sqrt() const {
     return _mm256_sqrt_ps(values);
+  }
+  Vec256<float> reciprocal() const {
+    return _mm256_div_ps(_mm256_set1_ps(1), values);
   }
   Vec256<float> rsqrt() const {
     return _mm256_div_ps(_mm256_set1_ps(1), _mm256_sqrt_ps(values));

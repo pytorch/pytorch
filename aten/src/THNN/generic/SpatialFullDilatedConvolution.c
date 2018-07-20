@@ -23,7 +23,7 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
     THNN_ARGCHECK(!weight->is_empty() && (weight->dim() == 2 || weight->dim() == 4), 5, weight,
                   "non-empty 2D or 4D weight tensor expected, but got: %s");
     if (bias != NULL) {
-      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[1]);
+      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size(1));
     }
   } else if (!weight_nullable) {
     THError("weight tensor is expected to be non-nullable");
@@ -43,8 +43,8 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
 		"non-empty 3D or 4D input tensor expected but got: %s");
 
-  int64_t inputHeight  = input->size[dimh];
-  int64_t inputWidth   = input->size[dimw];
+  int64_t inputHeight  = input->size(dimh);
+  int64_t inputWidth   = input->size(dimw);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
@@ -55,16 +55,16 @@ static inline void THNN_(SpatialFullDilatedConvolution_shapeCheck)(
   }
 
   if (weight != NULL) {
-    int64_t nInputPlane = weight->size[0];
+    int64_t nInputPlane = weight->size(0);
     THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
   }
 
   if (gradOutput != NULL) {
     if (weight != NULL) {
-      int64_t nOutputPlane = weight->size[1];
+      int64_t nOutputPlane = weight->size(1);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      int64_t nOutputPlane = bias->size[0];
+      int64_t nOutputPlane = bias->size(0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimh, outputHeight);
@@ -105,16 +105,16 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
   }
 
-  int64_t inputHeight  = input->size[2];
-  int64_t inputWidth   = input->size[3];
+  int64_t inputHeight  = input->size(2);
+  int64_t inputWidth   = input->size(3);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize4d)(output, batchSize, nOutputPlane, outputHeight, outputWidth);
@@ -126,7 +126,7 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->dim() != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize2d)(ones, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -145,9 +145,9 @@ void THNN_(SpatialFullDilatedConvolution_updateOutput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    int64_t m = weight->size[1] * weight->size[2] * weight->size[3];
-    int64_t n = columns->size[1];
-    int64_t k = weight->size[0];
+    int64_t m = weight->size(1) * weight->size(2) * weight->size(3);
+    int64_t n = columns->size(1);
+    int64_t k = weight->size(0);
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THBlas_(gemm)(
@@ -221,8 +221,8 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
     (input, gradOutput, weight, NULL, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, adjH, adjW, 0);
 
-  int nInputPlane = THTensor_(size)(weight,0);
-  int nOutputPlane = THTensor_(size)(weight,1);
+  int64_t nInputPlane = THTensor_(size)(weight,0);
+  int64_t nOutputPlane = THTensor_(size)(weight,1);
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -233,17 +233,17 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
-    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
+    THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2));
   }
 
-  int64_t inputWidth   = input->size[3];
-  int64_t inputHeight  = input->size[2];
+  int64_t inputWidth   = input->size(3);
+  int64_t inputHeight  = input->size(2);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize4d)(gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
@@ -275,9 +275,9 @@ void THNN_(SpatialFullDilatedConvolution_updateGradInput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    int64_t m = weight->size[0];
-    int64_t n = gradColumns->size[1];
-    int64_t k = weight->size[1] * weight->size[2] * weight->size[3];
+    int64_t m = weight->size(0);
+    int64_t n = gradColumns->size(1);
+    int64_t k = weight->size(1) * weight->size(2) * weight->size(3);
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THBlas_(gemm)(
@@ -328,7 +328,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
     (input, gradOutput, gradWeight, gradBias, kH, kW, dH, dW, padH, padW,
      dilationH, dilationW, adjH, adjW, 1);
 
-  int nOutputPlane;
+  int64_t nOutputPlane;
   if (gradWeight) {
     nOutputPlane = THTensor_(size)(gradWeight, 1);
   } else if (gradBias) {
@@ -352,20 +352,20 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   if (input->dim() == 3) {
     // Force batch
     is_batch = 0;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
-    THTensor_(resize4d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2]);
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
+    THTensor_(resize4d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2));
   }
 
-  int64_t inputWidth   = input->size[3];
-  int64_t inputHeight  = input->size[2];
+  int64_t inputWidth   = input->size(3);
+  int64_t inputHeight  = input->size(2);
   int64_t outputHeight = (inputHeight - 1) * dH - 2*padH + (dilationH * (kH - 1) + 1) + adjH;
   int64_t outputWidth  = (inputWidth - 1) * dW - 2*padW + (dilationW * (kW - 1) + 1) + adjW;
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->dim() != 2 || ones->size[0]*ones->size[1] < outputHeight*outputWidth) {
+  if (ones->dim() != 2 || ones->size(0)*ones->size(1) < outputHeight*outputWidth) {
     // Resize plane and fill with ones...
     THTensor_(resize2d)(ones, outputHeight, outputWidth);
     THTensor_(fill)(ones, 1);
@@ -401,9 +401,9 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
 
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-      int64_t n = columns->size[0];   // nOutputPlane * kh * kw
-      int64_t m = input_n->size[0];   // nInputPlane
-      int64_t k = columns->size[1];   // inputHeight * inputWidth
+      int64_t n = columns->size(0);   // nOutputPlane * kh * kw
+      int64_t m = input_n->size(0);   // nInputPlane
+      int64_t k = columns->size(1);   // inputHeight * inputWidth
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
       THBlas_(gemm)(
@@ -444,7 +444,7 @@ void THNN_(SpatialFullDilatedConvolution_accGradParameters)(
   // Resize
   if (is_batch == 0) {
     THTensor_(resize3d)(gradOutput, nOutputPlane, outputHeight, outputWidth);
-    THTensor_(resize3d)(input, input->size[1], inputHeight, inputWidth);
+    THTensor_(resize3d)(input, input->size(1), inputHeight, inputWidth);
   }
 
   THTensor_(free)(input);

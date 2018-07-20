@@ -6,39 +6,39 @@
 #include <omp.h>
 #endif
 
-#define ROW_PTR2(t, r) (THTensor_(data)(t) + (r) * (t)->stride[0])
-#define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride[1])
+#define ROW_PTR2(t, r) (THTensor_(data)(t) + (r) * (t)->stride(0))
+#define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride(1))
 
 static bool THNN_(checkLegacyInput)(THTensor* t)
 {
-  return !t->is_empty() && t->dim() == 3 && t->size[2] == 2;
+  return !t->is_empty() && t->dim() == 3 && t->size(2) == 2;
 }
 
 static bool THNN_(checkInput)(THTensor* t)
 {
-  return!t->is_empty() && t->dim() == 2 && t->size[1] == 3;
+  return!t->is_empty() && t->dim() == 2 && t->size(1) == 3;
 }
 
 static bool THNN_(checkSize2D)(THTensor* t, int64_t size0, int64_t size1)
 {
-  return !t->is_empty() && t->dim() == 2 && t->size[0] == size0 && t->size[1] == size1;
+  return !t->is_empty() && t->dim() == 2 && t->size(0) == size0 && t->size(1) == size1;
 }
 
 static bool THNN_(checkSize1D)(THTensor* t, int64_t size0)
 {
-  return !t->is_empty() && t->dim() == 1 && t->size[0] == size0;
+  return !t->is_empty() && t->dim() == 1 && t->size(0) == size0;
 }
 
 static void THNN_(set1d)(THTensor *t, int64_t x0, real value) {
-  THStorage_(set)(t->storage, t->storageOffset + x0*t->stride[0], value);
+  THStorage_(set)(t->storage, t->storageOffset + x0*t->stride(0), value);
 }
 static real THNN_(get3d)(const THTensor *t, int64_t x0, int64_t x1, int64_t x2) {
   return THStorage_(get)(t->storage, t->storageOffset +
-                         x0*t->stride[0] + x1*t->stride[1] + x2*t->stride[2]);
+                         x0*t->stride(0) + x1*t->stride(1) + x2*t->stride(2));
 }
 static real THNN_(get2d)(const THTensor *t, int64_t x0, int64_t x1) {
   return THStorage_(get)(t->storage, t->storageOffset +
-                         x0*t->stride[0] + x1*t->stride[1]);
+                         x0*t->stride(0) + x1*t->stride(1));
 }
 
 void THNN_(SparseLinear_updateOutput)(
@@ -92,8 +92,8 @@ void THNN_(SparseLinear_updateOutput)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
             val,
-            COL_PTR2(weight, offset), weight->stride[0],
-            ROW_PTR2(output, h), output->stride[1]);
+            COL_PTR2(weight, offset), weight->stride(0),
+            ROW_PTR2(output, h), output->stride(1));
       } else {
         THError("index out of bound. updateOutput: %d not between 1 and %d",
             offset + 1, inDim);
@@ -147,8 +147,8 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
                       val,
-                      COL_PTR2(weight, offset), weight->stride[0],
-                      ROW_PTR2(output, h), output->stride[1]);
+                      COL_PTR2(weight, offset), weight->stride(0),
+                      ROW_PTR2(output, h), output->stride(1));
       } else {
         THError("index out of bound. updateOutput: %d not between 1 and %d",
                 offset + 1, inDim);
@@ -221,8 +221,8 @@ void THNN_(SparseLinear_accGradParameters)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
             val,
-            ROW_PTR2(gradOutput, h), gradOutput->stride[1],
-            COL_PTR2(gradWeight, offset), gradWeight->stride[0]);
+            ROW_PTR2(gradOutput, h), gradOutput->stride(1),
+            COL_PTR2(gradWeight, offset), gradWeight->stride(0));
       } else {
         THError(
             "index out of bound. accGradParameters: %d not between 1 and %d",
@@ -289,8 +289,8 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
                       val,
-                      ROW_PTR2(gradOutput, h), gradOutput->stride[1],
-                      COL_PTR2(gradWeight, offset), gradWeight->stride[0]);
+                      ROW_PTR2(gradOutput, h), gradOutput->stride(1),
+                      COL_PTR2(gradWeight, offset), gradWeight->stride(0));
       } else {
         THError(
           "index out of bound. accGradParameters: %d not between 1 and %d",
@@ -324,8 +324,8 @@ void THNN_(SparseLinear_updateParameters)(
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t i;
-  int64_t outDim = weight->size[0];
-  int64_t inDim = weight->size[1];
+  int64_t outDim = weight->size(0);
+  int64_t inDim = weight->size(1);
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -380,8 +380,8 @@ void THNN_(SparseLinear_updateParameters)(
     int64_t offset = (int64_t)uniqueOffsets_p[i];
     THBlas_(axpy)(outDim,
                   -learningRate,
-                  COL_PTR2(gradWeight, offset), gradWeight->stride[0],
-                  COL_PTR2(weight, offset), weight->stride[0]);
+                  COL_PTR2(gradWeight, offset), gradWeight->stride(0),
+                  COL_PTR2(weight, offset), weight->stride(0));
   }
 
   THTensor_(free)(uniqueOffsets);
@@ -398,8 +398,8 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t h, i;
-  int64_t outDim = weight->size[0];
-  int64_t inDim = weight->size[1];
+  int64_t outDim = weight->size(0);
+  int64_t inDim = weight->size(1);
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -456,8 +456,8 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
     int64_t offset = (int64_t)uniqueOffsets_p[i];
     THBlas_(axpy)(outDim,
                   -learningRate,
-                  COL_PTR2(gradWeight, offset), gradWeight->stride[0],
-                  COL_PTR2(weight, offset), weight->stride[0]);
+                  COL_PTR2(gradWeight, offset), gradWeight->stride(0),
+                  COL_PTR2(weight, offset), weight->stride(0));
   }
 
   THTensor_(free)(uniqueOffsets);
@@ -471,8 +471,8 @@ void THNN_(SparseLinear_zeroGradParameters)(
 {
   int64_t i, j;
 
-  int64_t outDim = gradWeight->size[0];
-  int64_t inDim = gradWeight->size[1];
+  int64_t outDim = gradWeight->size(0);
+  int64_t inDim = gradWeight->size(1);
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkInput)(lastInput), 4,
@@ -492,10 +492,10 @@ void THNN_(SparseLinear_zeroGradParameters)(
     int64_t offset = (int64_t)(THNN_(get2d)(lastInput, i, 1)) - 1;
     if (offset >= 0 && offset < inDim) {
       real* pGradWeight = COL_PTR2(gradWeight, offset);
-      if (gradWeight->stride[0] == 1) {
+      if (gradWeight->stride(0) == 1) {
         THVector_(fill)(pGradWeight, 0, outDim);
       } else {
-        int64_t stride = gradWeight->stride[0];
+        int64_t stride = gradWeight->stride(0);
         for (j = 0; j < outDim; ++j) {
           pGradWeight[j * stride] = 0;
         }
@@ -517,8 +517,8 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
 {
   int64_t h, i, j;
 
-  int64_t outDim = gradWeight->size[0];
-  int64_t inDim = gradWeight->size[1];
+  int64_t outDim = gradWeight->size(0);
+  int64_t inDim = gradWeight->size(1);
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkLegacyInput)(lastInput), 4,
@@ -540,10 +540,10 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
       int64_t offset = (int64_t)(THNN_(get3d)(lastInput, h, i, 0)) - 1;
       if (offset >= 0 && offset < inDim) {
         real* pGradWeight = COL_PTR2(gradWeight, offset);
-        if (gradWeight->stride[0] == 1) {
+        if (gradWeight->stride(0) == 1) {
           THVector_(fill)(pGradWeight, 0, outDim);
         } else {
-          int64_t stride = gradWeight->stride[0];
+          int64_t stride = gradWeight->stride(0);
           for (j = 0; j < outDim; ++j) {
             pGradWeight[j * stride] = 0;
           }

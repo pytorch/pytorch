@@ -22,7 +22,8 @@ void THNN_(LeakyReLU_updateOutput)(
   {
     THTensor_(resizeAs)(output, input);
     TH_TENSOR_APPLY2(real, output, real, input,
-      *output_data = *input_data > 0 ? *input_data : *input_data * negval;
+      const real r = (*input_data > 0) ? 1 : negval;
+      *output_data = *input_data * r;
     );
   }
 }

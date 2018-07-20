@@ -5,6 +5,7 @@
 
 #include "caffe2/contrib/script/compiler.h"
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
@@ -1433,6 +1434,12 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(raw_data);
     return GetNUMANode(raw_data);
   });
+  m.def("get_blob_size_bytes", [](const std::string& blob_name) {
+    CAFFE_ENFORCE(gWorkspace);
+    auto* blob = gWorkspace->GetBlob(blob_name);
+    CAFFE_ENFORCE(blob);
+    return BlobStat::sizeBytes(*blob);
+  });
   m.def("support_onnx_export", [](const std::string& op) -> bool {
     const OpSchema* schema = caffe2::OpSchemaRegistry::Schema(op);
     if (!schema) {
@@ -1526,12 +1533,12 @@ void addGlobalMethods(py::module& m) {
   // into a python interface in transformations.py
   // Prefix the transformation with transform_ to avoid clobbering the
   // function namespace.
-  m.def("transform_optimizeForIDEEP", [](py::bytes def) {
+  m.def("transform_optimizeForIDEEP", [](py::bytes def, bool training_mode) {
     caffe2::NetDef proto;
     CAFFE_ENFORCE(ParseProtoFromLargeString(def.cast<std::string>(), &proto));
 
     auto nn = caffe2::convertToNNModule(proto);
-    opt::OptimizeForIdeep(&nn);
+    opt::OptimizeForIdeep(&nn, gWorkspace, training_mode);
     auto new_proto = caffe2::convertToCaffe2Proto(nn, proto);
 
     std::string out;

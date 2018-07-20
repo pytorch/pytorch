@@ -45,18 +45,11 @@
 #endif
 
 struct THCRNGState;  /* Random number generator state. */
-typedef struct THCStream THCStream;
+typedef struct CUDAStreamInternals THCStream;
 typedef struct THCState THCState;
 struct THCState;
 
-typedef struct _THCDeviceAllocator {
-   cudaError_t (*malloc)( void*, void**, size_t,         cudaStream_t);
-   cudaError_t (*realloc)(void*, void**, size_t, size_t, cudaStream_t);
-   cudaError_t (*free)(void*, void*);
-   cudaError_t (*emptyCache)(void*);
-   cudaError_t  (*cacheInfo)(void*, int, size_t*, size_t*);
-   void* state;
-} THCDeviceAllocator;
+typedef THAllocator THCDeviceAllocator;
 
 typedef struct _THCCudaResourcesPerDevice {
   /* Number of materialized cuBLAS handles */
@@ -110,8 +103,11 @@ THC_API int THCState_getNumDevices(THCState* state);
 /* Stream API */
 THC_API cudaStream_t THCState_getCurrentStreamOnDevice(THCState *state, int device);
 THC_API cudaStream_t THCState_getCurrentStream(THCState *state);
-THC_API struct THCStream* THCState_getStream(THCState *state);
-THC_API void THCState_setStream(THCState *state, struct THCStream* stream);
+
+THC_API THCStream* THCState_getStream(THCState *state);
+THC_API void THCState_setStream(THCState *state, THCStream* stream);
+THC_API THCStream* THCState_getStreamOnDevice(THCState* state, int device);
+THC_API void THCState_setStreamOnDevice(THCState *state, int device, THCStream *stream);
 
 THC_API void THCState_reserveBlasHandles(THCState* state, int numHandles);
 THC_API int THCState_getNumBlasHandles(THCState* state);
@@ -144,10 +140,13 @@ THC_API void __THCudaCheckWarn(cudaError_t err, const char *file, const int line
 THC_API void __THCublasCheck(cublasStatus_t status, const char *file, const int line);
 THC_API void __THCusparseCheck(cusparseStatus_t status, const char *file, const int line);
 
-THC_API cudaError_t THCudaMalloc(THCState *state, void **ptr, size_t size);
-THC_API cudaError_t THCudaFree(THCState *state, void *ptr);
-THC_API void* THCudaHostAlloc(THCState *state, size_t size);
-THC_API void THCudaHostFree(THCState *state, void *ptr);
+THC_API void* THCudaMalloc(THCState *state, size_t size);
+THC_API void THCudaFree(THCState *state, void* ptr);
+
+#ifdef __cplusplus
+at::DataPtr THCudaHostAlloc(THCState *state, size_t size);
+#endif
+
 THC_API void THCudaHostRecord(THCState *state, void *ptr);
 
 THC_API cudaError_t THCudaMemGetInfo(THCState *state, size_t* freeBytes, size_t* totalBytes);

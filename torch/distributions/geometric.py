@@ -74,4 +74,4 @@ class Geometric(Distribution):
         return value * (-probs).log1p() + self.probs.log()
 
     def entropy(self):
-        return binary_cross_entropy_with_logits(self.logits, self.probs, reduce=False) / self.probs
+        return binary_cross_entropy_with_logits(self.logits, self.probs, reduction='none') / self.probs

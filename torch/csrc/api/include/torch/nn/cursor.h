@@ -125,13 +125,13 @@ class CursorBase {
   template <typename Iterator, typename Function>
   void map(Iterator output_iterator, Function function) {
     for (auto& item : items_) {
-      *output_iterator = function(*item);
+      *output_iterator++ = function(*item);
     }
   }
   template <typename Iterator, typename Function>
   void map(Iterator output_iterator, Function function) const {
     for (auto& item : items_) {
-      *output_iterator = function(*item);
+      *output_iterator++ = function(*item);
     }
   }
 
@@ -142,13 +142,13 @@ class CursorBase {
   template <typename Iterator, typename Function>
   void map_items(Iterator output_iterator, Function function) {
     for (auto& item : items_) {
-      *output_iterator = function(item.key, item.value);
+      *output_iterator++ = function(item.key, item.value);
     }
   }
   template <typename Iterator, typename Function>
   void map_items(Iterator output_iterator, Function function) const {
     for (auto& item : items_) {
-      *output_iterator = function(item.key, item.value);
+      *output_iterator++ = function(item.key, item.value);
     }
   }
 

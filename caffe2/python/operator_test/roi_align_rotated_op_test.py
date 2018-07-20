@@ -113,12 +113,59 @@ class RoIAlignRotatedOp(hu.HypothesisTestCase):
             sampling_ratio=0,
         )
 
+        def roialign_rot90(m, k=1, axes=(0,1)):
+            axes = tuple(axes)
+            if len(axes) != 2:
+                raise ValueError("len(axes) must be 2.")
+
+            m = np.asanyarray(m)
+
+            if axes[0] == axes[1] or np.absolute(axes[0] - axes[1]) == m.ndim:
+                raise ValueError("Axes must be different.")
+
+            if (axes[0] >= m.ndim or axes[0] < -m.ndim or
+                    axes[1] >= m.ndim or axes[1] < -m.ndim):
+                raise ValueError(
+                    "Axes={} out of range for array of ndim={}.".format(axes, m.ndim))
+
+            k %= 4
+
+            if k == 0:
+                return m[:]
+            if k == 2:
+                return roialign_flip(roialign_flip(m, axes[0]), axes[1])
+
+            axes_list = np.arange(0, m.ndim)
+            (axes_list[axes[0]], axes_list[axes[1]]) = (axes_list[axes[1]],
+                                                        axes_list[axes[0]])
+
+            if k == 1:
+                return np.transpose(roialign_flip(m,axes[1]), axes_list)
+            else:
+                # k == 3
+                return roialign_flip(np.transpose(m, axes_list), axes[1])
+
+        def roialign_flip(m, axis):
+            if not hasattr(m, 'ndim'):
+                m = np.asarray(m)
+            indexer = [slice(None)] * m.ndim
+            try:
+                indexer[axis] = slice(None, None, -1)
+            except IndexError:
+                raise ValueError("axis=%i is invalid for the %i-dimensional input array"
+                                 % (axis, m.ndim))
+            return m[tuple(indexer)]
+
         def roialign_ref(X, R):
             # `angle` denotes counter-clockwise rotation. Rotate the input
             # feature map in the opposite (clockwise) direction and perform
             # standard RoIAlign. We assume all RoIs have the same angle.
+            #
+            # Also note that we need to have our own version of np.rot90,
+            # since axes isn't an argument until 1.12.0 and doesn't exist
+            # on all tested platforms.
             norm_angle = (angle + 360) % 360
-            X_ref = np.rot90(X, k=-norm_angle / 90, axes=(2, 3))
+            X_ref = roialign_rot90(X, k=-norm_angle / 90, axes=(2, 3))
 
             # Rotate RoIs clockwise wrt the center of the input feature
             # map to make them horizontal and convert from

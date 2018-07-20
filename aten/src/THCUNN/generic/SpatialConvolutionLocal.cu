@@ -30,8 +30,8 @@ static inline void THNN_(SpatialConvolutionLocal_shapeCheck)(
   THCUNN_argCheck(state, !input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
                   "non-empty 3D or 4D input tensor expected but got: %s");
 
-  int64_t nInputPlane = weight->size[2] / (kH * kW);
-  int64_t nOutputPlane = weight->size[1];
+  int64_t nInputPlane = weight->size(2) / (kH * kW);
+  int64_t nOutputPlane = weight->size(1);
 
   if (bias != NULL) {
    THCUNN_check_dim_size(state, bias, 3, 0, nOutputPlane);
@@ -56,9 +56,9 @@ static THCTensor* THNN_(view_weight_local)(
   AT_CHECK(!weight->is_empty() && (weight->dim() == 3 || weight->dim() == 6), 4,
            "weight tensor should be (non-empty) 3D or 6D - got size: ", weight->sizes());
   if (weight->dim() == 6) {
-    int64_t s1 = weight->size[0] * weight->size[1];
-    int64_t s2 = weight->size[2];
-    int64_t s3 = weight->size[3] * weight->size[4] * weight->size[5];
+    int64_t s1 = weight->size(0) * weight->size(1);
+    int64_t s2 = weight->size(2);
+    int64_t s3 = weight->size(3) * weight->size(4) * weight->size(5);
     THCTensor *old_weight = weight;
     weight = THCTensor_(newWithStorage3d)(state,
                           weight->storage,
@@ -105,7 +105,7 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
   }
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THCTensor_(resize4d)(state, output, batchSize, nOutputPlane, outputHeight, outputWidth);
@@ -219,7 +219,7 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
   }
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Resize output
   THCTensor_(resize4d)(state, gradInput, batchSize, nInputPlane, inputHeight, inputWidth);
@@ -339,7 +339,7 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
   }
 
   // Batch size + input planes
-  int64_t batchSize = input->size[0];
+  int64_t batchSize = input->size(0);
 
   // Helpers
   THCTensor *input_n = THCTensor_(new)(state);

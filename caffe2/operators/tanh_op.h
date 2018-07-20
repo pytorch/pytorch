@@ -11,7 +11,10 @@ namespace caffe2 {
 template <class Context>
 struct TanhFunctor {
   template <typename T>
-  bool operator()(const int N, const T* X, T* Y, Context* context) const;
+  bool operator()(const int N, const T* X, T* Y, Context* context) const {
+    math::Tanh<T, Context>(N, X, Y, context);
+    return true;
+  }
 };
 
 template <class Context>

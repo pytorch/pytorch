@@ -28,7 +28,7 @@ import errno
 import torch
 import torch.cuda
 from torch._utils_internal import get_writable_path
-from torch._six import string_classes
+from torch._six import string_classes, inf
 import torch.backends.cudnn
 import torch.backends.mkl
 
@@ -56,21 +56,45 @@ PY34 = sys.version_info >= (3, 4)
 IS_WINDOWS = sys.platform == "win32"
 IS_PPC = platform.machine() == "ppc64le"
 
-TEST_NUMPY = True
-try:
-    import numpy
-except ImportError:
-    TEST_NUMPY = False
 
-TEST_SCIPY = True
-try:
-    import scipy
-except ImportError:
-    TEST_SCIPY = False
+def _check_module_exists(name):
+    r"""Returns if a top-level module with :attr:`name` exists *without**
+    importing it. This is generally safer than try-catch block around a
+    `import X`. It avoids third party libraries breaking assumptions of some of
+    our tests, e.g., setting multiprocessing start method when imported
+    (see librosa/#747, torchvision/#544).
+    """
+    if not PY3:  # Python 2
+        import imp
+        try:
+            imp.find_module(name)
+            return True
+        except ImportError:
+            return False
+    elif PY34:  # Python [3, 3.4)
+        import importlib
+        loader = importlib.find_loader(name)
+        return loader is not None
+    else:  # Python >= 3.4
+        import importlib
+        spec = importlib.util.find_spec(name)
+        return spec is not None
 
+TEST_NUMPY = _check_module_exists('numpy')
+TEST_SCIPY = _check_module_exists('scipy')
 TEST_MKL = torch.backends.mkl.is_available()
 
-NO_MULTIPROCESSING_SPAWN = 'NO_MULTIPROCESSING_SPAWN' in os.environ
+# On Py2, importing librosa 0.6.1 triggers a TypeError (if using newest joblib)
+# see librosa/librosa#729.
+# TODO: allow Py2 when librosa 0.6.2 releases
+TEST_LIBROSA = _check_module_exists('librosa') and PY3
+
+NO_MULTIPROCESSING_SPAWN = os.environ.get('NO_MULTIPROCESSING_SPAWN', '0') == '1'
+TEST_WITH_ASAN = os.getenv('PYTORCH_TEST_WITH_ASAN', '0') == '1'
+TEST_WITH_UBSAN = os.getenv('PYTORCH_TEST_WITH_UBSAN', '0') == '1'
+
+if TEST_NUMPY:
+    import numpy
 
 
 def skipIfNoLapack(fn):
@@ -329,7 +353,7 @@ class TestCase(unittest.TestCase):
         elif isinstance(x, bool) and isinstance(y, bool):
             super(TestCase, self).assertEqual(x, y, message)
         elif isinstance(x, Number) and isinstance(y, Number):
-            if abs(x) == float('inf') or abs(y) == float('inf'):
+            if abs(x) == inf or abs(y) == inf:
                 if allow_inf:
                     super(TestCase, self).assertEqual(x, y, message)
                 else:

@@ -826,8 +826,7 @@ ptrdiff_t THDTensor_(nElement)(const THDTensor *self) {
 }
 
 void THDTensor_(retain)(THDTensor *tensor) {
-  if (tensor->flag & TH_TENSOR_REFCOUNTED)
-    tensor->refcount++;
+  tensor->refcount++;
 }
 
 void THDTensor_(free)(THDTensor *tensor) {

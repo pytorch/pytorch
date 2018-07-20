@@ -35,7 +35,9 @@ protected:
     }
 
 private:
-    friend struct std::hash<ConcreteType>;
+    friend size_t hash_value(const concrete_type& v) {
+        return std::hash<underlying_type>()(v.id_);
+    }
 
     // TODO Making operator== noexcept if underlying type is noexcept equality comparable doesn't work with GCC 4.8.
     //      Fix this once we don't need GCC 4.8 anymore.
@@ -59,7 +61,7 @@ private:
   template <>                                                \
   struct hash<ClassName> {                                   \
     size_t operator()(ClassName x) const {                   \
-      return std::hash<ClassName::underlying_type>()(x.id_); \
+      return hash_value(x);                                  \
     }                                                        \
   };                                                         \
   }

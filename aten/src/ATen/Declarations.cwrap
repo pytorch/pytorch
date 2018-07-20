@@ -828,6 +828,13 @@
       - arg: THTensor* self
         broadcast: other fallback
       - THTensor* other
+]]
+[[
+  name: _th_min
+  variants:
+    - method
+    - function
+  options:
     - cname: min
       return: argument 0,1
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -860,6 +867,13 @@
       - arg: THTensor* self
         broadcast: other fallback
       - THTensor* other
+]]
+[[
+  name: _th_max
+  variants:
+    - method
+    - function
+  options:
     - cname: max
       return: argument 0,1
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -875,12 +889,13 @@
           default: "false"
 ]]
 [[
-  name: kthvalue
+  name: _th_kthvalue
   backends:
     - CPU
   variants:
     - method
     - function
+  cname: kthvalue
   return: argument 0,1
   scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
   arguments:
@@ -897,10 +912,11 @@
       default: "false"
 ]]
 [[
-  name: mode
+  name: _th_mode
   variants:
     - method
     - function
+  cname: mode
   return: argument 0,1
   scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
   arguments:
@@ -926,6 +942,15 @@
       return: real
       arguments:
         - THTensor* self
+]]
+[[
+  name: _th_median
+  variants:
+    - method
+    - function
+  cname: median
+  return: argument 0,1
+  options:
     - cname: median
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
       arguments:
@@ -993,6 +1018,18 @@
       return: real
       arguments:
         - THTensor* self
+]]
+[[
+  name: _th_all
+  types:
+    - Byte
+  variants:
+    - method
+    - function
+  backends:
+    - CPU
+    - CUDA
+  options:
     - cname: logicalAnd
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -1020,6 +1057,18 @@
       return: real
       arguments:
         - THTensor* self
+]]
+[[
+  name: _th_any
+  types:
+    - Byte
+  variants:
+    - method
+    - function
+  backends:
+    - CPU
+    - CUDA
+  options:
     - cname: logicalAny
       return: argument 0
       scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
@@ -1065,24 +1114,10 @@
     - THTensor* self
 ]]
 [[
-  name: sigmoid_
+  name: _th_sigmoid
   types:
     - floating_point
   backends:
-    - CPU
-    - CUDA
-  cname: sigmoid
-  return: self
-  arguments:
-    - THTensor* self
-    - THTensor* self
-]]
-[[
-  name: sigmoid
-  types:
-    - floating_point
-  backends:
-    - CPU
     - CUDA
   cname: sigmoid
   variants:
@@ -1444,6 +1479,22 @@
     - THTensor* self
 ]]
 [[
+  name: _erfc
+  cname: erfc
+  types:
+    - floating_point
+  backends:
+    - CUDA
+  variants:
+    - method
+    - function
+  return: argument 0
+  arguments:
+    - arg: THTensor* result
+      output: True
+    - THTensor* self
+]]
+[[
   name: erfinv_
   types:
     - floating_point
@@ -1598,7 +1649,7 @@
     - THTensor* self
 ]]
 [[
-  name: var
+  name: _th_var
   types:
     - floating_point
   backends:
@@ -1633,7 +1684,7 @@
           default: "false"
 ]]
 [[
-  name: std
+  name: _th_std
   types:
     - floating_point
   backends:
@@ -1686,7 +1737,7 @@
           default: AS_REAL(2)
 ]]
 [[
-  name: norm
+  name: _th_norm
   types:
     - floating_point
   backends:
@@ -2428,21 +2479,7 @@
         - THTensor* other
 ]]
 [[
-  name: clamp
-  cname: clamp
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-    - real max
-]]
-[[
-  name: clamp_
+  name: _th_clamp_
   cname: clamp
   variants:
     - method
@@ -2455,20 +2492,7 @@
     - real max
 ]]
 [[
-  name: clamp_min
-  cname: cmaxValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-]]
-[[
-  name: clamp_min_
+  name: _th_clamp_min_
   cname: cmaxValue
   variants:
     - method
@@ -2480,20 +2504,7 @@
     - real min
 ]]
 [[
-  name: clamp_max
-  cname: cminValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real max
-]]
-[[
-  name: clamp_max_
+  name: _th_clamp_max_
   cname: cminValue
   variants:
     - method
@@ -3079,7 +3090,7 @@
       default: S
 ]]
 [[
-  name: inverse
+  name: _getri
   cname: getri
   types:
     - Float
@@ -3638,38 +3649,6 @@
   arguments:
     - THTensor* self
     - THTensor* src
-]]
-
-[[
-  name: as_strided
-  variants: [method,function]
-  cpu_half: True
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THSize* size
-    - THStride* stride
-    - arg: int64_t storage_offset
-  aten_custom_call: |
-    ${THTensor}_setStorage(${state,}result_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
-    result_->maybeScalar(size.size() == 0);
-]]
-
-[[
-  name: as_strided_
-  variants: [method]
-  cpu_half: True
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - THSize* size
-    - THStride* stride
-    - arg: int64_t storage_offset
-  aten_custom_call: |
-    ${THTensor}_setStorage(${state,}self_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
-    self_->maybeScalar(size.size() == 0);
 ]]
 
 [[

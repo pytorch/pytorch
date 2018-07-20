@@ -57,15 +57,15 @@ struct tensor_as_impl<std::array<bool, N>> {
 };
 
 template<>
-struct tensor_as_impl<at::IntList> {
-  at::IntList operator()(at::Tensor&& t) {
+struct tensor_as_impl<std::vector<int64_t>> {
+  std::vector<int64_t> operator()(at::Tensor&& t) {
     if (t.type().scalarType() != at::ScalarType::Long)
       throw tensor_conversion_error("Expected a LongTensor");
     if (t.dim() != 1)
       throw tensor_conversion_error("Expected a 1D LongTensor");
     if (!t.is_contiguous())
       throw tensor_conversion_error("Expected a contiguous LongTensor");
-    return at::IntList{t.data<int64_t>(), static_cast<size_t>(t.numel())};
+    return std::vector<int64_t>(t.data<int64_t>(), t.data<int64_t>() + t.numel());
   }
 };
 

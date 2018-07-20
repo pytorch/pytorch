@@ -14,6 +14,7 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/utils/variadic.h"
+#include "torch/csrc/autograd/functions/utils.h"
 
 #include <array>
 #include <cstddef>
@@ -38,10 +39,14 @@ using namespace torch::autograd::generated;
 namespace torch { namespace autograd {
 // Helper methods for working with Attributes (torch/csrc/jit/attributes.h)
 
+at::Tensor maybeUnwrapVar(const at::Tensor& t) {
+  return t.is_variable() ? Variable(t).data() : t;
+}
+
 // The overloaded accessors are convenient for the generated code (since we
 // don't want to make the codegen do the dispatch manually)
 static void setattr(jit::Node* n, jit::Symbol name, int64_t v)             { n->i_(name, v); }
-static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, v.toTensor()); }
+static void setattr(jit::Node* n, jit::Symbol name, const at::Scalar& v)   { n->t_(name, maybeUnwrapVar(v.toTensor())); }
 static void setattr(jit::Node* n, jit::Symbol name, SparseTensorRef s)     { n->t_(name, s.tref); }
 static void setattr(jit::Node* n, jit::Symbol name, const at::IntList& v)  { n->is_(name, v); }
 static void setattr(jit::Node* n, jit::Symbol name, bool v)                { n->i_(name, v); }
@@ -316,24 +321,15 @@ static Tensor as_view(const Tensor & base, Tensor tensor) {
   return make_variable_view(std::move(base_var), std::move(tensor));
 }
 
-struct ComputeRequiresGrad : IterArgs<ComputeRequiresGrad> {
-  bool out = false;
-  using IterArgs<ComputeRequiresGrad>::operator();
-  void operator()(const at::Tensor& tensor) {
-    const auto& var = static_cast<const Variable&>(tensor);
-    if (var.defined() && var.requires_grad()) {
-      out = true;
-    }
+static std::vector<Tensor> as_view(const Tensor & base, std::vector<Tensor> tensors) {
+  auto base_var = Variable(base);
+  if (base_var.is_view()) {
+    base_var = base_var.base();
   }
-  bool short_circuit() { return out; }
-};
-
-template<typename... Args>
-static bool compute_requires_grad(Args&&... args) {
-  if (!GradMode::is_enabled()) {
-    return false;
+  for(Tensor &tensor : tensors) {
+    tensor = make_variable_view(base_var, std::move(tensor));
   }
-  return ComputeRequiresGrad().apply(std::forward<Args>(args)...).out;
+  return tensors;
 }
 
 static void check_no_requires_grad(const Tensor& tensor, const char* name) {
@@ -376,20 +372,6 @@ static void rebase_history(ArrayRef<Variable> vars, std::shared_ptr<Function> gr
         // TODO: eliminate const_cast
         auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
         const_cast<Variable&>(var).rebase_history({grad_fn, output_nr});
-      } else {
-        grad_fn->add_input_metadata(Function::undefined_input());
-      }
-    }
-  }
-}
-
-static void set_history(ArrayRef<Variable> vars, std::shared_ptr<Function> grad_fn) {
-  if (grad_fn) {
-    for (auto& var : vars) {
-      if (var.defined()) {
-        // TODO: eliminate const_cast
-        auto output_nr = grad_fn->add_input_metadata(var.type(), var.sizes());
-        const_cast<Variable&>(var).set_gradient_edge({grad_fn, output_nr});
       } else {
         grad_fn->add_input_metadata(Function::undefined_input());
       }

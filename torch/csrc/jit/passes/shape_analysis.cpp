@@ -2,7 +2,7 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/argument_spec.h"
-#include "torch/csrc/jit/aten_dispatch.h"
+#include "torch/csrc/jit/operator.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -87,8 +87,8 @@ void broadcastPointwise(Node *node, std::vector<TensorType*>& types) {
 }
 
 void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>& types) {
-  auto op_info = getTensorOp(node);
-  std::vector<at::Tensor> stack;
+  auto op = getOperation(node);
+  Stack stack;
 
   for(auto & type : types) {
     stack.push_back(representativeTensor(type));
@@ -98,11 +98,11 @@ void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>&
   // is to uncover any mistakes we could make when editing this code,
   // and eventually it shouldn't matter, because this phase should be
   // preceded by schema checking.
-  op_info.op(stack);
+  op(stack);
 
   JIT_ASSERT(stack.size() == node->outputs().size());
   for(size_t i = 0; i < stack.size(); ++i) {
-    node->outputs()[i]->inferTypeFrom(stack[i]);
+    node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
   }
 }
 
@@ -321,14 +321,6 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
         sizes[dim] = index->sizes()[0];
         node->output()->setType(ten->withSizes(sizes));
       }
-    } break;
-    case prim::ReplaceIfUndef: {
-      // If types[0] has a type, then it is not defined, and the type will
-      // get set to types[0] because that will be the value propagated.
-      // If its type is not defined, then unification is an undefined type.
-      SHAPE_ASSERT(types.size() == 1);
-      node->output()->setType(types.at(0)->shared_from_this());
-      handled = true;
     } break;
     case prim::Constant: {
       node->output()->inferTypeFrom(node->t(attr::value));

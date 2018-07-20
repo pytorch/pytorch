@@ -6,13 +6,12 @@
 namespace caffe2 {
 
 namespace {
-template <typename T>
 __global__ void BooleanMaskCopyKernel(
     const TIndex numOfOutput,
     const TIndex numBytes,
     const TIndex* indices,
-    const T* src,
-    T* dest) {
+    const uint8_t* src,
+    uint8_t* dest) {
   for (TIndex i = blockIdx.x; i < numOfOutput; i += gridDim.x) {
     const auto srcBase = indices[i] * numBytes;
     const auto destBase = i * numBytes;
@@ -81,8 +80,8 @@ class BooleanMaskOp<CUDAContext> final : public Operator<CUDAContext> {
     std::vector<TIndex> dims = src.dims();
     dims[0] = numOfOutput;
     dest->Resize(dims);
-    auto* destData = (char*)dest->raw_mutable_data(src.meta());
-    const auto* srcData = (char*)src.raw_data();
+    auto* destData = (uint8_t*)dest->raw_mutable_data(src.meta());
+    const auto* srcData = (uint8_t*)src.raw_data();
     if (OutputSize() == 2) {
       auto* indicesOut = Output(1);
       indicesOut->Resize(numOfOutput);

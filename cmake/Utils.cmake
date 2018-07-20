@@ -188,6 +188,25 @@ function(dedent outvar text)
 endfunction()
 
 
+function(pycmd_no_exit outvar exitcode cmd)
+  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
+  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
+    set(_python_exe "python")
+  else()
+    set(_python_exe "${PYTHON_EXECUTABLE}")
+  endif()
+  # run the actual command
+  execute_process(
+    COMMAND "${_python_exe}" -c "${cmd}"
+    RESULT_VARIABLE _exitcode
+    OUTPUT_VARIABLE _output)
+  # Remove supurflous newlines (artifacts of print)
+  string(STRIP "${_output}" _output)
+  set(${outvar} "${_output}" PARENT_SCOPE)
+  set(${exitcode} "${_exitcode}" PARENT_SCOPE)
+endfunction()
+
+
 ###
 # Helper function to run `python -c "<cmd>"` and capture the results of stdout
 #
@@ -204,17 +223,8 @@ endfunction()
 #
 function(pycmd outvar cmd)
   dedent(_dedent_cmd "${cmd}")
-  # Use PYTHON_EXECUTABLE if it is defined, otherwise default to python
-  if ("${PYTHON_EXECUTABLE}" STREQUAL "")
-    set(_python_exe "python")
-  else()
-    set(_python_exe "${PYTHON_EXECUTABLE}")
-  endif()
-  # run the actual command
-  execute_process(
-    COMMAND "${_python_exe}" -c "${_dedent_cmd}"
-    RESULT_VARIABLE _exitcode
-    OUTPUT_VARIABLE _output)
+  pycmd_no_exit(_output _exitcode "${_dedent_cmd}")
+
   if(NOT ${_exitcode} EQUAL 0)
     message(ERROR " Failed when running python code: \"\"\"\n${_dedent_cmd}\n\"\"\"")
     message(FATAL_ERROR " Python command failed with error code: ${_exitcode}")
@@ -276,10 +286,11 @@ function(target_enable_style_warnings TARGET)
             -Wmissing-include-dirs
             -Woverloaded-virtual
             -Wredundant-decls
+            -Wno-shadow
             -Wsign-promo
-            -Wstrict-overflow=5
+            -Wno-strict-overflow
             -fdiagnostics-show-option
-            -Wconversion
+            -Wno-conversion
             -Wpedantic
             -Wundef
             )
@@ -300,6 +311,9 @@ function(target_enable_style_warnings TARGET)
     if (WERROR)
       list(APPEND WARNING_OPTIONS "-Werror")
     endif()
+  endif()
+  if(APPLE)
+    set(WARNING_OPTIONS -Wno-gnu-zero-variadic-macro-arguments)
   endif()
   target_compile_options(${TARGET} PRIVATE ${WARNING_OPTIONS})
 endfunction()

@@ -84,15 +84,13 @@ class OnnxifiOp final : public Operator<Context> {
     // should retry until it get consistent. For now, we don't do that.
     CAFFE_ENFORCE_EQ(
         lib_->onnxGetBackendIDs(nullptr, &num_backends_),
-        ONNXIFI_STATUS_SUCCESS);
-    backend_ids_.resize(num_backends_);
-    size_t num_backends = 0;
-    CAFFE_ENFORCE_EQ(
-        lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends),
-        ONNXIFI_STATUS_SUCCESS);
-
-    CAFFE_ENFORCE_LT(
+        ONNXIFI_STATUS_FALLBACK);
+    CAFFE_ENFORCE_GT(
         num_backends_, 0, "At least 1 onnxifi backend should be available");
+    backend_ids_.resize(num_backends_);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends_),
+        ONNXIFI_STATUS_SUCCESS);
 
     // TODO: choose backend id
     CAFFE_ENFORCE_EQ(

@@ -32,6 +32,14 @@ bool PackSegmentsOp<CPUContext>::DoRunWithType2() {
     max_length = std::max(max_length, l[i]);
     total_length += l[i];
   }
+  if (max_length_ != -1) {
+    // Final dim must be greater than the max_length
+    CAFFE_ENFORCE_GE(
+        max_length_,
+        max_length,
+        "Pre-defined max_length should be greater than the real max_length");
+    max_length = max_length_;
+  }
 
   // Total lengths must be the same as data.dims(0)
   CAFFE_ENFORCE_EQ(
@@ -124,7 +132,7 @@ bool UnpackSegmentsOp<CPUContext>::DoRunWithType2() {
   output->Resize(shape);
   // create output tensor
   auto* out = static_cast<char*>(output->raw_mutable_data(data.meta()));
-  if (!(data.dim(0) * data.dim(1))) {
+  if (!(data.dim(0) && data.dim(1))) {
     return true;
   }
   auto block_size = data.size_from_dim(2);

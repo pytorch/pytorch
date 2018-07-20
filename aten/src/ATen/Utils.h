@@ -10,6 +10,14 @@
 #include <typeinfo>
 #include <numeric>
 
+#if defined(__clang__)
+#define __ubsan_ignore_float_divide_by_zero__ __attribute__((no_sanitize("float-divide-by-zero")))
+#define __ubsan_ignore_vptr__ __attribute__((no_sanitize("vptr")))
+#else
+#define __ubsan_ignore_float_divide_by_zero__
+#define __ubsan_ignore_vptr__
+#endif
+
 namespace at {
 
 AT_API int _crash_if_asan(int);

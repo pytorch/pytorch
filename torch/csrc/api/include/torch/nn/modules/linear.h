@@ -19,6 +19,7 @@ struct LinearOptions {
 
 class LinearImpl : public Cloneable<LinearImpl> {
  public:
+  LinearImpl(int64_t in, int64_t out) : LinearImpl(LinearOptions(in, out)) {}
   explicit LinearImpl(LinearOptions options);
 
   void reset() override;

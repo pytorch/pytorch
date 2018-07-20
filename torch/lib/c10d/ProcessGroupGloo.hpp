@@ -15,11 +15,11 @@
 
 #include <torch/csrc/utils/hash.h>
 
-#include "CUDAUtils.hpp"
-#include "ProcessGroup.hpp"
-#include "Store.hpp"
-#include "Types.hpp"
-#include "Utils.hpp"
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
+#include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 
 // Forward declaration
 struct THCState;

@@ -13,25 +13,24 @@
 #include <test/cpp/api/util.h>
 
 using namespace torch::nn;
+using namespace torch::test;
 
 class TestModel : public torch::nn::Module {
  public:
-  TestModel() {
-    l1 = register_module("l1", Linear(10, 3));
-    l2 = register_module("l2", Linear(3, 5));
-    l3 = register_module("l3", Linear(5, 100));
-  }
+  TestModel()
+      : l1(register_module("l1", Linear(10, 3))),
+        l2(register_module("l2", Linear(3, 5))),
+        l3(register_module("l3", Linear(5, 100))) {}
 
   Linear l1, l2, l3;
 };
 
 class NestedModel : public torch::nn::Module {
  public:
-  NestedModel() {
-    l1 = register_module("l1", Linear(5, 20));
-    t = register_module("test", std::make_shared<TestModel>());
-    param_ = register_parameter("param", torch::empty({3, 2, 21}));
-  }
+  NestedModel()
+      : l1(register_module("l1", Linear(5, 20))),
+        t(register_module("test", std::make_shared<TestModel>())),
+        param_(register_parameter("param", torch::empty({3, 2, 21}))) {}
 
   torch::Tensor param_;
   Linear l1;
@@ -124,7 +123,7 @@ TEST_CASE("modules") {
   }
 
   SECTION("simple") {
-    auto model = std::make_shared<torch::SimpleContainer>();
+    auto model = std::make_shared<SimpleContainer>();
     auto l1 = model->add(Linear(10, 3), "l1");
     auto l2 = model->add(Linear(3, 5), "l2");
     auto l3 = model->add(Linear(5, 100), "l3");

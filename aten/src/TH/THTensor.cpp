@@ -43,17 +43,9 @@ void THTensor_free(THTensor *self)
   if(!self)
     return;
 
-  if(self->flag & TH_TENSOR_REFCOUNTED)
+  if(--self->refcount == 0)
   {
-    if(--self->refcount == 0)
-    {
-      THFree(self->size);
-      THFree(self->stride);
-      if(self->storage)
-        THStorage_free(self->storage);
-      self->refcount.~atomic<int>();
-      THFree(self);
-    }
+    delete self;
   }
 }
 

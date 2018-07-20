@@ -132,9 +132,7 @@ void test(Type &T) {
     if (t.numel() != 0) {
       REQUIRE(t.sum(0).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
-      if (!T.is_cuda()) { // FIXME: out of range exception in CUDA
-        REQUIRE(t.sum(0).equal(at::empty({0}, T)));
-      }
+      REQUIRE(t.sum(0).equal(at::zeros({}, T)));
     }
 
     // reduce (with dimension argument and with 2 return arguments)
@@ -143,7 +141,6 @@ void test(Type &T) {
       REQUIRE(std::get<0>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
       REQUIRE(std::get<1>(ret).dim() == std::max<int64_t>(t.dim() - 1, 0));
     } else {
-      // FIXME: you should be able to reduce over size {0}
       REQUIRE_THROWS(t.min(0));
     }
 
@@ -156,8 +153,8 @@ void test(Type &T) {
 
     // fill_ (argument to fill_ can only be a 0-dim tensor)
     TRY_CATCH_ELSE(t.fill_(t.sum(0)),
-                   REQUIRE((t.numel() == 0 || t.dim() > 1)),
-                   { REQUIRE(t.numel() > 0); REQUIRE(t.dim() <= 1); });
+                   REQUIRE(t.dim() > 1),
+                   REQUIRE(t.dim() <= 1));
   }
 
   for (auto lhs_it = sizes.begin(); lhs_it != sizes.end(); ++lhs_it) {

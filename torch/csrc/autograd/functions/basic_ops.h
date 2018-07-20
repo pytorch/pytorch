@@ -18,17 +18,20 @@ struct Error : public Function {
   Error(std::string msg)
     : msg(std::move(msg)) {}
 
-  virtual variable_list apply(const variable_list& inputs) override;
+  variable_list apply(variable_list&& inputs) override;
 
   std::string msg;
 };
 
 // Identity in forward, Error in backward. Used to implement @once_differentiable
 struct DelayedError : public Function {
-  DelayedError(std::string msg)
-    : msg(std::move(msg)) {};
+  DelayedError(std::string msg, int num_inputs)
+    : msg(std::move(msg)) {
+      for (int i = 0; i < num_inputs; i++)
+        add_input_metadata(Function::undefined_input());
+    }
 
-  virtual variable_list apply(const variable_list& inputs) override;
+  variable_list apply(variable_list&& inputs) override;
 
   std::string msg;
 };
@@ -38,7 +41,7 @@ struct GraphRoot : public Function {
       : Function(std::move(functions)),
         outputs(std::move(inputs)) {}
 
-  virtual variable_list apply(const variable_list& inputs) {
+  variable_list apply(variable_list&& inputs) override {
     return outputs;
   }
 

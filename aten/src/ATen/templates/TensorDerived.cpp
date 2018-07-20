@@ -31,7 +31,9 @@ const char * ${Tensor}::toString() const {
 }
 
 IntList ${Tensor}::sizes() const {
-  return IntList(tensor->size,dim());
+  // NB: dim in tensor is not synchronized with THTensor, so it's
+  // important to apply dim here
+  return IntList(THTensor_getSizePtr(tensor), dim());
 }
 
 int64_t ${Tensor}::dim() const {
@@ -47,6 +49,11 @@ void * ${Tensor}::unsafeGetTH(bool retain) {
   if (retain)
       ${THTensor}_retain(${state,} tensor);
   return tensor;
+}
+
+void ${Tensor}::release_resources() {
+  ${THTensor}_free(${state,} tensor);
+  tensor = nullptr;
 }
 
 ${TensorDenseOrSparse}

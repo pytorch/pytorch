@@ -61,13 +61,13 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value,
   THCTensor *self_;
   THCTensor *src_ = THCTensor_(newTranspose)(state, src, dimension, 0);
   THCTensor *data = THCTensor_(newClone)(state, src_);
-  ptrdiff_t size = THCTensor_(nElement)(state, data)/data->size[0];
+  ptrdiff_t size = THCTensor_(nElement)(state, data)/data->size(0);
 
   THArgCheck(dimension >= 0 && dimension < THCTensor_(_nDimension)(state, src), 3, "invalid dimension");
   THArgCheck(THCNumerics<real>::gt(value, scalar_cast<real>(0)), 2, "non-positive-norm not supported");
   THArgCheck(THCTensor_(_nDimension)(state, src) > 1, 1, "need at least 2 dimensions");
 
-  dim3 grid(data->size[0]);
+  dim3 grid(data->size(0));
   dim3 threads(32);
 
   THCTensor_kernel_renorm<real, accreal>
@@ -167,7 +167,7 @@ THCTensor_(varall)(THCState *state, THCTensor *self, int biased)
 
   val = THCNumerics<accreal>::div(
     val,
-    scalar_cast<accreal>(THCTensor_(nElement)(state, self) - (biased ? 0 : 1))
+    scalar_cast<accreal>(std::max<int64_t>(0, THCTensor_(nElement)(state, self) - (biased ? 0 : 1)))
   );
 
   THCudaCheck(cudaGetLastError());
@@ -329,7 +329,6 @@ THC_API accreal
 THCTensor_(meanall)(THCState *state, THCTensor *self)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, self));
-  THArgCheck(self->_dim() > 0, 1, "empty Tensor");
   return THCTensor_(sumall)(state, self)/THCTensor_(nElement)(state, self);
 }
 

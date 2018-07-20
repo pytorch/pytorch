@@ -160,11 +160,15 @@ class Caffe2Backend {
 
   Caffe2Ops CommonOnnxNodeToCaffe2Ops(OnnxNode* onnx_node, int opset_version);
 
+  Caffe2Ops CreateArgMaxMin(OnnxNode* onnx_node, int opset_version);
+
   Caffe2Ops CreateCast(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateConstant(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateConvPoolOpBase(OnnxNode* onnx_node, int opset_version);
+
+  Caffe2Ops CreatePadPool(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateReshape(OnnxNode* onnx_node, int opset_version);
 

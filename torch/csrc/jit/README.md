@@ -70,25 +70,3 @@ other well-known functions which are specific to PyTorch.
     </dl>
   * **input**: 1 - ∞ (same as inputs of Subgraph)
   * **output**: 1 - ∞ (same as outputs of Subgraph)
-
-* **Eval** (renders as `CppOp[N5torch8autograd4EvalE]`)
-
-  An Eval node takes some inputs, and an autograd closure `Handle`.  It applies
-  those inputs to the autograd closure, and returns the results of having
-  executed the closure.  An Eval node is primarily used to implement backwards
-  operations for black box forward operations: because the backwards computation
-  of a black box forwards is not known until we actually execute the forward
-  operation, we have to run the forward computation, giving us an autograd
-  closure to compute backwards, and then run it later when we actually
-  execute backwards.
-
-  * **input**:
-    <dl>
-      <dt>Input1, Input2, ...</dt>
-      <dd>Any number of inputs, which will be passed as inputs to the
-      autograd closure</dd>
-      <dt>Handle</dt>
-      <dd>An autograd closure (opaquely represented with type `Handle` in our
-      IR) which specifies how to execute the operation.)</dd>
-    </dl>
-  * **output**: 1 - ∞ (same as outputs of autograd closure)

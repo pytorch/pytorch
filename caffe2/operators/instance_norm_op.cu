@@ -51,7 +51,7 @@ __global__ void InstanceNormInvStdevKernel(
     }
     inv_stdev_data[i] /= dim;
     inv_stdev_data[i] += epsilon;
-    inv_stdev_data[i] = 1.0 / std::sqrt(inv_stdev_data[i]);
+    inv_stdev_data[i] = 1.0 / sqrtf(inv_stdev_data[i]);
   }
 }
 
