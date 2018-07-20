@@ -7,7 +7,6 @@
 #include "torch/csrc/jit/resource_guard.h"
 #include "torch/csrc/jit/source_location.h"
 #include "torch/csrc/jit/type.h"
-#include "torch/csrc/jit/variable_flags.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/utils/functional.h"
