@@ -46,6 +46,12 @@ IntList TensorImpl::sizes() const {
   return IntList(THTensor_getSizePtr(tensor), dim());
 }
 
+IntList TensorImpl::strides() const {
+  // NB: THTensor doesn't agree with Tensor for scalars, so we
+  // have to construct a fresh IntList
+  return IntList(THTensor_getStridePtr(tensor), dim());
+}
+
 void TensorImpl::release_resources() {
   if (tensor) {
       tensor->release();
