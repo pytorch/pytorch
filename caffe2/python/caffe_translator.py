@@ -649,6 +649,12 @@ def TranslateSoftmaxWithLoss(layer, pretrained_blobs, is_test, **kwargs):
         layer.top[0])
     return [softmax_op, xent_op, loss_op], []
 
+@TranslatorRegistry.Register("ChannelShuffle")
+def TranslateAccuracy(layer, pretrained_blobs, is_test, **kwargs):
+    caffe_op = BaseTranslate(layer, "ChannelShuffle")
+    #if layer.accuracy_param.top_k != 1:
+    AddArgument(caffe_op, "group", layer.shuffle_channel_param.group)
+    return caffe_op, []
 
 @TranslatorRegistry.Register("Accuracy")
 def TranslateAccuracy(layer, pretrained_blobs, is_test, **kwargs):
@@ -751,7 +757,7 @@ def TranslateScale(layer, pretrained_blobs, is_test, **kwargs):
             raise RuntimeError("This path has not been verified yet.")
 
         output = mul_op.output[0]
-        mul_op_param = output + '_w'
+        mul_op_param = output + '_scale_w'
         mul_op.input.append(mul_op_param)
         weights = []
         weights.append(utils.NumpyArrayToCaffe2Tensor(
@@ -767,7 +773,7 @@ def TranslateScale(layer, pretrained_blobs, is_test, **kwargs):
             # Include a separate Add op for the bias followed by Mul.
             add_op = copy.deepcopy(mul_op)
             add_op.type = "Add"
-            add_op_param = output + '_b'
+            add_op_param = output + '_scale_b'
             internal_blob = output + "_internal"
             del mul_op.output[:]
             mul_op.output.append(internal_blob)
