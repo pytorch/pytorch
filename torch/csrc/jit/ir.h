@@ -398,10 +398,10 @@ public:
   template<typename T>
   at::optional<T> get(Symbol name);
   at::optional<IValue> get(Symbol name);
-  Value* getValue(Symbol name);
+  Value* input(Symbol name);
 
   // Returns true if the value of input name is statically known
-  bool knows(Symbol name) {
+  bool is_constant(Symbol name) {
     return static_cast<bool>(get(name));
   }
 
@@ -663,7 +663,7 @@ public:
   }
 
   // XXX: this function is meant to be used with string literals only!
-  bool matches(const char *signature_literal);
+  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
 
   const FunctionSchema& schema() {
     if (!schema_) findSchema();

@@ -682,7 +682,7 @@ at::optional<IValue> Node::get(Symbol name) {
   return IValue{std::move(value)};
 }
 
-Value* Node::getValue(Symbol name) {
+Value* Node::input(Symbol name) {
   // TODO (apaszke): remove once tracer and compiler stop emitting attributes
   if (hasAttribute(name)) {
     switch (kindOf(name)) {
@@ -725,8 +725,12 @@ std::pair<Value*, const Argument&> Node::findInput(Symbol name) {
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
-bool Node::matches(const char *signature_literal) {
-  return sig(signature_literal).matches(this);
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+  if (!sig(signature_literal).matches(this)) return false;
+  for (Symbol s : const_inputs) {
+    if (!is_constant(s)) return false;
+  }
+  return true;
 }
 
 void Node::findSchema() {

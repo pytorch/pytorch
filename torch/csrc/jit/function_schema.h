@@ -79,7 +79,7 @@ struct FunctionSchema {
 
 // for debugging, make sure we can describe the call site
 inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
-  return out << arg.type->str() << " " << arg.name;
+  return out << arg.type->str() << " " << arg.name << (arg.default_value ? "=<default>" : "");
 }
 
 inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {

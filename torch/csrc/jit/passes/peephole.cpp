@@ -24,10 +24,10 @@ void PeepholeOptimize(Block * block) {
 
     // XXX: remember that if you want to simplify an expression by combining multiple nodes
     // into a different one, then you need to check that they all belong to the given block
-    if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor") &&
-        node->knows(attr::size)) {
+    if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor",
+        /*with_const=*/attr::size)) {
       // x.expand(x.size()) == x
-      if (auto input_type = node->getValue(attr::self)->type()->cast<TensorType>()) {
+      if (auto input_type = node->input(attr::self)->type()->cast<TensorType>()) {
         auto expanded_sizes = node->get<std::vector<int64_t>>(attr::size);
         if (expanded_sizes == input_type->sizes()) {
           node->output()->replaceAllUsesWith(node->input());
@@ -48,8 +48,8 @@ void PeepholeOptimize(Block * block) {
           self_type->device() == other_type->device()) {
         node->output()->replaceAllUsesWith(node->input(0));
       }
-    } else if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") &&
-               node->knows(attr::alpha)) {
+    } else if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
+               /*with_const=*/attr::alpha)) {
       // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
       if (tensor_as<double>(node->get<at::Tensor>(attr::alpha).value()) == 1.) {
         // Look for mm from both sides of the add

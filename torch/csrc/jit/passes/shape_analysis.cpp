@@ -264,8 +264,8 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     std::swap(strides.at(0), strides.at(1));
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return;
-  } else if (node->matches("aten::narrow(Tensor self, int dim, int start, int length) -> Tensor") &&
-             node->knows(attr::dim) && node->knows(attr::length)) {
+  } else if (node->matches("aten::narrow(Tensor self, int dim, int start, int length) -> Tensor",
+                           /*with_const=*/{attr::dim, attr::length})) {
     auto tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     int64_t dim = node->get<int64_t>(attr::dim).value();
@@ -277,8 +277,8 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   } else if (node->matches("aten::sum(Tensor self) -> Tensor")) {
     node->output()->setType(tensor_types.at(0)->withSizes({}));
     return;
-  } else if (node->matches("aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor") &&
-             node->knows(attr::dim) && node->knows(attr::keepdim)) {
+  } else if (node->matches("aten::sum(Tensor self, int[] dim, int keepdim) -> Tensor",
+             /*with_const=*/{attr::dim, attr::keepdim})) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto dims = node->get<std::vector<int64_t>>(attr::dim).value();
@@ -294,8 +294,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     node->output()->setType(tp->withSizes(sizes));
     return;
-  } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor") &&
-             node->knows(attr::dim)) {
+  } else if (node->matches("aten::squeeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto strides = tp->strides();
@@ -307,8 +306,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     }
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return;
-  } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor") &&
-             node->knows(attr::dim)) {
+  } else if (node->matches("aten::unsqueeze(Tensor self, int dim) -> Tensor", /*with_const=*/attr::dim)) {
     auto & tp = tensor_types.at(0);
     auto sizes = tp->sizes();
     auto strides = tp->strides();
@@ -319,8 +317,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     strides.insert(strides.begin() + dim, new_stride);
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return;
-  } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor") &&
-             node->knows(attr::size)) {
+  } else if (node->matches("aten::view(Tensor self, int[] size) -> Tensor", /*with_const=*/attr::size)) {
     auto sizes = node->get<std::vector<int64_t>>(attr::size).value();
     bool inferred = false;
     size_t inferred_idx;
@@ -347,22 +344,22 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     return;
   } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
     if (tensor_types.at(0)->scalarType() == tensor_types.at(1)->scalarType()) {
-      node->output()->setType(node->getValue(attr::self)->type());
+      node->output()->setType(node->input(attr::self)->type());
     } else {
       // This will be a copy, so the result will be contiguous
       node->output()->setType(tensor_types.at(1)->withSizes(tensor_types.at(0)->sizes()));
     }
     return;
-  } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor") &&
-             node->knows(attr::size)) {
+  } else if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor",
+             /*with_const=*/attr::size)) {
     auto tp = tensor_types.at(0);
     std::vector<int64_t> sizes, strides;
     std::tie(sizes, strides) = at::inferExpandGeometry(
         tp->sizes(), tp->strides(), node->get<std::vector<int64_t>>(attr::size).value());
     node->output()->setType(tp->withSizesStrides(sizes, strides));
     return;
-  } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor") &&
-             node->knows(attr::dim)) {
+  } else if (node->matches("aten::index_select(Tensor self, int dim, Tensor index) -> Tensor",
+             /*with_const=*/attr::dim)) {
     auto ten = tensor_types.at(0);
     auto index = tensor_types.at(1);
     int64_t dim = node->get<int64_t>(attr::dim).value();
