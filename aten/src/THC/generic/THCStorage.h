@@ -2,8 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCStorage.h"
 #else
 
-#define TH_STORAGE_REFCOUNTED 1
-#define TH_STORAGE_RESIZABLE  2
+#define TH_STORAGE_RESIZABLE  1
 
 #define THCStorage THStorage
 
@@ -45,8 +44,7 @@ THC_API THCStorage* THCStorage_(newWithDataAndAllocator)(
   at::Allocator* allocator);
 #endif
 
-THC_API void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag);
-THC_API void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag);
+THC_API void THCStorage_(setResizable)(THCState *state, THCStorage *storage, bool resizable);
 THC_API void THCStorage_(retain)(THCState *state, THCStorage *storage);
 
 THC_API void THCStorage_(free)(THCState *state, THCStorage *storage);

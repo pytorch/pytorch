@@ -8,12 +8,13 @@ namespace at {
 struct Type;
 
 struct Storage {
-  static const char RESIZABLE = 2;
-
   Storage() {}
   Storage(THStorage* storage)
       : storage(storage) {}
-  Storage(const Storage& other) = delete;
+  Storage(Storage&) = delete;
+  Storage(const Storage&) = delete;
+  Storage(Storage&&) = delete;
+  Storage(const Storage&&) = delete;
   virtual ~Storage() {
     THStorage_free(storage);
   }
@@ -42,8 +43,8 @@ struct Storage {
   int getDevice() const {
     return storage->data_ptr.device().index();
   }
-  void clear_flag(char flag) {
-    THStorage_clearFlag(storage, flag);
+  void set_resizable(bool resizable) {
+    THStorage_setResizable(storage, resizable);
   }
 
  protected:

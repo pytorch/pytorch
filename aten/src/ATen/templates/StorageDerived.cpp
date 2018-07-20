@@ -21,8 +21,9 @@ ${Storage}::${Storage}(size_t storage_size)
 
 ${Storage}::${Storage}(size_t size, Allocator* allocator)
   : Storage(nullptr) {
-  storage = ${THStorage}_newWithAllocator(${state,} size, allocator);
-  ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
+//  storage = ${THStorage}_newWithAllocator(${state,} size, allocator);
+  storage = new THStorage(ScalarType::${ScalarName}, size, allocator, TH_STORAGE_RESIZABLE);
+  THStorage_setResizable(storage, TH_STORAGE_RESIZABLE);
 }
 
 // TODO: Take in Device as an input to the std::function constructor
@@ -47,7 +48,7 @@ ${Storage}::${Storage}(
        ), size,
      /* allocator */ nullptr
     )) {
-    ${THStorage}_clearFlag(${state,} storage, TH_STORAGE_RESIZABLE);
+    ${THStorage}_setResizable(${state,} storage, TH_STORAGE_RESIZABLE);
 }
 
 ${Storage}::~${Storage}() { }

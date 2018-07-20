@@ -35,8 +35,7 @@
 
 ptrdiff_t THStorage_size(const THStorage *self);
 
-void THStorage_setFlag(THStorage *storage, const char flag);
-void THStorage_clearFlag(THStorage *storage, const char flag);
+void THStorage_setResizable(THStorage *storage, bool resizable);
 void THStorage_retain(THStorage *storage);
 void THStorage_resize(THStorage *storage, ptrdiff_t size);
 void THStorage_swap(THStorage *storage1, THStorage *storage2);
