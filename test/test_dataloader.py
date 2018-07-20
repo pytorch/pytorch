@@ -9,7 +9,7 @@ import time
 import traceback
 import unittest
 import subprocess
-from torch import multiprocessing
+from torch import multiprocessing as mp
 from torch.utils.data import Dataset, TensorDataset, DataLoader, ConcatDataset
 from torch.utils.data.dataset import random_split
 from torch.utils.data.dataloader import default_collate, ExceptionWrapper, MANAGER_STATUS_CHECK_INTERVAL
@@ -24,12 +24,9 @@ TEST_CUDA = torch.cuda.is_available()
 # We need spawn start method for test_manager_unclean_exit, but
 # Python 2.7 doesn't allow it.
 if sys.version_info[0] == 3:
-    # Without the try-catch block, some tests will complain that
-    # context has already been set.
-    try:
-        multiprocessing.set_start_method('spawn')
-    except RuntimeError:
-        pass
+    # Get a multiprocessing context because some test / third party library will
+    # set start_method when imported, and setting again triggers RuntimeError.
+    mp = mp.get_context(method='spawn')
 
 
 JOIN_TIMEOUT = 17.0 if IS_WINDOWS else 6.5
@@ -144,11 +141,11 @@ class TestConcatDataset(TestCase):
 
 # Stores the first encountered exception in .exception.
 # Inspired by https://stackoverflow.com/a/33599967
-class ErrorTrackingProcess(multiprocessing.Process):
+class ErrorTrackingProcess(mp.Process):
 
     def __init__(self, *args, **kwargs):
         super(ErrorTrackingProcess, self).__init__(*args, **kwargs)
-        self._pconn, self._cconn = multiprocessing.Pipe()
+        self._pconn, self._cconn = mp.Pipe()
         self._exception = None
 
     def run(self):
@@ -235,8 +232,8 @@ class SynchronizedSeedDataset(Dataset):
 
     def __init__(self, size, num_workers):
         assert size >= num_workers
-        self.count = multiprocessing.Value('i', 0, lock=True)
-        self.barrier = multiprocessing.Semaphore(0)
+        self.count = mp.Value('i', 0, lock=True)
+        self.barrier = mp.Semaphore(0)
         self.num_workers = num_workers
         self.size = size
 
@@ -537,12 +534,12 @@ class TestDataLoader(TestCase):
     def test_manager_unclean_exit(self):
         '''there might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
 but they are all safe to ignore'''
-        worker_pids = multiprocessing.Array('i', [0] * 4)
+        worker_pids = mp.Array('i', [0] * 4)
 
-        manager_exit_event = multiprocessing.Event()
-        mp = multiprocessing.Process(target=TestDataLoader._manager_process,
-                                     args=(self.dataset, worker_pids, manager_exit_event))
-        mp.start()
+        manager_exit_event = mp.Event()
+        p = mp.Process(target=TestDataLoader._manager_process,
+                       args=(self.dataset, worker_pids, manager_exit_event))
+        p.start()
 
         manager_exit_event.wait()
 

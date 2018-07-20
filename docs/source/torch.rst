@@ -223,6 +223,7 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isfinite
 .. autofunction:: isinf
 .. autofunction:: isnan
 .. autofunction:: kthvalue
@@ -250,6 +251,7 @@ Spectral Ops
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: bincount
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diagflat
@@ -257,6 +259,7 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flip
 .. autofunction:: histc
+.. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: trace
 .. autofunction:: tril

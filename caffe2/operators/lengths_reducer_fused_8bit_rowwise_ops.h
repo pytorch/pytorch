@@ -68,6 +68,8 @@ class SparseLengthsFused8BitRowwiseOp : public Operator<Context> {
     return true;
   }
 
+  USE_VALUE_KEY_LENGTH_INPUT_FILLERS(Context, DATA, INDICES, LENGTHS)
+
  private:
   enum {
     DATA = 0,

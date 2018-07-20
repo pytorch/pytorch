@@ -249,8 +249,6 @@ class TestMultiprocessing(TestCase):
         self._test_sharing(repeat=TEST_REPEATS)
 
     @unittest.skipIf(platform == 'darwin', "file descriptor strategy is not supported on macOS")
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "test_fd_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fd_preserve_sharing(self):
         self._test_preserve_sharing(repeat=TEST_REPEATS)
 
@@ -264,8 +262,6 @@ class TestMultiprocessing(TestCase):
         with fs_sharing():
             self._test_sharing(repeat=TEST_REPEATS)
 
-    @unittest.skipIf(TEST_WITH_ASAN,
-                     "test_fs_preserve_sharing is known buggy, see https://github.com/pytorch/pytorch/issues/5311")
     def test_fs_preserve_sharing(self):
         with fs_sharing():
             self._test_preserve_sharing(repeat=TEST_REPEATS)

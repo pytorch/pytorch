@@ -2,9 +2,9 @@
 #include <cub/block/block_reduce.cuh>
 
 #include "caffe2/core/context_gpu.h"
-#include "softmax_op.h"
-#include "softmax_with_loss_op.h"
-#include "spatial_softmax_with_loss_op.h"
+#include "caffe2/operators/softmax_op.h"
+#include "caffe2/operators/softmax_with_loss_op.h"
+#include "caffe2/operators/spatial_softmax_with_loss_op.h"
 
 namespace caffe2 {
 
@@ -70,7 +70,7 @@ __global__ void ProbCrossEntropyKernel(
       int idx = i * D + j;
       CUDA_KERNEL_ASSERT(labeldata[idx] >= 0);
       total_prob += labeldata[idx];
-      sum += -logf(max(Pdata[idx], FLT_MIN)) * labeldata[idx] * weight;
+      sum += -logf(fmaxf(Pdata[idx], FLT_MIN)) * labeldata[idx] * weight;
     }
     float tot = BlockReduce(temp_storage).Sum(sum);
     __syncthreads();
@@ -78,7 +78,7 @@ __global__ void ProbCrossEntropyKernel(
     if (threadIdx.x == 0) {
       Ydata[i] = tot;
       // Sanity check
-      CUDA_KERNEL_ASSERT(abs(1.0 - total_prob_sum) < 1e-5f);
+      CUDA_KERNEL_ASSERT(fabsf(1.0 - total_prob_sum) < 1e-5f);
     }
     __syncthreads();
   }
@@ -118,14 +118,14 @@ __global__ void SpatialSoftmaxKernel(
     float max_val = -FLT_MAX;
     for(int c = 0; c < D; ++c) {
       int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-      max_val = max(max_val, Xdata[idx]);
+      max_val = fmaxf(max_val, Xdata[idx]);
     }
 
     // Exponentiate
     float expsum = 0.0f;
     for(int c = 0; c < D; ++c) {
       int idx = i * (H * W * D) + c * (H * W) + y * W + x;
-      float expx = exp(Xdata[idx] - max_val);
+      float expx = expf(Xdata[idx] - max_val);
       Pdata[idx] = expx;
       expsum += expx;
     }
@@ -160,7 +160,7 @@ __global__ void SpatialCrossEntropyLossKernel(
     if (label != DONTCARE) {
       CUDA_KERNEL_ASSERT(label >= 0 && label < D);
       float weight = (weights == NULL ? 1.0 : weights[index]);
-      loss_data[index] = -log(max(
+      loss_data[index] = -logf(fmaxf(
         Pdata[i * W * H * D + label * W * H + y * W + x], 1e-20f)) * weight;
       weight_data[index] = weight;
     } else {
@@ -213,7 +213,7 @@ __global__ void SoftmaxNormalizeLogsKernel(
     float* out_log) {
   CUDA_1D_KERNEL_LOOP(index, nthreads) {
     int n = index / D;
-    out_log[index] = logits[index] - rowmax[n] - logf(max(scales[n], FLT_MIN));
+    out_log[index] = logits[index] - rowmax[n] - logf(fmaxf(scales[n], FLT_MIN));
   }
 }
 

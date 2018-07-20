@@ -120,7 +120,7 @@ TEST_CASE("module/as") {
   REQUIRE(unit.as<AGIUnit>() == &unit);
 }
 
-TEST_CASE("module/conversions", "[cuda]") {
+TEST_CASE("module/conversions", "[multi-cuda]") {
   torch::manual_seed(0);
   Linear module(128, 64);
   SECTION("starts as float on CPU") {
@@ -348,5 +348,33 @@ TEST_CASE("module/buffers") {
     REQUIRE(buffers.contains("a"));
     REQUIRE(buffers.contains("b"));
     REQUIRE(buffers.contains("c"));
+  }
+}
+
+TEST_CASE("module/default-constructor") {
+  struct AImpl : torch::nn::Module {
+    AImpl() : x_(123) {}
+    AImpl(int x) : x_(x) {}
+    int x_;
+  };
+  TORCH_MODULE(A);
+
+  {
+    A a;
+    REQUIRE(a);
+    REQUIRE(!a.is_empty());
+    REQUIRE(a->x_ == 123);
+  }
+  {
+    A a(5);
+    REQUIRE(a);
+    REQUIRE(!a.is_empty());
+    REQUIRE(a->x_ == 5);
+  }
+  {
+    A a = nullptr;
+    REQUIRE(!a);
+    REQUIRE(a.is_empty());
+    REQUIRE_THROWS_WITH(a->x_, StartsWith("Accessing empty ModuleHolder"));
   }
 }

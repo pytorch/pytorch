@@ -4,12 +4,14 @@
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_arg_parser.h"
 #include "torch/csrc/utils/python_strings.h"
+#include "torch/csrc/utils/python_numbers.h"
 #include "torch/csrc/utils/pybind.h"
 
 #include <ATen/Device.h>
 #include <ATen/Error.h>
 
 #include <cstring>
+#include <limits>
 #include <structmember.h>
 #include <sstream>
 
@@ -93,6 +95,13 @@ PyObject *THPDevice_index(THPDevice *self)
     Py_RETURN_NONE;
   }
   END_HANDLE_TH_ERRORS
+}
+
+static Py_ssize_t THPDevice_hash(THPDevice *self)
+{
+  HANDLE_TH_ERRORS
+  return static_cast<Py_ssize_t>(std::hash<at::Device>{}(self->device) % std::numeric_limits<Py_ssize_t>::max());
+  END_HANDLE_TH_ERRORS_RET(-1)
 }
 
 PyObject *THPDevice_rc(PyObject *a, PyObject *b, int op) {
@@ -181,7 +190,7 @@ PyTypeObject THPDeviceType = {
   0,                                     /* tp_as_number */
   0,                                     /* tp_as_sequence */
   0,                                     /* tp_as_mapping */
-  0,                                     /* tp_hash  */
+  (hashfunc)THPDevice_hash,              /* tp_hash  */
   0,                                     /* tp_call */
   (reprfunc)THPDevice_str,               /* tp_str */
   0,                                     /* tp_getattro */

@@ -3,6 +3,7 @@ import warnings
 from functools import total_ordering
 
 import torch
+from torch._six import inf
 
 from .bernoulli import Bernoulli
 from .beta import Beta
@@ -113,7 +114,7 @@ def _infinite_like(tensor):
     """
     Helper function for obtaining infinite KL Divergence throughout
     """
-    return tensor.new_tensor(float('inf')).expand_as(tensor)
+    return tensor.new_tensor(inf).expand_as(tensor)
 
 
 def _x_log_x(tensor):
@@ -173,10 +174,10 @@ _euler_gamma = 0.57721566490153286060
 @register_kl(Bernoulli, Bernoulli)
 def _kl_bernoulli_bernoulli(p, q):
     t1 = p.probs * (p.probs / q.probs).log()
-    t1[q.probs == 0] = float('inf')
+    t1[q.probs == 0] = inf
     t1[p.probs == 0] = 0
     t2 = (1 - p.probs) * ((1 - p.probs) / (1 - q.probs)).log()
-    t2[q.probs == 1] = float('inf')
+    t2[q.probs == 1] = inf
     t2[p.probs == 1] = 0
     return t1 + t2
 
@@ -208,7 +209,7 @@ def _kl_binomial_binomial(p, q):
 @register_kl(Categorical, Categorical)
 def _kl_categorical_categorical(p, q):
     t = p.probs * (p.logits - q.logits)
-    t[q.probs == 0] = float('inf')
+    t[q.probs == 0] = inf
     t[p.probs == 0] = 0
     return t.sum(-1)
 
@@ -322,7 +323,7 @@ def _kl_pareto_pareto(p, q):
     t1 = q.alpha * scale_ratio.log()
     t2 = -alpha_ratio.log()
     result = t1 + t2 + alpha_ratio - 1
-    result[p.support.lower_bound < q.support.lower_bound] = float('inf')
+    result[p.support.lower_bound < q.support.lower_bound] = inf
     return result
 
 
@@ -346,7 +347,7 @@ def _kl_transformed_transformed(p, q):
 @register_kl(Uniform, Uniform)
 def _kl_uniform_uniform(p, q):
     result = ((q.high - q.low) / (p.high - p.low)).log()
-    result[(q.low > p.low) | (q.high < p.high)] = float('inf')
+    result[(q.low > p.low) | (q.high < p.high)] = inf
     return result
 
 
@@ -392,7 +393,7 @@ def _kl_beta_normal(p, q):
 @register_kl(Beta, Uniform)
 def _kl_beta_uniform(p, q):
     result = -p.entropy() + (q.high - q.low).log()
-    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = float('inf')
+    result[(q.low > p.support.lower_bound) | (q.high < p.support.upper_bound)] = inf
     return result
 
 
@@ -543,7 +544,7 @@ def _kl_pareto_exponential(p, q):
     t2 = p.alpha.reciprocal()
     t3 = p.alpha * scale_rate_prod / (p.alpha - 1)
     result = t1 - t2 + t3 - 1
-    result[p.alpha <= 1] = float('inf')
+    result[p.alpha <= 1] = inf
     return result
 
 
@@ -555,7 +556,7 @@ def _kl_pareto_gamma(p, q):
     t3 = (1 - q.concentration) * common_term
     t4 = q.rate * p.alpha * p.scale / (p.alpha - 1)
     result = t1 + t2 + t3 + t4 - 1
-    result[p.alpha <= 1] = float('inf')
+    result[p.alpha <= 1] = inf
     return result
 
 # TODO: Add Pareto-Laplace KL Divergence
@@ -570,7 +571,7 @@ def _kl_pareto_normal(p, q):
     t3 = p.alpha * common_term.pow(2) / (p.alpha - 2)
     t4 = (p.alpha * common_term - q.loc).pow(2)
     result = t1 - t2 + (t3 + t4) / var_normal - 1
-    result[p.alpha <= 2] = float('inf')
+    result[p.alpha <= 2] = inf
     return result
 
 
@@ -588,14 +589,14 @@ def _kl_uniform_beta(p, q):
     t3 = (q.concentration0 - 1) * (_x_log_x((1 - p.high)) - _x_log_x((1 - p.low)) + common_term) / common_term
     t4 = q.concentration1.lgamma() + q.concentration0.lgamma() - (q.concentration1 + q.concentration0).lgamma()
     result = t3 + t4 - t1 - t2
-    result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = float('inf')
+    result[(p.high > q.support.upper_bound) | (p.low < q.support.lower_bound)] = inf
     return result
 
 
 @register_kl(Uniform, Exponential)
 def _kl_uniform_exponetial(p, q):
     result = q.rate * (p.high + p.low) / 2 - ((p.high - p.low) * q.rate).log()
-    result[p.low < q.support.lower_bound] = float('inf')
+    result[p.low < q.support.lower_bound] = inf
     return result
 
 
@@ -607,7 +608,7 @@ def _kl_uniform_gamma(p, q):
     t3 = (1 - q.concentration) * (_x_log_x(p.high) - _x_log_x(p.low) - common_term) / common_term
     t4 = q.rate * (p.high + p.low) / 2
     result = -t1 + t2 + t3 + t4
-    result[p.low < q.support.lower_bound] = float('inf')
+    result[p.low < q.support.lower_bound] = inf
     return result
 
 
@@ -638,5 +639,5 @@ def _kl_uniform_pareto(p, q):
     t1 = (q.alpha * q.scale.pow(q.alpha) * (support_uniform)).log()
     t2 = (_x_log_x(p.high) - _x_log_x(p.low) - support_uniform) / support_uniform
     result = t2 * (q.alpha + 1) - t1
-    result[p.low < q.support.lower_bound] = float('inf')
+    result[p.low < q.support.lower_bound] = inf
     return result

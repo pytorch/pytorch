@@ -1,7 +1,5 @@
 #pragma once
 
-#include <THC/THC.h>
-
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
 
@@ -21,7 +19,7 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const at::optional<std::vector<int64_t>>& chunk_sizes = at::nullopt,
     int64_t dim = 0,
-    const at::optional<std::vector<THCStream*>>& streams = at::nullopt);
+    const at::optional<std::vector<at::CUDAStream>>& streams = at::nullopt);
 
 at::Tensor gather(
     at::TensorList tensors,

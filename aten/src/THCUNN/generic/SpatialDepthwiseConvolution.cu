@@ -23,15 +23,15 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   // the caller, so we verify that here to some extent
 
   // Weight Tensor is shape (output_channels, 1, kH, kW)
-  THAssert(weight->size[1] == 1);
+  THAssert(weight->size(1) == 1);
 
   // Input Tensor is shape (N, input_channels, H, W)
   // We verify that the # of output_channels is a multiple of input_channels
-  THAssert(weight->size[0] % input->size[1] == 0);
+  THAssert(weight->size(0) % input->size(1) == 0);
 
   // Bias has same # of channels as output
   if (bias) {
-    THAssert(bias->size[0] == weight->size[0]);
+    THAssert(bias->size(0) == weight->size(0));
   }
 
   input = THCTensor_(newContiguous)(state, input);
@@ -41,12 +41,12 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
   // Following the behvaior of other THCUNN functions, we shape the output
   // Tensor ourselves
 
-  int batchSize = input->size[0];
-  int height = input->size[2];
-  int width = input->size[3];
+  int batchSize = input->size(0);
+  int height = input->size(2);
+  int width = input->size(3);
   int outputHeight = (height + 2 * padH - (dilationH * (kH - 1) + 1)) / dH + 1;
   int outputWidth = (width + 2 * padW - (dilationW * (kW - 1) + 1)) / dW + 1;
-  int outputChannels = weight->size[0];
+  int outputChannels = weight->size(0);
 
   THCTensor_(resize4d)(state, output, batchSize, outputChannels, outputHeight, outputWidth);
 
@@ -61,7 +61,7 @@ void THNN_(SpatialDepthwiseConvolution_updateOutput)(
     dBias = toDeviceTensor<real, 1>(state, bias);
   }
 
-  int inputChannels = input->size[1];
+  int inputChannels = input->size(1);
   int depthwiseMultiplier = outputChannels / inputChannels;
 
   // One thread per output value
@@ -113,20 +113,20 @@ void THNN_(SpatialDepthwiseConvolution_updateGradInput)(
 
   // Minimal shape checking, as above
   // Same # of elements in batch
-  THAssert(input->size[0] == gradOutput->size[0]);
+  THAssert(input->size(0) == gradOutput->size(0));
   // Same # of filters as outputChannels
-  THAssert(weight->size[0] == gradOutput->size[1]);
+  THAssert(weight->size(0) == gradOutput->size(1));
 
   // Resize GradInput
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  int inputChannels = input->size[1];
-  int height = input->size[2];
-  int width = input->size[3];
+  int inputChannels = input->size(1);
+  int height = input->size(2);
+  int width = input->size(3);
 
-  int outputChannels = gradOutput->size[1];
-  int outputHeight = gradOutput->size[2];
-  int outputWidth = gradOutput->size[3];
+  int outputChannels = gradOutput->size(1);
+  int outputHeight = gradOutput->size(2);
+  int outputWidth = gradOutput->size(3);
 
   int depthwiseMultiplier = outputChannels / inputChannels;
 
@@ -210,18 +210,18 @@ void THNN_(SpatialDepthwiseConvolution_accGradParameters)(
 
   // Minimal shape checking as above
   // Same # of elements in batch
-  THAssert(input->size[0] == gradOutput->size[0]);
+  THAssert(input->size(0) == gradOutput->size(0));
   // Same # of filters as outputChannels
-  THAssert(gradWeight->size[0] == gradOutput->size[1]);
+  THAssert(gradWeight->size(0) == gradOutput->size(1));
 
-  int batchSize = input->size[0];
-  int inputChannels = input->size[1];
-  int height = input->size[2];
-  int width = input->size[3];
+  int batchSize = input->size(0);
+  int inputChannels = input->size(1);
+  int height = input->size(2);
+  int width = input->size(3);
 
-  int outputChannels = gradOutput->size[1];
-  int outputHeight = gradOutput->size[2];
-  int outputWidth = gradOutput->size[3];
+  int outputChannels = gradOutput->size(1);
+  int outputHeight = gradOutput->size(2);
+  int outputWidth = gradOutput->size(3);
 
   int depthwiseMultiplier = outputChannels / inputChannels;
 

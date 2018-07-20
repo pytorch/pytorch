@@ -175,6 +175,9 @@ goto:eof
   cmake .. %CMAKE_GENERATOR_COMMAND% ^
                   -DCMAKE_BUILD_TYPE=%BUILD_TYPE% ^
                   -DBUILD_CAFFE2=OFF ^
+                  -DBUILD_TORCH="%BUILD_TORCH%" ^
+                  -DNVTOOLEXT_HOME="%NVTOOLEXT_HOME%" ^
+                  -DNO_API=ON ^
                   -DBUILD_ATEN=ON ^
                   -DBUILD_PYTHON=OFF ^
                   -DBUILD_BINARY=OFF ^
