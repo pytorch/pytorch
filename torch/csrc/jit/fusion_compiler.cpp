@@ -9,6 +9,7 @@
 
 #include "ATen/ATen.h"
 #ifdef USE_CUDA
+#include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
@@ -651,7 +652,7 @@ protected:
             *(THCCachingAllocator_getCudaFreeMutex()));
         cudaFree(0);
      }
-     CUstream stream = at::globalContext().getCurrentCUDAStream();
+     CUstream stream = at::cuda::getCurrentCUDAStream();
      TORCH_CU_CHECK(cuLaunchKernel(
        function,
        numBlocks, 1, 1,
