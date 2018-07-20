@@ -39,8 +39,7 @@ THD_API THDStorage* THDStorage_(newWithMapping)(const char *filename, ptrdiff_t 
     //real* data, ptrdiff_t size, THDAllocator* allocator, void *allocatorContext);
 
 /* should not differ with API */
-THD_API void THDStorage_(setFlag)(THDStorage *storage, const char flag);
-THD_API void THDStorage_(clearFlag)(THDStorage *storage, const char flag);
+THD_API void THDStorage_(setResizable)(THDStorage *storage, const bool);
 THD_API void THDStorage_(retain)(THDStorage *storage);
 THD_API void THDStorage_(swap)(THDStorage *storage1, THDStorage *storage2);
 

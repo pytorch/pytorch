@@ -20,8 +20,7 @@
    primitives??
  */
 
-#define TH_STORAGE_REFCOUNTED 1
-#define TH_STORAGE_RESIZABLE  2
+#define TH_STORAGE_RESIZABLE  1
 
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
 typedef struct THStorage THStorage;
@@ -61,8 +60,8 @@ TH_API THStorage* THStorage_(newWithDataAndAllocator)(
 #endif
 
 /* should not differ with API */
-TH_API void THStorage_(setFlag)(THStorage *storage, const char flag);
-TH_API void THStorage_(clearFlag)(THStorage *storage, const char flag);
+
+TH_API void THStorage_(setResizable)(THStorage *storage, bool resizable);
 TH_API void THStorage_(retain)(THStorage *storage);
 TH_API void THStorage_(swap)(THStorage *storage1, THStorage *storage2);
 

@@ -44,7 +44,7 @@ THCStorage* THCStorage_(new)(THCState *state)
       at::CTypeToScalarType<real>::to(),
       0,
       state->cudaDeviceAllocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      TH_STORAGE_RESIZABLE);
   return storage;
 }
 
@@ -54,7 +54,7 @@ THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
       at::CTypeToScalarType<real>::to(),
       size,
       state->cudaDeviceAllocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      TH_STORAGE_RESIZABLE);
   return storage;
 }
 
@@ -65,7 +65,7 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
       at::CTypeToScalarType<real>::to(),
       size,
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      TH_STORAGE_RESIZABLE);
   return storage;
 }
 
@@ -119,18 +119,13 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
       size,
       std::move(data),
       allocator,
-      TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE);
+      TH_STORAGE_RESIZABLE);
   return storage;
 }
 
-void THCStorage_(setFlag)(THCState *state, THCStorage *storage, const char flag)
+void THCStorage_(setResizable)(THCState *state, THCStorage *storage, bool resizable)
 {
-  THStorage_setFlag(storage, flag);
-}
-
-void THCStorage_(clearFlag)(THCState *state, THCStorage *storage, const char flag)
-{
-  THStorage_clearFlag(storage, flag);
+  THStorage_setResizable(storage, resizable);
 }
 
 void THCStorage_(retain)(THCState *state, THCStorage *self)

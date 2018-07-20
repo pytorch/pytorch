@@ -5,6 +5,7 @@
 #define __STDC_FORMAT_MACROS
 #endif
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <stdio.h>

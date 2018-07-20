@@ -40,14 +40,14 @@ struct THFinalizer {
 struct THStorage
 {
   THStorage() = delete;
-  THStorage(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, char);
-  THStorage(at::ScalarType, ptrdiff_t, at::Allocator*, char);
+  THStorage(at::ScalarType, int64_t, at::DataPtr, at::Allocator*, bool);
+  THStorage(at::ScalarType, int64_t, at::Allocator*, bool);
   at::ScalarType scalar_type;
   at::DataPtr data_ptr;
-  ptrdiff_t size;
+  int64_t size;
   std::atomic<int> refcount;
   std::atomic<int> weakcount;
-  char flag;
+  bool resizable_;
   at::Allocator* allocator;
   std::unique_ptr<THFinalizer> finalizer;
   struct THStorage* view;

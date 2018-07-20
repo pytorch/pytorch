@@ -2,27 +2,27 @@
 
 THStorage::THStorage(
     at::ScalarType scalar_type,
-    ptrdiff_t size,
+    int64_t size,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
-    char flag)
+    bool resizable)
     : scalar_type(scalar_type),
       data_ptr(std::move(data_ptr)),
       size(size),
       refcount(1),
       weakcount(1), // from the strong reference
-      flag(flag),
+      resizable_(resizable),
       allocator(allocator),
       finalizer(nullptr) {}
 
 THStorage::THStorage(
     at::ScalarType scalar_type,
-    ptrdiff_t size,
+    int64_t size,
     at::Allocator* allocator,
-    char flag)
+    bool resizable)
     : THStorage(
           scalar_type,
           size,
           allocator->allocate(at::elementSize(scalar_type) * size),
           allocator,
-          flag) {}
+          resizable) {}

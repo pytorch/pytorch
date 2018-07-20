@@ -12,7 +12,7 @@ static THDStorage* THDStorage_(_alloc)() {
   new (&new_storage->refcount) std::atomic<int>(1);
   new_storage->storage_id = THDState::s_nextId++;
   new_storage->node_id = THDState::s_current_worker;
-  new_storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
+  new_storage->resizable_ = TH_STORAGE_RESIZABLE;
   return new_storage;
 }
 
@@ -149,16 +149,12 @@ THDStorage* THDStorage_(newWithSize4)(real value1, real value2, real value3, rea
   return storage;
 }
 
-void THDStorage_(setFlag)(THDStorage *storage, const char flag) {
-  storage->flag |= flag;
-}
-
-void THDStorage_(clearFlag)(THDStorage *storage, const char flag) {
-  storage->flag &= ~flag;
+void THDStorage_(setResizable)(THDStorage *storage, bool resizable) {
+  storage->resizable_ = resizable;
 }
 
 void THDStorage_(retain)(THDStorage *storage) {
-  if (storage && (storage->flag & TH_STORAGE_REFCOUNTED))
+  if (storage)
     storage->refcount++;
 }
 
@@ -169,7 +165,8 @@ void THDStorage_(swap)(THDStorage *storage1, THDStorage *storage2) {
 }
 
 void THDStorage_(free)(THDStorage *storage) {
-  if (!storage || !(storage->flag & TH_STORAGE_REFCOUNTED)) return;
+  if (!storage)
+    return;
 
   if (--storage->refcount == 0) {
     masterCommandChannel->sendMessage(
@@ -185,7 +182,7 @@ void THDStorage_(free)(THDStorage *storage) {
 }
 
 void THDStorage_(resize)(THDStorage *storage, ptrdiff_t size) {
-  if (!(storage->flag & TH_STORAGE_RESIZABLE))
+  if (!storage->resizable_)
     THError("Trying to resize storage that is not resizable");
   if (size < storage->size)
     return;
