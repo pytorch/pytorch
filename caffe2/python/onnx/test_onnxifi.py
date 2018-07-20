@@ -19,6 +19,7 @@ from caffe2.python.models.download import downloadFromURLToFile, getURLFromName,
 from caffe2.python.onnx.onnxifi import onnxifi_caffe2_net
 from caffe2.python.onnx.tests.test_utils import TestCase
 
+
 def _print_net(net):
     for i in net.external_input:
         print("Input: {}".format(i))
@@ -98,6 +99,7 @@ class OnnxifiTest(TestCase):
         Y = workspace.FetchBlob("Y")
         np.testing.assert_almost_equal(Y, Y_without_padding)
 
+
 class OnnxifiTransformTest(TestCase):
     def _model_dir(self, model):
         caffe2_home = os.path.expanduser(os.getenv('CAFFE2_HOME', '~/.caffe2'))
@@ -170,13 +172,12 @@ class OnnxifiTransformTest(TestCase):
         pred_net.op.extend([tail])
         pred_net.external_output[0] = new_tail
 
-
-    @unittest.skip("Need ONNXIFI backend support")
+    #@unittest.skip("Need ONNXIFI backend support")
     def test_resnet50_core(self):
         N = 1
         repeat = 1
         print("Batch size: {}, repeat inference {} times".format(N, repeat))
-        init_net, pred_net, _  = self._get_c2_model('resnet50')
+        init_net, pred_net, _ = self._get_c2_model('resnet50')
         self._add_head_tail(pred_net, 'real_data', 'real_softmax')
         input_blob_dims = (N, 3, 224, 224)
         input_name = "real_data"
@@ -222,14 +223,14 @@ class OnnxifiTransformTest(TestCase):
             workspace.FeedBlob(input_name, data)
             workspace.CreateNet(pred_net_cut)
             end = time.time()
-            print("Conversion time: {:.2f}s".format(end -start))
+            print("Conversion time: {:.2f}s".format(end - start))
 
             start = time.time()
             for _ in range(repeat):
                 workspace.RunNet(pred_net_cut.name)
             end = time.time()
             trt_time = end - start
-            print("Onnxifi runtime: {}s, improvement: {}%".format(trt_time, (c2_time-trt_time)/c2_time*100))
+            print("Onnxifi runtime: {}s, improvement: {}%".format(trt_time, (c2_time - trt_time) / c2_time * 100))
             output_values = [workspace.FetchBlob(name) for name in net_outputs]
             Y_trt = namedtupledict('Outputs', net_outputs)(*output_values)
         np.testing.assert_allclose(Y_c2, Y_trt, rtol=1e-3)

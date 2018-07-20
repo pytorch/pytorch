@@ -20,7 +20,7 @@ class OnnxExporter;
 
 class OnnxifiTransformer {
  public:
-  OnnxifiTransformer(bool debug);
+  explicit OnnxifiTransformer(bool debug);
 
   void Transform(
       Workspace* ws,

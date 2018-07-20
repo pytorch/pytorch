@@ -41,7 +41,9 @@ std::unordered_map<std::string, TensorShape> InferShapes(
   return shape_hints;
 }
 
-void DumpModel(const ::ONNX_NAMESPACE::ModelProto& model, const std::string& fname) {
+void DumpModel(
+    const ::ONNX_NAMESPACE::ModelProto& model,
+    const std::string& fname) {
   std::ofstream ff(fname);
   std::string body;
   ::google::protobuf::TextFormat::PrintToString(model.graph(), &body);
@@ -86,7 +88,8 @@ OnnxifiTransformer::OnnxifiTransformer(bool debug) : debug_(debug) {
   lib_ = onnx::initOnnxifiLibrary();
   CAFFE_ENFORCE(lib_, "Cannot initialize ONNXIFI library");
   CAFFE_ENFORCE_EQ(
-      lib_->onnxGetBackendIDs(nullptr, &num_backends_), ONNXIFI_STATUS_FALLBACK);
+      lib_->onnxGetBackendIDs(nullptr, &num_backends_),
+      ONNXIFI_STATUS_FALLBACK);
   CAFFE_ENFORCE_GT(
       num_backends_, 0, "At least 1 onnxifi backend should be available");
   backend_ids_.resize(num_backends_);
@@ -320,39 +323,36 @@ void OnnxifiTransformer::Transform(
 
   // function to tell whether the ONNXIFI backend supports a given C2 op or not
   // TODO: choose backend id
-  auto supports = [&exporter,
-                   &shape_hints,
-                   backend = lib_,
-                   backend_id =
-                       backend_ids_[0]](const caffe2::OperatorDef& op) {
-    const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
-    // NB: this might not be a hard constraint as we can just export C2
-    // domain specific ops to ONNX
-    if (!schema || schema->onnx_schema().empty()) {
-      LOG(INFO) << "Cannot export c2 op " << op.type()
-                << " to onnx as there is no corresponding ONNX schema.";
-      return false;
-    }
+  auto supports =
+      [&exporter, &shape_hints, backend = lib_, backend_id = backend_ids_[0]](
+          const caffe2::OperatorDef& op) {
+        const OpSchema* schema = OpSchemaRegistry::Schema(op.type());
+        // NB: this might not be a hard constraint as we can just export C2
+        // domain specific ops to ONNX
+        if (!schema || schema->onnx_schema().empty()) {
+          LOG(INFO) << "Cannot export c2 op " << op.type()
+                    << " to onnx as there is no corresponding ONNX schema.";
+          return false;
+        }
 
-    ::ONNX_NAMESPACE::ModelProto onnx_model;
-    FillModelInfo(&onnx_model);
-    auto results = exporter.Caffe2OpToOnnxNodes(op, shape_hints);
-    for (const auto& n : results.first) {
-      onnx_model.mutable_graph()->add_node()->CopyFrom(n);
-    }
-    std::string onnx_model_str;
-    onnx_model.SerializeToString(&onnx_model_str);
-    auto ret = backend->onnxGetBackendCompatibility(
+        ::ONNX_NAMESPACE::ModelProto onnx_model;
+        FillModelInfo(&onnx_model);
+        auto results = exporter.Caffe2OpToOnnxNodes(op, shape_hints);
+        for (const auto& n : results.first) {
+          onnx_model.mutable_graph()->add_node()->CopyFrom(n);
+        }
+        std::string onnx_model_str;
+        onnx_model.SerializeToString(&onnx_model_str);
+        auto ret = backend->onnxGetBackendCompatibility(
             backend_id, onnx_model_str.size(), onnx_model_str.c_str());
-    if (ret !=
-        ONNXIFI_STATUS_SUCCESS) {
-        LOG(INFO) << "Don't support onnx for " << op.type() << " c2 op (" << ret
-                  << ")";
-        return false;
-    } else {
-      return true;
-    }
-  };
+        if (ret != ONNXIFI_STATUS_SUCCESS) {
+          LOG(INFO) << "Don't support onnx for " << op.type() << " c2 op ("
+                    << ret << ")";
+          return false;
+        } else {
+          return true;
+        }
+      };
 
   // function to convert runnbale subgraph into a trt op. Note that to keep the
   // interface clean, we do the double conversion from C2 op to Onnx ops here
