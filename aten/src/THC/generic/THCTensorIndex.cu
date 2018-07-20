@@ -218,18 +218,14 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(THCTensor_(_nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCTensor_(_nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCudaLongTensor__nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(!(THCTensor_(_nDimension)(state, src) == 0 && THCudaLongTensor__nDimension(state, index) != 0), 2,
+  THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(!(THCTensor_(nDimension)(state, src) == 0 && THCudaLongTensor_nDimension(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
   THCTensor_(resizeNd)(state, dst, index->dim(), THTensor_getSizePtr(index), NULL);
-
-  // dispatchTakePut only handles non-empty tensors;
-  if (index->_dim() > 0) {
-    dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
-  }
+  dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
 }
 
 static void THCTensor_(sort_indices)(THCState *state, THCudaLongTensor *index, THCTensor *src) {
@@ -255,9 +251,9 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
   THArgCheck(THCTensor_(nElement)(state, src) == numIndices,
     3, "src should have the same number of elements as index");
 
-  THArgCheck(THCTensor_(_nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCTensor_(_nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCudaLongTensor__nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   if (numIndices == 0) {
     return;
