@@ -1157,8 +1157,9 @@ class CTCLoss(_Loss):
         >>> loss = ctc_loss(log_probs, targets, input_lengths, target_lengths)
         >>> loss.backward()
 
-    Reference: 
-        A. Graves et al.: Connectionist Temporal Classification: Labelling Unsegmented Sequence Data with Recurrent Neural Networks:
+    Reference:
+        A. Graves et al.: Connectionist Temporal Classification:
+        Labelling Unsegmented Sequence Data with Recurrent Neural Networks:
         https://www.cs.toronto.edu/~graves/icml_2006.pdf
 
     .. Note::
