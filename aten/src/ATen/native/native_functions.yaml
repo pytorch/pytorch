@@ -636,6 +636,20 @@
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
 
+# potrf
+- func: potrf(Tensor self, bool upper) -> Tensor
+
+# TODO
+# - func: potrf_out(Tensor solution, Tensor self, bool upper) -> Tensor
+#  variants: function
+
+# potrf handles broadcasting of arbitrary batch dims while _potrf_helper does not.
+- func: _potrf_helper(Tensor self, bool upper) -> Tensor
+  dispatch:
+    CPU: _potrf_helper_cpu
+    # CUDA: _potrf_helper_cuda
+
+
 - func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
   variants: function
 

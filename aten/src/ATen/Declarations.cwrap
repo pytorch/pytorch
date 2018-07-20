@@ -3097,7 +3097,8 @@
     - THTensor* self
 ]]
 [[
-  name: potrf
+  name: _potrf_single
+  cname: potrf
   types:
     - Float
     - Double
