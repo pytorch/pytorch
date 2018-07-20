@@ -73,11 +73,6 @@ class OnnxifiOp final : public Operator<Context> {
     auto weight_descs = BuildInitializationList(
         &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
 
-    ::ONNX_NAMESPACE::ModelProto onnx_model;
-    ParseProtoFromLargeString(onnx_model_str, &onnx_model);
-    onnx_model_str.clear();
-    onnx_model.SerializeToString(&onnx_model_str);
-
     // Build the Onnxifi engine
     // TODO: In spec, backends are hot-pluggable, so two calls to
     // onnxGetBackendIDs may result in different number of backend. And we
