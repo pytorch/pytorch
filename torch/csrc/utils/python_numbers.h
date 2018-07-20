@@ -4,6 +4,7 @@
 #include <stdint.h>
 #include <stdexcept>
 #include "torch/csrc/Exceptions.h"
+#include "torch/csrc/utils/tensor_numpy.h"
 
 // largest integer that can be represented consecutively in a double
 const int64_t DOUBLE_INT_MAX = 9007199254740992;
@@ -85,9 +86,9 @@ inline int64_t THPUtils_unpackIndex(PyObject* obj) {
 
 inline bool THPUtils_checkDouble(PyObject* obj) {
 #if PY_MAJOR_VERSION == 2
-  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj);
+  return PyFloat_Check(obj) || PyLong_Check(obj) || PyInt_Check(obj) || torch::utils::is_numpy_scalar(obj);
 #else
-  return PyFloat_Check(obj) || PyLong_Check(obj);
+  return PyFloat_Check(obj) || PyLong_Check(obj) || torch::utils::is_numpy_scalar(obj);
 #endif
 }
 
