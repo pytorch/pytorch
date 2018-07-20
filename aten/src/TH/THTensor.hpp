@@ -17,7 +17,6 @@ struct THTensor
       , storage_offset_(0)
       , sizes_{0}
       , strides_{1}
-      , dim_(1)
       {}
 
     ~THTensor() {
@@ -35,7 +34,6 @@ struct THTensor
 
     std::vector<int64_t> sizes_;
     std::vector<int64_t> strides_;
-    int64_t dim_;
 
     template <typename T>
     inline T * data() const {
@@ -51,11 +49,11 @@ struct THTensor
     // _dim() returns the "old" TH dimension view where no dimensions represents an empty tensor.
     // dim()  returns the ATen view of the dimensionality, i.e. 0-sized dimensions are supported.
     inline int64_t _dim() const {
-      return is_empty() ? 0 : dim_;
+      return is_empty() ? 0 : dim();
     }
 
     inline int64_t dim() const {
-      return dim_;
+      return sizes_.size();
     }
 
     ptrdiff_t storage_offset() const {
@@ -64,7 +62,7 @@ struct THTensor
 
     // represents that numel() == 0.
     inline bool is_empty() const {
-      for (int64_t i = 0; i < dim_; ++i) {
+      for (int64_t i = 0; i < dim(); ++i) {
         if (sizes_[i] == 0) {
           return true;
         }
@@ -113,7 +111,6 @@ inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
 }
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
-  tensor->dim_ = ndim;
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
   // assumes that old values are preserved
   tensor->sizes_.resize(ndim);
@@ -121,7 +118,6 @@ inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
 }
 
 inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
-  tensor->dim_ = new_size.size();
   tensor->sizes_ = std::move(new_size);
   tensor->strides_ = std::move(new_stride);
 }
