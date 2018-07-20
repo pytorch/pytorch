@@ -40,13 +40,8 @@
 
 void THTensor_free(THTensor *self)
 {
-  if(!self)
-    return;
-
-  if(--self->refcount == 0)
-  {
-    delete self;
-  }
+  if (!self) return;
+  self->release();
 }
 
 // On a high level,

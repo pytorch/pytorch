@@ -61,8 +61,8 @@ static THCTensor* THNN_(view_weight_local)(
     int64_t s3 = weight->size(3) * weight->size(4) * weight->size(5);
     THCTensor *old_weight = weight;
     weight = THCTensor_(newWithStorage3d)(state,
-                          weight->storage,
-                          weight->storageOffset,
+                          THTensor_getStoragePtr(weight),
+                          weight->storage_offset(),
                           s1, -1, s2, -1, s3, -1);
     THCTensor_(free)(state, old_weight);
   }
@@ -140,12 +140,12 @@ void THNN_(SpatialConvolutionLocal_updateOutput)(
       1, 1, THCTensor_(data)(state, finput_n)
     );
 
-    output3d = THCTensor_(newWithStorage3d)(state, output_n->storage, output_n->storageOffset,
+    output3d = THCTensor_(newWithStorage3d)(state, THTensor_getStoragePtr(output_n), output_n->storage_offset(),
                                              outputHeight*outputWidth, 1,
                                              nOutputPlane, outputHeight*outputWidth,
                                              1, nOutputPlane*outputHeight*outputWidth);
 
-    finput3d = THCTensor_(newWithStorage3d)(state, finput_n->storage, finput_n->storageOffset,
+    finput3d = THCTensor_(newWithStorage3d)(state, THTensor_getStoragePtr(finput_n), finput_n->storage_offset(),
                                              outputHeight*outputWidth, 1,
                                              kW*kH*nInputPlane, outputHeight*outputWidth,
                                              1, kW*kH*nInputPlane*outputHeight*outputWidth);
@@ -247,11 +247,11 @@ void THNN_(SpatialConvolutionLocal_updateGradInput)(
     THCTensor_(select)(state, fgradInput_n, fgradInput, 0, elt);
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 
-    gradOutput3d = THCTensor_(newWithStorage3d)(state, gradOutput_n->storage, gradOutput_n->storageOffset,
+    gradOutput3d = THCTensor_(newWithStorage3d)(state, THTensor_getStoragePtr(gradOutput_n), gradOutput_n->storage_offset(),
                                                outputHeight*outputWidth, 1,
                                                nOutputPlane, outputHeight*outputWidth,
                                                1, nOutputPlane*outputHeight*outputWidth);
-    fgradInput3d = THCTensor_(newWithStorage3d)(state, fgradInput_n->storage, fgradInput_n->storageOffset,
+    fgradInput3d = THCTensor_(newWithStorage3d)(state, THTensor_getStoragePtr(fgradInput_n), fgradInput_n->storage_offset(),
                                                outputHeight*outputWidth, 1,
                                                kW*kH*nInputPlane, outputHeight*outputWidth,
                                                1, kW*kH*nInputPlane*outputHeight*outputWidth);
@@ -358,11 +358,11 @@ void THNN_(SpatialConvolutionLocal_accGradParameters)(
     THCTensor_(select)(state, finput_n, finput, 0, elt);
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 
-    gradOutput3d = THCTensor_(newWithStorage3d)(state, gradOutput_n->storage, gradOutput_n->storageOffset,
+    gradOutput3d = THCTensor_(newWithStorage3d)(state, THTensor_getStoragePtr(gradOutput_n), gradOutput_n->storage_offset(),
                                                  outputHeight*outputWidth, 1,
                                                  nOutputPlane, outputHeight*outputWidth,
                                                  1, nOutputPlane*outputHeight*outputWidth);
-    finput3d = THCTensor_(newWithStorage3d)(state, finput_n->storage, finput_n->storageOffset,
+    finput3d = THCTensor_(newWithStorage3d)(state, THTensor_getStoragePtr(finput_n), finput_n->storage_offset(),
                                              outputHeight*outputWidth, 1,
                                              1, kW*kH*nInputPlane*outputHeight*outputWidth,
                                              kW*kH*nInputPlane, outputHeight*outputWidth);
