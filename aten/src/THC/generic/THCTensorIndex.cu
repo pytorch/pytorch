@@ -221,7 +221,7 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(!(THCTensor_(nDimension)(state, src) == 0 && THCudaLongTensor_nDimension(state, index) != 0), 2,
+  THArgCheck(!(THCTensor_(numel)(state, src) == 0 && THCudaLongTensor_numel(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
   THCTensor_(resizeNd)(state, dst, index->dim(), THTensor_getSizePtr(index), NULL);
