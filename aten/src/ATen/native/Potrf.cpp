@@ -62,7 +62,8 @@ Tensor _potrf_helper_cpu(const Tensor& A, bool upper) {
 Tensor potrf(const Tensor& A, bool upper) {
  if (A.dim() <= 2 && A.dim() <= 2) {
    int64_t n = A.size(0);
-   IntList size({1, n, n});
+   std::vector<int64_t> s = {1, n, n};
+   IntList size(s);
    auto new_tensor = A.view(size);
    return new_tensor.type()._potrf_helper(new_tensor, upper)
      .view_as(A);
