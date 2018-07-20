@@ -1,5 +1,8 @@
 #include "pybind_state.h"
 
+#include <chrono>
+#include <future>
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -244,6 +247,33 @@ OPERATOR_SCHEMA(PythonDLPackGradient).AllowInplace([](int, int) {
   return true;
 });
 REGISTER_GRADIENT(PythonDLPack, GetPythonGradient);
+
+class BackgroundPlan {
+ public:
+  BackgroundPlan(Workspace* ws, PlanDef def) : ws_(ws), def_(def) {}
+
+  void run() {
+    fut_ =
+        std::async(std::launch::async, [this]() { return ws_->RunPlan(def_); });
+  }
+
+  bool isDone() {
+    CAFFE_ENFORCE(fut_.valid());
+    auto status = fut_.wait_for(std::chrono::milliseconds(0));
+    return status == std::future_status::ready;
+  }
+
+  bool isSucceeded() {
+    CAFFE_ENFORCE(isDone());
+    return fut_.get();
+  }
+
+ private:
+  Workspace* ws_;
+  PlanDef def_;
+
+  std::future<bool> fut_;
+};
 
 void addObjectMethods(py::module& m) {
   py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
@@ -504,6 +534,11 @@ void addObjectMethods(py::module& m) {
         CAFFE_ENFORCE(ws->second.get());
         return py::cast(ws->second.get(), py::return_value_policy::reference);
       });
+
+  py::class_<BackgroundPlan, std::shared_ptr<BackgroundPlan>>(
+      m, "BackgroundPlan")
+      .def("is_done", &BackgroundPlan::isDone)
+      .def("is_succeeded", &BackgroundPlan::isSucceeded);
 
   // Gradients
   py::class_<GradientWrapper>(m, "GradientWrapper")
@@ -1182,6 +1217,17 @@ void addGlobalMethods(py::module& m) {
     py::gil_scoped_release g;
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;
+  });
+  m.def("run_plan_in_background", [](const py::bytes& plan_def) {
+    CAFFE_ENFORCE(gWorkspace);
+    PlanDef def;
+    CAFFE_ENFORCE(
+        ParseProtoFromLargeString(plan_def.cast<std::string>(), &def));
+    py::gil_scoped_release g;
+
+    auto background_plan = std::make_shared<BackgroundPlan>(gWorkspace, def);
+    background_plan->run();
+    return background_plan;
   });
   m.def(
       "apply_transform",
