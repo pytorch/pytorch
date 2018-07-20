@@ -9,7 +9,7 @@ import unittest
 import numpy as np
 
 from caffe2.proto import caffe2_pb2
-from caffe2.python import core, workspace, test_util
+from caffe2.python import core, workspace, schema, test_util
 from caffe2.python.task import Node, Task
 
 
@@ -197,6 +197,24 @@ class TestCloneNet(test_util.TestCase):
 
         params._CheckLookupTables()
         n._CheckLookupTables()
+
+
+class TestExternalInputs(test_util.TestCase):
+    def testSetInputRecordWithBlobs(self):
+        net = core.Net("test")
+        record = schema.NewRecord(net, schema.Struct(
+            ("x", schema.Scalar(np.float)),
+        ))
+        input_record = net.set_input_record(record)
+        self.assertTrue(net.BlobIsDefined(input_record.x()))
+        self.assertIn(input_record.x(), net.external_inputs)
+
+    def testSetInputRecordWithoutBlobs(self):
+        net = core.Net("test")
+        record = schema.Struct(("x", schema.Scalar(np.float)))
+        input_record = net.set_input_record(record)
+        self.assertTrue(net.BlobIsDefined(input_record.x()))
+        self.assertIn(input_record.x(), net.external_inputs)
 
 
 class TestCreateOperator(test_util.TestCase):
