@@ -34,6 +34,13 @@ install_ubuntu() {
     curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o hcsparse.deb
     dpkg -i hcsparse.deb
     rm hcsparse.deb
+
+    # hotfix a bug in hip's cmake files, this has been fixed in
+    # https://github.com/ROCm-Developer-Tools/HIP/pull/516 but for
+    # some reason it has not included in the latest rocm release
+    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
+        sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
+    fi
 }
 
 install_centos() {
