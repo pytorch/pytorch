@@ -27,4 +27,12 @@ public:
   THTensor * tensor;
 };
 
+namespace detail {
+  // This is just a temporary function to help out code generation.
+  // Eventually, the codegen code should construct tensors using
+  // a new Tensor constructor that takes scalar type and backend,
+  // but I haven't written this yet.
+  ${Tensor}* new_${Tensor}();
+}
+
 } // namespace at
