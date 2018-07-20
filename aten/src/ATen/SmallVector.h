@@ -33,6 +33,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <ATen/ATenGeneral.h>
+
 #if __GNUG__ && __GNUC__ < 5
 #define AT_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else

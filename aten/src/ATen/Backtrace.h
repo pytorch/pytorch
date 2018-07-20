@@ -4,6 +4,8 @@
 #include <string>
 #include <typeinfo>
 
+#include <ATen/ATenGeneral.h>
+
 namespace at {
 /// Utility to demangle a C++ symbol name.
 AT_API std::string demangle(const char* name);

@@ -53,7 +53,7 @@ AT_API void CUDAStream_free(CUDAStreamInternals*&);
 
 // RAII for a CUDA stream
 // Allows use as a cudaStream_t, copying, moving, and metadata access.
-struct AT_API CUDAStream {
+struct CUDAStream {
   // Constants
   static constexpr int32_t DEFAULT_FLAGS = 1; // = cudaStreamNonBlocking;
   static constexpr int32_t DEFAULT_PRIORITY = 0;
