@@ -487,6 +487,22 @@ def replace_math_functions(input_string):
     return output_string
 
 
+def replace_extern_shared(input_string):
+    """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
+       https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+    Example:
+        "extern __shared__ char smemChar[];" => "HIP_DYNAMIC_SHARED( char, smemChar)"
+        "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
+    """
+    output_string = input_string
+    output_string = re.sub(
+        r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+)\s+(\w+)\s*\[\s*\]\s*;",
+        lambda inp: "HIP_DYNAMIC_SHARED({0} {1}, {2})".format(
+            inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
+
+    return output_string
+
+
 def disable_function(input_string, function, replace_style):
     """ Finds and disables a function in a particular file.
 
@@ -698,6 +714,9 @@ def preprocessor(filepath, stats, hipify_caffe2):
 
         # Replace __forceinline__ with inline
         output_source = replace_forceinline(output_source)
+
+        # Replace the extern __shared__
+        output_source = replace_extern_shared(output_source)
 
         fout.write(output_source)
 
