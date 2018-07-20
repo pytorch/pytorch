@@ -523,7 +523,7 @@ class BCEWithLogitsLoss(_Loss):
     :math:`p_n > 1` increases the recall, :math:`p_n < 1` increases the precision.
 
     For example, if a dataset contains 100 positive and 300 negative examples of a single class,
-    then `pos_weight` for the class should be equal to math:`\frac{300}{100}=3`.
+    then `pos_weight` for the class should be equal to :math:`\frac{300}{100}=3`.
     The loss would act as if the dataset contains math:`3\times 100=300` positive examples.
 
     Args:
