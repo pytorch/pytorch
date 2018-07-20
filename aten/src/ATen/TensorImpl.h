@@ -7,6 +7,8 @@
 #include "ATen/ScalarType.h"
 #include "ATen/optional.h"
 
+struct THTensor;
+
 namespace at {
 class Scalar;
 struct Type;
@@ -16,8 +18,8 @@ struct Tensor;
 
 namespace at {
 struct TensorImpl : public Retainable {
-  explicit TensorImpl(Type * type)
-  : is_scalar(false), type_(type) {}
+  explicit TensorImpl(Type * type, THTensor * tensor)
+  : is_scalar(false), type_(type), tensor(tensor) {}
 
   Type & type() const {
     return *type_;
@@ -94,5 +96,7 @@ struct TensorImpl : public Retainable {
 protected:
   bool is_scalar;
   Type * type_;
+public:
+  THTensor * tensor;
 };
 } // namespace at

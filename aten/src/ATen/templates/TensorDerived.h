@@ -23,8 +23,6 @@ public:
   virtual std::unique_ptr<Storage> storage() override;
   virtual void release_resources() override;
   static const char * typeString();
-
-  THTensor * tensor;
 };
 
 namespace detail {

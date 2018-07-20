@@ -22,8 +22,8 @@ namespace detail {
 }
 
 ${Tensor}::${Tensor}(${THTensor} * tensor)
-: TensorImpl(&globalContext().getType(Backend::${Backend},ScalarType::${ScalarName})),
-  tensor(tensor) {}
+: TensorImpl(&globalContext().getType(Backend::${Backend},ScalarType::${ScalarName}), tensor)
+{}
 
 ${Tensor}::~${Tensor}() {
   if (tensor) tensor->release();
