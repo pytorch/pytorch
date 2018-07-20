@@ -649,6 +649,12 @@ def TranslateSoftmaxWithLoss(layer, pretrained_blobs, is_test, **kwargs):
         layer.top[0])
     return [softmax_op, xent_op, loss_op], []
 
+@TranslatorRegistry.Register("ChannelShuffle")
+def TranslateAccuracy(layer, pretrained_blobs, is_test, **kwargs):
+    caffe_op = BaseTranslate(layer, "ChannelShuffle")
+    #if layer.accuracy_param.top_k != 1:
+    AddArgument(caffe_op, "group", layer.shuffle_channel_param.group)
+    return caffe_op, []
 
 @TranslatorRegistry.Register("Accuracy")
 def TranslateAccuracy(layer, pretrained_blobs, is_test, **kwargs):

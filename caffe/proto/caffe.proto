@@ -403,6 +403,13 @@ message LayerParameter {
   optional ThresholdParameter threshold_param = 128;
   optional TileParameter tile_param = 138;
   optional WindowDataParameter window_data_param = 129;
+  
+  // ChannelShuffle
+  optional ShuffleChannelParameter shuffle_channel_param = 164;
+}
+
+message ShuffleChannelParameter {
+  optional uint32 group = 1[default = 1]; // The number of group
 }
 
 // Message that stores parameters used to apply transformation
