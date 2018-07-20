@@ -251,6 +251,7 @@ Spectral Ops
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: bincount
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diagflat
@@ -258,7 +259,6 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flip
 .. autofunction:: histc
-.. autofunction:: bincount
 .. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: trace
