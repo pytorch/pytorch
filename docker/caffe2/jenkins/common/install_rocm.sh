@@ -7,8 +7,9 @@ apt-get install -y wget
 
 DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
 wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
+echo "deb [arch=amd64] $DEB_ROCM_REPO xenial main" > /etc/apt/sources.list.d/rocm.list
 
-apt-get update
+apt-get update --allow-insecure-repositories
 apt-get install -y \
   rocm-dev \
   rocm-libs \
