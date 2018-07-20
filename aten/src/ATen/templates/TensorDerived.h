@@ -12,7 +12,6 @@ namespace at {
 
 struct ${Tensor} final : public TensorImpl {
 public:
-  explicit ${Tensor}();
   ${Tensor}(THTensor * tensor);
   virtual ~${Tensor}();
   virtual const char * toString() const override;

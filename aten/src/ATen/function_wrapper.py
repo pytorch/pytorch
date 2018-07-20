@@ -180,7 +180,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new ${Tensor}();
+auto ${name}_ = new ${Tensor}(${THTensor}_new());
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -1228,7 +1228,10 @@ def create_derived(backend_type_env, declarations):
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
         name = arg['name']
-        allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env, arguments=[])
+        state = ''
+        if is_cuda:
+            state = 'globalContext().getTHCState()'
+        allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env, arguments=[env["THTensor"] + "_new(" + state + ")"])
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
