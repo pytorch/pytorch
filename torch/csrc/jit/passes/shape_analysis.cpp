@@ -150,6 +150,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   }
   std::vector<TensorType*> types;
   bool present;
+  // TODO (apaszke): This currently assumes that inputs are pretty much tensor-only. Need to fix that.
   std::tie(types, present) = gatherTypes(node->inputs());
   if(!present) {
     return setDynamicType(node);
@@ -171,10 +172,12 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     return true;
   };
 
+  // TODO (apaszke): Those currently assume that a lot of stuff is constant, which might
+  // not be the case if they are produced by script.
   switch(node->kind()) {
-    //TODO: for expensive ops we can directly encode their shape propagation
+    // For expensive ops we can directly encode their shape propagation
     // here, otherwise we fallback to running a fake version of the op
-    // to get a quick and dirty propagation
+    // to get a quick and dirty propagation.
     case aten::add:
     case aten::sub:
     case aten::mul:
@@ -236,12 +239,16 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
                           {AKind::i, attr::keepdim}})) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
-        int64_t dim = node->is(attr::dim).at(0);
-        SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
-        if (node->i(attr::keepdim)) {
-          sizes.at(dim) = 1;
-        } else {
-          sizes.erase(sizes.begin() + dim);
+        auto dims = node->get<std::vector<int64_t>>(attr::dim).value();
+        bool keepdim = node->get<int64_t>(attr::keepdim).value();
+        std::reverse(dims.begin(), dims.end());
+        for (int64_t dim : dims) {
+          SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
+          if (keepdim) {
+            sizes.at(dim) = 1;
+          } else {
+            sizes.erase(sizes.begin() + dim);
+          }
         }
         node->output()->setType(tp->withSizes(sizes));
       } else if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1, {})) {
@@ -254,7 +261,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
         auto strides = tp->strides();
-        int64_t dim = node->i(attr::dim);
+        int64_t dim = node->get<int64_t>(attr::dim).value();
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < sizes.size());
         if (sizes.at(dim) == 1) {
           sizes.erase(sizes.begin() + dim);
@@ -269,7 +276,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
         auto tp = types.at(0);
         auto sizes = tp->sizes();
         auto strides = tp->strides();
-        int64_t dim = node->i(attr::dim);
+        int64_t dim = node->get<int64_t>(attr::dim).value();
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) <= sizes.size());
         sizes.insert(sizes.begin() + dim, 1);
         strides.insert(strides.begin() + dim, 1);
@@ -279,7 +286,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     case aten::view: {
       if (check_overload(/*num_inputs=*/1, /*num_outputs=*/1,
                          {{AKind::is, attr::size}})) {
-        auto sizes = node->is(attr::size);
+        auto sizes = node->get<std::vector<int64_t>>(attr::size).value();
         bool inferred = false;
         size_t inferred_idx;
         int64_t size_product = 1;
@@ -314,7 +321,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
                         {{AKind::i, attr::dim}})) {
         auto ten = types.at(0);
         auto index = types.at(1);
-        int64_t dim = node->i(attr::dim);
+        int64_t dim = node->get<int64_t>(attr::dim).value();
         SHAPE_ASSERT(index->sizes().size() == 1);
         SHAPE_ASSERT(dim >= 0 && static_cast<size_t>(dim) < ten->sizes().size());
         std::vector<int64_t> sizes = ten->sizes();
