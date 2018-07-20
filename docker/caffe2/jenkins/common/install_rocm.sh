@@ -25,15 +25,15 @@ install_ubuntu() {
                    rocm-profiler \
                    cxlactivitylogger
 
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb
-    dpkg -i /opt/rocm/debians/hcrng.deb
-    rm /opt/rocm/debians/hcrng.deb
-
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
-    dpkg -i /opt/rocm/debians/hcsparse.deb
-    rm /opt/rocm/debians/hcsparse.deb
+    pushd $HOME
+    # install hcrng
+    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o hcrng.deb
+    dpkg -i hcrng.deb
+    rm hcrng.deb
+    # install hcsparse
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o hcsparse.deb
+    dpkg -i hcsparse.deb
+    rm hcsparse.deb
 }
 
 install_centos() {
