@@ -495,6 +495,10 @@
 - func: dot_out(Tensor result, Tensor self, Tensor tensor) -> Tensor
   variants: function
 
+- func: fused_dropout(Tensor self, double p, Generator* generator=nullptr) -> (Tensor, Tensor)
+  dispatch:
+     CUDA: fused_dropout_cuda
+
 - func: einsum(std::string equation, TensorList tensors) -> Tensor
   variants: function
 
@@ -904,6 +908,11 @@
 
 - func: logsumexp_out(Tensor result, Tensor self, int64_t dim, bool keepdim=False) -> Tensor
   variants: function
+
+- func: masked_scale(Tensor self, Tensor mask, double scale) -> Tensor
+  dispatch:
+     CUDA: masked_scale_cuda
+
 
 - func: margin_ranking_loss(Tensor input1, Tensor input2, Tensor target, double margin=0.0, int64_t reduction=Reduction::ElementwiseMean) -> Tensor
   variants: function

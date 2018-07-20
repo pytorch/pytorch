@@ -712,9 +712,10 @@ class TestNN(NNTestCase):
             self.assertFalse(output2.requires_grad)
             self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
-    def _test_dropout(self, cls, input):
+    def _test_dropout(self, cls, cuda, input):
         p = 0.2
-        input.fill_(1 - p)
+        device = torch.device("cuda") if cuda else torch.device("cpu")
+        input = input.to(device).fill_(1 - p)
 
         module = cls(p)
         input_var = torch.tensor(input, requires_grad=True)
@@ -2077,7 +2078,7 @@ class TestNN(NNTestCase):
 
     def test_Dropout(self):
         input = torch.Tensor(1000)
-        self._test_dropout(nn.Dropout, input)
+        self._test_dropout(nn.Dropout, False, input)
 
     def test_Dropout2d(self):
         b = random.randint(1, 5)
@@ -2085,7 +2086,7 @@ class TestNN(NNTestCase):
         h = random.randint(1, 5)
         num_features = 1000
         input = torch.Tensor(num_features, b, w, h)
-        self._test_dropout(nn.Dropout2d, input)
+        self._test_dropout(nn.Dropout2d, False, input)
 
     def test_Dropout3d(self):
         b = random.randint(1, 5)
@@ -2094,7 +2095,31 @@ class TestNN(NNTestCase):
         d = random.randint(1, 2)
         num_features = 1000
         input = torch.Tensor(num_features, b, d, w, h)
-        self._test_dropout(nn.Dropout3d, input)
+        self._test_dropout(nn.Dropout3d, False, input)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_Dropout_cuda(self):
+        input = torch.Tensor(1000)
+        self._test_dropout(nn.Dropout, True, input)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_Dropout2d_cuda(self):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        num_features = 1000
+        input = torch.Tensor(num_features, b, w, h)
+        self._test_dropout(nn.Dropout2d, True, input)
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
+    def test_Dropout3d_cuda(self):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        d = random.randint(1, 2)
+        num_features = 1000
+        input = torch.Tensor(num_features, b, d, w, h)
+        self._test_dropout(nn.Dropout3d, True, input)
 
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
