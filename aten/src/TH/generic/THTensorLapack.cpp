@@ -118,7 +118,7 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
       "rows, B has %ld", a->size(0), b->size(0));
 
   if (b->dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
             b->stride(0), 1, 0);
     free_b = 1;
   }
@@ -171,7 +171,7 @@ void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
       "rows, B has %ld", a->size(0), b->size(0));
 
   if (b->_dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
             b->stride(0), 1, 0);
     free_b = 1;
   }
@@ -221,7 +221,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
       "rows, B has %ld", a->size(0), b->size(0));
 
   if (b->_dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
             b->stride(0), 1, 0);
     free_b = 1;
   }
@@ -644,7 +644,7 @@ void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
       "rows, B has %ld", a->size(0), b->size(0));
 
   if (b->_dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size(0),
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
             b->stride(0), 1, 0);
     free_b = 1;
   }
