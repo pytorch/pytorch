@@ -24,7 +24,7 @@ ${Tensor}::${Tensor}(Context* context, ${THTensor} * tensor)
   context(context) {}
 
 ${Tensor}::~${Tensor}() {
-  tensor->release();
+  if (tensor) tensor->release();
 }
 
 const char * ${Tensor}::toString() const {
