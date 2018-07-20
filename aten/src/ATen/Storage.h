@@ -1,7 +1,22 @@
 #pragma once
 
+#include <ATen/Allocator.h>
+
+#include <ATen/ScalarType.h>
+#include <ATen/ScalarTypeUtils.h>
+#include "THTypeConversion.hpp"
+#include <atomic>
+
 #include "ATen/Scalar.h"
-#include <TH/THStorageFunctions.hpp>
+#include <ATen/Half.h>
+
+#include <ATen/Config.h>
+
+// Legacy for compatability with TH!
+struct THFinalizer {
+  virtual void operator()() = 0;
+  virtual ~THFinalizer() {};
+};
 
 namespace at {
 
@@ -9,46 +24,68 @@ struct Type;
 
 struct Storage {
   Storage() {}
-  Storage(THStorage* storage)
-      : storage(storage) {}
+
+  Storage(at::Backend, at::ScalarType, int64_t, at::DataPtr, at::Allocator*, bool);
+  Storage(at::Backend, at::ScalarType, int64_t, at::Allocator*, bool);
+
+  at::Backend backend;
+  at::ScalarType scalar_type;
+  at::DataPtr data_ptr;
+  int64_t size_;
+  std::atomic<int> refcount;
+  std::atomic<int> weakcount;
+  bool resizable_;
+  at::Allocator* allocator;
+  std::unique_ptr<THFinalizer> finalizer;
+  struct Storage* view;
+
   Storage(Storage&) = delete;
   Storage(const Storage&) = delete;
   Storage(Storage&&) = delete;
   Storage(const Storage&&) = delete;
-  virtual ~Storage() {
-    THStorage_free(storage);
-  }
   void operator=(const Storage&) = delete;
 
-  virtual size_t elementSize() const = 0;
-  size_t size() const {
-    return storage->size;
-  };
-  void* data() {
-    return storage->data_ptr.get();
-  };
-  const void* data() const {
-    return storage->data_ptr.get();
-  };
-  void* unsafeGetTH(bool retain_) const {
-    if (retain_) {
-      THStorage_retain(storage);
+  template <typename T>
+  inline T* data() const {
+    auto scalar_type_T = at::CTypeToScalarType<th::from_type<T>>::to();
+    if (scalar_type != scalar_type_T) {
+      AT_ERROR(
+          "Attempt to access Storage having data type ",
+          at::toString(scalar_type),
+          " as data type ",
+          at::toString(scalar_type_T));
     }
-    return storage;
-  }
-  void retain() {
-    THStorage_retain(storage);
-  }
-  virtual Type & type() const = 0;
-  int getDevice() const {
-    return storage->data_ptr.device().index();
-  }
-  void set_resizable(bool resizable) {
-    THStorage_setResizable(storage, resizable);
+    return unsafe_data<T>();
   }
 
- protected:
-  THStorage *storage;
+  template <typename T>
+  inline T* unsafe_data() const {
+    return static_cast<T*>(this->data_ptr.get());
+  }
+
+  size_t elementSize() const {
+    return at::elementSize(scalar_type);
+  }
+  size_t size() const {
+    return size_;
+  };
+  void* data() {
+    return data_ptr.get();
+  };
+  const void* data() const {
+    return data_ptr.get();
+  };
+  void retain() {
+    ++refcount;
+  }
+  Type& type() const;
+  int getDevice() const {
+    return data_ptr.device().index();
+  }
+  void set_resizable(bool resizable) {
+    resizable_ = resizable;
+  }
+
 };
 
 } // namespace at

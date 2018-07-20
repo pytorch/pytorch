@@ -40,8 +40,10 @@ struct THFinalizer {
 struct THStorage
 {
   THStorage() = delete;
+
   THStorage(at::ScalarType, int64_t, at::DataPtr, at::Allocator*, bool);
   THStorage(at::ScalarType, int64_t, at::Allocator*, bool);
+
   at::ScalarType scalar_type;
   at::DataPtr data_ptr;
   int64_t size;

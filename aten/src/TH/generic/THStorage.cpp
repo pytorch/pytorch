@@ -22,6 +22,7 @@ size_t THStorage_(elementSize)()
 THStorage* THStorage_(new)(void)
 {
   THStorage* storage = new THStorage(
+      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       0,
       getTHDefaultAllocator(),
@@ -32,6 +33,7 @@ THStorage* THStorage_(new)(void)
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
   THStorage* storage = new THStorage(
+      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       getTHDefaultAllocator(),
@@ -43,6 +45,7 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         at::Allocator *allocator)
 {
   THStorage* storage = new THStorage(
+      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       allocator,
@@ -56,6 +59,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
   auto scalar_type = at::CTypeToScalarType<th::from_type<real>>::to();
   size_t actual_size = -1;
   THStorage* storage = new THStorage(
+      at::Backend::CPU,
       scalar_type,
       size,
       THMapAllocator::makeDataPtr(
@@ -64,7 +68,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       TH_STORAGE_RESIZABLE);
 
   if (size <= 0) {
-    storage->size = actual_size / at::elementSize(scalar_type);
+    storage->size_ = actual_size / at::elementSize(scalar_type);
   }
 
   THStorage_setResizable(storage, TH_STORAGE_RESIZABLE);
@@ -128,6 +132,7 @@ void THStorage_(free)(THStorage *storage)
 THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
   THStorage* storage = new THStorage(
+      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       std::move(data),
@@ -144,19 +149,19 @@ void THStorage_(resize)(THStorage *storage, ptrdiff_t size)
 void THStorage_(fill)(THStorage *storage, real value)
 {
   ptrdiff_t i;
-  for(i = 0; i < storage->size; i++)
+  for(i = 0; i < storage->size(); i++)
     THStorage_(data)(storage)[i] = value;
 }
 
 void THStorage_(set)(THStorage *self, ptrdiff_t idx, real value)
 {
-  THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
   THStorage_(data)(self)[idx] = value;
 }
 
 real THStorage_(get)(const THStorage *self, ptrdiff_t idx)
 {
-  THArgCheck((idx >= 0) && (idx < self->size), 2, "out of bounds");
+  THArgCheck((idx >= 0) && (idx < self->size()), 2, "out of bounds");
   return THStorage_(data)(self)[idx];
 }
 

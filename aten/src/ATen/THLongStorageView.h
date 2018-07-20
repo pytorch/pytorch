@@ -1,8 +1,9 @@
 #pragma once
 
-#include "TH/TH.h"
-#include "TH/THStorageFunctions.hpp"
-#include "TH/THTypeConversion.hpp"
+// #include "TH/TH.h"
+// #include "TH/THStorageFunctions.hpp"
+#include "ATen/Storage.h"
+// #include "TH/THTypeConversion.hpp"
 
 namespace at {
 
@@ -17,7 +18,7 @@ enum class THLongStorageViewKind {
 class THLongStorageView {
 public:
   operator THLongStorage*() {
-    if (storage.size == 0 && zero_dim_to_null) {
+    if (storage.size() == 0 && zero_dim_to_null) {
       return nullptr;
     }
     return &storage;
@@ -37,7 +38,7 @@ public:
   */
 
   THLongStorageView(ArrayRef<int64_t> ref, THLongStorageViewKind kind)
-  : storage(at::CTypeToScalarType<th::from_type<int64_t>>::to(), 0, getTHDefaultAllocator(), 0), zero_dim_to_null(false)
+  : storage(kCPU, at::CTypeToScalarType<th::from_type<int64_t>>::to(), 0, getTHDefaultAllocator(), 0), zero_dim_to_null(false)
   {
     // zero_dim_to_one converts an empty ArrayRef into [1]
     // zero_dim_to_null converts an empty ArrayRef into a null THLongStorage
@@ -59,10 +60,10 @@ public:
       // so that our 0-dim tensors get allocated as 1-dim inside TH
       one = 1;
       storage.data_ptr = {&one, kCPU}; // non-owning
-      storage.size = 1;
+      storage.size_ = 1; // TODO: Hack until this disappeared
     } else {
       storage.data_ptr = {const_cast<void*>(static_cast<const void*>(ref.data())), kCPU}; // non-owning
-      storage.size = ref.size();
+      storage.size_ = ref.size();
     }
     storage.scalar_type = at::CTypeToScalarType<th::from_type<int64_t>>::to();
     storage.refcount = 0;
@@ -70,7 +71,7 @@ public:
   }
 private:
   int64_t one;
-  THLongStorage storage;
+  Storage storage;
   bool zero_dim_to_null;
 };
 

@@ -23,9 +23,6 @@ public:
     void * data, size_t size, const std::function<void(void*)> & deleter);
   ~${Storage}();
 
-  size_t elementSize() const final;
-
-  Type& type() const final;
   static const char * typeString();
 
 

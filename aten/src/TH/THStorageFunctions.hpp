@@ -3,13 +3,15 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THStorageClass.hpp"
 #include "THStorageFunctions.h"
 
+#include <ATen/Storage.h>
 #include <ATen/ScalarType.h>
 #include <ATen/ScalarTypeUtils.h>
 #include "THTypeConversion.hpp"
 #include <atomic>
+
+#define THStorage at::Storage
 
 // Note [Weak references for intrusive refcounting]
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

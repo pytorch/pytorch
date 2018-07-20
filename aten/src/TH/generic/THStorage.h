@@ -6,6 +6,8 @@
 #include <ATen/Allocator.h>
 #endif
 
+#include <ATen/Storage.h>
+
 /* on pourrait avoir un liste chainee
    qui initialise math, lab structures (or more).
    mouais -- complique.
@@ -22,8 +24,7 @@
 
 #define TH_STORAGE_RESIZABLE  1
 
-// Struct definition is moved to THStorage.hpp (so this file stays C compatible)
-typedef struct THStorage THStorage;
+#define THStorage at::Storage
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THStorage type.

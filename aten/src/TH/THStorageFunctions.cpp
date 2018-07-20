@@ -54,15 +54,15 @@ THStorage* THStorage_weakLock(THStorage *weak_storage) {
 }
 
 THDescBuff THLongStorage_sizeDesc(const THLongStorage *size) {
-  return _THSizeDesc(THLongStorage_data(size), size->size);
+  return _THSizeDesc(THLongStorage_data(size), size->size_);
 }
 
 THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElement)
 {
-  ptrdiff_t total_size = (size->size > 0 ? 1 : 0);
+  ptrdiff_t total_size = (size->size_ > 0 ? 1 : 0);
   ptrdiff_t dim_infer = -1;
   ptrdiff_t i;
-  for (i = 0; i < size->size; i++) {
+  for (i = 0; i < size->size_; i++) {
     if (THLongStorage_data(size)[i] == -1) {
       THArgCheck(dim_infer == -1, 1, "only one dimension can be inferred");
       dim_infer = i;
@@ -79,7 +79,7 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
     THArgCheck(nElement == total_size, 2,
         "size '%s' is invalid for input with %td elements", buf.str, nElement);
   }
-  THLongStorage* copy = THLongStorage_newWithSize(size->size);
+  THLongStorage* copy = THLongStorage_newWithSize(size->size_);
   THLongStorage_copy(copy, size);
   if (dim_infer != -1) {
     THLongStorage_data(copy)[dim_infer] = nElement / total_size;
@@ -89,7 +89,7 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
 
 ptrdiff_t THStorage_size(const THStorage *self)
 {
-  return self->size;
+  return self->size();
 }
 
 void THStorage_setResizable(THStorage *storage, bool resizable)
@@ -119,15 +119,15 @@ void THStorage_resize(THStorage *storage, int64_t size)
     /* case when the allocator does not have a realloc defined */
     at::DataPtr old_data;
     std::swap(old_data, storage->data_ptr);
-    ptrdiff_t old_size = storage->size;
+    ptrdiff_t old_size = storage->size_;
     if (size != 0) {
       storage->data_ptr = storage->allocator->allocate(at::elementSize(storage->scalar_type)*size);
     }
-    storage->size = size;
+    storage->size_ = size;
     if (old_data != nullptr) {
       ptrdiff_t copy_size = old_size;
-      if (storage->size < copy_size) {
-        copy_size = storage->size;
+      if (storage->size_ < copy_size) {
+        copy_size = storage->size_;
       }
       if (copy_size > 0) {
         memcpy(storage->data_ptr.get(), old_data.get(), at::elementSize(storage->scalar_type)*copy_size);
@@ -143,7 +143,7 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
 #define SWAP(val) { std::swap(storage1->val, storage2->val); }
     SWAP(scalar_type);
     SWAP(data_ptr);
-    SWAP(size);
+    SWAP(size_);
     // don't swap refcount!
     SWAP(resizable_);
     SWAP(allocator);
