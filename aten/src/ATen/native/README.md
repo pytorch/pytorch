@@ -179,6 +179,15 @@ There are a few situations where you might like to use this functionality:
 If you grep for `python_default_init`, you can find examples of this being used;
 in general, most functions will not need to use this.
 
+### `cpu_half`
+
+```
+cpu_half: True
+```
+
+By default, we do not generate dispatch for CPU half, because most kernels will
+not work.  You probably don't actually want to use this.
+
 ## Writing an implementation in C++
 
 Implementations of native functions go in an appropriate C++ file in the

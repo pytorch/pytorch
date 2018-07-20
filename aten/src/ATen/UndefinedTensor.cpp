@@ -34,10 +34,6 @@ std::unique_ptr<Storage> UndefinedTensor::storage() {
 IntList UndefinedTensor::strides() const {
   AT_ERROR("strides() called on undefined Tensor");
 }
-Scalar UndefinedTensor::localScalar() {
-  AT_ERROR("localScalar() called on undefined Tensor");
-}
-
 UndefinedTensor UndefinedTensor::_singleton;
 
 }

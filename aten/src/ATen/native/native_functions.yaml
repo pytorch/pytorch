@@ -1970,3 +1970,18 @@
 
 - func: meshgrid(TensorList tensors) -> TensorList
   variants: function
+
+# This has a method dispatch to work around circular include problems
+- func: _local_scalar(Tensor self) -> Scalar
+  variants:
+    - function
+    - method
+
+# NB: Does NOT check precondition that numel == 1
+- func: _local_scalar_dense(Tensor self) -> Scalar
+  cpu_half: True
+  dispatch:
+    CPU: _local_scalar_dense_cpu
+    CUDA: _local_scalar_dense_cuda
+  variants:
+    - function
