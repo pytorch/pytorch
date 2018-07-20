@@ -647,7 +647,7 @@
 - func: _potrf_helper(Tensor self, bool upper) -> Tensor
   dispatch:
     CPU: _potrf_helper_cpu
-    # CUDA: _potrf_helper_cuda
+    CUDA: _potrf_helper_cuda
 
 
 - func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
