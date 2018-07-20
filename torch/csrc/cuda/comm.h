@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_CUDA
+
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -27,3 +29,5 @@ at::Tensor gather(
     int64_t dim,
     at::optional<int32_t> destination_index);
 }}
+
+#endif

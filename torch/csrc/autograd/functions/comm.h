@@ -1,5 +1,7 @@
 #pragma once
 
+#ifdef USE_CUDA
+
 #include <torch/csrc/autograd/function.h>
 #include <torch/csrc/autograd/variable.h>
 
@@ -39,3 +41,5 @@ struct Gather : public Function {
 
 } // namespace autograd
 } // namespace torch
+
+#endif
