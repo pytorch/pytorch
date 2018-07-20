@@ -205,9 +205,12 @@ class SleepDataset(Dataset):
     def __init__(self, size, sleep_sec):
         self.size = size
         self.sleep_sec = sleep_sec
+        self.sleeped = False
 
     def __getitem__(self, idx):
-        time.sleep(self.sleep_sec)
+        if not self.sleeped:
+            time.sleep(self.sleep_sec)
+            self.sleeped = True
         return idx
 
     def __len__(self):
@@ -251,7 +254,7 @@ class SynchronizedSeedDataset(Dataset):
 
 
 def _test_timeout():
-    dataset = SleepDataset(10, 10)
+    dataset = SleepDataset(10, 3)
     dataloader = DataLoader(dataset, batch_size=2, num_workers=2, timeout=1)
     _ = next(iter(dataloader))
 
@@ -478,7 +481,7 @@ class TestDataLoader(TestCase):
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_partial_workers(self):
-        "check that workers exit even if the iterator is not exhausted"
+        r"""check that workers exit even if the iterator is not exhausted"""
         loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=True))
         workers = loader.workers
         worker_manager_thread = loader.worker_manager_thread
@@ -530,8 +533,8 @@ class TestDataLoader(TestCase):
                      but we need it for creating another process with CUDA")
     @unittest.skipIf(not TEST_CUDA, "CUDA unavailable")
     @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
-    def test_main_process_unclean_exit(self):
-        '''There might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
+    def test_manager_unclean_exit(self):
+        r'''there might be ConnectionResetError or leaked semaphore warning (due to dirty process exit), \
 but they are all safe to ignore'''
         worker_pids = mp.Array('i', [0] * 4)
 
@@ -600,7 +603,7 @@ but they are all safe to ignore'''
             self.assertIsInstance(batch, tt)
 
     @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
-    def test_default_colate_bad_numpy_types(self):
+    def test_default_collate_bad_numpy_types(self):
         import numpy as np
 
         # Should be a no-op
