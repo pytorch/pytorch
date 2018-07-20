@@ -16,7 +16,7 @@ struct Scatter : public Function {
       std::vector<at::Device> devices,
       const at::optional<std::vector<int64_t>>& chunk_sizes = at::nullopt,
       int64_t dim = 0,
-      const at::optional<std::vector<at::CUDAStream>>& streams = at::nullopt,
+      const at::optional<std::vector<at::cuda::CUDAStream>>& streams = at::nullopt,
       bool unsqueeze_scalars = false);
 
   variable_list apply(variable_list&& inputs) override;
@@ -24,7 +24,7 @@ struct Scatter : public Function {
   std::vector<at::Device> devices_;
   at::optional<std::vector<int64_t>> chunk_sizes_;
   int64_t dim_;
-  at::optional<std::vector<at::CUDAStream>> streams_;
+  at::optional<std::vector<at::cuda::CUDAStream>> streams_;
   bool unsqueeze_scalars_;
 };
 
