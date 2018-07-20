@@ -337,6 +337,7 @@ view of a storage and defines numeric operations on it.
    .. automethod:: rsqrt
    .. automethod:: rsqrt_
    .. automethod:: scatter_
+   .. automethod:: scatter_add_
    .. automethod:: select
    .. automethod:: set_
    .. automethod:: share_memory_
