@@ -146,7 +146,9 @@ void BatchMMBlock(Block* block) {
   // Look for trees in the block
   std::unordered_map<Node*, TreeToken> tokens;
   for (auto node : block->nodes()) {
-    if (node->kind() == aten::mm) {
+    if (node->kind() == aten::mm &&
+        node->input(0)->type()->cast<TensorType>() &&
+        node->input(1)->type()->cast<TensorType>()) {
       tokens[node] = TreeToken::fromMM(node);
     } else if (node->kind() == aten::add) {
       // NOTE: x + 2 is add[other={2}](%x)
@@ -187,9 +189,9 @@ void BatchMMBlock(Block* block) {
       cat_sizes[cat_dim] *= matmuls.size(); // make them really cat_sizes
 
       auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
-      Node *cat = graph->create(aten::cat, inputs)
-                       ->i_(attr::dim, cat_dim);
-      cat->insertBefore(root.node);
+      WithInsertPoint iguard { root.node };
+      inputs.push_back(graph->insertConstant(cat_dim));
+      Node *cat = graph->insertNode(graph->create(aten::cat, inputs));
       cat->output()->setType(type->withSizes(cat_sizes));
       return cat->output();
     };

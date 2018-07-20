@@ -259,7 +259,9 @@ def embedding_bag(g,
 
 def size(g, self, dim):
     if _is_value(dim):
-        raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        if dim.node().kind() != 'onnx::Constant':
+            raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        dim = int(dim.node().t('value'))
     full_shape = g.op("Shape", self)
     return select(g, full_shape, dim=0, index=dim)
 

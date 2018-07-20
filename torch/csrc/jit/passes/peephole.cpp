@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
+
 #include "torch/csrc/jit/symbolic_variable.h"
+#include "torch/csrc/jit/tensor_conversions.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {
@@ -28,7 +30,7 @@ void PeepholeOptimize(Block * block) {
         if (!n->input()->isTensor()) break;
         // the sizes are dynamic
         if(n->inputs().size() != 1) break;
-        if (n->is(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
+        if (n->get<std::vector<int64_t>>(attr::size) == n->input()->type()->expect<TensorType>()->sizes()) {
           n->output()->replaceAllUsesWith(n->input());
           // Let DCE clean up any unused nodes at this point
         }
@@ -56,35 +58,24 @@ void PeepholeOptimize(Block * block) {
            }
         }
       } break;
-      // Fuse mm + add into addmm
       case aten::add: {
-        // Must have two inputs
-        if (n->inputs().size() != 2) {
-          continue;
+        // mm + add == addmm
+        if (n->inputs().size() == 2 &&
+            n->get<at::Tensor>(attr::alpha) &&
+            tensor_as<double>(*n->get<at::Tensor>(attr::alpha)) == 1. &&
+            n->input(1)->node()->kind() == aten::mm) {
+          WithInsertPoint guard(n);
+
+          auto input_node = n->input(1)->node();
+          SymbolicVariable mat(n->input(0));
+          SymbolicVariable mat1(input_node->input(0));
+          SymbolicVariable mat2(input_node->input(1));
+          SymbolicVariable addmm_value = mat.addmm(mat1, mat2);
+
+          // Copy shape information from output node
+          ((Value*)addmm_value)->copyMetadata(n->output());
+          n->output()->replaceAllUsesWith(addmm_value);
         }
-        // Alpha parameter must be 1.0
-        auto alpha = at::Scalar(it->t(attr::alpha));
-        if (alpha.to<double>() != 1.0) {
-          continue;
-        }
-
-        auto input_node = n->input(1)->node();
-        // Input must be an mm node
-        if (input_node->kind() != aten::mm) {
-          continue;
-        }
-
-        WithInsertPoint guard(n);
-
-        SymbolicVariable mat(n->input(0));
-        SymbolicVariable mat1(input_node->input(0));
-        SymbolicVariable mat2(input_node->input(1));
-        SymbolicVariable addmm_value = mat.addmm(mat1, mat2);
-
-        // Copy shape information from output node
-        ((Value*)addmm_value)->copyMetadata(n->output());
-        n->output()->replaceAllUsesWith(addmm_value);
-        // Let DCE clean up any unused nodes at this point
       } break;
     }
   }
