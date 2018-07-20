@@ -97,7 +97,7 @@ inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema)
 
   out << schema.name;
   emitList(schema.arguments);
-  if(schema.returns.size() > 1) {
+  if(schema.returns.size() > 0) {
     out << " -> ";
     emitList(schema.returns);
   }
