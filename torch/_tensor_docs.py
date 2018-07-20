@@ -1743,8 +1743,8 @@ scatter_(dim, index, src) -> Tensor
 
 Writes all values from the tensor :attr:`src` into :attr:`self` at the indices
 specified in the :attr:`index` tensor. For each value in :attr:`src`, its output
-index is specified by its index in :attr:`src` for dimension != :attr:`dim` and
-by the corresponding value in :attr:`index` for dimension = :attr:`dim`.
+index is specified by its index in :attr:`src` for ``dimension != dim`` and by
+the corresponding value in :attr:`index` for ``dimension = dim``.
 
 For a 3-D tensor, :attr:`self` is updated as::
 
@@ -1754,14 +1754,14 @@ For a 3-D tensor, :attr:`self` is updated as::
 
 This is the reverse operation of the manner described in :meth:`~Tensor.gather`.
 
-:attr:`self`, :attr:`index` and :attr:`src` should have same number of
-dimensions. It is also required that `index.size(d) <= src.size(d)` for all
-dimensions `d`, and that `index.size(d) <= self.size(d)` for all dimensions
-`d != dim`.
+:attr:`self`, :attr:`index` and :attr:`src` (if it is a Tensor) should have same
+number of dimensions. It is also required that ``index.size(d) <= src.size(d)``
+for all dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all
+dimensions ``d != dim``.
 
 Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
-between `0` and `(self.size(dim) -1)` inclusive, and all values in a row along
-the specified dimension :attr:`dim` must be unique.
+between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row
+along the specified dimension :attr:`dim` must be unique.
 
 Args:
     dim (int): the axis along which to index
@@ -1783,6 +1783,50 @@ Example::
     >>> z
     tensor([[ 0.0000,  0.0000,  1.2300,  0.0000],
             [ 0.0000,  0.0000,  0.0000,  1.2300]])
+""")
+
+add_docstr_all('scatter_add_',
+               r"""
+scatter_add_(dim, index, other) -> Tensor
+
+Adds all values from the tensor :attr:`other` into :attr:`self` at the indices
+specified in the :attr:`index` tensor in a similar fashion as
+:meth:`~torch.Tensor.scatter_`. For each value in :attr:`other`, it is added to
+an index in :attr:`self` which is specified by its index in :attr:`other`
+for ``dimension != dim`` and by the corresponding value in :attr:`index` for
+``dimension = dim``.
+
+For a 3-D tensor, :attr:`self` is updated as::
+
+    self[index[i][j][k]][j][k] += other[i][j][k]  # if dim == 0
+    self[i][index[i][j][k]][k] += other[i][j][k]  # if dim == 1
+    self[i][j][index[i][j][k]] += other[i][j][k]  # if dim == 2
+
+:attr:`self`, :attr:`index` and :attr:`other` should have same number of
+dimensions. It is also required that ``index.size(d) <= other.size(d)`` for all
+dimensions ``d``, and that ``index.size(d) <= self.size(d)`` for all dimensions
+``d != dim``.
+
+Moreover, as for :meth:`~Tensor.gather`, the values of :attr:`index` must be
+between ``0`` and ``self.size(dim) - 1`` inclusive, and all values in a row along
+the specified dimension :attr:`dim` must be unique.
+
+Args:
+    dim (int): the axis along which to index
+    index (LongTensor): the indices of elements to scatter and add
+    other (Tensor): the source elements to scatter and add
+
+Example::
+
+    >>> x = torch.rand(2, 5)
+    >>> x
+    tensor([[0.7404, 0.0427, 0.6480, 0.3806, 0.8328],
+            [0.7953, 0.2009, 0.9154, 0.6782, 0.9620]])
+    >>> torch.ones(3, 5).scatter_add_(0, torch.tensor([[0, 1, 2, 0, 0], [2, 0, 0, 1, 2]]), x)
+    tensor([[1.7404, 1.2009, 1.9154, 1.3806, 1.8328],
+            [1.0000, 1.0427, 1.0000, 1.6782, 1.0000],
+            [1.7953, 1.0000, 1.6480, 1.0000, 1.9620]])
+
 """)
 
 add_docstr_all('select',
