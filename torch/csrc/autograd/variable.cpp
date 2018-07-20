@@ -9,8 +9,6 @@
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/jit/tracer_state.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <ATen/ATen.h>
 
@@ -141,7 +139,6 @@ void Variable::Impl::release_resources() {
   grad_.reset();
   grad_fn_.reset();
   hooks_.clear();
-  tracing_state_.reset();
 }
 
 Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
@@ -203,15 +200,6 @@ void Variable::rebase_history(Edge gradient_edge) {
   } else {
     set_gradient_edge(std::move(gradient_edge));
   }
-}
-
-void Variable::set_tracing_state(
-    jit::tracer::ValueTracingState* new_tracing_state) {
-  get()->tracing_state_.reset(new_tracing_state);
-}
-
-jit::tracer::ValueTracingState& Variable::tracing_state() const noexcept {
-  return *get()->tracing_state_;
 }
 
 }} // namespace torch::autograd

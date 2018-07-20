@@ -1274,7 +1274,7 @@ def instance_norm(input, running_mean=None, running_var=None, weight=None,
 
     import torch.onnx.symbolic
 
-    @torch.onnx.symbolic_override_first_arg_based(torch.onnx.symbolic.instance_norm)
+    @torch.onnx.symbolic_override(torch.onnx.symbolic.instance_norm)
     def _instance_norm(input, running_mean=None, running_var=None, weight=None,
                        bias=None, use_input_stats=None, momentum=None, eps=None):
         # Repeat stored stats and affine transform params if necessary
