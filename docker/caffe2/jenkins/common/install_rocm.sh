@@ -28,10 +28,12 @@ install_ubuntu() {
     mkdir -p /opt/rocm/debians
     curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb
     dpkg -i /opt/rocm/debians/hcrng.deb
+    rm /opt/rocm/debians/hcrng.deb
 
     mkdir -p /opt/rocm/debians
     curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
     dpkg -i /opt/rocm/debians/hcsparse.deb
+    rm /opt/rocm/debians/hcsparse.deb
 }
 
 install_centos() {
