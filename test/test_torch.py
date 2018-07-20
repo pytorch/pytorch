@@ -6320,9 +6320,7 @@ class TestTorch(TestCase):
         # numpy/sci often has a direct wrapper (e.g. lu_factor) and a wrapper that "does the right thing"
         # (e.g. lu).  We often name our functions identically to the lapack function, so it will take work
         # to name / migrate-to better wrappers.
-
-        # FIXME: enable CUDA tests.
-        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
 
             def fn(torchfn, *args):
