@@ -1,7 +1,8 @@
 #include "THCCachingAllocator.h"
 
 #include <ATen/Context.h>
-#include <ATen/cudnn/Exceptions.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/Exceptions.h>
 
 #include <cuda_runtime_api.h>
 #include <algorithm>
@@ -507,7 +508,7 @@ struct CudaCachingAllocator : public at::Allocator {
     THCudaCheck(cudaGetDevice(&device));
     void* r = nullptr;
     if (size != 0) {
-      AT_CUDA_CHECK(caching_allocator.malloc(&r, size, at::globalContext().getCurrentCUDAStreamOnDevice(device)));
+      AT_CUDA_CHECK(caching_allocator.malloc(&r, size, at::cuda::getCurrentCUDAStreamOnDevice(device)));
     }
     return {r, r, &CudaCachingDeleter, at::Device(at::kCUDA, device)};
   }
