@@ -54,6 +54,13 @@ RENAME_TRACE = {
     's_native_mul': 'mul',
     'th_addmm': 'addmm',
     's_native_addmm': 'addmm',
+    'zero': 'zeros_like',
+    'fill': 'full_like',
+}
+
+# (declaration name, argument name) -> attribute name
+RENAME_ATTRIBUTES = {
+    ('fill_', 'value'): 'fill_value'
 }
 
 # These functions are not worth profiling because they are very cheap and may
@@ -126,7 +133,7 @@ profiler::RecordFunction profiler("${name}");""")
 
 PRE_RECORD_TRACE = CodeTemplate("""\
 jit::tracer::PreTraceInfo trace_info;
-if (jit::tracer::isTracing( ${tensor_args} )) {
+if (jit::tracer::isTracing()) {
   trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
   if (!jit::tracer::ArgumentStash::empty()) {
     ${record_positional_attributes}
@@ -138,13 +145,13 @@ if (jit::tracer::isTracing( ${tensor_args} )) {
 """)
 
 POST_RECORD_TRACE = CodeTemplate("""\
-if (trace_info.state != nullptr) {
+if (jit::tracer::isTracing()) {
   jit::tracer::postRecordTrace( trace_info,  ${trace_outputs} );
 }
 """)
 
 RECORD_ATTRIBUTE = CodeTemplate("""\
-setattr(trace_info.n, jit::attr::${name}, ${name});""")
+setattr(trace_info.n, jit::attr::${attr_name}, ${name});""")
 
 RECORD_POSITIONAL_ATTRIBUTE = CodeTemplate("""\
 setposattr(trace_info.n, ${i}, "${name}", ${name});""")
@@ -417,7 +424,8 @@ def emit_body(declaration):
         for arg in declaration['arguments']:
             if arg['simple_type'] in {'Tensor', 'TensorList'}:
                 continue
-            local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(name=arg['name']))
+            attr_name = RENAME_ATTRIBUTES.get((declaration['name'], arg['name']), arg['name'])
+            local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(attr_name=attr_name, name=arg['name']))
 
         local['record_positional_attributes'] = []
         for i, arg in enumerate(declaration['arguments']):

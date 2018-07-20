@@ -24,12 +24,12 @@ void THNN_(PReLU_updateOutput)(
     input = THCTensor_(newContiguous)(state, input);
 
     int n = THCTensor_(nElement)(state, input);
-    if (input->size[ndim > 1] != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[ndim > 1]);
+    if (input->size(ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(ndim > 1));
 
     int mapSize = 1;
     for (int d = 2; d < ndim; d++) {
-      mapSize *= input->size[d];
+      mapSize *= input->size(d);
     }
     int nElemsPerSample = nOutputPlane * mapSize;
     preluForward<<<GET_BLOCKS(n), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
@@ -69,12 +69,12 @@ void THNN_(PReLU_updateGradInput)(
     gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
     int n = THCTensor_(nElement)(state, input);
-    if (input->size[ndim > 1] != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[ndim > 1]);
+    if (input->size(ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(ndim > 1));
 
     int mapSize = 1;
     for (int d = 2; d < ndim; d++) {
-      mapSize *= input->size[d];
+      mapSize *= input->size(d);
     }
     int nElemsPerSample = nOutputPlane * mapSize;
     preluBackward<<<GET_BLOCKS(n), CUDA_NUM_THREADS, 0, THCState_getCurrentStream(state)>>>(
@@ -142,10 +142,10 @@ void THNN_(PReLU_accGradParameters)(
         THCTensor *buffer = THCTensor_(newContiguous)(state, gradInput);
         int64_t size3 = 1;
         for (int d = 2; d < ndim; d++) {
-          size3 *= input->size[d];
+          size3 *= input->size(d);
         }
-        THCTensor_(resize3d)(state, buffer, input->size[0], nOutputPlane, size3);
-        THCTensor_(resize2d)(state, sumbuf, input->size[0], nOutputPlane);
+        THCTensor_(resize3d)(state, buffer, input->size(0), nOutputPlane, size3);
+        THCTensor_(resize2d)(state, sumbuf, input->size(0), nOutputPlane);
         THCTensor_(sum)(state, sumbuf, buffer, 2, 1);
         THCTensor_(sum)(state, gradWeightBuf, sumbuf, 0, 1);
         THCTensor_(cadd)(state, gradWeight, gradWeight, scale, gradWeightBuf);

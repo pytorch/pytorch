@@ -196,8 +196,8 @@ void THCTensor_(tril)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   if (self_ != src_)
     THCTensor_(resizeAs)(state, self_, src_);
 
-  int64_t stride0 = self_->stride[0];
-  int64_t stride1 = self_->stride[1];
+  int64_t stride0 = self_->stride(0);
+  int64_t stride1 = self_->stride(1);
   real *start = THCTensor_(data)(state, self_);
 
   TensorTriOp<real, 0> op(start, stride0, stride1, k);
@@ -225,8 +225,8 @@ void THCTensor_(triu)(THCState *state, THCTensor *self_, THCTensor *src_, int64_
   if (self_ != src_)
     THCTensor_(resizeAs)(state, self_, src_);
 
-  int64_t stride0 = self_->stride[0];
-  int64_t stride1 = self_->stride[1];
+  int64_t stride0 = self_->stride(0);
+  int64_t stride1 = self_->stride(1);
   real *start = THCTensor_(data)(state, self_);
 
   TensorTriOp<real, 1> op(start, stride0, stride1, k);

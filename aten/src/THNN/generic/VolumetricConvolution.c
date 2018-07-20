@@ -33,13 +33,13 @@ void THNN_(VolumetricConvolution_updateOutput)(
     dimw++;
   }
 
-  int64_t nOutputPlane = weight->size[0];
-  int64_t kT           = weight->size[2];
-  int64_t kH           = weight->size[3];
-  int64_t kW           = weight->size[4];
-  int64_t inputDepth   = input->size[dimt];
-  int64_t inputHeight  = input->size[dimh];
-  int64_t inputWidth   = input->size[dimw];
+  int64_t nOutputPlane = weight->size(0);
+  int64_t kT           = weight->size(2);
+  int64_t kH           = weight->size(3);
+  int64_t kW           = weight->size(4);
+  int64_t inputDepth   = input->size(dimt);
+  int64_t inputHeight  = input->size(dimh);
+  int64_t inputWidth   = input->size(dimw);
   int64_t outputDepth  = (inputDepth - kT) / dT + 1;
   int64_t outputWidth  = (inputWidth - kW) / dW + 1;
   int64_t outputHeight = (inputHeight - kH) / dH + 1;
@@ -51,7 +51,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
 
     /* add bias */
     if (bias) {
-      for (i = 0; i < bias->size[0]; i++)
+      for (i = 0; i < bias->size(0); i++)
       {
         THTensor_(select)(outn, output, 0, i);
         THTensor_(fill)(outn, THTensor_(get1d)(bias, i));
@@ -65,7 +65,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
   }
   else /* batch mode */
   {
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
     THTensor_(resize5d)(output, nBatch, nOutputPlane, outputDepth, outputHeight, outputWidth);
     THTensor *inb = THTensor_(new)();
     THTensor *outb = THTensor_(new)();
@@ -78,7 +78,7 @@ void THNN_(VolumetricConvolution_updateOutput)(
 
       /* add bias */
       if (bias) {
-        for (i = 0; i < bias->size[0]; i++)
+        for (i = 0; i < bias->size(0); i++)
         {
           THTensor_(select)(outn, outb, 0, i);
           THTensor_(fill)(outn, THTensor_(get1d)(bias, i));
@@ -117,7 +117,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for weight, but got: %s");
 
-  int nOutputPlane = (int)weight->size[0];
+  int nOutputPlane = (int)weight->size(0);
 
   THNN_ARGCHECK(!gradOutput->is_empty() && (gradOutput->dim() == 4 || gradOutput->dim() == 5), 3,
 		gradOutput,
@@ -129,7 +129,7 @@ void THNN_(VolumetricConvolution_updateGradInput)(
     dimPlane++;
   }
 
-  THArgCheck(nOutputPlane == gradOutput->size[dimPlane], 1,
+  THArgCheck(nOutputPlane == gradOutput->size(dimPlane), 1,
     "Number of output features is not equal to nOutputPlane"
   );
 
@@ -141,13 +141,13 @@ void THNN_(VolumetricConvolution_updateGradInput)(
   }
   else /* batch mode */
   {
-    int64_t nBatch = gradOutput->size[0];
+    int64_t nBatch = gradOutput->size(0);
     THTensor *ginpb = THTensor_(new)();
     THTensor *goutb = THTensor_(new)();
     int64_t j;
 
     THTensor_(resize5d)(gradInput,
-      input->size[0], input->size[1], input->size[2], input->size[3], input->size[4]
+      input->size(0), input->size(1), input->size(2), input->size(3), input->size(4)
     );
 
     /* loop over batches */
@@ -187,9 +187,9 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 		"non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
 		"expected for gradWeight, but got: %s");
 
-  int nOutputPlane = (int)gradWeight->size[0];
+  int nOutputPlane = (int)gradWeight->size(0);
   if (gradBias) {
-    THArgCheck(!gradBias->is_empty() && gradBias->dim() == 1 && gradBias->size[0] == nOutputPlane, 5,
+    THArgCheck(!gradBias->is_empty() && gradBias->dim() == 1 && gradBias->size(0) == nOutputPlane, 5,
       "gradBias tensor has wrong size"
     );
   }
@@ -203,7 +203,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
     dimPlane++;
   }
 
-  THArgCheck(nOutputPlane == gradOutput->size[dimPlane], 1,
+  THArgCheck(nOutputPlane == gradOutput->size(dimPlane), 1,
     "Number of output features is not equal to nOutputPlane"
   );
 
@@ -226,7 +226,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
   }
   else /* batch mode */
   {
-    int64_t nBatch = gradOutput->size[0];
+    int64_t nBatch = gradOutput->size(0);
     THTensor *inpb = THTensor_(new)();
     THTensor *goutb = THTensor_(new)();
     int64_t j;

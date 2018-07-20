@@ -31,7 +31,9 @@ const char * ${Tensor}::toString() const {
 }
 
 IntList ${Tensor}::sizes() const {
-  return IntList(tensor->size,dim());
+  // NB: dim in tensor is not synchronized with THTensor, so it's
+  // important to apply dim here
+  return IntList(THTensor_getSizePtr(tensor), dim());
 }
 
 int64_t ${Tensor}::dim() const {

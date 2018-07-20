@@ -7,8 +7,6 @@
 #include <torch/csrc/cuda/nccl.h>
 #endif
 
-#include <THC/THC.h>
-
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
 
@@ -16,7 +14,6 @@
 #include <vector>
 
 namespace torch { namespace cuda {
-
 using namespace at;
 
 // Some operations can be performed more efficiently if we're handling tensors
@@ -121,7 +118,7 @@ std::vector<at::Tensor> scatter(
     at::IntList devices,
     const at::optional<std::vector<int64_t>>& chunk_sizes,
     int64_t dim,
-    const at::optional<std::vector<THCStream*>>& streams) {
+    const at::optional<std::vector<at::CUDAStream>>& streams) {
   std::vector<at::Tensor> chunks;
   if (chunk_sizes) {
     const int64_t chunk_size_sum =
@@ -148,12 +145,12 @@ std::vector<at::Tensor> scatter(
     const auto device_index = static_cast<int32_t>(devices[chunk]);
     if (streams) {
       AT_CHECK(
-          THCStream_device((*streams)[chunk]) == device_index,
+          (*streams)[chunk].device() == device_index,
           "Expected the device associated with the stream at index ",
-          chunk, " (was ", THCStream_device((*streams)[chunk]), ") ",
+          chunk, " (was ", (*streams)[chunk].device(), ") ",
           "to match the device supplied at that index ",
           "(expected ", device_index, ")");
-      cuda_guard.set_stream(CUDAStream((*streams)[chunk], /*retain=*/true));
+      cuda_guard.set_stream((*streams)[chunk]);
     }
     chunks[chunk] = chunks[chunk].contiguous().to(
         {at::kCUDA, device_index}, /*non_blocking=*/true);
@@ -174,7 +171,7 @@ at::Tensor gather(
   for (const auto& tensor : tensors) {
     AT_CHECK(
         tensor.type().is_cuda(), "Gather expects all inputs to have CUDA type");
-    AT_CHECK(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
+    AT_ASSERT(tensor.ndimension() == static_cast<int64_t>(expected_size.size()));
     expected_size[dim] = tensor.size(dim);
     for (size_t dimension = 0; dimension < expected_size.size(); ++dimension) {
       AT_CHECK(

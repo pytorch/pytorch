@@ -1122,18 +1122,18 @@ class TestTorch(TestCase):
 
     @staticmethod
     def _test_neg(self, cast):
-        float_types = ['torch.DoubleTensor', 'torch.FloatTensor', 'torch.LongTensor']
-        int_types = ['torch.IntTensor', 'torch.ShortTensor', 'torch.ByteTensor',
-                     'torch.CharTensor']
+        float_types = [torch.DoubleTensor, torch.FloatTensor, torch.LongTensor]
+        int_types = [torch.IntTensor, torch.ShortTensor, torch.ByteTensor,
+                     torch.CharTensor]
 
         for t in float_types + int_types:
             if t in float_types:
                 a = cast(torch.randn(100, 90).type(t))
             else:
-                a = cast(torch.Tensor(100, 90).type(t).random_(-128, 128))
+                a = cast(torch.randint(-128, 128, (100, 90), dtype=t.dtype))
             zeros = cast(torch.Tensor().type(t)).resize_as_(a).zero_()
 
-            if t == 'torch.ByteTensor':
+            if t == torch.ByteTensor:
                 res_add = torch.add(zeros, a, alpha=255)
             else:
                 res_add = torch.add(zeros, a, alpha=-1)
@@ -6218,8 +6218,7 @@ class TestTorch(TestCase):
 
     @skipIfNoZeroSize
     def test_blas_empty(self):
-        # FIXME: enable CUDA tests.
-        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
 
             def fn(torchfn, *args):
@@ -6279,6 +6278,40 @@ class TestTorch(TestCase):
             # dot
             self.assertEqual(torch.tensor(0., device=device), fn(torch.dot, (0,), (0,)))
 
+            # btrifact
+            A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
+            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
+            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
+            A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
+            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
+
+    @skipIfNoZeroSize
+    def test_blas_alpha_beta_empty(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in ['cuda']:
+            # ensure beta is respected
+            value = 11
+            input = torch.full((2,), value, device=device)
+            mat = torch.ones((2, 0), device=device)
+            vec = torch.ones((0,), device=device)
+            out = torch.randn((2,), device=device)
+            alpha = 6
+            beta = 3
+            self.assertEqual(torch.full((2,), beta * value, device=device),
+                             torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta))
+            self.assertEqual(torch.full((2,), beta * value, device=device),
+                             torch.addmv(input=input, mat=mat, vec=vec, alpha=alpha, beta=beta, out=out))
+
+            # torch.addmm
+            input = torch.full((2, 3), value, device=device)
+            mat2 = torch.ones((0, 3), device=device)
+            out = torch.randn((2, 3), device=device)
+            self.assertEqual(torch.full((2, 3), beta * value, device=device),
+                             torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta))
+            self.assertEqual(torch.full((2, 3), beta * value, device=device),
+                             torch.addmm(input=input, mat1=mat, mat2=mat2, alpha=alpha, beta=beta, out=out))
+
     @skipIfNoZeroSize
     @skipIfNoLapack
     def test_lapack_empty(self):
@@ -6321,14 +6354,6 @@ class TestTorch(TestCase):
             self.assertRaises(RuntimeError, lambda: torch.qr(torch.randn(0, 0)))
             self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0, 0), torch.randn(0, 0)))
             self.assertRaises(RuntimeError, lambda: torch.gels(torch.randn(0,), torch.randn(0, 0)))
-
-            # btrifact
-            A_LU, pivots = fn(torch.btrifact, (0, 5, 5))
-            self.assertEqual([(0, 5, 5), (0, 5)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.btrifact, (0, 0, 0))
-            self.assertEqual([(0, 0, 0), (0, 0)], [A_LU.shape, pivots.shape])
-            A_LU, pivots = fn(torch.btrifact, (2, 0, 0))
-            self.assertEqual([(2, 0, 0), (2, 0)], [A_LU.shape, pivots.shape])
 
     def test_expand(self):
         tensor = torch.rand(1, 8, 1)

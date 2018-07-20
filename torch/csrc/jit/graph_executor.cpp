@@ -226,7 +226,7 @@ struct GraphExecutorImpl {
     // there is no need to optimize, but we do need to splice the graph of
     // this excutor into the trace. Otherwise we might unroll control-flow
     // operations.
-    if(isTracing(inputs)) {
+    if(tracer::isTracing()) {
       return runTraced(std::move(inputs));
     }
 
@@ -274,26 +274,11 @@ struct GraphExecutorImpl {
 private:
   friend struct GraphExecutor;
 
-  // TODO: switching tracing to be part of the local thread state, instead of
-  // a per-variable property will make this check significantly faster.
-  // It is along the fast path, so this is important.
-  static bool isTracing(const variable_tensor_list& inputs) {
-    for(auto & i : inputs) {
-      if(i.defined() && tracer::isTracingVar(autograd::as_variable_ref(i)))
-        return true;
-    }
-    return false;
-  }
   variable_tensor_list runTraced(variable_tensor_list inputs) {
-    // TODO: unnecessary copy to variable_list
-    variable_list input_vars(inputs.begin(), inputs.end());
-    auto state = tracer::getTracingState(input_vars);
-    auto input_values = fmap(input_vars, [&](const Variable& v) {
-      return tracer::getValueTrace(state, v);
-    });
+    auto state = tracer::getTracingState();
+    auto input_values = fmap(inputs, tracer::getValueTrace);
 
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
-    input_vars.clear(); // don't hold inputs during execution
     auto outputs = runFallback(std::move(inputs));
 
     auto all_dynamic = [](const at::ArrayRef<Value*> xs) {
@@ -316,7 +301,7 @@ private:
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
     for(size_t i = 0; i < outputs.size(); ++i) {
-      tracer::setValueTrace(state, outputs[i], output_values[i]);
+      tracer::setValueTrace(outputs[i], output_values[i]);
     }
     return outputs;
   }
