@@ -1,4 +1,4 @@
-#include "caffe2/onnx/onnxifi_transformer.h"
+#include "caffe2/opt/onnxifi_transformer.h"
 
 #include <iostream>
 #include <unordered_set>

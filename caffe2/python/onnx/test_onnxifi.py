@@ -171,7 +171,7 @@ class OnnxifiTransformTest(TestCase):
         pred_net.external_output[0] = new_tail
 
 
-    #@unittest.skip("Need ONNXIFI backend support")
+    @unittest.skip("Need ONNXIFI backend support")
     def test_resnet50_core(self):
         N = 1
         repeat = 1
