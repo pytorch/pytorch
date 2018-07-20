@@ -3,7 +3,6 @@
 # sccache is only supported in CMake master and not in the newest official
 # release (3.11.3) yet. Hence we need our own Modules_CUDA_fix to enable sccache.
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_LIST_DIR}/../Modules_CUDA_fix)
-include(CMakeInitializeConfigs)
 
 # Find CUDA.
 find_package(CUDA 7.0)
@@ -97,6 +96,8 @@ if(NOT CUDNN_FOUND)
   message(WARNING
     "Caffe2: Cannot find cuDNN library. Turning the option off")
   set(CAFFE2_USE_CUDNN OFF)
+else()
+  set(CAFFE2_USE_CUDNN ON)
 endif()
 
 # Optionally, find TensorRT
@@ -299,16 +300,21 @@ else()
   list(APPEND CUDA_NVCC_FLAGS "-DONNX_NAMESPACE=onnx_c2")
 endif()
 
-# CUDA 9.x requires GCC version <= 6
+# CUDA 9.0 & 9.1 require GCC version <= 5
+# Although they support GCC 6, but a bug that wasn't fixed until 9.2 prevents
+# them from compiling the std::tuple header of GCC 6.
+# See Sec. 2.2.1 of
+# https://developer.download.nvidia.com/compute/cuda/9.2/Prod/docs/sidebar/CUDA_Toolkit_Release_Notes.pdf
 if ((CUDA_VERSION VERSION_EQUAL   9.0) OR
     (CUDA_VERSION VERSION_GREATER 9.0  AND CUDA_VERSION VERSION_LESS 9.2))
   if (CMAKE_C_COMPILER_ID STREQUAL "GNU" AND
-      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 7.0 AND
+      NOT CMAKE_C_COMPILER_VERSION VERSION_LESS 6.0 AND
       CUDA_HOST_COMPILER STREQUAL CMAKE_C_COMPILER)
     message(FATAL_ERROR
-      "CUDA ${CUDA_VERSION} is not compatible with GCC version >= 7. "
-      "Use the following option to use another version (for example): \n"
-      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-6\n")
+      "CUDA ${CUDA_VERSION} is not compatible with std::tuple from GCC version "
+      ">= 6. Please upgrade to CUDA 9.2 or use the following option to use "
+      "another version (for example): \n"
+      "  -DCUDA_HOST_COMPILER=/usr/bin/gcc-5\n")
   endif()
 elseif (CUDA_VERSION VERSION_EQUAL 8.0)
   # CUDA 8.0 requires GCC version <= 5
@@ -323,24 +329,7 @@ elseif (CUDA_VERSION VERSION_EQUAL 8.0)
 endif()
 
 # setting nvcc arch flags
-if ((NOT EXISTS ${TORCH_CUDA_ARCH_LIST}) AND (DEFINED ENV{TORCH_CUDA_ARCH_LIST}))
-  message(WARNING
-      "In the future we will require one to explicitly pass "
-      "TORCH_CUDA_ARCH_LIST to cmake instead of implicitly setting it as an "
-      "env variable. This will become a FATAL_ERROR in future version of "
-      "pytorch.")
-  set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
-endif()
-if (EXISTS ${CUDA_ARCH_NAME})
-  message(WARNING
-      "CUDA_ARCH_NAME is no longer used. Use TORCH_CUDA_ARCH_LIST instead. "
-      "Right now, CUDA_ARCH_NAME is ${CUDA_ARCH_NAME} and "
-      "TORCH_CUDA_ARCH_LIST is ${TORCH_CUDA_ARCH_LIST}.")
-  set(TORCH_CUDA_ARCH_LIST TORCH_CUDA_ARCH_LIST ${CUDA_ARCH_NAME})
-endif()
-
-# Invoke cuda_select_nvcc_arch_flags from proper cmake FindCUDA.
-cuda_select_nvcc_arch_flags(NVCC_FLAGS_EXTRA ${TORCH_CUDA_ARCH_LIST})
+torch_cuda_get_nvcc_gencode_flag(NVCC_FLAGS_EXTRA)
 list(APPEND CUDA_NVCC_FLAGS ${NVCC_FLAGS_EXTRA})
 message(STATUS "Added CUDA NVCC flags for: ${NVCC_FLAGS_EXTRA}")
 
@@ -350,7 +339,7 @@ foreach(diag cc_clobber_ignored integer_sign_change useless_using_declaration se
 endforeach()
 
 # Set C++11 support
-set(CUDA_PROPAGATE_HOST_FLAGS OFF)
+set(CUDA_PROPAGATE_HOST_FLAGS_BLACKLIST "-Werror")
 if (NOT MSVC)
   list(APPEND CUDA_NVCC_FLAGS "-std=c++11")
   list(APPEND CUDA_NVCC_FLAGS "-Xcompiler -fPIC")
@@ -377,6 +366,8 @@ if (MSVC)
   else()
     message(FATAL_ERROR "Unknown cmake build type: " ${CMAKE_BUILD_TYPE})
   endif()
+elseif (CUDA_DEVICE_DEBUG)
+  list(APPEND CUDA_NVCC_FLAGS "-g" "-G")  # -G enables device code debugging symbols
 endif()
 
 # Set expt-relaxed-constexpr to suppress Eigen warnings

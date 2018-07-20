@@ -5,9 +5,10 @@
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/utils.h"
-#include "torch/csrc/utils/auto_gpu.h"
 
 #include <cstdint>
+#include <stdexcept>
+#include <utility>
 
 using at::Tensor;
 
@@ -21,7 +22,7 @@ AccumulateGrad::AccumulateGrad(Variable variable_)
   add_input_metadata(variable.type(), variable.sizes());
 }
 
-auto AccumulateGrad::apply(const variable_list& grads) -> variable_list {
+auto AccumulateGrad::apply(variable_list&& grads) -> variable_list {
   // XXX: this method is not thread-safe!
   check_input_variables("AccumulateGrad", grads, 1, 0);
 

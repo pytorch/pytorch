@@ -1,4 +1,5 @@
 #include "torch/csrc/python_headers.h"
+#include "ATen/Utils.h"
 #include <functional>
 
 static PyObject* THPWrapperClass = NULL;

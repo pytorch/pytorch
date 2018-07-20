@@ -37,20 +37,16 @@ class TestCaffe2Basic(TestCase):
         assert n1 != n2, "Got same names in different calls: {}".format(n1)
 
     def test_check_arguments(self):
-        X = np.random.randn(3, 2).astype(np.float32)
-        Y = np.random.randn(3, 2).astype(np.float32)
-        Z = np.zeros((3, 2)).astype(np.float32)
-
         b2 = C.Caffe2Backend()
 
-        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], broadcast = 0)
-        output = b2.convert_node(node_def.SerializeToString(), 6)
+        node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"])
+        b2.convert_node(node_def.SerializeToString(), 6)
 
         bad_node_def = make_node("Add", inputs = ["X", "Y"], outputs = ["Z"], foo = 42, bar = 56)
         with self.assertRaisesRegexp(
             RuntimeError,
             ".*?Don't know how to map unexpected argument (foo|bar) \(from operator .*?\).*$"):
-            output = b2.convert_node(bad_node_def.SerializeToString(), 6)
+            b2.convert_node(bad_node_def.SerializeToString(), 6)
 
     def test_relu_graph(self):
         X = np.random.randn(3, 2).astype(np.float32)
@@ -104,6 +100,37 @@ class TestCaffe2Basic(TestCase):
         c2_rep = c2.prepare(make_model(graph_def, producer_name='caffe2-ref-test'))
         output = c2_rep.run({"X": X, "Y": Y})
         np.testing.assert_almost_equal(output["W3"], W_ref)
+
+    def test_upsample(self):
+        X = np.random.randn(1, 1, 2, 2).astype(np.float32)
+        width_scale = 2.0
+        height_scale = 2.0
+
+        predict_net = caffe2_pb2.NetDef()
+        predict_net.name = 'test-upsample-net'
+        predict_net.external_input[:] = ['X']
+        predict_net.external_output[:] = ['Y']
+        predict_net.op.extend([
+            core.CreateOperator(
+                'ResizeNearest',
+                inputs=['X'],
+                outputs=['Y'],
+                width_scale=width_scale,
+                height_scale=height_scale,
+            ),
+        ])
+        ws, c2_outputs = c2_native_run_net(
+            init_net=None,
+            predict_net=predict_net,
+            inputs=[X])
+
+        onnx_model = c2_onnx.caffe2_net_to_onnx_model(
+            predict_net=predict_net,
+            value_info={
+                'X': (onnx.mapping.NP_TYPE_TO_TENSOR_TYPE[X.dtype], X.shape)
+            })
+        onnx_outputs = c2.run_model(onnx_model, inputs=[X])
+        self.assertSameOutputs(c2_outputs, onnx_outputs)
 
     def test_gemm(self):
         # simple
@@ -166,8 +193,7 @@ class TestCaffe2Basic(TestCase):
             ['A', 'B', 'C'],
             ["Y"],
             alpha=alpha,
-            beta=beta,
-            broadcast=1)
+            beta=beta)
         output = c2.run_node(node_def, [A, B, C])
         np.testing.assert_almost_equal(
             output["Y"],
@@ -380,9 +406,9 @@ class TestCaffe2End2End(TestCase):
 
     @unittest.skipIf(
         os.environ.get('JENKINS_URL'),
-        'Running vgg19 on Travis with Python 2 keeps getting OOM!')
-    def test_vgg19(self):
-        self._test_net('vgg19')
+        'Taking too long to download!')
+    def test_zfnet(self):
+        self._test_net('zfnet')
 
     def test_inception_v1(self):
         self._test_net('inception_v1', decimal=2)

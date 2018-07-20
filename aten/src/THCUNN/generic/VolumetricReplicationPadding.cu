@@ -13,8 +13,8 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
              "input tensor must fit into 32-bit index math");
   int numInputDims = THCTensor_(nDimension)(state, input);
 
-  THCUNN_argCheck(state, numInputDims == 4 || numInputDims == 5, 2, input,
-    "4D or 5D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 4 || numInputDims == 5), 2, input,
+    "non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   int planeDim = 0;
   int dimd = 1;
@@ -28,9 +28,9 @@ static inline void THNN_(VolumetricReplicationPadding_shapeCheck)(
     }
 
   int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int idepth = input->size[dimd];
-  int iheight = input->size[dimh];
-  int iwidth = input->size[dimw];
+  int idepth = input->size(dimd);
+  int iheight = input->size(dimh);
+  int iwidth = input->size(dimw);
   int odepth = idepth + pfront + pback;
   int oheight = iheight + ptop + pbottom;
   int owidth  = iwidth + pleft + pright;

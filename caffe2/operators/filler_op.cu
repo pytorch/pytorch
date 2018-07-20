@@ -1,6 +1,7 @@
 #include <cmath>
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/filler_op.h"
+#include "caffe2/operators/operator_fallback_gpu.h"
 
 namespace caffe2 {
 
@@ -63,5 +64,8 @@ REGISTER_CUDA_OPERATOR(GaussianFill, GaussianFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(XavierFill, XavierFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(MSRAFill, MSRAFillOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(RangeFill, RangeFillOp<float, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    LengthsRangeFill,
+    GPUFallbackOp<LengthsRangeFillOp<CPUContext>>);
 
 } // namespace caffe2

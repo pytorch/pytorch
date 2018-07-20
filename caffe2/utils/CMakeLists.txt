@@ -64,6 +64,8 @@ set(Caffe2_HIP_TEST_SRCS ${Caffe2_HIP_TEST_SRCS}
 set(LIB_SOURCES_CPU
         Array.cpp
         C++17.cpp
+        IdWrapper.cpp
+        Optional.cpp
         Metaprogramming.cpp
         TypeList.cpp
         TypeTraits.cpp

@@ -618,6 +618,10 @@ def prepare_tests():
         test_params = deepcopy(test_params)
         name = test_params.pop('module_name')
         name = name_remap.get(name, name)
+        # hardshrink is deprecated in nn
+        if name == "HardShrink":
+            continue
+
         test_params['constructor'] = getattr(nn, name)
         test = OldModuleTest(**test_params)
         add_test(test)
@@ -625,6 +629,9 @@ def prepare_tests():
         test_params = deepcopy(test_params)
         name = test_params.pop('module_name')
         name = name_remap.get(name, name.replace('Loss', 'Criterion'))
+        # hardshrink is deprecated in nn
+        if name == "HardShrink":
+            continue
 
         # nn.NLLLoss2d is deprecated, but there is a NLLLoss test for 2d
         if name == 'ClassNLLCriterion' and 'desc' in test_params.keys() and '2d' in test_params['desc']:

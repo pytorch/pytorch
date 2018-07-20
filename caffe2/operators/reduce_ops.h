@@ -277,6 +277,68 @@ struct MeanReducer {
   }
 };
 
+template <class Context>
+struct L1Reducer {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data,
+      Context* context) const {
+    math::ReduceL1<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data,
+      Context* context) const;
+};
+
+template <class Context>
+struct L2Reducer {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& dims,
+      const std::vector<int>& axes,
+      const T* X_data,
+      T* Y_data,
+      Context* context) const {
+    math::ReduceL2<T, Context>(
+        dims.size(),
+        dims.data(),
+        axes.size(),
+        axes.data(),
+        X_data,
+        Y_data,
+        context);
+    return true;
+  }
+
+  template <typename T>
+  bool Backward(
+      const std::vector<int>& dY_dims,
+      const std::vector<int>& dX_dims,
+      const T* dY_data,
+      const T* X_data,
+      const T* Y_data,
+      T* dX_data,
+      Context* context) const;
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_REDUCE_OPS_H_

@@ -259,6 +259,20 @@ void pushPackingPastRnn(Block *b) {
     newPackPadded->addInput(next->outputs()[0]);
     newPackPadded->addInput(n->inputs()[1]);
 
+    // See https://github.com/pytorch/pytorch/issues/9043 for a full
+    // description.  Since PackPadded is for now treated in an
+    // unhygenic way, Pytorch ends up propagating an incorrect type.
+    // Until a long-term cleanup comes around, we can fix this by
+    // resetting the size to the correct value.
+    TensorType* oldType = rnn->inputs()[0]->type()->cast<TensorType>();
+    std::vector<int64_t> new_sizes;
+    new_sizes.push_back(oldType->sizes()[0]);
+    new_sizes.push_back(oldType->sizes()[1]);
+    new_sizes.push_back(rnn->i(attr::hidden_size));
+    TensorTypePtr newType = std::make_shared<TensorType>(
+        oldType->scalarType(), oldType->device(), new_sizes);
+    next->outputs()[0]->setType(newType);
+
     it.destroyCurrent();
   }
 }
@@ -330,7 +344,7 @@ void fixDefaultRNNState(Graph* graph, Node * n, int input_index) {
 
   Node * hidden_size = graph->create(onnx::Constant, 1);
   hidden_size->insertBefore(n);
-  hidden_size->t_(attr::value, at::CPU(at::kLong).tensor({1}).fill_(n->i(attr::hidden_size))); // at::Scalar(n->i(attr::hidden_size)).toTensor());
+  hidden_size->t_(attr::value, at::full({1}, n->i(attr::hidden_size), at::kLong)); // at::Scalar(n->i(attr::hidden_size)).toTensor());
 
   Node * num_directions = graph->create(onnx::Constant, 1);
   num_directions->insertBefore(n);

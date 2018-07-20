@@ -86,6 +86,8 @@ from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .half_cauchy import HalfCauchy
+from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace

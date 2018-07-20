@@ -70,8 +70,8 @@ PerOpEnginePrefType& g_per_op_engine_pref() {
 }
 
 GlobalEnginePrefType& g_global_engine_pref() {
-  static auto* g_global_engine_pref_ =
-      new GlobalEnginePrefType{{DeviceType::CUDA, {"CUDNN"}}};
+  static auto* g_global_engine_pref_ = new GlobalEnginePrefType{
+      {DeviceType::CUDA, {"CUDNN"}}, {DeviceType::HIP, {"MIOPEN"}}};
   return *g_global_engine_pref_;
 }
 
@@ -629,6 +629,10 @@ std::set<std::string> GetRegisteredOperators() {
   }
   // CUDA operators
   for (const auto& name : CUDAOperatorRegistry()->Keys()) {
+    all_keys.emplace(name);
+  }
+  // HIP operators
+  for (const auto& name : HIPOperatorRegistry()->Keys()) {
     all_keys.emplace(name);
   }
 

@@ -40,6 +40,10 @@ case NNKind::Reshape:
   return "Reshape";
 case NNKind::Flatten:
   return "Flatten";
+case NNKind::NCHW2NHWC:
+  return "NCHW2NHWC";
+case NNKind::NHWC2NCHW:
+  return "NHWC2NCHW";
 case NNKind::Int8Quantize:
   return "Int8Quantize";
 case NNKind::Int8Dequantize:
@@ -80,3 +84,9 @@ case NNKind::Int8AveragePoolRelu:
   return "Int8AveragePoolRelu";
 case NNKind::Int8MaxPoolRelu:
   return "Int8MaxPoolRelu";
+case NNKind::BatchMatMul:
+  return "BatchMatMul";
+case NNKind::BatchGather:
+  return "BatchGather";
+case NNKind::ConcatBatchMatMulBatchGatherOp:
+  return "ConcatBatchMatMulBatchGatherOp";

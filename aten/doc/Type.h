@@ -366,6 +366,9 @@ struct AT_API Type {
   virtual Tensor & erf_(Tensor & self) const;
   virtual Tensor & erf_out(Tensor & result, const Tensor & self) const;
   virtual Tensor erf(const Tensor & self) const;
+  virtual Tensor & erfc_(Tensor & self) const;
+  virtual Tensor & erfc_out(Tensor & result, const Tensor & self) const;
+  virtual Tensor erfc(const Tensor & self) const;
   virtual Tensor & erfinv_(Tensor & self) const;
   virtual Tensor & erfinv_out(Tensor & result, const Tensor & self) const;
   virtual Tensor erfinv(const Tensor & self) const;
@@ -747,12 +750,6 @@ struct AT_API Type {
   virtual Tensor glu_forward(const Tensor & self, int64_t dim) const;
   virtual Tensor & glu_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, int64_t dim) const;
   virtual Tensor glu_backward(const Tensor & grad_output, const Tensor & self, int64_t dim) const;
-  virtual Tensor & hardshrink_out(Tensor & output, const Tensor & self, Scalar lambd=0.5) const;
-  virtual Tensor hardshrink(const Tensor & self, Scalar lambd=0.5) const;
-  virtual Tensor & hardshrink_forward_out(Tensor & output, const Tensor & self, Scalar lambd) const;
-  virtual Tensor hardshrink_forward(const Tensor & self, Scalar lambd) const;
-  virtual Tensor & hardshrink_backward_out(Tensor & grad_input, const Tensor & grad_output, const Tensor & self, Scalar lambd) const;
-  virtual Tensor hardshrink_backward(const Tensor & grad_output, const Tensor & self, Scalar lambd) const;
   virtual Tensor & hardtanh_out(Tensor & output, const Tensor & self, Scalar min_val=-1, Scalar max_val=1) const;
   virtual Tensor hardtanh(const Tensor & self, Scalar min_val=-1, Scalar max_val=1) const;
   virtual Tensor & hardtanh_forward_out(Tensor & output, const Tensor & self, Scalar min_val, Scalar max_val) const;

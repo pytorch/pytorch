@@ -131,9 +131,9 @@ __global__ void L1DistanceKernel(
   for (int i = blockIdx.x; i < N; i += gridDim.x) {
     float sum = 0.0f;
     for (int j = threadIdx.x; j < D; j += blockDim.x) {
-      sum +=
-          abs(convert::To<T, float>(X[i * D + j]) -
-              convert::To<T, float>(Y[i * D + j]));
+      sum += fabsf(
+          convert::To<T, float>(X[i * D + j]) -
+          convert::To<T, float>(Y[i * D + j]));
     }
 
     float aggregate = BlockReduce(temp_storage).Sum(sum);
@@ -329,7 +329,7 @@ bool CosineSimilarityOp<float, CUDAContext>::RunOnDevice() {
   math::Maximum<float, CUDAContext>(N, kEps, x2, x2, &context_);
   math::Maximum<float, CUDAContext>(N, kEps, y2, y2, &context_);
   math::Mul(N, x2, y2, scale, &context_);
-  math::InvSqrt(N, scale, scale, &context_);
+  math::Rsqrt(N, scale, scale, &context_);
   math::Mul(N, result_data, scale, result_data, &context_);
   return true;
 }
@@ -395,33 +395,33 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
       context_.cuda_stream()>>>(N, D, X_data, Y_data, xy);
   math::Div<float, CUDAContext>(N, dCos_data, xyn, scale, &context_);
   // dX
-  BatchedMul<<<
+  BatchedMul<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, Y_data, scale, dX_data);
-  Scale2AxpyScale<<<
+  Scale2AxpyScale<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, scale, xy, xn, axpy_scale);
-  BatchedAxpy<<<
+  BatchedAxpy<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, axpy_scale, X_data, dX_data);
   // dY
-  BatchedMul<<<
+  BatchedMul<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, D, X_data, scale, dY_data);
-  Scale2AxpyScale<<<
+  Scale2AxpyScale<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(N, scale, xy, yn, axpy_scale);
-  BatchedAxpy<<<
+  BatchedAxpy<float><<<
       std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),
       CAFFE_CUDA_NUM_THREADS,
       0,

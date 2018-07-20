@@ -17,14 +17,7 @@ class SparseNormalizeOp final : public Operator<Context> {
     CAFFE_ENFORCE_GE(norm_, 0, "norm should be bigger than 0");
   }
 
-  bool RunOnDevice() override {
-    CAFFE_ENFORCE_EQ(
-        Input(PARAM).size_from_dim(1),
-        Input(GRAD).size_from_dim(Input(INDICES).ndim()));
-
-    return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, Input(INDICES));
-  }
+  bool RunOnDevice() override;
 
   template <typename SIndex>
   bool DoRunWithType();

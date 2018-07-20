@@ -7,13 +7,12 @@ void THNN_(AbsCriterion_updateOutput)(
            THCTensor *input,
            THCTensor *target,
            THCTensor *output,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 3, input, target, output);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCTensor_(resizeAs)(state, output, input);
     THC_pointwiseApply3<real, real, real>(state, input, target, output,
                         abs_updateOutput_no_reduce_functor<real>());
@@ -31,7 +30,7 @@ void THNN_(AbsCriterion_updateOutput)(
   thrust::device_ptr<real> target_data(THCTensor_(data)(state, target));
   accreal sum = thrust::inner_product(input_data, input_data+size, target_data, (accreal)0, thrust::plus<accreal>(), abs_functor<real, accreal>());
 
-  if (sizeAverage)
+  if (reduction == Reduction::ElementwiseMean)
     sum /= size;
 
   THCTensor_(free)(state, input);
@@ -46,15 +45,14 @@ void THNN_(AbsCriterion_updateGradInput)(
            THCTensor *target,
            THCTensor *gradOutput,
            THCTensor *gradInput,
-           bool sizeAverage,
-           bool reduce)
+           int64_t reduction)
 {
   THCUNN_check_shape(state, input, target);
   THCUNN_assertSameGPU(state, 4, input, target, gradOutput, gradInput);
 
   THCTensor_(resizeAs)(state, gradInput, input);
 
-  if (!reduce) {
+  if (reduction == Reduction::None) {
     THCUNN_check_shape(state, gradOutput, input);
     THC_pointwiseApply3<real, real, real>(state, input, target, gradInput,
                         abs_updateGradInput_no_reduce_functor<real>());
@@ -65,7 +63,7 @@ void THNN_(AbsCriterion_updateGradInput)(
   THCUNN_check_dim_size(state, gradOutput, 1, 0, 1);
 
   ptrdiff_t size = THCTensor_(nElement)(state, input);
-  real norm = ScalarConvert<double, real>::to(sizeAverage ? 1./size : 1.);
+  real norm = ScalarConvert<double, real>::to(reduction == Reduction::ElementwiseMean ? 1./size : 1.);
 
   input = THCTensor_(newContiguous)(state, input);
   target = THCTensor_(newContiguous)(state, target);

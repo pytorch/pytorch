@@ -92,6 +92,8 @@ class CPUSparseLengthsReductionOp : public Operator<CPUContext> {
     return true;
   }
 
+  USE_VALUE_KEY_LENGTH_INPUT_FILLERS(CPUContext, DATA, INDICES, LENGTHS)
+
  private:
   enum {
     DATA = 0, // Data input.

@@ -41,6 +41,21 @@ void PeepholeOptimize(Block * block) {
           // Let DCE clean up any unused nodes at this point
         }
       } break;
+      case aten::type_as: {
+        JIT_ASSERT(n->inputs().size() == 2);
+        Value *lhs = n->input(0);
+        Value *rhs = n->input(1);
+        // If LHS and RHS have the same static type, remove the type_as operator.
+        if (lhs->type()->kind() == TypeKind::TensorType &&
+            rhs->type()->kind() == TypeKind::TensorType) {
+           auto ltype = (*lhs->type()).cast<TensorType>();
+           auto rtype = (*rhs->type()).cast<TensorType>();
+           if(ltype->device() == rtype->device() &&
+              ltype->scalarType() == rtype->scalarType()) {
+              n->output()->replaceAllUsesWith(lhs);
+           }
+        }
+      } break;
       // Fuse mm + add into addmm
       case aten::add: {
         // Must have two inputs

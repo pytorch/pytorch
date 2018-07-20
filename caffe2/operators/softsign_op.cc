@@ -1,5 +1,7 @@
 #include "caffe2/operators/softsign_op.h"
 
+#include "caffe2/utils/eigen_utils.h"
+
 #include <algorithm>
 #include <functional>
 
@@ -17,14 +19,14 @@ operator()(const int N, const T* X, T* Y, CPUContext* /* context */) const {
 template <>
 template <typename T>
 bool SoftsignGradientFunctor<CPUContext>::Forward(
-    const std::vector<int>& dY_dims,
-    const std::vector<int>& /* X_dims */,
-    const T* dY,
+    const std::vector<int>& X_dims,
+    const std::vector<int>& /* dY_dims */,
     const T* X,
+    const T* dY,
     T* dX,
     CPUContext* /* context */) const {
   const int size = std::accumulate(
-      dY_dims.cbegin(), dY_dims.cend(), 1, std::multiplies<int>());
+      X_dims.cbegin(), X_dims.cend(), 1, std::multiplies<int>());
   ConstEigenVectorArrayMap<T> dY_arr(dY, size);
   ConstEigenVectorArrayMap<T> X_arr(X, size);
   EigenVectorMap<T>(dX, size) =
@@ -103,13 +105,13 @@ Y:
 
 )DOC")
     .Input(0, "input", "Input data blob to be operated on.")
-    .Output(0,"output", "Output data blob with same shape as input")
+    .Output(0, "output", "Output data blob with same shape as input")
     .InheritOnnxSchema("Softsign");
 
 OPERATOR_SCHEMA(SoftsignGradient)
     .NumInputs(2)
     .NumOutputs(1)
-    .AllowInplace({{0, 0}})
+    .AllowInplace({{1, 0}})
     .SetDoc(R"DOC(
 Calculates the softsign gradient (sgn(x)/(1+|x|)^2) of the given input tensor
 element-wise.
@@ -135,7 +137,7 @@ class GetSoftsignGradient : public GradientMakerBase {
     return SingleGradientDef(
         "SoftsignGradient",
         "",
-        std::vector<std::string>{GO(0), I(0)},
+        std::vector<std::string>{I(0), GO(0)},
         std::vector<std::string>{GI(0)});
   }
 };

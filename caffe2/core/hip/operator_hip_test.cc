@@ -49,7 +49,7 @@ TEST(EnginePrefTest, GPUDeviceDefaultPreferredEngines)
     {
       const auto op = CreateOperator(op_def, &ws);
       EXPECT_NE(nullptr, op.get());
-      EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "HIP");
+      EXPECT_EQ(static_cast<JustTest*>(op.get())->type(), "MIOPEN");
     }
 }
 

@@ -17,18 +17,18 @@ void THNN_(LRNforward)(THCState* state, THCTensor* input, THCTensor* output,
   int imsize_h;
   int imsize_w;
 
-  if (input->_dim() == 3) {
+  if (input->dim() == 3) {
     batchSize = 1;
-    nInputPlane = input->size[0];
-    imsize_h = input->size[1];
-    imsize_w = input->size[2];
+    nInputPlane = input->size(0);
+    imsize_h = input->size(1);
+    imsize_w = input->size(2);
   }
   else
   {
-    batchSize = input->size[0];
-    nInputPlane = input->size[1];
-    imsize_h = input->size[2];
-    imsize_w = input->size[3];
+    batchSize = input->size(0);
+    nInputPlane = input->size(1);
+    imsize_h = input->size(2);
+    imsize_w = input->size(3);
   }
 
   input = THCTensor_(newContiguous)(state, input);
@@ -62,18 +62,18 @@ void THNN_(LRNbackward)(THCState* state, THCTensor* input, THCTensor* output,
   int imsize_h;
   int imsize_w;
 
-  if (input->_dim() == 3) {
+  if (input->dim() == 3) {
     batchSize = 1;
-    nInputPlane = input->size[0];
-    imsize_h = input->size[1];
-    imsize_w = input->size[2];
+    nInputPlane = input->size(0);
+    imsize_h = input->size(1);
+    imsize_w = input->size(2);
   }
   else
   {
-    batchSize = input->size[0];
-    nInputPlane = input->size[1];
-    imsize_h = input->size[2];
-    imsize_w = input->size[3];
+    batchSize = input->size(0);
+    nInputPlane = input->size(1);
+    imsize_h = input->size(2);
+    imsize_w = input->size(3);
   }
 
   input = THCTensor_(newContiguous)(state, input);

@@ -1,5 +1,8 @@
 #include "ulp.h"
+
+#include <cstring>
 #include "caffe2/operators/conv_pool_op_base.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "ulp_neon.h"
 
 namespace caffe2 {
@@ -286,7 +289,8 @@ std::unique_ptr<QConvState> create2b1bConvState(Workspace* ws,
 #endif
   };
   if (b) {
-    state->bias = caffe2::make_unique<TensorCPU>(*b);
+    CPUContext context;
+    state->bias = caffe2::make_unique<TensorCPU>(*b, &context);
   }
   return state;
 }

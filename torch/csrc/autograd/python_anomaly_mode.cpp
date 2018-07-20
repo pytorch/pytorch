@@ -17,6 +17,9 @@ void PyAnomalyMetadata::store_stack() {
   }
 
   THPObjectPtr list(PyObject_CallMethod(mod.get(), "format_stack", ""));
+  if (!list) {
+    throw python_error();
+  }
 
   if (PyDict_SetItemString(dict(), ANOMALY_TRACE_KEY, list.get())) {
     throw python_error();
@@ -31,16 +34,25 @@ void PyAnomalyMetadata::print_stack() {
 
   THPObjectPtr stack(PyDict_GetItemString(dict(), ANOMALY_TRACE_KEY));
   if (!stack) {
-    std::cout << "No forward pass information available." << std::endl;
-    std::cout << "Enable detect anomaly during forward pass for more informations." << std::endl;
+    AT_WARN("No forward pass information available. Enable detect anomaly "
+            "during forward pass for more information.");
     return;
   }
 
   THPObjectPtr empty_string(PyUnicode_FromString(""));
-  THPObjectPtr msg(PyUnicode_Join(empty_string, stack.get()));
+  if (!empty_string) {
+    throw python_error();
+  }
 
-  std::cout << "Traceback of forward call that caused the error:" << std::endl;
-  std::cout << THPUtils_unpackString(msg.get()) << std::endl;
+  // stack is a list of Python strings ending with newlines. Use join to convert
+  // to a single string.
+  THPObjectPtr msg(PyUnicode_Join(empty_string, stack.get()));
+  if (!msg) {
+    throw python_error();
+  }
+
+  AT_WARN("Traceback of forward call that caused the error:\n",
+          THPUtils_unpackString(msg.get()));
 }
 
 }}

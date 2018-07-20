@@ -430,7 +430,7 @@ class TestCaffe2Backend(unittest.TestCase):
         x = Variable(torch.randn(1, 1, 224, 224), requires_grad=True)
         self.run_model_test(super_resolution_net, train=False,
                             batch_size=BATCH_SIZE, state_dict=state_dict,
-                            input=x, use_gpu=False)
+                            input=x, use_gpu=False, atol=1e-6)
 
     @unittest.skip("This model takes too much memory")
     def test_vgg16(self):
@@ -614,6 +614,13 @@ class TestCaffe2Backend(unittest.TestCase):
     def test_avgpool2d_no_padding(self):
         model = nn.AvgPool2d(5)
         self.run_model_test(model, train=False, batch_size=BATCH_SIZE)
+
+    def test_weight_norm(self):
+        model = nn.utils.weight_norm(nn.Conv1d(1, 1, 3))
+        input = Variable(torch.randn(1, 1, 5), requires_grad=True)
+        self.run_model_test(
+            model, train=True, batch_size=0, input=input, use_gpu=False
+        )
 
     def test_mnist(self):
         model = MNIST()

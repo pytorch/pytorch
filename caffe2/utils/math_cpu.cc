@@ -11,12 +11,14 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <cmath>
 #include <cstring>
 #include <functional>
 #include <limits>
@@ -551,14 +553,22 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, vsTan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tan, vdTan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, vsAtan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Atan, vdAtan)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sinh, vsSinh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sinh, vdSinh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cosh, vsCosh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cosh, vdCosh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tanh, vsTanh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tanh, vdTanh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, vsInvSqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(double, InvSqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqr, vdSqr)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, vsSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sqrt, vdSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -612,9 +622,10 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Asin, asin)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tan, tan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Atan, atan)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, abs)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
-DELEGATE_SIMPLE_UNARY_FUNCTION(float, InvSqrt, rsqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, square)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqrt, sqrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
+
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T)                                     \
@@ -628,13 +639,54 @@ DELEGATE_SINCOS_FUNCTION(float)
 DELEGATE_SINCOS_FUNCTION(double)
 #undef DELEGATE_SINCOS_FUNCTION
 
-#define DELEGATE_POWX_FUNCTION(T)                                             \
+#define DELEGATE_TANH_FUNCTION(T)                                             \
   template <>                                                                 \
-  void Powx<T, CPUContext>(const int N, const T* a, T b, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b);       \
+  void Tanh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) {      \
+    EigenVectorMap<T>(Y, N) = T(1) -                                          \
+        ((ConstEigenVectorArrayMap<T>(X, N) * T(2)).exp() + T(1)).inverse() * \
+            T(2);                                                             \
+  }
+DELEGATE_TANH_FUNCTION(float)
+DELEGATE_TANH_FUNCTION(double)
+#undef DELEGATE_TANH_FUNCTION
+
+#define DELEGATE_CBRT_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cbrt<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    std::transform(X, X + N, Y, [](const T x) { return cbrt(x); });      \
+  }
+DELEGATE_CBRT_FUNCTION(float)
+DELEGATE_CBRT_FUNCTION(double)
+#undef DELEGATE_CBRT_FUNCTION
+
+#define DELEGATE_POWX_FUNCTION(T)                                       \
+  template <>                                                           \
+  void Powx<T, CPUContext>(                                             \
+      const int N, const T* a, const T b, T* y, CPUContext*) {          \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(a, N).pow(b); \
   }
 DELEGATE_POWX_FUNCTION(float)
 #undef DELEGATE_POWX_FUNCTION
+
+#define DELEGATE_SINH_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Sinh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    ConstEigenVectorArrayMap<T> X_arr(X, N);                             \
+    EigenVectorMap<T>(Y, N) = (X_arr.exp() - (-X_arr).exp()) / 2;        \
+  }
+DELEGATE_SINH_FUNCTION(float)
+DELEGATE_SINH_FUNCTION(double)
+#undef DELEGATE_SINH_FUNCTION
+
+#define DELEGATE_COSH_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cosh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    ConstEigenVectorArrayMap<T> X_arr(X, N);                             \
+    EigenVectorMap<T>(Y, N) = (X_arr.exp() + (-X_arr).exp()) / 2;        \
+  }
+DELEGATE_COSH_FUNCTION(float)
+DELEGATE_COSH_FUNCTION(double)
+#undef DELEGATE_COSH_FUNCTION
 
 #endif // CAFFE2_USE_MKL
 
@@ -659,6 +711,17 @@ DELEGATE_SIGN_FUNCTION(double)
 DELEGATE_SIGN_FUNCTION(std::int32_t)
 DELEGATE_SIGN_FUNCTION(std::int64_t)
 #undef DELEGATE_SIGN_FUNCTION
+
+#define DELEGATE_CUBE_FUNCTION(T)                                        \
+  template <>                                                            \
+  void Cube<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) { \
+    EigenVectorMap<T>(Y, N) = ConstEigenVectorArrayMap<T>(X, N).cube();  \
+  }
+DELEGATE_CUBE_FUNCTION(float)
+DELEGATE_CUBE_FUNCTION(double)
+DELEGATE_CUBE_FUNCTION(std::int32_t)
+DELEGATE_CUBE_FUNCTION(std::int64_t)
+#undef DELEGATE_CUBE_FUNCTION
 
 #define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
   template <>                                                   \
@@ -741,6 +804,9 @@ void ReduceTensor(
     T* Y,
     CPUContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
+  if (X == Y) {
+    return;
+  }
   std::vector<int> Y_dims(dims, dims + num_dims);
   for (int i = 0; i < num_axes; ++i) {
     Y_dims[axes[i]] = 1;
@@ -869,6 +935,61 @@ CAFFE2_SPECIALIZED_REDUCE_SUM(double)
   }
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
 #undef CAFFE2_SPECIALIZED_REDUCE_MEAN
+
+#define CAFFE2_SPECIALIZED_REDUCE_L1(T)                         \
+  template <>                                                   \
+  void ReduceL1<T, CPUContext>(                                 \
+      const int num_dims,                                       \
+      const int* dims,                                          \
+      const int num_axes,                                       \
+      const int* axes,                                          \
+      const T* X,                                               \
+      T* Y,                                                     \
+      CPUContext* context) {                                    \
+    ReduceTensor(                                               \
+        num_dims,                                               \
+        dims,                                                   \
+        num_axes,                                               \
+        axes,                                                   \
+        [](const T& a, const T& b) { return a + std::abs(b); }, \
+        T(0),                                                   \
+        X,                                                      \
+        Y,                                                      \
+        context);                                               \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L1(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L1
+
+#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                             \
+  template <>                                                       \
+  void ReduceL2<T, CPUContext>(                                     \
+      const int num_dims,                                           \
+      const int* dims,                                              \
+      const int num_axes,                                           \
+      const int* axes,                                              \
+      const T* X,                                                   \
+      T* Y,                                                         \
+      CPUContext* context) {                                        \
+    ReduceTensor(                                                   \
+        num_dims,                                                   \
+        dims,                                                       \
+        num_axes,                                                   \
+        axes,                                                       \
+        [](const T& a, const T& b) { return a + b * b; },           \
+        T(0),                                                       \
+        X,                                                          \
+        Y,                                                          \
+        context);                                                   \
+    std::vector<int> Y_dims(dims, dims + num_dims);                 \
+    for (int i = 0; i < num_axes; ++i) {                            \
+      Y_dims[axes[i]] = 1;                                          \
+    }                                                               \
+    const int Y_size = std::accumulate(                             \
+        Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>()); \
+    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                     \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L2(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L2
 
 namespace {
 
@@ -1593,31 +1714,101 @@ DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
-template <>
-void RandUniform<float, CPUContext>(
-    const size_t n,
-    const float a,
-    const float b,
-    float* r,
-    CPUContext* context) {
-  std::uniform_real_distribution<float> distribution(a, b);
-  for (size_t i = 0; i < n; ++i) {
-    r[i] = distribution(context->RandGenerator());
+#define CAFFE2_RAND_UNIFORM_REAL(T)                                      \
+  template <>                                                            \
+  void RandUniform<T, CPUContext>(                                       \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    std::uniform_real_distribution<T> distribution(a, b);                \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = distribution(context->RandGenerator());                     \
+    }                                                                    \
   }
-}
+CAFFE2_RAND_UNIFORM_REAL(float);
+CAFFE2_RAND_UNIFORM_REAL(double);
+#undef CAFFE2_RAND_UNIFORM_REAL
 
-template <>
-void RandUniform<int, CPUContext>(
-    const size_t n,
-    const int a,
-    const int b,
-    int* r,
-    CPUContext* context) {
-  std::uniform_int_distribution<int> distribution(a, b);
-  for (size_t i = 0; i < n; ++i) {
-    r[i] = distribution(context->RandGenerator());
+#define CAFFE2_RAND_UNIFORM_CHAR(T)                                        \
+  template <>                                                              \
+  void RandUniform<T, CPUContext>(                                         \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) {   \
+    std::uniform_int_distribution<short> distribution((short)a, (short)b); \
+    for (size_t i = 0; i < n; ++i) {                                       \
+      r[i] = static_cast<T>(distribution(context->RandGenerator()));       \
+    }                                                                      \
   }
-}
+CAFFE2_RAND_UNIFORM_CHAR(int8_t);
+CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
+#undef CAFFE2_RAND_UNIFORM_CHAR
+
+#define CAFFE2_RAND_UNIFORM_INT(T)                                       \
+  template <>                                                            \
+  void RandUniform<T, CPUContext>(                                       \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    std::uniform_int_distribution<T> distribution(a, b);                 \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = distribution(context->RandGenerator());                     \
+    }                                                                    \
+  }
+
+CAFFE2_RAND_UNIFORM_INT(int16_t);
+CAFFE2_RAND_UNIFORM_INT(int32_t);
+CAFFE2_RAND_UNIFORM_INT(int64_t);
+CAFFE2_RAND_UNIFORM_INT(uint16_t);
+CAFFE2_RAND_UNIFORM_INT(uint32_t);
+CAFFE2_RAND_UNIFORM_INT(uint64_t);
+#undef CAFFE2_RAND_UNIFORM_INT
+
+// This is not uniformly distributed between a and b.
+// It takes advantage of normal distribution to generate numbers
+// with mean = sum / n.
+// Ideally the algorithm should be generating n numbers between 0 and 1,
+// sum them up as scaled_sum, and use sum / scaled_sum to adjust the values
+// to between a and b.
+// The algorithm is non-trivial given the adjustment would be different towards
+// each value.
+#define CAFFE2_RAND_FIXED_SUM(T)                                        \
+  template <>                                                           \
+  void RandFixedSum<T, CPUContext>(                                     \
+      const size_t n,                                                   \
+      const T a,                                                        \
+      const T b,                                                        \
+      const T sum,                                                      \
+      T* r,                                                             \
+      CPUContext* context) {                                            \
+    CAFFE_ENFORCE_GE(a, 0);                                             \
+    CAFFE_ENFORCE_GE(sum / (double)n, a);                               \
+    CAFFE_ENFORCE_LE(sum / (double)n, b);                               \
+    T current_sum = 0;                                                  \
+    for (size_t i = 0; i < n - 1; ++i) {                                \
+      auto remaining_numbers = n - 1 - i;                               \
+      double mean = (sum - current_sum) / remaining_numbers;            \
+      double stdev = std::min(mean - a, b - mean);                      \
+      std::normal_distribution<double> distribution{mean, stdev / 4.0}; \
+      T value = distribution(context->RandGenerator());                 \
+      auto remaining_sum = sum - current_sum - value;                   \
+      if (value < a || remaining_sum > b * remaining_numbers) {         \
+        value = a;                                                      \
+      } else if (value > b || remaining_sum < a * remaining_numbers) {  \
+        value = b;                                                      \
+      }                                                                 \
+      r[i] = value;                                                     \
+      CAFFE_ENFORCE(a <= value && value <= b);                          \
+      current_sum += value;                                             \
+    }                                                                   \
+    r[n - 1] = sum - current_sum;                                       \
+    CAFFE_ENFORCE(a <= r[n - 1] && r[n - 1] <= b);                      \
+  }
+CAFFE2_RAND_FIXED_SUM(float);
+CAFFE2_RAND_FIXED_SUM(double);
+CAFFE2_RAND_FIXED_SUM(int8_t);
+CAFFE2_RAND_FIXED_SUM(int16_t);
+CAFFE2_RAND_FIXED_SUM(int32_t);
+CAFFE2_RAND_FIXED_SUM(int64_t);
+CAFFE2_RAND_FIXED_SUM(uint8_t);
+CAFFE2_RAND_FIXED_SUM(uint16_t);
+CAFFE2_RAND_FIXED_SUM(uint32_t);
+CAFFE2_RAND_FIXED_SUM(uint64_t);
+#undef CAFFE2_RAND_FIXED_SUM
 
 #define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                      \
   template <>                                                          \

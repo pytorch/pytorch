@@ -3,7 +3,7 @@
 #include "GlooCache.hpp"
 #include "Store.hpp"
 
-#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
 #include "gloo/transport/ibverbs/device.h"
 #endif
 
@@ -81,7 +81,7 @@ DataChannelGloo::DataChannelGloo(InitMethod::Config config)
 {
   _num_processes = config.world_size;
 
-#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
 
   // This helper function automatically detects the IB device in the system
   auto ibDeviceNames = ::gloo::transport::ibverbs::getDeviceNames();

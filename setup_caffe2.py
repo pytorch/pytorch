@@ -137,6 +137,7 @@ class cmake_build(Caffe2Command):
                 '-DBUILD_TEST=OFF',
                 '-DBUILD_BENCHMARK=OFF',
                 '-DBUILD_BINARY=OFF',
+                '-DCMAKE_EXPORT_COMPILE_COMMANDS=ON',
             ]
             if NINJA:
                 cmake_args.extend(['-G', 'Ninja'])
@@ -218,6 +219,9 @@ ext_modules = [
         sources=[]),
     setuptools.Extension(
         name=str('caffe2.python.caffe2_pybind11_state_gpu'),
+        sources=[]),
+    setuptools.Extension(
+        name=str('caffe2.python.caffe2_pybind11_state_hip'),
         sources=[]),
 ]
 

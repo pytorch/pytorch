@@ -8,8 +8,15 @@
 #include "ATen/Storage.h"
 #include "ATen/Generator.h"
 #include "ATen/Deprecated.h"
+#include "ATen/NativeFunctions.h"
+#include "ATen/DeviceGuard.h"
+#include "ATen/TensorOptions.h"
+#include "THNN/Reduction.h"
 
 namespace at {
+
+using native::from_blob;
+using native::tensor;
 
 ${function_declarations}
 

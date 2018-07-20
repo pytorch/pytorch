@@ -53,13 +53,16 @@ FILE(GLOB mkl_cpp "mkl/*.cpp")
 FILE(GLOB mkldnn_cpp "mkldnn/*.cpp")
 
 FILE(GLOB native_cpp "native/*.cpp")
+FILE(GLOB native_sparse_cpp "native/sparse/*.cpp")
+FILE(GLOB native_sparse_cuda_cu "native/sparse/cuda/*.cu")
+FILE(GLOB native_sparse_cuda_cpp "native/sparse/cuda/*.cpp")
 FILE(GLOB native_cudnn_cpp "native/cudnn/*.cpp")
 FILE(GLOB native_cuda_cu "native/cuda/*.cu")
 FILE(GLOB native_cuda_cpp "native/cuda/*.cpp")
 FILE(GLOB native_mkl_cpp "native/mkl/*.cpp")
 FILE(GLOB native_mkldnn_cpp "native/mkldnn/*.cpp")
 
-set(all_cpu_cpp ${base_cpp} ${native_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
+set(all_cpu_cpp ${base_cpp} ${native_cpp} ${native_sparse_cpp} ${native_mkl_cpp} ${native_mkldnn_cpp} ${generated_cpp} ${ATen_CPU_SRCS} ${cpu_kernel_cpp})
 if(AT_MKL_ENABLED)
   set(all_cpu_cpp ${all_cpu_cpp} ${mkl_cpp})
 endif()
@@ -69,8 +72,8 @@ endif()
 
 IF(USE_CUDA OR USE_ROCM)
   list(APPEND ATen_CUDA_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/cuda)
-  set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu})
-  set(all_cuda_cpp ${native_cudnn_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
+  set(ATen_CUDA_SRCS ${ATen_CUDA_SRCS} ${cuda_cu} ${native_cuda_cu} ${native_sparse_cuda_cu})
+  set(all_cuda_cpp ${native_cudnn_cpp} ${native_sparse_cuda_cpp} ${cuda_cpp} ${native_cuda_cpp} ${cuda_generated_cpp} ${ATen_CUDA_SRCS})
   IF(CUDNN_FOUND)
     SET(all_cuda_cpp ${all_cuda_cpp} ${cudnn_cpp})
   ENDIF()
@@ -85,24 +88,6 @@ list(APPEND ATen_CPU_INCLUDE ${CMAKE_CURRENT_BINARY_DIR})
 IF(NOT AT_LINK_STYLE)
   SET(AT_LINK_STYLE SHARED)
 ENDIF()
-
-# Unset our restrictive C++ flags here and reset them later.
-# Remove this once we use proper target_compile_options.
-set(OLD_CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
-set(CMAKE_CXX_FLAGS)
-
-set(TBB_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../../third_party/tbb")
-set(TBB_BUILD_STATIC ON CACHE BOOL " " FORCE)
-set(TBB_BUILD_SHARED OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TBBMALLOC OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TBBMALLOC_PROXY OFF CACHE BOOL " " FORCE)
-set(TBB_BUILD_TESTS OFF CACHE BOOL " " FORCE)
-add_subdirectory(cpu/tbb)
-set_property(TARGET tbb_static tbb_def_files PROPERTY FOLDER "dependencies")
-list(APPEND ATen_THIRD_PARTY_INCLUDE ${TBB_ROOT_DIR}/include)
-list(APPEND ATen_CPU_DEPENDENCY_LIBS tbb_static)
-
-set(CMAKE_CXX_FLAGS ${OLD_CMAKE_CXX_FLAGS})
 
 IF(BLAS_FOUND)
   IF ($ENV{TH_BINARY_BUILD})
@@ -250,10 +235,6 @@ IF(USE_CUDA AND NOT USE_ROCM)
       ${CUDA_LIBRARIES}
       ${CUDA_cusparse_LIBRARY}
       ${CUDA_curand_LIBRARY})
-
-      # Set necessary HIPCC/CXX Flags
-      SET(HIP_HCC_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${HIP_HCC_FLAGS}")
-      SET(CMAKE_CXX_FLAGS "-DCUDA_HAS_FP16=1 -D__HIP_NO_HALF_OPERATORS__=1 -D__HIP_NO_HALF_CONVERSIONS__=1 -D__HIP_PLATFORM_HCC__=1 ${CMAKE_CXX_FLAGS}")
   ENDIF()
 
   if(CUDNN_FOUND)
@@ -312,12 +293,12 @@ else()
 endif()
 
 if(USE_CUDA OR USE_ROCM)
+  set(ATen_CUDA_SRCS ${all_cuda_cpp})
   if(AT_LINK_STYLE STREQUAL "INTERFACE")
     # Source code can't be added to an interface library, so it is
     # passed back to be compiled into the containing library
     add_library(ATen_cuda INTERFACE)
     list(APPEND ATen_CUDA_DEPENDENCY_LIBS ATEN_CUDA_FILES_GEN_LIB)
-    set(ATen_CUDA_SRCS ${all_cuda_cpp})
   else()
     # A hack to deal with cuda library dependencies and modern CMake: the
     # CUDA_ADD_LIBRARY includes a target_link_libraries, and as a result,
@@ -412,7 +393,7 @@ INSTALL(FILES "${CMAKE_CURRENT_BINARY_DIR}/cmake-exports/ATenConfig.cmake"
   DESTINATION "${AT_INSTALL_SHARE_DIR}/cmake/ATen")
 
 # https://stackoverflow.com/questions/11096471/how-can-i-install-a-hierarchy-of-files-using-cmake
-FOREACH(HEADER ${base_h})
+FOREACH(HEADER ${base_h} ${cuda_h} ${cudnn_h})
   string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
   GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
@@ -420,11 +401,6 @@ ENDFOREACH()
 FOREACH(HEADER ${generated_h} ${cuda_generated_h})
   # NB: Assumed to be flat
   INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen)
-ENDFOREACH()
-FOREACH(HEADER ${cuda_h})
-  string(REPLACE "${CMAKE_CURRENT_SOURCE_DIR}/" "" HEADER_SUB ${HEADER})
-  GET_FILENAME_COMPONENT(DIR ${HEADER_SUB} DIRECTORY)
-  INSTALL(FILES ${HEADER} DESTINATION ${AT_INSTALL_INCLUDE_DIR}/ATen/${DIR})
 ENDFOREACH()
 INSTALL(FILES ${CMAKE_BINARY_DIR}/aten/src/ATen/Declarations.yaml
   DESTINATION ${AT_INSTALL_SHARE_DIR}/ATen)
@@ -456,7 +432,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
           ${test_name} PRIVATE $<INSTALL_INTERFACE:include>)
       target_include_directories(${test_name} PRIVATE ${ATen_CPU_INCLUDE})
       target_include_directories(${test_name} SYSTEM PRIVATE ${ATen_THIRD_PARTY_INCLUDE})
-      target_link_libraries(${test_name} ATen_cpu ATen_cuda)
+      target_link_libraries(${test_name} -Wl,--no-as-needed ATen_cpu ATen_cuda)
       add_test(NAME ${test_name} COMMAND $<TARGET_FILE:${test_name}>)
       install(TARGETS ${test_name} DESTINATION test)
     endforeach()

@@ -9,7 +9,7 @@
 #include "gloo/allreduce_ring.h"
 #include "gloo/barrier_all_to_all.h"
 #include "gloo/broadcast_one_to_all.h"
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include "gloo/cuda_allreduce_ring.h"
 #include "gloo/cuda_allreduce_halving_doubling.h"
 #include "gloo/cuda_allreduce_halving_doubling_pipelined.h"
@@ -19,7 +19,7 @@
 #include "gloo/rendezvous/store.h"
 #include "gloo/rendezvous/prefix_store.h"
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
 #endif
@@ -141,10 +141,9 @@ struct GlooCache {
     if (device == DeviceType::CPU) {
       return std::shared_ptr<buffer_type>(new char[bytes],
                                           std::default_delete<char[]>());
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (device == DeviceType::CUDA) {
-      buffer_type *buf;
-      THCudaCheck(THCudaMalloc(THDGetCudaState(), (void**)&buf, bytes));
+      buffer_type *buf = static_cast<buffer_type*>(THCudaMalloc(THDGetCudaState(), bytes));
       return std::shared_ptr<buffer_type>(buf, [](char* ptr) { THCudaFree(THDGetCudaState(), ptr); });
 #endif
     } else {
@@ -184,7 +183,7 @@ struct GlooCache {
 
     if (t_dev == DeviceType::CPU) {
       std::memcpy(input_buffer, t.data_ptr(), tensor_bytes);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
       THCudaCheck(cudaMemcpyAsync(input_buffer, t.data_ptr(), tensor_bytes,
@@ -202,7 +201,7 @@ struct GlooCache {
 
     if (t_dev == DeviceType::CPU) {
       std::memcpy(t.data_ptr(), output_buffer, tensor_bytes);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (t_dev == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
       THCudaCheck(cudaMemcpyAsync(t.data_ptr(), output_buffer, tensor_bytes,
@@ -318,14 +317,14 @@ struct algorithm_spec<CollectiveType::ALL_REDUCE, T> {
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,
         THDToGlooReduceOp<T>(op));
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (device == DeviceType::CUDA) {
       if (op != THDReduceSUM) {
         throw std::runtime_error("Gloo backend only supports sum op for CUDA all reduce");
       }
       auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
       // Only enable GPU direct if the device supports it
       if (context->getDevice()->hasGPUDirect()) {
         algo = std::make_shared<::gloo::CudaAllreduceHalvingDoublingPipelined<T,
@@ -388,11 +387,11 @@ struct algorithm_spec<CollectiveType::BROADCAST, T> {
         std::initializer_list<T*>{reinterpret_cast<T*>(input_buffer.get())},
         count,
         src_rank);
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
     } else if (device == DeviceType::CUDA) {
       auto stream = THCState_getCurrentStream(THDGetCudaState());
 
-#if defined(WITH_GLOO_IBVERBS) && WITH_GLOO_IBVERBS
+#if defined(USE_GLOO_IBVERBS) && USE_GLOO_IBVERBS
       // Only enable GPU direct if the device supports it
       if (context->getDevice()->hasGPUDirect()) {
         algo = std::make_shared<::gloo::CudaBroadcastOneToAll<T,

@@ -1,6 +1,12 @@
 #ifndef THCUNN_LINEAR_UPSAMPLING_H
 #define THCUNN_LINEAR_UPSAMPLING_H
 
+#undef MIN
+#define MIN(a,b) ( ((a)<(b)) ? (a) : (b) )
+#undef MAX
+#define MAX(a,b) ( ((a)>(b)) ? (a) : (b) )
+
+
 template<typename Acctype>
 __host__ __forceinline__
 static Acctype linear_upsampling_compute_scale(
@@ -25,6 +31,11 @@ static Acctype linear_upsampling_compute_source_index(
   }
 }
 
-
+__device__ __forceinline__
+static int nearest_neighbor_compute_source_index(
+		const float scale, int dst_index, int inputSize) {
+  const int src_index = MIN(floor(dst_index * scale), inputSize - 1);
+  return src_index;
+}
 #endif
 
