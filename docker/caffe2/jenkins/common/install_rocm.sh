@@ -1,3 +1,5 @@
+set -ex
+
 export DEBIAN_FRONTEND=noninteractive
 
 apt-get update
@@ -6,6 +8,7 @@ apt-get install -y wget
 DEB_ROCM_REPO=http://repo.radeon.com/rocm/apt/debian
 wget -qO - $DEB_ROCM_REPO/rocm.gpg.key | apt-key add -
 
+apt-get update
 apt-get install -y \
   rocm-dev \
   rocm-libs \
