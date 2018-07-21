@@ -63,7 +63,7 @@ class NegativeBinomial(Distribution):
     @lazy_property
     def _gamma(self):
         return torch.distributions.Gamma(concentration=self.total_count,
-                                         rate=(1. - self.probs) / self.probs)
+                                         rate=torch.exp(-self.logits))
 
     def sample(self, sample_shape=torch.Size()):
         with torch.no_grad():
