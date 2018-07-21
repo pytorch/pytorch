@@ -10,7 +10,7 @@
 // - implement primitive constant ops.
 namespace torch { namespace jit {
 
-Value* createConstant(
+Value* insertConstant(
     Graph& g,
     IValue val,
     at::optional<script::SourceRange> loc = at::nullopt);

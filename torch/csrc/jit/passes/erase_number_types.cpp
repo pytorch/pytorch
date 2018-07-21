@@ -3,14 +3,6 @@
 
 namespace torch { namespace jit {
 
-static bool isNumberTypeCast(const Value* value, const Use& use) {
-  auto* node = use.user;
-  if (node->kind() != aten::type_as) {
-    return false;
-  }
-  return node->inputs()[0] == value;
-}
-
 static void EraseNumberTypesOnBlock(Block* block) {
   for (auto it = block->nodes().begin(), end = block->nodes().end(); it != end;
        ++it) {
@@ -20,25 +12,17 @@ static void EraseNumberTypesOnBlock(Block* block) {
     switch (it->kind()) {
       case prim::Constant: {
         // remove primitive constants, replacing with tensor equivalent
+        // ONNX does not support non-tensor constants
         if(it->output()->type()->isSubtypeOf(*NumberType::get())) {
           auto s = *constant_as<at::Scalar>(it->output());
           WithInsertPoint guard(*it);
-          Value* r = createConstant(*block->owningGraph(), s.toTensor());
+          Value* r = insertConstant(*block->owningGraph(), s.toTensor());
           it->output()->replaceAllUsesWith(r);
         }
       } break;
-      case prim::TensorToNum: {
-        it->output()->replaceAllUsesWith(it->inputs()[0]);
-        // Let DCE cleanup
-      } break;
+      case prim::TensorToNum:
       case prim::NumToTensor: {
-        auto* ten = it->output();
-        for (const auto& use : ten->uses()) {
-          if (isNumberTypeCast(ten, use)) {
-            use.user->output()->replaceAllUsesWith(ten);
-          }
-        }
-        ten->replaceAllUsesWith(it->inputs()[0]);
+        it->output()->replaceAllUsesWith(it->inputs()[0]);
         // Let DCE cleanup
       } break;
       default: {

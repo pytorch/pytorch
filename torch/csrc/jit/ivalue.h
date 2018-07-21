@@ -333,6 +333,9 @@ struct ConstantList : at::Retainable {
   at::ArrayRef<Elem> elements() const {
     return elements_;
   }
+  operator at::ArrayRef<Elem>() const {
+    return elements();
+  }
 };
 
 inline IValue::IValue(Shared<Tuple> v)

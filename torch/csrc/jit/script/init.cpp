@@ -188,23 +188,23 @@ struct VISIBILITY_HIDDEN ConstantPythonValue : public PythonValue {
     //   f = f + 1
     auto& g = *m.graph();
     if(py::isinstance<py::int_>(self)) {
-      return toSimple(createConstant(g, py::cast<int64_t>(self), loc));
+      return toSimple(insertConstant(g, py::cast<int64_t>(self), loc));
     } else if(py::isinstance<py::float_>(self)) {
-      return toSimple(createConstant(g, py::cast<float>(self), loc));
+      return toSimple(insertConstant(g, py::cast<float>(self), loc));
     } else if(py::isinstance<py::bool_>(self)) {
-      return toSimple(createConstant(g, py::cast<bool>(self), loc));
+      return toSimple(insertConstant(g, py::cast<bool>(self), loc));
     } else if(THPDevice_Check(self.ptr())) {
       auto device = (THPDevice*) self.ptr();
       std::vector<int64_t> v = {static_cast<int64_t>(device->device.type()), device->device.index()};
-      return toSimple(createConstant(g, std::move(v)));
+      return toSimple(insertConstant(g, std::move(v)));
     } else if(THPLayout_Check(self.ptr())) {
       auto layout = (THPLayout*) self.ptr();
       const auto v = static_cast<int64_t>(layout->layout);
-      return toSimple(createConstant(g, v, loc));
+      return toSimple(insertConstant(g, v, loc));
     } else if(THPDtype_Check(self.ptr())) {
       auto dtype = (THPDtype*)(self.ptr());
       const auto v = static_cast<int64_t>(dtype->scalar_type);
-      return toSimple(createConstant(g, v, loc));
+      return toSimple(insertConstant(g, v, loc));
     }
     return std::make_shared<ConstantPythonValue>(self);
   }

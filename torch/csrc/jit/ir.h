@@ -1000,7 +1000,7 @@ public:
     for(const auto & v : values) {
       JIT_ASSERT(v->type()->isSubtypeOf(*elem_type));
     }
-    n->outputs()[0]->setType(std::make_shared<ListType>(elem_type));
+    n->output()->setType(std::make_shared<ListType>(elem_type));
     return n;
   }
   Node* createNumToTensor(Value* value) {

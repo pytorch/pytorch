@@ -139,23 +139,21 @@ void repeatBody(Block *body, int64_t times) {
 // we can replace these with symbolic variable
 Value* intMath(Symbol sym, Value* a, Value* b) {
   auto& g = *a->owningGraph();
-  return g.insertNode(g.create(aten::div, {a, b}))
+  return g.insertNode(g.create(sym, {a, b}))
       ->output()
       ->setType(IntType::get());
 }
 Value* intMath(Symbol sym, Value* a, int64_t b) {
-  return intMath(sym, a, createConstant(*a->owningGraph(), b));
+  return intMath(sym, a, insertConstant(*a->owningGraph(), b));
 }
 
 // Replaces the builtin loop counter with a "mutable" variable outside of the loop.
 void replaceLoopCounter(Node *loop) {
   Graph *graph = loop->owningGraph();
   Block *body = loop->blocks().at(0);
-  Value* init_counter;
-  {
-    WithInsertPoint guard(loop);
-    init_counter = createConstant(*graph, 0);
-  }
+  WithInsertPoint guard(loop);
+  Value* init_counter = insertConstant(*graph, 0);
+
   loop->insertInput(2, init_counter);
   loop->insertOutput(0);
 

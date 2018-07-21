@@ -219,6 +219,7 @@ RegisterOperators reg({
               std::vector<double> vals = fmap(inputs, [](const IValue& v) {
                 return v.toDouble();
               });
+              drop(stack, num_inputs);
               push(stack, std::move(vals));
               return 0;
             };

@@ -56,13 +56,13 @@ static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->
 template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
-static jit::Value* createConstant(jit::Node* n, jit::IValue value) {
+static jit::Value* insertConstant(jit::Node* n, jit::IValue value) {
   jit::WithInsertPoint guard(n);
-  return createConstant(*n->owningGraph(), std::move(value));
+  return insertConstant(*n->owningGraph(), std::move(value));
 }
 
 static void genericInsertInput(jit::Node* n, size_t idx, jit::IValue value) {
-  n->insertInput(idx, createConstant(n, std::move(value)));
+  n->insertInput(idx, insertConstant(n, std::move(value)));
 }
 
 void failPositionalAttr() {
@@ -78,7 +78,7 @@ static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Int
     auto info = ArgumentStash::popIntList(name);
     for (size_t i = 0; i < info.size(); ++i) {
       if (info[i] != nullptr) continue;
-      info[i] = createConstant(n, v[i]);
+      info[i] = insertConstant(n, v[i]);
     }
     for (jit::Value* v : info) {
       if (*v->type() != *jit::IntType::get()) {

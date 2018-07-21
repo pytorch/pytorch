@@ -4,7 +4,7 @@
 namespace torch { namespace jit {
 
 // IValue -> Constant node
-Value* createConstant(
+Value* insertConstant(
     Graph& g,
     IValue val,
     at::optional<script::SourceRange> loc) {
