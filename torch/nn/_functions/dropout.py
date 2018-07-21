@@ -55,7 +55,7 @@ class Dropout(InplaceFunction):
 
     @staticmethod
     def backward(ctx, grad_output):
-        if ctx.use_fused_kernel:
+        if hasattr(ctx, 'use_fused_kernel') and ctx.use_fused_kernel:
             if not grad_output.requires_grad:
                 return grad_output.masked_scale(ctx.noise, 1. / (1 - ctx.p)), None, None, None
             else:
