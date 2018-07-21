@@ -66,7 +66,7 @@ static void launch_kernel(int64_t N, const func_t& f) {
 }
 
 template<typename func_t>
-inline void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
+static inline void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   char* out_data = (char*)iter.data_ptr(0);
@@ -93,7 +93,7 @@ inline void gpu_nullary_kernel(TensorIterator& iter, const func_t& f) {
 }
 
 template<typename func_t>
-inline void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
+static inline void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   char* out_data = (char*)iter.data_ptr(0);
@@ -131,7 +131,7 @@ inline void gpu_unary_kernel(TensorIterator& iter, const func_t& f) {
 }
 
 template<typename func_t>
-inline void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
+static inline void gpu_binary_kernel(TensorIterator& iter, const func_t& f) {
   ASSERT_HOST_DEVICE_LAMBDA(func_t);
 
   if (!iter.can_use_32bit_indexing()) {

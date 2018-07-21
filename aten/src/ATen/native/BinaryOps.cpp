@@ -8,10 +8,10 @@
 namespace at {
 namespace native {
 
-DispatchStub<binary_fn_alpha> add_stub;
-DispatchStub<binary_fn_alpha> sub_stub;
-DispatchStub<binary_fn> mul_stub;
-DispatchStub<binary_fn> div_stub;
+DEFINE_DISPATCH(add_stub);
+DEFINE_DISPATCH(sub_stub);
+DEFINE_DISPATCH(mul_stub);
+DEFINE_DISPATCH(div_stub);
 
 Tensor& add_out(Tensor& result, const Tensor& self, const Tensor& other, Scalar alpha) {
   if (other.is_sparse()) {
