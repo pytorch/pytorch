@@ -118,7 +118,7 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
             fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<dim_block, grid, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
       }
    });
   } else {
@@ -133,10 +133,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<dim_block, grid, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<dim_block, grid, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
       }
    });
   }
