@@ -1978,12 +1978,27 @@ def pixel_shuffle(input, upscale_factor):
     out_height = in_height * upscale_factor
     out_width = in_width * upscale_factor
 
-    input_view = input.contiguous().view(
+    input_view = input.reshape(
         batch_size, channels, upscale_factor, upscale_factor,
         in_height, in_width)
 
-    shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3).contiguous()
-    return shuffle_out.view(batch_size, channels, out_height, out_width)
+    shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3)
+    return shuffle_out.reshape(batch_size, channels, out_height, out_width)
+
+
+def pixel_unshuffle(input, downscale_factor):
+    batch_size, channels, in_height, in_width = input.size()
+
+    out_height = in_height // downscale_factor
+    out_width = in_width // downscale_factor
+
+    input_view = input.reshape(
+        batch_size, channels, out_height, downscale_factor,
+        out_width, downscale_factor)
+
+    channels *= downscale_factor ** 2
+    unshuffle_out = input_view.permute(0, 1, 3, 5, 2, 4)
+    return unshuffle_out.reshape(batch_size, channels, out_height, out_width)
 
 
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):

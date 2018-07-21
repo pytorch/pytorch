@@ -4564,6 +4564,8 @@ class TestNN(NNTestCase):
         self._verify_pixel_shuffle(input.data, output.data, upscale_factor)
         output.backward(output.data)
         self.assertEqual(input.data, input.grad.data)
+        pus = nn.PixelUnshuffle(upscale_factor)
+        self.assertEqual(input, pus(output))
 
     def test_elu_inplace_view(self):
         v = torch.tensor([1.0, -1.0, 1.0, -1.0], requires_grad=True)
