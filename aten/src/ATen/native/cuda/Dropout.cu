@@ -98,10 +98,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   Tensor mask = self.type().toScalarType(kByte).tensor(self.sizes());
   const int64_t nelem = self.numel();
   int64_t block_size = 256;
-  unsigned int blocks_per_sm = at::globalContext().getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
+  unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
   dim3 dim_block(block_size);
   dim3 grid((nelem + block_size -1)/block_size);
-  grid.x = std::min((unsigned int)at::globalContext().getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
+  grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
   int64_t nrep = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
   if (cuda::detail::canUse32BitIndexMath(self)){
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "fused_dropout", [&] {
@@ -115,10 +115,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<dim_block, grid, 0, globalContext().getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<dim_block, grid, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
       }
    });
   } else {
@@ -133,10 +133,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<dim_block, grid, 0, globalContext().getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<dim_block, grid, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<dim_block, grid, 0, globalContext().getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<dim_block, grid, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
       }
    });
   }
