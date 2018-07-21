@@ -1,3 +1,5 @@
+#ifdef USE_CUDA
+
 #include <torch/csrc/autograd/functions/comm.h>
 
 #include <torch/csrc/autograd/function.h>
@@ -129,3 +131,5 @@ variable_list Gather::apply(variable_list&& inputs) {
 
 } // namespace autograd
 } // namespace torch
+
+#endif
