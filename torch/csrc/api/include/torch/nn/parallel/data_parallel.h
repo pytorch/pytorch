@@ -161,6 +161,7 @@ Tensor data_parallel(
     return module->forward(std::move(input)).to(*output_device);
   }
 
+#ifdef USE_CUDA
   autograd::Scatter scatter(*devices, /*chunk_sizes=*/at::nullopt, dim);
   auto scattered_inputs = scatter.apply({std::move(input)});
 
@@ -169,6 +170,9 @@ Tensor data_parallel(
   return autograd::Gather(*output_device, dim)
       .apply(std::move(outputs))
       .front();
+#else
+  AT_ERROR("data_parallel not supported without CUDA");
+#endif
 }
 
 } // namespace parallel

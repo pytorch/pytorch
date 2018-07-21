@@ -1947,9 +1947,10 @@ class Net(object):
                 self._input_record = schema.NewRecord(self, input_record)
         else:
             self._input_record = input_record
-            for blob in input_record.field_blobs():
-                if blob not in self.external_inputs:
-                    self.AddExternalInput(blob)
+
+        for blob in self._input_record.field_blobs():
+            if blob not in self.external_inputs:
+                self.AddExternalInput(blob)
         return self._input_record
 
     def recover_input_record_by_prefix(self, prefix):

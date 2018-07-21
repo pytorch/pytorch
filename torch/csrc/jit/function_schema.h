@@ -1,6 +1,6 @@
 #pragma once
 #include "ATen/ATen.h"
-#include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/type.h"
 
 namespace torch { namespace jit {
 
