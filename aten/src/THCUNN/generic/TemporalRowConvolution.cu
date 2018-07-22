@@ -151,7 +151,7 @@ void THNN_(TemporalRowConvolution_updateOutput)(
             THCTensor_(data)(state, columns));
 
     THCTensor *output3d = THCTensor_(newWithStorage3d)(
-        state, output_n->storage, output_n->storageOffset, inputFrameSize, -1,
+        state, THTensor_getStoragePtr(output_n), output_n->storage_offset(), inputFrameSize, -1,
         1, -1, nOutputFrame, -1);
 
     // weight:    inputFrameSize x 1 x kW
@@ -251,7 +251,7 @@ void THNN_(TemporalRowConvolution_updateGradInput)(
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 
     THCTensor *gradOutput3d = THCTensor_(newWithStorage3d)(
-        state, gradOutput_n->storage, gradOutput_n->storageOffset,
+        state, THTensor_getStoragePtr(gradOutput_n), gradOutput_n->storage_offset(),
         inputFrameSize, -1, 1, -1, nOutputFrame, -1);
 
     // weight:          inputFrameSize x kW x 1
@@ -365,7 +365,7 @@ void THNN_(TemporalRowConvolution_accGradParameters)(
     THCTensor_(select)(state, gradOutput_n, gradOutput, 0, elt);
 
     THCTensor *gradOutput3d = THCTensor_(newWithStorage3d)(
-        state, gradOutput_n->storage, gradOutput_n->storageOffset,
+        state, THTensor_getStoragePtr(gradOutput_n), gradOutput_n->storage_offset(),
         inputFrameSize, -1, 1, -1, nOutputFrame, -1);
 
     // Extract columns
