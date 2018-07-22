@@ -89,8 +89,10 @@ class AffineGridGenerator(Function):
             base_grid = theta.new(N, D, H, W, 4)
 
             base_grid[:, :, :, :, 0] = (torch.linspace(-1, 1, W) if W > 1 else torch.Tensor([-1]))
-            base_grid[:, :, :, :, 1] = (torch.linspace(-1, 1, H) if H > 1 else torch.Tensor([-1])).unsqueeze(-1)
-            base_grid[:, :, :, :, 2] = (torch.linspace(-1, 1, D) if D > 1 else torch.Tensor([-1])).unsqueeze(-1).unsqueeze(-1)
+            base_grid[:, :, :, :, 1] = (torch.linspace(-1, 1, H) if H > 1 else torch.Tensor([-1]))\
+                .unsqueeze(-1)
+            base_grid[:, :, :, :, 2] = (torch.linspace(-1, 1, D) if D > 1 else torch.Tensor([-1]))\
+                .unsqueeze(-1).unsqueeze(-1)
             base_grid[:, :, :, :, 3] = 1
 
             grid = torch.bmm(base_grid.view(N, D * H * W, 4), theta.transpose(1, 2))
@@ -101,7 +103,8 @@ class AffineGridGenerator(Function):
             base_grid = theta.new(N, H, W, 3)
 
             base_grid[:, :, :, 0] = (torch.linspace(-1, 1, W) if W > 1 else torch.Tensor([-1]))
-            base_grid[:, :, :, 1] = (torch.linspace(-1, 1, H) if H > 1 else torch.Tensor([-1])).unsqueeze(-1)
+            base_grid[:, :, :, 1] = (torch.linspace(-1, 1, H) if H > 1 else torch.Tensor([-1]))\
+                .unsqueeze(-1)
             base_grid[:, :, :, 2] = 1
 
             grid = torch.bmm(base_grid.view(N, H * W, 3), theta.transpose(1, 2))
