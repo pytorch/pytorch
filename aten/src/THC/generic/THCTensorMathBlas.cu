@@ -51,7 +51,7 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
   if( (mat->dim() != 2) || (vec->dim() != 1) )
     THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
-       mat->dim(), vec->dim())
+       mat->dim(), vec->dim());
 
   if( mat->size(1) != vec->size(0) )
     THError("size mismatch");
@@ -153,7 +153,7 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
   if ( (vec1->dim() != 1) || (vec2->dim() != 1) ) {
     THError("1D tensor and 1D tensor expected, got %dD, %dD tensors",
-       vec1->dim(), vec2->dim())
+       vec1->dim(), vec2->dim());
   }
 
   if (t->dim() != 2) {
