@@ -15,6 +15,7 @@
 #include <forward_list>
 #include <tuple>
 #include "ATen/ATen.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #ifdef USE_CUDA
 #include "ATen/cuda/CUDAContext.h"
@@ -163,12 +164,12 @@ enum class ProfilerState {
     NVTX,  // only emit NVTX markers
 };
 
-RangeEventList& getEventList();
-void mark(std::string name, bool include_cuda = true);
-void pushRange(std::string name);
-void popRange();
+TORCH_API RangeEventList& getEventList();
+TORCH_API void mark(std::string name, bool include_cuda = true);
+TORCH_API void pushRange(std::string name);
+TORCH_API void popRange();
 
-struct RecordFunction {
+struct TORCH_API RecordFunction {
   explicit RecordFunction(Function* fn);
 
   explicit RecordFunction(std::string name);
@@ -184,8 +185,8 @@ struct RecordFunction {
 using thread_event_lists = std::vector<std::vector<Event>>;
 // NOTE: changing profiler modes is **NOT THREAD SAFE**. You should ensure that
 // there no autograd functions are being executed when these function are used.
-void enableProfiler(ProfilerState state);
-thread_event_lists disableProfiler();
+TORCH_API void enableProfiler(ProfilerState state);
+TORCH_API thread_event_lists disableProfiler();
 
 } // namespace profiler
 }} // namespace torch::autograd

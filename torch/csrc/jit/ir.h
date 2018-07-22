@@ -16,6 +16,7 @@
 #include "torch/csrc/utils/python_stub.h"
 
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
 #include "ATen/ArrayRef.h"
@@ -51,9 +52,9 @@ struct Node;
 // Tensor or an opaque Handle object, as determined by type().
 struct Value;
 
-std::ostream& operator<<(std::ostream & out, const Graph & g);
-std::ostream& operator<<(std::ostream & out, const Type & t);
-std::ostream& operator<<(std::ostream & out, const Node & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Graph & g);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Node & t);
 
 // A list of nodes, with inputs and outputs
 struct Block;
@@ -195,7 +196,7 @@ public:
   bool hasUniqueName() const {
     return unique_name_ != "";
   }
-  Value* setUniqueName(const std::string & name);
+  TORCH_API Value* setUniqueName(const std::string & name);
   std::string uniqueName() const {
     if (hasUniqueName())
       return unique_name_;
@@ -813,7 +814,7 @@ struct Block {
   // to the inputs, nodes, and outputs of this block
   // value_map is used whenever a node in src references a free variable
   // in src to look up its corresponding value
-  void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
+  TORCH_API void cloneFrom(Block * src, std::function<Value*(Value*)> value_map);
 private:
   // should only be called in the constructor
   Node* initOutput(Node* p) {
@@ -1069,9 +1070,9 @@ public:
   }
 
   // Checks well-formedness and invariants of graph
-  void lint() const;
+  TORCH_API void lint() const;
   // for use in debugger
-  void dump() const;
+  TORCH_API void dump() const;
 
   ~Graph() {
     for (const Node * n : all_nodes)
@@ -1089,7 +1090,7 @@ public:
   }
 
   friend std::ostream& operator<<(std::ostream & out, const Graph & g);
-  std::shared_ptr<Graph> copy();
+  TORCH_API std::shared_ptr<Graph> copy();
 
 private:
 
@@ -1338,8 +1339,8 @@ struct PythonOp : public Node {
 
 };
 // patched in when python bindings are loaded
-PythonOp* allocPythonOp(Graph* g);
-void setAllocPythonOp(PythonOp* (*v)(Graph* g));
+TORCH_API PythonOp* allocPythonOp(Graph* g);
+TORCH_API void setAllocPythonOp(PythonOp* (*v)(Graph* g));
 
 inline Node* Graph::createPythonOp(
     THPObjectPtr&& pyobj,
@@ -1365,6 +1366,6 @@ inline const_graph_node_list_iterator Node::reverseIterator() const {
   return iterator().reverse();
 }
 
-void LintGraph(std::shared_ptr<Graph>& graph);
+TORCH_API void LintGraph(std::shared_ptr<Graph>& graph);
 
 }} // namespace torch::jit
