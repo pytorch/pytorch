@@ -5661,6 +5661,16 @@ class TestTorch(TestCase):
         check(src, idx)
         check(src.transpose(1, 2), idx)
 
+    @skipIfNoZeroSize
+    def test_take_empty(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for input_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
+                for indices_shape in [(0,), (0, 1, 2, 0)]:
+                    input = torch.empty(input_shape, device=device)
+                    indices = torch.empty(indices_shape, dtype=torch.int64, device=device)
+                    self.assertEqual(indices, torch.take(input, indices))
+
     def test_put_(self):
         def check(dst, idx, value):
             expected = dst.clone().view(-1).index_copy_(
@@ -5681,6 +5691,18 @@ class TestTorch(TestCase):
         src = torch.Tensor([1, 2, 3, 4])
         dst.put_(idx, src, accumulate=True)
         self.assertEqual(dst.tolist(), [[5, 7], [1, 1]])
+
+    @skipIfNoZeroSize
+    def test_put_empty(self):
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
+        for device in devices:
+            for dst_shape in [(0,), (0, 1, 2, 0), (1, 2, 3)]:
+                for indices_shape in [(0,), (0, 1, 2, 0)]:
+                    for accumulate in [False, True]:
+                        dst = torch.randn(dst_shape, device=device)
+                        indices = torch.empty(indices_shape, dtype=torch.int64, device=device)
+                        src = torch.randn(indices_shape, device=device)
+                        self.assertEqual(dst, dst.put_(indices, src, accumulate=accumulate))
 
     # Fill idx with valid indices.
     @staticmethod
@@ -6320,9 +6342,7 @@ class TestTorch(TestCase):
         # numpy/sci often has a direct wrapper (e.g. lu_factor) and a wrapper that "does the right thing"
         # (e.g. lu).  We often name our functions identically to the lapack function, so it will take work
         # to name / migrate-to better wrappers.
-
-        # FIXME: enable CUDA tests.
-        devices = ['cpu']  # if not torch.cuda.is_available() else ['cpu', 'cuda']
+        devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
 
             def fn(torchfn, *args):

@@ -60,6 +60,10 @@ struct THTensor
       return storage_offset_;
     }
 
+    ptrdiff_t storage_offset() const {
+      return storage_offset_;
+    }
+
     // represents that numel() == 0.
     inline bool is_empty() const {
       for (int64_t i = 0; i < dim(); ++i) {

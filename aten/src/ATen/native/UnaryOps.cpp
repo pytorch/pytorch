@@ -92,14 +92,14 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   Tensor& _##op##__cpu(Tensor& self_) {                         \
     if (self_.numel() > 0) {                                    \
       Tensor self = sort_strides(self_);                        \
-      op##Impl(kCPU, self, self);                               \
+      op##Impl(self, self);                                     \
     }                                                           \
     return self_;                                               \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
     if (result.numel() > 0) {                                   \
-      op##Impl(kCPU, result, self);                             \
+      op##Impl(result, self);                                   \
     }                                                           \
     return result;                                              \
   }
@@ -144,30 +144,6 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
-
-DispatchStub<unary_fn> absImpl;
-DispatchStub<unary_fn> acosImpl;
-DispatchStub<unary_fn> asinImpl;
-DispatchStub<unary_fn> atanImpl;
-DispatchStub<unary_fn> ceilImpl;
-DispatchStub<unary_fn> cosImpl;
-DispatchStub<unary_fn> erfImpl;
-DispatchStub<unary_fn> erfcImpl;
-DispatchStub<unary_fn> expImpl;
-DispatchStub<unary_fn> expm1Impl;
-DispatchStub<unary_fn> floorImpl;
-DispatchStub<unary_fn> logImpl;
-DispatchStub<unary_fn> log10Impl;
-DispatchStub<unary_fn> log1pImpl;
-DispatchStub<unary_fn> log2Impl;
-DispatchStub<unary_fn> roundImpl;
-DispatchStub<unary_fn> rsqrtImpl;
-DispatchStub<unary_fn> sigmoidImpl;
-DispatchStub<unary_fn> sinImpl;
-DispatchStub<unary_fn> sqrtImpl;
-DispatchStub<unary_fn> tanImpl;
-DispatchStub<unary_fn> tanhImpl;
-DispatchStub<unary_fn> truncImpl;
 
 }
 } // namespace at
