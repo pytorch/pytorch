@@ -50,7 +50,7 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
   if( (mat->dim() != 2) || (vec->dim() != 1) )
-    THError("matrix and vector expected");
+    THError("2D tensor and 1D tensor expected");
 
   if( mat->size(1) != vec->size(0) )
     THError("size mismatch");
@@ -248,10 +248,10 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   THCTensor *r__, *m1_, *m2_;
 
   if( (m1->dim() != 2) || (m2->dim() != 2) )
-    THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
+    THError("2D tensors expected, got %dD, %dD tensors", m1->dim(), m2->dim());
 
   if(t->dim() != 2)
-    THError("matrix expected, got %dD tensor for t", t->dim());
+    THError("2D tensor expected, got %dD tensor for t", t->dim());
 
   if(m1->size(1) != m2->size(0)) {
     THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
