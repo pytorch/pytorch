@@ -289,7 +289,8 @@ private:
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially change
   // the schema.
-  const FunctionSchema* schema_;
+  // note: mutable because schema_ is effectively a cache
+  mutable const FunctionSchema* schema_;
 protected:
   Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -391,14 +392,23 @@ public:
   Value * input(size_t i) {
     return inputs_.at(i);
   }
-  const Value * input(size_t i) const {
+  Value * input(size_t i) const {
     return inputs_.at(i);
   }
 
+  Value* input(Symbol name) const { throw std::runtime_error("NO!"); }
+
+  Value* namedInput(Symbol name) const;
+
+  at::optional<IValue> get(Symbol name) const;
+
   template<typename T>
-  at::optional<T> get(Symbol name);
-  at::optional<IValue> get(Symbol name);
-  Value* input(Symbol name);
+  at::optional<T> get(Symbol name) const {
+    if(auto v = get(name))
+      return v->template to<T>();
+    return at::nullopt;
+  }
+
 
   // Returns true if the value of input name is statically known
   bool is_constant(Symbol name) {
@@ -665,15 +675,16 @@ public:
   // XXX: this function is meant to be used with string literals only!
   bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
 
-  const FunctionSchema& schema() {
-    if (!schema_) findSchema();
+  const FunctionSchema& schema() const {
+    if (!schema_)
+      findSchema();
     return *schema_;
   }
 
   virtual ~Node() {}
 private:
   std::pair<Value*, const Argument&> findInput(Symbol name);
-  void findSchema();
+  void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
   use_list::iterator findUseForInput(size_t i) {
     auto & input_uses = inputs_[i]->uses_;
@@ -1037,9 +1048,6 @@ public:
     }
     return r;
   }
-
-  template<typename T>
-  Value * insertConstant(T value);
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);

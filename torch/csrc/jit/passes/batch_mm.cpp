@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
@@ -191,7 +192,7 @@ void BatchMMBlock(Block* block) {
 
       auto inputs = fmap(matmuls, [=](Node *mm) { return mm->inputs()[inputs_off]; });
       WithInsertPoint iguard { root.node };
-      inputs.push_back(graph->insertConstant(cat_dim));
+      inputs.push_back(insertConstant(*graph, cat_dim));
       Node *cat = graph->insertNode(graph->create(aten::cat, inputs));
       cat->output()->setType(type->withSizes(cat_sizes));
       return cat->output();

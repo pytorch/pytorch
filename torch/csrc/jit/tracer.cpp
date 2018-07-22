@@ -63,12 +63,12 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
   auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
   auto* value = getValueTrace(var);
   WithInsertPoint ipoint { graph->block() };
-  auto* node = graph->insertNode(graph->create(aten::size, {value, graph->insertConstant(dim)}));
+  auto* node = graph->insertNode(graph->create(aten::size, {value, insertConstant(*graph, dim)}));
   node->output()->setType(jit::IntType::get());
 
   auto ten =
       graph->appendNode(graph->createNumToTensor(node->output()))->output();
-  setValueTrace(tracing_state, size_var, ten);
+  setValueTrace(size_var, ten);
   return size_var;
 }
 
@@ -85,7 +85,7 @@ void ArgumentStash::stashIntListElem(const std::string& arg_name, size_t size, s
   JIT_ASSERT(idx < list_trace.size());
   JIT_ASSERT(list_trace[idx] == nullptr);
 
-  Value* ten = getValueTrace(tracing_state, var);
+  Value* ten = getValueTrace(var);
   auto& g = *ten->owningGraph();
   auto prim = g.createTensorToNum(jit::IntType::get(), ten)
                    ->insertAfter(ten->node())

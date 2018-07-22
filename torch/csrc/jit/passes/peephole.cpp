@@ -27,7 +27,7 @@ void PeepholeOptimize(Block * block) {
     if (node->matches("aten::expand(Tensor self, int[] size, *, int implicit) -> Tensor",
         /*with_const=*/attr::size)) {
       // x.expand(x.size()) == x
-      if (auto input_type = node->input(attr::self)->type()->cast<TensorType>()) {
+      if (auto input_type = node->namedInput(attr::self)->type()->cast<TensorType>()) {
         auto expanded_sizes = node->get<std::vector<int64_t>>(attr::size);
         if (expanded_sizes == input_type->sizes()) {
           node->output()->replaceAllUsesWith(node->input());
@@ -70,9 +70,9 @@ void PeepholeOptimize(Block * block) {
         }
       }
     } else if(node->kind() == prim::TensorToNum) {
-      Node* input_node = n->input()->node();
+      Node* input_node = node->input()->node();
       if (input_node->kind() == prim::NumToTensor) {
-        n->output()->replaceAllUsesWith(input_node->input());
+        node->output()->replaceAllUsesWith(input_node->input());
       }
     }
   }

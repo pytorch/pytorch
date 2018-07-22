@@ -204,6 +204,8 @@ struct IValue {
     return toRetainable<IntList>();
   }
 
+  std::vector<int64_t> copyToIntList() const;
+
   // DoubleList
   IValue(Shared<DoubleList> v);
   IValue(std::vector<double> v);
@@ -256,6 +258,10 @@ struct IValue {
   // that use template meta-programming.
   // prefer the directly named methods when you can,
   // since they are simpler to understand
+
+  // Note: if you get linker errors saying one of these is missing,
+  // change it to ... && = delete; and you will see better error messages for why
+  // However, we cannot commit this because some compiler versions barf on it.
   template<typename T>
   T to() &&;
   template<typename T>
@@ -315,6 +321,7 @@ DEFINE_TO(Shared<DoubleList>, toDoubleList)
 DEFINE_TO(Shared<IntList>, toIntList)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(bool, toInt)
+DEFINE_TO(std::vector<int64_t>, copyToIntList)
 
 #undef DEFINE_TO
 
@@ -357,5 +364,8 @@ inline IValue::IValue(Shared<DoubleList> v)
 inline IValue::IValue(std::vector<double> v)
 : IValue(DoubleList::create(std::move(v))) {}
 
+inline std::vector<int64_t> IValue::copyToIntList() const {
+  return std::vector<int64_t>(toIntList()->elements());
+}
 
 }}

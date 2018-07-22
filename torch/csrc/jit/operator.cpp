@@ -341,7 +341,7 @@ bool typeMatches(TypePtr actual, TypePtr formal) {
   return actual->isSubtypeOf(*formal);
 }
 
-bool Operator::matches(Node* node) const {
+bool Operator::matches(const Node* node) const {
   if (node->kind().toQualString() != schema.name) {
     return false;
   }
@@ -399,7 +399,7 @@ bool Operator::matches(Node* node) const {
   return true;
 }
 
-std::shared_ptr<Operator> findOperatorFor(Node* node) {
+std::shared_ptr<Operator> findOperatorFor(const Node* node) {
   const auto& candidates = getAllOperatorsFor(node->kind());
   for(const auto& candidate : candidates) {
     if(candidate->matches(node)) {
@@ -409,7 +409,7 @@ std::shared_ptr<Operator> findOperatorFor(Node* node) {
   return nullptr;
 }
 
-const Operator& getOperatorFor(Node* node) {
+const Operator& getOperatorFor(const Node* node) {
   auto op = findOperatorFor(node);
   if(op)
     return *op;

@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/operator.h"
 
@@ -73,12 +74,12 @@ at::optional<std::vector<TensorType*>> gatherTensorTypes(Node *node) {
   size_t input_i = 0;
   for (auto& arg : args) {
     size_t consume_n; // how many tensors do we check for in the input list
-    if (arg.type->isSubtypeOf(*List::ofTensors())) {
+    if (arg.type->isSubtypeOf(*ListType::ofTensors())) {
       // we have a list of tensor, there is only ever one list
       // so we calculte how many elements must be in it by how much bigger
       // or smaller the input list is compared to the arguments in the schema
       consume_n = node->inputs().size() + 1 - args.size();
-    } else if (schema_type->isSubtypeOf(*DynamicType::get())) {
+    } else if (arg.type->isSubtypeOf(*DynamicType::get())) {
       // a single Tensor for this argument
       consume_n = 1;
     } else {
@@ -155,7 +156,7 @@ void PropagateShapeOnNodeByRunningIt(Node* node) {
     // some ops may have mixed tensor/primitive outputs
     // for primitives, we don't need to change the type because it is already
     // its most constrained form.
-    if(stack[i].isTensor()
+    if(stack[i].isTensor())
       node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
   }
 }
@@ -388,7 +389,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     return;
   } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
     if (tensor_types.at(0)->scalarType() == tensor_types.at(1)->scalarType()) {
-      node->output()->setType(node->input(attr::self)->type());
+      node->output()->setType(node->namedInput(attr::self)->type());
     } else {
       // This will be a copy, so the result will be contiguous
       node->output()->setType(tensor_types.at(1)->withSizes(tensor_types.at(0)->sizes()));
