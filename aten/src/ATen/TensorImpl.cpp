@@ -2,7 +2,6 @@
 
 #include <ATen/Tensor.h>
 #include <ATen/optional.h>
-#include <ATen/Scalar.h>
 
 #include <TH/THTensor.hpp>
 
