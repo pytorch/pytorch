@@ -1,3 +1,4 @@
+import os
 from .env import check_env_flag, check_negative_env_flag
 
 # Get ROCm Home Path
