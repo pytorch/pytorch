@@ -20,6 +20,8 @@ log.setLevel(logging.DEBUG)
 
 print("scipy version: ", scipy.version.version)
 
+# flake8: noqa: E241
+
 if torch.cuda.is_available():
     def device_():
         return ['cpu', 'cuda']
@@ -34,7 +36,7 @@ def angle_rad_():
 
 def axis_vector_():
     t = (random.random(), random.random(), random.random())
-    l = sum(x**2 for x in t)**0.5
+    l = sum(x ** 2 for x in t) ** 0.5
 
     return [(1.0, 0.0, 0.0), (0.0, 1.0, 0.0), (0.0, 0.0, 1.0), tuple(x/l for x in t)]
 
@@ -73,8 +75,8 @@ def output_size3d_():
 
 def _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad):
     log.debug(["_buildEquivalentTransforms2d", device, input_size, output_size, angle_rad * 180 / math.pi])
-    input_center = [(x-1)/2 for x in input_size]
-    output_center = [(x-1)/2 for x in output_size]
+    input_center = [(x - 1) / 2 for x in input_size]
+    output_center = [(x - 1) / 2 for x in output_size]
 
     s = math.sin(angle_rad)
     c = math.cos(angle_rad)
@@ -270,7 +272,8 @@ class TestAffine(TestCase):
                 output_size = [1, 1, 5, 5]
                 angle_rad = 0.
 
-                transform_tensor, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+                transform_tensor, transform_ary, offset = \
+                    _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
                 # reference
                 # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -327,7 +330,8 @@ class TestAffine(TestCase):
                 output_size = output_size2dsq
                 angle_rad = 0.25 * math.pi * 2
 
-                transform_tensor, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+                transform_tensor, transform_ary, offset = \
+                    _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
                 # reference
                 # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -391,7 +395,8 @@ class TestAffine(TestCase):
             output_size = [1, 1, 3, 3]
             angle_rad = 0.125 * math.pi * 2
 
-            transform_tensor, transform_ary, offset = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+            transform_tensor, transform_ary, offset = \
+                _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
             # reference
             # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -448,7 +453,8 @@ class TestAffine(TestCase):
             input_ary[0, 0, -1, 0] = 6
             input_ary[0, 0, -1, -1] = 8
 
-            transform_tensor, transform_ary, grid_ary = _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
+            transform_tensor, transform_ary, grid_ary = \
+                _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad)
 
             # reference
             # https://stackoverflow.com/questions/20161175/how-can-i-use-scipy-ndimage-interpolation-affine-transform-to-rotate-an-image-ab
@@ -495,7 +501,7 @@ class TestAffine(TestCase):
 
                     try:
                         assert np.allclose(affine_tensor[0, r, c], grid_out[:2], atol=1e-5)
-                    except:
+                    except Exception:
                         log.debug([r, c, 'affine:', affine_tensor[0, r, c], 'grid:', grid_out[:2]])
                         raise
 
@@ -568,7 +574,7 @@ class TestAffine(TestCase):
                         grid_out = grid_ary @ [i, r, c, 1]
                         try:
                             assert np.allclose(affine_tensor[0, i, r, c], grid_out[:3], atol=1e-5)
-                        except:
+                        except Exception:
                             log.debug([i, r, c, 'affine:', affine_tensor[0, i, r, c], 'grid:', grid_out[:3].round(3)])
                             raise
 
