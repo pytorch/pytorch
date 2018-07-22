@@ -17,6 +17,9 @@ fi
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
+# Invoke from the pytorch_amd directory.
+USE_ROCM=1 python "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/setup.py" install
+
 echo "Python version:"
 python --version
 
