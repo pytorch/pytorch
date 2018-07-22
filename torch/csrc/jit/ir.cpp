@@ -642,6 +642,10 @@ at::optional<T> Node::get(Symbol name) {
     return getattr<T>()(this, name);
   }
   auto inp = findInput(name);
+  const Argument & arg = inp.second;
+  if (!inp.first) {
+    return tensor_as<T>(arg.default_value.value());
+  }
   Node *producer = inp.first->node();
   if (producer->kind() != prim::Constant) return at::nullopt;
   auto value = producer->t(attr::value);
@@ -655,25 +659,30 @@ template at::optional<std::vector<int64_t>> Node::get(Symbol name);
 
 at::optional<IValue> Node::get(Symbol name) {
   // TODO (apaszke): remove once tracer and compiler stop emitting attributes
-  if (hasAttributes()) {
-    throw std::runtime_error("IValue Node::get() not implemented for the attribute case");
+  if (hasAttribute(name)) {
+    switch (kindOf(name)) {
+      case AttributeKind::i:
+        return IValue{as_tensor(i(name))};
+      case AttributeKind::t:
+        return IValue{as_tensor(t(name))};
+      case AttributeKind::is:
+        return IValue{as_tensor(is(name))};
+      default:
+        throw std::runtime_error("get() NYI");
+    }
   }
   auto inp = findInput(name);
+  const Argument & arg = inp.second;
+  if (!inp.first) {
+    return IValue{arg.default_value.value()};
+  }
   Node * producer = inp.first->node();
   if (producer->kind() != prim::Constant) return at::nullopt;
   auto value = producer->t(attr::value);
-  const Argument & arg = inp.second;
-  if (arg.type->isSubtypeOf(*DynamicType::get())) {
-    return IValue{std::move(value)};
-  } else if (arg.type->isSubtypeOf(*IntType::get())) {
-    return IValue{tensor_as<int64_t>(std::move(value))};
-  } else if (arg.type->isSubtypeOf(*FloatType::get())) {
-    return IValue{tensor_as<double>(std::move(value))};
-  }
-  throw std::runtime_error("Unsupported case in Node::get! File a bug report.");
+  return IValue{std::move(value)};
 }
 
-Value* Node::getValue(Symbol name) {
+Value* Node::input(Symbol name) {
   // TODO (apaszke): remove once tracer and compiler stop emitting attributes
   if (hasAttribute(name)) {
     switch (kindOf(name)) {
@@ -687,9 +696,13 @@ Value* Node::getValue(Symbol name) {
         throw std::runtime_error("getValue() NYI");
     }
   }
-  return findInput(name).first;
+  auto inp = findInput(name);
+  if (inp.first) return inp.first;
+  return owningGraph()->insertConstant(inp.second.default_value.value());
 }
 
+// XXX: the first coordinate can be a nullptr, which means that you should use
+// the default value for this arg, because it's optional and missing
 std::pair<Value*, const Argument&> Node::findInput(Symbol name) {
   if (!schema_) {
     findSchema();
@@ -700,11 +713,24 @@ std::pair<Value*, const Argument&> Node::findInput(Symbol name) {
     const auto & arg = schema_->arguments[i];
     if (hasAttributeS(arg.name)) continue;
     if (arg.name == name_str) {
-      return std::pair<Value*, const Argument&>(input(input_i), arg);
+      if (input_i < inputs().size()) {
+        return std::pair<Value*, const Argument&>(input(input_i), arg);
+      } else {
+        JIT_ASSERT(arg.default_value);
+        return std::pair<Value*, const Argument&>(nullptr, arg);
+      }
     }
     input_i++;
   }
   throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+}
+
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+  if (!sig(signature_literal).matches(this)) return false;
+  for (Symbol s : const_inputs) {
+    if (!is_constant(s)) return false;
+  }
+  return true;
 }
 
 void Node::findSchema() {

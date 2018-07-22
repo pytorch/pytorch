@@ -398,7 +398,12 @@ public:
   template<typename T>
   at::optional<T> get(Symbol name);
   at::optional<IValue> get(Symbol name);
-  Value* getValue(Symbol name);
+  Value* input(Symbol name);
+
+  // Returns true if the value of input name is statically known
+  bool is_constant(Symbol name) {
+    return static_cast<bool>(get(name));
+  }
 
   // Graphs
 
@@ -655,6 +660,14 @@ public:
   T* expect() {
     JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", T::Kind.toDisplayString(), kind().toDisplayString());
     return static_cast<T*>(this);
+  }
+
+  // XXX: this function is meant to be used with string literals only!
+  bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
+
+  const FunctionSchema& schema() {
+    if (!schema_) findSchema();
+    return *schema_;
   }
 
   virtual ~Node() {}
