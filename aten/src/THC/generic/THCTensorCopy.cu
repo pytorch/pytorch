@@ -10,7 +10,7 @@ THCTensor_(copy)(THCState* state, THCTensor* dst, THCTensor* src) {
 
 template <>
 THCTensor *THCTensor_newClone<real>(THCState *state, THCTensor *self) {
-  THCTensor *tensor = THCTensor_new(state, self->storage->scalar_type);
+  THCTensor *tensor = THCTensor_new(state, THTensor_getStoragePtr(self)->scalar_type);
   THCTensor_resizeAs(state, tensor, self);
   THC_copyTensor<real, real>(state, tensor, self);
   return tensor;
