@@ -4,6 +4,7 @@ from .env import check_env_flag, check_negative_env_flag
 # Get ROCm Home Path
 ROCM_HOME = os.getenv("ROCM_HOME", "/opt/rocm")
 ROCM_VERSION = ""
+USE_ROCM = False
 
 # Check if ROCm disabled.
 if check_negative_env_flag("USE_ROCM"):
