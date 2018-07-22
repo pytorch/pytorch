@@ -32,11 +32,11 @@ struct Operator {
 
   FunctionSchema schema;
 
-  bool matchesNode(Node* n) const;
+  bool matches(Node* n) const;
   // Operators have different versions depending on if some inputs are encoded
   // as attributes or inputs. This function returns the right Operation function,
   // given a node encoded for one variant.
-  // Behavior is undefined if matchesNode(n) == false
+  // Behavior is undefined if matches(n) == false
   Operation selectVariant(Node* n) const {
     if(n->hasAttributes()) {
       JIT_ASSERT(op_const_attributes != nullptr);
@@ -55,12 +55,15 @@ std::shared_ptr<Operator> findOperatorFor(Node* node);
 const Operator& getOperatorFor(Node* node);
 
 inline Operation getOperation(Node* node) {
-  // note: getOperatorFor ensures that getOperatorFor(node).matchesNode(node) == true
+  // note: getOperatorFor ensures that getOperatorFor(node).matches(node) == true
   // so the call to selectVariant is always valid.
   return getOperatorFor(node).selectVariant(node);
 }
 
 void registerOperator(Operator&& op);
+
+// XXX: this function is meant to be used with string literals only!
+Operator& sig(const char *signature_literal);
 
 struct RegisterOperators {
   RegisterOperators(std::vector<Operator> operators) {
