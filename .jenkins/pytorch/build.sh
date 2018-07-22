@@ -44,7 +44,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
 
   # This environment variable enabled HCC Optimizations that speed up the linking stage.
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
-  # export KMTHINLTO=1
+  export KMTHINLTO=1
 
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
