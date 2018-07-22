@@ -1038,7 +1038,7 @@ void THDTensor_(addcdiv)(THDTensor *self, THDTensor *src1, real value, THDTensor
 
 void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *mat,  THDTensor *vec) {
   if ((mat->nDimension != 2) || (vec->nDimension != 1))
-    THError("2D tensor and 1D tensor expected, got %dD tensor, %dD tensor", mat->nDimension, vec->nDimension);
+    THError("2D tensor and 1D tensor expected, got %dD, %dD tensors", mat->nDimension, vec->nDimension);
 
   if (mat->size[1] != vec->size[0]) {
     THDDescBuff bm = THDTensor_(sizeDesc)(mat);
