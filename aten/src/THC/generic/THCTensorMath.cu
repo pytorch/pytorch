@@ -383,8 +383,8 @@ void THCTensor_(eye)(THCState *state, THCTensor *self_, int64_t n, int64_t m)
   int64_t stride = THCTensor_(stride)(state, self_, 0) +
                    THCTensor_(stride)(state, self_, 1);
 
-  THCTensor *diag = THCTensor_(newWithStorage1d)(state, self_->storage,
-      self_->storageOffset,  sz, stride);
+  THCTensor *diag = THCTensor_(newWithStorage1d)(state, THTensor_getStoragePtr(self_),
+      self_->storage_offset(),  sz, stride);
 
   THCTensor_(fill)(state, diag, ScalarConvert<int, real>::to(1));
   THCTensor_(free)(state, diag);

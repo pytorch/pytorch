@@ -3674,12 +3674,12 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   // Second path for non-contiguous
   int64_t offset;
   if (dimension == 0 && allContiguous) {
-    real* result_data = THStorage_(data)(result->storage) + result->storageOffset;
+    real* result_data = THStorage_(data)(THTensor_getStoragePtr(result)) + result->storage_offset();
     offset = 0;
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j])) {
         THTensor* input0 = inputs[j];
-        real* input0_data = THStorage_(data)(input0->storage) + input0->storageOffset;
+        real* input0_data = THStorage_(data)(THTensor_getStoragePtr(input0)) + input0->storage_offset();
         int64_t input0_size = THTensor_(nElement)(input0);
         // C standard says you can't pass nullptrs to memcpy, even if the size is 0; ubsan checks this.
         if (input0_size != 0) {
