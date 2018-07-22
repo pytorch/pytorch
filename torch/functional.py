@@ -296,8 +296,9 @@ def argmin(input, dim=None, keepdim=False):
     if dim is None:
         # Instead of squeeze to 1 dimension, do it multiple passes for better perf.
         t, pos = torch.min(input, dim=0)
-        index = _reduceDim(t, pos, torch.min)
-        shape = input.shape
-        return _translate_idx(shape, index)
+        idx = _reduceDim(t, pos, torch.min)
+        tensor_dim = input.shape
+        idx_tensor = torch.tensor(_translate_idx(tensor_dim, idx), device=input.device)
+        return idx_tensor
 
     return torch._argmin(input, dim, keepdim)
