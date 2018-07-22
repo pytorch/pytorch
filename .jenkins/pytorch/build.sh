@@ -17,9 +17,6 @@ fi
 COMPACT_JOB_NAME="${BUILD_ENVIRONMENT}-build"
 source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 
-# Invoke from the pytorch_amd directory.
-USE_ROCM=1 python "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/setup.py" install
-
 echo "Python version:"
 python --version
 
@@ -53,7 +50,8 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # ROCm builds experience OOM issues when buliding with sscache. (HCC Issue #785)
   export MAX_JOBS=`expr $(nproc) - 1`
 
-  USE_ROCM=1 python setup.py install
+  # Invoke from the pytorch_amd directory.
+  USE_ROCM=1 python "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/setup.py" install
   exit
 fi
 
