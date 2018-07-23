@@ -17,7 +17,7 @@ struct Tensor;
 } // namespace at
 
 namespace at {
-struct TensorImpl : public Retainable {
+struct AT_API TensorImpl : public Retainable {
   explicit TensorImpl(Type * type, THTensor * tensor)
   : is_scalar(false), type_(type), tensor(tensor) {}
 
@@ -75,27 +75,27 @@ struct TensorImpl : public Retainable {
   // Some methods below are defined in TensorImpl.cpp because Tensor is an
   // incomplete type.
 
-  AT_API virtual void set_requires_grad(bool requires_grad) {
+  virtual void set_requires_grad(bool requires_grad) {
     AT_ERROR("set_requires_grad is not implemented for Tensor");
   }
-  AT_API virtual bool requires_grad() const {
+  virtual bool requires_grad() const {
     AT_ERROR("requires_grad is not implemented for Tensor");
   }
 
-  AT_API virtual Tensor& grad();
-  AT_API virtual const Tensor& grad() const;
+  virtual Tensor& grad();
+  virtual const Tensor& grad() const;
 
-  AT_API virtual Tensor detach() const;
-  AT_API virtual void detach_() {
+  virtual Tensor detach() const;
+  virtual void detach_() {
     AT_ERROR("detach_ is not implemented for Tensor");
   }
 
-  AT_API virtual void backward(
+  virtual void backward(
       at::optional<Tensor> gradient,
       bool keep_graph,
       bool create_graph);
 
-  AT_API virtual void set_data(Tensor new_data);
+  virtual void set_data(Tensor new_data);
 
 protected:
   bool is_scalar;
