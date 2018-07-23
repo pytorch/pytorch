@@ -92,11 +92,16 @@ fi
 
 rocm_ignore_test=()
 if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
+
   # Currently these tests are failing on ROCM platform
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/arg_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
+
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/utility_ops_test.py::TestScatterOps::testScatterWeightedSum")
 fi
 
 # Python tests
