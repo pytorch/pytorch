@@ -6,6 +6,8 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/assertions.h"
 
+#include "torch/csrc/autograd/variable.h"
+
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
 
@@ -46,7 +48,8 @@ IValue representativeValue(Value* v) {
     auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
     at::DeviceGuard device_guard(type->device());
     auto& attype = at::getType(backend, type->scalarType());
-    return attype.tensor(type->sizes(), type->strides()).zero_();
+    auto t = attype.tensor(type->sizes(), type->strides()).zero_();
+    return autograd::make_variable(t, /*requires_grad=*/false);
   } else if (type_->isSubtypeOf(FloatType::get())) {
     return 0.f;
   }
@@ -273,11 +276,12 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   // For expensive ops we can directly encode their shape propagation
   // here, otherwise we fallback to running a fake version of the op
   // to get a quick and dirty propagation.
-  if (insert_expands && (
-      node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
+  if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
       node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
-      node->matches("aten::mul(Tensor self, Tensor other) -> Tensor") ||
-      node->matches("aten::div(Tensor self, Tensor other) -> Tensor") ||
+      node->matches("aten::mul(Tensor self, Tensor other) -> Tensor")) {
+    PropagateShapeOnNodeByRunningIt(node);
+    return;
+  } else if (insert_expands && (
       node->matches("aten::pow(Tensor self, Tensor exponent) -> Tensor") ||
       node->matches("aten::min(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::max(Tensor self, Tensor other) -> Tensor") ||

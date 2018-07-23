@@ -50,7 +50,7 @@
 
 namespace at {
 
-struct OperandInfo {
+struct AT_API OperandInfo {
   OperandInfo() {}
   OperandInfo(const Tensor& t) : tensor(const_cast<Tensor*>(&t)) {}
 
@@ -82,7 +82,7 @@ struct OperandInfo {
 
 struct SplitUntil32Bit;
 
-struct TensorIterator {
+struct AT_API TensorIterator {
   struct Builder;
   friend struct Builder;
 
@@ -210,10 +210,11 @@ private:
 /// A container-like struct that acts as if it contains splits of a
 /// TensorIterator that can use 32-bit indexing. Taken together the splits cover
 /// the original TensorIterator.
-struct SplitUntil32Bit {
-  struct iterator {
+struct AT_API SplitUntil32Bit {
+  struct AT_API iterator {
     iterator() {};
     iterator(const TensorIterator& iter);
+    iterator(iterator&&) = default;
 
     TensorIterator& operator*() const;
     iterator& operator++();

@@ -283,7 +283,7 @@ struct OperatorRegistry  {
         }
       }
 #endif
-      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
+      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for ", name);
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
     return it->second;
