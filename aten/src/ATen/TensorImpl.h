@@ -17,7 +17,7 @@ struct Tensor;
 } // namespace at
 
 namespace at {
-struct TensorImpl : public Retainable {
+struct AT_API TensorImpl : public Retainable {
   explicit TensorImpl(Type * type, THTensor * tensor)
   : is_scalar(false), type_(type), tensor(tensor) {}
 
