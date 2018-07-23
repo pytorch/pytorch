@@ -11,4 +11,8 @@ if (USE_CUDA)
 
   target_link_libraries(caffe2_detectron_ops_gpu caffe2_gpu)
   install(TARGETS caffe2_detectron_ops_gpu DESTINATION lib)
+elseif(NOT IOS_PLATFORM)
+  add_library(caffe2_detectron_ops SHARED ${Detectron_CPU_SRCS})
+  target_link_libraries(caffe2_detectron_ops caffe2)
+  install(TARGETS caffe2_detectron_ops DESTINATION lib)
 endif()
