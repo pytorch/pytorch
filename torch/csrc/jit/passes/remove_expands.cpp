@@ -1,3 +1,4 @@
+#include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {

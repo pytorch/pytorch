@@ -953,7 +953,7 @@ void testProto() {
   proto.set_producer_name("foo");
 }
 
-std::string runJITCPPTests() {
+TORCH_API std::string runJITCPPTests() {
   std::stringstream out;
   testIValue();
   testControlFlow();

@@ -37,7 +37,7 @@ struct THFinalizer {
   virtual ~THFinalizer() {};
 };
 
-struct THStorage
+struct TH_CPP_API THStorage
 {
   THStorage() = delete;
   THStorage(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, char);
