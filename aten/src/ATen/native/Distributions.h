@@ -66,6 +66,7 @@ deviceforcuda scalar_t sample_gamma(scalar_t alpha, BaseSampler<accscalar_t>& st
 
   // Boost alpha for higher acceptance probability.
   if (alpha < cast_wrapper<scalar_t,float>(1.0f)) {
+    if (alpha == 0.f) return 0.f;
     scale *= std::pow(1 - standard_uniform.sample(), 1.0f / alpha);
     alpha += cast_wrapper<scalar_t,float>(1.0f);
   }
