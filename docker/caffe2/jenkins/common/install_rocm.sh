@@ -60,5 +60,3 @@ fi
 if [ "$ROCM_VERSION" = "nightly" ]; then
   install_hip_nightly
 fi
-
-install_hip_thrust
