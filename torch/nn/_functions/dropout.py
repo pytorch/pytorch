@@ -1,7 +1,6 @@
 import torch
 from torch.autograd.function import InplaceFunction
 from itertools import repeat
-from torch.autograd.function import once_differentiable
 
 
 class Dropout(InplaceFunction):
@@ -34,7 +33,7 @@ class Dropout(InplaceFunction):
             return input
 
         if ctx.use_fused_kernel:
-            output, ctx.noise = input.fused_dropout(1 - ctx.p)
+            output, ctx.noise = input._fused_dropout(1 - ctx.p)
             return output
 
         if ctx.inplace:
@@ -55,9 +54,9 @@ class Dropout(InplaceFunction):
 
     @staticmethod
     def backward(ctx, grad_output):
-        if hasattr(ctx, 'use_fused_kernel') and ctx.use_fused_kernel:
+        if ctx.use_fused_kernel:
             if not grad_output.requires_grad:
-                return grad_output.masked_scale(ctx.noise, 1. / (1 - ctx.p)), None, None, None
+                return grad_output._masked_scale(ctx.noise, 1. / (1 - ctx.p)), None, None, None
             else:
                 # use autograd-friendly backward if double backward is required
                 return grad_output * (ctx.noise.type_as(grad_output) * (1. / (1 - ctx.p))), None, None, None
@@ -100,6 +99,7 @@ class AlphaDropout(Dropout):
         if p < 0 or p > 1:
             raise ValueError("dropout probability has to be between 0 and 1, "
                              "but got {}".format(p))
+        ctx.use_fused_kernel = False
         ctx.p = p
         ctx.train = train
         ctx.inplace = inplace

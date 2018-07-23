@@ -17,7 +17,8 @@ namespace native{
 
 namespace {
 
-//due to limitations of philox generator UNROLL has to be 4
+// philox generates 128 bits of randomness at a time. Kernel uses this explicitly by putting suitably transformed result into float4
+// for all members of float4 to be consumed UNROLL has to be 4. Don't change!
 const int UNROLL = 4;
 
 std::pair<uint64_t, uint64_t> next_philox_seed(at::Generator* gen, uint64_t increment) {
@@ -50,7 +51,8 @@ fused_dropout_kernel(cuda::detail::TensorInfo<scalar_t, IndexType> a,
         idx,
         seeds.second,
         &state);
-  IndexType rounded_size = ((totalElements - 1)/(blockDim.x*gridDim.x*UNROLL)+1)*blockDim.x*gridDim.x*UNROLL;
+  IndexType rounded_size = ((totalElements - 1)/(blockDim.x * gridDim.x * UNROLL)+1) * 
+        blockDim.x * gridDim.x * UNROLL;
   for (IndexType linearIndex = idx;
        linearIndex < rounded_size;
        linearIndex += gridDim.x * blockDim.x*UNROLL) {
@@ -97,12 +99,13 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
   Tensor ret = at::empty_like(self);
   Tensor mask = self.type().toScalarType(kByte).tensor(self.sizes());
   const int64_t nelem = self.numel();
-  int64_t block_size = 256;
+  const int64_t block_size = 256;
   unsigned int blocks_per_sm = at::cuda::getCurrentDeviceProperties()->maxThreadsPerMultiProcessor/block_size;
   dim3 dim_block(block_size);
   dim3 grid((nelem + block_size -1)/block_size);
   grid.x = std::min((unsigned int)at::cuda::getCurrentDeviceProperties()->multiProcessorCount * blocks_per_sm, grid.x);
-  int64_t nrep = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
+//number of times random will be generated per thread, to offset philox counter in thc random state
+  int64_t counter_offset = ((nelem - 1)/(block_size*grid.x*UNROLL)+1)*UNROLL;
   if (cuda::detail::canUse32BitIndexMath(self)){
   AT_DISPATCH_FLOATING_TYPES_AND_HALF(self.type(), "fused_dropout", [&] {
       using accscalar_t = acc_type<scalar_t, true>;
@@ -115,10 +118,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, unsigned int, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
       }
    });
   } else {
@@ -133,10 +136,10 @@ fused_dropout_cuda(const Tensor& self, double p, Generator * gen){
       mask_info.collapseDims(); //ret and mask are collapsed to 1d contiguous tensor
       switch (self_info.dims) {
         case 1:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, 1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
             break;
         default:
-            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,nrep));
+            fused_dropout_kernel<scalar_t, accscalar_t, uint64_t, -1><<<grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(self_info, ret_info, mask_info, nelem, pa, next_philox_seed(gen,counter_offset));
       }
    });
   }
