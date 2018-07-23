@@ -20,7 +20,7 @@ int64_t current_device() {
   return cur_device;
 }
 
-AT_API void set_device(int64_t device) {
+void set_device(int64_t device) {
   AT_CUDA_CHECK(cudaSetDevice((int)device));
 }
 
