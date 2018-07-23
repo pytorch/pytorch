@@ -152,7 +152,7 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
   if ( (vec1->dim() != 1) || (vec2->dim() != 1) ) {
-    THError("1D tensor and 1D tensor expected, got %dD, %dD tensors",
+    THError("1D tensors expected, got %dD, %dD tensors",
        vec1->dim(), vec2->dim());
   }
 
