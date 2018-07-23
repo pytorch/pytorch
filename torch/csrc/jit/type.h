@@ -173,6 +173,8 @@ struct TensorType : public Type {
     }
     return prod;
   }
+  static TypePtr fromNumberType(TypePtr typ);
+
 private:
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
@@ -339,6 +341,17 @@ inline TypePtr unshapedType(const TypePtr& type) {
   }
 }
 
+inline TypePtr TensorType::fromNumberType(TypePtr typ) {
+  JIT_ASSERT(typ->isSubtypeOf(*NumberType::get()));
+  if(typ->isSubtypeOf(*IntType::get())) {
+    TensorType tt(at::kLong, -1, {});
+    return std::make_shared<TensorType>(std::move(tt));
+  } else if(typ->isSubtypeOf(*FloatType::get())) {
+    TensorType tt(at::kFloat, -1, {});
+    return std::make_shared<TensorType>(std::move(tt));
+  }
+  AT_ERROR("unknown number type", typ->str());
+}
 
 std::ostream& operator<<(std::ostream & out, const Type & t);
 

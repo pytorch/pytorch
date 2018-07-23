@@ -240,6 +240,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       return;
     }
     case prim::TensorToNum:
+    case prim::NumToTensor:
       return; // correct num type is already set
     case prim::Constant: {
       if(node->output()->type()->isSubtypeOf(*DynamicType::get())) {
@@ -247,7 +248,6 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
-    case prim::NumToTensor: //todo: this case is pretty easy
     case prim::PythonOp:
     case prim::Print:
     case prim::Undefined: {

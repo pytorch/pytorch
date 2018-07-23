@@ -1,9 +1,9 @@
 graph(%a : Dynamic) {
   %1 : Long() = prim::Constant[value={7}]()
   %2 : Long() = prim::Constant[value={1}]()
-  %3 : Dynamic = aten::add(%1, %2)
+  %3 : Long() = aten::add(%1, %2)
   %4 : Long() = prim::Constant[value={3}]()
-  %b : Dynamic = aten::add(%3, %4)
+  %b : Long() = aten::add(%3, %4)
   %6 : Long() = prim::Constant[value={1}]()
   %c.1 : Dynamic = aten::add(%a, %b, %6)
   %8 : Long() = prim::Constant[value={1}]()

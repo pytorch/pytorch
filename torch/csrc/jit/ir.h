@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "torch/csrc/jit/attributes.h"
@@ -1013,8 +1014,10 @@ public:
     return n;
   }
   Node* createNumToTensor(Value* value) {
-    JIT_ASSERT(value->type()->isSubtypeOf(*NumberType::get()));
-    return create(prim::NumToTensor, {value});
+    auto typ = value->type();
+    Node * result = create(prim::NumToTensor, {value});
+    result->output()->setType(TensorType::fromNumberType(typ));
+    return result;
   }
   Node* createTensorToNum(const TypePtr& type, Value* value) {
     auto* result = create(prim::TensorToNum, {value});

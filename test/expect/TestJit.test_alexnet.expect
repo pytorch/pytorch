@@ -30,7 +30,7 @@ graph(%0 : Double(1, 3, 224, 224)
   %31 : Double(1, 256, 6, 6), %32 : Long(1, 256, 6, 6) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%30), scope: AlexNet/Sequential[features]/MaxPool2d[12]
   %33 : int = prim::Constant[value=0](), scope: AlexNet
   %34 : int = aten::size(%31, %33), scope: AlexNet
-  %35 : Dynamic = prim::NumToTensor(%34), scope: AlexNet
+  %35 : Long() = prim::NumToTensor(%34), scope: AlexNet
   %36 : int = prim::TensorToNum(%35), scope: AlexNet
   %37 : int = prim::Constant[value=9216](), scope: AlexNet
   %38 : int[] = prim::ListConstruct(%36, %37), scope: AlexNet
