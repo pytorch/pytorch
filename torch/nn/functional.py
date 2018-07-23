@@ -1954,51 +1954,46 @@ def multi_margin_loss(input, target, p=1, margin=1, weight=None, size_average=No
     return torch._C._nn.multi_margin_loss(input, target, p, margin, weight, reduction)
 
 
-def pixel_shuffle(input, upscale_factor):
-    r"""Rearranges elements in a tensor of shape :math:`[*, C*r^2, H, W]` to a
-    tensor of shape :math:`[C, H*r, W*r]`.
+pixel_shuffle = _add_docstr(torch.pixel_shuffle, r"""
+Rearranges elements in a tensor of shape :math:`(*, C \times r^2, H, W)` to a
+tensor of shape :math:`(C, H \times r, W \times r)`.
 
-    See :class:`~torch.nn.PixelShuffle` for details.
+This is the inverse operation of :meth:`~torch.nn.functional.pixel_unshuffle`.
 
-    Args:
-        input (Tensor): Input
-        upscale_factor (int): factor to increase spatial resolution by
+See :class:`~torch.nn.PixelShuffle` for details.
 
-    Examples::
+Args:
+    input (Tensor): the input tensor
+    upscale_factor (int): factor to increase spatial resolution by
 
-        >>> ps = nn.PixelShuffle(3)
-        >>> input = torch.empty(1, 9, 4, 4)
-        >>> output = ps(input)
-        >>> print(output.size())
-        torch.Size([1, 1, 12, 12])
-    """
-    batch_size, channels, in_height, in_width = input.size()
-    channels //= upscale_factor ** 2
+Examples::
 
-    out_height = in_height * upscale_factor
-    out_width = in_width * upscale_factor
-
-    input_view = input.reshape(
-        batch_size, channels, upscale_factor, upscale_factor,
-        in_height, in_width)
-
-    shuffle_out = input_view.permute(0, 1, 4, 2, 5, 3)
-    return shuffle_out.reshape(batch_size, channels, out_height, out_width)
+    >>> input = torch.randn(1, 9, 4, 4)
+    >>> output = torch.nn.functional.pixel_shuffle(input, 3)
+    >>> print(output.size())
+    torch.Size([1, 1, 12, 12])
+""")
 
 
-def pixel_unshuffle(input, downscale_factor):
-    batch_size, channels, in_height, in_width = input.size()
+pixel_unshuffle = _add_docstr(torch.pixel_unshuffle, r"""
+Rearranges elements in a tensor of shape :math:`(C, H \times r, W \times r)` to a
+tensor of shape :math:`(*, C \times r^2, H, W)`.
 
-    out_height = in_height // downscale_factor
-    out_width = in_width // downscale_factor
+This is the inverse operation of :meth:`~torch.nn.functional.pixel_shuffle`.
 
-    input_view = input.reshape(
-        batch_size, channels, out_height, downscale_factor,
-        out_width, downscale_factor)
+See :class:`~torch.nn.PixelUnshuffle` for details.
 
-    channels *= downscale_factor ** 2
-    unshuffle_out = input_view.permute(0, 1, 3, 5, 2, 4)
-    return unshuffle_out.reshape(batch_size, channels, out_height, out_width)
+Args:
+    input (Tensor): the input tensor
+    upscale_factor (int): factor to reduce spatial resolution by
+
+Examples::
+
+    >>> input = torch.randn(1, 1, 12, 12)
+    >>> output = torch.nn.functional.pixel_unshuffle(input, 3)
+    >>> print(output.size())
+    torch.Size([1, 9, 4, 4])
+""")
 
 
 def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=None):

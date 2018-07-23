@@ -8256,6 +8256,11 @@ new_module_tests = [
         input_size=(1, 9, 4, 4),
     ),
     dict(
+        module_name='PixelUnshuffle',
+        constructor_args=(3,),
+        input_size=(1, 2, 12, 9),
+    ),
+    dict(
         module_name='Upsample',
         constructor_args=(12, None, 'nearest'),
         input_size=(1, 2, 4),
