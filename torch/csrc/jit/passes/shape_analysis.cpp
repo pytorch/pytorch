@@ -140,7 +140,6 @@ void PropagateShapeOnNodeByRunningIt(Node* node) {
   auto op = getOperation(node);
   Stack stack;
 
-  size_t types_i = 0;
   for (auto input : node->inputs()) {
     stack.push_back(representativeValue(input));
   }
