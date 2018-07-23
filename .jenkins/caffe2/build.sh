@@ -7,7 +7,6 @@ INSTALL_PREFIX="/usr/local/caffe2"
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
 CMAKE_ARGS=()
-SCCACHE="$(which sccache)"
 
 
 # Setup SCCACHE
