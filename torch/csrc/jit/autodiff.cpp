@@ -12,9 +12,9 @@ using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
 bool hasOneValuedInput(Node *n, torch::jit::Symbol name) {
-  auto maybe_t = n->get<at::Tensor>(name);
+  auto maybe_t = n->get<at::Scalar>(name);
   if (!maybe_t) return false;
-  return at::Scalar(*maybe_t).toDouble() == 1.0;
+  return maybe_t->toDouble() == 1.0;
 }
 
 bool isDifferentiable(Node * n) {

@@ -1,7 +1,7 @@
 #include "torch/csrc/jit/passes/peephole.h"
 
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {
@@ -51,7 +51,7 @@ void PeepholeOptimize(Block * block) {
     } else if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor",
                /*with_const=*/attr::alpha)) {
       // z + x.mm(y) == z.addmm(x, y) == x.mm(y) + z
-      if (tensor_as<double>(node->get<at::Tensor>(attr::alpha).value()) == 1.) {
+      if (node->get<at::Scalar>(attr::alpha).value().toDouble() == 1.) {
         // Look for mm from both sides of the add
         for (size_t mm_side = 0; mm_side < 2; mm_side++) {
           if (node->input(mm_side)->node()->matches("aten::mm(Tensor self, Tensor mat2) -> Tensor")) {

@@ -1,6 +1,6 @@
 #pragma once
 #include "ATen/ATen.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/ivalue.h"
 
 namespace torch { namespace jit {

@@ -4,7 +4,7 @@
 #include "torch/csrc/Dtype.h"
 #include "torch/csrc/Layout.h"
 #include "torch/csrc/jit/script/compiler.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/constants.h"

@@ -2,7 +2,7 @@
 #include "torch/csrc/jit/script/lexer.h"
 #include "torch/csrc/jit/script/tree.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/script/error_report.h"
 
 namespace torch { namespace jit {

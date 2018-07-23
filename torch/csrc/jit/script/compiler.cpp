@@ -6,7 +6,7 @@
 #include "torch/csrc/jit/script/parser.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/jit/operator.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/constants.h"
 
 #include "ATen/optional.h"

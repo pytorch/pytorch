@@ -1,6 +1,6 @@
 #include "ir.h"
 
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/constants.h"
@@ -569,6 +569,17 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
+std::pair<size_t, const Argument&> findArgument(const FunctionSchema& the_schema, Symbol name) {
+  auto name_str = name.toUnqualString();
+  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
+    const auto & arg = the_schema.arguments[i];
+    if (arg.name == name_str) {
+      return std::make_pair(i, arg);
+    }
+  }
+  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+}
+
 at::optional<IValue> Node::get(Symbol name) const {
   // TODO (apaszke): remove. this is in here for now just so that we can ensure
   // we always use this in places where the node has a valid schema already
@@ -579,8 +590,16 @@ at::optional<IValue> Node::get(Symbol name) const {
         return IValue(i(name));
       case AttributeKind::f:
         return IValue(f(name));
-      case AttributeKind::t:
-        return IValue(t(name));
+      case AttributeKind::t: {
+        // attributes are ambiguous, this might be a at::Scalar
+        // disambiguate via schema
+        at::Tensor ten = t(name);
+        const auto& arg = findArgument(schema(), name).second;
+        if(arg.type->isSubtypeOf(*NumberType::get())) {
+          return IValue(at::Scalar(ten));
+        }
+        return IValue(ten);
+      }
       case AttributeKind::is:
         return IValue(is(name));
       default:
@@ -599,15 +618,7 @@ Value* Node::namedInput(Symbol name) const {
     // so this is completely unsafe and needs to be gone as soon as possible.
     return v;
   }
-  const auto& the_schema = schema();
-  auto name_str = name.toUnqualString();
-  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
-    const auto & arg = the_schema.arguments[i];
-    if (arg.name == name_str) {
-      return input(i);
-    }
-  }
-  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+  return input(findArgument(schema(), name).first);
 }
 
 bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {

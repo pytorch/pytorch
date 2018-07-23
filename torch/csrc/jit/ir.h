@@ -396,8 +396,6 @@ public:
     return inputs_.at(i);
   }
 
-  Value* input(Symbol name) const { throw std::runtime_error("NO!"); }
-
   Value* namedInput(Symbol name) const;
 
   at::optional<IValue> get(Symbol name) const;
