@@ -2064,7 +2064,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   if( t->dim() != 2 )
-    THError("1D tensor expected, got %dD tensor for t", t->dim());
+    THError("2D tensor expected, got %dD tensor for t", t->dim());
 
   if( (t->size(0) != m1->size(0)) || (t->size(1) != m2->size(1)) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
