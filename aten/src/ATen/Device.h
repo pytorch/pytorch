@@ -111,8 +111,8 @@ struct Device {
 };
 } // namespace at
 
-std::ostream& operator<<(std::ostream& stream, at::Device::Type type);
-std::ostream& operator<<(std::ostream& stream, const at::Device& device);
+AT_API std::ostream& operator<<(std::ostream& stream, at::Device::Type type);
+AT_API std::ostream& operator<<(std::ostream& stream, const at::Device& device);
 
 namespace std {
   template<> struct hash<at::Device>

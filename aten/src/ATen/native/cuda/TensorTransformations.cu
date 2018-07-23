@@ -2,6 +2,7 @@
 
 #include "ATen/cuda/detail/IndexUtils.cuh"
 #include "ATen/NativeFunctions.h"
+#include "ATen/cuda/CUDAContext.h"
 
 #include <cstddef>
 #include <vector>
@@ -83,7 +84,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
       int flip_dim = in_tensor_info.collapseDims(dims[0]);
       out_tensor_info.collapseDims(dims[0]);
       kernel_pointwise_flip_apply2<scalar_t, int64_t>
-        <<<dim_grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(
+        <<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
           in_tensor_info, out_tensor_info, N, flip_dim, total_dims);
     });
     return out_tensor;
@@ -113,7 +114,7 @@ Tensor flip_cuda(const Tensor& self, IntList dims) {
   }
 
   AT_DISPATCH_ALL_TYPES_AND_HALF(in_tensor.type(), "flip_cuda", [&] {
-    flip_cuda_kernel<<<dim_grid, dim_block, 0, globalContext().getCurrentCUDAStream()>>>(
+    flip_cuda_kernel<<<dim_grid, dim_block, 0, at::cuda::getCurrentCUDAStream()>>>(
       in_tensor.data<scalar_t>(), out_tensor.data<scalar_t>(), N, flip_dims_t.toType(CUDA(kLong)).data<int64_t>(), flip_dims_size,
       strides_t.toType(CUDA(kLong)).data<int64_t>(), stride_contiguous.toType(CUDA(kLong)).data<int64_t>(), shape_t.toType(CUDA(kLong)).data<int64_t>(), total_dims);
   });

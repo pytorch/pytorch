@@ -1,4 +1,5 @@
 #include <ATen/ATen.h>
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/NativeFunctions.h>
 #include <ATen/native/sparse/SparseUtils.h>
 #include <ATen/native/sparse/cuda/SparseCUDAApplyUtils.cuh>
@@ -197,7 +198,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 
   _get_sparse_impl(r_)->raw_resize_(1, 1, {m, n});
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 
@@ -282,7 +283,7 @@ Tensor& add_out_dense_sparse_cuda(Tensor& r_, const Tensor& dense, SparseTensorR
     dim3 grid;
     int curDevice = -1;
     cudaGetDevice(&curDevice);
-    cudaStream_t stream = globalContext().getCurrentCUDAStreamOnDevice(curDevice);
+    cudaStream_t stream = at::cuda::getCurrentCUDAStreamOnDevice(curDevice);
     if (sparse._denseDims() == 0) {
       AT_CHECK(cuda::getApplyGrid(nnz, grid, curDevice), "add: Argument #0: tensor too large or too many dimensions");
 
@@ -482,7 +483,7 @@ SparseTensor& s_mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, co
   dim3 grid;
   int curDevice = -1;
   cudaGetDevice(&curDevice);
-  cudaStream_t stream = globalContext().getCurrentCUDAStreamOnDevice(curDevice);
+  cudaStream_t stream = at::cuda::getCurrentCUDAStreamOnDevice(curDevice);
   AT_CHECK(cuda::getApplyGrid(valueSize, grid, curDevice), "mul: Argument #0: tensor too large or too many dimensions");
 
   LongTensor resultNnz = at::empty({1}, CUDA(kLong));
