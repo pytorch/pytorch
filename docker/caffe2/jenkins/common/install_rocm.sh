@@ -13,12 +13,6 @@ install_hip_nightly() {
     yes | ./install.sh --install
     popd
     rm -rf HIP
-
-    git clone https://github.com/ROCmSoftwarePlatform/hipBLAS.git
-    pushd hipBLAS
-    yes | ./install.sh --install
-    popd
-    rm -rf hipBLAS
 }
 
 install_ubuntu() {
@@ -42,6 +36,7 @@ install_ubuntu() {
                    hipblas \
                    rocrand \
                    rocm-profiler \
+                   hcsparse \
                    cxlactivitylogger
 }
 
@@ -49,27 +44,6 @@ install_centos() {
     echo "Not implemented yet"
     exit 1
 }
-
-install_hip_thrust() {
-    # Needed for now, will be replaced soon
-    git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
-    rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
-    git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
-    cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
-}
-
-install_hcrng() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
-    dpkg -i /opt/rocm/debians/hcrng.deb
-}
-
-install_hcsparse() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
-    dpkg -i /opt/rocm/debians/hcsparse.deb
-}
-
 
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
@@ -88,5 +62,3 @@ if [ "$ROCM_VERSION" = "nightly" ]; then
 fi
 
 install_hip_thrust
-install_hcrng
-install_hcsparse
