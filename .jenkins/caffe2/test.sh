@@ -95,13 +95,24 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
 
-  # Currently these tests are failing on ROCM platform
+  # Currently these tests are failing on ROCM platform:
+
+  # Unknown reasons, need to debug
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/arg_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/utility_ops_test.py::TestScatterOps::testScatterWeightedSum")
+
+  # Need to go through roi ops to replace max(...) with fmaxf(...)
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
+
+  # Our cuda top_k op has some asm code, the hipified version doesn't
+  # compile yet, so we don't have top_k operator for now
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
 
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/utility_ops_test.py::TestScatterOps::testScatterWeightedSum")
+  # Failing on CI with rocm 1.8.1, but passed in local environment
+  # with rocm 1.8.2. Revisit this once the docker images are upgraded.
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/recurrent_net_executor_test.py::TestRNNExecutor::test_lstm_with_attention_equal_simplenet")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py::TestSoftmaxOps::test_softmax_axis")
 fi
 
 # Python tests
