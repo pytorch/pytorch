@@ -516,28 +516,28 @@ void runRequiredPasses(const std::shared_ptr<Graph>& g)  {
   RemoveExpands(g);
 }
 
-void specializeToSpec(const std::shared_ptr<Graph>& graph_, const ArgumentSpec& spec) {
+void specializeToSpec(const std::shared_ptr<Graph>& graph, const ArgumentSpec& spec) {
   // clean up GradOf and AutogradAdd nodes
   // this must be first because later passes do not know what GradOfs are
   std::vector<bool> defined;
   for(size_t i = 0; i < spec.size(); ++i) {
     defined.push_back(spec.at(i).defined());
   }
-  specializeUndef(*graph_, defined);
+  specializeUndef(*graph, defined);
 
   // required passes shared with autograd fallback
-  runRequiredPasses(graph_);
+  runRequiredPasses(graph);
 
   // Decompose addmm nodes to add + mm, so expands can be inserted and
   // gradients accumulated on the backward pass
   //
   // In the future, if we need more passes like this, we should convert this
   // into a generic canonicalization pass.
-  DecomposeAddmm(graph_);
+  DecomposeAddmm(graph);
   // clean up dead constants from specialization
-  EliminateDeadCode(graph_);
+  EliminateDeadCode(graph);
   // calculate all input shapes
-  PropagateInputShapes(*graph_, spec);
+  PropagateInputShapes(*graph, spec);
 }
 
 void runOptimization(std::shared_ptr<Graph> & graph, bool graphMustSupportVariables) {

@@ -7,6 +7,7 @@ import re
 import subprocess
 import sys
 
+
 DEFAULT_FILE_PATTERN = r".*\.[ch](pp)?"
 
 # @@ -start,count +start,count @@
@@ -24,6 +25,11 @@ def run_shell_command(arguments, process_name=None):
         raise RuntimeError("Error executing {}: {}".format(process_name, e))
     else:
         return output.decode()
+
+
+def normalize_directory_path(path):
+    """Normalizes a directory path."""
+    return path.rstrip('/')
 
 
 def transform_globs_into_regexes(globs):
@@ -49,14 +55,35 @@ def git_diff(args, verbose):
     return run_shell_command(command, process_name="git diff")
 
 
-def filter_files(files, file_patterns):
+def filter_files(files, file_patterns, verbose):
     """Returns all files that match any of the patterns."""
     filtered = []
     for file in files:
+        has_match = False
         for pattern in file_patterns:
-            if pattern.match(file):
+            if pattern.search(file):
                 filtered.append(file)
+                has_match = True
+        if not has_match and verbose:
+            message = "{} does not match any ".format(file)
+            message += "file pattern in {{{}}}".format(', '.join(map(str, file_patterns)))
+            print(message)
     return filtered
+
+
+def remove_recursive_files(files, paths, verbose):
+    """
+    Removes all files that are not immediately under one of the given paths.
+    """
+    for file in files:
+        if os.path.dirname(file) in paths:
+            yield file
+        else:
+            if verbose:
+
+                message = "{} ({}) does not match any ".format(file, os.path.dirname(file))
+                message += "non-recursive path in {{{}}}".format(", ".join(paths))
+                print(message)
 
 
 def get_changed_files(revision, paths, verbose):
@@ -152,7 +179,17 @@ def parse_options():
     )
     parser.add_argument("-r", "--revision", help="Git revision to get changes from")
     parser.add_argument(
-        "-p", "--paths", nargs="+", default=["."], help="Lint only the given paths"
+        "-p",
+        "--paths",
+        nargs="+",
+        default=["."],
+        help="Lint only the given paths (recursively)",
+    )
+    parser.add_argument(
+        "-n",
+        "--no-recursive",
+        action="store_true",
+        help="If paths are supplied with -p/--paths, do not recurse into paths",
     )
     parser.add_argument(
         "-s",
@@ -173,12 +210,15 @@ def parse_options():
 
 def main():
     options = parse_options()
+    paths = map(normalize_directory_path, options.paths)
     if options.revision:
-        files = get_changed_files(options.revision, options.paths, options.verbose)
+        files = get_changed_files(options.revision, paths, options.verbose)
     else:
-        files = get_all_files(options.paths)
+        files = get_all_files(paths)
+    if options.no_recursive:
+        files = remove_recursive_files(files, paths, options.verbose)
     file_patterns = get_file_patterns(options.glob, options.regex)
-    files = filter_files(files, file_patterns)
+    files = filter_files(files, file_patterns, options.verbose)
 
     # clang-tidy error's when it does not get input files.
     if not files:
