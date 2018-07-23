@@ -7615,9 +7615,9 @@ class TestTorch(TestCase):
         r1 = np_sc * t
         self.assertIsInstance(r1, torch.Tensor)
         self.assertTrue(r1.requires_grad)
-        r2 = np_sc * t
-        self.assertIsInstance(r1, torch.Tensor)
-        self.assertTrue(r1.requires_grad)
+        r2 = t * np_sc
+        self.assertIsInstance(r2, torch.Tensor)
+        self.assertTrue(r2.requires_grad)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
