@@ -35,8 +35,8 @@ namespace at {
 
 namespace detail {
 
-float halfbits2float(unsigned short bits);
-unsigned short float2halfbits(float value);
+AT_API float halfbits2float(unsigned short bits);
+AT_API unsigned short float2halfbits(float value);
 
 }
 
