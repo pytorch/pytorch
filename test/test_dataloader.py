@@ -486,7 +486,7 @@ class TestDataLoader(TestCase):
             loader = iter(DataLoader(self.dataset, batch_size=2, num_workers=4, pin_memory=pin_memory))
             workers = loader.workers
             if pin_memory:
-                worker_manager_thread = loader.worker_manager_thread
+                pin_memory_thread = loader.pin_memory_thread
             for i, sample in enumerate(loader):
                 if i == 10:
                     break
@@ -495,8 +495,8 @@ class TestDataLoader(TestCase):
                 w.join(JOIN_TIMEOUT)
                 self.assertFalse(w.is_alive(), 'subprocess not terminated')
             if pin_memory:
-                worker_manager_thread.join(JOIN_TIMEOUT)
-                self.assertFalse(worker_manager_thread.is_alive())
+                pin_memory_thread.join(JOIN_TIMEOUT)
+                self.assertFalse(pin_memory_thread.is_alive())
 
     @staticmethod
     def _main_process(dataset, worker_pids, main_exit_event, raise_error):
