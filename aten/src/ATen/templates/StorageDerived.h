@@ -16,7 +16,6 @@ struct Allocator;
 struct ${Storage} final : public Storage {
 public:
   ${Storage}();
-  ${Storage}(THStorage *wrapped);
   ${Storage}(size_t size);
   ${Storage}(size_t size, Allocator* allocator);
   ${Storage}(

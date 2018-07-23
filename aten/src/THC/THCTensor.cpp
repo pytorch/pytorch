@@ -60,9 +60,9 @@ THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type) {
 void THCTensor_resize(THCState *state, THCTensor *self, THLongStorage *size, THLongStorage *stride) {
   THArgCheck(size != NULL, 2, "invalid size");
   if(stride)
-    THArgCheck(stride->size == size->size, 3, "invalid stride");
+    THArgCheck(stride->size_ == size->size_, 3, "invalid stride");
 
-  THCTensor_resizeNd(state, self, size->size, THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
+  THCTensor_resizeNd(state, self, size->size_, THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
 }
 
 void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
@@ -153,7 +153,7 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
     if(!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size) {
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size_) {
       THCStorage_resize(state, THTensor_getStoragePtr(self), totalSize+self->storage_offset());
     }
   }

@@ -299,7 +299,7 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_->tensor',
     'THDenseTensor*': '{}_->tensor',
     'THDenseIndexTensor*': '{}_->tensor',
-    'THStorage*': '{}_->storage',
+    'THStorage*': '{}_',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }

@@ -23,7 +23,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
   if(size == 0)
   {
     self->data_ptr = at::DataPtr(nullptr, at::Device(at::kCUDA, device));
-    self->size = 0;
+    self->size_ = 0;
   }
   else
   {
@@ -36,14 +36,14 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
 
       THCudaCheck(cudaMemcpyAsync(data.get(),
                                   self->data_ptr.get(),
-                                  THMin(self->size, size) * elementSize,
+                                  THMin(self->size(), size) * elementSize,
                                   cudaMemcpyDeviceToDevice,
                                   THCState_getCurrentStream(state)));
     }
 
     // Destructively overwrite data_ptr
     self->data_ptr = std::move(data);
-    self->size = size;
+    self->size_ = size;
   }
 }
 
