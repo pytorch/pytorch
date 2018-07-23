@@ -30,10 +30,22 @@ class CopyIDEEPToCPUOp final : public IDEEPOperator {
   USE_SIMPLE_IDEEP_CTOR_DTOR(CopyIDEEPToCPUOp);
   USE_IDEEP_DEF_ALIASES();
   bool RunOnDevice() override {
-    const auto& X = OperatorBase::Input<itensor>(0);
-    auto* Y = OperatorBase::Output<TensorCPU>(0);
-    Y->Resize(X.get_dims());
-    X.reorder_to(Y->template mutable_data<float>());
+    const auto& input_blob = OperatorBase::InputBlob(0);
+    if (input_blob.template IsType<TensorCPU>()) {
+      VLOG(2) << "Directing sharing of TensorCPU";
+      const auto& X = OperatorBase::Input<TensorCPU>(0);
+      auto* Y = OperatorBase::Output<TensorCPU>(0);
+      Y->CopyFrom(X);
+    } else {
+      const auto& X = OperatorBase::Input<itensor>(0);
+      auto* Y = OperatorBase::Output<TensorCPU>(0);
+      Y->Resize(X.get_dims());
+      if (X.get_data_type() == itensor::data_type::f32) {
+        X.reorder_to(Y->template mutable_data<float>());
+      } else {
+        CAFFE_THROW("Unsupported ideep type: ", X.get_data_type());
+      }
+    }
     return true;
   }
 };
