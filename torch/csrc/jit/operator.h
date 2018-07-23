@@ -13,7 +13,7 @@ FunctionSchema parseSchema(const std::string& decl);
 
 using OperationCreator = std::function<Operation(Node*)>;
 
-struct Operator {
+struct TORCH_API Operator {
   Operator(FunctionSchema schema, OperationCreator op, OperationCreator op_const_attributes = nullptr)
     : schema(std::move(schema))
     , op(std::move(op))
@@ -65,7 +65,7 @@ void registerOperator(Operator&& op);
 // XXX: this function is meant to be used with string literals only!
 Operator& sig(const char *signature_literal);
 
-struct RegisterOperators {
+struct TORCH_API RegisterOperators {
   RegisterOperators(std::vector<Operator> operators) {
     for(Operator& o : operators) {
       registerOperator(std::move(o));

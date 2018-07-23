@@ -11,9 +11,9 @@ private:
   std::unordered_map<Value*, std::vector<Value*>> batch_map;
 public:
   static std::unordered_map<std::string, std::shared_ptr<Graph>> batch_operator_table;
-  void toBatch(Block* block, Block* res_block);
+  TORCH_API void toBatch(Block* block, Block* res_block);
 };
 
-std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph);
-void initRegisterBatchOpsBindings(PyObject* module);
+TORCH_API std::shared_ptr<Graph> to_batch_graph(std::shared_ptr<Graph>& graph);
+TORCH_API void initRegisterBatchOpsBindings(PyObject* module);
 }}
