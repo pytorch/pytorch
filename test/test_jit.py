@@ -1674,21 +1674,19 @@ class TestScript(JitTestCase):
 
             st = second + third
             fs = first + second
-            zero = FIXME_zerol()
-            return third + zero, st + zero, fs + zero
+            return third, st, fs
 
         inputs = self._make_scalar_vars([10], torch.int64)
         self.checkScript(func, inputs, optimize=True)
 
     def test_if(self):
         def func(a, b):
-            zero = FIXME_zerol()
-            d = 3
+            d = 3 + FIXME_zerol()
             if a > 10:
-                a = zero + 3 + d
+                a = 3 + d
             else:
-                b = zero + 3 + d
-                d = 4
+                b = 3 + d
+                d = FIXME_zerol() + 4
             c = a + b
             return c
 
@@ -1697,7 +1695,7 @@ class TestScript(JitTestCase):
 
     def test_if_for_in_range(self):
         def func(a, b):
-            d = FIXME_zerol() + 3
+            d = 3 + FIXME_zerol()
             for _ in range(20):
                 if a > 10:
                     a = 3 + d
@@ -3005,14 +3003,14 @@ def func(t):
                 b = 1
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo2(a):
             b = 0
             if a == 0:
                 b = 1
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         @torch.jit.script
         def foo3(a):
@@ -3021,7 +3019,7 @@ def func(t):
                 c = 4
             else:
                 b = 0
-            return FIXME_zerol() + (b + 1)
+            return b + 1
 
         a = torch.ones(1, dtype=torch.long)
         b = torch.zeros(1, dtype=torch.long)
