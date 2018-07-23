@@ -51,7 +51,7 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   export MAX_JOBS=`expr $(nproc) - 1`
   
   # Invoke from the pytorch_amd directory.
-  pushd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/setup.py"
+  pushd "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/"
   USE_ROCM=1 python setup.py install
   exit
 fi
