@@ -116,9 +116,12 @@ def _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad):
         [1, 0, 0],
         [0, 0, 1],
     ], dtype=np.float64)
+    
+    transform_ary = np.dot(np.dot(np.dot(np.dot(intrans_ary, inscale_ary), rotation_ary.T), outscale_ary), outtrans_ary)
+    grid_ary = np.dot(np.dot(np.dot(reorder_ary, rotation_ary.T), outscale_ary), outtrans_ary)
 
-    transform_ary = intrans_ary @ inscale_ary @ rotation_ary.T @ outscale_ary @ outtrans_ary
-    grid_ary = reorder_ary @ rotation_ary.T @ outscale_ary @ outtrans_ary
+    # transform_ary = intrans_ary @ inscale_ary @ rotation_ary.T @ outscale_ary @ outtrans_ary
+    # grid_ary = reorder_ary @ rotation_ary.T @ outscale_ary @ outtrans_ary
     transform_tensor = torch.from_numpy((rotation_ary)).to(device, torch.float32)
 
     transform_tensor = transform_tensor[:2].unsqueeze(0)
@@ -140,19 +143,19 @@ def _buildEquivalentTransforms2d(device, input_size, output_size, angle_rad):
     log.debug(['grid_ary', grid_ary.shape, grid_ary.dtype])
     log.debug([grid_ary.round(3)])
 
-    def prtf(pt):
-        log.debug([pt, 'transformed', (transform_ary @ (pt + [1]))[:2].round(3)])
-
-    prtf([0, 0])
-    prtf([1, 0])
-    prtf([2, 0])
-
-    log.debug([''])
-
-    prtf([0, 0])
-    prtf([0, 1])
-    prtf([0, 2])
-    prtf(output_center[2:])
+    # def prtf(pt):
+    #     log.debug([pt, 'transformed', (transform_ary @ (pt + [1]))[:2].round(3)])
+    #
+    # prtf([0, 0])
+    # prtf([1, 0])
+    # prtf([2, 0])
+    #
+    # log.debug([''])
+    #
+    # prtf([0, 0])
+    # prtf([0, 1])
+    # prtf([0, 2])
+    # prtf(output_center[2:])
 
     return transform_tensor, transform_ary, grid_ary
 
@@ -217,8 +220,11 @@ def _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axi
         [0, 0, 0, 1],
     ], dtype=np.float64)
 
-    transform_ary = intrans_ary @ inscale_ary @ np.linalg.inv(scipyRotation_ary) @ outscale_ary @ outtrans_ary
-    grid_ary = reorder_ary @ np.linalg.inv(scipyRotation_ary) @ outscale_ary @ outtrans_ary
+    transform_ary = np.dot(np.dot(np.dot(np.dot(intrans_ary, inscale_ary), np.linalg.inv(scipyRotation_ary)), outscale_ary), outtrans_ary)
+    grid_ary = np.dot(np.dot(np.dot(reorder_ary, np.linalg.inv(scipyRotation_ary)), outscale_ary), outtrans_ary)
+
+    # transform_ary = intrans_ary @ inscale_ary @ np.linalg.inv(scipyRotation_ary) @ outscale_ary @ outtrans_ary
+    # grid_ary = reorder_ary @ np.linalg.inv(scipyRotation_ary) @ outscale_ary @ outtrans_ary
     transform_tensor = torch.from_numpy((torchRotation_ary)).to(device, torch.float32)
     transform_tensor = transform_tensor[:3].unsqueeze(0)
 
@@ -239,26 +245,26 @@ def _buildEquivalentTransforms3d(device, input_size, output_size, angle_rad, axi
     log.debug(['grid_ary', grid_ary.shape, grid_ary.dtype])
     log.debug([grid_ary.round(3)])
 
-    def prtf(pt):
-        log.debug([pt, 'transformed', (transform_ary @ (pt + [1]))[:3].round(3)])
-
-    prtf([0, 0, 0])
-    prtf([1, 0, 0])
-    prtf([2, 0, 0])
-
-    log.debug([''])
-
-    prtf([0, 0, 0])
-    prtf([0, 1, 0])
-    prtf([0, 2, 0])
-
-    log.debug([''])
-
-    prtf([0, 0, 0])
-    prtf([0, 0, 1])
-    prtf([0, 0, 2])
-
-    prtf(output_center[2:])
+    # def prtf(pt):
+    #     log.debug([pt, 'transformed', (transform_ary @ (pt + [1]))[:3].round(3)])
+    #
+    # prtf([0, 0, 0])
+    # prtf([1, 0, 0])
+    # prtf([2, 0, 0])
+    #
+    # log.debug([''])
+    #
+    # prtf([0, 0, 0])
+    # prtf([0, 1, 0])
+    # prtf([0, 2, 0])
+    #
+    # log.debug([''])
+    #
+    # prtf([0, 0, 0])
+    # prtf([0, 0, 1])
+    # prtf([0, 0, 2])
+    #
+    # prtf(output_center[2:])
 
     return transform_tensor, transform_ary, grid_ary
 
@@ -479,7 +485,7 @@ class TestAffine(TestCase):
 
             for r in range(affine_tensor.size(1)):
                 for c in range(affine_tensor.size(2)):
-                    grid_out = grid_ary @ [r, c, 1]
+                    grid_out = np.dot(grid_ary, [r, c, 1])
                     log.debug([r, c, 'affine:', affine_tensor[0, r, c], 'grid:', grid_out[:2]])
 
             gridsample_ary = torch.nn.functional.grid_sample(
@@ -497,7 +503,7 @@ class TestAffine(TestCase):
 
             for r in range(affine_tensor.size(1)):
                 for c in range(affine_tensor.size(2)):
-                    grid_out = grid_ary @ [r, c, 1]
+                    grid_out = np.dot(grid_ary, [r, c, 1])
 
                     try:
                         assert np.allclose(affine_tensor[0, r, c], grid_out[:2], atol=1e-5)
@@ -551,7 +557,7 @@ class TestAffine(TestCase):
             for i in range(affine_tensor.size(1)):
                 for r in range(affine_tensor.size(2)):
                     for c in range(affine_tensor.size(3)):
-                        grid_out = grid_ary @ [i, r, c, 1]
+                        grid_out = np.dot(grid_ary, [i, r, c, 1])
                         log.debug([i, r, c, 'affine:', affine_tensor[0, i, r, c], 'grid:', grid_out[:3].round(3)])
 
             log.debug(['input_ary', input_ary.shape, input_ary.dtype])
@@ -571,7 +577,7 @@ class TestAffine(TestCase):
             for i in range(affine_tensor.size(1)):
                 for r in range(affine_tensor.size(2)):
                     for c in range(affine_tensor.size(3)):
-                        grid_out = grid_ary @ [i, r, c, 1]
+                        grid_out = np.dot(grid_ary, [i, r, c, 1])
                         try:
                             assert np.allclose(affine_tensor[0, i, r, c], grid_out[:3], atol=1e-5)
                         except Exception:
