@@ -134,13 +134,7 @@ profiler::RecordFunction profiler("${name}");""")
 PRE_RECORD_TRACE = CodeTemplate("""\
 jit::tracer::PreTraceInfo trace_info;
 if (jit::tracer::isTracing()) {
-  trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
-  if (!jit::tracer::ArgumentStash::empty()) {
-    ${record_positional_attributes}
-    AT_ASSERT(jit::tracer::ArgumentStash::empty());
-  } else {
-    ${record_attributes}
-  }
+  trace_info = jit::tracer::preRecordTrace(jit::aten::${trace_name}, ${trace_inputs});
 }
 """)
 
@@ -387,55 +381,22 @@ def emit_body(declaration):
         if not should_trace(declaration):
             return ('', '')
 
-        # Note [clang-802.0.42 tuple overload bug]
-        # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-        # Originally, my plan for emit_$ecord_trace was to keep it as
-        # simple as possible, if at the expense of some somewhat ugly
-        # overloads.  So this meant we had a 'recordTrace' function
-        # with overloads like this:
-        #
-        #   recordTrace(..., const Variable& out)
-        #   recordTrace(..., const std::tuple<Variable, Variable>& out)
-        #
-        # Unfortunately, this triggers a bug in clang-802.0.42
-        # (widely used in macOS Sierra 10.12.6) wherein a Variable is
-        # implicitly convertible into a std::tuple<Variable, Variable>;
-        # a minimal repro can be seen below here:
-        #
-        #   #include <tuple>
-        #   struct T {};
-        #   void f(const std::tuple<T, T>&) {}
-        #   void g(T& x) { f(x); }
-        #
-        # To work around this bug, the code generator is a bit more
-        # complicated, and is taught how to handle this situation.
-
         local = {}
 
-        tensor_args = [arg for arg in declaration['arguments'] if arg['simple_type'] in {'Tensor', 'TensorList'}]
-        local['tensor_args'] = [arg['name'] for arg in tensor_args]
-        if any(arg['simple_type'] == 'TensorList' for arg in tensor_args):
-            # Allocate a temporary vector with flatten and pass it in
-            local['trace_inputs'] = CodeTemplate("flatten_tensor_args( $tensor_args )").substitute(local)
-        else:
-            local['trace_inputs'] = CodeTemplate("{ ${tensor_args} }").substitute(local)
-
-        local['record_attributes'] = []
-        for arg in declaration['arguments']:
-            if arg['simple_type'] in {'Tensor', 'TensorList'}:
-                continue
-            attr_name = RENAME_ATTRIBUTES.get((declaration['name'], arg['name']), arg['name'])
-            local['record_attributes'].append(RECORD_ATTRIBUTE.substitute(attr_name=attr_name, name=arg['name']))
-
-        local['record_positional_attributes'] = []
-        for i, arg in enumerate(declaration['arguments']):
+        def prepare_arg(arg):
             if arg['simple_type'] == 'Tensor':
-                continue
-            if arg['simple_type'] == 'TensorList':
-                local['record_positional_attributes'] = POSITIONAL_ATTR_NYI
-                break
-            local['record_positional_attributes'].append(
-                RECORD_POSITIONAL_ATTRIBUTE.substitute(name=arg['name'], i=i))
+                return 'trace_inputs.push_back({});'.format(arg['name'])
+            elif arg['simple_type'] == 'TensorList':
+                return 'trace_inputs.insert(trace_inputs.end(), {n}.begin(), {n}.end());'.format(n=arg['name'])
+            elif arg['simple_type'] == 'IntList':
+                return 'trace_inputs.push_back(make_variable(getIntListTensor("{n}", {n}), false));'.format(
+                    n=arg['name'])
+            elif arg['simple_type'] in {'bool', 'double', 'int64_t', 'Scalar'}:
+                return 'trace_inputs.push_back(make_variable(jit::as_tensor({}), false));'.format(arg['name'])
+            else:
+                return 'throw std::runtime_error("Unsupported argument type found in the tracer: {}");'.format(
+                    arg['simple_type'])
+        local['trace_inputs'] = sum([['"{}"'.format(arg['name']), arg['name']] for arg in declaration['arguments']], [])
 
         # Record inplace operations as out-of-place operations (e.g.,
         # not add_ but add)

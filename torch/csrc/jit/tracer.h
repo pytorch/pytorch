@@ -193,35 +193,57 @@ struct PreTraceInfo {
   Node *n;
 };
 
-TORCH_API PreTraceInfo preRecordTrace(Symbol op, at::ArrayRef<Variable> inputs);
-TORCH_API void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
 TORCH_API void recordSourceLocation(Node* n);
 TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 
-// We must record the nodes of inputs before we actually carry out
-// the operation, because an inplace operation may destroy the information
-// we're interested in.  See #4480.
-template<typename F>
-PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
+namespace detail {
+
+// NB: those serve both as an intermediate steps in addInputs below,
+// as well as the overloads that terminate template recursion
+void addInputs(Node *n, const char * name, int64_t value);
+void addInputs(Node *n, const char * name, bool value);
+void addInputs(Node *n, const char * name, double value);
+void addInputs(Node *n, const char * name, const at::Scalar& value);
+void addInputs(Node *n, const char * name, const at::Tensor& value);
+void addInputs(Node *n, const char * name, at::IntList value);
+void addInputs(Node *n, const char * name, at::TensorList value);
+void addInputs(Node *n, const char * name, const std::string& value);
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value);
+
+template<size_t N>
+void addInputs(Node *n, const char * name, std::array<bool, N> value) {
+  throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
+}
+
+template<typename T, typename... Args>
+void addInputs(Node *n, const char * arg_name, T arg, const char * next_arg_name, Args... args) {
+  addInputs(n, arg_name, arg);
+  addInputs(n, next_arg_name, args...);
+}
+
+} // namespace detail
+
+// NB: if you change this function, you might want to take a look at
+// preRecordPythonTrace from python_tracer.cpp
+template<typename... Args>
+PreTraceInfo preRecordTrace(Symbol op, Args... inputs) {
   PreTraceInfo info;
   auto & state = getTracingState();
   auto & graph = state->graph;
 
-  Node *n = ctor(state, *graph);
+  Node * n = info.n = graph->create(op, /*outputs=*/0);
   recordSourceLocation(n);
 
-  for (const Variable & input : inputs) {
-    n->addInput(getValueTrace(input));
-  }
+  detail::addInputs(n, inputs...);
 
   // NB: Order matters. This must append after inputs but before outputs.
   graph->appendNode(n);
 
-  info.n = n;
-
   return info;
 }
+
+TORCH_API void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
 TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 
