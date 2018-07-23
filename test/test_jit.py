@@ -1079,7 +1079,7 @@ class TestJit(JitTestCase):
             a = mat.addmm(mat1, mat2)
             b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
             c = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
-            d = mat.addmm(mat1, mat2, alpha=alpha, beta=beta)
+            d = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
 
             return a + b + c + d
 
@@ -2024,7 +2024,6 @@ def func(t):
             scope = {}
             exec(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
         var_int = 2
@@ -3481,7 +3480,7 @@ def func(t):
     def test_loop_unrolling(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += i
             return y
 
@@ -3516,7 +3515,7 @@ def func(t):
         def fn(x):
             y = FIXME_zerol()
             for i in range(10):
-                for j in range(x):
+                for j in range(int(x)):
                     y += j
             return y
 
@@ -3528,7 +3527,7 @@ def func(t):
     def test_loop_unroll_unused_counter(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += 1
             return y
 
@@ -3539,7 +3538,7 @@ def func(t):
     def test_loop_unroll_negative(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += 1
             return y
 
@@ -3584,7 +3583,7 @@ def func(t):
         with self.assertRaisesRegex(RuntimeError, 'argument \'chunks\' must be a constant'):
             @torch.jit.script
             def chunk_non_constant(x, y):
-                return x.chunk(y)
+                return x.chunk(int(y))
 
     def test_unknown_builtin(self):
         with self.assertRaisesRegex(RuntimeError, 'unknown builtin op'):
@@ -3593,7 +3592,7 @@ def func(t):
                 return x.splork(3)
 
     def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found a Tuple'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found'):
             @torch.jit.script
             def return_tuple_wrong(x):
                 a = (x, x)

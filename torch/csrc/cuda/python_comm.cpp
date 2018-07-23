@@ -28,14 +28,14 @@ void initCommMethods(PyObject *module) {
      at::optional<std::vector<int64_t>> chunk_sizes,
      int64_t dim,
      at::optional<py::object> py_streams) {
-     at::optional<std::vector<at::CUDAStream>> streams;
+     at::optional<std::vector<at::cuda::CUDAStream>> streams;
      if (py_streams) {
        py::handle handle = *py_streams;
        streams = fmap(
            THPUtils_PySequence_to_THCStreamList(handle.ptr()),
            [](THCStream* stream) {
-             at::detail::CUDAStream_retain(stream);
-             return at::CUDAStream(stream);
+             at::cuda::detail::CUDAStream_retain(stream);
+             return at::cuda::CUDAStream(stream);
            });
      }
      // Note: We're holding the GIL up to here.

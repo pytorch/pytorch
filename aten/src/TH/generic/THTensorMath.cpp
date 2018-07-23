@@ -1949,7 +1949,7 @@ void THTensor_(addcdiv)(THTensor *r_, THTensor *t, real value, THTensor *src1, T
 void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor *mat, THTensor *vec)
 {
   if( (mat->dim() != 2) || (vec->dim() != 1) )
-    THError("matrix and vector expected, got %dD, %dD",
+    THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
       mat->dim(), vec->dim());
 
   if( mat->size(1) != vec->size(0) ) {
@@ -1959,7 +1959,7 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   if(t->dim() != 1)
-    THError("vector expected, got t: %dD", t->dim());
+    THError("1D tensor expected, got t: %dD tensor", t->dim());
 
   if(t->size(0) != mat->size(0)) {
     THDescBuff bt = THTensor_(sizeDesc)(t);
@@ -2055,7 +2055,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   int free_m2 = 0;
 
   if( (m1->dim() != 2) || (m2->dim() != 2))
-    THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
+    THError("2D tensors expected, got %dD, %dD tensors", m1->dim(), m2->dim());
 
   if(m1->size(1) != m2->size(0)) {
     THDescBuff bm1 = THTensor_(sizeDesc)(m1);
@@ -2064,7 +2064,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   }
 
   if( t->dim() != 2 )
-    THError("matrix expected, got %dD tensor for t", t->dim());
+    THError("2D tensor expected, got %dD tensor for t", t->dim());
 
   if( (t->size(0) != m1->size(0)) || (t->size(1) != m2->size(1)) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -2196,7 +2196,7 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
         vec1->dim(), vec2->dim());
 
   if(t->dim() != 2)
-    THError("expected matrix, got %dD tensor for t", t->dim());
+    THError("expected 2D tensor, got %dD tensor for t", t->dim());
 
   if( (t->size(0) != vec1->size(0)) || (t->size(1) != vec2->size(0)) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
@@ -3528,7 +3528,7 @@ void THTensor_(tril)(THTensor *r_, THTensor *t, int64_t k)
   real *t_data, *r__data;
   int64_t r, c;
 
-  THArgCheck(THTensor_(_nDimension)(t) == 2, 1, "expected a matrix");
+  THArgCheck(THTensor_(_nDimension)(t) == 2, 1, "expected a 2D tensor");
 
   THTensor_(resizeAs)(r_, t);
 
@@ -3559,7 +3559,7 @@ void THTensor_(triu)(THTensor *r_, THTensor *t, int64_t k)
   real *t_data, *r__data;
   int64_t r, c;
 
-  THArgCheck(THTensor_(_nDimension)(t) == 2, 1, "expected a matrix");
+  THArgCheck(THTensor_(_nDimension)(t) == 2, 1, "expected a 2D tensor");
 
   THTensor_(resizeAs)(r_, t);
 
@@ -3674,12 +3674,12 @@ void THTensor_(catArray)(THTensor *result, THTensor **inputs, int numInputs, int
   // Second path for non-contiguous
   int64_t offset;
   if (dimension == 0 && allContiguous) {
-    real* result_data = THStorage_(data)(result->storage) + result->storageOffset;
+    real* result_data = THStorage_(data)(THTensor_getStoragePtr(result)) + result->storage_offset();
     offset = 0;
     for (int j = 0; j < numInputs; j++) {
       if (!should_skip(inputs[j])) {
         THTensor* input0 = inputs[j];
-        real* input0_data = THStorage_(data)(input0->storage) + input0->storageOffset;
+        real* input0_data = THStorage_(data)(THTensor_getStoragePtr(input0)) + input0->storage_offset();
         int64_t input0_size = THTensor_(nElement)(input0);
         // C standard says you can't pass nullptrs to memcpy, even if the size is 0; ubsan checks this.
         if (input0_size != 0) {

@@ -17,8 +17,8 @@
 namespace at {
 namespace native {
 
-DispatchStub<reduce_fn> sum_kernel;
-DispatchStub<reduce_fn> prod_kernel;
+DEFINE_DISPATCH(sum_kernel);
+DEFINE_DISPATCH(prod_kernel);
 
 static inline Tensor integer_upcast(const Tensor& self, optional<ScalarType> dtype) {
   ScalarType scalarType = self.type().scalarType();

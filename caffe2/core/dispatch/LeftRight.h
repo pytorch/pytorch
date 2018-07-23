@@ -17,7 +17,7 @@ class LeftRight {
   }
 
   template <typename F>
-  auto read(F&& readFunc) -> typename std::result_of<F(const T&)>::type {
+  auto read(F&& readFunc) const -> typename std::result_of<F(const T&)>::type {
     auto localCounterIndex = counterIndex_.load();
     ++counters_[localCounterIndex];
     try {
@@ -34,7 +34,7 @@ class LeftRight {
   template <typename F>
   auto write(F&& writeFunc) -> typename std::result_of<F(T&)>::type {
     std::unique_lock<std::mutex> lock(mutex_);
-    uniqueWrite(std::forward<F&&>(writeFunc));
+    return uniqueWrite(std::forward<F&&>(writeFunc));
   }
 
  private:
@@ -64,7 +64,7 @@ class LeftRight {
   std::mutex mutex_;
   std::atomic<uint8_t> counterIndex_{0};
   std::atomic<uint8_t> dataIndex_{0};
-  std::atomic<int32_t> counters_[2];
+  mutable std::atomic<int32_t> counters_[2];
   T data_[2];
 };
 

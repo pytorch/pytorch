@@ -22,8 +22,9 @@ ${Tensor}::${Tensor}(Context* context, ${THTensor} * tensor)
 : TensorImpl(&context->getType(Backend::${Backend},ScalarType::${ScalarName})),
   tensor(tensor),
   context(context) {}
+
 ${Tensor}::~${Tensor}() {
-  ${THTensor}_free(${state,} tensor);
+  if (tensor) tensor->release();
 }
 
 const char * ${Tensor}::toString() const {
@@ -46,13 +47,14 @@ const char * ${Tensor}::typeString() {
   return "${Type}";
 }
 void * ${Tensor}::unsafeGetTH(bool retain) {
-  if (retain)
-      ${THTensor}_retain(${state,} tensor);
+  if (retain) {
+    tensor->retain();
+  }
   return tensor;
 }
 
 void ${Tensor}::release_resources() {
-  ${THTensor}_free(${state,} tensor);
+  tensor->release();
   tensor = nullptr;
 }
 

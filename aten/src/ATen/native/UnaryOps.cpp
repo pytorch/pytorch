@@ -145,29 +145,29 @@ IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
 
-DispatchStub<unary_fn> absImpl;
-DispatchStub<unary_fn> acosImpl;
-DispatchStub<unary_fn> asinImpl;
-DispatchStub<unary_fn> atanImpl;
-DispatchStub<unary_fn> ceilImpl;
-DispatchStub<unary_fn> cosImpl;
-DispatchStub<unary_fn> erfImpl;
-DispatchStub<unary_fn> erfcImpl;
-DispatchStub<unary_fn> expImpl;
-DispatchStub<unary_fn> expm1Impl;
-DispatchStub<unary_fn> floorImpl;
-DispatchStub<unary_fn> logImpl;
-DispatchStub<unary_fn> log10Impl;
-DispatchStub<unary_fn> log1pImpl;
-DispatchStub<unary_fn> log2Impl;
-DispatchStub<unary_fn> roundImpl;
-DispatchStub<unary_fn> rsqrtImpl;
-DispatchStub<unary_fn> sigmoidImpl;
-DispatchStub<unary_fn> sinImpl;
-DispatchStub<unary_fn> sqrtImpl;
-DispatchStub<unary_fn> tanImpl;
-DispatchStub<unary_fn> tanhImpl;
-DispatchStub<unary_fn> truncImpl;
+DEFINE_DISPATCH(absImpl);
+DEFINE_DISPATCH(acosImpl);
+DEFINE_DISPATCH(asinImpl);
+DEFINE_DISPATCH(atanImpl);
+DEFINE_DISPATCH(ceilImpl);
+DEFINE_DISPATCH(cosImpl);
+DEFINE_DISPATCH(erfImpl);
+DEFINE_DISPATCH(erfcImpl);
+DEFINE_DISPATCH(expImpl);
+DEFINE_DISPATCH(expm1Impl);
+DEFINE_DISPATCH(floorImpl);
+DEFINE_DISPATCH(logImpl);
+DEFINE_DISPATCH(log10Impl);
+DEFINE_DISPATCH(log1pImpl);
+DEFINE_DISPATCH(log2Impl);
+DEFINE_DISPATCH(roundImpl);
+DEFINE_DISPATCH(rsqrtImpl);
+DEFINE_DISPATCH(sigmoidImpl);
+DEFINE_DISPATCH(sinImpl);
+DEFINE_DISPATCH(sqrtImpl);
+DEFINE_DISPATCH(tanImpl);
+DEFINE_DISPATCH(tanhImpl);
+DEFINE_DISPATCH(truncImpl);
 
 }
 } // namespace at
