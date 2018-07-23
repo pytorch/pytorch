@@ -7,6 +7,7 @@ import tempfile
 import unittest
 
 from functools import wraps
+from collections import namedtuple
 
 import torch
 from torch import nn
@@ -25,18 +26,32 @@ if not c10d.is_available():
 TIMEOUT_DEFAULT = 5
 TIMEOUT_OVERRIDE = {}
 
-SKIP_IF_NOT_MULTIGPU = 75
+TestSkip = namedtuple('TestSkip', 'exit_code, message')
+
+TEST_SKIPS = {
+    "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
+    "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
+}
 
 
 def skip_if_not_multigpu(func):
-    """Multi-GPU tests requires at least 2 GPUS. Skip if this is not met"""
-    func.skip_if_not_multigpu = True
-
+    """Multi-GPU tests requires at least 2 GPUS. Skip if this is not met."""
     @wraps(func)
     def wrapper(*args, **kwargs):
         if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
             return func(*args, **kwargs)
-        sys.exit(SKIP_IF_NOT_MULTIGPU)
+        sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+
+    return wrapper
+
+
+def skip_if_not_nccl(func):
+    """Skips a test if NCCL is not available (for c10d)."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if hasattr(c10d, "ProcessGroupNCCL"):
+            return func(*args, **kwargs)
+        sys.exit(TEST_SKIPS['nccl'].exit_code)
 
     return wrapper
 
@@ -242,8 +257,9 @@ class MultiProcessTestCase(TestCase):
         first_process = self.processes[0]
         for p in self.processes:
             self.assertEqual(p.exitcode, first_process.exitcode)
-        if first_process.exitcode == SKIP_IF_NOT_MULTIGPU:
-            raise unittest.SkipTest("Need at least 2 CUDA devices")
+        for skip in TEST_SKIPS.values():
+            if first_process.exitcode == skip.exit_code:
+                raise unittest.SkipTest(skip.message)
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
@@ -335,7 +351,7 @@ class ProcessGroupNCCLTest(TestCase):
     def tearDown(self):
         self.file.close()
 
-    @skip_if_not_multigpu
+    @skip_if_not_nccl
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
@@ -358,7 +374,7 @@ class ProcessGroupNCCLTest(TestCase):
             for i in range(self.num_gpus):
                 self.assertEqual(tensors[i], tensors[rt])
 
-    @skip_if_not_multigpu
+    @skip_if_not_nccl
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
         pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
@@ -458,7 +474,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
 
         def update_parameters(model):
             for param in model.parameters():
-                param.data += param.grad
+                param.data -= param.grad
                 param.grad = None
 
         # check two model parameters over 2 iterations
@@ -482,6 +498,7 @@ class DistributedDataParallelTest(MultiProcessTestCase):
             # Shuffle the input so that DDP input is different
             input = input[torch.randperm(global_batch_size)]
 
+    @skip_if_not_multigpu
     def test_gloo_backend(self):
         store = c10d.TCPStore('localhost', self.port, self.rank == 0)
         options = c10d.ProcessGroupGloo.Options()
@@ -489,6 +506,8 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         process_group = c10d.ProcessGroupGloo(store, self.rank, self.size, options)
         self._test_ddp_with_process_group(process_group)
 
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
     def test_nccl_backend(self):
         store = c10d.TCPStore('localhost', self.port, self.rank == 0)
         process_group = c10d.ProcessGroupNCCL(store, self.rank, self.size)

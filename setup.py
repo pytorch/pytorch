@@ -816,11 +816,9 @@ if USE_DISTRIBUTED:
     main_link_args += [THD_LIB]
 
 if USE_C10D:
-    extra_compile_args.append('-DUSE_C10D')
-    if USE_NCCL:
-        extra_compile_args.append('-DUSE_C10D_NCCL')
-    main_sources.append('torch/csrc/distributed/c10d/init.cpp')
-    main_link_args.append(C10D_LIB)
+    extra_compile_args += ['-DUSE_C10D']
+    main_sources += ['torch/csrc/distributed/c10d/init.cpp']
+    main_link_args += [C10D_LIB]
 
 if USE_CUDA:
     nvtoolext_lib_name = None
