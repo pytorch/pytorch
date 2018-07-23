@@ -118,7 +118,7 @@ def _worker_loop(dataset, index_queue, data_queue, done_event, collate_fn, seed,
             del samples
 
 
-def _worker_manager_loop(in_queue, out_queue, done_event, pin_memory, device_id):
+def _pin_memory_loop(in_queue, out_queue, done_event, pin_memory, device_id):
     if pin_memory:
         torch.cuda.set_device(device_id)
 
@@ -278,17 +278,12 @@ class _DataLoaderIter(object):
 
             if self.pin_memory:
                 self.data_queue = queue.Queue()
-                if self.pin_memory:
-                    maybe_device_id = torch.cuda.current_device()
-                else:
-                    # do not initialize cuda context if not necessary
-                    maybe_device_id = None
-                self.worker_manager_thread = threading.Thread(
-                    target=_worker_manager_loop,
+                self.pin_memory_thread = threading.Thread(
+                    target=_pin_memory_loop,
                     args=(self.worker_result_queue, self.data_queue, self.done_event, self.pin_memory,
-                          maybe_device_id))
-                self.worker_manager_thread.daemon = True
-                self.worker_manager_thread.start()
+                          torch.cuda.current_device()))
+                self.pin_memory_thread.daemon = True
+                self.pin_memory_thread.start()
             else:
                 self.data_queue = self.worker_result_queue
 
@@ -376,18 +371,17 @@ class _DataLoaderIter(object):
     def _shutdown_workers(self):
         if not self.shutdown:
             self.shutdown = True
-            self.done_event.set()
             # removes pids from the C side data structure first so worker
             # termination afterwards won't trigger false positive error report.
             if self.worker_pids_set:
                 _remove_worker_pids(id(self))
                 self.worker_pids_set = False
-            use_manager_thread = hasattr(self, 'worker_manager_thread')
-            if use_manager_thread:
-                # Sending `None` to `worker_manager_thread` must be before
+            self.done_event.set()
+            if self.pin_memory:
+                # Sending `None` to `pin_memory_thread` must be before
                 # stopping worker processes because the workers may leave
                 # corrupted data in `worker_result_queue`, causing
-                # `worker_manager_thread` unable to read and terminate properly.
+                # `pin_memory_thread` unable to read and terminate properly.
                 self.worker_result_queue.put(None)
             # Workers can't be waiting to put be cause their output queue
             # is a multiprocessing.Queue and its .put is non-blocking.
@@ -396,8 +390,8 @@ class _DataLoaderIter(object):
                 q.put(None)
             for w in self.workers:
                 w.join()
-            if use_manager_thread:
-                self.worker_manager_thread.join()
+            if self.pin_memory:
+                self.pin_memory_thread.join()
 
     def __del__(self):
         if self.num_workers > 0:
