@@ -47,8 +47,8 @@ IntList TensorImpl::sizes() const {
 }
 
 IntList TensorImpl::strides() const {
-  // NB: THTensor doesn't agree with Tensor for scalars, so we
-  // have to construct a fresh IntList
+  // NB: dim in tensor is not synchronized with THTensor, so it's
+  // important to apply dim here
   return IntList(THTensor_getStridePtr(tensor), dim());
 }
 
