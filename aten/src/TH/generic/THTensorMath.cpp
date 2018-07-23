@@ -4,6 +4,24 @@
 
 #include <TH/generic/THTensorApply.hpp>
 
+// HEY YOU!
+//
+// Looking for a function which used to be in THTensorMath.cpp, but
+// can't find it anymore?  Check THTensorMoreMath.cpp and
+// THTensorEvenMoreMath.cpp.  These source files have been split up
+// because they were getting too big (a whopping 4669 lines at time
+// of writing) and causing MSVC to run out of memory.  Did you come
+// here because you saw:
+//
+//    fatal error C1002: compiler is out of heap space in pass 2
+//
+// Try splitting up the file some more.
+//
+// At some point, we should reorganize these files in a way that makes
+// sense (rather than just having cut the file down the middle, which is
+// what I did when I split these up originally).
+
+
 // Should wrap if the value (a) has a different sign than the divisor (b), but is not 0.
 static inline bool modulo_wrap(real a, real b) {
   return (a != 0) && (a < 0) != (b < 0);
