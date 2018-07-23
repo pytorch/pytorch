@@ -1,7 +1,7 @@
 #ifndef THC_GENERAL_INC
 #define THC_GENERAL_INC
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 #include "THAllocator.h"
 #include "THCThreadLocal.h"
 #undef log10

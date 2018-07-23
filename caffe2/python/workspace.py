@@ -228,6 +228,14 @@ def RunPlan(plan_or_step):
     return C.run_plan(StringifyProto(plan_or_step))
 
 
+def RunPlanInBackground(plan_or_step):
+    # TODO(jiayq): refactor core.py/workspace.py to avoid circular deps
+    import caffe2.python.core as core
+    if isinstance(plan_or_step, core.ExecutionStep):
+        plan_or_step = core.Plan(plan_or_step)
+    return C.run_plan_in_background(StringifyProto(plan_or_step))
+
+
 def InferShapesAndTypes(nets, blob_dimensions=None, nets_proto=False):
     """Infers the shapes and types for the specified nets.
 

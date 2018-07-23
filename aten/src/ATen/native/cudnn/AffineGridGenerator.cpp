@@ -30,6 +30,7 @@ Tensor cudnn_affine_grid_generator_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
 

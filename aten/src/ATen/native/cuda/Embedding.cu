@@ -1,7 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/TensorUtils.h"
 #include "ATen/Error.h"
-
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/AccumulateType.h"
 
 #include <THC/THCDeviceUtils.cuh>
@@ -217,7 +217,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
   auto grad_weight = at::zeros({num_weights, grad_.size(-1)}, grad_.options());
 
   int64_t stride = grad_weight.stride(0);
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   if (num_indices <= 768 && !scale_grad_by_freq) {
     auto indices_contig = indices.contiguous();
@@ -332,7 +332,7 @@ Tensor & embedding_renorm_cuda_(Tensor & self, const Tensor & indices,
   checkDim("embedding_renorm_", self_arg, 2);
   checkSameGPU("embedding_renorm", self_arg, indices_arg);
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   auto allocator = THCThrustAllocator(globalContext().lazyInitCUDA());
   auto policy = thrust::cuda::par(allocator).on(stream);
 

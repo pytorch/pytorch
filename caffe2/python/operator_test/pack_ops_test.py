@@ -101,6 +101,7 @@ class TestTensorPackOps(hu.HypothesisTestCase):
             'UnpackSegments',
             ['l', 't'],
             ['newd'],
+            max_length=max_length,
             device_option=gc))
         assert(workspace.FetchBlob('t').shape[1] == max_length)
         assert((workspace.FetchBlob('newd') == workspace.FetchBlob('d')).all())

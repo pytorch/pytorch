@@ -11,7 +11,6 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 #include <algorithm>
@@ -30,6 +29,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -2476,7 +2476,7 @@ namespace {
 
 #ifdef CAFFE2_USE_HPTT
 
-bool TryTransposeWithHPTT(
+bool TransposeWithHPTT(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -2511,6 +2511,62 @@ bool TryTransposeWithHPTT(
 
 #endif // CAFFE2_USE_HPTT
 
+template <typename T>
+void Tranpose2D(const int rows, const int cols, const T* X, T* Y);
+
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                          \
+  template <>                                                            \
+  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+    Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                  \
+  }
+DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
+DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
+#undef DELEGATE_TRANSPOSE_2D_FUNCTION
+
+#endif // CAFFE2_USE_MKL
+
+#define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                               \
+  template <>                                                            \
+  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+    EigenMatrixMap<T>(Y, rows, cols) =                                   \
+        ConstEigenMatrixMap<T>(X, cols, rows).transpose();               \
+  }
+
+#ifndef CAFFE2_USE_MKL
+
+template <>
+void Tranpose2D<float>(
+    const int rows,
+    const int cols,
+    const float* X,
+    float* Y) {
+#ifdef CAFFE2_USE_HPTT
+  const std::array<int, 2> dims = {rows, cols};
+  const std::array<int, 2> axes = {1, 0};
+  if (TransposeWithHPTT(2, dims.data(), axes.data(), X, Y)) {
+    return;
+  }
+#endif // CAFFE2_USE_HPTT
+  EigenMatrixMap<float>(Y, rows, cols) =
+      ConstEigenMatrixMap<float>(X, cols, rows).transpose();
+}
+
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(double)
+
+#endif // CAFFE2_USE_MKL
+
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(int)
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(TIndex)
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(long)
+#endif
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(std::uint8_t)
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(std::uint16_t)
+
+#undef CAFFE2_SPECIALIZED_TRANSPOSE_2D
+
 std::vector<int>
 ComputeXStrides(const int ndim, const int* dims, const int* axes) {
   std::vector<int> x_strides(ndim);
@@ -2527,7 +2583,7 @@ ComputeXStrides(const int ndim, const int* dims, const int* axes) {
 }
 
 template <typename T>
-void TransposeCPUImpl(
+void TransposeND(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -2547,10 +2603,6 @@ void TransposeCPUImpl(
   const int itr_axes = ndim - num_shared_idx;
   const int num_blocks = std::accumulate(
       Y_dims.cbegin(), Y_dims.cbegin() + itr_axes, 1, std::multiplies<int>());
-  if (ndim < 2 || itr_axes == 0) {
-    std::memcpy(Y, X, num_blocks * block_size * sizeof(T));
-    return;
-  }
   const std::vector<int> X_strides = ComputeXStrides(itr_axes, dims, axes);
   std::vector<int> index(itr_axes, 0);
   for (int Y_index = 0; Y_index < num_blocks; ++Y_index) {
@@ -2568,23 +2620,52 @@ void TransposeCPUImpl(
   }
 }
 
-} // namespace
+template <typename T>
+void TransposeCPUImpl(
+    const int ndim,
+    const int* dims,
+    const int* axes,
+    const T* X,
+    T* Y) {
+  if (utils::IsIdentityPermutation(ndim, axes)) {
+    const int size =
+        std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());
+    std::memcpy(Y, X, size * sizeof(T));
+    return;
+  }
+  if (ndim == 2) {
+    Tranpose2D<T>(dims[0], dims[1], X, Y);
+  } else {
+    TransposeND<T>(ndim, dims, axes, X, Y);
+  }
+}
 
 template <>
-void Transpose<float, CPUContext>(
+void TransposeCPUImpl(
     const int ndim,
     const int* dims,
     const int* axes,
     const float* X,
-    float* Y,
-    CPUContext* /* context */) {
-#ifdef CAFFE2_USE_HPTT
-  if (TryTransposeWithHPTT(ndim, dims, axes, X, Y)) {
+    float* Y) {
+  if (utils::IsIdentityPermutation(ndim, axes)) {
+    const int size =
+        std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());
+    std::memcpy(Y, X, size * sizeof(float));
     return;
   }
-#endif // CAFFE2_USE_HPTT
-  TransposeCPUImpl(ndim, dims, axes, X, Y);
+  if (ndim == 2) {
+    Tranpose2D<float>(dims[0], dims[1], X, Y);
+  } else {
+#ifdef CAFFE2_USE_HPTT
+    if (TransposeWithHPTT(ndim, dims, axes, X, Y)) {
+      return;
+    }
+#endif
+    TransposeND<float>(ndim, dims, axes, X, Y);
+  }
 }
+
+} // namespace
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE(T)       \
   template <>                                 \
@@ -2597,6 +2678,7 @@ void Transpose<float, CPUContext>(
       CPUContext* /* context */) {            \
     TransposeCPUImpl(ndim, dims, axes, X, Y); \
   }
+CAFFE2_SPECIALIZED_TRANSPOSE(float)
 CAFFE2_SPECIALIZED_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_TRANSPOSE(int)
 CAFFE2_SPECIALIZED_TRANSPOSE(TIndex)

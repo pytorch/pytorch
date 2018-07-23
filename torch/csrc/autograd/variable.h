@@ -77,7 +77,7 @@ struct Function;
 /// free function instead. To create a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable : public at::Tensor {
+struct TORCH_API Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
 
