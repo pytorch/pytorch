@@ -224,7 +224,8 @@ struct IValue {
   }
 
   // Scalar, which gets encoded as either an Int or a Double
-  IValue(at::Scalar s) {
+  IValue(at::Scalar s)
+  : IValue() {
     if(s.isFloatingPoint()) {
       *this = s.toDouble();
     } else {
