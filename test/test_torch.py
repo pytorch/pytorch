@@ -7930,8 +7930,8 @@ class TestTorch(TestCase):
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
                 RuntimeError,
-                # message includes both torch.DoubleTensor and torch.LongTensor
-                '(?=.*torch\.DoubleTensor)(?=.*torch\.LongTensor)'):
+                # message includes both Double and Long
+                '(?=.*Double)(?=.*Long)'):
 
             # Calls model with a DoubleTensor input but LongTensor weights
             input = torch.autograd.Variable(torch.randn(1, 1, 1, 6).double())
