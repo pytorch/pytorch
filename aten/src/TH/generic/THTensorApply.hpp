@@ -153,3 +153,23 @@ if (std::isnan(val)) break;
 #else
 #define th_isnan_break(val)
 #endif
+
+static inline real THTensor_(powOne)(real x, real y) {
+#if defined(TH_REAL_IS_FLOAT)
+  return powf(x, y);
+#elif defined(TH_REAL_IS_DOUBLE)
+  return pow(x, y);
+#else
+  THArgCheck(y >= 0, 1,
+      "Integers to negative integer powers are not allowed");
+  real result = 1;
+  while (y) {
+    if (y & 1) {
+       result *= x;
+    }
+    y /= 2;
+    x *= x;
+  }
+  return result;
+#endif
+}
