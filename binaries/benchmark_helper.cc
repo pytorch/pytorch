@@ -236,7 +236,7 @@ void runNetwork(
     caffe2::wipe_cache();
   }
   if (sleep_before_run > 0) {
-    time.sleep(sleep_before_run);
+    sleep(sleep_before_run);
   }
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
