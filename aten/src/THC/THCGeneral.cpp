@@ -2,7 +2,6 @@
 #include "TH.h"
 #include "THCAllocator.h"
 #include "THCCachingHostAllocator.h"
-#include "THCThreadLocal.h"
 #include "THCTensorRandom.h"
 #include "THCGeneral.hpp"
 
@@ -440,13 +439,7 @@ void THCudaHostRecord(THCState *state, void *ptr) {
   }
 }
 
-cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes)
-{
-  size_t largestBlock = 0;
-  return THCudaMemGetInfoCached(state, freeBytes, totalBytes, &largestBlock);
-}
-
-cudaError_t THCudaMemGetInfoCached(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
+cudaError_t THCudaMemGetInfo(THCState *state,  size_t* freeBytes, size_t* totalBytes, size_t* largestBlock)
 {
   size_t cachedBytes = 0;
   THCDeviceAllocator* allocator = state->cudaDeviceAllocator;
