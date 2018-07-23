@@ -6,6 +6,7 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/Context.h"
+#include "ATen/TensorMethods.h"
 
 namespace at {
 Tensor Scalar::toTensor() const {
