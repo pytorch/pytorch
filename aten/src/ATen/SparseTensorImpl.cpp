@@ -28,10 +28,6 @@ SparseTensorImpl::SparseTensorImpl(Type * type)
       AT_ASSERT(type->is_sparse());
     }
 
-const char * SparseTensorImpl::toString() const {
-  // TODO: also give back type information
-  return "SparseTensor";
-}
 IntList SparseTensorImpl::sizes() const {
   return size_;
 }
