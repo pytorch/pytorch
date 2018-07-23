@@ -12,9 +12,9 @@ using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
 bool hasOneValuedInput(Node *n, torch::jit::Symbol name) {
-  auto maybe_t = n->get<at::Tensor>(name);
+  auto maybe_t = n->get<at::Scalar>(name);
   if (!maybe_t) return false;
-  return at::Scalar(*maybe_t).toDouble() == 1.0;
+  return maybe_t->toDouble() == 1.0;
 }
 
 bool isDifferentiable(Node * n) {
@@ -33,6 +33,12 @@ bool isDifferentiable(Node * n) {
     if (!hasOneValuedInput(n, attr::alpha) || !hasOneValuedInput(n, attr::beta))
       return false;
   }
+  auto isTensor = [](Value* v) { return v->type()->isSubtypeOf(*DynamicType::get()); };
+
+  if(!std::all_of(n->inputs().begin(), n->inputs().end(), isTensor)
+    || !std::all_of(n->outputs().begin(), n->outputs().end(), isTensor))
+    return false;
+
   if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
     return false;
   }
@@ -90,7 +96,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         } else if (node->hasAttribute(attr::alpha)) {
           return {grads.at(0), grads.at(0) * at::Scalar(node->t(attr::alpha))};
         } else {
-          return {grads.at(0), nullptr, grads.at(0) * node->input(attr::alpha)};
+          return {grads.at(0), nullptr, grads.at(0) * node->namedInput(attr::alpha)};
         }
       case aten::sub:
         // o = self - alpha*other
@@ -99,7 +105,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         } else if (node->hasAttribute(attr::alpha)) {
           return {grads.at(0), -grads.at(0) * at::Scalar(node->t(attr::alpha))};
         } else {
-          return {grads.at(0), nullptr, grads.at(0) * node->input(attr::alpha)};
+          return {grads.at(0), nullptr, grads.at(0) * node->namedInput(attr::alpha)};
         }
       case aten::mul:
         // o = self * other
@@ -119,7 +125,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {grads.at(0) * (outputs.at(0))};
       case aten::chunk:
       case aten::split:
-        return {SymbolicVariable::cat(grads, node->input(attr::dim))};
+        return {SymbolicVariable::cat(grads, node->namedInput(attr::dim))};
       case aten::t:
         return {grads.at(0).t()};
       case aten::neg:
@@ -130,7 +136,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       case aten::type_as:
         return {grads.at(0).type_as(inputs.at(0))};
       case aten::unsqueeze:
-        return {grads.at(0).squeeze(node->input(attr::dim))};
+        return {grads.at(0).squeeze(node->namedInput(attr::dim))};
       case aten::mm: {
         SymbolicVariable dmat1, dmat2;
         if (auto type = inputs.at(0).value()->type()->cast<TensorType>()) {

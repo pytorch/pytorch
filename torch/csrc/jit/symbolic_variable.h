@@ -52,11 +52,6 @@ struct SymbolicVariable {
       return (int64_t) i == s.toLong();
     }
   }
-  // TODO (apaszke): Use this instead of attribute setters
-  template<typename T>
-  SymbolicVariable insertConstant(T value) const {
-    return v->owningGraph()->insertConstant(std::move(value));
-  }
   SymbolicVariable operator*(const SymbolicVariable rhs) const {
     return create(aten::mul, {*this, rhs})[0].typeLike(*this);
   }
