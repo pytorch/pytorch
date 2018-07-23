@@ -60,7 +60,7 @@ void TensorImpl::release_resources() {
 }
 
 int64_t TensorImpl::dim() const {
-  if (isScalar()) {
+  if(is_scalar) {
     return 0;
   }
   return tensor->dim();

@@ -49,14 +49,6 @@ struct AT_API TensorImpl : public Retainable {
     return n;
   }
 
-  // 0-dim patchup of TH requires us to have a flag marking
-  // if a Tensor should be treated as 0-dim.
-  // the generated wrapper manipulates this flag.
-  // the setter should never be exposed in Tensor's public API
-  // because eventually we would like isScalar() to just be dim() == 0;
-  bool isScalar() const {
-    return is_scalar;
-  }
   // this is called by the generated wrapper code when there are conditions
   // when this output tensor should be a scalar. e.g. when all inputs
   // to a function 'add' were scalars, then condition_when_scalar == true.
