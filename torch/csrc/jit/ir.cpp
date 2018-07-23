@@ -569,11 +569,11 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
-std::pair<size_t, const Argument&> findArgument(const FunctionSchema& the_schema, Symbol name) {
+std::pair<size_t, const Argument*> findArgument(const FunctionSchema& the_schema, Symbol name) {
   auto name_str = name.toUnqualString();
   for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
-    const auto & arg = the_schema.arguments[i];
-    if (arg.name == name_str) {
+    const Argument* arg = &the_schema.arguments[i];
+    if (arg->name == name_str) {
       return std::make_pair(i, arg);
     }
   }
@@ -594,8 +594,8 @@ at::optional<IValue> Node::get(Symbol name) const {
         // attributes are ambiguous, this might be a at::Scalar
         // disambiguate via schema
         at::Tensor ten = t(name);
-        const auto& arg = findArgument(schema(), name).second;
-        if(arg.type->isSubtypeOf(*NumberType::get())) {
+        const Argument* arg = findArgument(schema(), name).second;
+        if(arg->type->isSubtypeOf(*NumberType::get())) {
           return IValue(at::Scalar(ten));
         }
         return IValue(ten);
