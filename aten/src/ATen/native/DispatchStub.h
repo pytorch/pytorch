@@ -28,6 +28,12 @@
 // To call:
 //   stub(kCPU, tensor);
 
+// ignore warnings about DispatchStub::DEFAULT, AVX, AVX2 defined elsewhere
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundefined-var-template"
+#endif
+
 namespace at { namespace native {
 
 enum class CPUCapability {
@@ -112,3 +118,8 @@ struct RegisterDispatch {
 
 
 }} // namespace at::native
+
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
