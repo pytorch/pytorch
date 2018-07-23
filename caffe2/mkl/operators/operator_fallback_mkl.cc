@@ -76,7 +76,7 @@ REGISTER_MKL_OPERATOR(
     mkl::MKLFallbackOp<ElementwiseLinearOp<float, CPUContext>>);
 REGISTER_MKL_OPERATOR(
     ChannelShuffle,
-    mkl::MKLFallbackOp<ChannelShuffleOp<CPUContext>>);
+    mkl::MKLFallbackOp<ChannelShuffleOp<float, CPUContext>>);
 REGISTER_MKL_OPERATOR(
     NCHW2NHWC,
     mkl::MKLFallbackOp<NCHW2NHWCOp<float, CPUContext>>);

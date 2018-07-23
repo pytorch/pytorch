@@ -1,4 +1,4 @@
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 #include "THRandom.h"
 #include "THGenerator.hpp"
 

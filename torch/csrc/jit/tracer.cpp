@@ -62,10 +62,9 @@ autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim) {
 
   auto size_var = autograd::make_variable(at::Scalar(var.size(dim)).toTensor());
   auto* value = getValueTrace(var);
-  auto* node = graph->create(aten::size, {value})
-                    ->i_(attr::dim, dim);
+  WithInsertPoint ipoint { graph->block() };
+  auto* node = graph->insertNode(graph->create(aten::size, {value, graph->insertConstant(dim)}));
   node->output()->inferTypeFrom(size_var);
-  graph->appendNode(node);
   setValueTrace(size_var, node->output());
 
   return size_var;

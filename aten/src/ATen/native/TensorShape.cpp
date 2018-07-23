@@ -126,7 +126,7 @@ Tensor expand(const Tensor& self, IntList size, bool implicit) {
 
   std::vector<int64_t> expandedSizes;
   std::vector<int64_t> expandedStrides;
-  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self, size);
+  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self.sizes(), self.strides(), size);
 
   return self.as_strided(expandedSizes, expandedStrides);
 }

@@ -1,3 +1,4 @@
+#include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 
 namespace torch { namespace jit {
@@ -7,7 +8,7 @@ static void RemoveExpands(Block* block) {
        ++it) {
     for (auto sub : it->blocks())
       RemoveExpands(sub);
-    if (it->kind() == aten::expand && it->hasAttribute(attr::implicit) && it->i(attr::implicit)) {
+    if (it->kind() == aten::expand && it->get<int64_t>(attr::implicit) != static_cast<int64_t>(0)) {
       it->output()->replaceAllUsesWith(it->input());
       it.destroyCurrent();
     }

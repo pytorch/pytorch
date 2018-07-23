@@ -49,6 +49,7 @@ torch/csrc/nn/THNN.cpp
 torch/csrc/nn/THNN.cwrap
 torch/lib/*.a*
 torch/lib/*.dll*
+torch/lib/*.exe*
 torch/lib/*.dylib*
 torch/lib/*.h
 torch/lib/*.lib

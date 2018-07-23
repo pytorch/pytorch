@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/function_hook.h"
@@ -19,7 +20,7 @@ namespace torch { namespace jit { namespace tracer {
 using torch::autograd::Variable;
 using variable_list = std::vector<Variable>;
 
-struct TracingState : public std::enable_shared_from_this<TracingState> {
+struct TORCH_API TracingState : public std::enable_shared_from_this<TracingState> {
   TracingState();
   ~TracingState();
 
@@ -59,10 +60,10 @@ struct ArgumentStash {
     return stash.intlists.empty();
   }
 
-  static void stashIntListElem(const std::string& arg_name,
-                               size_t size,
-                               size_t idx,
-                               const Variable& var);
+  TORCH_API static void stashIntListElem(const std::string& arg_name,
+                                         size_t size,
+                                         size_t idx,
+                                         const Variable& var);
 
   static bool hasIntList(const std::string& arg_name) {
     return stash.intlists.count(arg_name) > 0;
@@ -80,8 +81,8 @@ private:
 };
 
 // Retrieve or set the current tracing state. Returns a nullptr if tracing is disabled.
-const std::shared_ptr<TracingState>& getTracingState();
-void setTracingState(std::shared_ptr<TracingState> state);
+TORCH_API const std::shared_ptr<TracingState>& getTracingState();
+TORCH_API void setTracingState(std::shared_ptr<TracingState> state);
 
 inline bool isTracing() {
   return static_cast<bool>(getTracingState());
@@ -191,11 +192,11 @@ struct PreTraceInfo {
   Node *n;
 };
 
-PreTraceInfo preRecordTrace(Symbol op, at::ArrayRef<Variable> inputs);
-void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
+TORCH_API PreTraceInfo preRecordTrace(Symbol op, at::ArrayRef<Variable> inputs);
+TORCH_API void postRecordTrace(const PreTraceInfo& info, at::ArrayRef<Variable> outputs);
 
-void recordSourceLocation(Node* n);
-void setRecordSourceLocation(void (*v)(Node*));
+TORCH_API void recordSourceLocation(Node* n);
+TORCH_API void setRecordSourceLocation(void (*v)(Node*));
 
 // We must record the nodes of inputs before we actually carry out
 // the operation, because an inplace operation may destroy the information
@@ -221,6 +222,6 @@ PreTraceInfo makePreTraceInfo(at::ArrayRef<Variable> inputs, F ctor) {
   return info;
 }
 
-autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
+TORCH_API autograd::Variable getSizeOf(const autograd::Variable& var, int64_t dim);
 
 }}} // namespace torch::jit::tracer

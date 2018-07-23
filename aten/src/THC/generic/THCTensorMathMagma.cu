@@ -12,7 +12,7 @@ static void THCTensor_(copyArray1d)(THCState *state, THCTensor *self, real *src,
   int64_t stride[1] = { 1 };
   THCTensor_(resizeNd)(state, self, 1, size, stride);
   size_t len = k * sizeof(real);
-  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, self->storage) + self->storageOffset, src, len, cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
 }
 
 static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, real *src, int m, int n)
@@ -21,16 +21,16 @@ static void THCTensor_(copyArray2d)(THCState *state, THCTensor *self, real *src,
   int64_t stride[2] = { 1, m };
   THCTensor_(resizeNd)(state, self, 2, size, stride);
   size_t len = m * n * sizeof(real);
-  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, self->storage) + self->storageOffset, src, len, cudaMemcpyHostToDevice));
+  THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(self)) + self->storage_offset(), src, len, cudaMemcpyHostToDevice));
 }
 
 static void THCTensor_(copyTensor2d)(THCState *state, real *dst, THCTensor *self)
 {
-  THAssert(self->_dim() == 2);
+  THAssert(self->dim() == 2);
   size_t len = THCTensor_(nElement)(state, self)*sizeof(real);
   THCTensor *temp = THCTensor_(newTranspose)(state, self, 0, 1);
   THCTensor *selfc = THCTensor_(newContiguous)(state, temp);
-  THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, selfc->storage) + selfc->storageOffset, len, cudaMemcpyDeviceToHost));
+  THCudaCheck(cudaMemcpy(dst, THCStorage_(data)(state, THTensor_getStoragePtr(selfc)) + selfc->storage_offset(), len, cudaMemcpyDeviceToHost));
   THCTensor_(free)(state, temp);
   THCTensor_(free)(state, selfc);
 }
@@ -39,7 +39,7 @@ static void THCTensor_(copyTensor2d)(THCState *state, real *dst, THCTensor *self
 
 static THCTensor* THCTensor_(newColumnMajor)(THCState *state, THCTensor *self, THCTensor *src)
 {
-  THAssert(src->_dim() == 2);
+  THAssert(src->dim() == 2);
   if (self == src && self->stride(0) == 1 && self->stride(1) == self->size(0))
   {
     THCTensor_(retain)(state, self);
@@ -194,46 +194,47 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
   THCTensor *input = THCTensor_(newColumnMajor)(state, rv_, a);
   real *input_data = THCTensor_(data)(state, input);
 
-  // eigen values and workspace
-  real *w = th_magma_malloc_pinned<real>(n);
-  real *wA = th_magma_malloc_pinned<real>(lda * n);
+  if (n > 0) {
+    // eigen values and workspace
+    real *w = th_magma_malloc_pinned<real>(n);
+    real *wA = th_magma_malloc_pinned<real>(lda * n);
 
-  // compute optimal size of work array
-  int info;
-  real lwork;
-  int liwork;
+    // compute optimal size of work array
+    int info;
+    real lwork;
+    int liwork;
 
 #if defined(THC_REAL_IS_FLOAT)
-  magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
+    magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
 #else
-  magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
+    magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, &lwork, -1, &liwork, -1, &info);
 #endif
 
-  real *work = th_magma_malloc_pinned<real>((size_t)lwork);
-  int *iwork = th_magma_malloc_pinned<int>(liwork);
+    real *work = th_magma_malloc_pinned<real>((size_t)lwork);
+    int *iwork = th_magma_malloc_pinned<int>(liwork);
 
   // compute eigenvalues and, optionally, eigenvectors
 #if defined(THC_REAL_IS_FLOAT)
-  magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
+    magma_ssyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
 #else
-  magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
+    magma_dsyevd_gpu(jobz, uplo, n, input_data, lda, w, wA, n, work, (int) lwork, iwork, liwork, &info);
 #endif
 
-  // copy eigen values from w to re_
-  if (info == 0)
-    THCTensor_(copyArray1d)(state, re_, w, n);
+    // copy eigen values from w to re_
+    if (info == 0)
+      THCTensor_(copyArray1d)(state, re_, w, n);
 
-  magma_free_pinned(iwork);
-  magma_free_pinned(work);
-  magma_free_pinned(wA);
-  magma_free_pinned(w);
+    magma_free_pinned(iwork);
+    magma_free_pinned(work);
+    magma_free_pinned(wA);
+    magma_free_pinned(w);
 
-  // check error value
-  if (info > 0)
-    THError("MAGMA syev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
-  else if (info < 0)
-    THError("MAGMA syev : Argument %d : illegal value", -info);
-
+    // check error value
+    if (info > 0)
+      THError("MAGMA syev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
+    else if (info < 0)
+      THError("MAGMA syev : Argument %d : illegal value", -info);
+  }
   THCTensor_(freeCopyTo)(state, input, rv_);
 #else
   THError(NoMagma(syev));
@@ -243,7 +244,7 @@ THC_API void THCTensor_(syev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
 THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, THCTensor *a_, const char *jobvrs)
 {
 #ifdef USE_MAGMA
-  THArgCheck(!a_->is_empty() && a_->dim() == 2, 3, "A should be (non-empty) 2 dimensional");
+  THArgCheck(a_->dim() == 2, 3, "A should be 2 dimensional");
   THArgCheck(a_->size(0) == a_->size(1), 3, "A should be square");
 
   magma_vec_t jobvr = jobvrs[0] == 'N' ? MagmaNoVec : MagmaVec;
@@ -263,34 +264,39 @@ THC_API void THCTensor_(geev)(THCState *state, THCTensor *re_, THCTensor *rv_, T
     ldvr = n;
   }
 
-  real wkopt;
-  int info;
+  real *work_data = nullptr;
 
+  if (n > 0) {
+    int info;
+    real wkopt;
 #if defined(THC_REAL_IS_FLOAT)
-  magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
+    magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
 #else
-  magma_dgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
+    magma_dgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, &wkopt, -1, &info);
 #endif
 
-  int lwork = (int) wkopt;
-  real *work_data = th_magma_malloc_pinned<real>(lwork);
+    int lwork = (int) wkopt;
+    work_data = th_magma_malloc_pinned<real>(lwork);
 
 #if defined(THC_REAL_IS_FLOAT)
-  magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
+    magma_sgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
 #else
-  magma_dgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
+    magma_dgeev(MagmaNoVec, jobvr, n, a_data, n, wr, wi, NULL, 1, vr_data, ldvr, work_data, lwork, &info);
 #endif
 
-  if (info > 0)
-    THError("MAGMA geev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
-  else if (info < 0)
-    THError("MAGMA geev : Argument %d : illegal value", -info);
+    if (info > 0)
+      THError("MAGMA geev : Failed to converge. %d off-diagonal elements of an didn't converge to zero", info);
+    else if (info < 0)
+      THError("MAGMA geev : Argument %d : illegal value", -info);
+  }
 
   {
     THCTensor_(resize2d)(state, re_, 2, n);
     THCTensor *re = THCTensor_(newContiguous)(state, re_);
-    THCudaCheck(cudaMemcpy(THCStorage_(data)(state, re->storage) + re->storageOffset, wr, n*sizeof(real), cudaMemcpyHostToDevice));
-    THCudaCheck(cudaMemcpy(THCStorage_(data)(state, re->storage) + re->storageOffset + n, wi, n*sizeof(real), cudaMemcpyHostToDevice));
+    if (n > 0) {
+      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset(), wr, n*sizeof(real), cudaMemcpyHostToDevice));
+      THCudaCheck(cudaMemcpy(THCStorage_(data)(state, THTensor_getStoragePtr(re)) + re->storage_offset() + n, wi, n*sizeof(real), cudaMemcpyHostToDevice));
+    }
     THCTensor_(freeCopyTo)(state, re, re_);
     THCTensor_(transpose)(state, re_, NULL, 0, 1);
   }

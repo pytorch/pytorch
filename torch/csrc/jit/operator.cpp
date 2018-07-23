@@ -223,15 +223,80 @@ struct SchemaParser {
 
 namespace {
 
+std::string canonicalSchemaString(const FunctionSchema& schema) {
+  std::ostringstream out;
+
+  out << schema.name;
+  out << "(";
+
+  bool seen_kwarg_only = false;
+  for(size_t i = 0; i < schema.arguments.size(); ++i) {
+    if (i > 0) out << ", ";
+    if (schema.arguments[i].kwarg_only && !seen_kwarg_only) {
+      out << "*, ";
+      seen_kwarg_only = true;
+    }
+    const auto & arg = schema.arguments[i];
+    out << arg.type->str() << " " << arg.name;
+  }
+
+  out << ") -> ";
+  if (schema.returns.size() == 1) {
+    out << schema.returns.at(0).type->str();
+  } else if (schema.returns.size() > 1) {
+    out << "(";
+    for (size_t i = 0; i < schema.returns.size(); ++i) {
+      if (i > 0) out << ", ";
+      out << schema.returns[i].type->str();
+    }
+    out << ")";
+  }
+  return out.str();
+}
+
 using OperatorMap = std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>>;
 struct OperatorRegistry  {
   OperatorMap operators;
   std::mutex lock;
+  // Those two maps are used to implement lookupByLiteral, which is needed for the n->match(...) calls.
+  // Basically, every function schema is assigned a unique string you can use to match it. However,
+  // parsing those strings or comparing and hashing them character by character would be very slow, so
+  // we use a trick here! Every string literal in your program is guaranteed to have static storage
+  // duration and so its address won't change at runtime. This allows us to memoize answerts for every
+  // pointer, which is done by the operators_by_sig_literal map. Still, this map is initially
+  // empty, and so we still need to do the complete string matching at the first time, which is implemented
+  // by performing a lookup in the operators_by_sig map.
+  std::unordered_map<std::string, std::shared_ptr<Operator>> operators_by_sig;
+  std::unordered_map<const char *, std::shared_ptr<Operator>> operators_by_sig_literal;
   void registerOperator(Operator&& op){
     std::lock_guard<std::mutex> guard(lock);
+
     Symbol sym = Symbol::fromQualString(op.schema.name);
-    operators[sym].push_back(std::make_shared<Operator>(std::move(op)));
+    auto op_ptr = std::make_shared<Operator>(std::move(op));
+
+    operators[sym].push_back(op_ptr);
+
+    operators_by_sig[canonicalSchemaString(op.schema)] = op_ptr;
   }
+
+  Operator& lookupByLiteral(const char * name) {
+    auto it = operators_by_sig_literal.find(name);
+    if (it == operators_by_sig_literal.end()) {
+      auto op_ptr_it = operators_by_sig.find(name);
+      // Handy debugging code that dumps all operators we know about on mismatch
+#if 0
+      if (op_ptr_it == operators_by_sig.end()) {
+        for (auto & entry : operators_by_sig) {
+          std::cout << entry.first << std::endl;
+        }
+      }
+#endif
+      JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
+      it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
+    }
+    return *it->second;
+  }
+
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
     std::lock_guard<std::mutex> guard(lock);
     static std::vector<std::shared_ptr<Operator>> empty;
@@ -242,19 +307,23 @@ struct OperatorRegistry  {
   }
 };
 
-OperatorRegistry& getRegsitry() {
+OperatorRegistry& getRegistry() {
   static OperatorRegistry r;
   return r;
 }
 
-}
+} // anonymous namespace
 
 void registerOperator(Operator&& op) {
-  getRegsitry().registerOperator(std::move(op));
+  getRegistry().registerOperator(std::move(op));
 }
 
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
-  return getRegsitry().getOperators(name);
+  return getRegistry().getOperators(name);
+}
+
+Operator& sig(const char *signature) {
+  return getRegistry().lookupByLiteral(signature);
 }
 
 FunctionSchema parseSchema(const std::string& schema) {
@@ -293,7 +362,10 @@ bool typeMatches(TypePtr actual, TypePtr formal) {
   return false;
 }
 
-bool Operator::matchesNode(Node* node) const {
+bool Operator::matches(Node* node) const {
+  if (node->kind().toQualString() != schema.name) {
+    return false;
+  }
   size_t attributes_size = node->numAttributes();
   size_t attributes_seen = 0;
   auto inputs_size = node->inputs().size();
@@ -351,7 +423,7 @@ bool Operator::matchesNode(Node* node) const {
 std::shared_ptr<Operator> findOperatorFor(Node* node) {
   const auto& candidates = getAllOperatorsFor(node->kind());
   for(const auto& candidate : candidates) {
-    if(candidate->matchesNode(node)) {
+    if(candidate->matches(node)) {
       return candidate;
     }
   }
