@@ -63,7 +63,7 @@ struct CUDAEvent {
   ~CUDAEvent() { 
     if (is_created) {
       at::DeviceGuard device_guard{device_};
-      AT_CUDA_CHECK(cudaEventDestroy(event_)); 
+      cudaEventDestroy(event_); // Unchecked
     }
   }
   
