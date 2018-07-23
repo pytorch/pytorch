@@ -1,6 +1,8 @@
 #pragma once
 #include "ATen/ATen.h"
+
 #include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/ivalue.h"
 
 namespace torch { namespace jit {
 
@@ -12,7 +14,7 @@ struct Argument {
       std::string name = "",
       TypePtr type = nullptr,
       at::optional<int32_t> N = at::nullopt,
-      at::optional<at::Tensor> default_value = at::nullopt,
+      at::optional<IValue> default_value = at::nullopt,
       bool kwarg_only = true)
       : name(std::move(name)),
         type(type? type : DynamicType::get()),
@@ -28,8 +30,7 @@ struct Argument {
   // become a list.
   at::optional<int32_t> N;
 
-  // encoded using as_tensor, use tensor_as<T> to get value for attribute
-  at::optional<at::Tensor> default_value;
+  at::optional<IValue> default_value;
   // is this only specifyable as a keyword argument?
   bool kwarg_only;
 };

@@ -48,9 +48,11 @@ def _if_scalar_type_as(self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    else:
+    elif tensor.type().kind() == "TensorType":
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
+    else:
+        return self
 
 
 def _broadcast_if_scalar(x):
