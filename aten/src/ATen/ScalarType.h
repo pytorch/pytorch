@@ -1,10 +1,11 @@
 #pragma once
 
-#include <stdint.h>
-
 #include "ATen/ArrayRef.h"
 #include "ATen/ATenGeneral.h"
 #include "ATen/Half.h"
+
+#include <cstdint>
+#include <iostream>
 
 namespace at {
 
@@ -168,3 +169,9 @@ typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 
 } // namespace at
+
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    at::ScalarType scalar_type) {
+  return stream << at::toString(scalar_type);
+}
