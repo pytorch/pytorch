@@ -476,6 +476,13 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         v.value = graph.insertNode(graph.createList(IntType::get(), unpacked))->output();
       }
 
+      if (v.value->node()->kind() == prim::None){
+        if (arg.type->isSubtypeOf(NumberType::get()))
+          v.value = insertConstant(graph, at::Scalar(NAN), loc);
+        else
+          v.value = graph.insertNode(graph.createUndefined())->output();
+      }
+
       if(!v.value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
               << v.value->type()->str() << "\n"

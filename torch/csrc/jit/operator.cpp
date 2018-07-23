@@ -163,7 +163,6 @@ struct SchemaParser {
   }
 
   IValue parseTensorDefault(const SourceRange& range) {
-  at::Tensor parseTensorDefault(const SourceRange& range) {
     L.expect(TK_NONE);
     return at::Tensor();
   }
