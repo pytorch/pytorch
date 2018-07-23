@@ -127,6 +127,7 @@ const auto options = TensorOptions()
 auto result = torch::${name}(${args}, options);
 """)
 
+# TODO (apaszke): remove the attributed codepath once we remove them
 CONSTRUCTOR = CodeTemplate("""\
 [](Node *node) {
   ${kw_assignments}

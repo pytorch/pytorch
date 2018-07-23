@@ -60,15 +60,15 @@
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->dim(); TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
-  TENSOR1##_data = (TENSOR1)->storage->data<TYPE1>()+(TENSOR1)->storageOffset; \
+  TENSOR1##_data = THTensor_getStoragePtr(TENSOR1)->data<TYPE1>()+(TENSOR1)->storage_offset(); \
   TENSOR1##_stride = (TENSOR1)->stride(DIMENSION); \
   TENSOR1##_size = TENSOR1->size(DIMENSION); \
 \
-  TENSOR2##_data = (TENSOR2)->storage->data<TYPE2>()+(TENSOR2)->storageOffset; \
+  TENSOR2##_data = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+(TENSOR2)->storage_offset(); \
   TENSOR2##_stride = (TENSOR2)->stride(DIMENSION); \
   TENSOR2##_size = TENSOR2->size(DIMENSION); \
 \
-  TENSOR3##_data = (TENSOR3)->storage->data<TYPE3>()+(TENSOR3)->storageOffset; \
+  TENSOR3##_data = THTensor_getStoragePtr(TENSOR3)->data<TYPE3>()+(TENSOR3)->storage_offset(); \
   TENSOR3##_stride = (TENSOR3)->stride(DIMENSION); \
   TENSOR3##_size = TENSOR3->size(DIMENSION); \
 \
@@ -167,11 +167,11 @@
   for(TH_TENSOR_DIM_APPLY_i = 0; TH_TENSOR_DIM_APPLY_i < TENSOR1->dim(); TH_TENSOR_DIM_APPLY_i++) \
     TH_TENSOR_DIM_APPLY_counter[TH_TENSOR_DIM_APPLY_i] = 0; \
 \
-  TENSOR1##_data = (TENSOR1)->storage->data<TYPE1>()+(TENSOR1)->storageOffset; \
+  TENSOR1##_data = THTensor_getStoragePtr(TENSOR1)->data<TYPE1>()+(TENSOR1)->storage_offset(); \
   TENSOR1##_stride = (TENSOR1)->stride(DIMENSION); \
   TENSOR1##_size = TENSOR1->size(DIMENSION); \
 \
-  TENSOR2##_data = (TENSOR2)->storage->data<TYPE2>()+(TENSOR2)->storageOffset; \
+  TENSOR2##_data = THTensor_getStoragePtr(TENSOR2)->data<TYPE2>()+(TENSOR2)->storage_offset(); \
   TENSOR2##_stride = (TENSOR2)->stride(DIMENSION); \
   TENSOR2##_size = TENSOR2->size(DIMENSION); \
 \
@@ -269,7 +269,7 @@
   if( (DIMENSION < 0) || (DIMENSION >= TENSOR->_dim()) ) \
     THError("invalid dimension"); \
 \
-  TENSOR##_data = (TENSOR)->storage->data<TYPE>()+(TENSOR)->storageOffset; \
+  TENSOR##_data = THTensor_getStoragePtr(TENSOR)->data<TYPE>()+(TENSOR)->storage_offset(); \
   TENSOR##_stride = (TENSOR)->stride(DIMENSION); \
   TENSOR##_size = TENSOR->size(DIMENSION); \
   /* Counter stores the indices into the Tensor at any time */ \

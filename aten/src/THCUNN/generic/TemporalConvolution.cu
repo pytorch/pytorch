@@ -90,13 +90,13 @@ void THNN_(TemporalConvolution_updateOutput)(
       int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
       nOutputFrame -= nFrame;
 
-      THCTensor_(setStorage2d)(state, inputWindow, input->storage,
-                              input->storageOffset+k*dW*input->size(1),
+      THCTensor_(setStorage2d)(state, inputWindow, THTensor_getStoragePtr(input),
+                              input->storage_offset()+k*dW*input->size(1),
                               nFrame, inputFrameStride*input->size(1),
                               kW*input->size(1), 1);
 
-      THCTensor_(setStorage2d)(state, outputWindow, output->storage,
-                              output->storageOffset + k*output->size(1),
+      THCTensor_(setStorage2d)(state, outputWindow, THTensor_getStoragePtr(output),
+                              output->storage_offset() + k*output->size(1),
                               nFrame, outputFrameStride*output->size(1),
                               output->size(1), 1);
 
@@ -138,13 +138,13 @@ void THNN_(TemporalConvolution_updateOutput)(
         int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
         nOutputSampleFrame -= nFrame;
 
-        THCTensor_(setStorage2d)(state, inputWindow, inputSample->storage,
-                                inputSample->storageOffset+k*dW*inputSample->size(1),
+        THCTensor_(setStorage2d)(state, inputWindow, THTensor_getStoragePtr(inputSample),
+                                inputSample->storage_offset()+k*dW*inputSample->size(1),
                                 nFrame, inputFrameStride*inputSample->size(1),
                                 kW*inputSample->size(1), 1);
 
-        THCTensor_(setStorage2d)(state, outputWindow, outputSample->storage,
-                                outputSample->storageOffset + k*outputSample->size(1),
+        THCTensor_(setStorage2d)(state, outputWindow, THTensor_getStoragePtr(outputSample),
+                                outputSample->storage_offset() + k*outputSample->size(1),
                                 nFrame, outputFrameStride*outputSample->size(1),
                                 outputSample->size(1), 1);
 
@@ -215,13 +215,13 @@ void THNN_(TemporalConvolution_updateGradInput)(
       int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
       nOutputFrame -= nFrame;
 
-      THCTensor_(setStorage2d)(state, gradOutputWindow, gradOutput->storage,
-                              gradOutput->storageOffset + k*gradOutput->size(1),
+      THCTensor_(setStorage2d)(state, gradOutputWindow, THTensor_getStoragePtr(gradOutput),
+                              gradOutput->storage_offset() + k*gradOutput->size(1),
                               nFrame, outputFrameStride*gradOutput->size(1),
                               gradOutput->size(1), 1);
 
-      THCTensor_(setStorage2d)(state, gradInputWindow, gradInput->storage,
-                              gradInput->storageOffset+k*dW*gradInput->size(1),
+      THCTensor_(setStorage2d)(state, gradInputWindow, THTensor_getStoragePtr(gradInput),
+                              gradInput->storage_offset()+k*dW*gradInput->size(1),
                               nFrame, inputFrameStride*gradInput->size(1),
                               kW*gradInput->size(1), 1);
 
@@ -247,13 +247,13 @@ void THNN_(TemporalConvolution_updateGradInput)(
         int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
         nOutputSampleFrame -= nFrame;
 
-        THCTensor_(setStorage2d)(state, gradOutputWindow, gradOutputSample->storage,
-                                gradOutputSample->storageOffset + k*gradOutputSample->size(1),
+        THCTensor_(setStorage2d)(state, gradOutputWindow, THTensor_getStoragePtr(gradOutputSample),
+                                gradOutputSample->storage_offset() + k*gradOutputSample->size(1),
                                 nFrame, outputFrameStride*gradOutputSample->size(1),
                                 gradOutputSample->size(1), 1);
 
-        THCTensor_(setStorage2d)(state, gradInputWindow, gradInputSample->storage,
-                                gradInputSample->storageOffset+k*dW*gradInputSample->size(1),
+        THCTensor_(setStorage2d)(state, gradInputWindow, THTensor_getStoragePtr(gradInputSample),
+                                gradInputSample->storage_offset()+k*dW*gradInputSample->size(1),
                                 nFrame, inputFrameStride*gradInputSample->size(1),
                                 kW*gradInputSample->size(1), 1);
 
@@ -324,13 +324,13 @@ void THNN_(TemporalConvolution_accGradParameters)(
       int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
       nOutputFrame -= nFrame;
 
-      THCTensor_(setStorage2d)(state, inputWindow, input->storage,
-                              input->storageOffset+k*dW*input->size(1),
+      THCTensor_(setStorage2d)(state, inputWindow, THTensor_getStoragePtr(input),
+                              input->storage_offset()+k*dW*input->size(1),
                               nFrame, inputFrameStride*input->size(1),
                               kW*input->size(1), 1);
 
-      THCTensor_(setStorage2d)(state, gradOutputWindow, gradOutput->storage,
-                              gradOutput->storageOffset + k*gradOutput->size(1),
+      THCTensor_(setStorage2d)(state, gradOutputWindow, THTensor_getStoragePtr(gradOutput),
+                              gradOutput->storage_offset() + k*gradOutput->size(1),
                               nFrame, outputFrameStride*gradOutput->size(1),
                               gradOutput->size(1), 1);
 
@@ -367,13 +367,13 @@ void THNN_(TemporalConvolution_accGradParameters)(
         int64_t nFrame = (nInputFrame-k*dW-kW)/inputFrameStride + 1;
         nOutputSampleFrame -= nFrame;
 
-        THCTensor_(setStorage2d)(state, inputWindow, inputSample->storage,
-                                inputSample->storageOffset+k*dW*inputSample->size(1),
+        THCTensor_(setStorage2d)(state, inputWindow, THTensor_getStoragePtr(inputSample),
+                                inputSample->storage_offset()+k*dW*inputSample->size(1),
                                 nFrame, inputFrameStride*inputSample->size(1),
                                 kW*inputSample->size(1), 1);
 
-        THCTensor_(setStorage2d)(state, gradOutputWindow, gradOutputSample->storage,
-                                gradOutputSample->storageOffset + k*gradOutputSample->size(1),
+        THCTensor_(setStorage2d)(state, gradOutputWindow, THTensor_getStoragePtr(gradOutputSample),
+                                gradOutputSample->storage_offset() + k*gradOutputSample->size(1),
                                 nFrame, outputFrameStride*gradOutputSample->size(1),
                                 gradOutputSample->size(1), 1);
 

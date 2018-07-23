@@ -15,6 +15,6 @@ namespace torch { namespace jit {
 // - prim::TensorToNum, and prim::NumToTensor nodes are erased.
 //
 // The pass assumes that DCE will be called sometime after.
-void EraseNumberTypes(const std::shared_ptr<Graph>& graph);
+TORCH_API void EraseNumberTypes(const std::shared_ptr<Graph>& graph);
 
 }}
