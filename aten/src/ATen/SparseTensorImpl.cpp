@@ -19,7 +19,7 @@ namespace at {
 // we don't currently support zero-size dimensions, so we can't actually
 // do this; so we just allocate zero-size tensors for everything.
 SparseTensorImpl::SparseTensorImpl(Type * type)
-    : TensorImpl(type)
+    : TensorImpl(type, nullptr)
     , size_{0}
     , sparseDims_(1)
     , denseDims_(0)

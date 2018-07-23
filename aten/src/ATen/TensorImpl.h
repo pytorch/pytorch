@@ -7,6 +7,8 @@
 #include "ATen/ScalarType.h"
 #include "ATen/optional.h"
 
+struct THTensor;
+
 namespace at {
 class Scalar;
 struct Type;
@@ -15,23 +17,27 @@ struct Tensor;
 } // namespace at
 
 namespace at {
-struct TensorImpl : public Retainable {
-  explicit TensorImpl(Type * type)
-  : is_scalar(false), type_(type) {}
+struct AT_API TensorImpl : public Retainable {
+  explicit TensorImpl(Type * type, THTensor * tensor)
+  : is_scalar(false), type_(type), tensor(tensor) {}
+
+  virtual ~TensorImpl();
+
+  virtual void release_resources() override;
 
   Type & type() const {
     return *type_;
   }
   virtual const char * toString() const = 0;
-  virtual IntList sizes() const = 0;
+  virtual IntList sizes() const;
   virtual IntList strides() const = 0;
-  virtual int64_t dim() const = 0;
+  virtual int64_t dim() const;
   /**
    * Perform a conversion of this tensor to a scalar, if numel() == 1.
    * Otherwise, raise an error.
    */
   virtual Scalar localScalar() = 0;
-  virtual void * unsafeGetTH(bool retain) = 0;
+  virtual void * unsafeGetTH(bool retain);
   virtual std::unique_ptr<Storage> storage() = 0;
   friend struct Type;
 
@@ -94,5 +100,7 @@ struct TensorImpl : public Retainable {
 protected:
   bool is_scalar;
   Type * type_;
+public:
+  THTensor * tensor;
 };
 } // namespace at

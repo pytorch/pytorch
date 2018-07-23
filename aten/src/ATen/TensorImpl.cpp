@@ -3,6 +3,8 @@
 #include <ATen/Tensor.h>
 #include <ATen/optional.h>
 
+#include <TH/THTensor.hpp>
+
 namespace at {
 Tensor& TensorImpl::grad() {
   AT_ERROR("grad is not implemented for Tensor");
@@ -33,4 +35,36 @@ void Tensor::backward(
     bool create_graph) {
   pImpl->backward(std::move(gradient), keep_graph, create_graph);
 }
+
+TensorImpl::~TensorImpl() {
+  if (tensor) tensor->release();
+}
+
+IntList TensorImpl::sizes() const {
+  // NB: dim in tensor is not synchronized with THTensor, so it's
+  // important to apply dim here
+  return IntList(THTensor_getSizePtr(tensor), dim());
+}
+
+void TensorImpl::release_resources() {
+  if (tensor) {
+      tensor->release();
+      tensor = nullptr;
+  }
+}
+
+int64_t TensorImpl::dim() const {
+  if (isScalar()) {
+    return 0;
+  }
+  return tensor->dim();
+}
+
+void * TensorImpl::unsafeGetTH(bool retain) {
+  if (retain) {
+    tensor->retain();
+  }
+  return tensor;
+}
+
 } // namespace at
