@@ -184,7 +184,8 @@ TEST_CASE("module/clone") {
   SECTION(
       "a module that overrides clone() does not throw when clone() is called ") {
     struct Cloneable : Module {
-      std::shared_ptr<Module> clone() const override {
+      std::shared_ptr<Module> clone(
+          at::optional<torch::Device> device = at::nullopt) const override {
         return nullptr;
       }
     };
@@ -296,6 +297,56 @@ TEST_CASE("module/clone") {
     REQUIRE(b->module->parameters()["weight"].allclose(a->module->weight));
     REQUIRE(b->module->weight.allclose(a->module->weight));
     REQUIRE(b->module->value == a->module->value);
+  }
+}
+
+TEST_CASE("module/clone-to-device", "[cuda]") {
+  struct TestModule : public Cloneable<TestModule> {
+    TestModule() {
+      reset();
+    }
+    void reset() override {
+      l1 = register_module("l1", Linear(10, 3));
+      l2 = register_module("l2", Linear(3, 5));
+      l3 = register_module("l3", Linear(5, 100));
+      buffer = register_buffer("buf", torch::ones({2, 2}));
+    }
+
+    Linear l1{nullptr}, l2{nullptr}, l3{nullptr};
+    torch::Tensor buffer;
+  };
+
+  SECTION("Cloning preserves the device of parameters/buffers") {
+    TestModule m;
+    torch::Device device(torch::kCUDA, 0);
+
+    m.to(device);
+
+    auto clone = m.clone();
+    for (const auto& parameter : clone->parameters()) {
+      REQUIRE(parameter->device().type() == device.type());
+      REQUIRE(parameter->device().index() == device.index());
+    }
+    for (const auto& buffer : clone->buffers()) {
+      REQUIRE(buffer->device().type() == device.type());
+      REQUIRE(buffer->device().index() == device.index());
+    }
+  }
+
+  SECTION(
+      "Cloning to a particular device places all parameters/buffers there") {
+    TestModule m;
+    torch::Device device(torch::kCUDA, 1);
+    // everything is on CPU here
+    auto clone = m.clone(device);
+    for (const auto& parameter : clone->parameters()) {
+      REQUIRE(parameter->device().type() == device.type());
+      REQUIRE(parameter->device().index() == device.index());
+    }
+    for (const auto& buffer : clone->buffers()) {
+      REQUIRE(buffer->device().type() == device.type());
+      REQUIRE(buffer->device().index() == device.index());
+    }
   }
 }
 
