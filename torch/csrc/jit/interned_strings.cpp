@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 #include "ATen/optional.h"
+#include "ATen/Error.h"
 #include "string.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/interned_strings_class.h"
 
 namespace torch { namespace jit {

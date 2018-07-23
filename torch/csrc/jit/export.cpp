@@ -3,6 +3,8 @@
 #include "torch/csrc/autograd/symbolic.h"
 
 #include "torch/csrc/utils/functional.h"
+#include <torch/csrc/jit/assertions.h>
+
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
 
@@ -71,7 +73,7 @@ void encodeTensor(onnx::TensorProto * p, const at::Tensor & tensor,
       onnx_type = onnx::kINT64;
       break;
     default:
-      torch::barf("unexpected tensor scalar type");
+      AT_ERROR("unexpected tensor scalar type");
       break;
   }
   p->set_data_type(onnx_type);
@@ -184,7 +186,7 @@ void encodeTypeProtoTensorType(onnx::TypeProtoTensor* tensor_type, Value* n) {
         onnx_type = onnx::kINT64;
         break;
       default:
-        torch::barf("unexpected tensor scalar type");
+        AT_ERROR("unexpected tensor scalar type");
         break;
     }
     tensor_type->set_data_type(onnx_type);

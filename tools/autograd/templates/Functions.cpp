@@ -360,7 +360,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     // At this point omitted_products is the same size
     // as input, except on the dimension dim where it's
     // dim_size - k
-    TORCH_ASSERT(omitted_products.size(dim) == dim_size - k);
+    AT_ASSERT(omitted_products.size(dim) == dim_size - k);
 
     grad_input.select(dim, k).copy_(
         at::sum(grad.slice(dim, k) * omitted_products,dim));
@@ -656,7 +656,7 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
 }
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
-  TORCH_ASSERT(indices.dim() >= dim);
+  AT_ASSERT(indices.dim() >= dim);
   auto size = std::vector<int64_t>(indices.sizes().slice(0, indices.dim() - dim));
   size.push_back(-1);
   auto indices_view = indices.view(size);
@@ -768,7 +768,7 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
 
 Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
-  TORCH_ASSERT(ndimension == 1 || ndimension == 2);
+  AT_ASSERT(ndimension == 1 || ndimension == 2);
 
   if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
     return grad.diag(diagonal);
