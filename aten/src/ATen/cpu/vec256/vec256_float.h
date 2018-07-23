@@ -93,6 +93,9 @@ public:
   Vec256<float> erf() const {
     return Vec256<float>(Sleef_erff8_u10(values));
   }
+  Vec256<float> erfc() const {
+    return Vec256<float>(Sleef_erfcf8_u15(values));
+  }
   Vec256<float> exp() const {
     return Vec256<float>(Sleef_expf8_u10(values));
   }

@@ -70,6 +70,7 @@ test_aten() {
     # put the dynamic libraries somewhere were the dynamic linker can find them.
     # This is a bit of a hack.
     ln -s "$TORCH_LIB_PATH"/libcaffe2* build/bin
+    ln -s "$TORCH_LIB_PATH"/libnccl* build/bin
     ls build/bin
     aten/tools/run_tests.sh build/bin
   fi
@@ -98,12 +99,12 @@ test_libtorch() {
      echo "Testing libtorch"
      CPP_BUILD="$PWD/../cpp-build"
      if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
-       "$CPP_BUILD"/libtorch/bin/test_jit
+       "$CPP_BUILD"/caffe2/bin/test_jit
      else
-       "$CPP_BUILD"/libtorch/bin/test_jit "[cpu]"
+       "$CPP_BUILD"/caffe2/bin/test_jit "[cpu]"
      fi
      python tools/download_mnist.py --quiet -d test/cpp/api/mnist
-     OMP_NUM_THREADS=2 "$CPP_BUILD"/libtorch/bin/test_api
+     OMP_NUM_THREADS=2 "$CPP_BUILD"/caffe2/bin/test_api
   fi
 }
 

@@ -18,6 +18,8 @@ namespace detail {
 template <typename Derived>
 class DropoutImplBase : public torch::nn::Cloneable<Derived> {
  public:
+  explicit DropoutImplBase(double rate)
+      : DropoutImplBase(DropoutOptions(rate)) {}
   explicit DropoutImplBase(DropoutOptions options_);
 
   void reset() override;

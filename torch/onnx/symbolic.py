@@ -259,7 +259,9 @@ def embedding_bag(g,
 
 def size(g, self, dim):
     if _is_value(dim):
-        raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        if dim.node().kind() != 'onnx::Constant':
+            raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        dim = int(dim.node().t('value'))
     full_shape = g.op("Shape", self)
     return select(g, full_shape, dim=0, index=dim)
 
@@ -688,6 +690,16 @@ def exp(g, self):
     return g.op("Exp", self)
 
 
+def norm(g, self, p, dim, keepdim):
+    if p == 1:
+        f = _reduce_op_symbolic("ReduceL1")
+    elif p == 2:
+        f = _reduce_op_symbolic("ReduceL2")
+    else:
+        raise RuntimeError("ONNX export only p-norms with p of 1 or 2")
+    return f(g, self, dim=dim, keepdim=keepdim)
+
+
 def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
@@ -735,10 +747,23 @@ for k, v in cast_pytorch_to_onnx.items():
     globals()[name] = partial(_cast_func_template, v)
 
 
+def zeros_like(g, input):
+    return g.op("Sub", input, input).setType(input.type().contiguous())
+
+
+def full_like(g, input, fill_value):
+    # TODO: a more efficient implementation (ConstantFill?)
+    return add(g, zeros_like(g, input), fill_value, alpha=torch.tensor(1))
+
+
 def slice(g, self, dim, start, end, step):
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
+
+
+def hardtanh(g, self, min_val, max_val):
+    return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
 
 def alias(g, self):

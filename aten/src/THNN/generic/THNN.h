@@ -147,39 +147,39 @@ TH_API void THNN_(Im2Col_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int kH, int kW,
-          int dH, int dW,
-          int padH, int padW,
-          int sH, int sW);
+          int64_t kH, int64_t kW,
+          int64_t dH, int64_t dW,
+          int64_t padH, int64_t padW,
+          int64_t sH, int64_t sW);
 
 TH_API void THNN_(Im2Col_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int inputHeight, int inputWidth,
-          int kH, int kW,
-          int dH, int dW,
-          int padH, int padW,
-          int sH, int sW);
+          int64_t inputHeight, int64_t inputWidth,
+          int64_t kH, int64_t kW,
+          int64_t dH, int64_t dW,
+          int64_t padH, int64_t padW,
+          int64_t sH, int64_t sW);
 
 TH_API void THNN_(Col2Im_updateOutput)(
           THNNState *state,
           THTensor *input,
           THTensor *output,
-          int outputHeight, int outputWidth,
-          int kH, int kW,
-          int dH, int dW,
-          int padH, int padW,
-          int sH, int sW);
+          int64_t outputHeight, int64_t outputWidth,
+          int64_t kH, int64_t kW,
+          int64_t dH, int64_t dW,
+          int64_t padH, int64_t padW,
+          int64_t sH, int64_t sW);
 
 TH_API void THNN_(Col2Im_updateGradInput)(
           THNNState *state,
           THTensor *gradOutput,
           THTensor *gradInput,
-          int kH, int kW,
-          int dH, int dW,
-          int padH, int padW,
-          int sH, int sW);
+          int64_t kH, int64_t kW,
+          int64_t dH, int64_t dW,
+          int64_t padH, int64_t padW,
+          int64_t sH, int64_t sW);
 
 TH_API void THNN_(L1Cost_updateOutput)(
           THNNState *state,            // library's state

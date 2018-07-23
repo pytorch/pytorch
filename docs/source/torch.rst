@@ -169,6 +169,7 @@ Pointwise Ops
 .. autofunction:: cosh
 .. autofunction:: div
 .. autofunction:: erf
+.. autofunction:: erfc
 .. autofunction:: erfinv
 .. autofunction:: exp
 .. autofunction:: expm1
@@ -222,6 +223,8 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isfinite
+.. autofunction:: isinf
 .. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
@@ -248,6 +251,7 @@ Spectral Ops
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: bincount
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diagflat
@@ -255,6 +259,7 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flip
 .. autofunction:: histc
+.. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: trace
 .. autofunction:: tril

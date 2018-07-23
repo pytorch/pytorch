@@ -88,9 +88,10 @@ FROM_ATTRIBUTE = {
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
 FROM_TENSOR = {
-    'Device': 'tensor_as<IntList>',
+    'Device': 'tensor_as<std::vector<int64_t>>',
     'ScalarType': 'tensor_as<int64_t>',
     'Layout': 'tensor_as<int64_t>',
+    'IntList': 'tensor_as<std::vector<int64_t>>',
 }
 
 
@@ -107,7 +108,7 @@ auto ${name} = ${type_cast}(node->${method}(Symbol::attr("${name}")));\
 """)
 
 POS_ASSIGNMENT = CodeTemplate("""\
-auto ${name} = ${from_tensor}(std::move(peek(stack, ${i}, ${N})));\
+auto ${name} = ${from_tensor}(std::move(peek(stack, ${i}, ${N})).toTensor());\
 """)
 
 CALL_NAMESPACE = CodeTemplate("""\
@@ -126,6 +127,7 @@ const auto options = TensorOptions()
 auto result = torch::${name}(${args}, options);
 """)
 
+# TODO (apaszke): remove the attributed codepath once we remove them
 CONSTRUCTOR = CodeTemplate("""\
 [](Node *node) {
   ${kw_assignments}
@@ -261,12 +263,12 @@ def gen_jit_dispatch(declarations, out, template_path):
                 # NOTE: don't advance real_inputs here. After this we are going
                 # to switch over to indexing from the end as if we only had
                 # the static arguments.
-                arguments.append('peekSlice(stack, {}, varargs_length - {}, varargs_length)'
+                arguments.append('toTensors(peekSlice(stack, {}, varargs_length - {}, varargs_length))'
                                  .format(real_inputs, static_inputs))
             elif arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
             elif is_tensor_arg(arg):
-                arguments.append('std::move(peek(stack, {}, {}))'.format(real_inputs, view_length))
+                arguments.append('std::move(peek(stack, {}, {})).toTensor()'.format(real_inputs, view_length))
                 real_inputs += 1
             elif is_positional_arg[i]:
                 template_kwargs = dict(from_tensor=from_tensor(arg),

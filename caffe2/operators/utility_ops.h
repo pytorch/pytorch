@@ -703,6 +703,9 @@ class LengthsToSegmentIdsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(LengthsToSegmentIdsOp);
 
+  // TODO: enable the InputFillers
+  DISABLE_INPUT_FILLERS(Context)
+
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
@@ -757,6 +760,9 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SegmentIdsToLengthsOp);
+
+  // TODO: enable the InputFillers
+  DISABLE_INPUT_FILLERS(Context)
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -814,6 +820,9 @@ class SegmentIdsToRangesOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SegmentIdsToRangesOp);
+
+  // TODO: enable the InputFillers
+  DISABLE_INPUT_FILLERS(Context)
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));

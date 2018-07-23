@@ -29,6 +29,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -556,6 +557,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sinh, vsSinh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Sinh, vdSinh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cosh, vsCosh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cosh, vdCosh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Tanh, vsTanh)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Tanh, vdTanh)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Abs, vsAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Abs, vdAbs)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Sqr, vsSqr)
@@ -635,6 +638,17 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, rsqrt)
 DELEGATE_SINCOS_FUNCTION(float)
 DELEGATE_SINCOS_FUNCTION(double)
 #undef DELEGATE_SINCOS_FUNCTION
+
+#define DELEGATE_TANH_FUNCTION(T)                                             \
+  template <>                                                                 \
+  void Tanh<T, CPUContext>(const int N, const T* X, T* Y, CPUContext*) {      \
+    EigenVectorMap<T>(Y, N) = T(1) -                                          \
+        ((ConstEigenVectorArrayMap<T>(X, N) * T(2)).exp() + T(1)).inverse() * \
+            T(2);                                                             \
+  }
+DELEGATE_TANH_FUNCTION(float)
+DELEGATE_TANH_FUNCTION(double)
+#undef DELEGATE_TANH_FUNCTION
 
 #define DELEGATE_CBRT_FUNCTION(T)                                        \
   template <>                                                            \
@@ -921,6 +935,61 @@ CAFFE2_SPECIALIZED_REDUCE_SUM(double)
   }
 CAFFE2_SPECIALIZED_REDUCE_MEAN(float)
 #undef CAFFE2_SPECIALIZED_REDUCE_MEAN
+
+#define CAFFE2_SPECIALIZED_REDUCE_L1(T)                         \
+  template <>                                                   \
+  void ReduceL1<T, CPUContext>(                                 \
+      const int num_dims,                                       \
+      const int* dims,                                          \
+      const int num_axes,                                       \
+      const int* axes,                                          \
+      const T* X,                                               \
+      T* Y,                                                     \
+      CPUContext* context) {                                    \
+    ReduceTensor(                                               \
+        num_dims,                                               \
+        dims,                                                   \
+        num_axes,                                               \
+        axes,                                                   \
+        [](const T& a, const T& b) { return a + std::abs(b); }, \
+        T(0),                                                   \
+        X,                                                      \
+        Y,                                                      \
+        context);                                               \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L1(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L1
+
+#define CAFFE2_SPECIALIZED_REDUCE_L2(T)                             \
+  template <>                                                       \
+  void ReduceL2<T, CPUContext>(                                     \
+      const int num_dims,                                           \
+      const int* dims,                                              \
+      const int num_axes,                                           \
+      const int* axes,                                              \
+      const T* X,                                                   \
+      T* Y,                                                         \
+      CPUContext* context) {                                        \
+    ReduceTensor(                                                   \
+        num_dims,                                                   \
+        dims,                                                       \
+        num_axes,                                                   \
+        axes,                                                       \
+        [](const T& a, const T& b) { return a + b * b; },           \
+        T(0),                                                       \
+        X,                                                          \
+        Y,                                                          \
+        context);                                                   \
+    std::vector<int> Y_dims(dims, dims + num_dims);                 \
+    for (int i = 0; i < num_axes; ++i) {                            \
+      Y_dims[axes[i]] = 1;                                          \
+    }                                                               \
+    const int Y_size = std::accumulate(                             \
+        Y_dims.cbegin(), Y_dims.cend(), 1, std::multiplies<int>()); \
+    Sqrt<T, CPUContext>(Y_size, Y, Y, context);                     \
+  }
+CAFFE2_SPECIALIZED_REDUCE_L2(float)
+#undef CAFFE2_SPECIALIZED_REDUCE_L2
 
 namespace {
 
@@ -1645,31 +1714,101 @@ DEFINE_BROADCAST_BITWISE_BINARY_FUNCTION(BitwiseXor, std::bit_xor)
 
 #undef DELEGATE_BROADCAST_BINARY_FUNCTION
 
-template <>
-void RandUniform<float, CPUContext>(
-    const size_t n,
-    const float a,
-    const float b,
-    float* r,
-    CPUContext* context) {
-  std::uniform_real_distribution<float> distribution(a, b);
-  for (size_t i = 0; i < n; ++i) {
-    r[i] = distribution(context->RandGenerator());
+#define CAFFE2_RAND_UNIFORM_REAL(T)                                      \
+  template <>                                                            \
+  void RandUniform<T, CPUContext>(                                       \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    std::uniform_real_distribution<T> distribution(a, b);                \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = distribution(context->RandGenerator());                     \
+    }                                                                    \
   }
-}
+CAFFE2_RAND_UNIFORM_REAL(float);
+CAFFE2_RAND_UNIFORM_REAL(double);
+#undef CAFFE2_RAND_UNIFORM_REAL
 
-template <>
-void RandUniform<int, CPUContext>(
-    const size_t n,
-    const int a,
-    const int b,
-    int* r,
-    CPUContext* context) {
-  std::uniform_int_distribution<int> distribution(a, b);
-  for (size_t i = 0; i < n; ++i) {
-    r[i] = distribution(context->RandGenerator());
+#define CAFFE2_RAND_UNIFORM_CHAR(T)                                        \
+  template <>                                                              \
+  void RandUniform<T, CPUContext>(                                         \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) {   \
+    std::uniform_int_distribution<short> distribution((short)a, (short)b); \
+    for (size_t i = 0; i < n; ++i) {                                       \
+      r[i] = static_cast<T>(distribution(context->RandGenerator()));       \
+    }                                                                      \
   }
-}
+CAFFE2_RAND_UNIFORM_CHAR(int8_t);
+CAFFE2_RAND_UNIFORM_CHAR(uint8_t);
+#undef CAFFE2_RAND_UNIFORM_CHAR
+
+#define CAFFE2_RAND_UNIFORM_INT(T)                                       \
+  template <>                                                            \
+  void RandUniform<T, CPUContext>(                                       \
+      const size_t n, const T a, const T b, T* r, CPUContext* context) { \
+    std::uniform_int_distribution<T> distribution(a, b);                 \
+    for (size_t i = 0; i < n; ++i) {                                     \
+      r[i] = distribution(context->RandGenerator());                     \
+    }                                                                    \
+  }
+
+CAFFE2_RAND_UNIFORM_INT(int16_t);
+CAFFE2_RAND_UNIFORM_INT(int32_t);
+CAFFE2_RAND_UNIFORM_INT(int64_t);
+CAFFE2_RAND_UNIFORM_INT(uint16_t);
+CAFFE2_RAND_UNIFORM_INT(uint32_t);
+CAFFE2_RAND_UNIFORM_INT(uint64_t);
+#undef CAFFE2_RAND_UNIFORM_INT
+
+// This is not uniformly distributed between a and b.
+// It takes advantage of normal distribution to generate numbers
+// with mean = sum / n.
+// Ideally the algorithm should be generating n numbers between 0 and 1,
+// sum them up as scaled_sum, and use sum / scaled_sum to adjust the values
+// to between a and b.
+// The algorithm is non-trivial given the adjustment would be different towards
+// each value.
+#define CAFFE2_RAND_FIXED_SUM(T)                                        \
+  template <>                                                           \
+  void RandFixedSum<T, CPUContext>(                                     \
+      const size_t n,                                                   \
+      const T a,                                                        \
+      const T b,                                                        \
+      const T sum,                                                      \
+      T* r,                                                             \
+      CPUContext* context) {                                            \
+    CAFFE_ENFORCE_GE(a, 0);                                             \
+    CAFFE_ENFORCE_GE(sum / (double)n, a);                               \
+    CAFFE_ENFORCE_LE(sum / (double)n, b);                               \
+    T current_sum = 0;                                                  \
+    for (size_t i = 0; i < n - 1; ++i) {                                \
+      auto remaining_numbers = n - 1 - i;                               \
+      double mean = (sum - current_sum) / remaining_numbers;            \
+      double stdev = std::min(mean - a, b - mean);                      \
+      std::normal_distribution<double> distribution{mean, stdev / 4.0}; \
+      T value = distribution(context->RandGenerator());                 \
+      auto remaining_sum = sum - current_sum - value;                   \
+      if (value < a || remaining_sum > b * remaining_numbers) {         \
+        value = a;                                                      \
+      } else if (value > b || remaining_sum < a * remaining_numbers) {  \
+        value = b;                                                      \
+      }                                                                 \
+      r[i] = value;                                                     \
+      CAFFE_ENFORCE(a <= value && value <= b);                          \
+      current_sum += value;                                             \
+    }                                                                   \
+    r[n - 1] = sum - current_sum;                                       \
+    CAFFE_ENFORCE(a <= r[n - 1] && r[n - 1] <= b);                      \
+  }
+CAFFE2_RAND_FIXED_SUM(float);
+CAFFE2_RAND_FIXED_SUM(double);
+CAFFE2_RAND_FIXED_SUM(int8_t);
+CAFFE2_RAND_FIXED_SUM(int16_t);
+CAFFE2_RAND_FIXED_SUM(int32_t);
+CAFFE2_RAND_FIXED_SUM(int64_t);
+CAFFE2_RAND_FIXED_SUM(uint8_t);
+CAFFE2_RAND_FIXED_SUM(uint16_t);
+CAFFE2_RAND_FIXED_SUM(uint32_t);
+CAFFE2_RAND_FIXED_SUM(uint64_t);
+#undef CAFFE2_RAND_FIXED_SUM
 
 #define CAFFE2_SPECIALIZED_RAND_UNIFORM_UNIQUE(T)                      \
   template <>                                                          \
@@ -2337,7 +2476,7 @@ namespace {
 
 #ifdef CAFFE2_USE_HPTT
 
-bool TryTransposeWithHPTT(
+bool TransposeWithHPTT(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -2372,6 +2511,62 @@ bool TryTransposeWithHPTT(
 
 #endif // CAFFE2_USE_HPTT
 
+template <typename T>
+void Tranpose2D(const int rows, const int cols, const T* X, T* Y);
+
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                          \
+  template <>                                                            \
+  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+    Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                  \
+  }
+DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
+DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
+#undef DELEGATE_TRANSPOSE_2D_FUNCTION
+
+#endif // CAFFE2_USE_MKL
+
+#define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                               \
+  template <>                                                            \
+  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+    EigenMatrixMap<T>(Y, rows, cols) =                                   \
+        ConstEigenMatrixMap<T>(X, cols, rows).transpose();               \
+  }
+
+#ifndef CAFFE2_USE_MKL
+
+template <>
+void Tranpose2D<float>(
+    const int rows,
+    const int cols,
+    const float* X,
+    float* Y) {
+#ifdef CAFFE2_USE_HPTT
+  const std::array<int, 2> dims = {rows, cols};
+  const std::array<int, 2> axes = {1, 0};
+  if (TransposeWithHPTT(2, dims.data(), axes.data(), X, Y)) {
+    return;
+  }
+#endif // CAFFE2_USE_HPTT
+  EigenMatrixMap<float>(Y, rows, cols) =
+      ConstEigenMatrixMap<float>(X, cols, rows).transpose();
+}
+
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(double)
+
+#endif // CAFFE2_USE_MKL
+
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(int)
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(TIndex)
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(long)
+#endif
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(std::uint8_t)
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(std::uint16_t)
+
+#undef CAFFE2_SPECIALIZED_TRANSPOSE_2D
+
 std::vector<int>
 ComputeXStrides(const int ndim, const int* dims, const int* axes) {
   std::vector<int> x_strides(ndim);
@@ -2388,7 +2583,7 @@ ComputeXStrides(const int ndim, const int* dims, const int* axes) {
 }
 
 template <typename T>
-void TransposeCPUImpl(
+void TransposeND(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -2408,10 +2603,6 @@ void TransposeCPUImpl(
   const int itr_axes = ndim - num_shared_idx;
   const int num_blocks = std::accumulate(
       Y_dims.cbegin(), Y_dims.cbegin() + itr_axes, 1, std::multiplies<int>());
-  if (ndim < 2 || itr_axes == 0) {
-    std::memcpy(Y, X, num_blocks * block_size * sizeof(T));
-    return;
-  }
   const std::vector<int> X_strides = ComputeXStrides(itr_axes, dims, axes);
   std::vector<int> index(itr_axes, 0);
   for (int Y_index = 0; Y_index < num_blocks; ++Y_index) {
@@ -2429,23 +2620,52 @@ void TransposeCPUImpl(
   }
 }
 
-} // namespace
+template <typename T>
+void TransposeCPUImpl(
+    const int ndim,
+    const int* dims,
+    const int* axes,
+    const T* X,
+    T* Y) {
+  if (utils::IsIdentityPermutation(ndim, axes)) {
+    const int size =
+        std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());
+    std::memcpy(Y, X, size * sizeof(T));
+    return;
+  }
+  if (ndim == 2) {
+    Tranpose2D<T>(dims[0], dims[1], X, Y);
+  } else {
+    TransposeND<T>(ndim, dims, axes, X, Y);
+  }
+}
 
 template <>
-void Transpose<float, CPUContext>(
+void TransposeCPUImpl(
     const int ndim,
     const int* dims,
     const int* axes,
     const float* X,
-    float* Y,
-    CPUContext* /* context */) {
-#ifdef CAFFE2_USE_HPTT
-  if (TryTransposeWithHPTT(ndim, dims, axes, X, Y)) {
+    float* Y) {
+  if (utils::IsIdentityPermutation(ndim, axes)) {
+    const int size =
+        std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());
+    std::memcpy(Y, X, size * sizeof(float));
     return;
   }
-#endif // CAFFE2_USE_HPTT
-  TransposeCPUImpl(ndim, dims, axes, X, Y);
+  if (ndim == 2) {
+    Tranpose2D<float>(dims[0], dims[1], X, Y);
+  } else {
+#ifdef CAFFE2_USE_HPTT
+    if (TransposeWithHPTT(ndim, dims, axes, X, Y)) {
+      return;
+    }
+#endif
+    TransposeND<float>(ndim, dims, axes, X, Y);
+  }
 }
+
+} // namespace
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE(T)       \
   template <>                                 \
@@ -2458,6 +2678,7 @@ void Transpose<float, CPUContext>(
       CPUContext* /* context */) {            \
     TransposeCPUImpl(ndim, dims, axes, X, Y); \
   }
+CAFFE2_SPECIALIZED_TRANSPOSE(float)
 CAFFE2_SPECIALIZED_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_TRANSPOSE(int)
 CAFFE2_SPECIALIZED_TRANSPOSE(TIndex)

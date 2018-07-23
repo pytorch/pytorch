@@ -22,8 +22,9 @@ ${Tensor}::${Tensor}(Context* context, ${THTensor} * tensor)
 : TensorImpl(&context->getType(Backend::${Backend},ScalarType::${ScalarName})),
   tensor(tensor),
   context(context) {}
+
 ${Tensor}::~${Tensor}() {
-  ${THTensor}_free(${state,} tensor);
+  if (tensor) tensor->release();
 }
 
 const char * ${Tensor}::toString() const {
@@ -31,7 +32,9 @@ const char * ${Tensor}::toString() const {
 }
 
 IntList ${Tensor}::sizes() const {
-  return IntList(tensor->size,dim());
+  // NB: dim in tensor is not synchronized with THTensor, so it's
+  // important to apply dim here
+  return IntList(THTensor_getSizePtr(tensor), dim());
 }
 
 int64_t ${Tensor}::dim() const {
@@ -44,9 +47,15 @@ const char * ${Tensor}::typeString() {
   return "${Type}";
 }
 void * ${Tensor}::unsafeGetTH(bool retain) {
-  if (retain)
-      ${THTensor}_retain(${state,} tensor);
+  if (retain) {
+    tensor->retain();
+  }
   return tensor;
+}
+
+void ${Tensor}::release_resources() {
+  tensor->release();
+  tensor = nullptr;
 }
 
 ${TensorDenseOrSparse}

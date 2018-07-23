@@ -6,8 +6,8 @@ static inline void THNN_(Im2Col_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
                          THTensor *gradOutput,
-                         int kH, int kW, int dH, int dW,
-                         int padH, int padW, int sH, int sW) {
+                         int64_t kH, int64_t kW, int64_t dH, int64_t dW,
+                         int64_t padH, int64_t padW, int64_t sH, int64_t sW) {
 
   THArgCheck(kW > 0 && kH > 0, 4,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
@@ -16,21 +16,21 @@ static inline void THNN_(Im2Col_shapeCheck)(
   THArgCheck(sW > 0 && sH > 0, 10,
              "stride should be greater than zero, but got sH: %d sW: %d", sH, sW);
 
-  int ndim = THTensor_(nDimension)(input);
+  int64_t ndim = THTensor_(nDimension)(input);
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
                 "Expected non-empty 3D or 4D input tensor, but got input of shape %s");
 
-  int dim_batch = 0;
+  int64_t dim_batch = 0;
   if (ndim == 3) {
     dim_batch = -1;
   }
-  int nInputPlane  = THTensor_(size)(input, dim_batch + 1);
-  int inputHeight  = THTensor_(size)(input, dim_batch + 2);
-  int inputWidth   = THTensor_(size)(input, dim_batch + 3);
-  int outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
-  int outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
-  int nOutputPlane = nInputPlane * kW * kH;
-  int outputLength = outputHeight * outputWidth;
+  int64_t nInputPlane  = THTensor_(size)(input, dim_batch + 1);
+  int64_t inputHeight  = THTensor_(size)(input, dim_batch + 2);
+  int64_t inputWidth   = THTensor_(size)(input, dim_batch + 3);
+  int64_t outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
+  int64_t outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
+  int64_t nOutputPlane = nInputPlane * kW * kH;
+  int64_t outputLength = outputHeight * outputWidth;
 
   if (outputHeight < 1 || outputWidth < 1) {
     THError("Given input with spatial size (%d, %d), kernel_size=(%d, %d), "
@@ -46,10 +46,10 @@ void THNN_(Im2Col_updateOutput)(
            THNNState *state,
            THTensor *input,
            THTensor *output,
-           int kH, int kW,
-           int dH, int dW,
-           int padH, int padW,
-           int sH, int sW) {
+           int64_t kH, int64_t kW,
+           int64_t dH, int64_t dW,
+           int64_t padH, int64_t padW,
+           int64_t sH, int64_t sW) {
 
   THNN_(Im2Col_shapeCheck)(state, input, NULL, kH, kW, dH, dW, padH, padW, sH, sW);
 
@@ -57,18 +57,18 @@ void THNN_(Im2Col_updateOutput)(
   bool batched_input = true;
   if (input->dim() == 3) {
     batched_input = false;
-    THTensor_(resize4d)(input, 1, input->size[0], input->size[1], input->size[2]);
+    THTensor_(resize4d)(input, 1, input->size(0), input->size(1), input->size(2));
   }
 
-  int batchSize    = THTensor_(size)(input, 0);
-  int nInputPlane  = THTensor_(size)(input, 1);
-  int inputHeight  = THTensor_(size)(input, 2);
-  int inputWidth   = THTensor_(size)(input, 3);
+  int64_t batchSize    = THTensor_(size)(input, 0);
+  int64_t nInputPlane  = THTensor_(size)(input, 1);
+  int64_t inputHeight  = THTensor_(size)(input, 2);
+  int64_t inputWidth   = THTensor_(size)(input, 3);
 
-  int outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
-  int outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
-  int nOutputPlane = nInputPlane * kW * kH;
-  int outputLength = outputHeight * outputWidth;
+  int64_t outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
+  int64_t outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
+  int64_t nOutputPlane = nInputPlane * kW * kH;
+  int64_t outputLength = outputHeight * outputWidth;
 
   THTensor_(resize3d)(output, batchSize, nOutputPlane, outputLength);
   THTensor_(zero)(output);
@@ -76,7 +76,7 @@ void THNN_(Im2Col_updateOutput)(
   THTensor *input_n = THTensor_(new)();
   THTensor *output_n = THTensor_(new)();
 
-  for (int elt = 0; elt < batchSize; elt++) {
+  for (int64_t elt = 0; elt < batchSize; elt++) {
     THTensor_(select)(input_n, input, 0, elt);
     THTensor_(select)(output_n, output, 0, elt);
 
@@ -102,11 +102,11 @@ void THNN_(Im2Col_updateGradInput)(
            THNNState *state,
            THTensor *gradOutput,
            THTensor *gradInput,
-           int inputHeight, int inputWidth,
-           int kH, int kW,
-           int dH, int dW,
-           int padH, int padW,
-           int sH, int sW) {
+           int64_t inputHeight, int64_t inputWidth,
+           int64_t kH, int64_t kW,
+           int64_t dH, int64_t dW,
+           int64_t padH, int64_t padW,
+           int64_t sH, int64_t sW) {
 
 
   THNN_(Col2Im_updateOutput)(state, gradOutput, gradInput,

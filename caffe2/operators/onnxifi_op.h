@@ -73,26 +73,19 @@ class OnnxifiOp final : public Operator<Context> {
     auto weight_descs = BuildInitializationList(
         &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
 
-    ::ONNX_NAMESPACE::ModelProto onnx_model;
-    ParseProtoFromLargeString(onnx_model_str, &onnx_model);
-    onnx_model_str.clear();
-    onnx_model.SerializeToString(&onnx_model_str);
-
     // Build the Onnxifi engine
     // TODO: In spec, backends are hot-pluggable, so two calls to
     // onnxGetBackendIDs may result in different number of backend. And we
     // should retry until it get consistent. For now, we don't do that.
     CAFFE_ENFORCE_EQ(
         lib_->onnxGetBackendIDs(nullptr, &num_backends_),
-        ONNXIFI_STATUS_SUCCESS);
-    backend_ids_.resize(num_backends_);
-    size_t num_backends = 0;
-    CAFFE_ENFORCE_EQ(
-        lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends),
-        ONNXIFI_STATUS_SUCCESS);
-
-    CAFFE_ENFORCE_LT(
+        ONNXIFI_STATUS_FALLBACK);
+    CAFFE_ENFORCE_GT(
         num_backends_, 0, "At least 1 onnxifi backend should be available");
+    backend_ids_.resize(num_backends_);
+    CAFFE_ENFORCE_EQ(
+        lib_->onnxGetBackendIDs(backend_ids_.data(), &num_backends_),
+        ONNXIFI_STATUS_SUCCESS);
 
     // TODO: choose backend id
     CAFFE_ENFORCE_EQ(

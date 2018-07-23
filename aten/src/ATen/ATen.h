@@ -21,3 +21,4 @@
 #include "ATen/TensorOptions.h"
 #include "ATen/Layout.h"
 #include "ATen/OptionsGuard.h"
+#include "ATen/CUDAGuard.h"

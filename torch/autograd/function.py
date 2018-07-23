@@ -204,12 +204,12 @@ def once_differentiable(fn):
         if not requires_grad:
             return outputs
 
-        err_fn = torch._C._functions.DelayedError(
-            b"trying to differentiate twice a function that was marked"
-            b"with @once_differentiable")
-
         if not isinstance(outputs, tuple):
             outputs = (outputs,)
+
+        err_fn = torch._C._functions.DelayedError(
+            b"trying to differentiate twice a function that was marked"
+            b"with @once_differentiable", len(outputs))
 
         # Create aliases of each output that has requires_grad=True. We need
         # at least one of the inputs to err_fn to require grad so that the

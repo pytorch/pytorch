@@ -91,6 +91,10 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
     tensor_descriptor.dataType = ONNXIFI_DATATYPE_FLOAT32;
     tensor_descriptor.memoryType = ONNXIFI_MEMORY_TYPE_CPU;
     tensor_descriptor.dimensions = tensor_dims.size();
+    CAFFE_ENFORCE(
+        tensor_descriptor.dimensions != 0,
+        tensor_descriptor.name,
+        " has 0 dim");
     output_shapes_.emplace_back(tensor_dims.cbegin(), tensor_dims.cend());
     tensor_descriptor.shape = output_shapes_.back().data();
     tensor_descriptor.buffer =
@@ -107,21 +111,20 @@ bool OnnxifiOp<float, CPUContext>::RunOnDevice() {
       ONNXIFI_STATUS_SUCCESS);
 
   onnxMemoryFence input_fence;
-  input_fence.event = nullptr;
   input_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
   CAFFE_ENFORCE_EQ(
-      lib_->onnxInitEvent(backend_, input_fence.event), ONNXIFI_STATUS_SUCCESS);
+      lib_->onnxInitEvent(backend_, &input_fence.event),
+      ONNXIFI_STATUS_SUCCESS);
   onnxMemoryFence output_fence;
   output_fence.type = ONNXIFI_SYNCHRONIZATION_EVENT;
-  output_fence.event = nullptr;
 
   // Call the asycn run on backend, singal event on input fence and wait for the
   // event on output fence
   CAFFE_ENFORCE_EQ(
+      lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
+  CAFFE_ENFORCE_EQ(
       lib_->onnxRunGraph(graph_, &input_fence, &output_fence),
       ONNXIFI_STATUS_SUCCESS);
-  CAFFE_ENFORCE_EQ(
-      lib_->onnxSignalEvent(input_fence.event), ONNXIFI_STATUS_SUCCESS);
   CAFFE_ENFORCE_EQ(
       lib_->onnxWaitEvent(output_fence.event), ONNXIFI_STATUS_SUCCESS);
 

@@ -59,36 +59,51 @@ ERMatXf ComputeAllAnchors(
     float feat_stride) {
   const auto K = height * width;
   const auto A = anchors.dim(0);
+  const auto box_dim = anchors.dim(1);
+  CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
   ERMatXf shift_x = (ERVecXf::LinSpaced(width, 0.0, width - 1.0) * feat_stride)
                         .replicate(height, 1);
   ERMatXf shift_y = (EVecXf::LinSpaced(height, 0.0, height - 1.0) * feat_stride)
                         .replicate(1, width);
-  Eigen::MatrixXf shifts(K, 4);
-  shifts << ConstEigenVectorMap<float>(shift_x.data(), shift_x.size()),
-      ConstEigenVectorMap<float>(shift_y.data(), shift_y.size()),
-      ConstEigenVectorMap<float>(shift_x.data(), shift_x.size()),
-      ConstEigenVectorMap<float>(shift_y.data(), shift_y.size());
+  Eigen::MatrixXf shifts(K, box_dim);
+  if (box_dim == 4) {
+    // Upright boxes in [x1, y1, x2, y2] format
+    shifts << ConstEigenVectorMap<float>(shift_x.data(), shift_x.size()),
+        ConstEigenVectorMap<float>(shift_y.data(), shift_y.size()),
+        ConstEigenVectorMap<float>(shift_x.data(), shift_x.size()),
+        ConstEigenVectorMap<float>(shift_y.data(), shift_y.size());
+  } else {
+    // Rotated boxes in [ctr_x, ctr_y, w, h, angle] format.
+    // Zero shift for width, height and angle.
+    ERMatXf shift_zero = ERMatXf::Constant(height, width, 0.0);
+    shifts << ConstEigenVectorMap<float>(shift_x.data(), shift_x.size()),
+        ConstEigenVectorMap<float>(shift_y.data(), shift_y.size()),
+        ConstEigenVectorMap<float>(shift_zero.data(), shift_zero.size()),
+        ConstEigenVectorMap<float>(shift_zero.data(), shift_zero.size()),
+        ConstEigenVectorMap<float>(shift_zero.data(), shift_zero.size());
+  }
 
   // Broacast anchors over shifts to enumerate all anchors at all positions
   // in the (H, W) grid:
-  //   - add A anchors of shape (1, A, 4) to
-  //   - K shifts of shape (K, 1, 4) to get
-  //   - all shifted anchors of shape (K, A, 4)
-  //   - reshape to (K*A, 4) shifted anchors
+  //   - add A anchors of shape (1, A, box_dim) to
+  //   - K shifts of shape (K, 1, box_dim) to get
+  //   - all shifted anchors of shape (K, A, box_dim)
+  //   - reshape to (K*A, box_dim) shifted anchors
   ConstEigenMatrixMap<float> anchors_vec(
-      anchors.template data<float>(), 1, A * 4);
+      anchors.template data<float>(), 1, A * box_dim);
   // equivalent to python code
   //  all_anchors = (
-  //        self._model.anchors.reshape((1, A, 4)) +
-  //        shifts.reshape((1, K, 4)).transpose((1, 0, 2)))
-  //    all_anchors = all_anchors.reshape((K * A, 4))
-  // all_anchors_vec: (K, A * 4)
+  //        self._model.anchors.reshape((1, A, box_dim)) +
+  //        shifts.reshape((1, K, box_dim)).transpose((1, 0, 2)))
+  //    all_anchors = all_anchors.reshape((K * A, box_dim))
+  // all_anchors_vec: (K, A * box_dim)
   ERMatXf all_anchors_vec =
       anchors_vec.replicate(K, 1) + shifts.rowwise().replicate(A);
 
-  // use the following to reshape to (K * A, 4)
-  // Eigen::Map<const ERMatXf> all_anchors(all_anchors_vec.data(), K * A, 4);
+  // use the following to reshape to (K * A, box_dim)
+  // Eigen::Map<const ERMatXf> all_anchors(
+  //            all_anchors_vec.data(), K * A, box_dim);
 
   return all_anchors_vec;
 }
@@ -106,23 +121,25 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
   const auto& post_nms_topN = rpn_post_nms_topN_;
   const auto& nms_thresh = rpn_nms_thresh_;
   const auto& min_size = rpn_min_size_;
+  const int box_dim = static_cast<int>(all_anchors.cols());
+  CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
   // Transpose and reshape predicted bbox transformations to get them
   // into the same order as the anchors:
-  //   - bbox deltas will be (4 * A, H, W) format from conv output
-  //   - transpose to (H, W, 4 * A)
-  //   - reshape to (H * W * A, 4) where rows are ordered by (H, W, A)
+  //   - bbox deltas will be (box_dim * A, H, W) format from conv output
+  //   - transpose to (H, W, box_dim * A)
+  //   - reshape to (H * W * A, box_dim) where rows are ordered by (H, W, A)
   //     in slowest to fastest order to match the enumerated anchors
   CAFFE_ENFORCE_EQ(bbox_deltas_tensor.ndim(), 3);
-  CAFFE_ENFORCE_EQ(bbox_deltas_tensor.dim(0) % 4, 0);
-  auto A = bbox_deltas_tensor.dim(0) / 4;
+  CAFFE_ENFORCE_EQ(bbox_deltas_tensor.dim(0) % box_dim, 0);
+  auto A = bbox_deltas_tensor.dim(0) / box_dim;
   auto H = bbox_deltas_tensor.dim(1);
   auto W = bbox_deltas_tensor.dim(2);
   // equivalent to python code
-  //  bbox_deltas = bbox_deltas.transpose((1, 2, 0)).reshape((-1, 4))
-  ERArrXXf bbox_deltas(H * W * A, 4);
-  Eigen::Map<ERMatXf>(bbox_deltas.data(), H * W, 4 * A) =
-      Eigen::Map<const ERMatXf>(bbox_deltas_tensor.data(), A * 4, H * W)
+  //  bbox_deltas = bbox_deltas.transpose((1, 2, 0)).reshape((-1, box_dim))
+  ERArrXXf bbox_deltas(H * W * A, box_dim);
+  Eigen::Map<ERMatXf>(bbox_deltas.data(), H * W, box_dim * A) =
+      Eigen::Map<const ERMatXf>(bbox_deltas_tensor.data(), A * box_dim, H * W)
           .transpose();
   CAFFE_ENFORCE_EQ(bbox_deltas.rows(), all_anchors.rows());
 
@@ -173,11 +190,15 @@ void GenerateProposalsOp<CPUContext>::ProposalsForOneImage(
       bbox_deltas_sorted,
       bbox_weights,
       utils::BBOX_XFORM_CLIP_DEFAULT,
-      correct_transform_coords_);
+      correct_transform_coords_,
+      angle_bound_on_,
+      angle_bound_lo_,
+      angle_bound_hi_);
 
   // 2. clip proposals to image (may result in proposals with zero area
   // that will be removed in the next step)
-  proposals = utils::clip_boxes(proposals, im_info[0], im_info[1]);
+  proposals =
+      utils::clip_boxes(proposals, im_info[0], im_info[1], clip_angle_thresh_);
 
   // 3. remove predicted boxes with either height or width < min_size
   auto keep = utils::filter_boxes(proposals, min_size, im_info);
@@ -214,31 +235,34 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   const auto height = scores.dim(2);
   const auto width = scores.dim(3);
   const auto K = height * width;
+  const auto box_dim = anchors.dim(1);
+  CAFFE_ENFORCE(box_dim == 4 || box_dim == 5);
 
-  // bbox_deltas: (num_images, A * 4, H, W)
+  // bbox_deltas: (num_images, A * box_dim, H, W)
   CAFFE_ENFORCE_EQ(
-      bbox_deltas.dims(), (vector<TIndex>{num_images, 4 * A, height, width}));
+      bbox_deltas.dims(),
+      (vector<TIndex>{num_images, box_dim * A, height, width}));
 
   // im_info_tensor: (num_images, 3), format [height, width, scale; ...]
   CAFFE_ENFORCE_EQ(im_info_tensor.dims(), (vector<TIndex>{num_images, 3}));
   CAFFE_ENFORCE(
       im_info_tensor.template IsType<float>(), im_info_tensor.meta().name());
 
-  // anchors: (A, 4)
-  CAFFE_ENFORCE_EQ(anchors.dims(), (vector<TIndex>{A, 4}));
+  // anchors: (A, box_dim)
+  CAFFE_ENFORCE_EQ(anchors.dims(), (vector<TIndex>{A, box_dim}));
   CAFFE_ENFORCE(anchors.template IsType<float>(), anchors.meta().name());
 
   // Broadcast the anchors to all pixels
   auto all_anchors_vec =
       utils::ComputeAllAnchors(anchors, height, width, feat_stride_);
-  Eigen::Map<const ERMatXf> all_anchors(all_anchors_vec.data(), K * A, 4);
+  Eigen::Map<const ERMatXf> all_anchors(all_anchors_vec.data(), K * A, box_dim);
 
   Eigen::Map<const ERArrXXf> im_info(
       im_info_tensor.data<float>(),
       im_info_tensor.dim(0),
       im_info_tensor.dim(1));
 
-  const int roi_col_count = 5;
+  const int roi_col_count = box_dim + 1;
   out_rois->Resize(0, roi_col_count);
   out_rois_probs->Resize(0);
 
@@ -274,9 +298,9 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
     int csz = im_i_boxes.rows();
 
     // write rois
-    Eigen::Map<ERArrXXf> cur_rois(out_rois_ptr, csz, 5);
+    Eigen::Map<ERArrXXf> cur_rois(out_rois_ptr, csz, roi_col_count);
     cur_rois.col(0).setConstant(i);
-    cur_rois.block(0, 1, csz, 4) = im_i_boxes;
+    cur_rois.block(0, 1, csz, box_dim) = im_i_boxes;
 
     // write rois_probs
     Eigen::Map<EArrXf>(out_rois_probs_ptr, csz) = im_i_probs;
@@ -318,6 +342,29 @@ non-maximum suppression is applied to generate the final bounding boxes.
     .Arg("post_nms_topN", "(int) RPN_POST_NMS_TOP_N")
     .Arg("nms_thresh", "(float) RPN_NMS_THRESH")
     .Arg("min_size", "(float) RPN_MIN_SIZE")
+    .Arg(
+        "correct_transform_coords",
+        "bool (default false), Correct bounding box transform coordates,"
+        " see bbox_transform() in boxes.py "
+        "Set to true to match the detectron code, set to false for backward"
+        " compatibility")
+    .Arg(
+        "angle_bound_on",
+        "bool (default true). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "angle_bound_lo",
+        "int (default -90 degrees). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "angle_bound_hi",
+        "int (default 90 degrees). If set, for rotated boxes, angle is "
+        "normalized to be within [angle_bound_lo, angle_bound_hi].")
+    .Arg(
+        "clip_angle_thresh",
+        "float (default 1.0 degrees). For RRPN, clip almost horizontal boxes "
+        "within this threshold of tolerance for backward compatibility. "
+        "Set to negative value for no clipping.")
     .Input(0, "scores", "Scores from conv layer, size (img_count, A, H, W)")
     .Input(
         1,

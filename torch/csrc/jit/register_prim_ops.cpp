@@ -1,6 +1,5 @@
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
@@ -35,27 +34,6 @@ Operation noop(Node* n) {
 RegisterOperators reg({
 
     Operator(
-        prim::CppOp,
-        [](Node* node) {
-          CppOp* op = static_cast<CppOp*>(node);
-          std::shared_ptr<autograd::Function> func = op->fn;
-          JIT_ASSERT(!hasHandleOutput(op));
-          auto num_inputs = op->inputs().size();
-          return [=](Stack& stack) {
-            autograd::variable_list v_inputs;
-            for (size_t i = 0; i < num_inputs; i++) {
-              v_inputs.push_back(std::move(peek(stack, i, num_inputs)));
-            }
-            drop(stack, num_inputs);
-            autograd::variable_list v_outputs = (*func)(v_inputs);
-            for (auto& output : v_outputs) {
-              stack.push_back(output);
-            }
-            return 0;
-          };
-        }),
-
-    Operator(
         prim::FusionGroup,
         [](Node* node) {
           auto fusion_fn = sharedFusionCompiler().getOrCompile(node);
@@ -64,7 +42,10 @@ RegisterOperators reg({
             autograd::profiler::RecordFunction record("FusionGroup");
             std::vector<at::Tensor> toutputs;
             // TODO: have fusion_fn work off of a stack as well
-            fusion_fn->launch(last(stack, num_inputs), toutputs);
+            auto tinputs = fmap(last(stack, num_inputs), [](const IValue& v) {
+              return v.toTensor();
+            });
+            fusion_fn->launch(tinputs, toutputs);
             drop(stack, num_inputs);
             stack.insert(stack.end(), toutputs.begin(), toutputs.end());
             return 0;
@@ -92,27 +73,13 @@ RegisterOperators reg({
           };
         }),
     Operator(
-        prim::ReplaceIfUndef,
-        [](Node* n) {
-          return [](Stack& stack) {
-            auto alternate = pop(stack);
-            auto result = pop(stack);
-            if (result.defined()) {
-              stack.push_back(std::move(result));
-            } else {
-              stack.push_back(std::move(alternate));
-            }
-            return 0;
-          };
-        }),
-
-    Operator(
         prim::Print,
         [](Node* node) {
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
             bool first = true;
-            for (at::Tensor i : last(stack, num_inputs)) {
+            for (const IValue& i_ : last(stack, num_inputs)) {
+              auto i = i_.toTensor();
               if (!first)
                 std::cout << " ";
               first = false;
@@ -136,7 +103,7 @@ RegisterOperators reg({
     // and inst.outputs
     Operator(prim::Load, noop),
     // x, y = Store
-    // stores values from stack into registers, the actual callback does
+    // stores vales from stack into registers, the actual callback does
     // nothing since the stack manipulation is already encoded in inst.inputs
     // and inst.outputs
     Operator(prim::Store, noop),
@@ -154,8 +121,8 @@ RegisterOperators reg({
         onnx::Reshape,
         [](Node* node) {
           return [=](Stack& stack) {
-            auto shape = pop(stack).contiguous();
-            auto input = pop(stack);
+            auto shape = pop(stack).toTensor().contiguous();
+            auto input = pop(stack).toTensor();
             JIT_ASSERT(shape.ndimension() == 1);
             at::IntList shape_list(shape.data<int64_t>(), shape.size(0));
             stack.push_back(input.reshape(shape_list));
@@ -166,7 +133,7 @@ RegisterOperators reg({
         onnx::Shape,
         [](Node* node) {
           return [=](Stack& stack) {
-            auto t = pop(stack);
+            auto t = pop(stack).toTensor();
             at::IntList sizes = t.sizes();
             auto sizes_tensor = torch::empty(
                 {static_cast<int64_t>(sizes.size())}, at::dtype(at::kLong));
@@ -187,8 +154,8 @@ RegisterOperators reg({
           auto false_ = at::full({}, 0, at::kLong);
           return [=](Stack& stack) {
             bool result = false;
-            for (const at::Tensor& t : last(stack, num_inputs)) {
-              if (t.defined()) {
+            for (const IValue& t : last(stack, num_inputs)) {
+              if (std::move(t).toTensor().defined()) {
                 result = true;
                 break;
               }
@@ -203,8 +170,8 @@ RegisterOperators reg({
         prim::AutogradAdd,
         [](Node* node) {
           return [=](Stack& stack) {
-            auto a = pop(stack);
-            auto b = pop(stack);
+            auto a = pop(stack).toTensor();
+            auto b = pop(stack).toTensor();
             if (!a.defined())
               stack.push_back(b);
             else if (!b.defined())

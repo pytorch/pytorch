@@ -2,7 +2,6 @@
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/functions/special.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/jit/fusion_compiler.h"
@@ -10,6 +9,7 @@
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/variable_tensor_functions.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
 
@@ -365,13 +365,6 @@ public:
   }
 };
 
-bool hasHandleOutput(Node * n) {
-  if(n->outputs().size() == 0)
-    return false;
-  auto & last = n->outputs().back();
-  return last->isHandle() && last->uses().size() > 0; // don't bother creating a handle if it is never used
-}
-
 // We need some lists for inputs and outputs. To keep all the memory
 // contiguous we allocate a single vector and use offsets into the vector
 // which are stored in the ListHandle struct
@@ -418,7 +411,7 @@ struct CodeImpl {
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = tensor_as<int64_t>(pop(stack).toTensor());
       return (t == 0) ? offset : 0;
     };
     inst.debug_name = prim::JumpZ;
@@ -430,7 +423,7 @@ struct CodeImpl {
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = tensor_as<int64_t>(pop(stack).toTensor());
       return (t != 0) ? offset : 0;
     };
     inst.debug_name = prim::JumpNZ;
@@ -637,7 +630,8 @@ struct CodeImpl {
     return [=](Stack& stack) mutable {
       autograd::profiler::RecordFunction record("GraphExecutor");
       auto inputs = last(stack, num_inputs);
-      variable_tensor_list tinputs(inputs.begin(), inputs.end());
+      variable_tensor_list tinputs(
+          fmap(inputs, [](const IValue& v) { return v.toTensor(); }));
       drop(stack, num_inputs);
       //TODO: has graph executor work from a stack as well
       variable_tensor_list toutputs = executor->run(variable_tensor_list(std::move(tinputs)));
@@ -782,7 +776,7 @@ struct InterpreterStateImpl {
   // in the case where it is true, then the interpreter and this array get copied
   // if this every becomes a bottleneck then we _should_ consider minimizing the
   // total number or register
-  std::vector<at::Tensor> registers;
+  std::vector<IValue> registers;
 
   // single buffer for input/output calls to ATen functions, so that we do not reallocate
   Stack stack;
@@ -807,7 +801,7 @@ InterpreterState::InterpreterState(const Code & function)
 InterpreterState::~InterpreterState() {}
 
 void InterpreterState::runOneStage(Stack & stack) {
-    return pImpl->runOneStage(stack);
+  return pImpl->runOneStage(stack);
 }
 
 const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {

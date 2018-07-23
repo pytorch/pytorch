@@ -1,5 +1,7 @@
 #include "ir.h"
 
+#include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
 
 #include <iostream>
@@ -14,7 +16,6 @@
 namespace torch { namespace jit {
 
 // Sigh, see https://stackoverflow.com/questions/8016780/undefined-reference-to-static-constexpr-char
-constexpr Symbol CppOp::Kind;
 constexpr Symbol PythonOp::Kind;
 
 constexpr int max_tensor_display_size = 10;
@@ -38,10 +39,6 @@ std::ostream& operator<<(std::ostream & out, const at::ArrayRef<T> & nodes) {
     printValueRef(out, n);
   }
   return out;
-}
-
-std::string CppOp::name() const {
-  return fn->name();
 }
 
 struct const_value_list_with_types {
@@ -169,8 +166,6 @@ std::ostream& printNode(std::ostream & out, size_t level, const Node * n, std::v
   IR_IFM_CONST(n,PythonOp)
     out << "^" << value->name();
     value->writeScalars(out);
-  IR_ELSEIFM_CONST(CppOp)
-    out << "CppOp[" << value->name() << "]";
   IR_ELSE()
     if(n->hasAttribute(attr::Subgraph) && groups) {
       out << n->kind().toQualString() << "_" << groups->size();
@@ -289,10 +284,6 @@ void Node::lint() const {
       JIT_ASSERT(std::find(ALL_OF(input->uses_), Use(const_cast<Node*>(this), i)) != input->uses_.end());
       JIT_ASSERT(stage_ >= input->stage_);
       JIT_ASSERT(graph_->all_nodes.count(this) == 1);
-      // Handle invariant
-      if (i != inputs_.size() - 1) {
-        JIT_ASSERT(input->type()->kind() != TypeKind::HandleType);
-      }
       i++;
     }
   }
@@ -334,8 +325,6 @@ void Node::lint() const {
     }
     JIT_ASSERT(n_scalars == value->scalar_args.size());
     JIT_ASSERT(n_tensors == inputs_.size());
-  IR_ELSEIFM_CONST(CppOp)
-    // TODO: add invariants
   IR_ELSEIF(Eval)
     // TODO: add invariants
   // TODO: It's not good for these ops to be top-level, it makes cases longer.
@@ -577,6 +566,175 @@ Value* Value::setUniqueName(const std::string & name) {
   names[name] = this;
   unique_name_ = name;
   return this;
+}
+
+template<typename T>
+Value* Graph::insertConstant(T value) {
+  Node *n = create(prim::Constant);
+  insertNode(n);
+  auto t_value = as_tensor(value);
+  n->t_(attr::value, t_value.clone());
+  n->output()->inferTypeFrom(t_value);
+  return n->output();
+}
+
+// This is necessary, because integral literals are of type int by default,
+// and will dispatch to this function.
+template<>
+Value * Graph::insertConstant(int value) {
+  return insertConstant(static_cast<int64_t>(value));
+}
+
+template Value* Graph::insertConstant(int64_t value);
+template Value* Graph::insertConstant(double value);
+template Value* Graph::insertConstant(at::Tensor value);
+template Value* Graph::insertConstant(at::IntList value);
+template Value* Graph::insertConstant(at::Scalar value);
+
+namespace {
+
+// Of course any sane person would define this thing as a templated function, but
+// it so happens that clang 3.8 has a pretty annoying bug which makes it complain that
+// specializations are redefinitions of themselves, and so here we are.
+template<typename T>
+struct getattr {};
+
+template<>
+struct getattr<int64_t> {
+  int64_t operator()(Node *n, Symbol name) {
+    return n->i(name);
+  }
+};
+
+template<>
+struct getattr<double> {
+  double operator()(Node *n, Symbol name) {
+    return n->f(name);
+  }
+};
+
+template<>
+struct getattr<at::Tensor> {
+  at::Tensor operator()(Node *n, Symbol name) {
+    return n->t(name);
+  }
+};
+
+template<>
+struct getattr<std::vector<int64_t>> {
+  std::vector<int64_t> operator()(Node *n, Symbol name) {
+    return n->is(name);
+  }
+};
+
+} // anonymous namespace
+
+template<typename T>
+at::optional<T> Node::get(Symbol name) {
+  // TODO (apaszke): remove. this is in here for now just so that we can ensure
+  // we always use this in places where the node has a valid schema already
+  // (will make next commits easier).
+  if (!schema_) findSchema();
+  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
+  if (hasAttributes()) {
+    // If it has an attribute, then it is a constant. If it's missing, it means we're
+    // doing an invalid lookup and it should throw anyway.
+    return getattr<T>()(this, name);
+  }
+  auto inp = findInput(name);
+  const Argument & arg = inp.second;
+  if (!inp.first) {
+    return tensor_as<T>(arg.default_value.value());
+  }
+  Node *producer = inp.first->node();
+  if (producer->kind() != prim::Constant) return at::nullopt;
+  auto value = producer->t(attr::value);
+  return tensor_as<T>(std::move(value));
+}
+
+template at::optional<int64_t> Node::get(Symbol name);
+template at::optional<double> Node::get(Symbol name);
+template at::optional<at::Tensor> Node::get(Symbol name);
+template at::optional<std::vector<int64_t>> Node::get(Symbol name);
+
+at::optional<IValue> Node::get(Symbol name) {
+  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
+  if (hasAttribute(name)) {
+    switch (kindOf(name)) {
+      case AttributeKind::i:
+        return IValue{as_tensor(i(name))};
+      case AttributeKind::t:
+        return IValue{as_tensor(t(name))};
+      case AttributeKind::is:
+        return IValue{as_tensor(is(name))};
+      default:
+        throw std::runtime_error("get() NYI");
+    }
+  }
+  auto inp = findInput(name);
+  const Argument & arg = inp.second;
+  if (!inp.first) {
+    return IValue{arg.default_value.value()};
+  }
+  Node * producer = inp.first->node();
+  if (producer->kind() != prim::Constant) return at::nullopt;
+  auto value = producer->t(attr::value);
+  return IValue{std::move(value)};
+}
+
+Value* Node::input(Symbol name) {
+  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
+  if (hasAttribute(name)) {
+    switch (kindOf(name)) {
+      case AttributeKind::i:
+        return owningGraph()->insertConstant(i(name));
+      case AttributeKind::is:
+        return owningGraph()->insertConstant(is(name));
+      case AttributeKind::t:
+        return owningGraph()->insertConstant(t(name));
+      default:
+        throw std::runtime_error("getValue() NYI");
+    }
+  }
+  auto inp = findInput(name);
+  if (inp.first) return inp.first;
+  return owningGraph()->insertConstant(inp.second.default_value.value());
+}
+
+// XXX: the first coordinate can be a nullptr, which means that you should use
+// the default value for this arg, because it's optional and missing
+std::pair<Value*, const Argument&> Node::findInput(Symbol name) {
+  if (!schema_) {
+    findSchema();
+  }
+  auto name_str = name.toUnqualString();
+  size_t input_i = 0;
+  for (size_t i = 0; i < schema_->arguments.size(); ++i) {
+    const auto & arg = schema_->arguments[i];
+    if (hasAttributeS(arg.name)) continue;
+    if (arg.name == name_str) {
+      if (input_i < inputs().size()) {
+        return std::pair<Value*, const Argument&>(input(input_i), arg);
+      } else {
+        JIT_ASSERT(arg.default_value);
+        return std::pair<Value*, const Argument&>(nullptr, arg);
+      }
+    }
+    input_i++;
+  }
+  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+}
+
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+  if (!sig(signature_literal).matches(this)) return false;
+  for (Symbol s : const_inputs) {
+    if (!is_constant(s)) return false;
+  }
+  return true;
+}
+
+void Node::findSchema() {
+  schema_ = &getOperatorFor(this).schema;
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

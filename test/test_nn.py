@@ -15,6 +15,7 @@ import hashlib
 import os
 
 import torch
+from torch._six import inf, nan
 import torch.backends.cudnn as cudnn
 import torch.nn as nn
 import torch.nn.functional as F
@@ -733,6 +734,20 @@ class TestNN(NNTestCase):
         module.__repr__()
         str(module)
 
+    def _test_alpha_dropout(self, cls, input):
+        mean = input.mean()
+        std = input.std()
+
+        for p in [0.2, 0.5, 0.8]:
+            module = cls(p)
+            input_var = torch.tensor(input, requires_grad=True)
+            output = module(input_var)
+            # output mean should be close to input mean
+            self.assertLess(abs(output.data.mean() - mean), 0.1)
+            # output std should be close to input std
+            self.assertLess(abs(output.data.std() - std), 0.1)
+            output.backward(input)
+
     def test_parameters(self):
         def num_params(module):
             return len(list(module.parameters()))
@@ -1110,6 +1125,91 @@ class TestNN(NNTestCase):
         module_list.extend(s.modules())
         check()
 
+    def test_ModuleDict(self):
+        modules = OrderedDict([
+            ('act', nn.ReLU()),
+            ('conv', nn.Conv2d(10, 10, 5)),
+            ('fc', nn.Linear(5, 5)),
+        ])
+
+        module_dict = nn.ModuleDict(modules)
+
+        def check():
+            self.assertEqual(len(module_dict), len(modules))
+            for k1, m2 in zip(modules, module_dict.children()):
+                self.assertIs(modules[k1], m2)
+            for k1, k2 in zip(modules, module_dict):
+                self.assertIs(modules[k1], module_dict[k2])
+            for k in module_dict:
+                self.assertIs(module_dict[k], modules[k])
+            for k in module_dict.keys():
+                self.assertIs(module_dict[k], modules[k])
+            for k, v in module_dict.items():
+                self.assertIs(modules[k], v)
+            for k1, m2 in zip(modules, module_dict.values()):
+                self.assertIs(modules[k1], m2)
+            for k in modules.keys():
+                self.assertTrue(k in module_dict)
+        check()
+
+        modules['conv'] = nn.Conv2d(3, 4, 3)
+        module_dict['conv'] = modules['conv']
+        check()
+
+        next_modules = [
+            ('fc2', nn.Linear(5, 5)),
+            ('act', nn.Sigmoid()),
+        ]
+        modules.update(next_modules)
+        module_dict.update(next_modules)
+        check()
+
+        next_modules = OrderedDict([
+            ('fc3', nn.Linear(5, 5)),
+            ('act2', nn.Sigmoid()),
+        ])
+        modules.update(next_modules)
+        module_dict.update(next_modules)
+        check()
+
+        next_modules = {
+            'fc4': nn.Linear(5, 5),
+            'act3': nn.Sigmoid()
+        }
+        modules.update(sorted(next_modules.items()))
+        module_dict.update(next_modules)
+        check()
+
+        del module_dict['fc']
+        del modules['fc']
+        check()
+
+        with self.assertRaises(TypeError):
+            module_dict.update(nn.ReLU())
+
+        with self.assertRaises(TypeError):
+            module_dict.update([nn.ReLU()])
+
+        with self.assertRaises(ValueError):
+            module_dict.update([[nn.ReLU()]])
+
+        with self.assertRaises(TypeError):
+            module_dict[1] = nn.ReLU()
+
+        s = nn.Sequential(modules)
+        module_dict = nn.ModuleDict(s.named_children())
+        check()
+
+        c = module_dict.pop('conv')
+        self.assertIs(c, modules['conv'])
+        modules.pop('conv')
+        check()
+
+        module_dict.clear()
+        self.assertEqual(len(module_dict), 0)
+        modules.clear()
+        check()
+
     def test_ParameterList(self):
         def make_param():
             return Parameter(torch.randn(10, 10))
@@ -1172,6 +1272,88 @@ class TestNN(NNTestCase):
         parameters = list(s.parameters())
         param_list = nn.ParameterList()
         param_list.extend(s.parameters())
+        check()
+
+    def test_ParameterDict(self):
+        parameters = OrderedDict([
+            ('p1', Parameter(torch.randn(10, 10))),
+            ('p2', Parameter(torch.randn(10, 10))),
+            ('p3', Parameter(torch.randn(10, 10))),
+        ])
+
+        parameter_dict = nn.ParameterDict(parameters)
+
+        def check():
+            self.assertEqual(len(parameter_dict), len(parameters))
+            for k1, m2 in zip(parameters, parameter_dict.parameters()):
+                self.assertIs(parameters[k1], m2)
+            for k1, k2 in zip(parameters, parameter_dict):
+                self.assertIs(parameters[k1], parameter_dict[k2])
+            for k in parameter_dict:
+                self.assertIs(parameter_dict[k], parameters[k])
+            for k in parameter_dict.keys():
+                self.assertIs(parameter_dict[k], parameters[k])
+            for k, v in parameter_dict.items():
+                self.assertIs(v, parameters[k])
+            for k1, m2 in zip(parameters, parameter_dict.values()):
+                self.assertIs(parameters[k1], m2)
+            for k in parameters.keys():
+                self.assertTrue(k in parameter_dict)
+
+        check()
+
+        parameters['p4'] = Parameter(torch.randn(10, 10))
+        parameter_dict['p4'] = parameters['p4']
+        check()
+
+        next_parameters = [
+            ('p5', Parameter(torch.randn(10, 10))),
+            ('p2', Parameter(torch.randn(10, 10))),
+        ]
+        parameters.update(next_parameters)
+        parameter_dict.update(next_parameters)
+        check()
+
+        next_parameters = OrderedDict([
+            ('p6', Parameter(torch.randn(10, 10))),
+            ('p5', Parameter(torch.randn(10, 10))),
+        ])
+        parameters.update(next_parameters)
+        parameter_dict.update(next_parameters)
+        check()
+
+        next_parameters = {
+            'p8': Parameter(torch.randn(10, 10)),
+            'p7': Parameter(torch.randn(10, 10))
+        }
+        parameters.update(sorted(next_parameters.items()))
+        parameter_dict.update(next_parameters)
+        check()
+
+        del parameter_dict['p3']
+        del parameters['p3']
+        check()
+
+        with self.assertRaises(TypeError):
+            parameter_dict.update(1)
+
+        with self.assertRaises(TypeError):
+            parameter_dict.update([1])
+
+        with self.assertRaises(ValueError):
+            parameter_dict.update(Parameter(torch.randn(10, 10)))
+
+        with self.assertRaises(TypeError):
+            parameter_dict[1] = Parameter(torch.randn(10, 10))
+
+        p_pop = parameter_dict.pop('p4')
+        self.assertIs(p_pop, parameters['p4'])
+        parameters.pop('p4')
+        check()
+
+        parameter_dict.clear()
+        self.assertEqual(len(parameter_dict), 0)
+        parameters.clear()
         check()
 
     def test_add_module(self):
@@ -1284,7 +1466,7 @@ class TestNN(NNTestCase):
 
         def compute_norm(norm_type):
             norm_type = float(norm_type)
-            if norm_type != float('inf'):
+            if norm_type != inf:
                 total_norm = 0
                 for p in l.parameters():
                     total_norm += p.grad.data.abs().pow(norm_type).sum()
@@ -1379,8 +1561,6 @@ class TestNN(NNTestCase):
     # We don't want to make propagating NaN a hard requirement on ops, but for
     # these easy ones, we should make them do so.
     def _test_nonlinearity_propagate_nan(self, device):
-        nan = float('nan')
-
         def test(nonlinearity, *args, **kwargs):
             x = torch.tensor([nan], device=device)
             fn = getattr(F, nonlinearity)
@@ -1919,19 +2099,16 @@ class TestNN(NNTestCase):
     def test_AlphaDropout(self):
         # generate random tensor with zero mean and unit std
         input = torch.randn(5000)
+        self._test_alpha_dropout(nn.AlphaDropout, input)
 
-        mean = input.mean()
-        std = input.std()
-
-        for p in [0.2, 0.5, 0.8]:
-            module = nn.AlphaDropout(p)
-            input_var = torch.tensor(input, requires_grad=True)
-            output = module(input_var)
-            # output mean should be close to input mean
-            self.assertLess(abs(output.data.mean() - mean), 0.1)
-            # output std should be close to input std
-            self.assertLess(abs(output.data.std() - std), 0.1)
-            output.backward(input)
+    def test_FeatureAlphaDropout(self):
+        b = random.randint(1, 5)
+        w = random.randint(1, 5)
+        h = random.randint(1, 5)
+        d = random.randint(1, 2)
+        num_features = 1000
+        input = torch.randn(num_features, b, d, w, h)
+        self._test_alpha_dropout(nn.FeatureAlphaDropout, input)
 
     def _test_InstanceNorm_general(self, cls, input, device="cpu", dtype=torch.float):
         # default case track_running_stats=False
@@ -2369,7 +2546,7 @@ class TestNN(NNTestCase):
             for num_dim in [1, 2, 3]:
                 fn_name = '{}max_pool{}d'.format(adaptive, num_dim)
                 fn = getattr(F, fn_name)
-                x = torch.full([1, 1] + num_dim * [3], float('nan'))
+                x = torch.full([1, 1] + num_dim * [3], nan)
                 res = fn(x, 1 if adaptive else 3)
                 self.assertTrue(math.isnan(res.item()))
 
@@ -5939,6 +6116,15 @@ new_criterion_tests = [
                                       (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
         check_sum_reduction=True,
         desc='scalar'
+    ),
+    dict(
+        module_name='MSELoss',
+        input_fn=lambda: torch.ones(5, 68, 64, 64, dtype=torch.float) / 10,
+        target_fn=lambda: torch.zeros(5, 68, 64, 64, dtype=torch.float),
+        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() /
+                                      (i.numel() if get_reduction(m) == 'elementwise_mean' else 1)),
+        check_forward_only=True,
+        desc='prec',
     ),
     dict(
         module_name='BCELoss',

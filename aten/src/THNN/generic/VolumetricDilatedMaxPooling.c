@@ -51,10 +51,10 @@ static inline void THNN_(VolumetricDilatedMaxPooling_shapeCheck)(
              "kT: %d kW: %d, kH: %d, padT: %d, padW: %d, padH: %d",
              kT, kW, kH, pT, pW, pH);
 
-  nslices = input->size[dimN];
-  itime   = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth  = input->size[dimw];
+  nslices = input->size(dimN);
+  itime   = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth  = input->size(dimw);
   if (ceilMode)
   {
     otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
@@ -241,10 +241,10 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
         ceilMode);
 
   /* sizes */
-  nslices = input->size[dimN];
-  itime   = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth  = input->size[dimw];
+  nslices = input->size(dimN);
+  itime   = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth  = input->size(dimw);
   if (ceilMode)
   {
     otime = (int)(ceil((float)(itime - (dilationT * (kT - 1) + 1) + 2*pT) / dT)) + 1;
@@ -298,7 +298,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateOutput)(
   else /* batch mode */
   {
     int64_t p;
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;
@@ -444,13 +444,13 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  nslices = input->size[dimN];
-  itime = input->size[dimt];
-  iheight = input->size[dimh];
-  iwidth = input->size[dimw];
-  otime = gradOutput->size[dimt];
-  oheight = gradOutput->size[dimh];
-  owidth = gradOutput->size[dimw];
+  nslices = input->size(dimN);
+  itime = input->size(dimt);
+  iheight = input->size(dimh);
+  iwidth = input->size(dimw);
+  otime = gradOutput->size(dimt);
+  oheight = gradOutput->size(dimh);
+  owidth = gradOutput->size(dimw);
 
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);
@@ -474,7 +474,7 @@ void THNN_(VolumetricDilatedMaxPooling_updateGradInput)(
   else /* batch mode */
   {
     int64_t p;
-    int64_t nBatch = input->size[0];
+    int64_t nBatch = input->size(0);
 
     int64_t istride = nslices * itime * iwidth * iheight;
     int64_t ostride = nslices * otime * owidth * oheight;

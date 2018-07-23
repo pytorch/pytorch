@@ -310,7 +310,7 @@ def RNN(*args, **kwargs):
         # function gets reconstructed each and every time when RNN() is invoked
         # and we don't want to pay the cost of decorator invocation
         import torch
-        if torch._C._jit_is_tracing(input):
+        if torch._C._get_tracing_state():
             import torch.onnx.symbolic
             sym = torch.onnx.symbolic.RNN_symbolic_builder(*args, **kwargs)
             cell_type = args[0]
@@ -318,7 +318,7 @@ def RNN(*args, **kwargs):
             bound_symbolic = partial(torch.onnx.symbolic.rnn_trace_override_symbolic,
                                      cell_type, func, sym)
 
-            decorator = torch.onnx.symbolic_override_first_arg_based(bound_symbolic)
+            decorator = torch.onnx.symbolic_override(bound_symbolic)
             func = decorator(func)
 
         return func(input, *fargs, **fkwargs)

@@ -176,6 +176,15 @@ Probability distributions - torch.distributions
     :undoc-members:
     :show-inheritance:
 
+:hidden:`LowRankMultivariateNormal`
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.lowrank_multivariate_normal
+.. autoclass:: LowRankMultivariateNormal
+    :members:
+    :undoc-members:
+    :show-inheritance:
+
 :hidden:`Multinomial`
 ~~~~~~~~~~~~~~~~~~~~~~~
 

@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
 
@@ -13,7 +14,6 @@ namespace torch { namespace jit {
 #define TH_FORALL_TYPES(_) \
 _(DynamicType) \
 _(TensorType) \
-_(HandleType) \
 _(TupleType) \
 _(ListType) \
 _(NumberType) \
@@ -30,7 +30,7 @@ struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
 
-struct Type : std::enable_shared_from_this<Type> {
+struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
 private:
   TypeKind kind_;
@@ -90,13 +90,13 @@ inline bool operator!=(const Type & lhs, const Type & rhs) {
 }
 
 // This node represents a single Tensor value, with an unknown shape.
-struct DynamicType : public Type {
+struct TORCH_API DynamicType : public Type {
   DynamicType()
   : Type(TypeKind::DynamicType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "Tensor";
   }
   static const TypeKind Kind = TypeKind::DynamicType;
@@ -107,7 +107,7 @@ struct DynamicType : public Type {
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This node represents a single Tensor value with a specific size
-struct TensorType : public Type {
+struct TORCH_API TensorType : public Type {
   friend struct Type;
   TensorType(const at::Tensor& tensor)
     : Type(TypeKind::TensorType)
@@ -152,7 +152,7 @@ struct TensorType : public Type {
     return t;
   }
 
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     if(rhs.kind() != kind())
       return false;
     auto rt = rhs.expect<TensorType>();
@@ -161,10 +161,10 @@ struct TensorType : public Type {
            strides() == rt->strides() &&
            device() == rt->device();
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     return *this == rhs || rhs.kind() == TypeKind::DynamicType;
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     // str is used for user-facing error messages, where we
     // don't want to reveal underlying size information.
     return "Tensor";
@@ -186,50 +186,18 @@ private:
   std::vector<int64_t> strides_;
 };
 
-// This value represents an opaque handle to external state.
-// Operators that produce/consume values of this type agree on
-// the format.
-
-/* Example Usage: passing state to opaque autograd Functions:
-graph(%1, %8) {
-  %2.0, %2.1 = ^AddConstant(2, False)(%1) // first output is Type::Handle, containing ctx
-  %4.0, %4.1 = ^Add(False)(%2.1, %1) // first output is Type::Handle, containing ctx
-  %6.0, %6.1 = ^Abs()(%4.1) // first output is Type::Handle, containing ctx
-  ---------------- stage 1 ----------------
-  %13 = AutogradOp[AbsBackward](%6.0, %8) // first argument is Type::Handle, consuming ctx
-  %15 = AutogradOp[AddBackward](%4.0, %13.0) // first argument is Type::Handle, consuming ctx
-  %18 = AutogradOp[AddConstantBackward](%2.0, %15.1) // first argument is Type::Handle, consuming ctx
-  %20 = AutogradOp[N5torch8autograd3AddE](%18.0, %18.0)
-  return (%6.0, %20.0);
-}
-*/
-struct HandleType : public Type {
-  friend struct Type;
-  HandleType()
-    : Type(TypeKind::HandleType) {}
-  virtual bool operator==(const Type& rhs) const override {
-    return rhs.kind() == kind();
-  }
-  virtual std::string str() const override {
-    return "Handle";
-  }
-  static const TypeKind Kind = TypeKind::HandleType;
-  // global singleton
-  static TypePtr get();
-};
-
-struct ListType : public Type {
+struct TORCH_API ListType : public Type {
   friend struct Type;
   static const TypeKind Kind = TypeKind::ListType;
   ListType(TypePtr elem)
   : Type(TypeKind::ListType), elem(elem) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<ListType>()) {
       return *getElementType() == *rhs_->getElementType();
     }
     return false;
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     std::stringstream ss;
     ss << getElementType()->str() << "[]";
     return ss.str();
@@ -244,7 +212,7 @@ private:
   TypePtr elem;
 };
 
-struct TupleType : public Type {
+struct TORCH_API TupleType : public Type {
   friend struct Type;
   TupleType(std::vector<TypePtr> elements_)
   : Type(TypeKind::TupleType)
@@ -253,12 +221,12 @@ struct TupleType : public Type {
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return compare(rhs, [](const Type& a, const Type& b) {
       return a == b;
     });
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     // e.g. (Tensor, Tensor, Tensor) <: List[Tensor]
     if(auto lt = rhs.cast<ListType>()) {
       for(auto e : elements()) {
@@ -272,7 +240,7 @@ struct TupleType : public Type {
       return a.isSubtypeOf(b);
     });
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     std::stringstream ss;
     ss << "(";
     for(size_t i = 0; i < elements().size(); ++i) {
@@ -301,13 +269,13 @@ private:
 };
 
 // This node represents a Python number value
-struct NumberType : public Type {
+struct TORCH_API NumberType : public Type {
   NumberType()
   : Type(TypeKind::NumberType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "Scalar"; // match what PythonArgParser says for clarity
   }
   static const TypeKind Kind = TypeKind::NumberType;
@@ -316,16 +284,16 @@ struct NumberType : public Type {
 };
 
 // This node represents a Python float number value
-struct FloatType : public Type {
+struct TORCH_API FloatType : public Type {
   FloatType()
   : Type(TypeKind::FloatType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "float";
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     return *this == rhs || rhs.kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::FloatType;
@@ -334,16 +302,16 @@ struct FloatType : public Type {
 };
 
 // This node represents a Python int number value
-struct IntType : public Type {
+struct TORCH_API IntType : public Type {
   IntType()
   : Type(TypeKind::IntType) {}
-  virtual bool operator==(const Type& rhs) const override {
+  bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
-  virtual std::string str() const override {
+  std::string str() const override {
     return "int";
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const Type& rhs) const override {
     return *this == rhs || rhs.kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::IntType;
@@ -352,6 +320,6 @@ struct IntType : public Type {
 };
 
 
-std::ostream& operator<<(std::ostream & out, const Type & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 
 }} // namespace torch::jit
