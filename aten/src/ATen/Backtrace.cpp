@@ -1,4 +1,5 @@
 #include <ATen/optional.h>
+#include <ATen/Backtrace.h>
 
 #include <functional>
 #include <memory>

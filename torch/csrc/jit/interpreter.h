@@ -3,6 +3,8 @@
 #include <vector>
 #include "ATen/optional.h"
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 namespace at {
   struct Tensor;
 }
@@ -22,7 +24,7 @@ struct TensorType;
 struct IValue;
 using Stack = std::vector<IValue>;
 
-struct Code {
+struct TORCH_API Code {
   Code()
     : pImpl(nullptr) {}
   Code(std::shared_ptr<Graph>& graph);
