@@ -467,6 +467,16 @@ avg_pool2d = _avg_pool('avg_pool2d', _pair)
 avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
+def adaptive_avg_pool2d(g, input, output_size):
+    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
+    return g.op("GlobalAveragePool", input)
+
+
+def adaptive_max_pool2d(g, input, output_size):
+    assert output_size == [1, 1], "Only output_size=[1, 1] is supported"
+    return g.op("GlobalMaxPool", input), None
+
+
 def reflection_pad(g, input, padding):
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "reflect"
