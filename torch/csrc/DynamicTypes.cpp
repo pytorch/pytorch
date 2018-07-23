@@ -134,7 +134,7 @@ PyObject* createPyObject(const at::Storage& storage)
   auto type = getPyTypeObject(storage);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
   if (!obj) throw python_error();
-  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)storage.unsafeGetTH(true);
+  ((THPVoidStorage*)obj.get())->cdata = (THVoidStorage *)&storage;
   return obj.release();
 }
 

@@ -4,7 +4,7 @@
 
 #include <ATen/ScalarType.h>
 #include <ATen/ScalarTypeUtils.h>
-#include "THTypeConversion.hpp"
+#include <TH/THTypeConversion.hpp>
 #include <atomic>
 
 #include "ATen/Scalar.h"
