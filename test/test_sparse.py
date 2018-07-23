@@ -1009,30 +1009,27 @@ class TestSparse(TestCase):
             expected_indices = torch.tensor([], dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-        # TODO: make this test case work when USE_ZERO_SIZE_DIM is enabled
         if USE_ZERO_SIZE_DIM:
-            # tensor = torch.sparse_coo_tensor(torch.Size([2, 0]), device=device)
-            # expected_indices = torch.empty((2, 0), dtype=torch.long, device=device)
+            tensor = torch.sparse_coo_tensor(torch.Size([2, 0]), device=device)
+            expected_indices = torch.empty((2, 0), dtype=torch.long, device=device)
             pass
         else:
             tensor = torch.sparse_coo_tensor([], [], torch.Size([2, 0]), device=device)
             expected_indices = torch.tensor([], dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-        # TODO: make this test case work when USE_ZERO_SIZE_DIM is enabled
         if USE_ZERO_SIZE_DIM:
-            # tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0]), device=device)
-            # expected_indices = torch.empty((3, 0), dtype=torch.long, device=device)
+            tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0]), device=device)
+            expected_indices = torch.empty((3, 0), dtype=torch.long, device=device)
             pass
         else:
             tensor = torch.sparse_coo_tensor([], [], torch.Size([2, 2, 0]), device=device)
             expected_indices = torch.tensor([], dtype=torch.long, device=device)
         self.assertEqual(tensor._indices(), expected_indices)
 
-        # TODO: make this test case work when USE_ZERO_SIZE_DIM is enabled
         if USE_ZERO_SIZE_DIM:
-            # tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0, 0]), device=device)
-            # expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
+            tensor = torch.sparse_coo_tensor(torch.Size([2, 2, 0, 0]), device=device)
+            expected_indices = torch.empty((4, 0), dtype=torch.long, device=device)
             pass
         else:
             tensor = torch.sparse_coo_tensor([], [], torch.Size([2, 2, 0, 0]), device=device)

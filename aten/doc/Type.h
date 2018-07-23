@@ -656,6 +656,7 @@ struct AT_API Type {
   virtual Tensor tensor(IntList size) const;
   virtual Tensor tensor(IntList size, IntList stride) const;
   virtual Tensor tensor() const;
+  virtual Tensor sparse_coo_tensor(IntList size) const;
   virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values, IntList size) const;
   virtual Tensor sparse_coo_tensor(const Tensor & indices, const Tensor & values) const;
   virtual Tensor alias(const Tensor & self) const;

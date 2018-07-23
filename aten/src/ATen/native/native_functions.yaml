@@ -1818,6 +1818,12 @@
 # just only ever dispatch to CPULongTensor or CUDALongTensor, but that
 # seems a bit too finely balanced.)
 
+- func: native_sparse_coo_tensor(Type self_ty, IntList size) -> Tensor
+  variants: []
+  dispatch:
+    SparseCPU: new_with_size_sparse
+    SparseCUDA: new_with_size_sparse
+
 - func: native_sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: []
   dispatch:
@@ -1829,6 +1835,9 @@
   dispatch:
     SparseCPU: new_with_tensor_and_size_sparse
     SparseCUDA: new_with_tensor_and_size_sparse
+
+- func: sparse_coo_tensor(Type dtype, IntList size) -> Tensor
+  variants: []
 
 - func: sparse_coo_tensor(IndexTensor indices, Tensor values) -> Tensor
   variants: []
