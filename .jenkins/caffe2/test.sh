@@ -90,24 +90,31 @@ if [[ $BUILD_ENVIRONMENT == conda* ]]; then
   conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/checkpoint_test.py")
 fi
 
-
-# TODO: re-enable this for rocm CI jobs once we have more rocm workers
-if [[ $BUILD_ENVIRONMENT != *rocm* ]]; then
-  # Python tests
-  echo "Running Python tests.."
-  "$PYTHON" \
-    -m pytest \
-    -x \
-    -v \
-    --junit-xml="$TEST_DIR/python/result.xml" \
-    --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
-    --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
-    --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
-    --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
-    ${conda_ignore_test[@]} \
-    "$CAFFE2_PYPATH/python" \
-    "${EXTRA_TESTS[@]}"
+rocm_ignore_test=()
+if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
+  # Currently these tests are failing on ROCM platform
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/arg_ops_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/spatial_bn_op_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
 fi
+
+# Python tests
+echo "Running Python tests.."
+"$PYTHON" \
+  -m pytest \
+  -x \
+  -v \
+  --junit-xml="$TEST_DIR/python/result.xml" \
+  --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
+  --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
+  --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
+  --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
+  ${conda_ignore_test[@]} \
+  ${rocm_ignore_test[@]} \
+  "$CAFFE2_PYPATH/python" \
+  "${EXTRA_TESTS[@]}"
 
 if [[ -n "$INTEGRATED" ]]; then
   pip install --user pytest-xdist torchvision

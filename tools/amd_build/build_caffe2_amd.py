@@ -14,6 +14,7 @@ includes = [
     "caffe2/transforms/*",
     "caffe2/video/*",
     "caffe2/distributed/*",
+    "caffe2/queue/*",
 ]
 
 ignores = [
@@ -24,8 +25,6 @@ ignores = [
     "caffe2/operators/top_k_heap_selection.cuh",
     "caffe2/operators/pool_op_cudnn.cu",
     "caffe2/operators/roi_align_op_gpu_test.cc",
-    # elementwise ops test is failing
-    "caffe2/operators/elementwise_op_gpu_test.cc",
     '**/hip/**',
 ]
 
