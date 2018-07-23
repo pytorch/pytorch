@@ -1524,16 +1524,19 @@ Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, cons
                                              "computing eigenvectors in forward pass"));
     }
     
-    Tensor result = at::zeros_like(self);
+    Tensor result;
     if (gv.defined()) {
-        Tensor F = at::zeros_like(self);
-        F.add_(at::unsqueeze(lambda, 0)).sub_(at::unsqueeze(lambda, 1));
-        F.as_strided({n}, {n + 1}).fill_(INFINITY);
+        Tensor F = lambda.unsqueeze(0).expand_as(self).clone();
+        F.sub_(at::unsqueeze(lambda, 1));
+        F.diagonal().fill_(INFINITY);
         F.pow_(-1);
         
         F.mul_(vt.mm(gv));
         result = v.mm(F.mm(vt));
+    } else {
+        result = at::zeros_like(self);
     }
+    
     if (glambda.defined()) {
         result.add_((v * glambda).mm(vt));
     }
