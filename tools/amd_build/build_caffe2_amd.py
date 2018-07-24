@@ -15,8 +15,7 @@ includes = [
     "caffe2/video/*",
     "caffe2/distributed/*",
     "caffe2/queue/*",
-    "caffe2/utils/*_test*",
-    "caffe2/core/*_test*",
+    "caffe2/**/*_test*",
 ]
 
 ignores = [
