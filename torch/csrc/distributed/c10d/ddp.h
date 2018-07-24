@@ -10,19 +10,19 @@
 #include <vector>
 
 namespace c10d {
-inline void dist_broadcast_coalesced(
+inline void distBroadcastCoalesced(
     std::vector<at::Tensor>& tensors,
-    int64_t buffer_size,
-    ProcessGroup& process_group) {
-  for (auto& group : torch::utils::take_tensors(tensors, buffer_size)) {
-    std::vector<at::Tensor> flat_tensor = {
+    int64_t bufferSize,
+    ProcessGroup& processGroup) {
+  for (auto& group : torch::utils::take_tensors(tensors, bufferSize)) {
+    std::vector<at::Tensor> flatTensor = {
         torch::utils::flatten_dense_tensors(group.tensors)};
-    BroadcastOptions broadcast_options;
-    broadcast_options.rootRank = 0;
-    broadcast_options.rootTensor = 0;
-    process_group.broadcast(flat_tensor, broadcast_options)->wait();
+    BroadcastOptions broadcastOptions;
+    broadcastOptions.rootRank = 0;
+    broadcastOptions.rootTensor = 0;
+    processGroup.broadcast(flatTensor, broadcastOptions)->wait();
     auto synced =
-        torch::utils::unflatten_dense_tensors(flat_tensor[0], group.tensors);
+        torch::utils::unflatten_dense_tensors(flatTensor[0], group.tensors);
     AT_ASSERT(synced.size() == group.tensors.size());
     for (size_t i = 0; i < synced.size(); ++i) {
       group.tensors[i].copy_(synced[i]);

@@ -200,7 +200,7 @@ PyObject* c10d_init(PyObject* _unused) {
           &::c10d::ProcessGroup::Work::wait,
           py::call_guard<py::gil_scoped_release>());
 
-  module.def("_dist_broadcast_coalesced", &::c10d::dist_broadcast_coalesced);
+  module.def("_dist_broadcast_coalesced", &::c10d::distBroadcastCoalesced);
 
   Py_RETURN_TRUE;
 }
