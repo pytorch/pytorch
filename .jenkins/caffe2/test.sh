@@ -108,9 +108,10 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # compile yet, so we don't have top_k operator for now
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
 
-  # Failing on CI with rocm 1.8.1, but passed in local environment
-  # with rocm 1.8.2. Revisit this once the docker images are upgraded.
+  # These are fixed in rocm 1.8.2, re-enable them once our CI docker images are upgraded
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/recurrent_net_executor_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/conv_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/group_conv_test.py")
 fi
 
 # Python tests
