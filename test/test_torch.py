@@ -956,6 +956,11 @@ class TestTorch(TestCase):
         expected = logsumexp(a.numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
         self.assertTrue(np.allclose(expected, actual.numpy()))
+        # check that out is actually inplace
+        b = torch.zeros(5, 2)
+        c = b[:, 0]
+        torch.logsumexp(a, 1, out=c)
+        self.assertTrue(np.allclose(expected, b[:, 0].numpy()))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_cpu_parallel(self):
