@@ -41,7 +41,6 @@ real THCStorage_(get)(THCState *state, const THCStorage *self, ptrdiff_t index)
 THCStorage* THCStorage_(new)(THCState *state)
 {
   THStorage* storage = new THStorage(
-      at::Backend::CUDA,
       at::CTypeToScalarType<real>::to(),
       0,
       state->cudaDeviceAllocator,
@@ -52,7 +51,6 @@ THCStorage* THCStorage_(new)(THCState *state)
 THCStorage* THCStorage_(newWithSize)(THCState *state, ptrdiff_t size)
 {
   THStorage* storage = new THStorage(
-      at::Backend::CUDA,
       at::CTypeToScalarType<real>::to(),
       size,
       state->cudaDeviceAllocator,
@@ -64,7 +62,6 @@ THCStorage* THCStorage_(newWithAllocator)(THCState *state, ptrdiff_t size,
                                           at::Allocator* allocator)
 {
   THStorage* storage = new THStorage(
-      at::Backend::CUDA,
       at::CTypeToScalarType<real>::to(),
       size,
       allocator,
@@ -118,7 +115,6 @@ THCStorage* THCStorage_(newWithDataAndAllocator)(
     ptrdiff_t size,
     at::Allocator* allocator) {
   THStorage* storage = new THStorage(
-      at::Backend::CUDA,
       at::CTypeToScalarType<real>::to(),
       size,
       std::move(data),

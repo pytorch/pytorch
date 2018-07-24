@@ -22,7 +22,6 @@ size_t THStorage_(elementSize)()
 THStorage* THStorage_(new)(void)
 {
   THStorage* storage = new THStorage(
-      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       0,
       getTHDefaultAllocator(),
@@ -33,7 +32,6 @@ THStorage* THStorage_(new)(void)
 THStorage* THStorage_(newWithSize)(ptrdiff_t size)
 {
   THStorage* storage = new THStorage(
-      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       getTHDefaultAllocator(),
@@ -45,7 +43,6 @@ THStorage* THStorage_(newWithAllocator)(ptrdiff_t size,
                                         at::Allocator *allocator)
 {
   THStorage* storage = new THStorage(
-      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       allocator,
@@ -59,7 +56,6 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
   auto scalar_type = at::CTypeToScalarType<th::from_type<real>>::to();
   size_t actual_size = -1;
   THStorage* storage = new THStorage(
-      at::Backend::CPU,
       scalar_type,
       size,
       THMapAllocator::makeDataPtr(
@@ -137,7 +133,6 @@ void THStorage_(free)(THStorage *storage)
 THStorage* THStorage_(newWithDataAndAllocator)(at::DataPtr&& data, ptrdiff_t size,
                                                at::Allocator* allocator) {
   THStorage* storage = new THStorage(
-      at::Backend::CPU,
       at::CTypeToScalarType<th::from_type<real>>::to(),
       size,
       std::move(data),

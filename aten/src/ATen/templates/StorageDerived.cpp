@@ -13,7 +13,6 @@ namespace at {
 
 ${Storage}::${Storage}()
   : Storage(
-      Backend::${Backend},
       ScalarType::${ScalarName}, 
       0,
 #if ${isCUDA}
@@ -27,7 +26,6 @@ ${Storage}::${Storage}()
 
 ${Storage}::${Storage}(size_t size)
   : Storage(
-      Backend::${Backend},
       ScalarType::${ScalarName}, 
       size,
 #if ${isCUDA}
@@ -41,7 +39,6 @@ ${Storage}::${Storage}(size_t size)
 
 ${Storage}::${Storage}(size_t size, Allocator* allocator)
   : Storage(
-      Backend::${Backend},
       ScalarType::${ScalarName}, 
       size,
       allocator,
@@ -62,7 +59,6 @@ static int getPointerDevice(void* ptr) {
 ${Storage}::${Storage}(
   void * data, size_t size, const std::function<void(void*)> & deleter)
   : Storage(
-      Backend::${Backend},
       ScalarType::${ScalarName},
       size,
       InefficientStdFunctionContext::makeDataPtr(data, deleter,

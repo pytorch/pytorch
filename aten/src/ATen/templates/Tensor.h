@@ -17,7 +17,6 @@
 
 namespace at {
 struct Type;
-// struct Tensor;
 struct TensorOptions;
 namespace detail {
 void set_data(Tensor& tensor, Tensor new_data);

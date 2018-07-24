@@ -43,10 +43,9 @@ struct Storage {
 
   Storage() = delete;
   virtual ~Storage() {};
-  Storage(at::Backend, at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, char);
-  Storage(at::Backend, at::ScalarType, ptrdiff_t, at::Allocator*, char);
+  Storage(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, char);
+  Storage(at::ScalarType, ptrdiff_t, at::Allocator*, char);
   at::ScalarType scalar_type;
-  at::Backend backend_;
   at::DataPtr data_ptr;
   ptrdiff_t size;
   std::atomic<int> refcount;

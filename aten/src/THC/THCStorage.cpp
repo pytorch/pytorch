@@ -55,7 +55,6 @@ THC_API THCStorage* THCStorage_new(
     THCState* state,
     at::ScalarType scalar_type) {
   THStorage* storage = new THStorage(
-      at::Backend::CUDA,
       scalar_type,
       0,
       state->cudaDeviceAllocator,

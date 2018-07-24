@@ -2,10 +2,9 @@
 #define TH_GENERIC_FILE "generic/THStorage.h"
 #else
 
-#include <ATen/Storage.h>
-
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
+#include <ATen/Storage.h>
 #endif
 
 /* on pourrait avoir un liste chainee
@@ -28,7 +27,12 @@
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
 // typedef struct THStorage THStorage;
 
+#ifdef __cplusplus
 #define THStorage at::Storage
+#else
+typedef struct at_Storage at_Storage;
+#define THStorage at_Storage
+#endif
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THStorage type.

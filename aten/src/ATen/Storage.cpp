@@ -4,14 +4,12 @@
 namespace at {
 
 Storage::Storage(
-    at::Backend backend,
     at::ScalarType scalar_type,
     ptrdiff_t size,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
     char flag)
     : scalar_type(scalar_type),
-      backend_(backend),
       data_ptr(std::move(data_ptr)),
       size(size),
       refcount(1),
@@ -21,13 +19,11 @@ Storage::Storage(
       finalizer(nullptr) {}
 
 Storage::Storage(
-    at::Backend backend,
     at::ScalarType scalar_type,
     ptrdiff_t size,
     at::Allocator* allocator,
     char flag)
     : Storage(
-          backend,
           scalar_type,
           size,
           allocator->allocate(at::elementSize(scalar_type) * size),
@@ -35,7 +31,9 @@ Storage::Storage(
           flag) {}
 
 Type& Storage::type() const {
-  return globalContext().getType(backend_, scalar_type);
+  if (data_ptr.device().is_cuda())
+    return globalContext().getType(at::Backend::CUDA, scalar_type);
+  return globalContext().getType(at::Backend::CPU, scalar_type);
 }
 
 } // namespace at
