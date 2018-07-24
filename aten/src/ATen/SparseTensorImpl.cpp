@@ -41,15 +41,6 @@ IntList SparseTensorImpl::strides() const {
 int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
 }
-Scalar SparseTensorImpl::localScalar() {
-  int64_t n = numel();
-  AT_CHECK(n == 1, "a Tensor with ", n, " elements cannot be converted to Scalar");
-  if (nnz_ == 0) return Scalar(0);
-  if (coalesced_) return values_.pImpl->localScalar();
-  // You have a non-coalesced scalar sparse tensor?!  Wow!  Have
-  // a cookie.
-  return values_.sum().pImpl->localScalar();
-}
 void * SparseTensorImpl::unsafeGetTH(bool retain) {
   AT_ERROR("unsafeGetTH not supported for new style TensorImpl");
 }

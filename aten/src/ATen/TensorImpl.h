@@ -30,13 +30,8 @@ struct AT_API TensorImpl : public Retainable {
   }
   virtual const char * toString() const = 0;
   virtual IntList sizes() const;
-  virtual IntList strides() const = 0;
+  virtual IntList strides() const;
   virtual int64_t dim() const;
-  /**
-   * Perform a conversion of this tensor to a scalar, if numel() == 1.
-   * Otherwise, raise an error.
-   */
-  virtual Scalar localScalar() = 0;
   virtual void * unsafeGetTH(bool retain);
   virtual std::unique_ptr<Storage> storage() = 0;
   friend struct Type;

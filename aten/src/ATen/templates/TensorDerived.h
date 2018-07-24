@@ -14,8 +14,6 @@ struct ${Tensor} final : public TensorImpl {
 public:
   ${Tensor}(THTensor * tensor);
   virtual const char * toString() const override;
-  virtual IntList strides() const override;
-  virtual Scalar localScalar() override;
   virtual std::unique_ptr<Storage> storage() override;
   static const char * typeString();
 };
