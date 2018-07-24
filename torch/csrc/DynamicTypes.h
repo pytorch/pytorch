@@ -28,7 +28,7 @@ void registerStoragePyTypeObject(
 void registerDtypeObject(THPDtype *dtype, at::ScalarType scalarType);
 void registerLayoutObject(THPLayout *layout, at::Backend backend);
 
-PyObject* createPyObject(const at::Storage& storage);
+PyObject* createPyObject(at::Storage& storage);
 std::unique_ptr<at::Storage> createStorage(PyObject* obj);
 bool isStorage(PyObject* obj);
 

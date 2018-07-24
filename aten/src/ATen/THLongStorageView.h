@@ -37,7 +37,7 @@ public:
   */
 
   THLongStorageView(ArrayRef<int64_t> ref, THLongStorageViewKind kind)
-  : storage(at::CTypeToScalarType<th::from_type<int64_t>>::to(), 0, getTHDefaultAllocator(), 0), zero_dim_to_null(false)
+  : storage(at::Backend::CPU, at::CTypeToScalarType<th::from_type<int64_t>>::to(), 0, getTHDefaultAllocator(), 0), zero_dim_to_null(false)
   {
     // zero_dim_to_one converts an empty ArrayRef into [1]
     // zero_dim_to_null converts an empty ArrayRef into a null THLongStorage

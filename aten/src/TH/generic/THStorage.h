@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/THStorage.h"
 #else
 
+#include <ATen/Storage.h>
+
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
 #endif
@@ -24,7 +26,9 @@
 #define TH_STORAGE_RESIZABLE  2
 
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
-typedef struct THStorage THStorage;
+// typedef struct THStorage THStorage;
+
+#define THStorage at::Storage
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation
 // alias these to the single THStorage type.

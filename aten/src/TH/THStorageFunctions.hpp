@@ -3,7 +3,7 @@
 // STOP!!! Thinking of including this header directly?  Please
 // read Note [TH abstraction violation]
 
-#include "THStorageClass.hpp"
+#include <ATen/Storage.h>
 #include "THStorageFunctions.h"
 
 #include <ATen/ScalarType.h>

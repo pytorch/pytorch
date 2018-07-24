@@ -315,7 +315,7 @@ CHECKED_USE = {
     'THIntegerTensor*': '{}_->tensor',
     'THDenseTensor*': '{}_->tensor',
     'THDenseIndexTensor*': '{}_->tensor',
-    'THStorage*': '{}_->storage',
+    'THStorage*': '{}_',
     'THGenerator*': '{}_->generator',
     'TensorList': "{0}_.data(), {0}_.size()",
 }
@@ -346,7 +346,7 @@ ALLOC_WRAP = {
 CONSTANT_REPLACEMENTS = [
     ('AS_REAL', '${AS_REAL}'),
     ('__storage_size.get\\(\\)',
-     'THLongStorageView(static_cast<int64_t>(source.size()), THLongStorageViewKind::LENGTH)'),
+     'THLongStorageView(static_cast<int64_t>(source.get_size()), THLongStorageViewKind::LENGTH)'),
     ('__last_dim', 'self.ndimension()-1'),
 ]
 

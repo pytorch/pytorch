@@ -1,12 +1,17 @@
-#include "THStorageClass.hpp"
+#include <ATen/Storage.h>
+#include <ATen/Context.h>
 
-THStorage::THStorage(
+namespace at {
+
+Storage::Storage(
+    at::Backend backend,
     at::ScalarType scalar_type,
     ptrdiff_t size,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
     char flag)
     : scalar_type(scalar_type),
+      backend_(backend),
       data_ptr(std::move(data_ptr)),
       size(size),
       refcount(1),
@@ -15,14 +20,22 @@ THStorage::THStorage(
       allocator(allocator),
       finalizer(nullptr) {}
 
-THStorage::THStorage(
+Storage::Storage(
+    at::Backend backend,
     at::ScalarType scalar_type,
     ptrdiff_t size,
     at::Allocator* allocator,
     char flag)
-    : THStorage(
+    : Storage(
+          backend,
           scalar_type,
           size,
           allocator->allocate(at::elementSize(scalar_type) * size),
           allocator,
           flag) {}
+
+Type& Storage::type() const {
+  return globalContext().getType(backend_, scalar_type);
+}
+
+} // namespace at

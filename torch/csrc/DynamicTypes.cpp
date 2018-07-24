@@ -129,7 +129,7 @@ at::Device::Type getDeviceType(const at::Type& type) {
   return type.is_cuda() ? at::Device::Type::CUDA : at::Device::Type::CPU;
 }
 
-PyObject* createPyObject(const at::Storage& storage)
+PyObject* createPyObject(at::Storage& storage)
 {
   auto type = getPyTypeObject(storage);
   auto obj = THPObjectPtr(type->tp_alloc(type, 0));
