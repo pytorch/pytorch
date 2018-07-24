@@ -46,6 +46,7 @@ Navigate to pytorch directory `cd /pytorch` inside the container.
 
 	
 * Test the rocm-caffe2 Installation 
+
 	Before running the tests, make sure that the required environment variables are set:
 	``` 
 	export LD_LIBRARY_PATH=/pytorch/build_caffe2/lib:$LD_LIBRARY_PATH
