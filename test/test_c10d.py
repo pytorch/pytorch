@@ -69,16 +69,16 @@ def find_free_port():
     return sockname[1]
 
 
-def gpus_for_rank(size):
+def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
     GPUs on each node. Nccl backend requires equal #GPUs in each process.
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
     visible_devices = list(range(torch.cuda.device_count()))
-    gpus_per_process = torch.cuda.device_count() // size
+    gpus_per_process = torch.cuda.device_count() // world_size
     gpus_for_rank = []
-    for rank in range(size):
+    for rank in range(world_size):
         gpus_for_rank.append(visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process])
     return gpus_for_rank
 
@@ -194,7 +194,7 @@ class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
 
     @property
-    def size(self):
+    def world_size(self):
         return 4
 
     @staticmethod
@@ -222,7 +222,7 @@ class MultiProcessTestCase(TestCase):
         self.rank = self.MAIN_PROCESS_RANK
         self.file = tempfile.NamedTemporaryFile()
         self.port = find_free_port()
-        self.processes = [self._spawn_process(rank) for rank in range(int(self.size))]
+        self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
         for p in self.processes:
@@ -260,6 +260,7 @@ class MultiProcessTestCase(TestCase):
         for skip in TEST_SKIPS.values():
             if first_process.exitcode == skip.exit_code:
                 raise unittest.SkipTest(skip.message)
+        self.assertEqual(first_process.exitcode, 0)
 
 
 class ProcessGroupGlooTest(MultiProcessTestCase):
@@ -271,7 +272,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.size, self.opts())
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
@@ -281,16 +282,16 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             work.wait()
 
         # Every rank is root once, every tensor index is root once
-        for i in range(self.size):
+        for i in range(self.world_size):
             for j in range(2):
                 xs = [
-                    torch.Tensor([self.rank * self.size + 0.0]),
-                    torch.Tensor([self.rank * self.size + 1.0]),
+                    torch.Tensor([self.rank * self.world_size + 0.0]),
+                    torch.Tensor([self.rank * self.world_size + 1.0]),
                 ]
 
                 broadcast(xs, i, j)
-                self.assertEqual(torch.Tensor([i * self.size + j]), xs[0])
-                self.assertEqual(torch.Tensor([i * self.size + j]), xs[1])
+                self.assertEqual(torch.Tensor([i * self.world_size + j]), xs[0])
+                self.assertEqual(torch.Tensor([i * self.world_size + j]), xs[1])
 
         # Test overloaded convenience function
         x = torch.Tensor([self.rank + 1.0])
@@ -300,7 +301,7 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
 
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.size, self.opts())
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         def allreduce(x, op):
             opts = c10d.AllreduceOptions()
@@ -311,12 +312,12 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Sum
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.SUM)
-        self.assertEqual(torch.Tensor([float(self.size * (self.size + 1) / 2)]), x)
+        self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
         # Product
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.PRODUCT)
-        self.assertEqual(torch.Tensor([float(math.factorial(self.size))]), x)
+        self.assertEqual(torch.Tensor([float(math.factorial(self.world_size))]), x)
 
         # Min
         x = torch.Tensor([self.rank + 1.0])
@@ -326,13 +327,13 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Max
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.MAX)
-        self.assertEqual(torch.Tensor([self.size]), x)
+        self.assertEqual(torch.Tensor([self.world_size]), x)
 
         # Test overloaded convenience function (defaults to using sum)
         x = torch.Tensor([self.rank + 1.0])
         work = pg.allreduce(x)
         work.wait()
-        self.assertEqual(torch.Tensor([float(self.size * (self.size + 1) / 2)]), x)
+        self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
 
 class ProcessGroupNCCLTest(TestCase):
@@ -344,7 +345,7 @@ class ProcessGroupNCCLTest(TestCase):
                                     " skipping test")
 
         self.rank = self.MAIN_PROCESS_RANK
-        self.size = 1
+        self.world_size = 1
         self.file = tempfile.NamedTemporaryFile()
         self.num_gpus = torch.cuda.device_count()
 
@@ -354,7 +355,7 @@ class ProcessGroupNCCLTest(TestCase):
     @skip_if_not_nccl
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
@@ -377,7 +378,7 @@ class ProcessGroupNCCLTest(TestCase):
     @skip_if_not_nccl
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce(tensors, op):
             opts = c10d.AllreduceOptions()
@@ -448,11 +449,11 @@ class Net(nn.Module):
 class DistributedDataParallelTest(MultiProcessTestCase):
 
     @property
-    def size(self):
+    def world_size(self):
         return 2
 
     def _test_ddp_with_process_group(self, process_group):
-        gpus = gpus_for_rank(self.size)[self.rank]
+        gpus = gpus_for_rank(self.world_size)[self.rank]
         model = Net()
         ddp_model = distributed_c10d._DistributedDataParallelC10d(
             copy.deepcopy(model).cuda(gpus[0]),
@@ -461,15 +462,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         model.cuda(gpus[0])
 
         local_batch_size = len(gpus)
-        global_batch_size = self.size * local_batch_size
-        criterion = nn.MSELoss()
+        global_batch_size = self.world_size * local_batch_size
         input = torch.randn(global_batch_size, 2).cuda(gpus[0])
         target = torch.randn(global_batch_size, 4).cuda(gpus[0])
 
-        def step_model(model, input, target, criterion):
+        def step_model(model, input, target):
             model.train()
             output = model(input)
-            loss = criterion(output, target)
+            loss = F.mse_loss(output, target)
             loss.backward()
 
         def update_parameters(model):
@@ -478,24 +478,24 @@ class DistributedDataParallelTest(MultiProcessTestCase):
                 param.grad = None
 
         # check two model parameters over 2 iterations
-        for _ in range(2):
+        for iteration in range(2):
             # single cpu/gpu training
-            step_model(model, input, target, criterion)
+            step_model(model, input, target)
 
             # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
             step_model(ddp_model,
                        input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
-                       target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
-                       criterion)
+                       target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
 
             # Update weights and run a second iteration to shake out errors
             update_parameters(model)
             update_parameters(ddp_model)
-            assert len(list(model.parameters())) == len(list(ddp_model.parameters()))
+            self.assertEqual(len(list(model.parameters())), len(list(ddp_model.parameters())))
             for i, j in zip(model.parameters(), ddp_model.parameters()):
                 self.assertEqual(i, j)
 
             # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
             input = input[torch.randperm(global_batch_size)]
 
     @skip_if_not_multigpu
@@ -503,14 +503,14 @@ class DistributedDataParallelTest(MultiProcessTestCase):
         store = c10d.TCPStore('localhost', self.port, self.rank == 0)
         options = c10d.ProcessGroupGloo.Options()
         options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
-        process_group = c10d.ProcessGroupGloo(store, self.rank, self.size, options)
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
         self._test_ddp_with_process_group(process_group)
 
     @skip_if_not_multigpu
     @skip_if_not_nccl
     def test_nccl_backend(self):
         store = c10d.TCPStore('localhost', self.port, self.rank == 0)
-        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
         self._test_ddp_with_process_group(process_group)
 
 if __name__ == '__main__':
