@@ -12,4 +12,8 @@ std::shared_ptr<script::Module> ImportIRModule(
     const std::string& serialized_module,
     const std::unordered_map<std::string, std::string>& storage_map);
 
-}}
+std::shared_ptr<script::Module> ImportIRModuleFromPyTorchFile(
+    const std::shared_ptr<script::Module> module,
+    const std::string& filename);
+
+}}  // namespace torch::jit

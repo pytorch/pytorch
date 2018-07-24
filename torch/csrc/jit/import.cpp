@@ -5,6 +5,7 @@
 
 #include <ATen/ATen.h>
 
+#include <cstdio>
 #include <unordered_map>
 #include <vector>
 #include <string>
@@ -317,6 +318,115 @@ std::shared_ptr<script::Module> ImportIRModule(
     const std::unordered_map<std::string, std::string>& storage_map) {
   ModuleDecoder decoder;
   return decoder.decode(module, serialized_module, storage_map);
+}
+
+// TODO: mmap file reader
+class PyTorchFileReader {
+ public:
+  PyTorchFileReader(const std::string& filename) {
+   fp = std::fopen(filename.c_str(), "rb");
+   std::fseek(fp, 0L, SEEK_END);
+   file_size = std::ftell(fp);
+   std::fseek(fp, 0L, SEEK_SET);
+   readAndValidateFileHeader();
+  }
+
+  // returns raw data map and the index of the last record (i.e. the ModelProto)
+  std::tuple<std::unordered_map<std::string, std::string>&, size_t> read_raw() {
+    JIT_ASSERT(!finalized);
+    size_t final_record_offset = cursor; // TODO: this is probably wrong
+    while (cursor != file_size) {
+      final_record_offset = readRecordIntoMap();
+    }
+    finalized = true;
+    return {raw_values, final_record_offset};
+  }
+
+  ~PyTorchFileReader() {
+    std::fclose(fp);
+  }
+
+ private:
+  FILE *fp;
+  size_t cursor = 0;
+  bool finalized = false;
+  size_t file_size;
+
+  std::unordered_map<std::string, std::string> raw_values;
+
+  static constexpr uint64_t kMaxSupportedFileFormatVersion = 0x1L;
+  // TODO: dedupe these between the {Reader, Writer} classes. Right now i'm too lazy
+  static constexpr uint64_t kFileMagicNumber = 0x314843524f545950L; // PYTORCH1
+  static constexpr uint64_t kFieldAlignment = 64L; // 64 byte alignment supports up to AVX512 for mmap
+
+  uint64_t read64BitIntegerLittleEndian() {
+   uint64_t retval;
+   // TODO endian swap on platforms that need it?
+   size_t read_bytes = std::fread(&retval, 1u, 8u, fp);
+   if (read_bytes != 8u) {
+     std::ostringstream errmsg;
+     errmsg << "Expected to read 8 bytes but got " << read_bytes;
+     throw std::runtime_error(errmsg.str());
+   }
+   cursor += read_bytes;
+   return retval;
+  }
+
+  void seekToNextAlignmentBoundary() {
+   size_t next_offset = (cursor + kFieldAlignment) - (cursor % kFieldAlignment);
+   size_t pad_amount = next_offset - cursor;
+   cursor += pad_amount;
+   std::fseek(fp, cursor, SEEK_SET);
+  }
+
+  void readAndValidateFileHeader() {
+   // Validate magic number
+   uint64_t magic = read64BitIntegerLittleEndian();
+   if (magic != kFileMagicNumber) {
+     throw std::runtime_error("Magic number mismatch in PyTorch file. File may"
+                              " be corrupted or is not actually a PyTorch file.");
+   }
+   uint64_t file_format_version = read64BitIntegerLittleEndian();
+   if (file_format_version > kMaxSupportedFileFormatVersion) {
+     std::ostringstream errmsg;
+     errmsg << "Attempted to read a PyTorch file with version " << file_format_version
+            << " but the maximum supported version for reading is " << kMaxSupportedFileFormatVersion
+            << ". Your PyTorch installation may be too old.";
+     throw std::runtime_error(errmsg.str());
+   }
+   seekToNextAlignmentBoundary();
+  }
+
+  size_t getRecordHeader() {
+    auto payload_size = read64BitIntegerLittleEndian();
+    seekToNextAlignmentBoundary();
+    return payload_size;
+  }
+
+  size_t readRecordIntoMap() {
+    auto record_offset = cursor;
+    auto size = getRecordHeader();
+    raw_values[std::to_string(record_offset)] = std::string(size, '0');
+    std::fread(reinterpret_cast<void*>(&raw_values[std::to_string(record_offset)][0]), size, 1, fp);
+    cursor += size;
+    seekToNextAlignmentBoundary();
+    return record_offset;
+  }
+};
+
+std::shared_ptr<script::Module> ImportIRModuleFromPyTorchFile(
+    const std::shared_ptr<script::Module> module,
+    const std::string& filename) {
+  PyTorchFileReader reader(filename);
+  std::unordered_map<std::string, std::string> raw_values;
+  size_t last_record_entry;
+  std::tie(raw_values, last_record_entry) = reader.read_raw();
+  auto last_entry_key = std::to_string(last_record_entry);
+  JIT_ASSERT(raw_values.count(last_entry_key));
+  std::string proto_string = std::move(raw_values[last_entry_key]);
+  raw_values.erase(last_entry_key);
+  ModuleDecoder decoder;
+  return decoder.decode(module, proto_string, raw_values);
 }
 
 }}

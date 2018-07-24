@@ -475,5 +475,7 @@ void initPythonIRBindings(PyObject * module_) {
                                  const std::unordered_map<std::string, std::string>& storages) {
     return ImportIRModule(module, serialized_module, storages);
   });
+  m.def("_jit_import_module_from_pytorch_file", &ImportIRModuleFromPyTorchFile);
+
 }
 }}

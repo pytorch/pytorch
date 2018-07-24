@@ -3063,6 +3063,36 @@ def func(t):
         with zipfile.ZipFile(f, 'r', compression=zipfile.ZIP_STORED) as z:
             self.assertExpected(str([file.filename for file in z.infolist()]))
 
+    def test_script_module_file_cpp_export(self):
+        from torch.onnx import OperatorExportTypes, ExportTypes
+        class M(torch.jit.ScriptModule):
+            def __init__(self):
+                super(M, self).__init__(False)
+                self.param = torch.nn.Parameter(torch.rand(2, 2).float())
+
+            @torch.jit.script_method
+            def foo(self):
+                return torch.ones([2, 2]) + self.param
+
+            @torch.jit.script_method
+            def forward(self, input):
+                return input + torch.ones([2, 2]) - self.param
+
+        m_orig = M()
+        m_import = torch.jit.ScriptModule()
+        import tempfile
+        filename = tempfile.mktemp()
+        m_orig.export_to_pytorch_file(filename)
+        torch._C._jit_import_module_from_pytorch_file(m_import, filename)
+
+        input = torch.rand(2, 2).float()
+        np.testing.assert_allclose(m_orig(input).detach().numpy(),
+                                   m_import(input).detach().numpy())
+        np.testing.assert_allclose(m_orig.foo().detach().numpy(),
+                                   m_import.foo().detach().numpy())
+        np.testing.assert_allclose(m_orig.param.detach().numpy(), m_import.param.detach().numpy())
+
+
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
             def __init__(self):

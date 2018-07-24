@@ -385,6 +385,15 @@ void initJitScriptBindings(PyObject* module) {
         return std::make_tuple(py::bytes(module), python_serialized_export_map);
       }, py::arg("onnx_opset_version")=0,
          py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::RAW)
+      .def("export_to_pytorch_file", [](const std::shared_ptr<Module> m, const std::string& filename,
+                                        int64_t onnx_opset_version,
+                                        ::torch::onnx::OperatorExportTypes operator_export_type) {
+        std::string module;
+        RawDataExportMap export_map;
+        ExportModuleAsPytorchFile(filename, m, onnx_opset_version, operator_export_type);
+      }, py::arg("filename")="out.model",
+         py::arg("onnx_opset_version")=0,
+         py::arg("operator_export_type")=::torch::onnx::OperatorExportTypes::RAW)
       .def("_set_optimized", &Module::set_optimized)
       .def(
           "_define",
