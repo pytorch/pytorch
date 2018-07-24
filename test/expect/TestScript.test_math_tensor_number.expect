@@ -1,0 +1,4 @@
+graph(%x : Dynamic) {
+  %1 : Dynamic = aten::add[other={7}, alpha={1}](%x)
+  return (%1);
+}

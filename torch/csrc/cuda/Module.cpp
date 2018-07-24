@@ -7,8 +7,9 @@
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
+#include "ATen/cuda/CUDAContext.h"
 #include <THC/THCCachingAllocator.h>
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
 #include <nccl.h>
 #endif
 
@@ -241,8 +242,7 @@ PyObject * THCPModule_cudaUnlockMutex(PyObject *module)
 PyObject * THCPModule_emptyCache(PyObject *_unused)
 {
   HANDLE_TH_ERRORS
-  auto device_allocator = THCState_getDeviceAllocator(state);
-  THCudaCheck(device_allocator->emptyCache(device_allocator->state));
+  THCCachingAllocator_emptyCache();
   END_HANDLE_TH_ERRORS
   Py_RETURN_NONE;
 }
@@ -310,7 +310,7 @@ static void bindCudaDeviceProperties(PyObject* module) {
       return stream.str();
     });
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
-    return at::globalContext().getDeviceProperties(device);
+    return at::cuda::getDeviceProperties(device);
   }, py::return_value_policy::reference);
 }
 
@@ -365,7 +365,7 @@ static PyObject * THCPModule_initExtension(PyObject *self)
   END_HANDLE_TH_ERRORS
 }
 
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
 #include "python_nccl.h"
 
 void THCPModule_useNccl()
@@ -412,7 +412,7 @@ static struct PyMethodDef _THCPModule_methods[] = {
   {"_cuda_sleep", (PyCFunction)THCPModule_cudaSleep, METH_O, NULL},
   {"_cuda_lock_mutex",   (PyCFunction)THCPModule_cudaLockMutex,   METH_NOARGS,  NULL},
   {"_cuda_unlock_mutex", (PyCFunction)THCPModule_cudaUnlockMutex, METH_NOARGS,  NULL},
-#ifdef WITH_NCCL
+#ifdef USE_NCCL
   {"_nccl_version", (PyCFunction)THCPModule_nccl_version, METH_NOARGS, NULL},
   {"_nccl_unique_id", (PyCFunction)THCPModule_nccl_unique_id, METH_NOARGS, NULL},
   {"_nccl_init_rank", (PyCFunction)THCPModule_nccl_init_rank, METH_VARARGS, NULL},

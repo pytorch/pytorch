@@ -67,14 +67,7 @@ for function_name in functions:
 
         # Start a new plot
         pylab.clf()
-
-        # Add an overlay on the background of faint traces of all the other
-        # functions. This is nice when flipping through images
-        for background_function in functions:
-            plot_function(
-                torch.nn.modules.activation.__dict__[background_function](),
-                alpha=0.03, color='k'
-            )
+        pylab.grid(color='k', alpha=0.2, linestyle='--')
 
         # Plot the current function
         plot_function(function)

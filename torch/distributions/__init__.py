@@ -86,11 +86,14 @@ from .fishersnedecor import FisherSnedecor
 from .gamma import Gamma
 from .geometric import Geometric
 from .gumbel import Gumbel
+from .half_cauchy import HalfCauchy
+from .half_normal import HalfNormal
 from .independent import Independent
 from .kl import kl_divergence, register_kl
 from .laplace import Laplace
 from .log_normal import LogNormal
 from .logistic_normal import LogisticNormal
+from .lowrank_multivariate_normal import LowRankMultivariateNormal
 from .multinomial import Multinomial
 from .multivariate_normal import MultivariateNormal
 from .normal import Normal

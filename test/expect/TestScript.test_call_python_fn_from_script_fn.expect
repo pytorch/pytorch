@@ -1,0 +1,5 @@
+graph(%x : Dynamic) {
+  %1 : Dynamic = ^python_fn()(%x)
+  %5 : Dynamic = aten::add[other={1}, alpha={1}](%1)
+  return (%5);
+}

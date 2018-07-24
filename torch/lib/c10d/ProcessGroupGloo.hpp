@@ -15,11 +15,11 @@
 
 #include <torch/csrc/utils/hash.h>
 
-#include "CUDAUtils.hpp"
-#include "ProcessGroup.hpp"
-#include "Store.hpp"
-#include "Types.hpp"
-#include "Utils.hpp"
+#include <c10d/CUDAUtils.hpp>
+#include <c10d/ProcessGroup.hpp>
+#include <c10d/Store.hpp>
+#include <c10d/Types.hpp>
+#include <c10d/Utils.hpp>
 
 // Forward declaration
 struct THCState;
@@ -218,6 +218,13 @@ class ProcessGroupGloo : public ProcessGroup {
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
     std::chrono::milliseconds timeout;
     int threads;
+
+    // This controls how many Gloo algorithm instances are created for
+    // a single identifying key. If you have many identical calls with
+    // tensors of identical size and need to parallelize, this should
+    // be greater than 1. More cache entries means more memory usage.
+    // The default value is 1.
+    int cacheNumAlgorithmEntries;
   };
 
   explicit ProcessGroupGloo(
@@ -265,7 +272,15 @@ class ProcessGroupGloo : public ProcessGroup {
   // Checkout constructs new AlgorithmEntry or returns existing one.
   AlgorithmEntry* checkout(const KeyType& key);
 
-  std::unordered_map<KeyType, EntryType, HashType> cache_;
+  // The maximum number of cached algorithms for a single key.
+  const int cacheNumAlgorithmEntries_;
+
+  // Index of the next algorithm to use for a particular key.
+  // Note that this index must be the same for all particating processes.
+  std::unordered_map<KeyType, int, HashType> cacheCurrentEntry_;
+
+  // The list of cached algorithms, by algorithm key.
+  std::unordered_map<KeyType, std::vector<EntryType>, HashType> cache_;
 
   std::shared_ptr<Work> enqueue(AlgorithmEntry* entry);
 

@@ -88,18 +88,26 @@ graph(%0 : Float(2, 3, 4)
       %2 : Float(2, 3, 4)
       %3 : Float(2, 3, 4)
       %4 : Float(2, 3, 4)) {
-  %5 : Float(2, 3, 4!) = prim::Constant[value=<Tensor>, is_zero=1]()
-  %6 : Dynamic = prim::ReplaceIfUndef(%0, %5)
-  %7 : Float(2, 3, 4!) = prim::Constant[value=<Tensor>, is_zero=1]()
-  %8 : Dynamic = prim::ReplaceIfUndef(%1, %7)
-  %9 : Dynamic = aten::mul(%6, %2)
-  %10 : Dynamic = aten::add[alpha={1}](%8, %9)
-  %11 : Dynamic = aten::mul(%6, %4)
-  %12 : Dynamic = aten::mul(%10, %3)
-  %13 : Dynamic = aten::mul(%10, %2)
-  %14 : Dynamic = aten::add[alpha={1}](%11, %12)
-  %15 : Dynamic = aten::add[alpha={1}](%6, %13)
-  return (%14, %15);
+  %5 : Float(2, 3, 4), %6 : Float(2, 3, 4) = prim::GradOf[name=aten::add](%0)
+    block0() {
+      -> (%0, %0)
+    }
+  %7 : Float(2, 3, 4), %8 : Float(2, 3, 4) = prim::GradOf[name=aten::mul](%5)
+    block0() {
+      %9 : Float(2, 3, 4) = aten::mul(%5, %2)
+      %10 : Float(2, 3, 4) = aten::mul(%5, %4)
+      -> (%9, %10)
+    }
+  %11 : Dynamic = prim::AutogradAdd(%1, %7)
+  %12 : Float(2, 3, 4), %13 : Float(2, 3, 4) = prim::GradOf[name=aten::mul](%11)
+    block0() {
+      %14 : Float(2, 3, 4) = aten::mul(%11, %3)
+      %15 : Float(2, 3, 4) = aten::mul(%11, %2)
+      -> (%14, %15)
+    }
+  %16 : Dynamic = prim::AutogradAdd(%8, %12)
+  %17 : Dynamic = prim::AutogradAdd(%6, %13)
+  return (%16, %17);
 }
 
 testDifferentiateWithRequiresGrad
@@ -116,14 +124,22 @@ graph(%0 : Float(2, 3, 4)
       %1 : Float(2, 3, 4)
       %2 : Float(2, 3, 4)
       %3 : Float(2, 3, 4)) {
-  %4 : Float(2, 3, 4!) = prim::Constant[value=<Tensor>, is_zero=1]()
-  %5 : Dynamic = prim::ReplaceIfUndef(%0, %4)
-  %6 : Float(2, 3, 4!) = prim::Constant[value=<Tensor>, is_zero=1]()
-  %7 : Dynamic = prim::ReplaceIfUndef(%1, %6)
-  %8 : Dynamic = aten::mul(%5, %2)
-  %9 : Dynamic = aten::add[alpha={1}](%7, %8)
-  %10 : Dynamic = aten::mul(%5, %3)
-  %11 : Dynamic = aten::add[alpha={1}](%10, %9)
-  return (%11);
+  %4 : Float(2, 3, 4), %5 : Float(2, 3, 4) = prim::GradOf[name=aten::add](%0)
+    block0() {
+      -> (%0, %0)
+    }
+  %6 : Float(2, 3, 4), %7 : Float(2, 3, 4) = prim::GradOf[name=aten::mul](%4)
+    block0() {
+      %8 : Float(2, 3, 4) = aten::mul(%4, %2)
+      %9 : Float(2, 3, 4) = aten::mul(%4, %3)
+      -> (%8, %9)
+    }
+  %10 : Dynamic = prim::AutogradAdd(%1, %6)
+  %11 : Float(2, 3, 4), %12 : Float(2, 3, 4) = prim::GradOf[name=aten::add](%10)
+    block0() {
+      -> (%10, %10)
+    }
+  %13 : Dynamic = prim::AutogradAdd(%7, %12)
+  return (%13);
 }
 

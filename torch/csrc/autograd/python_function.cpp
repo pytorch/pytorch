@@ -20,8 +20,16 @@
 #include "torch/csrc/jit/python_tracer.h"
 #include "torch/csrc/DynamicTypes.h"
 #include "torch/csrc/utils/auto_gil.h"
-#include "torch/csrc/utils/auto_gpu.h"
 #include "torch/csrc/Exceptions.h"
+
+#include <exception>
+#include <functional>
+#include <memory>
+#include <stdexcept>
+#include <string>
+#include <tuple>
+#include <utility>
+#include <vector>
 
 using namespace torch;
 using namespace torch::autograd;
@@ -37,7 +45,6 @@ namespace torch { namespace autograd {
 
 VariableInfo::VariableInfo(const Variable& var)
   : type(&var.type())
-  , device(-1)
   , size(var.sizes())
   , requires_grad(var.requires_grad()) {
   if (var.type().is_cuda()) {
@@ -45,9 +52,9 @@ VariableInfo::VariableInfo(const Variable& var)
   }
 }
 
-Variable VariableInfo::zeros(AutoGPU& gpu_guard) const {
-  gpu_guard.setDevice(device);
-  return at::zeros(*type, size);
+Variable VariableInfo::zeros(at::DeviceGuard& device_guard) const {
+  device_guard.set_index(device);
+  return at::zeros(size, *type);
 }
 
 auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
@@ -97,9 +104,9 @@ auto PyFunction::legacy_apply(const variable_list& inputs) -> variable_list {
 // NOTE: this function is written in a way that assumes it's only called for backward;
 // it's used by engine.cpp.  This is responsible for forwarding a call from
 // C++'s Function::apply to a Python method "apply".
-auto PyFunction::apply(const variable_list& inputs) -> variable_list {
+auto PyFunction::apply(variable_list&& inputs) -> variable_list {
   AutoGIL gil;
-  AutoGPU _gpu_guard(-1);
+  at::DeviceGuard _device_guard;
   THPFunction* py_fn = (THPFunction*)obj;
 
   THPObjectPtr _legacy(PyObject_GetAttrString(obj, "_is_legacy"));
@@ -117,7 +124,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     if (inputs[i].defined()) {
       input = THPVariable_Wrap(inputs[i]);
     } else {
-      input = THPVariable_Wrap(output_info[i].zeros(_gpu_guard));
+      input = THPVariable_Wrap(output_info[i].zeros(_device_guard));
     }
     if (!input) throw python_error();
     PyTuple_SET_ITEM(pyInputs.get(), i, input);
@@ -174,7 +181,7 @@ auto PyFunction::apply(const variable_list& inputs) -> variable_list {
     if (output == Py_None) {
       auto& info = input_info[results.size()];
       if (info.requires_grad) {
-        results.emplace_back(info.zeros(_gpu_guard));
+        results.emplace_back(info.zeros(_device_guard));
       } else {
         results.emplace_back();
       }
@@ -543,7 +550,7 @@ std::pair<UnpackedInput, InputFlags> unpack_input(PyObject *args) {
 }
 
 static void _assert_not_tracing(const char* name, const variable_list& input_vars) {
-  if (tracer::isTracingVar(input_vars)) {
+  if (tracer::isTracing()) {
     std::ostringstream oss;
     oss << "Attempted to trace " << name;
     oss << ", but tracing of legacy functions is not supported";
@@ -555,7 +562,7 @@ static jit::tracer::PreTraceInfo _trace_pre_record(
     PyObject* op_obj,
     PyObject *input_objects,
     const variable_list& input_vars) {
-  if (!tracer::isTracingVar(input_vars)) {
+  if (!jit::tracer::isTracing()) {
     return jit::tracer::PreTraceInfo();
   }
 
@@ -591,7 +598,7 @@ static void _trace_post_record(
     const variable_list& input_vars,
     PyObject *output_objects,
     bool is_inplace) {
-  if (!trace_info.state) {
+  if (!jit::tracer::isTracing()) {
     return;
   }
 
@@ -605,7 +612,6 @@ static void _trace_post_record(
 
   jit::tracer::postRecordTrace(trace_info, output_vars);
 
-  auto state_lock = trace_info.state->lock();
   trace_info.n->i_(attr::inplace, is_inplace);
 
 }
@@ -633,11 +639,6 @@ PyObject* process_outputs(PyObject *op_obj, THPFunction* grad_fn, const Unpacked
 
   bool is_inplace = static_cast<bool>(grad_fn->dirty_tensors);
   _wrap_outputs(grad_fn, inputs, raw_output, outputs, is_executable);
-  // NOTE: _trace_post_record has to run before _save_variables, because we need
-  // to assign traces to outputs before we convert them to SavedVariables.
-  // On the other hand, it needs to go after _mark_non_differentiable, because
-  // it might be wraping backwards in Evals, and _mark_non_differentiable uses
-  // grad_fn pointer equality for error checking.
   _trace_post_record(trace_info, op_obj, unpacked.input_vars, outputs, is_inplace);
   if (is_executable) {
     _save_variables(grad_fn);
@@ -708,10 +709,6 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
   // Record input nodes if tracing
   auto trace_info = _trace_pre_record(cls, inputs, unpacked_input.input_vars);
-  if (trace_info.state) {
-    // TODO: ezyang suggests this is unused and can be removed
-    ctx->is_traced = true;
-  }
 
   // Initialize backward function (and ctx)
   bool is_executable = input_info.is_executable;
@@ -751,7 +748,7 @@ PyObject *THPFunction_apply(PyObject *cls, PyObject *inputs)
 
 static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_grad_output)
 {
-  AutoGPU gpu_guard(-1);
+  at::DeviceGuard device_guard;
   int num_grads = PyTuple_GET_SIZE(raw_grads.get());
   // First, check if any of grads is None. If not, there's nothing to do
   bool has_none = false;
@@ -771,7 +768,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
   for (int i = 0; i < num_grads; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
     if (grad == Py_None) {
-      grad = THPVariable_Wrap(grads_info[i].zeros(gpu_guard));
+      grad = THPVariable_Wrap(grads_info[i].zeros(device_guard));
       if (!grad) throw python_error();
     } else {
       Py_INCREF(grad);
@@ -1002,7 +999,6 @@ static struct PyGetSetDef THPFunction_properties[] = {
   {"dirty_tensors", &getObject<&THPFunction::dirty_tensors>, &setObject<&THPFunction::dirty_tensors>, nullptr, nullptr},
   {"needs_input_grad", &getObject<&THPFunction::needs_input_grad>, nullptr, nullptr, nullptr},
   {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
-  {"_is_tracing", &getMember<char, &THPFunction::is_traced, PyBool_FromLong>, nullptr, nullptr, nullptr},
   {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
   {nullptr}
 };

@@ -19,13 +19,14 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   THArgCheck(dims <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   ptrdiff_t inElements = THCTensor_(nElement)(state, key);
-  int64_t keySliceSize = THCTensor_(size)(state, key, dim);
-  ptrdiff_t keySlices = inElements / keySliceSize;
 
-  if (THCTensor_(nDimension)(state, key) == 0) {
+  if (inElements == 0) {
     // Zero-dim tensor; do nothing
     return;
   }
+
+  int64_t keySliceSize = THCTensor_(size)(state, key, dim);
+  ptrdiff_t keySlices = inElements / keySliceSize;
 
   // The amount of shared memory and block size is based on
   // 2^ceil(lg(n)); we choose that sorting implementation for a given
@@ -158,7 +159,7 @@ void THCTensor_(sortViaThrust)(THCState* state,
                                THCudaLongTensor* indices,
                                THCTensor* input,
                                int dim, bool dir) {
-  int nDims = THCTensor_(nDimension)(state, input);
+  int nDims = THCTensor_(_nDimension)(state, input);
 
   ptrdiff_t totalElements = THCTensor_(nElement)(state, input);
   int64_t sliceSize = THCTensor_(size)(state, input, dim);

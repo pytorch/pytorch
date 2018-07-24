@@ -22,6 +22,13 @@ git submodule update --init --recursive
 export CMAKE_PREFIX_PATH=${PYTORCH_ENV_DIR}/miniconda3/
 
 # Test PyTorch
+if [[ "${JOB_BASE_NAME}" == *cuda9.2* ]]; then
+  # Eigen gives "explicit specialization of class must precede its first use" error
+  # when compiling with Xcode 9.1 toolchain, so we have to use Xcode 8.2 toolchain instead.
+  export DEVELOPER_DIR=/Library/Developer/CommandLineTools
+else
+  export DEVELOPER_DIR=/Applications/Xcode9.app/Contents/Developer
+fi
 export MACOSX_DEPLOYMENT_TARGET=10.9
 export CXX=clang++
 export CC=clang
@@ -50,7 +57,7 @@ test_cpp_api() {
   CPP_BUILD="$PWD/../cpp-build"
   rm -rf $CPP_BUILD
   mkdir -p $CPP_BUILD
-  WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$CPP_BUILD"
+  WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$CPP_BUILD"
 
   python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 
@@ -58,7 +65,7 @@ test_cpp_api() {
   # without these paths being set
   export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
   export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-  "$CPP_BUILD"/libtorch/bin/test_api
+  "$CPP_BUILD"/caffe2/bin/test_api
 }
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then

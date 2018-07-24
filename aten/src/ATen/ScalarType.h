@@ -1,13 +1,16 @@
 #pragma once
 
-#include <stdint.h>
-
 #include "ATen/ArrayRef.h"
 #include "ATen/ATenGeneral.h"
 #include "ATen/Half.h"
 
+#include <cstdint>
+#include <iostream>
+
 namespace at {
 
+// NB: Order matters for this macro; it is relied upon in
+// _promoteTypesLookup and probably other places.
 #define AT_FORALL_SCALAR_TYPES(_) \
 _(uint8_t,Byte,i) \
 _(int8_t,Char,i) \
@@ -15,6 +18,15 @@ _(int16_t,Short,i) \
 _(int,Int,i) \
 _(int64_t,Long,i) \
 _(at::Half,Half,d) \
+_(float,Float,d) \
+_(double,Double,d)
+
+#define AT_FORALL_SCALAR_TYPES_EXCEPT_HALF(_) \
+_(uint8_t,Byte,i) \
+_(int8_t,Char,i) \
+_(int16_t,Short,i) \
+_(int,Int,i) \
+_(int64_t,Long,i) \
 _(float,Float,d) \
 _(double,Double,d)
 
@@ -157,3 +169,9 @@ typedef ArrayRef<int64_t> IntList;
 typedef ArrayRef<Tensor> TensorList;
 
 } // namespace at
+
+inline std::ostream& operator<<(
+    std::ostream& stream,
+    at::ScalarType scalar_type) {
+  return stream << at::toString(scalar_type);
+}

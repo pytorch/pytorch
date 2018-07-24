@@ -54,13 +54,13 @@ struct Method {
   }
 
   variable_tensor_list run(variable_tensor_list && inputs) {
-    std::call_once(executor_init, [&]{
-      executor = GraphExecutor(graph(), optimize);
-    });
     for(auto tp : member_inputs) {
       inputs.push_back(*tp);
     }
-    return executor.run(std::move(inputs));
+    return get_executor().run(std::move(inputs));
+  }
+  std::shared_ptr<Graph> graph_for(const variable_tensor_list& inputs) {
+    return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {
     return graph_;
@@ -137,10 +137,19 @@ struct Method {
     schema.reset(new FunctionSchema(std::move(schema_)));
     return *this;
   }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
   bool optimize;
+
+  GraphExecutor& get_executor() {
+    std::call_once(executor_init, [&]{
+      executor = GraphExecutor(graph(), optimize);
+    });
+    return executor;
+  }
+
   GraphExecutor executor; // for execution
   // member_inputs are a list of additional arguments appended to graph that are
   // inputs that come from the members of the Module or its submodules.
@@ -198,7 +207,7 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-struct Module : public std::enable_shared_from_this<Module> {
+struct Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
   : modules("Module")
@@ -244,7 +253,7 @@ struct Module : public std::enable_shared_from_this<Module> {
   }
 
   autograd::Variable get_parameter(const std::string& name) const {
-    return static_cast<autograd::Variable&>(*parameter_slot(name));
+    return autograd::as_variable_ref(*parameter_slot(name));
   }
 
   // each module owns its method. The reference returned here

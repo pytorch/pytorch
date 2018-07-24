@@ -2,7 +2,7 @@
 
 #include "torch/csrc/utils/numpy_stub.h"
 
-#ifndef WITH_NUMPY
+#ifndef USE_NUMPY
 namespace torch { namespace utils {
 PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   throw std::runtime_error("PyTorch was compiled without NumPy support");
@@ -176,4 +176,4 @@ ScalarType numpy_dtype_to_aten(int dtype) {
 
 }} // namespace torch::utils
 
-#endif  // WITH_NUMPY
+#endif  // USE_NUMPY

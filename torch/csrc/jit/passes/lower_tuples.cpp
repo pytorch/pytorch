@@ -14,7 +14,7 @@ std::unordered_set<Symbol> white_list = {
   prim::TupleConstruct,
   prim::Param,
   prim::Return,
- };
+};
 
 
 static void LowerTuples(Block* block);

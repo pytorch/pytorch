@@ -6,6 +6,7 @@ from itertools import product
 
 import torch
 import torch.cuda
+from torch.nn.functional import _Reduction
 from common import TestCase, to_gpu, freeze_rng_state, is_iterable
 from common_cuda import TEST_CUDA
 from torch.autograd.gradcheck import get_numerical_jacobian, iter_tensors
@@ -20,8 +21,12 @@ else:
 PRECISION = 1e-5
 
 
-def get_size_average(m):
-    return getattr(m, 'size_average', False) or getattr(m, 'sizeAverage', False)
+def get_reduction(m):
+    result = getattr(m, 'reduction', None)
+    if result is None:
+        result = _Reduction.legacy_get_string(getattr(m, 'sizeAverage', None), True, emit_warning=False)
+    assert result is not None
+    return result
 
 
 def get_weight(m):
@@ -242,19 +247,19 @@ module_tests = [
 ]
 
 
-def kldivloss_reference(input, target, size_average=True, reduce=True):
+def kldivloss_reference(input, target, reduction='elementwise_mean'):
     safe_target = target * (target > 0).type_as(target)
     safe_target_log = (safe_target + (target <= 0).type_as(target)).log()
     result = safe_target * (safe_target_log - input)
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return result.mean()
-    elif reduce:
+    elif reduction == 'sum':
         return result.sum()
     return result
 
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
-                        size_average=True, reduce=True):
+                        reduction='elementwise_mean'):
     assert input.dim() >= 3
     N = input.size(0)
     C = input.size(1)
@@ -272,15 +277,15 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
         output[tup] = -input[tuple(input_index)] * norm
         total_weight += norm
 
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.sum() / total_weight
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum()
     return output
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
-                      size_average=True, reduce=True):
+                      reduction='elementwise_mean'):
 
     def nll_loss_helper(input, target, weight, ignore_index):
         if target == ignore_index:
@@ -293,22 +298,22 @@ def nllloss_reference(input, target, weight=None, ignore_index=-100,
                           for i, t in zip(input, target)]
     losses, weights = zip(*losses_and_weights)
     losses_tensor = input.new_tensor(losses)
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return sum(losses_tensor) / sum(weights)
-    elif reduce:
+    elif reduction == 'sum':
         return sum(losses_tensor)
     else:
         return losses_tensor
 
 
-def smoothl1loss_reference(input, target, size_average=True, reduce=True):
+def smoothl1loss_reference(input, target, reduction='elementwise_mean'):
     abs_diff = (input - target).abs()
     ge_one_mask = (abs_diff >= 1).type_as(abs_diff)
     lt_one_mask = (abs_diff < 1).type_as(abs_diff)
     output = ge_one_mask * (abs_diff - 0.5) + lt_one_mask * 0.5 * (abs_diff ** 2)
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.mean()
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum()
     return output
 
@@ -329,7 +334,7 @@ def _multilabelmarginloss_reference(input, target):
     return sum
 
 
-def multilabelmarginloss_reference(input, target, size_average=True, reduce=True):
+def multilabelmarginloss_reference(input, target, reduction='elementwise_mean'):
     if input.dim() == 1:
         n = 1
         dim = input.size(0)
@@ -342,30 +347,30 @@ def multilabelmarginloss_reference(input, target, size_average=True, reduce=True
         for i in range(0, n):
             output[i] = _multilabelmarginloss_reference(input[i], target[i])
 
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.mean() / dim
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum() / dim
     return output / dim
 
 
-def hingeembeddingloss_reference(input, target, margin=1.0, size_average=True, reduce=True):
+def hingeembeddingloss_reference(input, target, margin=1.0, reduction='elementwise_mean'):
     margin_clamp = (margin - input).clamp(min=0).type_as(input)
     output = torch.where(target == 1, input, margin_clamp)
 
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.mean()
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum()
     return output
 
 
-def softmarginloss_reference(input, target, size_average=True, reduce=True):
+def softmarginloss_reference(input, target, reduction='elementwise_mean'):
     output = (1 + (-input * target).exp()).log()
 
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.mean()
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum()
     return output
 
@@ -381,8 +386,7 @@ def _multimarginloss_reference(input, target_idx, p, margin, weight):
     return output
 
 
-def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_average=True,
-                              reduce=True):
+def multimarginloss_reference(input, target, p=1, margin=1, weight=None, reduction='elementwise_mean'):
     if input.dim() == 1:
         n = 1
         dim = input.size(0)
@@ -396,14 +400,14 @@ def multimarginloss_reference(input, target, p=1, margin=1, weight=None, size_av
         for x in range(0, n):
             output[x] = _multimarginloss_reference(input[x], target[x], p, margin, weight)
 
-        if reduce and size_average:
+        if reduction == 'elementwise_mean':
             return output.mean() / dim
-        elif reduce:
+        elif reduction == 'sum':
             return output.sum() / dim
         return output / dim
 
 
-def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
+def cosineembeddingloss_reference(input1, input2, target, margin=0, reduction='elementwise_mean'):
     def _cos(a, b):
         cos = a.new(a.size(0))
         for i in range(0, a.size(0)):
@@ -412,15 +416,15 @@ def cosineembeddingloss_reference(input1, input2, target, margin=0, size_average
 
     output = torch.where(target == 1, 1 - _cos(input1, input2), (_cos(input1, input2) - margin).clamp(min=0))
 
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.mean()
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum()
     return output
 
 
 def tripletmarginloss_reference(anchor, positive, negative, margin=1.0, p=2, eps=1e-6, swap=False,
-                                size_average=True, reduce=True):
+                                reduction='elementwise_mean'):
     d_p = torch.pairwise_distance(anchor, positive, p, eps)
     d_n = torch.pairwise_distance(anchor, negative, p, eps)
     if swap:
@@ -428,18 +432,18 @@ def tripletmarginloss_reference(anchor, positive, negative, margin=1.0, p=2, eps
         d_n = torch.min(d_n, d_s)
 
     output = torch.clamp(margin + d_p - d_n, min=0.0)
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.mean()
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum()
     return output
 
 
-def marginrankingloss_reference(input1, input2, target, margin=0, size_average=True, reduce=True):
+def marginrankingloss_reference(input1, input2, target, margin=0, reduction='elementwise_mean'):
     output = (-target * (input1 - input2) + margin).clamp(min=0)
-    if reduce and size_average:
+    if reduction == 'elementwise_mean':
         return output.mean()
-    elif reduce:
+    elif reduction == 'sum':
         return output.sum()
     return output
 
@@ -472,12 +476,12 @@ criterion_tests = [
         input_fn=lambda: torch.rand(15, 10).log(),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
-            nllloss_reference(i, t, size_average=get_size_average(m)),
-        check_no_size_average=True
+            nllloss_reference(i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args=(None, True, 2),
+        constructor_args=(None, None, 2),
         input_fn=lambda: torch.rand(15, 10).log(),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, _: nllloss_reference(i, t, ignore_index=2),
@@ -494,7 +498,7 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), True, 2),
+        constructor_args_fn=lambda: (torch.rand(10), None, 2),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10).floor().long(),
         reference_fn=lambda i, t, m:
@@ -503,7 +507,7 @@ criterion_tests = [
     ),
     dict(
         module_name='NLLLoss',
-        constructor_args_fn=lambda: (torch.rand(10), True, -1),
+        constructor_args_fn=lambda: (torch.rand(10), None, -1),
         input_fn=lambda: torch.rand(15, 10).add(1e-2).log(),
         target_fn=lambda: torch.Tensor(15).uniform_().mul(10 + 1).floor().long() - 1,
         reference_fn=lambda i, t, m:
@@ -515,22 +519,23 @@ criterion_tests = [
         input_fn=lambda: torch.rand(10, 10).log(),
         target_fn=lambda: torch.rand(10, 10),
         reference_fn=lambda i, t, m:
-            kldivloss_reference(i, t, get_size_average(m), reduce=True),
-        check_no_size_average=True,
+            kldivloss_reference(i, t, get_reduction(m)),
+        check_sum_reduction=True,
     ),
     dict(
         module_name='MSELoss',
         input_size=(2, 3, 4, 5),
         target_size=(2, 3, 4, 5),
-        reference_fn=lambda i, t, m: (i - t).abs().pow(2).sum() / (i.numel() if get_size_average(m) else 1),
-        check_no_size_average=True,
+        reference_fn=lambda i, t, m: ((i - t).abs().pow(2).sum() / (i.numel()
+                                      if get_reduction(m) == 'elementwise_mean' else 1)),
+        check_sum_reduction=True,
     ),
     dict(
         module_name='BCELoss',
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         reference_fn=lambda i, t, m: -(t * i.log() + (1 - t) * (1 - i).log()).sum() /
-            (i.numel() if get_size_average(m) else 1),
+            (i.numel() if get_reduction(m) else 1),
         check_gradgrad=False,
     ),
     dict(
@@ -539,7 +544,7 @@ criterion_tests = [
         input_fn=lambda: torch.rand(15, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.randn(15, 10).gt(0).double(),
         reference_fn=lambda i, t, m: -((t * i.log() + (1 - t) * (1 - i).log()) * get_weight(m)).sum() /
-            (i.numel() if get_size_average(m) else 1),
+            (i.numel() if get_reduction(m) else 1),
         desc='weights',
         check_gradgrad=False,
     ),
@@ -560,8 +565,8 @@ criterion_tests = [
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
         reference_fn=lambda i, t, m:
-            hingeembeddingloss_reference(i, t, size_average=get_size_average(m)),
-        check_no_size_average=True,
+            hingeembeddingloss_reference(i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
     ),
     dict(
         module_name='HingeEmbeddingLoss',
@@ -569,18 +574,18 @@ criterion_tests = [
         input_size=(10,),
         target_fn=lambda: torch.randn(10).gt(0).double().mul_(2).sub(1),
         reference_fn=lambda i, t, m:
-            hingeembeddingloss_reference(i, t, margin=0.5, size_average=get_size_average(m)),
+            hingeembeddingloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
-        check_no_size_average=True,
+        check_sum_reduction=True,
     ),
     dict(
         module_name='MultiLabelMarginLoss',
         input_size=(10,),
         target_fn=lambda: torch.rand(10).mul(10).floor().long(),
         reference_fn=lambda i, t, m:
-            multilabelmarginloss_reference(i, t, size_average=get_size_average(m)),
+            multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
         desc="1d",
-        check_no_size_average=True,
+        check_sum_reduction=True,
         check_gradgrad=False,
     ),
     dict(
@@ -588,8 +593,8 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5, 10).mul(10).floor().long(),
         reference_fn=lambda i, t, m:
-            multilabelmarginloss_reference(i, t, size_average=get_size_average(m)),
-        check_no_size_average=True,
+            multilabelmarginloss_reference(i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
         check_gradgrad=False,
     ),
     dict(
@@ -604,8 +609,8 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, size_average=get_size_average(m)),
-        check_no_size_average=True,
+            multimarginloss_reference(i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
         check_gradgrad=False,
     ),
     dict(
@@ -613,9 +618,9 @@ criterion_tests = [
         input_size=(10,),
         target_fn=lambda: torch.rand(1).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, size_average=get_size_average(m)),
+            multimarginloss_reference(i, t, reduction=get_reduction(m)),
         desc='1d',
-        check_no_size_average=True,
+        check_sum_reduction=True,
         check_gradgrad=False,
     ),
     dict(
@@ -624,9 +629,9 @@ criterion_tests = [
         input_fn=lambda: torch.rand(5, 10).clamp_(1e-2, 1 - 1e-2),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, p=2, size_average=get_size_average(m)),
+            multimarginloss_reference(i, t, p=2, reduction=get_reduction(m)),
         desc='p',
-        check_no_size_average=True,
+        check_sum_reduction=True,
         check_gradgrad=False,
     ),
     dict(
@@ -636,9 +641,9 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, margin=0.5, size_average=get_size_average(m)),
+            multimarginloss_reference(i, t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
-        check_no_size_average=True,
+        check_sum_reduction=True,
         check_gradgrad=False,
     ),
     dict(
@@ -648,34 +653,34 @@ criterion_tests = [
         input_size=(5, 10),
         target_fn=lambda: torch.rand(5).mul(8).floor().long(),
         reference_fn=lambda i, t, m:
-            multimarginloss_reference(i, t, weight=get_weight(m), size_average=get_size_average(m)),
+            multimarginloss_reference(i, t, weight=get_weight(m), reduction=get_reduction(m)),
         desc='weights',
-        check_no_size_average=True,
+        check_sum_reduction=True,
         check_gradgrad=False,
     ),
     dict(
         module_name='SmoothL1Loss',
         input_size=(5, 10),
         target_size=(5, 10),
-        check_no_size_average=True,
+        check_sum_reduction=True,
         reference_fn=lambda i, t, m:
-            smoothl1loss_reference(i, t, size_average=get_size_average(m)),
+            smoothl1loss_reference(i, t, reduction=get_reduction(m)),
     ),
     dict(
         module_name='SoftMarginLoss',
         input_size=(5, 5),
         target_fn=lambda: torch.randn(5, 5).sign(),
         reference_fn=lambda i, t, m:
-            softmarginloss_reference(i, t, size_average=get_size_average(m)),
-        check_no_size_average=True,
+            softmarginloss_reference(i, t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
         reference_fn=lambda i, t, m:
-            cosineembeddingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
-        check_no_size_average=True,
+            cosineembeddingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
     ),
     dict(
         module_name='CosineEmbeddingLoss',
@@ -683,17 +688,17 @@ criterion_tests = [
         input_fn=lambda: (torch.rand(15, 10), torch.rand(15, 10)),
         target_fn=lambda: torch.randn(15).sign(),
         reference_fn=lambda i, t, m:
-            cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, size_average=get_size_average(m)),
+            cosineembeddingloss_reference(i[0], i[1], t, margin=0.7, reduction=get_reduction(m)),
         desc='margin',
-        check_no_size_average=True,
+        check_sum_reduction=True,
     ),
     dict(
         module_name='MarginRankingLoss',
         input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target_fn=lambda: torch.randn(50).sign(),
         reference_fn=lambda i, t, m:
-            marginrankingloss_reference(i[0], i[1], t, size_average=get_size_average(m)),
-        check_no_size_average=True,
+            marginrankingloss_reference(i[0], i[1], t, reduction=get_reduction(m)),
+        check_sum_reduction=True,
     ),
     dict(
         module_name='MarginRankingLoss',
@@ -701,9 +706,9 @@ criterion_tests = [
         input_fn=lambda: (torch.randn(50).mul(10), torch.randn(50).mul(10)),
         target_fn=lambda: torch.randn(50).sign(),
         reference_fn=lambda i, t, m:
-            marginrankingloss_reference(i[0], i[1], t, margin=0.5, size_average=get_size_average(m)),
+            marginrankingloss_reference(i[0], i[1], t, margin=0.5, reduction=get_reduction(m)),
         desc='margin',
-        check_no_size_average=True,
+        check_sum_reduction=True,
     ),
 ]
 
@@ -749,7 +754,10 @@ class NNTestCase(TestCase):
             jacobian_param = torch.zeros(num_param, output_size)
 
         for i in range(output_size):
-            _, d_param = self._get_parameters(module)
+            param, d_param = self._get_parameters(module)
+            # make non grad zeros
+            d_param = [torch.zeros_like(p) if d is None else d for (p, d) in zip(param, d_param)]
+
             d_out = torch.zeros_like(output)
             flat_d_out = d_out.view(-1)
             flat_d_out[i] = 1
@@ -943,7 +951,16 @@ class ModuleTest(TestBase):
             return [self.noncontiguize(o) for o in obj]
         tensor = obj
         ndim = tensor.dim()
-        noncontig = torch.stack([torch.zeros_like(tensor), tensor], ndim).select(ndim, 1).detach()
+        # Always making only the last dimension noncontiguous is easy to hide
+        # bugs because .view(-1) will still work. So try to find a dim with size
+        # > 1 and make that non-contiguous, i.e., stack + select on the
+        # dimension directly after that.
+        dim = ndim
+        for d in range(ndim):
+            if tensor.size(d) > 1:
+                dim = d + 1
+                break
+        noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
         assert noncontig.numel() == 1 or not noncontig.is_contiguous()
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
@@ -972,11 +989,7 @@ class ModuleTest(TestBase):
             test_case._zero_grad_parameters(module)
             test_case._zero_grad_input(i)
             with freeze_rng_state():
-                try:
-                    out = test_case._forward(module, i)
-                except Exception:
-                    # Some modules will fail because of non contiguous inputs and we're ok with that
-                    continue
+                out = test_case._forward(module, i)
                 grad = test_case._backward(module, i, out, go)
 
                 test_case.assertEqual(out, output)
@@ -1074,6 +1087,7 @@ class CriterionTest(TestBase):
     def __init__(self, *args, **kwargs):
         super(CriterionTest, self).__init__(*args, **kwargs)
         self.should_test_cuda = kwargs.get('test_cuda', True)
+        self.check_forward_only = kwargs.get('check_forward_only', True)
 
     def _get_target(self):
         return self._get_arg('target', True)
@@ -1095,6 +1109,9 @@ class CriterionTest(TestBase):
             if isinstance(expected_out, torch.Tensor):
                 expected_out = expected_out.item()
             test_case.assertEqual(out, expected_out)
+
+        if self.check_forward_only:
+            return
 
         test_case.check_criterion_jacobian(module, input, target)
         self._do_extra_tests(test_case, module, input, target)

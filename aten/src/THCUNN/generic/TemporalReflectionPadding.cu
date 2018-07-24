@@ -14,8 +14,8 @@ void THNN_(TemporalReflectionPadding_updateOutput)(THCState *state,
   int numBatch = 1;
 
   int numInputDims = THCTensor_(nDimension)(state, input);
-  THCUNN_argCheck(state, numInputDims == 2 || numInputDims == 3, 2, input,
-                  "2D or 3D (batch mode) tensor expected for input, but got: %s")
+  THCUNN_argCheck(state, !input->is_empty() && (numInputDims == 2 || numInputDims == 3), 2, input,
+                  "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 3) {
     numBatch = THCTensor_(size)(state, input, 0);
@@ -84,7 +84,7 @@ void THNN_(TemporalReflectionPadding_updateGradInput)(
     planeDim++;
     dimw++;
   }
-  int iwidth = input->size[dimw];
+  int iwidth = input->size(dimw);
   int owidth  = iwidth + padL + padR;
 
   THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,

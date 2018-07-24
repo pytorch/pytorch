@@ -105,22 +105,76 @@ OPERATOR_SCHEMA(Reshape)
         })
     .AllowInplace({{0, 0}})
     .SetDoc(R"DOC(
-Reshape the input tensor similar to numpy.reshape.
+Reshape the input tensor similar to numpy's
+[reshape](https://docs.scipy.org/doc/numpy/reference/generated/numpy.reshape.html).
 
-It takes a tensor as input and an optional tensor specifying the new shape.
-When the second input is absent, an extra argument `shape` must be specified.
-It outputs the reshaped tensor as well as the original shape.
+Takes a tensor as input and an optional tensor specifying the new shape. When
+the second input is absent, an extra argument shape must be specified. Outputs
+the reshaped tensor as well as the original shape.
 
 At most one dimension of the new shape can be -1. In this case, the value is
 inferred from the size of the tensor and the remaining dimensions. A dimension
 could also be 0, in which case the actual dimension value is going to be copied
 from the input tensor.
+
+Github Links:
+
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reshape_op.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "Reshape",
+    ["data"],
+    ["reshaped", "old_shape"],
+    shape=(3,2)
+)
+
+workspace.FeedBlob("data", (np.random.randint(100, size=(6))))
+print("data:", workspace.FetchBlob("data"))
+workspace.RunOperatorOnce(op)
+print("reshaped:", workspace.FetchBlob("reshaped"))
+print("old_shape:", workspace.FetchBlob("old_shape"))
+```
+
+**Result**
+
+```
+data: [86 60 85 96  7 37]
+reshaped: [[86 60]
+          [85 96]
+          [ 7 37]]
+old_shape: [6]
+```
+
+</details>
+
 )DOC")
-    .Arg("shape", "New shape")
-    .Input(0, "data", "An input tensor.")
-    .Input(1, "new_shape", "New shape.")
-    .Output(0, "reshaped", "Reshaped data.")
-    .Output(1, "old_shape", "Original shape.")
+    .Arg("shape", "*(type: Tuple(int))* New shape. Do not set if using "
+    "`new_shape` input.")
+    .Input(
+        0,
+        "data",
+        "*(type: Tensor)* Input tensor.")
+    .Input(
+        1,
+        "new_shape",
+        "*(type: Tensor`<int>`)* [OPTIONAL] Tensor containing new shape.")
+    .Output(
+        0,
+        "reshaped",
+        "*(type: Tensor)* Reshaped output tensor.")
+    .Output(
+        1,
+        "old_shape",
+        "*(type: Tensor`<int>`)* Tensor containing old shape of `data`.")
     .InheritOnnxSchema("Reshape");
 
 class GetReshapeGradient : public GradientMakerBase {

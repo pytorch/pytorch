@@ -28,7 +28,7 @@ __host__ void THCTensor_(scanOuterDim)(THCState *state, THCTensor *tgt,
                                        THCTensor *src, int dimension,
                                        real init, BinaryOp binary_op)
 {
-  unsigned ndim = THCTensor_(nDimension)(state, src);
+  unsigned ndim = THCTensor_(_nDimension)(state, src);
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
   for (int dim = 0; dim < dimension; dim++) {
@@ -57,7 +57,7 @@ __host__ void THCTensor_(scanInnermostDim)(THCState *state, THCTensor *tgt,
                                            THCTensor *src, real init,
                                            BinaryFunction binary_op)
 {
-  unsigned ndim = THCTensor_(nDimension)(state, src);
+  unsigned ndim = THCTensor_(_nDimension)(state, src);
   // Treat all outer dimensions as a single dimension.
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
@@ -87,16 +87,18 @@ void THCTensor_(scanDim)(THCState *state, THCTensor *self_, THCTensor *src,
   THCTensor *self = THCTensor_(newContiguous)(state, self_);
   src = THCTensor_(newContiguous)(state, src);
 
-#ifndef THC_REAL_IS_HALF
-  if (ndim == 1) {
-    // thrust does not take an "init"
-    THCTensor_(scanThrust)(state, self, src, binary_op);
-  } else
-#endif
-  if (dimension == ndim - 1) {
-    THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
-  } else {
-    THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
+  if (!self->is_empty()) {
+  #ifndef THC_REAL_IS_HALF
+    if (ndim == 1) {
+      // thrust does not take an "init"
+      THCTensor_(scanThrust)(state, self, src, binary_op);
+    } else
+  #endif
+    if (dimension == ndim - 1) {
+      THCTensor_(scanInnermostDim)(state, self, src, init, binary_op);
+    } else {
+      THCTensor_(scanOuterDim)(state, self, src, dimension, init, binary_op);
+    }
   }
 
   THCTensor_(free)(state, src);

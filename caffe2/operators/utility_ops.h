@@ -703,6 +703,9 @@ class LengthsToSegmentIdsOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(LengthsToSegmentIdsOp);
 
+  // TODO: enable the InputFillers
+  DISABLE_INPUT_FILLERS(Context)
+
   bool RunOnDevice() override {
     auto& input = Input(0);
     auto* output = Output(0);
@@ -757,6 +760,9 @@ class SegmentIdsToLengthsOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SegmentIdsToLengthsOp);
+
+  // TODO: enable the InputFillers
+  DISABLE_INPUT_FILLERS(Context)
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -814,6 +820,9 @@ class SegmentIdsToRangesOp : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   USE_SIMPLE_CTOR_DTOR(SegmentIdsToRangesOp);
+
+  // TODO: enable the InputFillers
+  DISABLE_INPUT_FILLERS(Context)
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(0));
@@ -1405,6 +1414,68 @@ class RangeOp : public Operator<Context> {
  private:
   // local CPU tensor for copying constants.
   TensorCPU local_;
+};
+
+class ThrowExceptionOp : public Operator<CPUContext> {
+ public:
+  ThrowExceptionOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Exception from ThrowExceptionOp")) {}
+
+  bool RunOnDevice() override {
+    CAFFE_THROW(message_);
+  }
+
+ private:
+  const std::string message_;
+};
+
+class ThrowChildThreadExceptionOp : public Operator<CPUContext> {
+ public:
+  ThrowChildThreadExceptionOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Exception from ThrowChildThreadExceptionOp")) {}
+
+  bool RunOnDevice() override {
+    std::thread t([this]() { CAFFE_THROW(this->message_); });
+
+    t.join();
+    return true;
+  }
+
+ private:
+  const std::string message_;
+};
+
+class LogFatalOp : public Operator<CPUContext> {
+ public:
+  LogFatalOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws),
+        message_(GetSingleArgument<std::string>(
+            "message",
+            "Logging from LogFatalOp")) {}
+
+  bool RunOnDevice() override {
+    LOG(FATAL) << message_;
+    return true;
+  }
+
+ private:
+  const std::string message_;
+};
+
+class FailOp : public Operator<CPUContext> {
+ public:
+  FailOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CPUContext>(operator_def, ws) {}
+
+  bool RunOnDevice() override {
+    return false;
+  }
 };
 
 } // namespace caffe2

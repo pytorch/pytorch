@@ -9,8 +9,6 @@
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/generated/VariableType.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/jit/tracer_state.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <ATen/ATen.h>
 
@@ -23,13 +21,15 @@
 
 namespace torch { namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(VariableType::getType(data)),
+    : TensorImpl(VariableType::getType(data), nullptr),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
-      requires_grad_(requires_grad),
+      requires_grad_(false),
       is_view_(false),
       output_nr_(gradient_edge.input_nr),
       pyobj_(nullptr) {
+  // set_requires_grad also checks error conditions.
+  set_requires_grad(requires_grad);
   TORCH_ASSERTM(
       !grad_fn_ || !requires_grad_,
       "requires_grad should be false if grad_fn is set");
@@ -134,6 +134,13 @@ void Variable::Impl::set_data(Tensor new_data) {
   data_ = std::move(new_data);
 }
 
+void Variable::Impl::release_resources() {
+  data_.reset();
+  grad_.reset();
+  grad_fn_.reset();
+  hooks_.clear();
+}
+
 Variable::ViewImpl::ViewImpl(Variable base, at::Tensor data, Edge gradient_edge)
     : Variable::Impl(std::move(data), false, std::move(gradient_edge)),
       base_(std::move(base)) {
@@ -180,6 +187,11 @@ void Variable::ViewImpl::rebase_history(Edge gradient_edge) {
   get_grad_fn(); // trigger an update to the view's grad_fn
 }
 
+void Variable::ViewImpl::release_resources() {
+  Variable::Impl::release_resources();
+  base_.reset();
+}
+
 void Variable::rebase_history(Edge gradient_edge) {
   TORCH_ASSERT(gradient_edge.function != nullptr);
   if (is_view()) {
@@ -190,12 +202,4 @@ void Variable::rebase_history(Edge gradient_edge) {
   }
 }
 
-void Variable::set_tracing_state(
-    jit::tracer::ValueTracingState* new_tracing_state) {
-  get()->tracing_state_.reset(new_tracing_state);
-}
-
-jit::tracer::ValueTracingState& Variable::tracing_state() const noexcept {
-  return *get()->tracing_state_;
-}
 }} // namespace torch::autograd

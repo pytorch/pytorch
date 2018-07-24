@@ -23,7 +23,8 @@ install_ubuntu() {
                    hipblas \
                    rocrand \
                    rocm-profiler \
-                   cxlactivitylogger
+                   cxlactivitylogger \
+                   hcsparse
 
     pushd $HOME
     # install hcrng
@@ -48,6 +49,13 @@ install_centos() {
     echo "Not implemented yet"
     exit 1
 }
+  
+# This will be removed after merging an upcoming PR.
+install_hcrng() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
+    dpkg -i /opt/rocm/debians/hcrng.deb
+}
 
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
@@ -58,3 +66,5 @@ else
   echo "Unable to determine OS..."
   exit 1
 fi
+
+install_hcrng

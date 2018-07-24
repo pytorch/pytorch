@@ -1,6 +1,26 @@
+# UBSAN triggers when compiling protobuf, so we need to disable it.
+set(UBSAN_FLAG "-fsanitize=undefined")
+
+macro(disable_ubsan)
+  if (CMAKE_C_FLAGS MATCHES ${UBSAN_FLAG} OR CMAKE_CXX_FLAGS MATCHES ${UBSAN_FLAG})
+    set(CAFFE2_UBSAN_ENABLED ON)
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_C_FLAGS ${CMAKE_C_FLAGS})
+    string(REPLACE ${UBSAN_FLAG} "" CMAKE_CXX_FLAGS ${CMAKE_CXX_FLAGS})
+  endif()
+endmacro()
+
+macro(enable_ubsan)
+  if (CAFFE2_UBSAN_ENABLED)
+    set(CMAKE_C_FLAGS "${UBSAN_FLAG} ${CMAKE_C_FLAGS}")
+    set(CMAKE_CXX_FLAGS "${UBSAN_FLAG} ${CMAKE_CXX_FLAGS}")
+  endif()
+endmacro()
+
 # ---[ Custom Protobuf
 if(CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
+  disable_ubsan()
   include(${CMAKE_CURRENT_LIST_DIR}/ProtoBuf.cmake)
+  enable_ubsan()
 endif()
 
 # ---[ Threads
@@ -138,6 +158,7 @@ if(USE_GFLAGS)
   include(${CMAKE_CURRENT_LIST_DIR}/public/gflags.cmake)
   if (TARGET gflags)
     set(CAFFE2_USE_GFLAGS 1)
+    include_directories(SYSTEM ${GFLAGS_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS gflags)
   else()
     message(WARNING
@@ -153,6 +174,7 @@ if(USE_GLOG)
   include(${CMAKE_CURRENT_LIST_DIR}/public/glog.cmake)
   if (TARGET glog::glog)
     set(CAFFE2_USE_GOOGLE_GLOG 1)
+    include_directories(SYSTEM ${GLOG_INCLUDE_DIR})
     list(APPEND Caffe2_PUBLIC_DEPENDENCY_LIBS glog::glog)
   else()
     message(WARNING
@@ -316,7 +338,57 @@ include_directories(SYSTEM ${EIGEN3_INCLUDE_DIR})
 
 # ---[ Python + Numpy
 if(BUILD_PYTHON)
-  set(Python_ADDITIONAL_VERSIONS 2.8 2.7 2.6)
+  # If not given a Python installation, then use the current active Python
+  if(NOT DEFINED PYTHON_EXECUTABLE)
+    execute_process(
+      COMMAND "which" "python" RESULT_VARIABLE _exitcode OUTPUT_VARIABLE _py_exe)
+    if(${_exitcode} EQUAL 0)
+      string(STRIP ${_py_exe} PYTHON_EXECUTABLE)
+      message(STATUS "Setting Python to ${PYTHON_EXECUTABLE}")
+    endif()
+  endif()
+
+  # Check that Python works
+  if(DEFINED PYTHON_EXECUTABLE)
+    execute_process(
+        COMMAND "${PYTHON_EXECUTABLE}" "--version"
+        RESULT_VARIABLE _exitcode)
+    if(NOT ${_exitcode} EQUAL 0)
+      message(FATAL_ERROR "The Python executable ${PYTHON_EXECUTABLE} cannot be run. Make sure that it is an absolute path.")
+    endif()
+  endif()
+
+  # Seed PYTHON_INCLUDE_DIR and PYTHON_LIBRARY to be consistent with the
+  # executable that we already found (if we didn't actually find an executable
+  # then these will just use "python", but at least they'll be consistent with
+  # each other).
+  if(NOT DEFINED PYTHON_INCLUDE_DIR)
+    # distutils.sysconfig, if it's installed, is more accurate than sysconfig,
+    # which sometimes outputs directories that do not exist
+    pycmd_no_exit(_py_inc _exitcode "from distutils import sysconfig; print(sysconfig.get_python_inc())")
+    if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+      SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+      message(STATUS "Setting Python's include dir to ${_py_inc} from distutils.sysconfig")
+    else()
+      pycmd_no_exit(_py_inc _exitcode "from sysconfig import get_paths; print(get_paths()['include'])")
+      if("${_exitcode}" EQUAL 0 AND IS_DIRECTORY "${_py_inc}")
+        SET(PYTHON_INCLUDE_DIR "${_py_inc}")
+        message(STATUS "Setting Python's include dir to ${_py_inc} from sysconfig")
+      endif()
+    endif()
+  endif(NOT DEFINED PYTHON_INCLUDE_DIR)
+
+  if(NOT DEFINED PYTHON_LIBRARY)
+    pycmd_no_exit(_py_lib _exitcode "from sysconfig import get_paths; print(get_paths()['stdlib'])")
+    if("${_exitcode}" EQUAL 0 AND EXISTS "${_py_lib}" AND EXISTS "${_py_lib}")
+      SET(PYTHON_LIBRARY "${_py_lib}")
+      message(STATUS "Setting Python's library to ${_py_lib}")
+    endif()
+  endif(NOT DEFINED PYTHON_LIBRARY)
+
+  # These should fill in the rest of the variables, like versions, but resepct
+  # the variables we set above
+  set(Python_ADDITIONAL_VERSIONS 3.7 3.6 3.5 2.8 2.7 2.6)
   find_package(PythonInterp 2.7)
   find_package(PythonLibs 2.7)
   find_package(NumPy REQUIRED)
@@ -459,7 +531,8 @@ if(BUILD_CAFFE2 OR BUILD_ATEN)
     set(HIP_HIPCC_FLAGS "${HIP_HIPCC_FLAGS} -Wno-unused-command-line-argument")
 
     set(Caffe2_HIP_INCLUDES
-      ${hip_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+      ${hip_INCLUDE_DIRS} ${hcc_INCLUDE_DIRS} ${hsa_INCLUDE_DIRS} ${rocrand_INCLUDE_DIRS} ${hiprand_INCLUDE_DIRS} ${rocblas_INCLUDE_DIRS} ${miopen_INCLUDE_DIRS} ${thrust_INCLUDE_DIRS} $<INSTALL_INTERFACE:include> ${Caffe2_HIP_INCLUDES})
+
     # This is needed for library added by hip_add_library (same for hip_add_executable)
     hip_include_directories(${Caffe2_HIP_INCLUDES})
 
@@ -717,6 +790,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     caffe2_interface_library(onnx onnx_library)
   endif()
   list(APPEND Caffe2_DEPENDENCY_WHOLE_LINK_LIBS onnx_library)
+  list(APPEND Caffe2_DEPENDENCY_LIBS onnxifi_loader)
   # Recover the build shared libs option.
   set(BUILD_SHARED_LIBS ${TEMP_BUILD_SHARED_LIBS})
 endif()
@@ -737,8 +811,6 @@ endif()
 if (BUILD_ATEN)
   set(TORCH_CUDA_ARCH_LIST $ENV{TORCH_CUDA_ARCH_LIST})
   set(TORCH_NVCC_FLAGS $ENV{TORCH_NVCC_FLAGS})
-
-  add_definitions(-DTH_INDEX_BASE=0)
 
   # RPATH stuff
   # see https://cmake.org/Wiki/CMake_RPATH_handling
@@ -773,26 +845,28 @@ if (BUILD_ATEN)
 
   #Check if certain std functions are supported. Sometimes
   #_GLIBCXX_USE_C99 macro is not defined and some functions are missing.
-  CHECK_CXX_SOURCE_COMPILES("
-  #include <cmath>
-  #include <string>
+  if (NOT ANDROID)
+    CHECK_CXX_SOURCE_COMPILES("
+    #include <cmath>
+    #include <string>
 
-  int main() {
-    int a = std::isinf(3.0);
-    int b = std::isnan(0.0);
-    std::string s = std::to_string(1);
+    int main() {
+      int a = std::isinf(3.0);
+      int b = std::isnan(0.0);
+      std::string s = std::to_string(1);
 
-    return 0;
-    }" SUPPORT_GLIBCXX_USE_C99)
+      return 0;
+      }" SUPPORT_GLIBCXX_USE_C99)
 
-  if (NOT SUPPORT_GLIBCXX_USE_C99)
-    message(FATAL_ERROR
-            "The C++ compiler does not support required functions. "
-            "This is very likely due to a known bug in GCC 5 "
-            "(and maybe other versions) on Ubuntu 17.10 and newer. "
-            "For more information, see: "
-            "https://github.com/pytorch/pytorch/issues/5229"
-           )
+    if (NOT SUPPORT_GLIBCXX_USE_C99)
+      message(FATAL_ERROR
+              "The C++ compiler does not support required functions. "
+              "This is very likely due to a known bug in GCC 5 "
+              "(and maybe other versions) on Ubuntu 17.10 and newer. "
+              "For more information, see: "
+              "https://github.com/pytorch/pytorch/issues/5229"
+             )
+    endif()
   endif()
 
   # Top-level build config
@@ -846,7 +920,7 @@ if (BUILD_ATEN)
   ENDIF()
 
   IF (CUDA_HAS_FP16 OR NOT ${CUDA_VERSION} LESS 7.5)
-    MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.CudaHalfTensor")
+    MESSAGE(STATUS "Found CUDA with FP16 support, compiling with torch.cuda.HalfTensor")
     LIST(APPEND CUDA_NVCC_FLAGS "-DCUDA_HAS_FP16=1 -D__CUDA_NO_HALF_OPERATORS__ -D__CUDA_NO_HALF_CONVERSIONS__ -D__CUDA_NO_HALF2_OPERATORS__")
     add_compile_options(-DCUDA_HAS_FP16=1)
   ELSE()

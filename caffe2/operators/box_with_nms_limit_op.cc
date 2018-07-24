@@ -34,6 +34,8 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   auto* out_boxes = Output(1);
   auto* out_classes = Output(2);
 
+  const int box_dim = rotated_ ? 5 : 4;
+
   // tscores: (num_boxes, num_classes), 0 for background
   if (tscores.ndim() == 4) {
     CAFFE_ENFORCE_EQ(tscores.dim(2), 1, tscores.dim(2));
@@ -42,7 +44,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     CAFFE_ENFORCE_EQ(tscores.ndim(), 2, tscores.ndim());
   }
   CAFFE_ENFORCE(tscores.template IsType<float>(), tscores.meta().name());
-  // tboxes: (num_boxes, num_classes * 4)
+  // tboxes: (num_boxes, num_classes * box_dim)
   if (tboxes.ndim() == 4) {
     CAFFE_ENFORCE_EQ(tboxes.dim(2), 1, tboxes.dim(2));
     CAFFE_ENFORCE_EQ(tboxes.dim(3), 1, tboxes.dim(3));
@@ -55,7 +57,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   int num_classes = tscores.dim(1);
 
   CAFFE_ENFORCE_EQ(N, tboxes.dim(0));
-  CAFFE_ENFORCE_EQ(num_classes * 4, tboxes.dim(1));
+  CAFFE_ENFORCE_EQ(num_classes * box_dim, tboxes.dim(1));
 
   int batch_size = 1;
   vector<float> batch_splits_default(1, tscores.dim(0));
@@ -72,7 +74,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(batch_splits.sum(), N);
 
   out_scores->Resize(0);
-  out_boxes->Resize(0, 4);
+  out_boxes->Resize(0, box_dim);
   out_classes->Resize(0);
 
   TensorCPU* out_keeps = nullptr;
@@ -107,7 +109,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     for (int j = 1; j < num_classes; j++) {
       auto cur_scores = scores.col(j);
       auto inds = utils::GetArrayIndices(cur_scores > score_thres_);
-      auto cur_boxes = boxes.block(0, j * 4, boxes.rows(), 4);
+      auto cur_boxes = boxes.block(0, j * box_dim, boxes.rows(), box_dim);
 
       if (soft_nms_enabled_) {
         auto cur_soft_nms_scores = soft_nms_scores.col(j);
@@ -189,15 +191,16 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     int cur_out_idx = 0;
     for (int j = 1; j < num_classes; j++) {
       auto cur_scores = scores.col(j);
-      auto cur_boxes = boxes.block(0, j * 4, boxes.rows(), 4);
+      auto cur_boxes = boxes.block(0, j * box_dim, boxes.rows(), box_dim);
       auto& cur_keep = keeps[j];
       Eigen::Map<EArrXf> cur_out_scores(
           out_scores->mutable_data<float>() + cur_start_idx + cur_out_idx,
           cur_keep.size());
       Eigen::Map<ERArrXXf> cur_out_boxes(
-          out_boxes->mutable_data<float>() + (cur_start_idx + cur_out_idx) * 4,
+          out_boxes->mutable_data<float>() +
+              (cur_start_idx + cur_out_idx) * box_dim,
           cur_keep.size(),
-          4);
+          box_dim);
       Eigen::Map<EArrXf> cur_out_classes(
           out_classes->mutable_data<float>() + cur_start_idx + cur_out_idx,
           cur_keep.size());
@@ -272,11 +275,19 @@ returned boxes.
     .Arg(
         "soft_nms_min_score_thres",
         "(float) Lower bound on updated scores to discard boxes")
+    .Arg(
+        "rotated",
+        "bool (default false). If true, then boxes (rois and deltas) include "
+        "angle info to handle rotation. The format will be "
+        "[ctr_x, ctr_y, width, height, angle (in degrees)].")
     .Input(0, "scores", "Scores, size (count, num_classes)")
     .Input(
         1,
         "boxes",
-        "Bounding box for each class, size (count, num_classes * 4)")
+        "Bounding box for each class, size (count, num_classes * 4). "
+        "For rotated boxes, this would have an additional angle (in degrees) "
+        "in the format [<optionaal_batch_id>, ctr_x, ctr_y, w, h, angle]. "
+        "Size: (count, num_classes * 5).")
     .Input(
         2,
         "batch_splits",
@@ -284,7 +295,11 @@ returned boxes.
         "of RoIs/boxes belonging to the corresponding image in batch. "
         "Sum should add up to total count of scores/boxes.")
     .Output(0, "scores", "Filtered scores, size (n)")
-    .Output(1, "boxes", "Filtered boxes, size (n, 4)")
+    .Output(
+        1,
+        "boxes",
+        "Filtered boxes, size (n, 4). "
+        "For rotated boxes, size (n, 5), format [ctr_x, ctr_y, w, h, angle].")
     .Output(2, "classes", "Class id for each filtered score/box, size (n)")
     .Output(
         3,

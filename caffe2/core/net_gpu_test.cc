@@ -84,7 +84,7 @@ void checkChainingAndRun(
     FLAGS_caffe2_disable_chaining = false;
 
     std::unique_ptr<NetBase> net(CreateNet(net_def, &ws));
-    auto* dag = dynamic_cast_if_rtti<DAGNetBase*>(net.get());
+    auto* dag = dynamic_cast_if_rtti<AsyncNetBase*>(net.get());
     CHECK_NOTNULL(dag);
     const auto& chains = dag->TEST_execution_chains();
     EXPECT_EQ(chains, expected);

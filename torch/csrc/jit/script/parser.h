@@ -67,16 +67,6 @@ struct Parser {
         auto list = parseList('[', ',', ']', &Parser::parseExp);
         prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
-      case TK_FLOAT:
-      case TK_INT:
-      case TK_LONG: {
-        auto r = L.cur().range;
-        auto type = c(L.next().kind, r, {});
-        L.expect('(');
-        auto exp = parseExp();
-        L.expect(')');
-        prefix = Cast::create(r, Type(type), Expr(exp));
-      } break;
       default: {
         Ident name = parseIdent();
         prefix = Var::create(name.range(), name);
@@ -239,15 +229,11 @@ struct Parser {
 
     return Slice::create(range, Expr(value), Maybe<Expr>(first), Maybe<Expr>(second));
   }
+
   TreeRef parseParam() {
-    auto typ = parseType();
-    if (L.cur().kind != TK_IDENT && typ->trees()[0]->kind() == TK_IDENT) {
-      // oops, it wasn't a type but just a param without any type specified
-      return Param::create(
-          typ->range(), Ident(typ->trees()[0]), Type(c(TK_INFERRED, typ->range(), {})));
-    }
+    auto typ = TensorType::create(L.cur().range);
     auto ident = parseIdent();
-    return Param::create(typ->range(), Ident(ident), Type(typ));
+    return Param::create(typ.range(), Ident(ident), Type(typ));
   }
 
   // 'first' has already been parsed since expressions can exist
@@ -290,19 +276,6 @@ struct Parser {
       }
     }
   }
-  TreeRef parseScalarType() {
-    switch (L.cur().kind) {
-      case TK_INT:
-      case TK_FLOAT:
-      case TK_LONG:
-      case TK_DOUBLE: {
-        auto t = L.next();
-        return c(t.kind, t.range, {});
-      }
-      default:
-        return parseIdent();
-    }
-  }
   TreeRef parseOptionalIdentList() {
     TreeRef list = nullptr;
     if (L.cur().kind == '(') {
@@ -311,9 +284,6 @@ struct Parser {
       list = c(TK_LIST, L.cur().range, {});
     }
     return list;
-  }
-  TreeRef parseType() {
-    return TensorType::create(SourceRange(std::make_shared<std::string>(""), 0, 0));
   }
   TreeRef parseIf() {
     auto r = L.cur().range;

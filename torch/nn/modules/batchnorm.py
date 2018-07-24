@@ -7,6 +7,7 @@ from .. import functional as F
 # TODO: check contiguous in THNN
 # TODO: use separate backend functions?
 class _BatchNorm(Module):
+    _version = 2
 
     def __init__(self, num_features, eps=1e-5, momentum=0.1, affine=True,
                  track_running_stats=True):
@@ -68,22 +69,19 @@ class _BatchNorm(Module):
         return '{num_features}, eps={eps}, momentum={momentum}, affine={affine}, ' \
                'track_running_stats={track_running_stats}'.format(**self.__dict__)
 
-    def _load_from_state_dict(self,
-                              state_dict, prefix, strict,
+    def _load_from_state_dict(self, state_dict, prefix, metadata, strict,
                               missing_keys, unexpected_keys, error_msgs):
-        try:
-            version = state_dict._metadata[prefix[:-1]]['version']
-        except (AttributeError, KeyError):
-            version = None
+        version = metadata.get('version', None)
 
-        if version is None and self.track_running_stats:
+        if (version is None or version < 2) and self.track_running_stats:
+            # at version 2: added num_batches_tracked buffer
+            #               this should have a default value of 0
             num_batches_tracked_key = prefix + 'num_batches_tracked'
             if num_batches_tracked_key not in state_dict:
-                # Add the missing num_batches_tracked counter
                 state_dict[num_batches_tracked_key] = torch.tensor(0, dtype=torch.long)
 
         super(_BatchNorm, self)._load_from_state_dict(
-            state_dict, prefix, strict,
+            state_dict, prefix, metadata, strict,
             missing_keys, unexpected_keys, error_msgs)
 
 

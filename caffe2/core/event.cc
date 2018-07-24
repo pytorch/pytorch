@@ -99,28 +99,22 @@ void EventSetFinishedCPU(const Event* event, const char* err_msg) {
     wrapper->status_ = EventStatus::EVENT_FAILED;
   }
 
-  if (wrapper->callback_) {
-    wrapper->callback_();
+  for (auto& callback : wrapper->callbacks_) {
+    callback();
   }
 
   wrapper->cv_completed_.notify_all();
 }
 
-bool EventSetCallbackCPU(Event* event, EventCallbackFunction callback) {
+void EventSetCallbackCPU(Event* event, EventCallbackFunction callback) {
   auto* wrapper = static_cast<CPUEventWrapper*>(event->event_.get());
   std::unique_lock<std::mutex> lock(wrapper->mutex_);
 
-  if (wrapper->callback_) {
-    return false;
-  }
-  wrapper->callback_ = callback;
+  wrapper->callbacks_.push_back(callback);
   if (wrapper->status_ == EventStatus::EVENT_SUCCESS ||
       wrapper->status_ == EventStatus::EVENT_FAILED) {
-    if (wrapper->callback_) {
-      wrapper->callback_();
-    }
+    callback();
   }
-  return true;
 }
 
 void EventResetCPU(Event* event) {
@@ -128,7 +122,7 @@ void EventResetCPU(Event* event) {
   std::unique_lock<std::mutex> lock(wrapper->mutex_);
   wrapper->status_ = EventStatus::EVENT_INITIALIZED;
   wrapper->err_msg_ = "";
-  wrapper->callback_ = nullptr;
+  wrapper->callbacks_.clear();
 }
 
 REGISTER_EVENT_CREATE_FUNCTION(CPU, EventCreateCPU);

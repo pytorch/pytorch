@@ -168,6 +168,15 @@ class Tensor {
       return;
     }
     meta_ = src.meta();
+    if (src.size() == -1) {
+      dims_.clear();
+      size_ = -1;
+      data_.reset();
+      shares_data_ = false;
+      capacity_ = 0;
+      reserved_ = false;
+      return;
+    }
     Resize(src.dims());
     if (size() > 0) {
       if (meta_.copy()) {
@@ -437,7 +446,7 @@ class Tensor {
       Deleter d = nullptr) {
     meta_ = meta;
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id(),
+        meta_.id() != CaffeTypeId::uninitialized(),
         "To share with a raw external pointer you need to have meta "
         "already set.");
     CAFFE_ENFORCE_WITH_CALLER(
@@ -562,7 +571,7 @@ class Tensor {
    */
   inline void* raw_mutable_data() {
     CAFFE_ENFORCE_WITH_CALLER(
-        meta_.id() != 0,
+        meta_.id() != CaffeTypeId::uninitialized(),
         "Calling raw_mutable_data() without meta, but the current meta is "
         "of unknown type.");
     return raw_mutable_data(meta_);
@@ -680,6 +689,21 @@ class Tensor {
     #endif
     return dims_[i];
   }
+
+  Tensor Clone() const {
+    Tensor x;
+    x.CopyFrom(*this);
+    return x;
+  }
+
+  Tensor(Tensor<Context>&& src) noexcept {
+    swap(src);
+  }
+
+  /**
+   * @brief Delete the copy constructor and use Clone explicitly
+   */
+  Tensor(const Tensor<Context>& src) = delete;
 
  protected:
   vector<TIndex> dims_;

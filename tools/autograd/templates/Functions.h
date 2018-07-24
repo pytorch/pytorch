@@ -5,9 +5,11 @@
 #include <ATen/ATen.h>
 #include <ATen/TensorGeometry.h>
 
+#include "torch/csrc/THP_export.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/saved_variable.h"
+#include "torch/csrc/utils/functional.h"
 
 namespace torch { namespace autograd { namespace generated {
 
@@ -30,7 +32,7 @@ struct TypeAndSize {
     : sizes(t.sizes())
     , type(&t.type()) {}
 
-  Tensor zeros() { return at::zeros(*type, sizes); }
+  Tensor zeros() { return at::zeros(sizes, *type); }
 
 private:
   std::vector<int64_t> sizes;

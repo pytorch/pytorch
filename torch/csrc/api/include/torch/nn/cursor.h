@@ -1,6 +1,6 @@
 #pragma once
 
-#include <torch/csrc/autograd/variable.h>
+#include <torch/tensor.h>
 
 #include <cstddef>
 #include <iterator>
@@ -40,6 +40,8 @@ namespace detail {
 template <typename T>
 class CursorBase {
  public:
+  using ValueType = T;
+
   // NOTE: This is a template class, but we explicitly instantiate it in the
   // .cpp file for every type necessary, so we can define it in the .cpp file.
   // Hooray!
@@ -49,7 +51,9 @@ class CursorBase {
     Item(const std::string& key_, T& module_);
 
     T& operator*();
+    const T& operator*() const;
     T* operator->();
+    const T* operator->() const;
 
     const std::string key;
     T& value;
@@ -59,10 +63,8 @@ class CursorBase {
 
   // Picks either `const_iterator` or `iterator` as the iterator type, depending
   // on whether `T` is const.
-  using Iterator = typename std::conditional<
-      std::is_const<T>::value,
-      typename std::vector<Item>::const_iterator,
-      typename std::vector<Item>::iterator>::type;
+  using Iterator = typename std::vector<Item>::iterator;
+  using ConstIterator = typename std::vector<Item>::const_iterator;
 
   CursorBase() = default;
 
@@ -80,14 +82,23 @@ class CursorBase {
   // right of the colon in `for (auto x : ...)`) before iteration. This is
   // smart.
   Iterator begin() & noexcept;
+  ConstIterator begin() const& noexcept;
+
   Iterator end() & noexcept;
+  ConstIterator end() const& noexcept;
 
   /// Applies a function to every *value* available. The function should accept
   /// a single argument, that is a reference to the value type (e.g. `Module&`).
   template <typename Function>
   void apply(const Function& function) {
-    for (auto module : *this) {
-      function(*module);
+    for (auto& item : items_) {
+      function(*item);
+    }
+  }
+  template <typename Function>
+  void apply(const Function& function) const {
+    for (auto& item : items_) {
+      function(*item);
     }
   }
 
@@ -97,8 +108,14 @@ class CursorBase {
   /// `Module&`).
   template <typename Function>
   void apply_items(const Function& function) {
-    for (auto module : *this) {
-      function(module.key, *module);
+    for (auto& item : items_) {
+      function(item.key, item.value);
+    }
+  }
+  template <typename Function>
+  void apply_items(const Function& function) const {
+    for (auto& item : items_) {
+      function(item.key, item.value);
     }
   }
 
@@ -107,8 +124,14 @@ class CursorBase {
   /// a single argument, that is a reference to the value type (e.g. `Module&`).
   template <typename Iterator, typename Function>
   void map(Iterator output_iterator, Function function) {
-    for (auto module : *this) {
-      *output_iterator = function(*module);
+    for (auto& item : items_) {
+      *output_iterator++ = function(*item);
+    }
+  }
+  template <typename Iterator, typename Function>
+  void map(Iterator output_iterator, Function function) const {
+    for (auto& item : items_) {
+      *output_iterator++ = function(*item);
     }
   }
 
@@ -118,24 +141,40 @@ class CursorBase {
   /// std::string&`) and the other taking a referen
   template <typename Iterator, typename Function>
   void map_items(Iterator output_iterator, Function function) {
-    for (auto module : *this) {
-      *output_iterator = function(module.key, *module);
+    for (auto& item : items_) {
+      *output_iterator++ = function(item.key, item.value);
+    }
+  }
+  template <typename Iterator, typename Function>
+  void map_items(Iterator output_iterator, Function function) const {
+    for (auto& item : items_) {
+      *output_iterator++ = function(item.key, item.value);
     }
   }
 
   /// Attempts to find a value for the given `key`. If found, returns a pointer
   /// to the value. If not, returns a null pointer.
   T* find(const std::string& key) noexcept;
+  const T* find(const std::string& key) const noexcept;
 
   /// Attempts to find a value for the given `key`. If found, returns a
   /// reference to the value. If not, throws an exception.
   T& at(const std::string& key);
+  const T& at(const std::string& key) const;
+
+  /// Attempts to return the item at the given index. If the index is in range,
+  /// returns a reference to the item. If not, throws an exception.
+  Item& at(size_t index);
 
   /// Equivalent to `at(key)`.
   T& operator[](const std::string& key);
+  const T& operator[](const std::string& key) const;
+
+  /// Equivalent to `at(index)`.
+  Item& operator[](size_t index);
 
   /// Returns true if an item with the given `key` exists.
-  bool contains(const std::string& key) noexcept;
+  bool contains(const std::string& key) const noexcept;
 
   /// Counts the number of items available.
   size_t size() const noexcept;
@@ -155,6 +194,7 @@ namespace nn {
 
 class ModuleCursor : public detail::CursorBase<Module> {
  public:
+  friend class ConstModuleCursor;
   explicit ModuleCursor(
       Module& module,
       size_t maximum_depth = std::numeric_limits<size_t>::max());
@@ -165,32 +205,36 @@ class ConstModuleCursor : public detail::CursorBase<const Module> {
   explicit ConstModuleCursor(
       const Module& module,
       size_t maximum_depth = std::numeric_limits<size_t>::max());
+
+  /* implicit */ ConstModuleCursor(const ModuleCursor& cursor);
 };
 
 // Parameter cursors (`.parameters()`)
 
-class ParameterCursor : public detail::CursorBase<autograd::Variable> {
+class ParameterCursor : public detail::CursorBase<Tensor> {
  public:
+  friend class ConstParameterCursor;
   explicit ParameterCursor(Module& module);
 };
 
-class ConstParameterCursor
-    : public detail::CursorBase<const autograd::Variable> {
+class ConstParameterCursor : public detail::CursorBase<const Tensor> {
  public:
   explicit ConstParameterCursor(const Module& module);
+  /* implicit */ ConstParameterCursor(const ParameterCursor& cursor);
 };
 
 // Buffer cursors (`.buffers()`)
 
-class BufferCursor : public detail::CursorBase<autograd::Variable> {
+class BufferCursor : public detail::CursorBase<Tensor> {
  public:
+  friend class ConstBufferCursor;
   explicit BufferCursor(Module& module);
 };
 
-class ConstBufferCursor : public detail::CursorBase<const autograd::Variable> {
+class ConstBufferCursor : public detail::CursorBase<const Tensor> {
  public:
   explicit ConstBufferCursor(const Module& module);
+  /* implicit */ ConstBufferCursor(const BufferCursor& cursor);
 };
-
 } // namespace nn
 } // namespace torch

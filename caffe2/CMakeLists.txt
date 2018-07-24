@@ -53,6 +53,11 @@ if(BUILD_ATEN)
   ENDIF(USE_ROCM)
 endif()
 
+# ---[ Torch build
+if(BUILD_TORCH)
+  add_subdirectory(../torch torch)
+endif()
+
 # ---[ Caffe2 build
 if(BUILD_CAFFE2)
   # Note: the folders that are being commented out have not been properly
@@ -190,6 +195,7 @@ target_include_directories(caffe2_protos INTERFACE $<INSTALL_INTERFACE:include>)
 target_link_libraries(caffe2_protos PUBLIC protobuf::libprotobuf)
 
 # Compile exposed libraries.
+list(APPEND Caffe2_CPU_SRCs $<TARGET_OBJECTS:c10>)
 add_library(caffe2 ${Caffe2_CPU_SRCS})
 caffe2_interface_library(caffe2_protos caffe2_protos_whole)
 target_link_libraries(caffe2 PRIVATE caffe2_protos_whole)
@@ -254,18 +260,29 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
+  IF(BUILD_ATEN)
+     HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
+  ENDIF()
+  IF(BUILD_CAFFE2)
+     set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  ENDIF()
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
+  # Since PyTorch files contain HIP headers, these flags are required for the necessary definitions to be added.
+  set_target_properties(caffe2_hip PROPERTIES COMPILE_FLAGS ${HIP_HIPCC_FLAGS})
   target_link_libraries(caffe2_hip PUBLIC caffe2)
   target_link_libraries(caffe2_hip PUBLIC ${Caffe2_HIP_DEPENDENCY_LIBS})
+
+  # Since PyTorch files contain HIP headers, this is also needed to capture the includes.
+  target_include_directories(caffe2_hip PRIVATE ${Caffe2_HIP_INCLUDES})
+  target_include_directories(caffe2_hip INTERFACE $<INSTALL_INTERFACE:include>)
 
   IF(BUILD_ATEN)
     aten_set_target_props(caffe2_hip)
   ENDIF()
 
-  # https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
-  # To avoid having to do above, keep this commented.
+  # When a library has object files that contain device code, it needs to use hipcc/hcc to link.
   set_target_properties(caffe2_hip PROPERTIES LINKER_LANGUAGE HIP)
 
   caffe2_interface_library(caffe2_hip caffe2_hip_library)
@@ -355,11 +372,12 @@ if(BUILD_CAFFE2)
   if (BUILD_PYTHON)
     # Python site-packages
     # Get canonical directory for python site packages (relative to install
-    # location).  It varys from system to system.
+    # location).  It varies from system to system.
     pycmd(PYTHON_SITE_PACKAGES "
         from distutils import sysconfig
         print(sysconfig.get_python_lib(prefix=''))
     ")
+    SET(PYTHON_SITE_PACKAGES ${PYTHON_SITE_PACKAGES} PARENT_SCOPE) # for Summary
     # ---[ Options.
     SET(PYTHON_LIB_REL_PATH "${PYTHON_SITE_PACKAGES}" CACHE STRING "Python installation path (relative to CMake installation prefix)")
     message(STATUS "Using ${PYTHON_LIB_REL_PATH} as python relative installation path")
@@ -379,6 +397,26 @@ if(BUILD_CAFFE2)
       endif()
     endif()
 
+    # Allow different install locations for libcaffe2
+    # For setuptools installs (that all build Python), install libcaffe2 into
+    # site-packages, alongside the torch libraries. The pybind11 library needs
+    # an rpath to the torch library folder
+    # For cmake installs, including c++ only installs, install libcaffe2 into
+    # CMAKE_INSTALL_PREFIX/lib . The pybind11 library can have a hardcoded
+    # rpath
+    if(APPLE)
+      set(_rpath_portable_origin "@loader_path")
+    else()
+      set(_rpath_portable_origin $ORIGIN)
+    endif(APPLE)
+    set(caffe2_pybind11_rpath "${_rpath_portable_origin}")
+    if(${BUILDING_WITH_TORCH_LIBS})
+      # site-packages/caffe2/python/caffe2_pybind11_state
+      # site-packages/torch/lib
+      set(caffe2_pybind11_rpath "${_rpath_portable_origin}/../../torch/lib")
+    endif(${BUILDING_WITH_TORCH_LIBS})
+
+
     # ---[ Python.
     add_library(caffe2_pybind11_state MODULE ${Caffe2_CPU_PYTHON_SRCS})
     set_target_properties(caffe2_pybind11_state PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
@@ -387,15 +425,19 @@ if(BUILD_CAFFE2)
     if (APPLE)
       set_target_properties(caffe2_pybind11_state PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
     endif()
-    set_target_properties(
-        caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-        ${CMAKE_BINARY_DIR}/caffe2/python)
     target_link_libraries(
         caffe2_pybind11_state caffe2_library)
     if (WIN32)
       target_link_libraries(caffe2_pybind11_state ${PYTHON_LIBRARIES})
     endif(WIN32)
+
+    # Install caffe2_pybind11_state(_gpu|hip) in site-packages/caffe2/python,
+    # so it needs an rpath to find libcaffe2
+    set_target_properties(
+        caffe2_pybind11_state PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+        ${CMAKE_BINARY_DIR}/caffe2/python)
     install(TARGETS caffe2_pybind11_state DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+    set_target_properties(caffe2_pybind11_state PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
 
     if(USE_CUDA)
       add_library(caffe2_pybind11_state_gpu MODULE ${Caffe2_GPU_PYTHON_SRCS})
@@ -405,35 +447,41 @@ if(BUILD_CAFFE2)
       if (APPLE)
         set_target_properties(caffe2_pybind11_state_gpu PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
       endif()
-      set_target_properties(
-          caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-          ${CMAKE_BINARY_DIR}/caffe2/python)
       target_link_libraries(
           caffe2_pybind11_state_gpu caffe2_library caffe2_gpu_library)
       if (WIN32)
         target_link_libraries(caffe2_pybind11_state_gpu ${PYTHON_LIBRARIES})
       endif(WIN32)
+
+      # Install with same rpath as non-gpu caffe2_pybind11_state
+      set_target_properties(
+          caffe2_pybind11_state_gpu PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+          ${CMAKE_BINARY_DIR}/caffe2/python)
       install(TARGETS caffe2_pybind11_state_gpu DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+      set_target_properties(caffe2_pybind11_state_gpu PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
     endif()
 
     if(USE_ROCM)
-      set_source_files_properties(${Caffe2_HIP_PYTHON_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
       hip_add_library(caffe2_pybind11_state_hip MODULE ${Caffe2_HIP_PYTHON_SRCS})
-      set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "-fvisibility=hidden")
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINKER_LANGUAGE HIP)
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES COMPILE_FLAGS "${HIP_HIPCC_FLAGS} -fvisibility=hidden")
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES PREFIX "")
       set_target_properties(caffe2_pybind11_state_hip PROPERTIES SUFFIX ${PY_EXT_SUFFIX})
       if (APPLE)
         set_target_properties(caffe2_pybind11_state_hip PROPERTIES LINK_FLAGS "-undefined dynamic_lookup")
       endif()
-      set_target_properties(
-          caffe2_pybind11_state_hip PROPERTIES LIBRARY_OUTPUT_DIRECTORY
-          ${CMAKE_BINARY_DIR}/caffe2/python)
       target_link_libraries(
           caffe2_pybind11_state_hip caffe2_library caffe2_hip_library)
       if (WIN32)
         target_link_libraries(caffe2_pybind11_state_hip ${PYTHON_LIBRARIES})
       endif(WIN32)
+
+      # Install with same rpath as non-hip caffe2_pybind11_state
+      set_target_properties(
+          caffe2_pybind11_state_hip PROPERTIES LIBRARY_OUTPUT_DIRECTORY
+          ${CMAKE_BINARY_DIR}/caffe2/python)
       install(TARGETS caffe2_pybind11_state_hip DESTINATION "${PYTHON_LIB_REL_PATH}/caffe2/python")
+      set_target_properties(caffe2_pybind11_state_hip PROPERTIES INSTALL_RPATH "${caffe2_pybind11_rpath}")
     endif()
 
     if (MSVC AND CMAKE_GENERATOR MATCHES "Visual Studio")

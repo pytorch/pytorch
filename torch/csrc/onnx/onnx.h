@@ -1,7 +1,8 @@
 #pragma once
 
-#include "torch/csrc/onnx/onnx.pb.h"
+#include "torch/csrc/onnx/onnx.npb.h"
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <pb_encode.h>
 #include <ATen/ATen.h>
@@ -417,7 +418,7 @@ public:
     opset_import.emplace_back(ptr);
     return ptr;
   }
-  void dump(std::ostream& stream, size_t indent = 0);
+  TORCH_API void dump(std::ostream& stream, size_t indent = 0);
   std::string prettyPrint() {
     std::stringstream ss;
     dump(ss, 0);

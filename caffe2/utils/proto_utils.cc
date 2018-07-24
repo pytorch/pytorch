@@ -398,6 +398,11 @@ CAFFE2_MAKE_SINGULAR_ARGUMENT(string, s)
 #undef CAFFE2_MAKE_SINGULAR_ARGUMENT
 
 template <>
+bool ArgumentHelper::RemoveArgument(OperatorDef& def, int index);
+template <>
+bool ArgumentHelper::RemoveArgument(NetDef& def, int index);
+
+template <>
 Argument MakeArgument(const string& name, const MessageLite& value) {
   Argument arg;
   arg.set_name(name);
@@ -440,31 +445,72 @@ bool HasInput(const OperatorDef& op, const std::string& input) {
   return false;
 }
 
-const Argument& GetArgument(const OperatorDef& def, const string& name) {
-  for (const Argument& arg : def.arg()) {
+// Return the argument index or -1 if it does not exist.
+int GetArgumentIndex(
+    const google::protobuf::RepeatedPtrField<Argument>& args,
+    const string& name) {
+  int index = 0;
+  for (const Argument& arg : args) {
     if (arg.name() == name) {
-      return arg;
+      return index;
     }
+    index++;
   }
-  CAFFE_THROW(
-      "Argument named ",
-      name,
-      " does not exist in operator ",
-      ProtoDebugString(def));
+  return -1;
+}
+
+const Argument& GetArgument(const OperatorDef& def, const string& name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return def.arg(index);
+  } else {
+    CAFFE_THROW(
+        "Argument named ",
+        name,
+        " does not exist in operator ",
+        ProtoDebugString(def));
+  }
+}
+
+const Argument& GetArgument(const NetDef& def, const string& name) {
+  int index = GetArgumentIndex(def.arg(), name);
+  if (index != -1) {
+    return def.arg(index);
+  } else {
+    CAFFE_THROW(
+        "Argument named ",
+        name,
+        " does not exist in net ",
+        ProtoDebugString(def));
+  }
+}
+
+bool GetFlagArgument(
+    const google::protobuf::RepeatedPtrField<Argument>& args,
+    const string& name,
+    bool default_value) {
+  int index = GetArgumentIndex(args, name);
+  if (index != -1) {
+    auto arg = args.Get(index);
+    CAFFE_ENFORCE(
+        arg.has_i(), "Can't parse argument as bool: ", ProtoDebugString(arg));
+    return arg.i();
+  }
+  return default_value;
 }
 
 bool GetFlagArgument(
     const OperatorDef& def,
     const string& name,
-    bool def_value) {
-  for (const Argument& arg : def.arg()) {
-    if (arg.name() == name) {
-      CAFFE_ENFORCE(
-          arg.has_i(), "Can't parse argument as bool: ", ProtoDebugString(arg));
-      return arg.i();
-    }
-  }
-  return def_value;
+    bool default_value) {
+  return GetFlagArgument(def.arg(), name, default_value);
+}
+
+bool GetFlagArgument(
+    const NetDef& def,
+    const string& name,
+    bool default_value) {
+  return GetFlagArgument(def.arg(), name, default_value);
 }
 
 Argument* GetMutableArgument(

@@ -63,6 +63,9 @@ class Tracer {
   void setEnabled(bool enabled);
   bool isEnabled() const;
   int bumpIter();
+  // Dump the tracing result to file with given suffix, and then
+  // clear current events.
+  void dumpTracingResultAndClearEvents(const std::string& file_suffix);
 
   virtual ~Tracer();
 
@@ -104,7 +107,13 @@ class TracerGuard {
   Tracer* tracer_;
 };
 
-bool isTraceableNet(const std::string& net_name);
+// Extract the shard id from name of the form "...shard:123..."
+// Return -1 if there is no shard found
+int extractShardId(const std::string& name);
+
+// Check if the net name is white-listed for tracing (specified via a command
+// line flag)
+bool isTraceableNetName(const std::string& net_name);
 
 std::shared_ptr<Tracer> create(const NetBase* net, const std::string& net_name);
 bool startIter(const std::shared_ptr<Tracer>& tracer);

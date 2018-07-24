@@ -4,6 +4,7 @@
 #include "caffe2/perfkernels/common.h"
 #include "caffe2/perfkernels/typed_axpy.h"
 #include "caffe2/utils/cpuid.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 namespace caffe2 {

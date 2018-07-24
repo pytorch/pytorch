@@ -337,17 +337,12 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx::OperatorExportType
       // Macro'ed so we get a marginally better line number on failed export
 #define FAIL_EXPORT(name) \
       throw std::runtime_error(std::string("ONNX export failed: ") + name + "\n\nGraph we tried to export:\n" + graph->toString());
-    IR_IF(node, CppOp)
-      auto cpp_node = static_cast<torch::jit::CppOp*>(value);
-      FAIL_EXPORT(
-          "Couldn't export C++ operator " + cpp_node->name() +
-          "\n\nDefined at:\n" + getNodeStackTraceString(node))
-      IR_ELSEIF(PythonOp)
+    IR_IF(node, PythonOp)
       auto py_node = static_cast<torch::jit::PythonOp*>(value);
       FAIL_EXPORT(
           "Couldn't export Python operator " + py_node->name() +
           "\n\nDefined at:\n" + getNodeStackTraceString(node))
-      IR_ELSE()
+    IR_ELSE()
       // Special error messages for certain types of operators
       if (node->kind() == aten::expand) {
         FAIL_EXPORT(

@@ -290,6 +290,226 @@ Y:
 
 OPERATOR_SCHEMA(ReduceMeanGradient).NumInputs(3).NumOutputs(1);
 
+template <>
+template <typename T>
+bool L1Reducer<CPUContext>::Backward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& dX_dims,
+    const T* dY_data,
+    const T* X_data,
+    const T* /* Y_data */,
+    T* dX_data,
+    CPUContext* /* context */) const {
+  const float kEps = 1e-12f;
+  const int dX_size = std::accumulate(
+      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const int ndim = dX_dims.size();
+  std::vector<int> index(ndim, 0);
+  for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
+    const int dY_index =
+        math::utils::GetIndexFromDims(ndim, dY_dims.data(), index.data());
+    float temp = X_data[dX_index];
+    if (temp < -kEps) {
+      dX_data[dX_index] = -dY_data[dY_index];
+    } else if (temp > kEps) {
+      dX_data[dX_index] = dY_data[dY_index];
+    } else {
+      dX_data[dX_index] = T(0);
+    }
+    math::utils::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
+  }
+  return true;
+}
+
+template <>
+template <typename T>
+bool L2Reducer<CPUContext>::Backward(
+    const std::vector<int>& dY_dims,
+    const std::vector<int>& dX_dims,
+    const T* dY_data,
+    const T* X_data,
+    const T* Y_data,
+    T* dX_data,
+    CPUContext* /* context */) const {
+  const float kEps = 1e-12f;
+  const int dX_size = std::accumulate(
+      dX_dims.cbegin(), dX_dims.cend(), 1, std::multiplies<int>());
+  const int ndim = dX_dims.size();
+  std::vector<int> index(ndim, 0);
+  for (int dX_index = 0; dX_index < dX_size; ++dX_index) {
+    const int dY_index =
+        math::utils::GetIndexFromDims(ndim, dY_dims.data(), index.data());
+    T norm = Y_data[dY_index];
+    if (norm < kEps) {
+      dX_data[dX_index] = dY_data[dY_index];
+    } else {
+      dX_data[dX_index] = dY_data[dY_index] * X_data[dX_index] / norm;
+    }
+    math::utils::IncreaseIndexInDims(ndim, dX_dims.data(), index.data());
+  }
+  return true;
+}
+
+REGISTER_CPU_OPERATOR(
+    ReduceL1,
+    ReduceOp<TensorTypes<float>, CPUContext, L1Reducer<CPUContext>>);
+REGISTER_CPU_OPERATOR(
+    ReduceL1Gradient,
+    ReduceGradientOp<TensorTypes<float>, CPUContext, L1Reducer<CPUContext>>);
+
+OPERATOR_SCHEMA(ReduceL1)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Computes the **L1 norm** of the input tensor's elements along the provided `axes`. The resulting tensor has the same rank as the input if the `keepdims` argument equals 1 (default). If `keepdims` is set to 0, then the `axes` dimensions are pruned.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceL1",
+    ["X"],
+    ["Y"],
+    axes=(0,1),
+    keepdims=0
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(1,2,5,5)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[[ 2.  7.  6.  4.  5.]
+   [ 2.  1.  9.  8.  7.]
+   [ 4.  9.  1.  0.  0.]
+   [ 6.  4.  0.  8.  1.]
+   [ 1.  7.  1.  0.  2.]]
+
+  [[ 5.  8.  1.  7.  7.]
+   [ 4.  5.  6.  5.  4.]
+   [ 1.  9.  6.  6.  3.]
+   [ 6.  6.  8.  8.  4.]
+   [ 2.  3.  5.  8.  1.]]]]
+
+Y:
+[[  7.  15.   7.  11.  12.]
+ [  6.   6.  15.  13.  11.]
+ [  5.  18.   7.   6.   3.]
+ [ 12.  10.   8.  16.   5.]
+ [  3.  10.   6.   8.   3.]]
+
+```
+
+</details>
+
+
+)DOC")
+    .Arg("axes", "(*Tuple(int)*): list of axes to reduce")
+    .Arg(
+        "keepdims",
+        "(*int*): set to 1 to keep the reduced dimension(s) (default=1), else set to 0 to not keep the reduced dimension(s)")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
+    .Output(0, "Y", "(*Tensor`<float>`*): reduced tensor");
+
+OPERATOR_SCHEMA(ReduceL1Gradient).NumInputs(3).NumOutputs(1);
+
+REGISTER_CPU_OPERATOR(
+    ReduceL2,
+    ReduceOp<TensorTypes<float>, CPUContext, L2Reducer<CPUContext>>);
+REGISTER_CPU_OPERATOR(
+    ReduceL2Gradient,
+    ReduceGradientOp<TensorTypes<float>, CPUContext, L2Reducer<CPUContext>>);
+
+OPERATOR_SCHEMA(ReduceL2)
+    .NumInputs(1)
+    .NumOutputs(1)
+    .SetDoc(R"DOC(
+Computes the **L2 norm** of the input tensor's elements along the provided `axes`. The resulting tensor has the same rank as the input if the `keepdims` argument equals 1 (default). If `keepdims` is set to 0, then the `axes` dimensions are pruned.
+
+Github Links:
+- https://github.com/pytorch/pytorch/blob/master/caffe2/operators/reduce_ops.cc
+
+<details>
+
+<summary> <b>Example</b> </summary>
+
+**Code**
+
+```
+
+workspace.ResetWorkspace()
+
+op = core.CreateOperator(
+    "ReduceL2",
+    ["X"],
+    ["Y"],
+    axes=(0,1),
+    keepdims=0
+)
+
+workspace.FeedBlob("X", np.random.randint(10, size=(1,2,5,5)).astype(np.float32))
+print("X:", workspace.FetchBlob("X"))
+workspace.RunOperatorOnce(op)
+print("Y:", workspace.FetchBlob("Y"))
+
+```
+
+**Result**
+
+```
+
+X:
+[[[[ 8.  0.  2.  5.  1.]
+   [ 1.  3.  0.  4.  0.]
+   [ 1.  3.  6.  7.  7.]
+   [ 6.  9.  8.  4.  6.]
+   [ 6.  1.  5.  7.  3.]]
+
+  [[ 2.  4.  6.  2.  8.]
+   [ 1.  1.  8.  0.  8.]
+   [ 5.  9.  0.  3.  2.]
+   [ 1.  7.  3.  7.  3.]
+   [ 6.  8.  9.  8.  7.]]]]
+
+Y:
+[[  8.24621105   4.           6.3245554    5.38516474   8.06225777]
+ [  1.41421354   3.1622777    8.           4.           8.        ]
+ [  5.09901953   9.48683262   6.           7.6157732    7.28010988]
+ [  6.08276272  11.40175438   8.54400349   8.06225777   6.70820379]
+ [  8.48528099   8.06225777  10.29563046  10.63014603   7.6157732 ]]
+
+```
+
+</details>
+
+
+)DOC")
+    .Arg("axes", "(*Tuple(int)*): list of axes to reduce")
+    .Arg(
+        "keepdims",
+        "(*int*): set to 1 to keep the reduced dimension(s) (default=1), else set to 0 to not keep the reduced dimension(s)")
+    .Input(0, "X", "(*Tensor`<float>`*): input tensor")
+    .Output(0, "Y", "(*Tensor`<float>`*): reduced tensor");
+
+OPERATOR_SCHEMA(ReduceL2Gradient).NumInputs(3).NumOutputs(1);
+
 namespace {
 
 class GetReduceGradient final : public GradientMakerBase {
@@ -310,5 +530,7 @@ REGISTER_GRADIENT(ReduceMin, GetReduceGradient);
 REGISTER_GRADIENT(ReduceMax, GetReduceGradient);
 REGISTER_GRADIENT(ReduceSum, GetReduceGradient);
 REGISTER_GRADIENT(ReduceMean, GetReduceGradient);
+REGISTER_GRADIENT(ReduceL1, GetReduceGradient);
+REGISTER_GRADIENT(ReduceL2, GetReduceGradient);
 
 } // namespace caffe2

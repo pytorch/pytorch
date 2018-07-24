@@ -8,37 +8,12 @@
 #include "THCStorage.hpp"
 
 #include <atomic>
+#include <ATen/ATen.h>
 
-typedef struct THCTensor
-{
-    int64_t *size;
-    int64_t *stride;
-    int64_t dim_;
-
-    THCStorage *storage;
-    ptrdiff_t storageOffset;
-    std::atomic<int> refcount;
-
-    char flag;
-
-    template <typename T>
-    inline T * data() const {
-      return storage->data<T>() + storageOffset;
-    }
-
-    template <typename T>
-    inline T * unsafe_data() const {
-      return storage->unsafe_data<T>() + storageOffset;
-    }
-
-    // NOTE: this returns the "old" TH dimension view where no dimensions represents an empty tensor.
-    // There will be a dim() function that gives the new view that supports 0-sized dimensions.
-    inline int64_t _dim() const {
-      return dim_;
-    }
-} THCTensor;
-
+// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
 THC_API int THCTensor_nDimension(THCState *state, const THCTensor *self);
+THC_API int THCTensor__nDimension(THCState *state, const THCTensor *self);
+
 THC_API int64_t THCTensor_size(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim);
 THC_API THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self);
@@ -46,8 +21,8 @@ THC_API THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self);
 THC_API THCTensor *THCTensor_new(THCState *state, at::ScalarType scalar_type);
 
 THC_API void THCTensor_resize(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
-THC_API void THCTensor_resizeAs(THCState *state, THCTensor *tensor, THCTensor *src);
 THC_API void THCTensor_resizeNd(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
+THC_API void THCTensor_resizeAs(THCState *state, THCTensor *tensor, THCTensor *src);
 
 THC_API void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride);

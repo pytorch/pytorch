@@ -3,6 +3,8 @@
 #include <vector>
 #include "ATen/optional.h"
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
+
 namespace at {
   struct Tensor;
 }
@@ -19,8 +21,10 @@ struct InterpreterStateImpl;
 struct Graph;
 struct Node;
 struct TensorType;
+struct IValue;
+using Stack = std::vector<IValue>;
 
-struct Code {
+struct TORCH_API Code {
   Code()
     : pImpl(nullptr) {}
   Code(std::shared_ptr<Graph>& graph);
@@ -29,7 +33,7 @@ struct Code {
   // Returns pointers to GraphExecutors created to run GraphExecutor nodes in the given graph.
   const std::vector<GraphExecutor*>& executors();
 
-  operator bool() const {
+  explicit operator bool() const {
     return pImpl != nullptr;
   }
 
@@ -44,7 +48,7 @@ struct InterpreterState {
   // advance the interpreter state by running one stage. Returning the
   // outputs for that stage, suspending the computation.
   // Call this function again continues computation where it left off.
-  void runOneStage(std::vector<at::Tensor> & stack);
+  void runOneStage(Stack & stack);
   const TensorType & tensorTypeForInput(size_t i) const;
   ~InterpreterState();
   // create a copy of InterpreterState with its current state
@@ -54,10 +58,5 @@ private:
   InterpreterState(InterpreterStateImpl * pImpl);
   std::shared_ptr<InterpreterStateImpl> pImpl;
 };
-
-using Operation = std::function<int(std::vector<at::Tensor>&)>;
-using OpHandler = std::function<at::optional<Operation>(Node* n)>;
-void addInterpreterOpHandler(OpHandler handler);
-bool hasHandleOutput(Node * n);
 
 }}

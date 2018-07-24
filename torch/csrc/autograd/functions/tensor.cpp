@@ -1,20 +1,21 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 
 #include "torch/csrc/autograd/function.h"
-#include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/functions/utils.h"
 #include "torch/csrc/autograd/generated/Functions.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/auto_gpu.h"
 
-#include <cstdint>
+#include <ATen/ATen.h>
+
+#include <cstddef>
 #include <memory>
+#include <stdexcept>
 #include <utility>
 
 namespace torch { namespace autograd {
 
-auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
+auto CopyBackwards::apply(variable_list&& grads) -> variable_list {
   check_input_variables("CopyBackwards", grads, 1);
   auto& grad = grads[0];
   variable_list grad_inputs(2);
@@ -22,7 +23,7 @@ auto CopyBackwards::apply(const variable_list& grads) -> variable_list {
     grad_inputs[0] = at::zeros_like(grad);
   }
   if (should_compute_output(1)) {
-    AutoGPU autoGPU(src_device);
+    at::DeviceGuard device_guard(src_device);
     if (grad.is_cuda() && grad.get_device() != src_device) {
       grad_inputs[1] = src_type->copy(grad);
     } else {
@@ -51,7 +52,7 @@ CopySlices::CopySlices(
   }
 }
 
-auto CopySlices::apply(const variable_list& inputs) -> variable_list {
+auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   check_input_variables("CopySlices", inputs, 1);
   auto& grad = inputs[0];
 

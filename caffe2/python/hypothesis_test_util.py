@@ -251,7 +251,8 @@ def tensors1d(n, min_len=1, max_len=64, dtype=np.float32, elements=None):
 
 cpu_do = caffe2_pb2.DeviceOption()
 gpu_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA)
-device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else [])
+hip_do = caffe2_pb2.DeviceOption(device_type=caffe2_pb2.HIP)
+device_options = [cpu_do] + ([gpu_do] if workspace.has_gpu_support else []) + ([hip_do] if workspace.has_hip_support else [])
 # Include device option for each GPU
 expanded_device_options = [cpu_do] + (
     [caffe2_pb2.DeviceOption(device_type=caffe2_pb2.CUDA, cuda_gpu_id=i)
@@ -383,6 +384,7 @@ class HypothesisTestCase(test_util.TestCase):
             threshold=threshold,
             device_option=device_option,
             workspace_name=str(device_option),
+            input_device_options=input_device_options,
         )
         res, grad, grad_estimated = gc.CheckSimple(
             op, inputs, outputs_to_check, outputs_with_grads,
