@@ -46,7 +46,7 @@ inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allow
   // This is going away soon; delete this when we remove the subtypes of
   // TensorImpl (so that we can eliminate the T template parameter)
   if (typeid(*expr) != typeid(T)) {
-    AT_ERROR("Expected object of RAII type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
+    AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
              " for argument #", pos, " '", name, "'");
   }
   return static_cast<T*>(expr);
@@ -58,11 +58,13 @@ static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors,
   std::vector<TH*> casted(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     auto *expr = tensors[i].pImpl;
+    // TODO: Use the backend, scalar_type arguments to replace this
+    // dynamic cast for the test
     auto result = dynamic_cast<T*>(expr);
     if (result) {
       casted[i] = result->tensor;
     } else {
-      AT_ERROR("Expected a Tensor of RAII type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
+      AT_ERROR("Expected a Tensor of RTTI type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
 
     }
