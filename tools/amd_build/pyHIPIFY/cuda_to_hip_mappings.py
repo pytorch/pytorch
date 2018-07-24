@@ -2108,6 +2108,9 @@ PYTORCH_SPECIFIC_MAPPINGS = {
 
 CAFFE2_SPECIFIC_MAPPINGS = {
      "CUDA" :("HIP", API_CAFFE2),
+     "Cuda" :("Hip", API_CAFFE2),
+     "CUDNN" :("MIOPEN", API_CAFFE2),
+     "cuda_context" :("hip_context", API_CAFFE2),
      "REGISTER_CUDA_OPERATOR" : ("REGISTER_HIP_OPERATOR", API_CAFFE2),
      "cuda_stream" : ("hip_stream", API_CAFFE2),
      "context_gpu" : ("hip/context_hip", API_CAFFE2),
