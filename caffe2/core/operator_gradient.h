@@ -274,6 +274,7 @@ struct ThrowInTheTowelIfGradientIsCalled : public GradientMakerBase {
   GradientOpsMeta Get() override {
     CAFFE_ENFORCE(
         false, "One should not call gradient for operator ", def_.type(), ".");
+    return GradientOpsMeta();
   }
 };
 
@@ -292,6 +293,7 @@ struct GradientNotImplementedYet : public GradientMakerBase {
         "Operator ",
         def_.type(),
         " should have a gradient but is not implemented yet.");
+    return GradientOpsMeta();
   }
 };
 

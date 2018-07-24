@@ -129,6 +129,10 @@ class EnforceNotMet : public std::exception {
   const void* caller_;
 };
 
+#ifdef CAFFE_PREDICTOR_MODE
+#define CAFFE_ENFORCE(condition, ...) (condition)
+#define CAFFE_ENFORCE_WITH_CALLER(condition, ...) (condition)
+#else // CAFFE_PREDICTOR_MODE
 #define CAFFE_ENFORCE(condition, ...)                                         \
   do {                                                                        \
     if (!(condition)) {                                                       \
@@ -144,6 +148,7 @@ class EnforceNotMet : public std::exception {
           __FILE__, __LINE__, #condition, ::caffe2::MakeString(__VA_ARGS__), this); \
     }                                                                         \
   } while (false)
+#endif // CAFFE_PREDICTOR_MODE
 
 #define CAFFE_THROW(...)         \
   throw ::caffe2::EnforceNotMet( \
@@ -272,9 +277,24 @@ BINARY_COMP_HELPER(LessEquals, <=)
   } while (false)
 }
 
+#ifdef CAFFE_PREDICTOR_MODE
+#define CAFFE_ENFORCE_THAT(condition, ...) (condition)
+#define CAFFE_ENFORCE_EQ(x, y, ...) ((x) == (y))
+#define CAFFE_ENFORCE_NE(x, y, ...) ((x) != (y))
+#define CAFFE_ENFORCE_LE(x, y, ...) ((x) <= (y))
+#define CAFFE_ENFORCE_LT(x, y, ...) ((x) < (y))
+#define CAFFE_ENFORCE_GE(x, y, ...) ((x) >= (y))
+#define CAFFE_ENFORCE_GT(x, y, ...) ((x) > (y))
+
+#define CAFFE_ENFORCE_EQ_WITH_CALLER(x, y, ...) ((x) == (y))
+#define CAFFE_ENFORCE_NE_WITH_CALLER(x, y, ...) ((x) != (y))
+#define CAFFE_ENFORCE_LE_WITH_CALLER(x, y, ...) ((x) <= (y))
+#define CAFFE_ENFORCE_LT_WITH_CALLER(x, y, ...) ((x) < (y))
+#define CAFFE_ENFORCE_GE_WITH_CALLER(x, y, ...) ((x) >= (y))
+#define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...) ((x) > (y))
+#else
 #define CAFFE_ENFORCE_THAT(condition, ...) \
   CAFFE_ENFORCE_THAT_IMPL((condition), #condition, __VA_ARGS__)
-
 #define CAFFE_ENFORCE_EQ(x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL(Equals((x), (y)), #x " == " #y, __VA_ARGS__)
 #define CAFFE_ENFORCE_NE(x, y, ...) \
@@ -299,6 +319,7 @@ BINARY_COMP_HELPER(LessEquals, <=)
   CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(GreaterEquals((x), (y)), #x " >= " #y, __VA_ARGS__)
 #define CAFFE_ENFORCE_GT_WITH_CALLER(x, y, ...) \
   CAFFE_ENFORCE_THAT_IMPL_WITH_CALLER(Greater((x), (y)), #x " > " #y, __VA_ARGS__)
+#endif
 } // namespace caffe2
 
 #endif // CAFFE2_CORE_LOGGING_H_

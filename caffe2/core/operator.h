@@ -67,6 +67,9 @@ class OperatorBase : public Observable<OperatorBase> {
   template <typename T>
   const T& Input(int idx) const {
     DCHECK_LT(idx, inputs_.size());
+#ifdef CAFFE_PREDICTOR_MODE
+    return inputs_.at(idx)->template Get<T>();
+#else
     try {
       return inputs_.at(idx)->template Get<T>();
     } catch (::caffe2::EnforceNotMet& enf) {
@@ -77,6 +80,7 @@ class OperatorBase : public Observable<OperatorBase> {
       }
       throw enf;
     }
+#endif
   }
 
   template <typename T>

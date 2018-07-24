@@ -300,8 +300,8 @@ void handleWhileOp(
       "More than one entry node.");
 
   auto exit_tensor = *(rev_sorted.front().getNodes().begin());
-  CAFFE_ENFORCE(isa<repr::NeuralNetData>(exit_tensor->data()),
-      "Exit node is not a tensor.");
+  // CAFFE_ENFORCE(isa<repr::NeuralNetData>(exit_tensor->data()),
+  //     "Exit node is not a tensor.");
 
   auto bodyNodes = bodyGraph.getMutableNodes();
   auto bodyEdges = bodyGraph.getMutableEdges();
