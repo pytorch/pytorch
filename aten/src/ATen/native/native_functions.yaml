@@ -720,6 +720,12 @@
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
 
+- func: _gesv_single_helper_out(Tensor result0, Tensor result1, Tensor self, Tensor A) -> (Tensor, Tensor)
+  variants: function
+  dispatch:
+    CPU: _gesv_single_helper_out_cpu
+    CUDA: _gesv_single_helper_out_cuda
+
 - func: group_norm(Tensor input, int64_t num_groups, Tensor? weight={}, Tensor? bias={}, double eps=1e-5, bool cudnn_enabled=True) -> Tensor
   variants: function
 

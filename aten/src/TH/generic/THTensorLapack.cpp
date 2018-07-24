@@ -101,60 +101,6 @@ static THTensor *THTensor_(cloneColumnMajor)(THTensor *self, THTensor *src)
   return THTensor_(cloneColumnMajorNrows)(self, src, src->size(0));
 }
 
-void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
-{
-  int free_b = 0;
-  if (a == NULL) a = ra_;
-  if (b == NULL) b = rb_;
-  THArgCheck(a->dim() == 2, 2, "A should have 2 dimensions, but has %d",
-      a->dim());
-  THArgCheck(!a->is_empty(), 2, "A should not be empty");
-  THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
-      "dimensions, but has %d", b->dim());
-  THArgCheck(!b->is_empty(), 2, "B should not be empty");
-  THArgCheck(a->size(0) == a->size(1), 2, "A should be square, but is %ldx%ld",
-      a->size(0), a->size(1));
-  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size(0), b->size(0));
-
-  if (b->dim() == 1) {
-    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
-            b->stride(0), 1, 0);
-    free_b = 1;
-  }
-
-  int n, nrhs, lda, ldb, info;
-  THIntTensor *ipiv;
-  THTensor *ra__;  // working version of A matrix to be passed into lapack GELS
-  THTensor *rb__;  // working version of B matrix to be passed into lapack GELS
-
-  ra__ = THTensor_(cloneColumnMajor)(ra_, a);
-  rb__ = THTensor_(cloneColumnMajor)(rb_, b);
-
-  n    = (int)ra__->size(0);
-  nrhs = (int)rb__->size(1);
-  lda  = n;
-  ldb  = n;
-
-  ipiv = THIntTensor_newWithSize1d((int64_t)n);
-  THLapack_(gesv)(n, nrhs,
-		  THTensor_(data)(ra__), lda, THIntTensor_data(ipiv),
-		  THTensor_(data)(rb__), ldb, &info);
-
-  THLapackCheckWithCleanup("Lapack Error in %s : U(%d,%d) is zero, singular U.",
-                           THCleanup(
-                               THTensor_(free)(ra__);
-                               THTensor_(free)(rb__);
-                               THIntTensor_free(ipiv);
-                               if (free_b) THTensor_(free)(b);),
-                           "gesv", info, info);
-
-  THTensor_(freeCopyTo)(ra__, ra_);
-  THTensor_(freeCopyTo)(rb__, rb_);
-  THIntTensor_free(ipiv);
-  if (free_b) THTensor_(free)(b);
-}
-
 void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
                       const char *uplo, const char *trans, const char *diag)
 {

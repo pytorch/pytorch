@@ -138,6 +138,36 @@ std::tuple<Tensor,Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A)
   return std::tuple<Tensor,Tensor>(b_working_copy, A_working_copy);
 }
 
+std::tuple<Tensor&,Tensor&> _gesv_single_helper_out_cuda(Tensor& result0, Tensor& result1,
+    const Tensor& self, const Tensor& A) {
+#ifndef USE_MAGMA
+AT_ERROR("gesv: MAGMA library not found in "
+    "compilation. Please rebuild with MAGMA.");
+#else
+  magma_int_t bx = self.size(0);
+  magma_int_t by = (self.dim() == 1) ? 1 : self.size(1);
+  magma_int_t* info_array;
+  magma_int_t** ipiv_array;
+
+  result1 = A.t().clone();
+  result0 = self.view({bx, by}).t().clone();
+
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+      auto A_ptr = result1.data<scalar_t>();
+      auto b_ptr = result0.data<scalar_t>();
+
+      ALLOCATE_ARRAY(info_array, magma_int_t, 1, result0);
+      ALLOCATE_ARRAY(ipiv_array, magma_int_t*, 1, result0);
+
+      magmaGesvBatched<scalar_t>(
+          bx, by, &A_ptr, bx, ipiv_array, &b_ptr, bx,
+          info_array, 1, createMagmaQueue(result0));
+  });
+  std::vector<int64_t> infos = {info_array[0]};
+  checkErrors(infos);
+  return std::tuple<Tensor&,Tensor&>(result0, result1);
+#endif
+}
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY

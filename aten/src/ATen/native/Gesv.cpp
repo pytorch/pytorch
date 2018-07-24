@@ -72,8 +72,9 @@ static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
   }
 }
 
-static std::tuple<Tensor&,Tensor&> _gesv_single_helper(
-    const Tensor& self, const Tensor& A, Tensor& sol, Tensor& lu) {
+std::tuple<Tensor&,Tensor&> _gesv_single_helper_out_cpu(
+    Tensor& result0, Tensor& result1,
+    const Tensor& self, const Tensor& A) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv: LAPACK library not found in compilation");
 #endif
@@ -81,22 +82,22 @@ static std::tuple<Tensor&,Tensor&> _gesv_single_helper(
   int64_t by = (self.dim() == 1) ? 1 : self.size(1);
   int info = 0;
 
-  lu = A.t().clone();
-  sol = self.view({bx, by}).t().clone();
+  result1 = A.t().clone();
+  result0 = self.view({bx, by}).t().clone();
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-    auto A_ptr = lu.data<scalar_t>();
-    auto b_ptr = sol.data<scalar_t>();
-    auto ipiv = at::empty({bx}, sol.type().toScalarType(kInt));
+    auto A_ptr = result1.data<scalar_t>();
+    auto b_ptr = result0.data<scalar_t>();
+    auto ipiv = at::empty({bx}, result0.type().toScalarType(kInt));
 
     lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
   });
 
-  sol = sol.t();
-  lu = lu.t();
+  result0 = result0.t();
+  result1 = result1.t();
 
   checkErrors({info});
-  return std::tuple<Tensor&, Tensor&>(sol, lu);
+  return std::tuple<Tensor&, Tensor&>(result0, result1);
 }
 
 std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
@@ -116,9 +117,9 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
   checkInputs(self, A, batched);
 
   if (!batched) {
-    Tensor A_;
-    Tensor b_;
-    return _gesv_single_helper(self, A, b_, A_);
+    auto A_ = self.type().tensor();
+    auto b_ = self.type().tensor();
+    return self.type()._gesv_single_helper_out(b_, A_, self, A);
   }
 
   // broadcast the batch dimensions of self and A.
@@ -141,13 +142,14 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
 }
 
 std::tuple<Tensor&,Tensor&> gesv_out(
-    Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
+    Tensor& result0, Tensor& result1, const Tensor& self, const Tensor& A) {
   if (self.dim() > 2 || A.dim() > 2) {
     AT_ERROR("torch.gesv() with the `out` keyword does not support batching. "
                   "b.dim() (%lld) and A.dim() (%lld) must both be 2.",
                   (long long)self.dim(), (long long)A.dim());
   }
-  return _gesv_single_helper(self, A, solution, lu);
+
+  return self.type()._gesv_single_helper_out(result0, result1, self, A);
 }
 
 }}  // namespace at::native
