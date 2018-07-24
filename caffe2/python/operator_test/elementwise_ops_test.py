@@ -450,6 +450,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
 
+        A = np.random.rand(1, m, k, 1).astype(np.float32) + bias
+        B = np.random.rand(n, m, k, t).astype(np.float32) + bias
+        self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
+
         A = np.random.rand(m, 1, t).astype(np.float32) + bias
         B = np.random.rand(n, m, k, t).astype(np.float32) + bias
         self._run_single_test(op, ref, A, B, True, test_grad, gc, dc)
@@ -571,6 +575,10 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
         A = np.random.randint(128, size=(n, m, 1, 1))
+        B = np.random.randint(128, size=(n, m, k, t))
+        self._run_single_test(op, ref, A, B, True, False, gc, dc)
+
+        A = np.random.randint(128, size=(1, m, k, 1))
         B = np.random.randint(128, size=(n, m, k, t))
         self._run_single_test(op, ref, A, B, True, False, gc, dc)
 
