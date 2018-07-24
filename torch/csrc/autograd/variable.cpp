@@ -21,7 +21,7 @@
 
 namespace torch { namespace autograd {
 Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
-    : TensorImpl(VariableType::getType(data)),
+    : TensorImpl(VariableType::getType(data), nullptr),
       data_(std::move(data)),
       grad_fn_(std::move(gradient_edge.function)),
       requires_grad_(false),
