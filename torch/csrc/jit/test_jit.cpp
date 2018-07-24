@@ -714,7 +714,8 @@ bool isEqual(at::IntList lhs, at::IntList rhs) {
   return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
-bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
+bool isEqual(const ArgumentInfo & ti, const autograd::Variable & v) {
+  REQUIRE(ti.kind() == IValueKind::Tensor);
   if(!ti.defined())
     return ti.defined() == v.defined();
   return
@@ -758,7 +759,7 @@ void argumentSpecTest() {
   REQUIRE(d.hashCode() == a.hashCode());
 
   for(size_t i = 0; i < list.size(); ++i) {
-    REQUIRE(isEqual(a.tensorInfo(i), list[i].toTensor()));
+    REQUIRE(isEqual(a.at(i), list[i].toTensor()));
   }
   ArgumentSpec no_grad(/*with_grad=*/false, list);
   REQUIRE(no_grad != a);

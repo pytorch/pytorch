@@ -364,7 +364,7 @@ private:
 
   bool argumentSpecRequiresGradient(const ArgumentSpec & spec) {
     for(size_t i = 0; i < spec.size(); ++i) {
-      if(spec.tensorInfo(i).requires_grad())
+      if(spec.at(i).requires_grad())
         return true;
     }
     return false;
@@ -384,7 +384,7 @@ private:
     std::vector<bool> requires_grads;
     requires_grads.reserve(spec.size());
     for(size_t i = 0; i < spec.size(); i++)
-      requires_grads.push_back(spec.tensorInfo(i).requires_grad());
+      requires_grads.push_back(spec.at(i).requires_grad());
 
     Gradient gradient = differentiate(graph_, requires_grads);
     graph_ = gradient.f;
@@ -469,7 +469,7 @@ void specializeToSpec(const std::shared_ptr<Graph>& graph_, const ArgumentSpec& 
   // this must be first because later passes do not know what GradOfs are
   std::vector<bool> defined;
   for(size_t i = 0; i < spec.size(); ++i) {
-    defined.push_back(spec.tensorInfo(i).defined());
+    defined.push_back(spec.at(i).defined());
   }
   specializeUndef(*graph_, defined);
 
