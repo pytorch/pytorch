@@ -1,4 +1,4 @@
-# rocm-caffe2 Quickstart Guide
+# Caffe2 Quickstart Guide on ROCm Platform
 
 
 ## Running Core Tests

@@ -1,4 +1,4 @@
-# Caffe2: Building From Source on ROCm platform
+# Caffe2: Building From Source on ROCm Platform
 
 ## Intro
 This instruction provides a starting point to build caffe2 on AMD GPUs (Caffe2 ROCm port) from source.
