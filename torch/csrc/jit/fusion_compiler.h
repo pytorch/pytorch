@@ -108,6 +108,7 @@ protected:
   // launch_with_tensors handles packing at::Tensors into this arguments array.
   // CPU code uses the same convension so that launch_with_tensors can be shared.
   virtual void launch_raw(uint32_t numel, void ** arguments) = 0;
+  bool has_random;
   std::string name;
   // We keep these around for debugging
   std::string compilation_unit;
@@ -118,7 +119,6 @@ protected:
   // an output is actually a concatenation of
   // many subtensors that the fusion group produces
   std::vector<ConcatDesc> concat_desc;
-
 };
 
 struct FusionCompilerConfig {

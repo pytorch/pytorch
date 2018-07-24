@@ -92,88 +92,296 @@ struct TensorInfo {
 };
 )");
 constexpr auto rand_support_literal = R"(
-struct mtgp32_kernel_params {
-    unsigned int pos_tbl[200];
-    unsigned int param_tbl[200][16];
-    unsigned int temper_tbl[200][16];
-    unsigned int single_temper_tbl[200][16];
-    unsigned int sh1_tbl[200];
-    unsigned int sh2_tbl[200];
-    unsigned int mask[1];
-};
-struct curandStateMtgp32 {
-    unsigned int s[1024];
-    int offset;
-    int pIdx;
-    mtgp32_kernel_params_t * k;
-    int precise_double_flag;
-};
-typedef struct curandStateMtgp32 curandStateMtgp32_t;
-static __inline__ __attribute__((always_inline)) __attribute__((device)) __attribute__((host)) unsigned int para_rec(mtgp32_kernel_params_t * k,unsigned int X1, unsigned int X2, unsigned int Y, int bid) {
-    unsigned int X = (X1 & k->mask[0]) ^ X2;
-    unsigned int MAT;
+  /* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
-    X ^= X << k->sh1_tbl[bid];
-    Y = X ^ (Y >> k->sh2_tbl[bid]);
-    MAT = k->param_tbl[bid][Y & 0x0f];
-    return Y ^ MAT;
-}
-static __inline__ __attribute__((always_inline)) __attribute__((device)) __attribute__((host)) unsigned int temper(mtgp32_kernel_params_t * k,unsigned int V, unsigned int T, int bid) {
-    unsigned int MAT;
+  Licensed under the Apache License, Version 2.0 (the "License");
+  you may not use this file except in compliance with the License.
+  You may obtain a copy of the License at
 
-    T ^= T >> 16;
-    T ^= T >> 8;
-    MAT = k->temper_tbl[bid][T & 0x0f];
-    return V ^ MAT;
-}
-static __inline__ __attribute__((always_inline)) __attribute__((device)) __attribute__((host)) unsigned int curand(curandStateMtgp32_t *state)
-{
-    unsigned int t;
-    unsigned int d;
-    int pos = state->k->pos_tbl[state->pIdx];
-    unsigned int r;
-    unsigned int o;
+      http://www.apache.org/licenses/LICENSE-2.0
 
-    d = blockDim.z * blockDim.y * blockDim.x;
+  Unless required by applicable law or agreed to in writing, software
+  distributed under the License is distributed on an "AS IS" BASIS,
+  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+  See the License for the specific language governing permissions and
+  limitations under the License.
+  ==============================================================================*/
 
-    t = (blockDim.z * blockDim.y * threadIdx.z) + (blockDim.x * threadIdx.y) + threadIdx.x;
-    r = para_rec(state->k, state->s[(t + state->offset) & 1023],
-             state->s[(t + state->offset + 1) & 1023],
-             state->s[(t + state->offset + pos) & 1023],
-             state->pIdx);
+  // Implement the Philox algorithm to generate random numbers in parallel.
+  // Salmon et al. SC 2011. Parallel random numbers: as easy as 1, 2, 3.
+  //   http://www.thesalmons.org/john/random123/papers/random123sc11.pdf
 
-    state->s[(t + state->offset + 351) & 1023] = r;
-    o = temper(state->k, r,
-           state->s[(t + state->offset + pos -1) & 1023],
-           state->pIdx);
+  #ifndef TENSORFLOW_LIB_RANDOM_PHILOX_RANDOM_H_
+  #define TENSORFLOW_LIB_RANDOM_PHILOX_RANDOM_H_
 
-    __syncthreads();
+  // #include <stdlib.h>
 
-    if (t == 0)
-    {
-        state->offset = (state->offset + d) & 1023;
+  // #include "tensorflow/core/platform/types.h"
+  typedef unsigned long uint32;
+  typedef unsigned long long uint64;
+
+  // Function qualifiers that need to work on both CPU and GPU.
+  #if defined(__CUDACC__)
+  // For nvcc.
+  #define PHILOX_DEVICE_FUNC __host__ __device__
+  #define PHILOX_INLINE __inline__
+  #else
+  // For non-nvcc.
+  #define PHILOX_DEVICE_FUNC
+  #define PHILOX_INLINE inline
+  #endif
+  #define PHILOX_DEVICE_INLINE PHILOX_DEVICE_FUNC PHILOX_INLINE
+
+  // #include <math.h>
+
+  // namespace tensorflow {
+  // namespace random {
+
+  // A class that represents an inline array. It can be used on both CPU and GPU,
+  // and also trivially copyable between CPU and GPU.
+  // Arguments:
+  //   T: the array element type;
+  //   ElementCount: the fixed size of the array;
+  template <typename T, int ElementCount>
+  class Array {
+   public:
+    PHILOX_DEVICE_INLINE Array() {
+      for (int i = 0; i < ElementCount; ++i) {
+        data_[i] = T(0);
+      }
     }
 
-    __syncthreads();
+    PHILOX_DEVICE_INLINE const T& operator[](int index) const {
+      return data_[index];
+    }
 
-    return o;
+    PHILOX_DEVICE_INLINE T& operator[](int index) { return data_[index]; }
 
-}
-static __inline__ __attribute__((always_inline)) __attribute__((device)) float _curand_uniform(unsigned int x)
-{
-    return x * (2.3283064e-10f) + ((2.3283064e-10f)/2.0f);
-}
-static __inline__ __attribute__((always_inline)) __attribute__((device)) float curand_uniform(curandStateMtgp32_t *state)
-{
-    return _curand_uniform(curand(state));
-}
+    size_t size() const { return ElementCount; }
+
+   private:
+    T data_[ElementCount];
+  };
+
+  // A class that encapsulates all the states for a random number generator using
+  // the philox_4x32_10 algorithm. Each invocation returns a 128-bit random bits
+  // in the form of four uint32.
+  // There are multiple variants of this algorithm, we picked the 4x32_10 version
+  // that is most suited for our applications.
+  // Since this class is meant to be copied between CPU to GPU, it maintains a
+  // value semantics.
+  //
+  // For example: To use this class and populate an array of 1024 randoms on CPU
+  // with two threads,
+  //
+  //  void Fill(PhiloxRandom rnd, uint32* output, int start, int limit) {
+  //    assert(start % 4 == 0);
+  //    assert(limit % 4 == 0);
+  //    rnd.Skip(start / 4);
+  //    for (int i = start; i < limit; i += 4) {
+  //      auto sample = rnd();
+  //      ... copy sample[0..3] to output[i..i+3]
+  //    }
+  //  }
+  //
+  //  PhiloxRandom rng(seed);
+  //  PhiloxRandom rng_copy = rng;
+  //  rng.Skip(1000/4);
+  //
+  //  ... schedule Fill(rng_copy, output, 0, 512) in thread 1;
+  //  ... schedule Fill(rng_copy, output, 512, 1024) in thread 2;
+  //  ... wait for thread 1 & 2 to finish executing Fill().
+  //
+  // NOTE:
+  // 1. PhiloxRandom is trivially copyable.
+  // 2. PhiloxRandom is compilable by gcc and nvcc.
+  class PhiloxRandom {
+   public:
+    using ResultType = Array<uint32, 4>;
+    using ResultElementType = uint32;
+    // The number of elements that will be returned.
+    static const int kResultElementCount = 4;
+    // Cost of generation of a single element (in cycles).
+    static const int kElementCost = 10;
+    // The type for the 64-bit key stored in the form of two 32-bit uint
+    // that are used in the diffusion process.
+    using Key = Array<uint32, 2>;
+
+    PHILOX_DEVICE_INLINE
+    PhiloxRandom() {}
+
+    PHILOX_DEVICE_INLINE
+    explicit PhiloxRandom(uint64 seed) {
+      key_[0] = static_cast<uint32>(seed);
+      key_[1] = static_cast<uint32>(seed >> 32);
+    }
+
+    PHILOX_DEVICE_INLINE
+    explicit PhiloxRandom(uint64 seed_lo, uint64 seed_hi) {
+      key_[0] = static_cast<uint32>(seed_lo);
+      key_[1] = static_cast<uint32>(seed_lo >> 32);
+      counter_[2] = static_cast<uint32>(seed_hi);
+      counter_[3] = static_cast<uint32>(seed_hi >> 32);
+    }
+
+    PHILOX_DEVICE_INLINE
+    PhiloxRandom(ResultType counter, Key key) : counter_(counter), key_(key) {}
+
+    // Skip the specified number of samples of 128-bits in the current stream.
+    PHILOX_DEVICE_INLINE
+    void Skip(uint64 count) {
+      const uint32 count_lo = static_cast<uint32>(count);
+      uint32 count_hi = static_cast<uint32>(count >> 32);
+
+      counter_[0] += count_lo;
+      if (counter_[0] < count_lo) {
+        ++count_hi;
+      }
+
+      counter_[1] += count_hi;
+      if (counter_[1] < count_hi) {
+        if (++counter_[2] == 0) {
+          ++counter_[3];
+        }
+      }
+    }
+
+    // Returns a group of four random numbers using the underlying Philox
+    // algorithm.
+    PHILOX_DEVICE_INLINE ResultType operator()() {
+      ResultType counter = counter_;
+      Key key = key_;
+
+      // Run the single rounds for ten times. Manually unrolling the loop
+      // for better performance.
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+      RaiseKey(&key);
+      counter = ComputeSingleRound(counter, key);
+
+      SkipOne();
+
+      return counter;
+    }
+
+   private:
+    // We use the same constants as recommended by the original paper.
+    static const uint32 kPhiloxW32A = 0x9E3779B9;
+    static const uint32 kPhiloxW32B = 0xBB67AE85;
+    static const uint32 kPhiloxM4x32A = 0xD2511F53;
+    static const uint32 kPhiloxM4x32B = 0xCD9E8D57;
+
+    // Helper function to skip the next sample of 128-bits in the current stream.
+    PHILOX_DEVICE_INLINE void SkipOne() {
+      if (++counter_[0] == 0) {
+        if (++counter_[1] == 0) {
+          if (++counter_[2] == 0) {
+            ++counter_[3];
+          }
+        }
+      }
+    }
+
+    // Helper function to return the lower and higher 32-bits from two 32-bit
+    // integer multiplications.
+    PHILOX_DEVICE_INLINE
+    static void MultiplyHighLow(uint32 a, uint32 b, uint32* result_low,
+                                uint32* result_high) {
+  #ifndef __CUDA_ARCH__
+      const uint64 product = static_cast<uint64>(a) * b;
+      *result_low = static_cast<uint32>(product);
+      *result_high = static_cast<uint32>(product >> 32);
+  #else
+      *result_low = a * b;
+      *result_high = __umulhi(a, b);
+  #endif
+    }
+
+    // Helper function for a single round of the underlying Philox algorithm.
+    PHILOX_DEVICE_INLINE static ResultType ComputeSingleRound(
+        const ResultType& counter, const Key& key) {
+      uint32 lo0;
+      uint32 hi0;
+      MultiplyHighLow(kPhiloxM4x32A, counter[0], &lo0, &hi0);
+
+      uint32 lo1;
+      uint32 hi1;
+      MultiplyHighLow(kPhiloxM4x32B, counter[2], &lo1, &hi1);
+
+      ResultType result;
+      result[0] = hi1 ^ counter[1] ^ key[0];
+      result[1] = lo1;
+      result[2] = hi0 ^ counter[3] ^ key[1];
+      result[3] = lo0;
+      return result;
+    }
+
+    PHILOX_DEVICE_INLINE void RaiseKey(Key* key) {
+      (*key)[0] += kPhiloxW32A;
+      (*key)[1] += kPhiloxW32B;
+    }
+
+   private:
+    ResultType counter_;
+    Key key_;
+  };
+
+  // A Wrapper for Philox to get one random number at a time
+  class PhiloxWrapper {
+  public:
+    PHILOX_DEVICE_INLINE
+    explicit PhiloxWrapper(uint64 seed_lo, uint64 seed_hi, uint64 offset) {
+      philox = PhiloxRandom(seed_lo, seed_hi);
+      philox.Skip(offset / 4);
+      i = 0;
+    }
+    PHILOX_DEVICE_INLINE float operator()() {
+      if(i == 0) buf = philox();
+      uint32 ret = buf[i];
+      i = (i + 1) % 4;
+      static uint32 FLOAT_MASK = (1 << 24) - 1;
+      static float FLOAT_DIVISOR = 1.0f / (1 << 24);
+      return (ret & FLOAT_MASK) * FLOAT_DIVISOR;
+    }
+  private:
+    PhiloxRandom philox;
+    using ResultType = Array<uint32, 4>;
+    ResultType buf;
+    int i;
+  };
+
+  // }  // namespace random
+  // }  // namespace tensorflow
+
+  #endif  // TENSORFLOW_LIB_RANDOM_PHILOX_RANDOM_H_
 )";
 
+constexpr auto rand_param = ", uint64 seed, uint64 offset";
+constexpr auto rand_init = R"(
+  int idx = blockIdx.x*blockDim.x + threadIdx.x;
+  PhiloxWrapper rnd(seed, idx, offset);
+)";
 auto cuda_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 
 extern "C" __global__
-void ${kernelName}(IndexType totalElements, ${formals}) {
+void ${kernelName}(IndexType totalElements, ${formals} ${RandParam}) {
+  ${RandInit}
   for (IndexType linearIndex = blockIdx.x * blockDim.x + threadIdx.x;
         linearIndex < totalElements;
         linearIndex += gridDim.x * blockDim.x) {
@@ -192,7 +400,7 @@ auto cpu_compilation_unit_template = CodeTemplate(R"(
 ${type_declarations}
 
 #define OMP_THRESHOLD 100000
-static void ${kernelName}_kernel(curandStateMtgp32_t states, IndexType totalElements, ${formals}) {
+static void ${kernelName}_kernel(IndexType totalElements, ${formals}) {
   #pragma omp parallel for if(totalElements > OMP_THRESHOLD)
   for (IndexType linearIndex = 0;
         linearIndex < totalElements;
@@ -361,10 +569,10 @@ std::string encodeRHS(Node * n) {
     {aten::remainder, "remainderf(${0}, ${1})"},
     {aten::pow, "powf(${0}, ${1})"},
 
-    // binary with alpha
-    {aten::add, "${0} + ${2}*${1}"},
-    {aten::sub, "(${0} - ${2}*${1})"},
-    {aten::rand, "curand_uniform(&states[blockIdx.x])"},
+    //alpha
+    {aten::add, "${0} + ${alpha}*${1}"},
+    {aten::sub, "(${0} - ${alpha}*${1})"},
+    {aten::rand_like, "rnd()"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
@@ -396,6 +604,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
                                             const std::string & name,
                                             AnnotatedGraph & agraph,
                                             bool use_cuda) {
+  has_random = false;
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -468,7 +677,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     // FusedConcat nodes work by narrowing the output Tensors before the kernel runs
     if (n->kind() == prim::FusedConcat)
       continue;
-    if(n->kind() == aten::rand) {
+    if(n->kind() == aten::rand_like) {
       has_random = true;
       if(!use_cuda)
         throw std::runtime_error("Fusion doesn't support rand on CPU");
@@ -502,8 +711,12 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
 
   if (has_random) {
     env.s("RandHeader", rand_support_literal);
+    env.s("RandParam", rand_param);
+    env.s("RandInit", rand_init);
   } else {
     env.s("RandHeader", "");
+    env.s("RandParam", "");
+    env.s("RandInit", "");
   }
 
   env.s("tensorOffsets",tensorOffsets.str());
@@ -612,10 +825,9 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
   char * buffer_next = buffer.data();
   // A vector of arguments to the kernel. It's (numel, *input_descs, *output_descs)
   std::vector<void*> arguments;
-  arguments.reserve(2 + inputs.size() + flat_outputs_size);
+  arguments.reserve(3 + inputs.size() + flat_outputs_size);
   // Asserts that t's dims can be compressed in the same way as in desc
   // (that's what the kernel assumes), and appends it to the arguments vector.
-  arguments.push_back(nullptr);
   auto addTensorInfo = [&](TensorDesc & desc, const at::Tensor & t) {
     size_t nDim = desc.nDim(); // NOTE: this is the compressed dim
     JIT_ASSERT(nDim <= uncompressedDim); // We'd overflow the space otherwise
@@ -650,9 +862,14 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
       }
     }
   }
-  auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
-  std::lock_guard<std::mutex> lock(gen_->mutex);
-  arguments[0] = gen_->state.gen_states;
+  // If the kernel call contains a random op, we need to pass in random seeds as
+  // well.
+  if(has_random) {
+    auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
+    uint64_t offset = gen_->state.philox_seed_offset.fetch_add(20);
+    arguments.push_back(&gen_->state.initial_seed);
+    arguments.push_back(&offset);
+  }
   launch_raw(numel, arguments.data());
 }
 
@@ -688,15 +905,13 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     checkCUDAVersion(prop);
 
     std::stringstream cu;
-    bool has_random = false;
     concat_desc = codegen::emitCompilationUnit(cu, has_random, name, agraph, true);
-    if(has_random) maxBlocks = std::min(200, maxBlocks);
     compilation_unit = cu.str();
     nvrtcProgram program;
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
 
     std::string compute = "--gpu-architecture=compute_" + std::to_string(prop.major) + std::to_string(prop.minor);
-    std::vector<const char *> args = {"--std=c++11", compute.c_str()};
+    std::vector<const char *> args = {"--std=c++11", compute.c_str(), "-default-device"};
     nvrtcResult result = nvrtcCompileProgram(program, args.size(), args.data());
     if (result == NVRTC_ERROR_COMPILATION) {
       size_t logsize;
@@ -886,7 +1101,6 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
-    bool has_random = false;
     concat_desc = codegen::emitCompilationUnit(cu, has_random, name, agraph, false);
     JIT_ASSERT(!has_random);
     compilation_unit = cu.str();
