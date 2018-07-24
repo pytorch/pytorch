@@ -56,8 +56,8 @@ bool isOnIdeepDevice(const repr::NeuralNetOperator &nnOp) {
   return op.device_option().device_type() == DeviceTypeProto::PROTO_IDEEP;
 }
 
-bool shouldFuseConv(const repr::Conv &conv) {
-  return isOnIdeepDevice(conv) ? (conv.getGroup() <= 1) : false;
+bool shouldFuseConv(const repr::Conv& conv) {
+  return isOnIdeepDevice(conv);
 }
 
 void resetConvForFusion(repr::NNGraph::NodeRef convNode, int fusion_type) {

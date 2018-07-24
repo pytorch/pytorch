@@ -25,7 +25,7 @@ class ConvFusionTest(hu.HypothesisTestCase):
            output_channels=st.integers(1, 16),
            batch_size=st.integers(1, 3),
            use_bias=st.booleans(),
-           group=st.integers(1, 1),
+           group=st.integers(1, 2),
            **mu.gcs)
     def test_convolution_relu_fusion(self, stride, pad, kernel, size,
                              input_channels, output_channels,
