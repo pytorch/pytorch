@@ -44,12 +44,12 @@ class SummarizeOp final : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   bool RunOnDevice() override;
 
-  static constexpr int MIN_IDX = 0;
-  static constexpr int MAX_IDX = 1;
-  static constexpr int MEAN_IDX = 2;
-  static constexpr int STD_IDX = 3;
+  static constexpr const int& MIN_IDX = 0;
+  static constexpr const int& MAX_IDX = 1;
+  static constexpr const int& MEAN_IDX = 2;
+  static constexpr const int& STD_IDX = 3;
 
-  static constexpr int NUM_STATS = 4;
+  static constexpr const int& NUM_STATS = 4;
 
  protected:
   bool to_file_;

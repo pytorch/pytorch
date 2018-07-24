@@ -60,13 +60,13 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     : public Operator<CPUContext> {
  public:
   // Expect this many channels as input
-  static constexpr int kInputChannels = 4;
+  static constexpr const int& kInputChannels = 4;
 
   // Expect this many channels as output
-  static constexpr int kOutputChannels = 3;
+  static constexpr const int& kOutputChannels = 3;
 
   // We read this much noise per vectorized cycle
-  static constexpr int kNeonNoiseReadSize = kOutputChannels * 16;
+  static constexpr const int& kNeonNoiseReadSize = kOutputChannels * 16;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
   PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(
@@ -405,10 +405,10 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
   using Operator<CPUContext>::Operator;
 
   // Expect this many channels as input
-  static constexpr int kInputChannels = 3;
+  static constexpr const int& kInputChannels = 3;
 
   // Expect this many channels as output
-  static constexpr int kOutputChannels = 4;
+  static constexpr const int& kOutputChannels = 4;
 
   bool RunOnDevice() {
     const auto& X = Input(0);
@@ -493,7 +493,7 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
     constexpr int kLoadFloats = (sizeof(float32x4_t) / sizeof(float));
 
     // We store in chunks of this size
-    constexpr int kStoreUnit = sizeof(uint8x8x4_t);
+    constexpr int kStoreUni& = sizeof(uint8x8x4_t);
 
     // The vector portion loads this many f32 pixels at a time (8)
     constexpr int kLoadPixels = 2 * kLoadFloats;

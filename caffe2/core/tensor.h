@@ -294,8 +294,8 @@ class Tensor {
    * items is the same, the underlying storage is kept.
    */
   template <typename... Ts>
-  void Resize(Ts... dim_source) {
-    bool size_changed = SetDims(dim_source...);
+  void Resize(Ts&&... dim_source) {
+    bool size_changed = SetDims(std::forward<Ts>(dim_source)...);
     if (size_changed) {
       // If needed, we will free the data. the next mutable_data() call
       // will create the data storage.
@@ -719,6 +719,22 @@ class Tensor {
   template <
       typename T,
       typename = typename std::enable_if<std::is_integral<T>::value>::type>
+  bool SetDims(const TIndex d0, const vector<T>& src) {
+    auto old_size = size_;
+    dims_.resize(src.size() + 1);
+    dims_[0] = d0;
+    TIndex new_size = d0;
+    for (size_t i = 0; i < src.size(); ++i) {
+      new_size *= src[i];
+      dims_[i + 1] = src[i];
+    }
+    size_ = new_size;
+    return size_ != old_size;
+  }
+
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_integral<T>::value>::type>
   bool SetDims(const vector<T>& src) {
     auto old_size = size_;
     dims_.resize(src.size());
@@ -729,6 +745,20 @@ class Tensor {
     }
     size_ = new_size;
     return size_ != old_size;
+  }
+
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+  bool SetDims(const TIndex d0, vector<T>&& src) {
+    return SetDims(d0, src);
+  }
+
+  template <
+      typename T,
+      typename = typename std::enable_if<std::is_integral<T>::value>::type>
+  bool SetDims(vector<T>&& src) {
+    return SetDims(src);
   }
 
   bool SetDims() {
