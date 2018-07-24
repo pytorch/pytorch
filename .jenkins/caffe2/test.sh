@@ -111,7 +111,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Failing on CI with rocm 1.8.1, but passed in local environment
   # with rocm 1.8.2. Revisit this once the docker images are upgraded.
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/recurrent_net_executor_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
 fi
 
 # Python tests
