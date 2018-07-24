@@ -4,6 +4,7 @@
 #include <vector>
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/utils/hash.h"
+#include "torch/csrc/jit/stack.h"
 #include "torch/csrc/jit/variable_tensor_list.h"
 
 namespace torch { namespace jit {
@@ -38,12 +39,15 @@ static_assert(sizeof(TensorInfoPOD) == sizeof(int64_t),
 struct TensorInfo;
 
 struct ArgumentSpec {
-  // note: tensors must always be variables
-  ArgumentSpec(bool with_grad, const variable_tensor_list & tensors)
-  :  hash_code(0), ntensors(tensors.size()) {
-    int all_dims = 0;
-    for(size_t i = 0; i < ntensors; i++) {
-      all_dims += tensors[i].defined() ? tensors[i].ndimension() : 0;
+  ArgumentSpec(bool with_grad, const Stack & inputs)
+  :  hash_code(0), ntensors(0) {
+    int32_t all_dims = 0;
+    const int32_t num_inputs = inputs.size();
+    for (int32_t i = 0; i < num_inputs; i++) {
+      if (!inputs[i].isTensor()) continue;
+      ntensors++;
+      auto tensor = inputs[i].toTensor();
+      all_dims += tensor.defined() ? tensor.ndimension() : 0;
     }
     // allocate enough room for all TensorPODs and dimensions
     data.resize(ntensors + all_dims*2);
@@ -51,15 +55,16 @@ struct ArgumentSpec {
     // and reinterpret our data array as these structs
     TensorInfoPOD * pods = reinterpret_cast<TensorInfoPOD*>(data.data());
     int64_t * next_dim = sizes_strides();
-    int total_dims = 0;
-    for(size_t i = 0; i < ntensors; i++) {
-      const auto & t = tensors[i];
+    int32_t total_dims = 0;
+    for(int32_t i = 0; i < num_inputs; i++) {
+      if (!inputs[i].isTensor()) continue;
+      const auto & t = inputs[i].toTensor();
       auto & pod = pods[i];
       pod.defined = t.defined();
-      if(t.defined()) {
-        pod.type = static_cast<unsigned int>(t.type().scalarType());
+      if (pod.defined) {
+        pod.type = static_cast<int>(t.type().scalarType());
         pod.device = (!t.type().is_cuda()) ? -1 : t.get_device();
-        pod.requires_grad = with_grad && static_cast<const autograd::Variable&>(t).requires_grad();
+        pod.requires_grad = with_grad && autograd::as_variable_ref(t).requires_grad();
         total_dims += t.ndimension();
         auto sizes = t.sizes();
         std::copy(sizes.begin(),sizes.end(), next_dim);
@@ -108,7 +113,7 @@ private:
     return data.data() + ntensors;
   }
   size_t hash_code; // precomputed on construction
-  uint32_t ntensors;
+  int32_t ntensors;
   // layout is ntensors of TensorPOD (each 64-bit) followed by their size and stride info
   // for 3 tensors: [t0POD][t1POD][t2POD][t0 sizes][t0 strides][t1 sizes][t1 strides][t2 sizes][t2 strides]
   std::vector<int64_t> data;

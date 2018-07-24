@@ -728,8 +728,8 @@ bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
 // work around the fact that variable_tensor_list doesn't duplicate all
 // of std::vector's constructors.
 // most constructors are never used in the implementation, just in our tests.
-variable_tensor_list createVarList(std::vector<at::Tensor> && list) {
-  return variable_tensor_list(std::move(list));
+Stack createStack(std::vector<at::Tensor> && list) {
+  return Stack(std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
 }
 
 void argumentSpecTest() {
@@ -738,14 +738,14 @@ void argumentSpecTest() {
   auto & GF = at::CUDA(at::kFloat);
   auto & GD = at::CUDA(at::kDouble);
 
-  auto list =  createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+  auto list = createStack({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
 
   // make sure we have some non-standard strides
-  list[1].transpose_(0, 1);
+  list[1].toTensor().transpose_(0, 1);
 
   // same list but different backing values
-  auto list2 = createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
-  list2[1].transpose_(0, 1);
+  auto list2 = createStack({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+  list2[1].toTensor().transpose_(0, 1);
 
 
   ArgumentSpec a(true, list);
@@ -758,7 +758,7 @@ void argumentSpecTest() {
   REQUIRE(d.hashCode() == a.hashCode());
 
   for(size_t i = 0; i < list.size(); ++i) {
-    REQUIRE(isEqual(a.tensorInfo(i), list[i]));
+    REQUIRE(isEqual(a.tensorInfo(i), list[i].toTensor()));
   }
   ArgumentSpec no_grad(/*with_grad=*/false, list);
   REQUIRE(no_grad != a);
@@ -770,7 +770,7 @@ void argumentSpecTest() {
   spec.insert(std::move(no_grad));
   REQUIRE(spec.count(ArgumentSpec(true,list)) == 1);
 
-  list2[1].transpose_(0,1);
+  list2[1].toTensor().transpose_(0,1);
   ArgumentSpec c(true, list2); // same as list, except for one stride
   REQUIRE(!(c == a));
   REQUIRE(spec.count(c) == 0);
@@ -793,7 +793,7 @@ void shapeAnalysisTest() {
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto g = build_lstm();
-  ArgumentSpec spec(false, createVarList({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
+  ArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
@@ -818,14 +818,15 @@ void testGraphExecutor() {
   auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
-  std::vector<at::Tensor> inputs = {v(input), v(hx), v(cx), v(w_ih), v(w_hh) };
   auto g = build_lstm();
   GraphExecutor executor(g);
-  auto outputs = executor.run(variable_tensor_list(std::move(inputs)));
+  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+  executor.run(stack);
+  REQUIRE(stack.size() == 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  REQUIRE(almostEqual(Variable(outputs[0]).data(), r0));
-  REQUIRE(almostEqual(Variable(outputs[1]).data(), r1));
+  REQUIRE(almostEqual(Variable(stack[0].toTensor()).data(), r0));
+  REQUIRE(almostEqual(Variable(stack[1].toTensor()).data(), r1));
 }
 
 void testBlocks(std::ostream & out) {

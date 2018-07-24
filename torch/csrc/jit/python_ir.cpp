@@ -145,7 +145,7 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      PropagateInputShapes(g, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+      PropagateInputShapes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
                       int64_t onnx_opset_version, bool defer_weight_export,

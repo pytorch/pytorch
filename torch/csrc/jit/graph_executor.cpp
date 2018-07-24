@@ -34,6 +34,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <iterator>
 
 namespace torch { namespace jit {
 
@@ -53,36 +54,26 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
   : graph(std::move(graph)) {
     captures.reserve(capture_size);
   }
+
   virtual variable_list apply(variable_list&& inputs) override {
-    // TODO: expensive copies here to convert to/from tensor_list
-    // TODO: because inputs is passed by const reference there is no
-    // way to release tensors incrementally as this runs
-    variable_tensor_list all_inputs;
-    all_inputs.reserve(captures.size() + inputs.size());
-    all_inputs.insert(all_inputs.end(), inputs.begin(), inputs.end());
-    for(auto & sv : captures) {
-      all_inputs.push_back(sv.unpack(this->shared_from_this()));
+    Stack stack;
+    stack.reserve(captures.size() + inputs.size());
+    stack.insert(stack.end(), std::make_move_iterator(inputs.begin()),
+                              std::make_move_iterator(inputs.end()));
+    for (auto & sv : captures) {
+      stack.push_back(sv.unpack(this->shared_from_this()));
     }
-    auto tensors = graph.run(std::move(all_inputs));
-    // TODO: another copy that needs to be removed
-    return autograd::variable_list(tensors.begin(), tensors.end());
+    graph.run(stack);
+    return fmap(stack, [](IValue & val) {
+      return autograd::Variable(std::move(val).toTensor());
+    });
   }
 private:
   friend struct ExecutionPlan;
   GraphExecutor graph;
+  // TODO (apaszke): how to cpature scalars?
   std::vector<autograd::SavedVariable> captures;
 };
-
-
-// helper to run interpreter on variables until we switch
-// everything to IValue
-inline variable_tensor_list runOneStage(const Code & code, variable_tensor_list inputs) {
-  std::vector<IValue> stack(inputs.begin(), inputs.end());
-  InterpreterState(code).runOneStage(stack);
-  return variable_tensor_list(fmap(stack, [](IValue& v) {
-    return std::move(v).toTensor();
-  }));
-}
 
 // an optimized way of executing the subgraph computed directly on
 // tensors rather than Variables.
@@ -98,12 +89,13 @@ struct ExecutionPlan {
         grad(std::move(grad)),
         grad_executor(this->grad.df) {}
 
-  variable_tensor_list run(variable_tensor_list&& stack) const {
-    if(grad) {
-      return runWithGrad(std::move(stack));
+  void run(Stack & stack) const {
+    if (grad) {
+      return runWithGrad(stack);
     }
-    return runOneStage(f, std::move(stack));
+    InterpreterState(f).runOneStage(stack);
   }
+
   std::shared_ptr<Graph> get_graph() const {
     return graph;
   }
@@ -124,48 +116,38 @@ struct ExecutionPlan {
   }
 
 private:
-  // note: should be inplace to avoid allocations, but we have to switch from
-  // a list of tensor to a list of ivalues
-  std::vector<IValue> unwrapVariables(variable_tensor_list && list) const {
-    return fmap(list, [](const Variable& v) -> IValue {
-      return v.defined() ? autograd::as_variable_ref(v).detach() : at::Tensor();
-    });
-  }
-  // note: should be inplace to avoid allocations, but we have to switch from
-  // a list of tensor to a list of ivalues
-  variable_tensor_list wrapTensors(tensor_list && list) const {
-    for(auto & v : list) {
-      v = autograd::make_variable(v, /*requires_grad=*/false);
+  void detachVariables(Stack & stack) const {
+    for (IValue & v : stack) {
+      if (!v.isTensor()) continue;
+      auto t = std::move(v).toTensor();
+      v = IValue{t.defined() ? autograd::as_variable_ref(t).detach() : std::move(t)};
     }
-    return variable_tensor_list(std::move(list));
   }
   // Capture (save) inputs that would be required to subsequently run backwards
-  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & inputs) const {
-    for(auto offset : grad.df_input_captured_inputs) {
-      grad_fn.captures.emplace_back(autograd::as_variable_ref(inputs[offset]), false);
+  // TODO (apaszke): how to capture scalars?!
+  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, Stack & inputs) const {
+    for (size_t offset : grad.df_input_captured_inputs) {
+      grad_fn.captures.emplace_back(autograd::as_variable_ref(inputs[offset].toTensor()), false);
     }
   }
-  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, variable_tensor_list & outputs) const {
-    for(auto offset : grad.df_input_captured_outputs) {
-      grad_fn.captures.emplace_back(autograd::as_variable_ref(outputs[offset]), true);
+  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, Stack & outputs) const {
+    for (size_t offset : grad.df_input_captured_outputs) {
+      grad_fn.captures.emplace_back(autograd::as_variable_ref(outputs[offset].toTensor()), true);
     }
   }
 
-  variable_tensor_list runWithGrad(variable_tensor_list&& inputs) const {
+  void runWithGrad(Stack & stack) const {
     auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor,
       grad.df_input_captured_inputs.size() + grad.df_input_captured_outputs.size());
-    // hook up the outputs of df to the gradient functions of the inputs that require
-    // gradients
+    // hook up the outputs of df to the gradient functions of the inputs that require gradients
     for(auto idx : grad.df_output_vjps) {
-      auto & v = autograd::as_variable_ref(inputs[idx]);
+      auto & v = autograd::as_variable_ref(stack[idx].toTensor());
       grad_fn->add_next_edge(v.gradient_edge());
     }
-    captureInputs(*grad_fn, inputs);
+    captureInputs(*grad_fn, stack);
 
-    auto stack = unwrapVariables(std::move(inputs));
+    detachVariables(stack);
     InterpreterState(f).runOneStage(stack);
-    variable_tensor_list outputs(
-        fmap(stack, [](IValue& v) { return std::move(v).toTensor(); }));
 
     // hookup the gradients for the output tensors that require gradients
     // to the inputs to our gradient function df
@@ -178,16 +160,16 @@ private:
       // Note: we have to set this up in place, or we have to throw away and
       // reallocate variables that were already created in wrapTensors. We
       // should add an API for this.
-      auto& output = autograd::as_variable_ref(outputs[idx]);
+      Variable output = stack[idx].toTensor();
       autograd::create_gradient_edge(output, grad_fn);
       output.set_requires_grad(true);
     }
-    captureOutputs(*grad_fn, outputs);
+    captureOutputs(*grad_fn, stack);
     // drop the temporary outputs so that we return the same number of
     // outputs as if we were not also calculating gradient
-    outputs.erase(outputs.begin() + grad.f_real_outputs, outputs.end());
-    return outputs;
+    stack.erase(stack.begin() + grad.f_real_outputs, stack.end());
   }
+
   Code f;
   // optimized graph for debugging and testing
   std::shared_ptr<Graph> graph;
@@ -223,7 +205,7 @@ struct GraphExecutorImpl {
   }
 
   // entry point where execution begins
-  variable_tensor_list run(variable_tensor_list inputs) {
+  void run(Stack & inputs) {
     if(inputs.size() != num_inputs) {
       std::stringstream ss;
       ss << "expected " << num_inputs << " inputs but got " << inputs.size() << " inputs";
@@ -235,22 +217,22 @@ struct GraphExecutorImpl {
     // this excutor into the trace. Otherwise we might unroll control-flow
     // operations.
     if(tracer::isTracing()) {
-      return runTraced(std::move(inputs));
+      return runTraced(inputs);
     }
 
     // this is the fallback pathway, when we cannot differentiate
     if(!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
-      return runFallback(std::move(inputs));
+      return runFallback(inputs);
     }
 
     // either we can symbolically differentiate, or we do not need a gradient.
     // go down the route where we treat the inputs as tensors
     // and fully optimize
     auto & implementation = getOrCompile(inputs);
-    return implementation.run(std::move(inputs));
+    return implementation.run(inputs);
   }
 
-  std::shared_ptr<Graph> graphFor(const variable_tensor_list& inputs) const {
+  std::shared_ptr<Graph> graphFor(const Stack& inputs) const {
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
 
     if (!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
@@ -282,12 +264,14 @@ struct GraphExecutorImpl {
 private:
   friend struct GraphExecutor;
 
-  variable_tensor_list runTraced(variable_tensor_list inputs) {
+  void runTraced(Stack & stack) {
     auto state = tracer::getTracingState();
-    auto input_values = fmap(inputs, tracer::getValueTrace);
+    auto input_values = fmap(stack, [](IValue & v) {
+      return tracer::getValueTrace(v.toTensor());
+    });
 
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
-    auto outputs = runFallback(std::move(inputs));
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), stack);
+    runFallback(stack);
 
     auto all_dynamic = [](const at::ArrayRef<Value*> xs) {
       for(Value* x : xs) {
@@ -308,15 +292,17 @@ private:
     }
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
-    for(size_t i = 0; i < outputs.size(); ++i) {
-      tracer::setValueTrace(outputs[i], output_values[i]);
+    for(size_t i = 0; i < stack.size(); ++i) {
+      // We can't attach tracing states to scalars, so we have to skip them here
+      // TODO (apaszke): Should we reinterpret them as scalar tensors instead?
+      if (!stack[i].isTensor()) continue;
+      tracer::setValueTrace(stack[i].toTensor(), output_values[i]);
     }
-    return outputs;
   }
 
-  variable_tensor_list runFallback(variable_tensor_list inputs) {
+  void runFallback(Stack & stack) {
     auto & fb = getOrCreateAutogradFallback();
-    return runOneStage(fb, std::move(inputs));
+    InterpreterState(fb).runOneStage(stack);
   }
 
   static bool calcMayIntroduceGradient(Block* b) {
@@ -330,14 +316,16 @@ private:
     }
     return false;
   }
-  bool needsGradient(const variable_tensor_list & inputs) const {
+  bool needsGradient(const Stack & inputs) const {
     if (!autograd::GradMode::is_enabled()) {
       return false;
     }
-    if(may_introduce_gradient)
+    if (may_introduce_gradient)
       return true;
-    for (const auto & tensor : inputs) {
-      if(tensor.defined() && static_cast<const Variable&>(tensor).requires_grad())
+    for (const IValue & value : inputs) {
+      if (!value.isTensor()) continue;
+      auto t = value.toTensor();
+      if (t.defined() && autograd::as_variable_ref(t).requires_grad())
         return true;
     }
     return false;
@@ -359,7 +347,7 @@ private:
     autograd_fallback = Code(graph_);
     return autograd_fallback;
   }
-  const ExecutionPlan & getOrCompile(const variable_tensor_list & inputs) {
+  const ExecutionPlan & getOrCompile(const Stack & inputs) {
     // outside lock guard, to minimize the time holding the lock on the fast path
     // ArgumentSpec even computes its hashCode here.
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
@@ -450,15 +438,15 @@ GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize)
 GraphExecutor::GraphExecutor(std::shared_ptr<Graph> graph, bool optimize, bool symbolically_differentiable)
 : pImpl(new GraphExecutorImpl(std::move(graph), optimize, symbolically_differentiable)) {}
 
-variable_tensor_list GraphExecutor::run(variable_tensor_list && inputs) {
-  return pImpl->run(std::move(inputs));
+void GraphExecutor::run(Stack & inputs) {
+  return pImpl->run(inputs);
 }
 
 std::shared_ptr<Graph> GraphExecutor::graph() const {
   return pImpl->graph;
 }
 
-std::shared_ptr<Graph> GraphExecutor::graphFor(const variable_tensor_list& inputs) const {
+std::shared_ptr<Graph> GraphExecutor::graphFor(const Stack& inputs) const {
   return pImpl->graphFor(inputs);
 }
 
