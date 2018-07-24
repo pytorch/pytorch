@@ -40,7 +40,6 @@ install_ubuntu() {
                    miopengemm \
                    rocblas \
                    hipblas \
-                   rocrand \
                    rocm-profiler \
                    cxlactivitylogger
 }
@@ -57,10 +56,14 @@ install_hip_thrust() {
     git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
 }
 
-install_hcrng() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
-    dpkg -i /opt/rocm/debians/hcrng.deb
+install_rocrand() {
+    mkdir -p /opt/rocm/tmp/
+    cd /opt/rocm/tmp/
+    git clone -b v1.8.0 https://github.com/ROCmSoftwarePlatform/rocRAND.git
+    mkdir build && cd build
+    cmake ..
+    make
+    make install
 }
 
 install_hcsparse() {
@@ -87,5 +90,5 @@ if [ "$ROCM_VERSION" = "nightly" ]; then
 fi
 
 install_hip_thrust
-install_hcrng
+install_rocrand
 install_hcsparse
