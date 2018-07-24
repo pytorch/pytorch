@@ -44,28 +44,28 @@ bool ${Type}::is_sparse() const { return backend() == kSparseCPU || backend() ==
 bool ${Type}::is_distributed() const { return false; }
 
 std::unique_ptr<Storage> ${Type}::storage() const {
-  return std::unique_ptr<Storage>(new ${Storage}(context));
+  return std::unique_ptr<Storage>(new ${Storage}());
 }
 std::unique_ptr<Storage> ${Type}::storage(size_t size) const {
-  return std::unique_ptr<Storage>(new ${Storage}(context,size));
+  return std::unique_ptr<Storage>(new ${Storage}(size));
 }
 std::unique_ptr<Storage> ${Type}::storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const {
     return std::unique_ptr<Storage>(
-      new ${Storage}(context,data,size,deleter));
+      new ${Storage}(data,size,deleter));
 }
 std::unique_ptr<Storage> ${Type}::storageWithAllocator(int64_t size, Allocator* allocator) const {
     return std::unique_ptr<Storage>(
-        new ${Storage}(context, size, allocator));
+        new ${Storage}(size, allocator));
 }
 Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THTensor}_retain(${state,} (${THTensor}*) th_pointer);
-  return Tensor(new ${Tensor}(context,(${THTensor}*)(th_pointer)), false);
+  return Tensor(new ${Tensor}((${THTensor}*)(th_pointer)), false);
 }
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THStorage}_retain(${state,} (${THStorage}*) th_pointer);
-  return std::unique_ptr<Storage>(new ${Storage}(context, (${THStorage}*) th_pointer));
+  return std::unique_ptr<Storage>(new ${Storage}((${THStorage}*) th_pointer));
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
   return std::unique_ptr<Generator>(new ${Generator}(context));

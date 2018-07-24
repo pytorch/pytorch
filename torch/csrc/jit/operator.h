@@ -32,7 +32,7 @@ struct TORCH_API Operator {
 
   FunctionSchema schema;
 
-  bool matches(Node* n) const;
+  bool matches(const Node* n) const;
   // Operators have different versions depending on if some inputs are encoded
   // as attributes or inputs. This function returns the right Operation function,
   // given a node encoded for one variant.
@@ -45,14 +45,17 @@ struct TORCH_API Operator {
       return op(n);
     }
   }
+  bool hasAttributedVersion() const {
+    return op_const_attributes != nullptr;
+  }
 private:
   OperationCreator op;
   OperationCreator op_const_attributes;
 };
 
 const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name);
-std::shared_ptr<Operator> findOperatorFor(Node* node);
-const Operator& getOperatorFor(Node* node);
+std::shared_ptr<Operator> findOperatorFor(const Node* node);
+const Operator& getOperatorFor(const Node* node);
 
 inline Operation getOperation(Node* node) {
   // note: getOperatorFor ensures that getOperatorFor(node).matches(node) == true

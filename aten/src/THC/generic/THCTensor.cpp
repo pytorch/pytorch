@@ -407,7 +407,7 @@ void THCTensor_(select)(THCState *state, THCTensor *self, THCTensor *src, int di
     THTensor_setSizeAtDim(self, d, self->size(d+1));
     THTensor_setStrideAtDim(self, d, self->stride(d+1));
   }
-  THTensor_resizeDim(self, self->dim_ - 1);
+  THTensor_resizeDim(self, self->dim() - 1);
 }
 
 void THCTensor_(transpose)(THCState *state, THCTensor *self, THCTensor *src, int dimension1, int dimension2)
