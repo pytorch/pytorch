@@ -66,7 +66,7 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
   static constexpr const int& kOutputChannels = 3;
 
   // We read this much noise per vectorized cycle
-  static constexpr const int& kNeonNoiseReadSize = kOutputChannels * 16;
+  static constexpr const int& kNeonNoiseReadSize = 3 * 16;
 
   USE_OPERATOR_FUNCTIONS(CPUContext);
   PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp(
@@ -213,20 +213,20 @@ class PackedInt8BGRANHWCToNCHWCStylizerPreprocessOp
     // Loop unroll factor
     // FIXME: this doesn't actually unroll; clang has per-loop unroll
     // pragmas but GCC does not
-    constexpr int kUnroll = 1;
+    static constexpr const int& kUnroll = 1;
 
     // How much data we load for each inner loop
-    constexpr int kInnerLoadSize = sizeof(uint8x16x4_t);
+    static constexpr const int& kInnerLoadSize = sizeof(uint8x16x4_t);
 
     // What we write out
-    constexpr int kInnerStoreSize = sizeof(float32x4_t);
+    static constexpr const int& kInnerStoreSize = sizeof(float32x4_t);
 
     // We load 16 pixels at a time, with 4 channels each
-    constexpr int kLoadPixels = kInnerLoadSize / kInputChannels;
+    static constexpr const int& kLoadPixels = kInnerLoadSize / kInputChannels;
     static_assert(kLoadPixels == 16, "unexpected");
 
     // How many pixels we load per loop
-    constexpr int kLoadPixelsPerLoop = kLoadPixels * kUnroll;
+    static constexpr const int& kLoadPixelsPerLoop = kLoadPixels * kUnroll;
 
     // We need at least this much noise each loop through
     CAFFE_ENFORCE_GE(noiseCycle, kOutputChannels * kLoadPixelsPerLoop);
@@ -489,14 +489,15 @@ class BRGNCHWCToPackedInt8BGRAStylizerDeprocessOp
     // Vectorized load parameters:
 
     // We load in chunks of this size
-    constexpr int kLoadUnit = sizeof(float32x4_t);
-    constexpr int kLoadFloats = (sizeof(float32x4_t) / sizeof(float));
+    static constexpr const int& kLoadUnit = sizeof(float32x4_t);
+    static constexpr const int& kLoadFloats =
+        (sizeof(float32x4_t) / sizeof(float));
 
     // We store in chunks of this size
-    constexpr int kStoreUni& = sizeof(uint8x8x4_t);
+    static constexpr const int& kStoreUnit = sizeof(uint8x8x4_t);
 
     // The vector portion loads this many f32 pixels at a time (8)
-    constexpr int kLoadPixels = 2 * kLoadFloats;
+    static constexpr const int& kLoadPixels = 2 * kLoadFloats;
 
     float mean[kInputChannels] = {
         meanChannel[0], meanChannel[1], meanChannel[2]};

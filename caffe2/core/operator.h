@@ -65,7 +65,7 @@ class OperatorBase : public Observable<OperatorBase> {
 
   // Get the inputs and outputs as specific types.
   template <typename T>
-  inline const T& Input(int idx) {
+  const T& Input(int idx) const {
     DCHECK_LT(idx, inputs_.size());
     try {
       return inputs_.at(idx)->template Get<T>();

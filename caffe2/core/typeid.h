@@ -1,11 +1,12 @@
 #pragma once
 
 #include <cassert>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <unordered_map>
 #include <mutex>
 #include <type_traits>
+#include <unordered_map>
 #include <unordered_set>
 #ifdef __GXX_RTTI
 #include <typeinfo>
@@ -121,6 +122,14 @@ struct TypeNameRegisterer {
   }
 };
 
+#if !defined(__MSC_VER__) && defined(__GNUC__)
+template <typename T>
+struct TypeId_ {
+  static const CaffeTypeId id_;
+  static const TypeNameRegisterer<T> registerer_;
+};
+#endif
+
 /**
  * TypeMeta is a thin class that allows us to store the type of a container such
  * as a blob, or the data type of a tensor, with a unique run-time id. It also
@@ -223,9 +232,22 @@ class TypeMeta {
    * function. However, this is not guaranteed over different runs, as the id
    * is generated during run-time. Do NOT serialize the id for storage.
    */
+#if !defined(__MSC_VER__) && defined(__GNUC__)
+  template <typename T>
+  CAFFE2_API static const CaffeTypeId& Id() {
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundefined-var-template"
+#endif
+    return TypeId_<T>::id_;
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif
+  }
+#else // !defined(__MSC_VER__) && defined(__GNUC__)
   template <typename T>
   CAFFE2_API static CaffeTypeId Id();
-
+#endif
   /**
    * Returns the item size of the type. This is equivalent to sizeof(T).
    */
@@ -386,20 +408,28 @@ inline bool operator!=(const TypeMeta& lhs, const TypeMeta& rhs) noexcept {
 // and as a result, we define these two macros slightly differently.
 
 #ifdef _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                                        \
-  template <>                                                                      \
-  CAFFE2_EXPORT CaffeTypeId TypeMeta::Id<T>() {                                    \
-    static const CaffeTypeId type_id = CaffeTypeId::createTypeId();                \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                          \
-    return type_id;                                                                \
+#define CAFFE_KNOWN_TYPE(T)                                         \
+  template <>                                                       \
+  CAFFE2_EXPORT const CaffeTypeId& TypeMeta::Id<T>() {              \
+    static const CaffeTypeId type_id = CaffeTypeId::createTypeId(); \
+    static TypeNameRegisterer<T> registerer(type_id, #T);           \
+    return type_id;                                                 \
   }
-#else // _MSC_VER
-#define CAFFE_KNOWN_TYPE(T)                                                        \
-  template <>                                                                      \
-  CaffeTypeId TypeMeta::Id<T>() {                                                  \
-    static const CaffeTypeId type_id = CaffeTypeId::createTypeId();                \
-    static TypeNameRegisterer<T> registerer(type_id, #T);                          \
-    return type_id;                                                                \
+#elif defined __GNUC__ // !_MSC_VER
+#define CAFFE_KNOWN_TYPE(T)                                       \
+  template <>                                                     \
+  const CaffeTypeId __attribute__((init_priority(200)))           \
+      TypeId_<T>::id_(CaffeTypeId::createTypeId());               \
+  template <>                                                     \
+  const TypeNameRegisterer<T> __attribute__((init_priority(200))) \
+      TypeId_<T>::registerer_(TypeId_<T>::id_, #T);
+#else // _MSC_VER && __GNUC__
+#define CAFFE_KNOWN_TYPE(T)                                         \
+  template <>                                                       \
+  const CaffeTypeId& TypeMeta::Id<T>() {                            \
+    static const CaffeTypeId type_id = CaffeTypeId::createTypeId(); \
+    static TypeNameRegisterer<T> registerer(type_id, #T);           \
+    return type_id;                                                 \
   }
 #endif
 
