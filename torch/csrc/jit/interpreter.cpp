@@ -339,9 +339,6 @@ public:
   : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined)), nullptr) {}
 
   virtual ~ContainerTensor() {}
-  virtual const char * toString() const override {
-    throw std::runtime_error("toString() on ContainerTensor");
-  }
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
