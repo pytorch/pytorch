@@ -349,7 +349,7 @@ Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool kee
   AT_CHECK(self.numel() != 0, "logsumexp only works on nonempty tensors");
   auto maxes = at::max_values(self, dim, true);
   auto maxes_squeezed = (keepdim ? maxes : maxes.squeeze(dim));
-  maxes_squeezed.masked_scatter_(maxes_squeezed.abs() == INFINITY, at::zeros({1}, maxes_squeezed.options()).expand_as(maxes_squeezed));
+  maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
   at::sum_out(result, at::exp(self - maxes), dim, keepdim);
   result.log_().add_(maxes_squeezed);
   return result;
