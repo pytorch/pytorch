@@ -2007,6 +2007,13 @@ i.e. `len(LENGTHS)`. Other dimensions are inherited from the input tensor.
         "OUTPUT",
         "Aggregated output tensor. Has the first dimension of K "
         "(the number of segments).");
+    schema.TensorInferenceFunction(
+        [](const OperatorDef&, const std::vector<TensorShape>& input_types) {
+          std::vector<TensorShape> out(1);
+          out[0] = input_types[0];
+          out[0].set_dims(0, input_types[Reducer::kInputCount + 1].dims(0));
+          return out;
+        });
     ReducerDef::PopulateSchema(schema);
   }
   using Reducer = typename ReducerDef::template Reducer<T, Context>;
