@@ -4,6 +4,7 @@
 
 #include <torch/tensor.h>
 #include <torch/optim.h>
+#include <torch/utils.h>
 
 #include "cereal/archives/binary.hpp"
 #include "cereal/types/polymorphic.hpp"
@@ -168,6 +169,7 @@ loadBinary(BinaryInputArchive& archive, void* data, size_t size) {
 // Gradients will not be saved for variables
 template <class Archive>
 void save(Archive& archive, torch::Tensor const& tensor) {
+  torch::NoGradGuard guard;
   if (!tensor.defined()) {
     int32_t typeId = ::torch::detail::scalarTypeId(torch::Dtype::Undefined);
     archive(CEREAL_NVP(typeId));
@@ -199,6 +201,7 @@ void save(Archive& archive, torch::Tensor const& tensor) {
  **/
 template <class Archive>
 void load(Archive& archive, torch::Tensor& tensor) {
+  torch::NoGradGuard guard;
   torch::Dtype type;
   int32_t typeId;
   archive(CEREAL_NVP(typeId));
@@ -226,12 +229,13 @@ void load(Archive& archive, torch::Tensor& tensor) {
         archive,
         cputensor.data_ptr(),
         cputensor.numel() * cputensor.type().elementSizeInBytes());
-    tensor.copy_(cputensor);
+    tensor.data().copy_(cputensor.data());
   } else {
     agimpl::loadBinary(
         archive,
         tensor.data_ptr(),
         tensor.numel() * tensor.data().type().elementSizeInBytes());
   }
+  tensor.detach_(); // Detach after load, the graph doesn't make sense anymore
 }
 } // namespace cereal
