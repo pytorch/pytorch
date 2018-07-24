@@ -6326,7 +6326,7 @@ class TestTorch(TestCase):
     @skipIfNoZeroSize
     def test_blas_alpha_beta_empty(self):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
-        for device in ['cuda']:
+        for device in devices:
             # ensure beta is respected
             value = 11
             input = torch.full((2,), value, device=device)
@@ -7568,8 +7568,6 @@ class TestTorch(TestCase):
         self.assertEqual(y, x.contiguous().view(2, 1, 4))
         y = x.clone().unsqueeze_(2)
         self.assertEqual(y, x.contiguous().view(2, 4, 1))
-
-        self.assertRaises(RuntimeError, lambda: torch.Tensor().unsqueeze(0))
 
     def test_iter(self):
         x = torch.randn(5, 5)

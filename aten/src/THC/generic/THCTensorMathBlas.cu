@@ -116,7 +116,7 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
     THCTensor_(free)(state, cmat);
   }
 
-  // cublasSgemv, cublasDgemv have a bug where (x,0).mv(0) does not
+  // In cublasSgemv, cublasDgemv (x,0).mv(0) does not
   // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
   if (vec->size(0) == 0 && mat->size(0) != 0) {
     if(THCNumerics<real>::eq(beta, ScalarConvert<int, real>::to(0))) {
