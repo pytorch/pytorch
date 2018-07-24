@@ -42,6 +42,12 @@ install_ubuntu() {
     if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
         sudo sed -i 's/\ -I${dir}/\ $<$<BOOL:${dir}>:-I${dir}>/' /opt/rocm/hip/cmake/FindHIP.cmake
     fi
+    
+    # HIP has a bug that drops DEBUG symbols in generated MakeFiles.
+    # https://github.com/ROCm-Developer-Tools/HIP/pull/588
+    if [[ -f /opt/rocm/hip/cmake/FindHIP.cmake ]]; then
+        sudo sed -i 's/set(_hip_build_configuration "${CMAKE_BUILD_TYPE}")/string(TOUPPER _hip_build_configuration "${CMAKE_BUILD_TYPE}")/' /opt/rocm/hip/cmake/FindHIP.cmake
+    fi
 }
 
 install_centos() {
@@ -56,10 +62,10 @@ install_hcrng() {
     dpkg -i /opt/rocm/debians/hcrng.deb
 }
 
-install_hcsparse() {	
-    mkdir -p /opt/rocm/debians	
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb	
-    dpkg -i /opt/rocm/debians/hcsparse.deb	
+install_hcsparse() {
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
+    dpkg -i /opt/rocm/debians/hcsparse.deb
 }
 
 # Install Python packages depending on the base OS
