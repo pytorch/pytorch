@@ -3,6 +3,7 @@ import math
 import torch
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 from .module import Module
 from .utils import _single, _pair, _triple
 
@@ -39,12 +40,11 @@ class _ConvNd(Module):
 
     def reset_parameters(self):
         n = self.in_channels
-        for k in self.kernel_size:
-            n *= k
-        stdv = 1. / math.sqrt(n)
-        self.weight.data.uniform_(-stdv, stdv)
+        init.kaiming_uniform_(self.weight, a=math.sqrt(5))
         if self.bias is not None:
-            self.bias.data.uniform_(-stdv, stdv)
+            fan_in, _ = init._calculate_fan_in_and_fan_out(self.weight)
+            bound = 1 / math.sqrt(fan_in)
+            init.uniform_(self.bias, -bound, bound)
 
     def extra_repr(self):
         s = ('{in_channels}, {out_channels}, kernel_size={kernel_size}'
@@ -144,9 +144,13 @@ class Conv1d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-            (out_channels, in_channels, kernel_size)
+            (out_channels, in_channels, kernel_size). The values of these weights are sampled from
+            :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
         bias (Tensor):   the learnable bias of the module of shape
-            (out_channels)
+            (out_channels). If :attr:`bias` is ``True``, then the values of these weights are
+            sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+            :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
 
     Examples::
 
@@ -265,8 +269,14 @@ class Conv2d(_ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         (out_channels, in_channels, kernel_size[0], kernel_size[1])
-        bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         (out_channels, in_channels, kernel_size[0], kernel_size[1]).
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
+                         then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
 
     Examples::
 
@@ -388,7 +398,13 @@ class Conv3d(_ConvNd):
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (out_channels, in_channels, kernel_size[0], kernel_size[1], kernel_size[2])
-        bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels). If :attr:`bias` is ``True``,
+                         then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
 
     Examples::
 
@@ -537,8 +553,14 @@ class ConvTranspose1d(_ConvTransposeMixin, _ConvNd):
 
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
-                         (in_channels, out_channels, kernel_size[0], kernel_size[1])
-        bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         (in_channels, out_channels, kernel_size[0], kernel_size[1]). The values
+                         of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
+        bias (Tensor):   the learnable bias of the module of shape (out_channels).
+                         If :attr:`bias` is ``True``, then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \text{kernel_size}}`
     """
 
     def __init__(self, in_channels, out_channels, kernel_size, stride=1,
@@ -645,7 +667,13 @@ class ConvTranspose2d(_ConvTransposeMixin, _ConvNd):
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (in_channels, out_channels, kernel_size[0], kernel_size[1])
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         If :attr:`bias` is ``True``, then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{1}\text{kernel_size[i]}}`
 
     Examples::
 
@@ -782,7 +810,13 @@ class ConvTranspose3d(_ConvTransposeMixin, _ConvNd):
     Attributes:
         weight (Tensor): the learnable weights of the module of shape
                          (in_channels, out_channels, kernel_size[0], kernel_size[1], kernel_size[2])
+                         The values of these weights are sampled from
+                         :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
         bias (Tensor):   the learnable bias of the module of shape (out_channels)
+                         If :attr:`bias` is ``True``, then the values of these weights are
+                         sampled from :math:`\mathcal{U}(-\sqrt{k}, \sqrt{k})` where
+                         :math:`k = \frac{1}{\text{in_channels} * \prod_{i=0}^{2}\text{kernel_size[i]}}`
 
     Examples::
 
