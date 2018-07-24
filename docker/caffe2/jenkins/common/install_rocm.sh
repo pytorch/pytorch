@@ -23,8 +23,7 @@ install_ubuntu() {
                    hipblas \
                    rocrand \
                    rocm-profiler \
-                   cxlactivitylogger \
-                   hcsparse
+                   cxlactivitylogger
 
     pushd $HOME
     # install hcrng
@@ -57,6 +56,12 @@ install_hcrng() {
     dpkg -i /opt/rocm/debians/hcrng.deb
 }
 
+install_hcsparse() {	
+    mkdir -p /opt/rocm/debians	
+    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb	
+    dpkg -i /opt/rocm/debians/hcsparse.deb	
+}
+
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
   install_ubuntu
@@ -68,3 +73,4 @@ else
 fi
 
 install_hcrng
+install_hcsparse
