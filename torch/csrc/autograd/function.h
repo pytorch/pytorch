@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
@@ -8,7 +9,6 @@
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/type_and_shape.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
 
@@ -85,7 +85,7 @@ void deleteFunction(Function* function);
 /// are created in one thread and `C` is created in a new thread, there are *no
 /// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-struct Function : std::enable_shared_from_this<Function> {
+struct TORCH_API Function : std::enable_shared_from_this<Function> {
  public:
   /// Construct a new `Function` with `num_inputs` inputs and the given
   /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
@@ -101,9 +101,8 @@ struct Function : std::enable_shared_from_this<Function> {
     }
   }
 
-  explicit Function(
-      edge_list&& next_edges = edge_list())
-      : Function(next_sequence_nr_++, std::move(next_edges)) {}
+  explicit Function(edge_list&& next_edges = edge_list())
+      : Function(get_next_sequence_nr()++, std::move(next_edges)) {}
 
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
@@ -307,9 +306,7 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
  protected:
-  /// Monotonically incrementing (thread local!) counter to supply sequence
-  /// numbers.
-  static thread_local uint64_t next_sequence_nr_;
+  static uint64_t& get_next_sequence_nr();
 
   /// Performs the `Function`'s actual operation.
   virtual variable_list apply(variable_list&& inputs) = 0;

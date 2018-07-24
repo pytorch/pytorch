@@ -259,7 +259,9 @@ def embedding_bag(g,
 
 def size(g, self, dim):
     if _is_value(dim):
-        raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        if dim.node().kind() != 'onnx::Constant':
+            raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        dim = int(dim.node().t('value'))
     full_shape = g.op("Shape", self)
     return select(g, full_shape, dim=0, index=dim)
 
@@ -743,6 +745,15 @@ def _cast_func_template(to_i, g, input, non_blocking):
 for k, v in cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
     globals()[name] = partial(_cast_func_template, v)
+
+
+def zeros_like(g, input):
+    return g.op("Sub", input, input).setType(input.type().contiguous())
+
+
+def full_like(g, input, fill_value):
+    # TODO: a more efficient implementation (ConstantFill?)
+    return add(g, zeros_like(g, input), fill_value, alpha=torch.tensor(1))
 
 
 def slice(g, self, dim, start, end, step):

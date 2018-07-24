@@ -54,25 +54,25 @@
 //
 // ALSO do vol2col
 
-static void THNN_(im2col)(const real* data_im, const int channels,
-      const int height, const int width,
-      const int output_height, const int output_width,
-      const int kernel_h, const int kernel_w,
-      const int pad_h, const int pad_w,
-      const int stride_h, const int stride_w,
-      const int dilation_h, const int dilation_w,
+static void THNN_(im2col)(const real* data_im, const int64_t channels,
+      const int64_t height, const int64_t width,
+      const int64_t output_height, const int64_t output_width,
+      const int64_t kernel_h, const int64_t kernel_w,
+      const int64_t pad_h, const int64_t pad_w,
+      const int64_t stride_h, const int64_t stride_w,
+      const int64_t dilation_h, const int64_t dilation_w,
       real* data_col) {
-  const int height_col = output_height;
-  const int width_col = output_width;
-  const int channels_col = channels * kernel_h * kernel_w;
-  for (int c_col = 0; c_col < channels_col; ++c_col) {
-    int w_offset = c_col % kernel_w;
-    int h_offset = (c_col / kernel_w) % kernel_h;
-    int c_im = c_col / kernel_h / kernel_w;
-    for (int h_col = 0; h_col < height_col; ++h_col) {
-      int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
-      for (int w_col = 0; w_col < width_col; ++w_col) {
-        int w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
+  const int64_t height_col = output_height;
+  const int64_t width_col = output_width;
+  const int64_t channels_col = channels * kernel_h * kernel_w;
+  for (int64_t c_col = 0; c_col < channels_col; ++c_col) {
+    int64_t w_offset = c_col % kernel_w;
+    int64_t h_offset = (c_col / kernel_w) % kernel_h;
+    int64_t c_im = c_col / kernel_h / kernel_w;
+    for (int64_t h_col = 0; h_col < height_col; ++h_col) {
+      int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
+      for (int64_t w_col = 0; w_col < width_col; ++w_col) {
+        int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
         data_col[(c_col * height_col + h_col) * width_col + w_col] =
           (h_im >= 0 && w_im >= 0 && h_im < height && w_im < width) ?
           data_im[(c_im * height + h_im) * width + w_im] : 0;
@@ -81,26 +81,26 @@ static void THNN_(im2col)(const real* data_im, const int channels,
   }
 }
 
-static void THNN_(col2im)(const real* data_col, const int channels,
-      const int height, const int width,
-      const int output_height, const int output_width,
-      const int kernel_h, const int kernel_w,
-      const int pad_h, const int pad_w,
-      const int stride_h, const int stride_w,
-      const int dilation_h, const int dilation_w,
+static void THNN_(col2im)(const real* data_col, const int64_t channels,
+      const int64_t height, const int64_t width,
+      const int64_t output_height, const int64_t output_width,
+      const int64_t kernel_h, const int64_t kernel_w,
+      const int64_t pad_h, const int64_t pad_w,
+      const int64_t stride_h, const int64_t stride_w,
+      const int64_t dilation_h, const int64_t dilation_w,
       real* data_im) {
   memset(data_im, 0, sizeof(real) * height * width * channels);
-  const int height_col = output_height;
-  const int width_col = output_width;
-  const int channels_col = channels * kernel_h * kernel_w;
-  for (int c_col = 0; c_col < channels_col; ++c_col) {
-    int w_offset = c_col % kernel_w;
-    int h_offset = (c_col / kernel_w) % kernel_h;
-    int c_im = c_col / kernel_h / kernel_w;
-    for (int h_col = 0; h_col < height_col; ++h_col) {
-      int h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
-      for (int w_col = 0; w_col < width_col; ++w_col) {
-        int w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
+  const int64_t height_col = output_height;
+  const int64_t width_col = output_width;
+  const int64_t channels_col = channels * kernel_h * kernel_w;
+  for (int64_t c_col = 0; c_col < channels_col; ++c_col) {
+    int64_t w_offset = c_col % kernel_w;
+    int64_t h_offset = (c_col / kernel_w) % kernel_h;
+    int64_t c_im = c_col / kernel_h / kernel_w;
+    for (int64_t h_col = 0; h_col < height_col; ++h_col) {
+      int64_t h_im = h_col * stride_h - pad_h + h_offset * dilation_h;
+      for (int64_t w_col = 0; w_col < width_col; ++w_col) {
+        int64_t w_im = w_col * stride_w - pad_w + w_offset * dilation_w;
         if (h_im >= 0 && h_im < height && w_im >= 0 && w_im < width)
           data_im[(c_im * height + h_im) * width + w_im] +=
             data_col[(c_col * height_col + h_col) * width_col + w_col];
@@ -113,9 +113,9 @@ static inline void THNN_(Col2Im_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
                          THTensor *gradOutput,
-                         int outputHeight, int outputWidth,
-                         int kH, int kW, int dH, int dW,
-                         int padH, int padW, int sH, int sW) {
+                         int64_t outputHeight, int64_t outputWidth,
+                         int64_t kH, int64_t kW, int64_t dH, int64_t dW,
+                         int64_t padH, int64_t padW, int64_t sH, int64_t sW) {
 
   THArgCheck(kW > 0 && kH > 0, 6,
              "kernel size should be greater than zero, but got kH: %d kW: %d", kH, kW);
@@ -124,12 +124,12 @@ static inline void THNN_(Col2Im_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int ndim = THTensor_(nDimension)(input);
+  int64_t ndim = THTensor_(nDimension)(input);
   THNN_ARGCHECK(!input->is_empty() && (ndim == 2 || ndim == 3), 2, input,
                 "Expected non-empty 2D or 3D input tensor, but got input of shape %s");
 
-  int batch_dim = (ndim == 3) ? 0 : -1;
-  int64_t nInputPlane  = input->size[batch_dim + 1];
+  int64_t batch_dim = (ndim == 3) ? 0 : -1;
+  int64_t nInputPlane  = input->size(batch_dim + 1);
 
   if (nInputPlane % (kW * kH) != 0) {
     THError("Expected size of input's dimension 1 to be divisible by the "
@@ -137,7 +137,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
             "kernel_size=(%d, %d).", (long long) nInputPlane, kH, kW);
   }
 
-  int64_t inputLength  = input->size[batch_dim + 2];
+  int64_t inputLength  = input->size(batch_dim + 2);
   int64_t nBlocksH = 1 + (outputHeight + 2 * padH - dH * (kH - 1) - 1) / sH;
   int64_t nBlocksW = 1 + ( outputWidth + 2 * padW - dW * (kW - 1) - 1) / sW;
 
@@ -161,11 +161,11 @@ void THNN_(Col2Im_updateOutput)(
            THNNState *state,
            THTensor *input,
            THTensor *output,
-           int outputHeight, int outputWidth,
-           int kH, int kW,
-           int dH, int dW,
-           int padH, int padW,
-           int sH, int sW) {
+           int64_t outputHeight, int64_t outputWidth,
+           int64_t kH, int64_t kW,
+           int64_t dH, int64_t dW,
+           int64_t padH, int64_t padW,
+           int64_t sH, int64_t sW) {
 
   THNN_(Col2Im_shapeCheck)(state, input, NULL, outputHeight, outputWidth,
                            kH, kW, dH, dW, padH, padW, sH, sW);
@@ -174,11 +174,11 @@ void THNN_(Col2Im_updateOutput)(
   if (input->dim() == 2) {
       // Force batch
       batched_input = false;
-      THTensor_(resize3d)(input, 1, input->size[0], input->size[1]);
+      THTensor_(resize3d)(input, 1, input->size(0), input->size(1));
   }
 
-  long batchSize = input->size[0];
-  long nInputPlane = input->size[1];
+  long batchSize = input->size(0);
+  long nInputPlane = input->size(1);
   long nOutputPlane = nInputPlane / (kW * kH);
 
   input = THTensor_(newContiguous)(input);
@@ -189,10 +189,10 @@ void THNN_(Col2Im_updateOutput)(
   THTensor *input_n = THTensor_(new)();
   THTensor *output_n = THTensor_(new)();
 
-  int height_col = (outputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
-  int width_col = (outputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
+  int64_t height_col = (outputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
+  int64_t width_col = (outputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
 
-  for (int elt = 0; elt < batchSize; elt++) {
+  for (int64_t elt = 0; elt < batchSize; elt++) {
     THTensor_(select)(input_n, input, 0, elt);
     THTensor_(select)(output_n, output, 0, elt);
 
@@ -220,10 +220,10 @@ void THNN_(Col2Im_updateGradInput)(
            THNNState *state,
            THTensor *gradOutput,
            THTensor *gradInput,
-           int kH, int kW,
-           int dH, int dW,
-           int padH, int padW,
-           int sH, int sW) {
+           int64_t kH, int64_t kW,
+           int64_t dH, int64_t dW,
+           int64_t padH, int64_t padW,
+           int64_t sH, int64_t sW) {
 
   THNN_(Im2Col_updateOutput)(state, gradOutput, gradInput,
                              kH, kW, dH, dW, padH, padW, sH, sW);

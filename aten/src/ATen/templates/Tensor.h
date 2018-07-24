@@ -13,6 +13,7 @@
 #include "ATen/Utils.h"
 #include "ATen/Device.h"
 #include "ATen/Layout.h"
+#include "ATen/optional.h"
 
 namespace at {
 struct Type;
@@ -42,6 +43,7 @@ namespace at {
 // Note that Tensor can also be NULL, i.e. it is not associated with any underlying TensorImpl, and
 // special care must be taken to handle this.
 struct Tensor : public detail::TensorBase {
+  using TensorBase = detail::TensorBase;
   Tensor() : TensorBase() {}
   Tensor(TensorImpl * self, bool retain) : TensorBase(self, retain) {}
   Tensor(const TensorBase & rhs) : TensorBase(rhs) {}
@@ -197,6 +199,46 @@ struct Tensor : public detail::TensorBase {
   template <typename F, typename... Args>
   auto m(F func, Args&&... params) const -> decltype(func(*this, std::forward<Args>(params)...)) {
     return func(*this, std::forward<Args>(params)...);
+  }
+
+  friend struct WeakTensor;
+};
+
+struct WeakTensor : public detail::WeakTensorBase {
+  using WeakTensorBase = detail::WeakTensorBase;
+  WeakTensor() : WeakTensorBase() {}
+  WeakTensor(TensorImpl * self, bool retain) : WeakTensorBase(self, retain) {}
+  WeakTensor(const WeakTensor & rhs) = default;
+  WeakTensor(WeakTensor && rhs) noexcept = default;
+  WeakTensor(const Tensor& t) : WeakTensorBase(t.pImpl, true) {}
+
+  // reimplemented from TensorBase so the return type is WeakTensor rather than TensorBase
+  WeakTensor & operator=(WeakTensor && rhs) & {
+    rhs.swap(*this);
+    return *this;
+  }
+  WeakTensor & operator=(WeakTensor const & rhs) & {
+    //Tensor ctor retains original rhs.pImpl
+    //then rhs.pImpl is swapped with this->pImpl
+    //finally Tensor dtor releases rhs.pImpl, which was originally this->pImpl
+    WeakTensor(rhs).swap(*this);
+    return *this;
+  }
+
+  WeakTensor & operator=(const Tensor& t) {
+    WeakTensor(t.pImpl, true).swap(*this);
+    return *this;
+  }
+
+  // non-retaining
+  TensorImpl * unsafeGetTensorImpl() const {
+    return pImpl;
+  }
+
+  // XXX: this can return undefined tensors
+  // Ideally it would be at::optional<Tensor>, but MSVC is too cool for that
+  Tensor lock() const {
+    return pImpl->weak_lock() ? Tensor(pImpl, false) : Tensor();
   }
 };
 

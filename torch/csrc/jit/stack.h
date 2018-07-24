@@ -1,10 +1,11 @@
 #pragma once
 #include "ATen/ATen.h"
 #include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/ivalue.h"
 
 namespace torch { namespace jit {
 
-using Stack = std::vector<at::Tensor>;
+using Stack = std::vector<IValue>;
 using Operation = std::function<int(Stack&)>;
 
 // An operation with N inputs and M outputs pops the last N inputs off
@@ -21,21 +22,21 @@ using Operation = std::function<int(Stack&)>;
 
 // treat the last N elements of the stack as a list, looking up
 // element i
-static inline at::Tensor & peek(Stack & stack, size_t i, size_t N) {
+static inline IValue & peek(Stack & stack, size_t i, size_t N) {
   return *(stack.end() - N + i);
 }
 // treat the last N elements of the stack as a list, looking up the
 // slice starting at index i and having length len
-static inline at::ArrayRef<at::Tensor> peekSlice(Stack & stack, size_t i, size_t len, size_t N) {
-  return at::ArrayRef<at::Tensor>(stack).slice(stack.size() - N + i, len);
+static inline at::ArrayRef<IValue> peekSlice(Stack & stack, size_t i, size_t len, size_t N) {
+  return at::ArrayRef<IValue>(stack).slice(stack.size() - N + i, len);
 }
-static inline at::ArrayRef<at::Tensor> last(Stack & stack, size_t N) {
+static inline at::ArrayRef<IValue> last(Stack & stack, size_t N) {
   return peekSlice(stack, 0, N, N);
 }
 static inline void drop(Stack & stack, size_t n) {
   stack.erase(stack.end() - n, stack.end());
 }
-static inline at::Tensor pop(Stack & stack) {
+static inline IValue pop(Stack & stack) {
   auto r = std::move(stack.back());
   stack.pop_back();
   return r;
@@ -47,22 +48,22 @@ static inline at::Tensor pop(Stack & stack) {
 // pack takes the return values of aten functions pushes them onto the stack
 template<typename T>
 inline void pack(Stack & stack, T&& v) {
-  stack.push_back(as_variable(std::move(v)));
+  stack.push_back(IValue(as_variable(std::move(v))));
 }
 template<>
 inline void pack(Stack & stack, at::Tensor&& v) {
-  stack.push_back(std::move(v));
+  stack.push_back(IValue(std::move(v)));
 }
 
 template<>
 inline void pack(Stack & stack, autograd::Variable&& v) {
-  stack.push_back(std::move(v));
+  stack.push_back(IValue(std::move(v)));
 }
 
 template<>
 inline void pack(Stack & stack, std::vector<at::Tensor>&& ts) {
   for(auto& t : ts) {
-    stack.push_back(std::move(t));
+    stack.push_back(IValue(std::move(t)));
   }
 }
 

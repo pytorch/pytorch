@@ -1,4 +1,5 @@
 #include "ATen/Context.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/Dispatch.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/cuda/PinnedMemoryAllocator.h"
@@ -51,7 +52,7 @@ static magma_queue_t createMagmaQueue(const Tensor& tensor) {
   magma_queue_t magma_queue;
   magma_queue_create_from_cuda(
       tensor.get_device(),
-      context.getCurrentCUDAStream(),
+      at::cuda::getCurrentCUDAStream(),
       THCState_getCurrentBlasHandle(context.getTHCState()),
       THCState_getCurrentSparseHandle(context.getTHCState()),
       &magma_queue);

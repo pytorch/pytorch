@@ -26,13 +26,6 @@ class Cloneable : public Module {
   /// semantics, most importantly parameters, buffers and submodules.
   virtual void reset() = 0;
 
-  /// Moves the `Module` into a `shared_ptr` and calls `reset()` on it.
-  std::shared_ptr<Derived> build() {
-    auto module = std::make_shared<Derived>(static_cast<Derived&&>(*this));
-    module->reset();
-    return module;
-  }
-
   /// Performs a recursive "deep copy" of the `Module`, such that all parameters
   /// and submodules in the cloned module are different from those in the
   /// original module.
@@ -43,12 +36,32 @@ class Cloneable : public Module {
     copy->buffers_.clear();
     copy->children_.clear();
     copy->reset();
+    AT_CHECK(
+        copy->parameters_.size() == parameters_.size(),
+        "The cloned module does not have the same number of "
+        "parameters as the original module after calling reset(). "
+        "Are you sure you called register_parameter() inside reset() "
+        "and not the constructor?");
     for (const auto& parameter : parameters_) {
-      copy->parameters_[parameter.key].data().copy_(parameter->data());
+      copy->parameters_[parameter.key].data().copy_(
+          parameter->data(), /*non_blocking=*/true);
     }
+    AT_CHECK(
+        copy->buffers_.size() == buffers_.size(),
+        "The cloned module does not have the same number of "
+        "buffers as the original module after calling reset(). "
+        "Are you sure you called register_buffer() inside reset() "
+        "and not the constructor?");
     for (const auto& buffer : buffers_) {
-      copy->buffers_[buffer.key].data().copy_(buffer->data());
+      copy->buffers_[buffer.key].data().copy_(
+          buffer->data(), /*non_blocking=*/true);
     }
+    AT_CHECK(
+        copy->children_.size() == children_.size(),
+        "The cloned module does not have the same number of "
+        "child modules as the original module after calling reset(). "
+        "Are you sure you called register_module() inside reset() "
+        "and not the constructor?");
     for (const auto& child : children_) {
       copy->children_[child.key]->clone_(*child.value);
     }

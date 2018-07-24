@@ -1,5 +1,4 @@
-#ifndef CAFFE2_OPERATORS_MAX_POOL_WITH_INDEX_H_
-#define CAFFE2_OPERATORS_MAX_POOL_WITH_INDEX_H_
+#pragma once
 
 #include <cfloat>
 #include "caffe2/core/context.h"
@@ -45,5 +44,3 @@ class MaxPoolWithIndexGradientOp final : public ConvPoolOpBase<CUDAContext> {
 };
 
 }; // namespace caffe2
-
-#endif // CAFFE2_OPERATORS_MAX_POOL_WITH_INDEX_H_

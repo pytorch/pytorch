@@ -19,7 +19,7 @@ namespace at {
 /// `torch::TensorOptions` subclass of this `TensorOptions`, which changes
 /// `type()` to return a variable type instead of a tensor type, such that
 /// variables are created inside factory methods, instead of tensors.
-struct TensorOptions {
+struct AT_API TensorOptions {
   TensorOptions() : TensorOptions(/*use_thread_local_default_options=*/true) {}
 
   /// Constructs the `TensorOptions` with defaults taken from the thread local

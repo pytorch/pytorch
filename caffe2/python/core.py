@@ -1947,9 +1947,10 @@ class Net(object):
                 self._input_record = schema.NewRecord(self, input_record)
         else:
             self._input_record = input_record
-            for blob in input_record.field_blobs():
-                if blob not in self.external_inputs:
-                    self.AddExternalInput(blob)
+
+        for blob in self._input_record.field_blobs():
+            if blob not in self.external_inputs:
+                self.AddExternalInput(blob)
         return self._input_record
 
     def recover_input_record_by_prefix(self, prefix):
@@ -2732,6 +2733,8 @@ class Plan(object):
         assert isinstance(plan_proto, caffe2_pb2.PlanDef)
         plan = Plan(plan_proto.name)
         plan._plan.CopyFrom(plan_proto)
+        del plan._plan.network[:]
+        del plan._plan.execution_step[:]
 
         net_obj_dict = {}
         net_proto_dict = {}

@@ -10,6 +10,6 @@ namespace torch { namespace jit {
 //  outputs = <original_computation>
 // else:
 //  outputs = undefineds
-void LowerGradOf(Graph& graph);
+TORCH_API void LowerGradOf(Graph& graph);
 
 }}

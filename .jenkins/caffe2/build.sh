@@ -155,6 +155,9 @@ if [[ $BUILD_ENVIRONMENT == *rocm* ]]; then
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
   export HCC_AMDGPU_TARGET=gfx900
+
+  ########## HIPIFY Caffe2 operators
+  ${PYTHON} "${ROOT_DIR}/tools/amd_build/build_caffe2_amd.py"
 fi
 
 # Try to include Redis support for Linux builds
@@ -193,6 +196,7 @@ if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]] && [ -n "${SCCACHE}" ]; then
 else
   MAX_JOBS=$(nproc)
 fi
+
 
 
 ###############################################################################

@@ -2,6 +2,7 @@
 
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/assertions.h"
+#include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
 
@@ -29,7 +30,7 @@ struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
 
-struct Type : std::enable_shared_from_this<Type> {
+struct TORCH_API Type : std::enable_shared_from_this<Type> {
 
 private:
   TypeKind kind_;
@@ -89,7 +90,7 @@ inline bool operator!=(const Type & lhs, const Type & rhs) {
 }
 
 // This node represents a single Tensor value, with an unknown shape.
-struct DynamicType : public Type {
+struct TORCH_API DynamicType : public Type {
   DynamicType()
   : Type(TypeKind::DynamicType) {}
   bool operator==(const Type& rhs) const override {
@@ -106,7 +107,7 @@ struct DynamicType : public Type {
 struct TensorType;
 using TensorTypePtr = std::shared_ptr<TensorType>;
 // This node represents a single Tensor value with a specific size
-struct TensorType : public Type {
+struct TORCH_API TensorType : public Type {
   friend struct Type;
   TensorType(const at::Tensor& tensor)
     : Type(TypeKind::TensorType)
@@ -185,7 +186,7 @@ private:
   std::vector<int64_t> strides_;
 };
 
-struct ListType : public Type {
+struct TORCH_API ListType : public Type {
   friend struct Type;
   static const TypeKind Kind = TypeKind::ListType;
   ListType(TypePtr elem)
@@ -211,7 +212,7 @@ private:
   TypePtr elem;
 };
 
-struct TupleType : public Type {
+struct TORCH_API TupleType : public Type {
   friend struct Type;
   TupleType(std::vector<TypePtr> elements_)
   : Type(TypeKind::TupleType)
@@ -268,7 +269,7 @@ private:
 };
 
 // This node represents a Python number value
-struct NumberType : public Type {
+struct TORCH_API NumberType : public Type {
   NumberType()
   : Type(TypeKind::NumberType) {}
   bool operator==(const Type& rhs) const override {
@@ -283,7 +284,7 @@ struct NumberType : public Type {
 };
 
 // This node represents a Python float number value
-struct FloatType : public Type {
+struct TORCH_API FloatType : public Type {
   FloatType()
   : Type(TypeKind::FloatType) {}
   bool operator==(const Type& rhs) const override {
@@ -301,7 +302,7 @@ struct FloatType : public Type {
 };
 
 // This node represents a Python int number value
-struct IntType : public Type {
+struct TORCH_API IntType : public Type {
   IntType()
   : Type(TypeKind::IntType) {}
   bool operator==(const Type& rhs) const override {
@@ -319,6 +320,6 @@ struct IntType : public Type {
 };
 
 
-std::ostream& operator<<(std::ostream & out, const Type & t);
+TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 
 }} // namespace torch::jit

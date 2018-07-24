@@ -117,6 +117,22 @@
         "s_constants": {
             "RoiPooling2d_backward_kernel<<<": "RoiPooling2d_backward_kernel<float><<<"
         }
+      },
+      {
+        "path": "aten/src/ATen/CUDAStream.cpp",
+        "s_constants": {
+            # FIXME: ROCm currently does not support multi-GPU setup; and getNumGPUs runs into a seg fault
+            # ROCm Pytorch issue: https://github.com/ROCmSoftwarePlatform/pytorch/issues/31
+            "getCUDAHooks().getNumGPUs()": "1",
+        }
+      },
+      {
+        "path": "aten/src/ATen/Context.h",
+        "s_constants": {
+            # FIXME: ROCm currently does not support multi-GPU setup; and getNumGPUs runs into a seg fault
+            # ROCm Pytorch issue: https://github.com/ROCmSoftwarePlatform/pytorch/issues/31
+            "detail::getCUDAHooks().getNumGPUs()": "1",
+        }
       }
     ],
   "disabled_modules": [

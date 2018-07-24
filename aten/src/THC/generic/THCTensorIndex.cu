@@ -19,14 +19,14 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
   ptrdiff_t dstSliceSize = 1;
   for (int d = 0; d < dstDims; d++) {
     if (d != dim) {
-      dstSliceSize *= dst->size[d];
+      dstSliceSize *= dst->size(d);
     }
   }
 
   if (src == nullptr) return dstSliceSize;
 
   THArgCheck(dim < srcDims, 3, "Indexing dim is out of bounds");
-  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size[dim], 4,
+  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size(dim), 4,
              "length of src.size[dim] is not equal to length of indices");
 
   ptrdiff_t srcSliceSize = 1;
@@ -36,8 +36,8 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
 
   for (int d = 0; d < srcDims; d++) {
     if (d != dim) {
-      srcSliceSize *= src->size[d];
-      if (!mismatch && dst->size[d] != src->size[d]) mismatch = true;
+      srcSliceSize *= src->size(d);
+      if (!mismatch && dst->size(d) != src->size(d)) mismatch = true;
     }
   }
 
@@ -218,18 +218,14 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, dst, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(THCTensor_(_nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCTensor_(_nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCudaLongTensor__nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(!(THCTensor_(_nDimension)(state, src) == 0 && THCudaLongTensor__nDimension(state, index) != 0), 2,
+  THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(!(THCTensor_(numel)(state, src) == 0 && THCudaLongTensor_numel(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
-  THCTensor_(resizeNd)(state, dst, index->dim(), index->size, NULL);
-
-  // dispatchTakePut only handles non-empty tensors;
-  if (index->_dim() > 0) {
-    dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
-  }
+  THCTensor_(resizeNd)(state, dst, index->dim(), THTensor_getSizePtr(index), NULL);
+  dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
 }
 
 static void THCTensor_(sort_indices)(THCState *state, THCudaLongTensor *index, THCTensor *src) {
@@ -255,9 +251,9 @@ void THCTensor_(put)(THCState *state, THCTensor *dst, THCudaLongTensor *index, T
   THArgCheck(THCTensor_(nElement)(state, src) == numIndices,
     3, "src should have the same number of elements as index");
 
-  THArgCheck(THCTensor_(_nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCTensor_(_nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(THCudaLongTensor__nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
+  THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
 
   if (numIndices == 0) {
     return;

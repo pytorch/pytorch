@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/WrapDimUtils.h"
@@ -124,7 +125,7 @@ void SpatialSoftMax_getLaunchSizes(
   cudaOccupancyMaxActiveBlocksPerMultiprocessor(&max_active_blocks,
                                                 k, block_threads, smem_size);
 #endif
-  max_active_blocks *= at::globalContext().getCurrentDeviceProperties()->multiProcessorCount;
+  max_active_blocks *= at::cuda::getCurrentDeviceProperties()->multiProcessorCount;
   grid = SpatialSoftMax_getGridSize(block, max_active_blocks, outer_size, dim_size, inner_size);
 }
 
@@ -483,7 +484,7 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
   int64_t inner_size = 1;
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   for (int64_t i = 0; i < dim; ++i)
     outer_size *= input.size(i);
   for (int64_t i = dim + 1; i < input.dim(); ++i)
@@ -540,7 +541,7 @@ Tensor host_softmax_backward(const Tensor &grad_, const Tensor &output_, int64_t
   for (int64_t i = dim + 1; i < output.dim(); ++i)
     inner_size *= output.size(i);
 // See descriptions of kernels above.
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
   if (inner_size == 1) {
     const int ILP = 2;
     dim3 grid(outer_size);

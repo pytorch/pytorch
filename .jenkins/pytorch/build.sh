@@ -30,13 +30,25 @@ cmake --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # This is necessary in order to cross compile (or else we'll have missing GPU device).
   export HCC_AMDGPU_TARGET=gfx900
+
+  # These environment variables are not set on CI when we were running as the Jenkins user.
+  # The HIP Utility scripts require these environment variables to be set in order to run without error.
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
+
+  # This environment variable enabled HCC Optimizations that speed up the linking stage.
+  # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
+  # export KMTHINLTO=1
 
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
+
+  # ROCm builds experience OOM issues when buliding with sscache. (HCC Issue #785)
+  export MAX_JOBS=`expr $(nproc) - 1`
+
   USE_ROCM=1 python setup.py install
   exit
 fi
@@ -95,5 +107,5 @@ if [[ "$BUILD_TEST_LIBTORCH" == "1" ]]; then
   echo "Building libtorch"
   # NB: Install outside of source directory (at the same level as the root
   # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  WERROR=1 VERBOSE=1 tools/cpp_build/build_all.sh "$PWD/../cpp-build"
+  WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$PWD/../cpp-build"
 fi

@@ -28,7 +28,6 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
-import torch.jit.batchop
 
 try:
     import torchvision
@@ -256,6 +255,48 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
+    def test_peephole(self):
+        a = torch.tensor([0.4], requires_grad=True)
+        b = torch.tensor([0.7], requires_grad=True)
+        c = torch.tensor([0], dtype=torch.int32)
+
+        def f(x, y):
+            return x.type_as(y)
+
+        trace, z = torch.jit.get_trace_graph(f, (a, b))
+        self.run_pass('peephole', trace)
+        self.assertExpectedGraph(trace)
+        trace, z = torch.jit.get_trace_graph(f, (a, c))
+        s = str(trace)
+        self.run_pass('peephole', trace)
+        self.assertEqual(s, str(trace))
+
+    def test_peephole_dynamic(self):
+        def f(x, y):
+            return x.type_as(y)
+
+        fn = torch.jit.script(f)
+        s = str(fn.graph)
+        torch._C._jit_pass_peephole(fn.graph)
+        self.assertEqual(s, str(fn.graph))
+
+    @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    def test_peephole_cuda(self):
+        a = torch.tensor([0.4], requires_grad=True, device='cpu')
+        b = torch.tensor([0.7], requires_grad=True, device='cuda')
+        c = torch.tensor([0.7], requires_grad=True, device='cuda')
+
+        def f(x, y):
+            return x.type_as(y)
+
+        trace, z = torch.jit.get_trace_graph(f, (a, c))
+        s = str(trace)
+        self.run_pass('peephole', trace)
+        self.assertEqual(s, str(trace))
+        trace, z = torch.jit.get_trace_graph(f, (b, c))
+        self.run_pass('peephole', trace)
+        self.assertExpectedGraph(trace, subname="same_device")
+
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0], dtype=torch.int64)
@@ -292,9 +333,9 @@ class TestJit(JitTestCase):
 
         def f(x, y):
             out = x + y
-            with torch.jit.scope('Foo', out):
+            with torch.jit.scope('Foo'):
                 out = x * out
-                with torch.jit.scope('Bar', out):
+                with torch.jit.scope('Bar'):
                     out = torch.tanh(out)
                 out = torch.sigmoid(out)
             return out
@@ -446,6 +487,16 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(self.fn_test_relu, (x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_small_constant(self):
+        def fn_test_small_constant(x, y):
+            return (1e-8 * x + 5e-9 * y) * 1e8
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(fn_test_small_constant, (x, y))
 
     @staticmethod
     def fn_test_exp(x, y):
