@@ -9,7 +9,7 @@ __global__ void MRCKernel(
     const int N, const int* Y, const float* X1, const float* X2, const float margin,
     float* output) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    output[i] = max(0.f, -Y[i] * (X1[i] - X2[i]) + margin);
+    output[i] = fmaxf(0.f, -Y[i] * (X1[i] - X2[i]) + margin);
   }
 }
 
