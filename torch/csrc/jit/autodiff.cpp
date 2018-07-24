@@ -53,6 +53,9 @@ bool isDifferentiable(Node * n) {
         static_cast<bool (*)(Node*)>(isDifferentiable));
   }
 
+  if ((n->kind() == aten::add || n->kind() == aten::sub) && !hasOneValuedAttribute(n, attr::alpha))
+    return false;
+
   return differentiable_kinds.count(n->kind()) > 0;
 }
 
