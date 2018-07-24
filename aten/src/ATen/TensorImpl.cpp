@@ -19,47 +19,8 @@ Tensor TensorImpl::detach() const {
 }
 
 const char* TensorImpl::toString() const {
-  switch (type().backend()) {
-    case Backend::CPU:
-      switch (type().scalarType()) {
-#define DEFINE_CPU_STRING(_,name,_2) \
-        case ScalarType::name: return "CPU" #name "Tensor";
-        AT_FORALL_SCALAR_TYPES(DEFINE_CPU_STRING)
-#undef DEFINE_CPU_STRING
-        case ScalarType::Undefined: AT_ASSERT(false);
-        case ScalarType::NumOptions: AT_ASSERT(false);
-      }
-    case Backend::CUDA:
-      switch (type().scalarType()) {
-#define DEFINE_CUDA_STRING(_,name,_2) \
-        case ScalarType::name: return "CUDA" #name "Tensor";
-        AT_FORALL_SCALAR_TYPES(DEFINE_CUDA_STRING)
-#undef DEFINE_CUDA_STRING
-        case ScalarType::Undefined: AT_ASSERT(false);
-        case ScalarType::NumOptions: AT_ASSERT(false);
-      }
-    case Backend::SparseCPU:
-      switch (type().scalarType()) {
-#define DEFINE_CPU_STRING(_,name,_2) \
-        case ScalarType::name: return "SparseCPU" #name "Tensor";
-        AT_FORALL_SCALAR_TYPES(DEFINE_CPU_STRING)
-#undef DEFINE_CPU_STRING
-        case ScalarType::Undefined: AT_ASSERT(false);
-        case ScalarType::NumOptions: AT_ASSERT(false);
-      }
-    case Backend::SparseCUDA:
-      switch (type().scalarType()) {
-#define DEFINE_CUDA_STRING(_,name,_2) \
-        case ScalarType::name: return "SparseCUDA" #name "Tensor";
-        AT_FORALL_SCALAR_TYPES(DEFINE_CUDA_STRING)
-#undef DEFINE_CUDA_STRING
-        case ScalarType::Undefined: AT_ASSERT(false);
-        case ScalarType::NumOptions: AT_ASSERT(false);
-      }
-    case Backend::Undefined: return "UndefinedTensor";
-    case Backend::NumOptions: AT_ASSERT(false);
-  }
-  AT_ASSERT(false);
+  // This matches behavior with VariableImpl
+  return type().toString();
 }
 
 void TensorImpl::backward(
