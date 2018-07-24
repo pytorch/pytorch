@@ -413,6 +413,7 @@ class TestFFI(TestCase):
     @unittest.skipIf(not HAS_CFFI or not HAS_CUDA, "ffi tests require cffi package")
     @unittest.skipIf(IS_WINDOWS, "ffi doesn't currently work on Windows")
     def test_gpu(self):
+        from torch.utils.cpp_extension import CUDA_HOME
         create_extension(
             name='gpulib',
             headers=[test_dir + '/ffi/src/cuda/cudalib.h'],
@@ -421,6 +422,7 @@ class TestFFI(TestCase):
             ],
             with_cuda=True,
             verbose=False,
+            include_dirs=[os.path.join(CUDA_HOME, 'include')],
         ).build()
         import gpulib
         tensor = torch.ones(2, 2).float()
