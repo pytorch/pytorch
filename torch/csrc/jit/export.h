@@ -39,4 +39,10 @@ std::tuple<std::string, RawDataExportMap> ExportModule(
     ::torch::onnx::OperatorExportTypes operator_export_type
       = ::torch::onnx::OperatorExportTypes::RAW);
 
-}}
+void ExportModuleAsPytorchFile(
+  const std::string& filename,
+  const std::shared_ptr<script::Module>& module,
+  int64_t onnx_opset_version,
+  ::torch::onnx::OperatorExportTypes operator_export_type);
+
+}}  // namespace torch::jit

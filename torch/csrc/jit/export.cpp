@@ -7,6 +7,7 @@
 #include <ATen/ATen.h>
 #include <ATen/optional.h>
 
+#include <cstdio>
 #include <cstring>
 #include <fstream>
 #include <memory>
@@ -70,7 +71,7 @@ class JitEncoder {
              onnx_torch::OperatorExportTypes operator_export_type,
              bool defer_weight_export = false);
 
-  RawDataExportMap get_raw_data_export_map() {
+  const RawDataExportMap &get_raw_data_export_map() const {
     return raw_data_export_map_;
   }
 
@@ -754,6 +755,174 @@ std::tuple<std::string, RawDataExportMap> ExportGraph(
   auto graph_encoder = GraphEncoder(
     &model_proto, graph, onnx_opset_version, operator_export_type, initializers, defer_weight_export);
   return std::make_tuple(model_proto.SerializeAsString(), graph_encoder.get_raw_data_export_map());
+}
+
+class PyTorchFileWriter {
+public:
+  PyTorchFileWriter(const std::string& filename){
+    fp = std::fopen(filename.c_str(), "wb");
+    writeFileHeader();
+  }
+
+  // Serialize a tensor to file, then return its offset
+  size_t serializeTensor(const std::string& name, at::Tensor t) {
+    JIT_ASSERT(!finalized);
+    JIT_ASSERT(cursor % kFieldAlignment == 0);
+    // Keep track of the offset into the file for this tensor
+    JIT_ASSERT(key_to_file_offset.count(name) == 0);
+    key_to_file_offset[name] = cursor;
+
+    // Write out local "file" header: size of "file" in bytes + padding
+    size_t copy_bytes = t.type().elementSizeInBytes() * t.numel();
+    write64BitIntegerLittleEndian(copy_bytes);
+    padToNextAlignmentBoundary();
+
+    // Write out the actual data
+    std::fwrite(t.data_ptr(), copy_bytes, 1u, fp);
+    cursor += copy_bytes;
+    padToNextAlignmentBoundary();
+
+    return key_to_file_offset[name];
+  }
+
+  size_t tensorNameToOffset(const std::string& name) const {
+    return key_to_file_offset.at(name);
+  }
+
+  size_t getModelProtoOffset() const {
+    return key_to_file_offset.at("__MODEL_PROTO");
+  }
+
+  // Serialize the model proto to file, replacing the tensor names with
+  // string verisions of their file offsets. This also finalizes the file,
+  // and calling serializeTensor after calling this method is illegal.
+  // NOTE: this method mutates the model proto
+  size_t serializeModelProto(::ONNX_NAMESPACE::ModelProto *model_proto) {
+    JIT_ASSERT(!finalized);
+    JIT_ASSERT(cursor % kFieldAlignment == 0);
+    // Keep track of offset into the file for the model proto
+    JIT_ASSERT(key_to_file_offset.count("__MODEL_PROTO") == 0);
+    key_to_file_offset["__MODEL_PROTO"] = cursor;
+
+    // Swap initializer names to string versions of their file offsets
+    auto *graph = model_proto->mutable_graph();
+    for (int i=0; i < graph->initializer_size(); ++i) {
+      auto *init_proto = graph->mutable_initializer(i);
+      if (key_to_file_offset.count(init_proto->doc_string())) {
+        init_proto->set_doc_string(std::to_string(key_to_file_offset[init_proto->doc_string()]));
+      }
+    }
+
+    // Now swap names for tensor valued attributes to string versions of their
+    // file offsets
+    swapTensorAttributeNames(graph);
+
+    auto serialized_proto = model_proto->SerializeAsString();
+
+    // Write serialized proto size
+    size_t serialized_proto_size = serialized_proto.size();
+    write64BitIntegerLittleEndian(serialized_proto_size);
+    padToNextAlignmentBoundary();
+
+    // Write serialized proto
+    std::fwrite(serialized_proto.c_str(), serialized_proto_size, 1, fp);
+    cursor += serialized_proto_size;
+    padToNextAlignmentBoundary();
+
+    finalized = true;
+    return key_to_file_offset.at("__MODEL_PROTO");
+  }
+
+  ~PyTorchFileWriter() {
+    std::fclose(fp);
+  }
+private:
+  FILE *fp;
+  size_t cursor = 0;
+  std::unordered_map<std::string, size_t> key_to_file_offset;
+  bool finalized = false;
+
+  static constexpr uint64_t kFileFormatVersion = 0x1L;
+  static constexpr uint64_t kFileMagicNumber = 0x314843524f545950L; // PYTORCH1
+  static constexpr uint64_t kFieldAlignment = 64L; // 64 byte alignment supports up to AVX512 for mmap
+  static constexpr uint8_t kPadValue = 0xEF;
+
+  void write64BitIntegerLittleEndian(const uint64_t value) {
+    // TODO endian swap on platforms that need it?
+    std::fwrite(&value, 8u, 1u, fp);
+    cursor += 8u;
+  }
+
+  void writePad(const size_t num_bytes) {
+    uint8_t pad_val = kPadValue;
+    // TODO is there a more efficient way to do this?
+    for (size_t i = 0; i < num_bytes; ++i) {
+      std::fwrite(&pad_val, 1u, 1u, fp);
+    }
+    cursor += num_bytes;
+  }
+
+  void padToNextAlignmentBoundary() {
+    size_t next_offset = (cursor + kFieldAlignment) - (cursor % kFieldAlignment);
+    size_t pad_amount = next_offset - cursor;
+    writePad(pad_amount);
+  }
+
+  void writeFileHeader() {
+    write64BitIntegerLittleEndian(kFileMagicNumber);
+    write64BitIntegerLittleEndian(kFileFormatVersion);
+    padToNextAlignmentBoundary();
+  }
+
+  void swapTensorAttributeNames(::ONNX_NAMESPACE::GraphProto *g) {
+    for (int i=0; i < g->node_size(); ++i) {
+      auto *node = g->mutable_node(i);
+      for (int j=0; j < node->attribute_size(); ++j) {
+        auto *attr = node->mutable_attribute(j);
+        auto mutate_attribute = [this](::onnx_torch::TensorProto *t) {
+          if (key_to_file_offset.count(t->doc_string())) {
+            t->set_doc_string(std::to_string(key_to_file_offset.at(t->doc_string())));
+          }
+        };
+        if (attr->type() == ::onnx_torch::AttributeProto_AttributeType_TENSOR) {
+          mutate_attribute(attr->mutable_t());
+        } else if (attr->type() == ::onnx_torch::AttributeProto_AttributeType_TENSORS) {
+          for (int k = 0; k < attr->tensors_size(); ++k) {
+            mutate_attribute(attr->mutable_tensors(k));
+          }
+        } else if (attr->type() == ::onnx_torch::AttributeProto_AttributeType_GRAPH) {
+          swapTensorAttributeNames(attr->mutable_g());
+        } else if (attr->type() == ::onnx_torch::AttributeProto_AttributeType_GRAPHS) {
+          for (int k = 0; k < attr->graphs_size(); ++k) {
+            swapTensorAttributeNames(attr->mutable_graphs(k));
+          }  // for k
+        }  // if type
+      }  // for j
+    }  // for i
+  }
+
+};
+
+void writeStoragesAndProtoToFile(const std::string& filename,
+                                 ::ONNX_NAMESPACE::ModelProto *model_proto,
+                                 const ModuleEncoder &module_encoder) {
+  PyTorchFileWriter writer(filename);
+  for (const auto& kv : module_encoder.get_raw_data_export_map()) {
+    writer.serializeTensor(kv.first, kv.second);
+  }
+  writer.serializeModelProto(model_proto);
+}
+
+
+void ExportModuleAsPytorchFile(
+                        const std::string& filename,
+                        const std::shared_ptr<script::Module>& module,
+                        int64_t onnx_opset_version,
+                        ::torch::onnx::OperatorExportTypes operator_export_type) {
+  ::ONNX_NAMESPACE::ModelProto model_proto;
+  auto module_encoder = ModuleEncoder(
+    &model_proto, module, onnx_opset_version, operator_export_type);
+  writeStoragesAndProtoToFile(filename, &model_proto, module_encoder);
 }
 
 std::tuple<std::string, RawDataExportMap> ExportModule(
