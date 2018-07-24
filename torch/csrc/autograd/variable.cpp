@@ -40,12 +40,6 @@ Variable::Impl::Impl(at::Tensor data, bool requires_grad, Edge gradient_edge)
 
 Variable::Impl::~Impl() = default;
 
-const char* Variable::Impl::toString() const {
-  // technically this will say Variable[CPUFloatType] rather than
-  // Variable[CPUFloatTensor], but this is better than just Variable
-  return type().toString();
-}
-
 IntList Variable::Impl::sizes() const {
   return data_.sizes();
 }

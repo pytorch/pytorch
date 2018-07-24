@@ -9,7 +9,6 @@ public:
   static inline UndefinedTensor * singleton() {
     return &_singleton;
   }
-  const char * toString() const override;
   IntList sizes() const override;
   IntList strides() const override;
   int64_t dim() const override;
