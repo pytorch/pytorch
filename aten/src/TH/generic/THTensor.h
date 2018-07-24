@@ -103,6 +103,7 @@ TH_API void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff
 TH_API void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API void THTensor_(select)(THTensor *self, THTensor *src, int dimension_, int64_t sliceIndex_);
 TH_API void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1_, int dimension2_);
+TH_API int THTensor_(isTransposed)(const THTensor *self);
 TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, int64_t size_, int64_t step_);
 
 TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);
