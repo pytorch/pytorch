@@ -10,9 +10,9 @@
 #include <atomic>
 #include <ATen/ATen.h>
 
-// See [NOTE: _dim() vs dim()]; _nDimension corresponds to _dim(), nDimension corresponds to dim().
-THC_API int THCTensor_nDimension(THCState *state, const THCTensor *self);
-THC_API int THCTensor__nDimension(THCState *state, const THCTensor *self);
+// See [NOTE: nDimension vs nDimensionLegacyNoScalars vs nDimensionLegacyAll]
+THC_API int THCTensor_nDimensionLegacyNoScalars(THCState *state, const THCTensor *self);
+THC_API int THCTensor_nDimensionLegacyAll(THCState *state, const THCTensor *self);
 
 THC_API int64_t THCTensor_size(THCState *state, const THCTensor *self, int dim);
 THC_API int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim);

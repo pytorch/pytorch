@@ -15,7 +15,7 @@ static inline void THNN_(VolumetricUpSamplingNearest_shapeCheck)
        " but got input (D: %d, H: %d, W: %d) output (D: %d, H: %d, W: %d)",
        inputDepth, inputHeight, inputWidth, outputDepth, outputHeight, outputWidth);
   if (input != NULL) {
-    THNN_ARGCHECK(input->_dim() == 5, 2, input,
+    THNN_ARGCHECK(THTensor_nDimensionLegacyAll(input) == 5, 2, input,
       "5D input tensor expected but got: %s");
   }
 

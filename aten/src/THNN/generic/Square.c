@@ -9,7 +9,7 @@ void THNN_(Square_updateOutput)(
 {
   THTensor_(resizeAs)(output, input);
   
-  if (input->_dim() == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
+  if (THTensor_nDimensionLegacyAll(input) == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
     TH_TENSOR_APPLY2(real, output, real, input,
       *output_data = (*input_data) * (*input_data);
@@ -35,7 +35,7 @@ void THNN_(Square_updateGradInput)(
   THNN_CHECK_SHAPE(input, gradOutput);
   THTensor_(resizeAs)(gradInput, input);
 
-  if (input->_dim() == 1 || 
+  if (THTensor_nDimensionLegacyAll(input) == 1 || 
       !THTensor_(isContiguous)(input) || 
       !THTensor_(isContiguous)(gradOutput) ||
       !THTensor_(isContiguous)(gradInput))
