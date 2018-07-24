@@ -2229,6 +2229,7 @@ class TestTorch(TestCase):
             self.assertEqual((0,), torch.logspace(1, 1, 0, device=device).shape)
             self.assertEqual((0,), torch.randperm(0, device=device).shape)
             self.assertEqual((0,), torch.bartlett_window(0, device=device).shape)
+            self.assertEqual((0,), torch.bartlett_window(0, periodic=False, device=device).shape)
             self.assertEqual((0,), torch.hamming_window(0, device=device).shape)
             self.assertEqual((0,), torch.hann_window(0, device=device).shape)
             self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
