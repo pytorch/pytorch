@@ -425,6 +425,7 @@ def signature(decl):
 
             default = default_map.get(default, default)
             decl = '{}={}'.format(decl, default)
+            # print("decl", decl)
         return decl
 
     args = []
@@ -440,6 +441,8 @@ def signature(decl):
         ret_list = jit_type_of(decl['returns'][0])
     else:
         ret_list = '({})'.format(', '.join(jit_type_of(r) for r in decl['returns']))
+
+    print("signature return: %s" % 'aten::{}({}) -> {}'.format(decl['name'], arg_list, ret_list))
     return 'aten::{}({}) -> {}'.format(decl['name'], arg_list, ret_list)
 
 

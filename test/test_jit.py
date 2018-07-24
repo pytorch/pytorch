@@ -4861,7 +4861,9 @@ def create_script_fn(method_name, is_functional, output_process_fn):
         else:
             call = '{}.{}({}{})'.format(actuals[0], method_name, ', '.join(actuals[1:]), kwargs_str)
         script = script_template.format(', '.join(formals), call)
+        # print("script: ", script);
         CU = torch.jit.CompilationUnit(script)
+        # print("create_script_fn: tensors = %s" % tensors)
         return output_process_fn(CU.the_method(*tensors))
     return script_fn
 
