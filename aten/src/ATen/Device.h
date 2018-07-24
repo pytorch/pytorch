@@ -105,6 +105,14 @@ struct Device {
     return type_ == Type::CPU;
   }
 
+  Backend backend() const {
+    switch (type_) {
+      case Type::CPU: return Backend::CPU;
+      case Type::CUDA: return Backend::CUDA;
+    }
+    AT_ERROR("Device::backend(): unreachable");
+  }
+
  private:
   Type type_;
   int32_t index_ = -1;

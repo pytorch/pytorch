@@ -18,16 +18,18 @@ struct Tensor;
 
 namespace at {
 struct AT_API TensorImpl : public Retainable {
-  explicit TensorImpl(Type * type, THTensor * tensor)
-  : is_scalar(false), type_(type), tensor(tensor) {}
+  explicit TensorImpl(Backend backend, ScalarType scalar_type, THTensor * tensor, bool is_variable)
+  : is_scalar(false), backend_(backend), scalar_type_(scalar_type), is_variable_(is_variable), tensor(tensor) {}
 
   virtual ~TensorImpl();
 
   virtual void release_resources() override;
 
-  Type & type() const {
-    return *type_;
-  }
+  // The implementation of this method will have to be hoisted out and
+  // hooked in, so that Caffe2 doesn't need to know about Context
+  // TODO: This really really needs to be inlined.
+  Type & type() const;
+
   const char * toString() const;
   virtual IntList sizes() const;
   virtual IntList strides() const;
@@ -91,7 +93,11 @@ struct AT_API TensorImpl : public Retainable {
 
 protected:
   bool is_scalar;
-  Type * type_;
+  Backend backend_;
+  // INVARIANT: When storage is non-null, this scalar type must
+  // agree with the scalar type in storage
+  ScalarType scalar_type_;
+  bool is_variable_ = false;
 public:
   THTensor * tensor;
 };
