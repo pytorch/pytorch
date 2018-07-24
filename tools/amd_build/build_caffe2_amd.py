@@ -20,8 +20,6 @@ includes = [
 ]
 
 ignores = [
-    "caffe2/core/context_gpu_test.cc",
-
     "caffe2/operators/depthwise_3x3_conv_op.cu",
     "caffe2/operators/depthwise_3x3_conv_op_cudnn.cu",
     "caffe2/operators/top_k.cu",
