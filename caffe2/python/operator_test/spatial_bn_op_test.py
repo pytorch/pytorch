@@ -23,7 +23,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
 
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
@@ -72,7 +72,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
     @unittest.skipIf(not workspace.has_gpu_support and not workspace.has_hip_support, "No gpu support")
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
@@ -118,7 +118,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
 
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
@@ -129,7 +129,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and order != 'NCHW':
+        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
             return
 
         op = core.CreateOperator(
@@ -167,7 +167,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
 
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(1e-5, 1e-2),
@@ -178,7 +178,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             inplace, engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and order != 'NCHW':
+        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
             return
 
         op = core.CreateOperator(
@@ -207,7 +207,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
 
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
@@ -217,7 +217,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
             self, size, input_channels, batch_size, seed, order, epsilon,
             engine, gc, dc):
         # Currently HIP SpatialBN only supports NCHW
-        if _run_in_hip(gc, dc) and order != 'NCHW':
+        if _run_in_hip(gc, dc) and (order != 'NCHW' or batch_size == 0):
             return
 
         op = core.CreateOperator(
@@ -245,7 +245,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
 
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
            order=st.sampled_from(["NCHW", "NHWC"]),
            epsilon=st.floats(min_value=1e-5, max_value=1e-2),
@@ -282,7 +282,7 @@ class TestSpatialBN(hu.HypothesisTestCase):
 
     @given(size=st.integers(7, 10),
            input_channels=st.integers(1, 10),
-           batch_size=st.integers(1, 3),
+           batch_size=st.integers(0, 3),
            seed=st.integers(0, 65535),
            epsilon=st.floats(1e-5, 1e-2),
            engine=st.sampled_from(["", "CUDNN"]),
