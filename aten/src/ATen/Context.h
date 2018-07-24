@@ -15,12 +15,6 @@
 
 namespace at {
 
-enum class IsVariable {
-  NotVariable,
-  Variable,
-  NumOptions
-};
-
 class AT_API Context {
 public:
   Context();
