@@ -454,8 +454,15 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
             if op_name == "Constant":
                 return g.op("Constant", value_t=n["value"])
             elif op_name == "ListConstruct":
-                unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
-                return g.op("Concat", *unsqueezed, axis_i=0)
+                # XXX: this should really be done in a constant propagation pass and is a temporary hack
+                if all(input.node().kind() == "onnx::Constant" for input in inputs):
+                    if inputs:
+                        return g.op("Constant", value_t=torch.stack([input.node()['value'] for input in inputs]))
+                    else:
+                        return g.op("Constant", value_t=torch.tensor([]))
+                else:
+                    unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
+                    return g.op("Concat", *unsqueezed, axis_i=0)
             elif op_name == "Undefined":
                 # Undefined is not an ONNX operator; keep it as prim::Undefined
                 # and let the exporter handle finally eliminating these
