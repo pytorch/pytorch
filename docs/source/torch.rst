@@ -182,6 +182,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: mul
+.. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
 .. autofunction:: reciprocal
