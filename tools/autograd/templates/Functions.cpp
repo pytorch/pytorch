@@ -130,6 +130,12 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor & self, const Tensor & ex
   return grad * self.pow(exponent) * self.log();
 }
 
+Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
+  Tensor args = at::arange(-p + 1, 1, -1, self.options()).div_(2.);
+  args = args.add(self.unsqueeze(-1));
+  return grad * args.digamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+}
+
 Tensor reduce_to(const Tensor & grad, IntList sizes) {
   if (sizes.size() == 0) {
     return grad.sum();

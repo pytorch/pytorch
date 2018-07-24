@@ -424,6 +424,23 @@ class TestTorch(TestCase):
             return math.lgamma(x)
         self._test_math(torch.lgamma, lgamma)
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_mvlgamma(self):
+        from scipy.special import multigammaln
+        for d in range(1, 5):
+            input = torch.empty(10).uniform_(d, 10)
+            res_torch = torch.mvlgamma(input, d)
+            res_scipy = multigammaln(input.numpy(), d)
+            self.assertEqual(res_torch.numpy(), res_scipy)
+
+    def test_mvlgamma_argcheck(self):
+        def run_test(d):
+            input = torch.linspace((d - 2) / 2, 10, 10)
+            torch.mvlgamma(input, d)
+
+        with self.assertRaisesRegex(RuntimeError, "Condition for computing multivariate log-gamma not met"):
+            run_test(3)
+
     def _digamma_input(self, test_poles=True):
         input = []
         input.append((torch.randn(10).abs() + 1e-4).tolist())
