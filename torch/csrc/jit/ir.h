@@ -1,3 +1,4 @@
+
 #pragma once
 
 #include "torch/csrc/jit/attributes.h"
@@ -290,7 +291,8 @@ private:
   // This field is effective a cache that's populated on attribute lookups and
   // invalidated every time we perform an operation that could potentially change
   // the schema.
-  const FunctionSchema* schema_;
+  // note: mutable because schema_ is effectively a cache
+  mutable const FunctionSchema* schema_;
 protected:
   Node(Graph * graph_, NodeKind kind_); //defined after graph
 public:
@@ -392,14 +394,21 @@ public:
   Value * input(size_t i) {
     return inputs_.at(i);
   }
-  const Value * input(size_t i) const {
+  Value * input(size_t i) const {
     return inputs_.at(i);
   }
 
+  Value* namedInput(Symbol name) const;
+
+  at::optional<IValue> get(Symbol name) const;
+
   template<typename T>
-  at::optional<T> get(Symbol name);
-  at::optional<IValue> get(Symbol name);
-  Value* input(Symbol name);
+  at::optional<T> get(Symbol name) const {
+    if(auto v = get(name))
+      return v->template to<T>();
+    return at::nullopt;
+  }
+
 
   // Returns true if the value of input name is statically known
   bool is_constant(Symbol name) {
@@ -666,15 +675,16 @@ public:
   // XXX: this function is meant to be used with string literals only!
   bool matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs={});
 
-  const FunctionSchema& schema() {
-    if (!schema_) findSchema();
+  const FunctionSchema& schema() const {
+    if (!schema_)
+      findSchema();
     return *schema_;
   }
 
   virtual ~Node() {}
 private:
   std::pair<Value*, const Argument&> findInput(Symbol name);
-  void findSchema();
+  void findSchema() const;
   // Lookup iterator in use list of _input i_ that corresponds to its use of _this_
   use_list::iterator findUseForInput(size_t i) {
     auto & input_uses = inputs_[i]->uses_;
@@ -974,13 +984,7 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
-  Node * createConstant(const at::Tensor& ref) {
-    JIT_ASSERT(ref.defined());
-    auto n = create(prim::Constant);
-    n->t_(attr::value, ref.clone());
-    n->output()->inferTypeFrom(ref);
-    return n;
-  }
+
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));
@@ -1001,6 +1005,25 @@ public:
       n->addOutput()->setType(element);
     }
     return n;
+  }
+  Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
+    auto n = create(prim::ListConstruct, values);
+    for(const auto & v : values) {
+      JIT_ASSERT(v->type()->isSubtypeOf(*elem_type));
+    }
+    n->output()->setType(std::make_shared<ListType>(elem_type));
+    return n;
+  }
+  Node* createNumToTensor(Value* value) {
+    auto typ = value->type();
+    Node * result = create(prim::NumToTensor, {value});
+    result->output()->setType(TensorType::fromNumberType(typ));
+    return result;
+  }
+  Node* createTensorToNum(const TypePtr& type, Value* value) {
+    auto* result = create(prim::TensorToNum, {value});
+    result->output()->setType(type);
+    return result;
   }
   Node* createPythonOp(
       THPObjectPtr&& pyobj,
@@ -1027,9 +1050,6 @@ public:
     }
     return r;
   }
-
-  template<typename T>
-  Value * insertConstant(T value);
 
   Node * appendNode(Node * n) {
     return block_->appendNode(n);

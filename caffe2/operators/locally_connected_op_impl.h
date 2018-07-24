@@ -246,7 +246,7 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasNoTrans,
       CblasNoTrans,
       shape.output_image_size * group_,
@@ -255,9 +255,12 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       shape.kernel_size,
       1.0f,
       filter_data,
+      shape.M / group_ * shape.kernel_size,
       column_transposed_buffer->template data<T>(),
+      shape.kernel_size * shape.N,
       0.0f,
       Y_transposed_buffer_data,
+      shape.M / group_ * shape.N,
       &context_);
   if (bias_data != nullptr) {
     math::Gemm<T, Context>(
@@ -325,7 +328,7 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       column_buffer->template data<T>(),
       column_transposed_buffer->template mutable_data<T>(),
       &context_);
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasNoTrans,
       CblasTrans,
       shape.output_image_size,
@@ -334,9 +337,12 @@ void LocallyConnectedOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       shape.kernel_size,
       1.0f,
       column_transposed_buffer->template data<T>(),
+      shape.N * shape.kernel_size,
       filter_data,
+      shape.kernel_size * shape.M,
       0.0f,
       Y_transposed_buffer_data,
+      shape.N * shape.M,
       &context_);
   math::Transpose(
       shape.Y_transposed_dims.size(),
@@ -612,7 +618,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       &context_);
 
   // Gradient respect to filter.
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasNoTrans,
       CblasTrans,
       shape.output_image_size * group_,
@@ -621,9 +627,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
       shape.N,
       1.0f,
       dY_transposed_buffer_data,
+      shape.M / group_ * shape.N,
       column_transposed_buffer->template data<T>(),
+      shape.N * shape.kernel_size,
       0.0f,
       dfilter_data,
+      shape.M / group_ * shape.kernel_size,
       &context_);
 
   if (dbias_data != nullptr) {
@@ -642,7 +651,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
 
   if (dX_data != nullptr) {
     // Gradient respect to X.
-    math::GemmBatched(
+    math::GemmStridedBatched(
         CblasTrans,
         CblasNoTrans,
         shape.output_image_size * group_,
@@ -651,9 +660,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNCHWImpl(
         shape.M / group_,
         1.0f,
         filter_data,
+        shape.kernel_size * shape.M / group_,
         dY_transposed_buffer_data,
+        shape.M / group_ * shape.N,
         0.0f,
         column_transposed_buffer->template mutable_data<T>(),
+        shape.kernel_size * shape.N,
         &context_);
     math::Transpose(
         shape.column_transposed_dims.size(),
@@ -760,7 +772,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       &context_);
 
   // Gradient respect to filter.
-  math::GemmBatched(
+  math::GemmStridedBatched(
       CblasTrans,
       CblasNoTrans,
       shape.output_image_size,
@@ -769,9 +781,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
       shape.N,
       1.0f,
       dY_transposed_buffer_data,
+      shape.M * shape.N,
       column_transposed_buffer->template data<T>(),
+      shape.N * shape.kernel_size,
       0.0f,
       dfilter_data,
+      shape.M * shape.kernel_size,
       &context_);
 
   if (dbias_data != nullptr) {
@@ -790,7 +805,7 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
 
   if (dX_data != nullptr) {
     // Gradient respect to X.
-    math::GemmBatched(
+    math::GemmStridedBatched(
         CblasNoTrans,
         CblasNoTrans,
         shape.output_image_size,
@@ -799,9 +814,12 @@ void LocallyConnectedGradientOp<T, Context>::RunOnDeviceWithOrderNHWCImpl(
         shape.M,
         1.0f,
         dY_transposed_buffer_data,
+        shape.N * shape.M,
         filter_data,
+        shape.M * shape.kernel_size,
         0.0f,
         column_transposed_buffer->template mutable_data<T>(),
+        shape.N * shape.kernel_size,
         &context_);
     math::Transpose(
         shape.column_transposed_dims.size(),
