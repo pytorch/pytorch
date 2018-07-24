@@ -78,7 +78,7 @@ bool isOnIdeepDevice(const repr::NeuralNetOperator& nnOp) {
 }
 
 bool shouldFuseConv(const repr::Conv& conv) {
-  return isOnIdeepDevice(conv) ? (conv.getGroup() <= 1) : false;
+  return isOnIdeepDevice(conv);
 }
 
 void removeStopGradientForInference(repr::NNModule* nn) {
