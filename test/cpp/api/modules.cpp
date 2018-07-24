@@ -13,6 +13,7 @@
 #include <test/cpp/api/util.h>
 
 using namespace torch::nn;
+using namespace torch::test;
 
 class TestModel : public torch::nn::Module {
  public:
@@ -122,7 +123,7 @@ TEST_CASE("modules") {
   }
 
   SECTION("simple") {
-    auto model = std::make_shared<torch::SimpleContainer>();
+    auto model = std::make_shared<SimpleContainer>();
     auto l1 = model->add(Linear(10, 3), "l1");
     auto l2 = model->add(Linear(3, 5), "l2");
     auto l3 = model->add(Linear(5, 100), "l3");
@@ -141,8 +142,13 @@ TEST_CASE("modules") {
 
   SECTION("embedding") {
     SECTION("basic") {
-      int dict_size = 10;
+      const int64_t dict_size = 10;
       Embedding model(dict_size, 2);
+      REQUIRE(model->parameters().contains("weight"));
+      REQUIRE(model->weight.ndimension() == 2);
+      REQUIRE(model->weight.size(0) == dict_size);
+      REQUIRE(model->weight.size(1) == 2);
+
       // Cannot get gradients to change indices (input) - only for embedding
       // params
       auto x = torch::full({10}, dict_size - 1, torch::kInt64);
@@ -155,7 +161,7 @@ TEST_CASE("modules") {
       REQUIRE(y.size(0) == 10);
       REQUIRE(y.size(1) == 2);
 
-      REQUIRE(model->parameters()["table"].grad().numel() == 2 * dict_size);
+      REQUIRE(model->parameters()["weight"].grad().numel() == 2 * dict_size);
     }
 
     SECTION("list") {

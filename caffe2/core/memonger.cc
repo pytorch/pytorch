@@ -119,7 +119,7 @@ NetDef optimize_inference_net(
     ao->CopyFrom(op);
   }
 
-  LOG(INFO) << "optimized net using " << renaming.size() << " shared blobs";
+  VLOG(1) << "optimized net using " << renaming.size() << " shared blobs";
   return optim_net;
 }
 

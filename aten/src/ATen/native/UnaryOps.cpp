@@ -24,6 +24,55 @@
 namespace at {
 namespace native {
 
+Tensor clamp(const Tensor& self, Scalar min, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_out(result, self, min, max);
+}
+
+Tensor clamp_max(const Tensor& self, Scalar max) {
+  Tensor result = self.type().tensor();
+  return clamp_max_out(result, self, max);
+}
+
+Tensor clamp_min(const Tensor& self, Scalar min) {
+  Tensor result = self.type().tensor();
+  return clamp_min_out(result, self, min);
+}
+
+Tensor& _clamp__cpu(Tensor& self, Scalar min, Scalar max) {
+  return _th_clamp_(self, min, max);
+}
+
+Tensor& _clamp_out_cpu(
+    Tensor& result,
+    const Tensor& self,
+    Scalar min,
+    Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_(result, min, max);
+}
+
+Tensor& _clamp_max__cpu(Tensor& self, Scalar max) {
+  return _th_clamp_max_(self, max);
+}
+
+Tensor& _clamp_max_out_cpu(Tensor& result, const Tensor& self, Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_max_(result, max);
+}
+
+Tensor& _clamp_min__cpu(Tensor& self, Scalar min) {
+  return _th_clamp_min_(self, min);
+}
+
+Tensor& _clamp_min_out_cpu(Tensor& result, const Tensor& self, Scalar min) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_min_(result, min);
+}
+
 Tensor& fill_(Tensor& self, Scalar value) {
   return self._fill_(value);
 }
@@ -43,14 +92,14 @@ Tensor& fill_(Tensor& self, const Tensor& value) {
   Tensor& _##op##__cpu(Tensor& self_) {                         \
     if (self_.numel() > 0) {                                    \
       Tensor self = sort_strides(self_);                        \
-      op##Impl(self, self);                                     \
+      op##Impl(kCPU, self, self);                               \
     }                                                           \
     return self_;                                               \
   }                                                             \
   Tensor& _##op##_out_cpu(Tensor& result, const Tensor& self) { \
     result.resize_(self.sizes());                               \
     if (result.numel() > 0) {                                   \
-      op##Impl(result, self);                                   \
+      op##Impl(kCPU, result, self);                             \
     }                                                           \
     return result;                                              \
   }
@@ -78,6 +127,7 @@ IMPLEMENT_UNARY_OP_VEC(ceil)
 IMPLEMENT_UNARY_OP_VEC(cos)
 IMPLEMENT_UNARY_OP_TH(cosh)
 IMPLEMENT_UNARY_OP_VEC(erf)
+IMPLEMENT_UNARY_OP_VEC(erfc)
 IMPLEMENT_UNARY_OP_VEC(exp)
 IMPLEMENT_UNARY_OP_VEC(expm1)
 IMPLEMENT_UNARY_OP_VEC(floor)
@@ -94,6 +144,30 @@ IMPLEMENT_UNARY_OP_VEC(sqrt)
 IMPLEMENT_UNARY_OP_VEC(tan)
 IMPLEMENT_UNARY_OP_VEC(tanh)
 IMPLEMENT_UNARY_OP_VEC(trunc)
+
+DEFINE_DISPATCH(absImpl);
+DEFINE_DISPATCH(acosImpl);
+DEFINE_DISPATCH(asinImpl);
+DEFINE_DISPATCH(atanImpl);
+DEFINE_DISPATCH(ceilImpl);
+DEFINE_DISPATCH(cosImpl);
+DEFINE_DISPATCH(erfImpl);
+DEFINE_DISPATCH(erfcImpl);
+DEFINE_DISPATCH(expImpl);
+DEFINE_DISPATCH(expm1Impl);
+DEFINE_DISPATCH(floorImpl);
+DEFINE_DISPATCH(logImpl);
+DEFINE_DISPATCH(log10Impl);
+DEFINE_DISPATCH(log1pImpl);
+DEFINE_DISPATCH(log2Impl);
+DEFINE_DISPATCH(roundImpl);
+DEFINE_DISPATCH(rsqrtImpl);
+DEFINE_DISPATCH(sigmoidImpl);
+DEFINE_DISPATCH(sinImpl);
+DEFINE_DISPATCH(sqrtImpl);
+DEFINE_DISPATCH(tanImpl);
+DEFINE_DISPATCH(tanhImpl);
+DEFINE_DISPATCH(truncImpl);
 
 }
 } // namespace at

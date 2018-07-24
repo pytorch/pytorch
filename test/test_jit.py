@@ -28,7 +28,6 @@ import random
 
 from torch.jit.frontend import NotSupportedError
 from torch.jit import BatchTensor
-import torch.jit.batchop
 
 try:
     import torchvision
@@ -256,6 +255,48 @@ class TestJit(JitTestCase):
         self.assertExpectedGraph(trace)
         self.assertExportImport(trace, (x, y))
 
+    def test_peephole(self):
+        a = torch.tensor([0.4], requires_grad=True)
+        b = torch.tensor([0.7], requires_grad=True)
+        c = torch.tensor([0], dtype=torch.int32)
+
+        def f(x, y):
+            return x.type_as(y)
+
+        trace, z = torch.jit.get_trace_graph(f, (a, b))
+        self.run_pass('peephole', trace)
+        self.assertExpectedGraph(trace)
+        trace, z = torch.jit.get_trace_graph(f, (a, c))
+        s = str(trace)
+        self.run_pass('peephole', trace)
+        self.assertEqual(s, str(trace))
+
+    def test_peephole_dynamic(self):
+        def f(x, y):
+            return x.type_as(y)
+
+        fn = torch.jit.script(f)
+        s = str(fn.graph)
+        torch._C._jit_pass_peephole(fn.graph)
+        self.assertEqual(s, str(fn.graph))
+
+    @unittest.skipIf(not RUN_CUDA, "cpp tests require CUDA")
+    def test_peephole_cuda(self):
+        a = torch.tensor([0.4], requires_grad=True, device='cpu')
+        b = torch.tensor([0.7], requires_grad=True, device='cuda')
+        c = torch.tensor([0.7], requires_grad=True, device='cuda')
+
+        def f(x, y):
+            return x.type_as(y)
+
+        trace, z = torch.jit.get_trace_graph(f, (a, c))
+        s = str(trace)
+        self.run_pass('peephole', trace)
+        self.assertEqual(s, str(trace))
+        trace, z = torch.jit.get_trace_graph(f, (b, c))
+        self.run_pass('peephole', trace)
+        self.assertExpectedGraph(trace, subname="same_device")
+
     def test_index(self):
         x = torch.tensor([0.4], requires_grad=True)
         y = torch.tensor([0], dtype=torch.int64)
@@ -292,9 +333,9 @@ class TestJit(JitTestCase):
 
         def f(x, y):
             out = x + y
-            with torch.jit.scope('Foo', out):
+            with torch.jit.scope('Foo'):
                 out = x * out
-                with torch.jit.scope('Bar', out):
+                with torch.jit.scope('Bar'):
                     out = torch.tanh(out)
                 out = torch.sigmoid(out)
             return out
@@ -439,6 +480,16 @@ class TestJit(JitTestCase):
         y = torch.randn(4, 4, dtype=torch.float, device='cuda')
 
         ge = self.checkTrace(self.fn_test_relu, (x, y))
+
+    @unittest.skipIf(IS_WINDOWS, "NYI: fuser support for Windows")
+    @unittest.skipIf(not RUN_CUDA, "fuser requires CUDA")
+    def test_small_constant(self):
+        def fn_test_small_constant(x, y):
+            return (1e-8 * x + 5e-9 * y) * 1e8
+        x = torch.randn(4, 4, dtype=torch.float, device='cuda')
+        y = torch.randn(4, 4, dtype=torch.float, device='cuda')
+
+        ge = self.checkTrace(fn_test_small_constant, (x, y))
 
     @staticmethod
     def fn_test_exp(x, y):
@@ -1028,7 +1079,7 @@ class TestJit(JitTestCase):
             a = mat.addmm(mat1, mat2)
             b = mat.addmm(mat1, mat2, alpha=1.0, beta=1.0)
             c = mat.addmm(mat1, mat2, alpha=4.20, beta=2.0)
-            d = mat.addmm(mat1, mat2, alpha=alpha, beta=beta)
+            d = mat.addmm(mat1, mat2, alpha=int(alpha), beta=int(beta))
 
             return a + b + c + d
 
@@ -2258,7 +2309,6 @@ def func(t):
             scope = {}
             exec(code, globals(), scope)
             cu = torch.jit.CompilationUnit(code)
-
             self.assertEqual(cu.func(tensor), scope['func'](tensor))
 
         var_int = 2
@@ -3715,7 +3765,7 @@ def func(t):
     def test_loop_unrolling(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += i
             return y
 
@@ -3750,7 +3800,7 @@ def func(t):
         def fn(x):
             y = FIXME_zerol()
             for i in range(10):
-                for j in range(x):
+                for j in range(int(x)):
                     y += j
             return y
 
@@ -3762,7 +3812,7 @@ def func(t):
     def test_loop_unroll_unused_counter(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += 1
             return y
 
@@ -3773,7 +3823,7 @@ def func(t):
     def test_loop_unroll_negative(self):
         def fn(x):
             y = FIXME_zerol()
-            for i in range(x):
+            for i in range(int(x)):
                 y += 1
             return y
 
@@ -3818,7 +3868,7 @@ def func(t):
         with self.assertRaisesRegex(RuntimeError, 'argument \'chunks\' must be a constant'):
             @torch.jit.script
             def chunk_non_constant(x, y):
-                return x.chunk(y)
+                return x.chunk(int(y))
 
     def test_unknown_builtin(self):
         with self.assertRaisesRegex(RuntimeError, 'unknown builtin op'):
@@ -3827,7 +3877,7 @@ def func(t):
                 return x.splork(3)
 
     def test_expected_tensor_found_tuple(self):
-        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found a Tuple'):
+        with self.assertRaisesRegex(RuntimeError, 'expected a tensor value but found'):
             @torch.jit.script
             def return_tuple_wrong(x):
                 a = (x, x)
@@ -4496,6 +4546,22 @@ def func(t):
             @torch.jit.script
             def some_func(x):
                 return sm(x)
+
+    def test_index_put_trace_with_view(self):
+        @torch.jit.trace(torch.rand(100), torch.tensor([1, 2, 3, 4]), torch.rand(1, 1, 1, 4))
+        def test_index_put(target, indices, rhs):
+            target[indices] = rhs
+            return target
+
+        self.assertExpected(str(test_index_put.graph))
+
+    def test_index_put_trace_without_view(self):
+        @torch.jit.trace(torch.rand(100), torch.tensor([1, 2, 3, 4]), torch.rand(4))
+        def test_index_put(target, indices, rhs):
+            target[indices] = rhs
+            return target
+
+        self.assertExpected(str(test_index_put.graph))
 
 
 class TestEndToEndHybridFrontendModels(JitTestCase):

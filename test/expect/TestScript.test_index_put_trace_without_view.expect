@@ -1,0 +1,7 @@
+graph(%0 : Double(100)
+      %1 : Long(4)
+      %2 : Double(4)) {
+  %3 : Long(4) = aten::_cast_Long[non_blocking=0](%1)
+  %10 : Double(100) = aten::index_put(%0, %3, %2)
+  return (%10);
+}

@@ -311,12 +311,14 @@ class TestElementwiseOps(hu.HypothesisTestCase):
             reference=swish_gradient,
         )
 
-    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(), **hu.gcs)
-    def test_sigmoid(self, X, inplace, gc, dc):
+    @given(X=hu.tensor(dtype=np.float32), inplace=st.booleans(),
+           engine=st.sampled_from(["", "CUDNN"]), **hu.gcs)
+    def test_sigmoid(self, X, inplace, engine, gc, dc):
         op = core.CreateOperator(
             "Sigmoid",
             ["X"],
             ["X"] if inplace else ["Y"],
+            engine=engine,
         )
 
         def sigmoid_ref(X):

@@ -33,6 +33,8 @@
 #include <type_traits>
 #include <utility>
 
+#include <ATen/ATenGeneral.h>
+
 #if __GNUG__ && __GNUC__ < 5
 #define AT_IS_TRIVIALLY_COPYABLE(T) __has_trivial_copy(T)
 #else
@@ -57,7 +59,7 @@ static inline uint64_t NextPowerOf2(uint64_t A) {
 }
 
 /// This is all the non-templated stuff common to all SmallVectors.
-class SmallVectorBase {
+class AT_API SmallVectorBase {
 protected:
   void *BeginX, *EndX, *CapacityX;
 

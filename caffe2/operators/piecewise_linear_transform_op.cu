@@ -256,8 +256,8 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         X.data<float>(),
         Y->mutable_data<float>());
   } else {
+    // don't want N*M threads, only N*M/2
     PieceWiseLinearTransformBinaryKernel2<<<
-        // don't want N*M threads, only N*M/2
         CAFFE_GET_BLOCKS(X.size() / 2),
         CAFFE_CUDA_NUM_THREADS,
         0,

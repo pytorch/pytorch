@@ -48,9 +48,11 @@ def _if_scalar_type_as(self, tensor):
     """
     if isinstance(self, torch._C.Value):
         return self
-    else:
+    elif tensor.type().kind() == "TensorType":
         ty = tensor.type().scalarType().lower()
         return getattr(self, ty)()
+    else:
+        return self
 
 
 def _broadcast_if_scalar(x):
@@ -259,7 +261,9 @@ def embedding_bag(g,
 
 def size(g, self, dim):
     if _is_value(dim):
-        raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        if dim.node().kind() != 'onnx::Constant':
+            raise RuntimeError("ONNX export only supports constant dim values in .size()")
+        dim = int(dim.node().t('value'))
     full_shape = g.op("Shape", self)
     return select(g, full_shape, dim=0, index=dim)
 
@@ -688,6 +692,16 @@ def exp(g, self):
     return g.op("Exp", self)
 
 
+def norm(g, self, p, dim, keepdim):
+    if p == 1:
+        f = _reduce_op_symbolic("ReduceL1")
+    elif p == 2:
+        f = _reduce_op_symbolic("ReduceL2")
+    else:
+        raise RuntimeError("ONNX export only p-norms with p of 1 or 2")
+    return f(g, self, dim=dim, keepdim=keepdim)
+
+
 def conv_tbc(g, input, weight, bias, pad):
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
@@ -733,6 +747,15 @@ def _cast_func_template(to_i, g, input, non_blocking):
 for k, v in cast_pytorch_to_onnx.items():
     name = '_cast_{}'.format(k)
     globals()[name] = partial(_cast_func_template, v)
+
+
+def zeros_like(g, input):
+    return g.op("Sub", input, input).setType(input.type().contiguous())
+
+
+def full_like(g, input, fill_value):
+    # TODO: a more efficient implementation (ConstantFill?)
+    return add(g, zeros_like(g, input), fill_value, alpha=torch.tensor(1))
 
 
 def slice(g, self, dim, start, end, step):

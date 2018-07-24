@@ -96,18 +96,6 @@ def _sum_rightmost(value, dim):
     return value.reshape(required_shape).sum(-1)
 
 
-def _log_sum_exp(tensor, keepdim=True):
-    r"""
-    Numerically stable implementation for the `LogSumExp` operation. The
-    summing is done along the last dimension.
-
-    Args:
-        tensor (Tensor)
-        keepdim (Boolean): Whether to retain the last dimension on summing.
-    """
-    return tensor.logsumexp(dim=-1, keepdim=keepdim)
-
-
 def logits_to_probs(logits, is_binary=False):
     r"""
     Converts a tensor of logits into probabilities. Note that for the

@@ -4,7 +4,7 @@
 #include "ATen/Dispatch.h"
 #include "ATen/cpu/vml.h"
 #include "ATen/CPUApplyUtils.h"
-#include "ATen/native/cpu/CapabilityDispatch.h"
+#include "ATen/native/DispatchStub.h"
 #ifdef __AVX2__
 #include "ATen/native/cpu/avx_mathfun.h"
 #endif
@@ -151,6 +151,7 @@ IMPLEMENT_FLOAT_KERNEL(FLOATING, ceil)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, cos)
 // IMPLEMENT_FLOAT_KERNEL(FLOATING, cosh)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, erf)
+IMPLEMENT_FLOAT_KERNEL(FLOATING, erfc)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, exp)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, expm1)
 IMPLEMENT_FLOAT_KERNEL(FLOATING, floor)

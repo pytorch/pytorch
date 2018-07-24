@@ -14,6 +14,9 @@ template <typename scalar_t, bool LogSoftMax>
 void host_softmax(Tensor output, const Tensor& input, const int64_t dim) {
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
+  if (input.numel() == 0) {
+    return;
+  }
   int64_t inner_size = 1;
   for (int64_t i = 0; i < dim; ++i)
     outer_size *= input.size(i);
@@ -125,7 +128,7 @@ Tensor softmax_cpu(const Tensor& input_, const int64_t dim_) {
       dim >= 0 && dim < input.dim(),
       "dim must be non-negative and less than input dimensions");
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
-    softmax_lastdim_kernel(output, input);
+    softmax_lastdim_kernel(kCPU, output, input);
   } else {
     AT_DISPATCH_FLOATING_TYPES(input.type(), "softmax", [&] {
       host_softmax<scalar_t, false>(output, input, dim);
@@ -144,7 +147,7 @@ Tensor log_softmax_cpu(const Tensor& input_, const int64_t dim_) {
       dim >= 0 && dim < input.dim(),
       "dim must be non-negative and less than input dimensions");
   if (input.ndimension() > 0 && dim == input.ndimension() - 1) {
-    log_softmax_lastdim_kernel(output, input);
+    log_softmax_lastdim_kernel(kCPU, output, input);
   } else {
     AT_DISPATCH_FLOATING_TYPES(input.type(), "log_softmax", [&] {
       host_softmax<scalar_t, true>(output, input, dim);
@@ -173,7 +176,7 @@ Tensor softmax_backward_cpu(
       dim >= 0 && dim < grad.dim(),
       "dim must be non-negative and less than input dimensions");
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
-    softmax_backward_lastdim_kernel(grad_input, grad, output);
+    softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
     AT_DISPATCH_FLOATING_TYPES(grad.type(), "softmax_backward", [&] {
       host_softmax_backward<scalar_t, false>(grad_input, grad, output, dim);
@@ -202,7 +205,7 @@ Tensor log_softmax_backward_cpu(
       dim >= 0 && dim < grad.dim(),
       "dim must be non-negative and less than input dimensions");
   if (grad.ndimension() > 0 && dim == grad.ndimension() - 1) {
-    log_softmax_backward_lastdim_kernel(grad_input, grad, output);
+    log_softmax_backward_lastdim_kernel(kCPU, grad_input, grad, output);
   } else {
     AT_DISPATCH_FLOATING_TYPES(grad.type(), "log_softmax_backward", [&] {
       host_softmax_backward<scalar_t, true>(grad_input, grad, output, dim);
@@ -210,5 +213,11 @@ Tensor log_softmax_backward_cpu(
   }
   return grad_input;
 }
+
+DEFINE_DISPATCH(softmax_lastdim_kernel);
+DEFINE_DISPATCH(log_softmax_lastdim_kernel);
+DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
+DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
+
 }
 }

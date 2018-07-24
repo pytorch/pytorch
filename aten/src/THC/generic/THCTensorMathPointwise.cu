@@ -58,6 +58,7 @@ IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   tan, THCNumerics<real>::tan,   Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  atan, THCNumerics<real>::atan,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  tanh, THCNumerics<real>::tanh,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(   erf, THCNumerics<real>::erf,   Real)
+IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  erfc, THCNumerics<real>::erfc,  Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(erfinv, THCNumerics<real>::erfinv,Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC( round, THCNumerics<real>::round, Real)
 IMPLEMENT_CUDA_TENSOR_BASIC_FUNC(  frac, THCNumerics<real>::frac,  Real)
@@ -113,9 +114,9 @@ THCTensor_(cross)(THCState *state, THCTensor *self, THCTensor *x, THCTensor *y, 
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 3, self, x, y));
 
   int i;
-  int nd = THCTensor_(_nDimension)(state, x);
+  int nd = THCTensor_(nDimension)(state, x);
   ptrdiff_t nelem = THCTensor_(nElement)(state, x);
-  THArgCheck(nd == THCTensor_(_nDimension)(state, y), 1, "tensors must have same number of dimensions");
+  THArgCheck(nd == THCTensor_(nDimension)(state, y), 1, "tensors must have same number of dimensions");
   for (i = 0; i < nd; i++) {
     THArgCheck(THCTensor_(size)(state, x, i) == THCTensor_(size)(state, y, i), 1, "dimension %i of x and y does not match", i);
     if (dimension < 0 && THCTensor_(size)(state, x, i) == 3) {

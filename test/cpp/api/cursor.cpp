@@ -101,19 +101,36 @@ TEST_CASE("cursor/module") {
     SECTION("Map works") {
       std::vector<Module*> vector(3);
       cursor.map(vector.begin(), [](Module& module) { return &module; });
+      REQUIRE(vector[0] == &model[0]);
+      REQUIRE(vector[1] == &model[1]);
+      REQUIRE(vector[2] == &model[2]);
 
       std::list<Module*> list;
-      cursor.map(
-          std::back_inserter(list), [](Module& module) { return &module; });
+      cursor.map(std::inserter(list, list.end()), [](Module& module) {
+        return &module;
+      });
+      REQUIRE(list.size() == 3);
+      auto iterator = list.begin();
+      REQUIRE(*iterator++ == &model[0]);
+      REQUIRE(*iterator++ == &model[1]);
+      REQUIRE(*iterator++ == &model[2]);
+      REQUIRE(iterator == list.end());
     }
 
     SECTION("Map_items works") {
-      std::map<const char*, Module*> output;
+      std::map<std::string, Module*> output;
       cursor.map_items(
           std::inserter(output, output.end()),
           [](const std::string& key, Module& module) {
-            return std::make_pair(key.c_str(), &module);
+            return std::make_pair(key, &module);
           });
+      REQUIRE(output.size() == 3);
+      REQUIRE(output.count("0"));
+      REQUIRE(output.count("1"));
+      REQUIRE(output.count("2"));
+      REQUIRE(output["0"] == &model[0]);
+      REQUIRE(output["1"] == &model[1]);
+      REQUIRE(output["2"] == &model[2]);
     }
 
     SECTION("Count works for flat models") {
@@ -280,29 +297,28 @@ TEST_CASE("cursor/parameter") {
 
     SECTION("Apply_items works") {
       size_t count = 0;
-      cursor.apply_items(
-          [&count, &model, &first, &second](
-              const std::string& key, torch::Tensor& tensor) {
-            switch (count) {
-              case 0: {
-                REQUIRE(tensor.equal(first->tensor1));
-                break;
-              }
-              case 1: {
-                REQUIRE(tensor.equal(first->tensor2));
-                break;
-              }
-              case 2: {
-                REQUIRE(tensor.equal(second->tensor1));
-                break;
-              }
-              case 3: {
-                REQUIRE(tensor.equal(second->tensor2));
-                break;
-              }
-            }
-            count += 1;
-          });
+      cursor.apply_items([&count, &model, &first, &second](
+                             const std::string& key, torch::Tensor& tensor) {
+        switch (count) {
+          case 0: {
+            REQUIRE(tensor.equal(first->tensor1));
+            break;
+          }
+          case 1: {
+            REQUIRE(tensor.equal(first->tensor2));
+            break;
+          }
+          case 2: {
+            REQUIRE(tensor.equal(second->tensor1));
+            break;
+          }
+          case 3: {
+            REQUIRE(tensor.equal(second->tensor2));
+            break;
+          }
+        }
+        count += 1;
+      });
       REQUIRE(count == 4);
     }
 

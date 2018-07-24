@@ -131,7 +131,7 @@ class Dropout3d(_DropoutNd):
         return F.dropout3d(input, self.p, self.training, self.inplace)
 
 
-class AlphaDropout(Module):
+class AlphaDropout(_DropoutNd):
     r"""Applies Alpha Dropout over the input.
 
     Alpha Dropout is a type of Dropout that maintains the self-normalizing
@@ -153,6 +153,8 @@ class AlphaDropout(Module):
 
     Args:
         p (float): probability of an element to be dropped. Default: 0.5
+        inplace (bool, optional): If set to ``True``, will do this operation
+            in-place
 
     Shape:
         - Input: `Any`. Input can be of any shape
@@ -167,16 +169,11 @@ class AlphaDropout(Module):
     .. _Self-Normalizing Neural Networks: https://arxiv.org/abs/1706.02515
     """
 
-    def __init__(self, p=0.5):
-        super(AlphaDropout, self).__init__()
-        if p < 0 or p > 1:
-            raise ValueError("dropout probability has to be between 0 and 1, "
-                             "but got {}".format(p))
-        self.p = p
-
     def forward(self, input):
         return F.alpha_dropout(input, self.p, self.training)
 
-    def __repr__(self):
-        return self.__class__.__name__ + '(' \
-            + 'p=' + str(self.p) + ')'
+
+class FeatureAlphaDropout(_DropoutNd):
+
+    def forward(self, input):
+        return F.feature_alpha_dropout(input, self.p, self.training)

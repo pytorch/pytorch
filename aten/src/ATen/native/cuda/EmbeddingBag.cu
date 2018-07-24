@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/TensorUtils.h"
 #include "ATen/NativeFunctions.h"
 
@@ -176,7 +177,7 @@ Tensor embedding_bag_backward_cuda_sum_avg(
 
   auto grad_weight = at::zeros({num_weights, grad.size(1)}, grad.type());
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ptrdiff_t numel = indices.numel();
   int64_t stride = grad_weight.stride(0);
@@ -283,7 +284,7 @@ Tensor embedding_bag_backward_cuda_max(const Tensor &grad,
 
   int64_t numBags = grad.size(0);
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   dim3 block = dim3(32, 8);
   int grid = 1024;
@@ -323,7 +324,7 @@ _embedding_bag_cuda(const Tensor &weight, const Tensor &indices,
   auto offset2bag =
       at::zeros({indices.size(0)}, indices.options()); // offset2bag = [0 0 0 0 0]
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   auto output = at::zeros({offsets.size(0), weight.size(1)}, weight.options());
 

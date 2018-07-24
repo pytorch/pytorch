@@ -40,8 +40,11 @@ class Module {
   const std::string& name() const noexcept;
 
   /// Performs a recursive deep copy of the module and all its registered
-  /// parameters, buffers and submodules.
-  virtual std::shared_ptr<Module> clone() const;
+  /// parameters, buffers and submodules, optionally setting the current device
+  /// to the one supplied before cloning. If no device is given, each
+  /// parameter and buffer will be moved to the device of its source.
+  virtual std::shared_ptr<Module> clone(
+      at::optional<Device> device = at::nullopt) const;
 
   /// Provides a means to traverse the `Module` tree.
   ModuleCursor modules();
@@ -144,7 +147,7 @@ class Module {
   template <typename T>
   friend class detail::CursorBase;
 
-  virtual void clone_(Module& other);
+  virtual void clone_(Module& other, at::optional<Device> device);
 
   /// The implementation of the various `to()` methods.
   template <typename... Ts>

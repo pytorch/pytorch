@@ -168,6 +168,8 @@ class Caffe2Backend {
 
   Caffe2Ops CreateConvPoolOpBase(OnnxNode* onnx_node, int opset_version);
 
+  Caffe2Ops CreatePadPool(OnnxNode* onnx_node, int opset_version);
+
   Caffe2Ops CreateReshape(OnnxNode* onnx_node, int opset_version);
 
   Caffe2Ops CreateGather(OnnxNode* onnx_node, int opset_version);

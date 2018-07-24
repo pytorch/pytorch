@@ -1,5 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "conv_op_shared.h"
+#include "caffe2/operators/conv_op_shared.h"
 
 namespace caffe2 {
 

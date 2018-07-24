@@ -219,6 +219,26 @@ void ReduceMean(
     T* Y,
     Context* context);
 
+template <typename T, class Context>
+void ReduceL1(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
+template <typename T, class Context>
+void ReduceL2(
+    const int num_dims,
+    const int* dims,
+    const int num_axes,
+    const int* axes,
+    const T* X,
+    T* Y,
+    Context* context);
+
 // Broadcasts X with X_dims to Y with Y_dims.
 template <typename T, class Context>
 void Broadcast(
@@ -362,6 +382,17 @@ void Set(const size_t N, const T alpha, T* X, Context* context);
 
 template <typename T, class Context>
 void RandUniform(const size_t n, const T a, const T b, T* r, Context* context);
+
+// Generate n values that sum up to a fixed sum
+// and subject to a restriction a <= x <= b for each x generated
+template <typename T, class Context>
+void RandFixedSum(
+    const size_t n,
+    const T a,
+    const T b,
+    const T sum,
+    T* r,
+    Context* context);
 
 template <typename T, class Context>
 void RandUniformUnique(
