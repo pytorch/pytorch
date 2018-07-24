@@ -53,7 +53,6 @@ struct Storage {
   char flag;
   at::Allocator* allocator;
   std::unique_ptr<THFinalizer> finalizer;
-  struct Storage* view;
   Storage(Storage&) = delete;
   Storage(const Storage&) = delete;
   Storage(Storage&&) = delete;
@@ -79,9 +78,6 @@ struct Storage {
   static const char REFCOUNTED = 1;
   static const char RESIZABLE = 2;
 
-//  virtual ~Storage() {
-//    THStorage_free(storage);
-//  }
   void operator=(const Storage&) = delete;
 
   virtual size_t elementSize() const {
