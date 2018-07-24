@@ -186,7 +186,7 @@ REGISTER_CUDA_OPERATOR(NanCheck, NanCheckOp<CUDAContext>);
 __global__ void
 ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    maxout[i] = max(X[i], Y[i]);
+    maxout[i] = fmaxf(X[i], Y[i]);
   }
 }
 
@@ -217,7 +217,7 @@ REGISTER_CUDA_OPERATOR(MaxGradient, MaxGradientOp<float, CUDAContext>);
 __global__ void
 ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    minout[i] = min(X[i], Y[i]);
+    minout[i] = fminf(X[i], Y[i]);
   }
 }
 
