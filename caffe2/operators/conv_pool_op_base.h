@@ -319,6 +319,22 @@ class ConvPoolOpBase : public Operator<Context> {
     }
   }
 
+  bool HasPad() const {
+    if (kernel_.size() == 2) {
+      return pad_t() > 0 || pad_b() > 0 || pad_l() > 0 || pad_r() > 0;
+    }
+    return std::any_of(
+        pads_.cbegin(), pads_.cend(), [](const int x) { return x > 0; });
+  }
+
+  bool HasStride() const {
+    if (kernel_.size() == 2) {
+      return stride_h() > 1 || stride_w() > 1;
+    }
+    return std::any_of(
+        stride_.cbegin(), stride_.cend(), [](const int x) { return x > 1; });
+  }
+
   void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
     bool reset_tensor_device_ = false;
 
@@ -719,36 +735,38 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
  private:
- inline void AllocateAndCopy(const vector<int>& vec, Tensor<Context>& tensor) {
-      tensor.Resize(vec.size());
-      context_.template Copy<int, CPUContext, Context>(
-          vec.size(), vec.data(), tensor.template mutable_data<int>());
- }
+  inline void AllocateAndCopy(const vector<int>& vec, Tensor<Context>& tensor) {
+    tensor.Resize(vec.size());
+    context_.template Copy<int, CPUContext, Context>(
+        vec.size(), vec.data(), tensor.template mutable_data<int>());
+  }
 
-#define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
-  USE_OPERATOR_FUNCTIONS(Context);                 \
-  using ConvPoolOpBase<Context>::pads_;            \
-  using ConvPoolOpBase<Context>::pad_t;            \
-  using ConvPoolOpBase<Context>::pad_l;            \
-  using ConvPoolOpBase<Context>::pad_b;            \
-  using ConvPoolOpBase<Context>::pad_r;            \
-  using ConvPoolOpBase<Context>::legacy_pad_;      \
-  using ConvPoolOpBase<Context>::global_pooling_;  \
-  using ConvPoolOpBase<Context>::kernel_;          \
-  using ConvPoolOpBase<Context>::kernel_h;         \
-  using ConvPoolOpBase<Context>::kernel_w;         \
-  using ConvPoolOpBase<Context>::dilation_;        \
-  using ConvPoolOpBase<Context>::dilation_h;       \
-  using ConvPoolOpBase<Context>::dilation_w;       \
-  using ConvPoolOpBase<Context>::stride_;          \
-  using ConvPoolOpBase<Context>::stride_h;         \
-  using ConvPoolOpBase<Context>::stride_w;         \
-  using ConvPoolOpBase<Context>::group_;           \
-  using ConvPoolOpBase<Context>::order_;           \
-  using ConvPoolOpBase<Context>::shared_buffer_;   \
-  using ConvPoolOpBase<Context>::GetDims;          \
-  using ConvPoolOpBase<Context>::GetDimsSize;      \
-  using ConvPoolOpBase<Context>::SetDeviceTensor;  \
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context)     \
+  USE_OPERATOR_FUNCTIONS(Context);                \
+  using ConvPoolOpBase<Context>::pads_;           \
+  using ConvPoolOpBase<Context>::pad_t;           \
+  using ConvPoolOpBase<Context>::pad_l;           \
+  using ConvPoolOpBase<Context>::pad_b;           \
+  using ConvPoolOpBase<Context>::pad_r;           \
+  using ConvPoolOpBase<Context>::legacy_pad_;     \
+  using ConvPoolOpBase<Context>::global_pooling_; \
+  using ConvPoolOpBase<Context>::kernel_;         \
+  using ConvPoolOpBase<Context>::kernel_h;        \
+  using ConvPoolOpBase<Context>::kernel_w;        \
+  using ConvPoolOpBase<Context>::dilation_;       \
+  using ConvPoolOpBase<Context>::dilation_h;      \
+  using ConvPoolOpBase<Context>::dilation_w;      \
+  using ConvPoolOpBase<Context>::stride_;         \
+  using ConvPoolOpBase<Context>::stride_h;        \
+  using ConvPoolOpBase<Context>::stride_w;        \
+  using ConvPoolOpBase<Context>::group_;          \
+  using ConvPoolOpBase<Context>::order_;          \
+  using ConvPoolOpBase<Context>::shared_buffer_;  \
+  using ConvPoolOpBase<Context>::GetDims;         \
+  using ConvPoolOpBase<Context>::GetDimsSize;     \
+  using ConvPoolOpBase<Context>::SetDeviceTensor; \
+  using ConvPoolOpBase<Context>::HasPad;          \
+  using ConvPoolOpBase<Context>::HasStride;       \
   using ConvPoolOpBase<Context>::ws_
 };
 

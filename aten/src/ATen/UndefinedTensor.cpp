@@ -6,7 +6,7 @@ namespace at {
 
 // should this use the globalContext?  Can it get a context passed in somehow?
 UndefinedTensor::UndefinedTensor()
-: TensorImpl(&(globalContext().getType(Backend::Undefined,ScalarType::Undefined))) {
+: TensorImpl(&(globalContext().getType(Backend::Undefined,ScalarType::Undefined)), nullptr) {
 }
 
 const char * UndefinedTensor::toString() const {

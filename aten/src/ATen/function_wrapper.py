@@ -180,7 +180,7 @@ if(${check_name}.type().is_sparse()) {
 }""")
 
 BUFFER_DEFINITION = CodeTemplate("""\
-auto ${name}_ = new ${Tensor}(context);
+auto ${name}_ = new ${Tensor}(${THTensor}_new());
 auto ${name} = Tensor(${name}_, false);""")
 
 CONDITIONAL_INITIALIZER = CodeTemplate("""\
@@ -277,7 +277,7 @@ CHECKED_CAST = {
     'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*':
         CodeTemplate(
-            'check_generator<${Backend}Generator>(${arg_name}, &context->defaultGenerator(backend()))'),
+            'check_generator<${Backend}Generator>(${arg_name}, &globalContext().defaultGenerator(backend()))'),
     # This is a cast done via direct-construction
     'THSize*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::SIZE);'),
     # This is a cast done via direct-construction
@@ -306,14 +306,24 @@ CHECKED_USE = {
 
 CHECKED_USE_NULLABLE = CodeTemplate('${arg_name}_ ? ${usage} : NULL')
 
+ALLOC_NOARGS_WRAP = {
+    'THTensor*': 'detail::new_${Tensor}()',
+    'THBoolTensor*': 'detail::new_${Backend}ByteTensor()',
+    'THIndexTensor*': 'detail::new_${Backend}LongTensor()',
+    'THIntegerTensor*': 'detail::new_${Backend}IntTensor()',
+    'THSTensor*': 'detail::new_Sparse${Tensor}()',
+    'THDenseTensor*': 'detail::new_${DenseTensor}()',
+    'THDenseIndexTensor*': 'detail::new_${DenseBackend}LongTensor()',
+}
+
 ALLOC_WRAP = {
-    'THTensor*': 'new ${Tensor}(context${,arguments})',
-    'THBoolTensor*': 'new ${Backend}ByteTensor(context${,arguments})',
-    'THIndexTensor*': 'new ${Backend}LongTensor(context${,arguments})',
-    'THIntegerTensor*': 'new ${Backend}IntTensor(context${,arguments})',
-    'THSTensor*': 'new Sparse${Tensor}(context${,arguments})',
-    'THDenseTensor*': 'new ${DenseTensor}(context${,arguments})',
-    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(context${,arguments})',
+    'THTensor*': 'new ${Tensor}(${arguments})',
+    'THBoolTensor*': 'new ${Backend}ByteTensor(${arguments})',
+    'THIndexTensor*': 'new ${Backend}LongTensor(${arguments})',
+    'THIntegerTensor*': 'new ${Backend}IntTensor(${arguments})',
+    'THSTensor*': 'new Sparse${Tensor}(${arguments})',
+    'THDenseTensor*': 'new ${DenseTensor}(${arguments})',
+    'THDenseIndexTensor*': 'new ${DenseBackend}LongTensor(${arguments})',
 }
 
 # Replacements for constants when calling into TH
@@ -1228,7 +1238,10 @@ def create_derived(backend_type_env, declarations):
     def allocate_arg(env, arg, output_count):
         # type: (Environment, THFormal, int) -> List[str]
         name = arg['name']
-        allocation = CodeTemplate(ALLOC_WRAP[arg['type']]).substitute(env, arguments=[])
+        state = ''
+        if is_cuda:
+            state = 'globalContext().getTHCState()'
+        allocation = CodeTemplate(ALLOC_NOARGS_WRAP[arg['type']]).substitute(env)
         tensor_arg = '{}_'.format(name)
         if arg.get('mask', False):
             allocation = 'output_mask[{}] ? {} : nullptr'.format(output_count, allocation)
@@ -1257,7 +1270,7 @@ def create_derived(backend_type_env, declarations):
         is_nn = option['mode'] == 'NN'
         actuals = get_arguments(cimpl['arguments'], option)
         if is_cuda or is_nn:
-            actuals = ['context->getTHCState()'] + actuals
+            actuals = ['globalContext().getTHCState()'] + actuals
 
         cname = cimpl['cname']
         if option.get('sparse', False):

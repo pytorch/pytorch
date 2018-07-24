@@ -13,5 +13,5 @@ Scalar ${Tensor}::localScalar() {
 std::unique_ptr<Storage> ${Tensor}::storage() {
   auto storage = ${THTensor}_storage(${state,}tensor);
   ${THStorage}_retain(${state,}storage);
-  return std::unique_ptr<Storage>(new ${Storage}(&type().get_context(), storage));
+  return std::unique_ptr<Storage>(new ${Storage}(storage));
 }
