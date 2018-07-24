@@ -28,9 +28,9 @@ struct AT_API TensorImpl : public Retainable {
   Type & type() const {
     return *type_;
   }
-  virtual const char * toString() const = 0;
+  const char * toString() const;
   virtual IntList sizes() const;
-  virtual IntList strides() const = 0;
+  virtual IntList strides() const;
   virtual int64_t dim() const;
   /**
    * Perform a conversion of this tensor to a scalar, if numel() == 1.
