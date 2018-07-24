@@ -99,9 +99,6 @@ struct THTensor
     }
 };
 
-#include "generic/THTensorFastGetSet.hpp"
-#include "THGenerateAllTypes.h"
-
 inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
   return tensor->sizes_.data();
 }
@@ -109,6 +106,14 @@ inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
 inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
   return tensor->strides_.data();
 }
+
+// NB: Non-retaining
+inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
+  return tensor->storage_;
+}
+
+#include "generic/THTensorFastGetSet.hpp"
+#include "THGenerateAllTypes.h"
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
@@ -132,11 +137,6 @@ inline void THTensor_setStrideAtDim(THTensor* tensor, int dim, int64_t new_strid
 
 inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset) {
   tensor->storage_offset_ = storage_offset;
-}
-
-// NB: Non-retaining
-inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
-  return tensor->storage_;
 }
 
 // NB: Steals ownership of storage
