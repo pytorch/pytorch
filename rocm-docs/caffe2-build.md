@@ -1,4 +1,4 @@
-# rocm-caffe2: Building From Source
+# Caffe2: Building From Source on ROCm platform
 
 ## Intro
 This instruction provides a starting point to build caffe2 on AMD GPUs (Caffe2 ROCm port) from source.
@@ -14,18 +14,18 @@ Install ROCm stack following steps at [link](https://github.com/RadeonOpenComput
 
 ### Pull the docker image
 ```
-docker pull rohith612/caffe2:rocm1.8.2
+docker pull rocm/caffe2:unbuilt-rocm1.8.2
 ```
 This docker image has all the dependencies for caffe2 pre-installed.
 
 ### Pull the latest caffe2 source:
 * Using https 
 ```
-git clone --recursive https://github.com/pytorch/pytorch.git
+git clone --recurse-submodules https://github.com/pytorch/pytorch.git
 ```
 * Using ssh
 ```
-git clone --recursive git@github.com:pytorch/pytorch.git
+git clone --recurse-submodules git@github.com:pytorch/pytorch.git
 ```
 Navigate to repo directory
 ```
@@ -34,7 +34,7 @@ cd pytorch
 
 ### Launch the docker container
 ```	
-docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video -v $PWD:/pytorch rohith612/caffe2:rocm1.8.2
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video -v $PWD:/pytorch rocm/caffe2:unbuilt-rocm1.8.2
 ``` 
 Navigate to pytorch directory `cd /pytorch` inside the container.
 
