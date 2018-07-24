@@ -1,6 +1,8 @@
 #include "caffe2/utils/math_utils.h"
 
 #include <algorithm>
+#include <functional>
+#include <numeric>
 #include <vector>
 
 #include "caffe2/core/logging.h"
@@ -68,7 +70,8 @@ bool IsRowwiseBroadcastBinaryOp(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
-    int* pivot,
+    int* rows,
+    int* cols,
     bool* broadcast_1st) {
   if (ndim == 0) {
     return false;
@@ -82,16 +85,32 @@ bool IsRowwiseBroadcastBinaryOp(
   if (A_pivot == B_pivot) {
     return false;
   }
-  *pivot = std::max(A_pivot, B_pivot);
-  *broadcast_1st = A_pivot > B_pivot;
-  return std::equal(A_dims + *pivot, A_dims + ndim, B_dims + *pivot);
+  const int pivot = std::max(A_pivot, B_pivot);
+  if (A_pivot > B_pivot) {
+    *rows = std::accumulate(
+        B_dims + B_pivot, B_dims + pivot, 1, std::multiplies<int>());
+    *broadcast_1st = true;
+  } else {
+    *rows = std::accumulate(
+        A_dims + A_pivot, A_dims + pivot, 1, std::multiplies<int>());
+    *broadcast_1st = false;
+  }
+  *cols = 1;
+  for (int i = pivot; i < ndim; ++i) {
+    if (A_dims[i] != B_dims[i]) {
+      return false;
+    }
+    *cols *= A_dims[i];
+  }
+  return true;
 }
 
 bool IsColwiseBroadcastBinaryOp(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
-    int* pivot,
+    int* rows,
+    int* cols,
     bool* broadcast_1st) {
   if (ndim == 0) {
     return false;
@@ -105,9 +124,81 @@ bool IsColwiseBroadcastBinaryOp(
   if (A_pivot == B_pivot) {
     return false;
   }
-  *pivot = std::min(A_pivot, B_pivot) + 1;
-  *broadcast_1st = A_pivot < B_pivot;
-  return std::equal(A_dims, A_dims + *pivot, B_dims);
+  ++A_pivot;
+  ++B_pivot;
+  const int pivot = std::min(A_pivot, B_pivot);
+  if (A_pivot < B_pivot) {
+    *cols = std::accumulate(
+        B_dims + pivot, B_dims + B_pivot, 1, std::multiplies<int>());
+    *broadcast_1st = true;
+  } else {
+    *cols = std::accumulate(
+        A_dims + pivot, A_dims + A_pivot, 1, std::multiplies<int>());
+    *broadcast_1st = false;
+  }
+  *rows = 1;
+  for (int i = 0; i < pivot; ++i) {
+    if (A_dims[i] != B_dims[i]) {
+      return false;
+    }
+    *rows *= A_dims[i];
+  }
+  return true;
+}
+
+bool IsMiddleBroadcastBinaryOp(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    int* pre,
+    int* mid,
+    int* nxt,
+    bool* broadcast_1st) {
+  if (ndim == 0) {
+    return false;
+  }
+  int A_pre = 0;
+  for (; A_pre < ndim && A_dims[A_pre] == 1; ++A_pre)
+    ;
+  int B_pre = 0;
+  for (; B_pre < ndim && B_dims[B_pre] == 1; ++B_pre)
+    ;
+  int A_nxt = ndim - 1;
+  for (; A_nxt >= 0 && A_dims[A_nxt] == 1; --A_nxt)
+    ;
+  int B_nxt = ndim - 1;
+  for (; B_nxt >= 0 && B_dims[B_nxt] == 1; --B_nxt)
+    ;
+  ++A_nxt;
+  ++B_nxt;
+  if (A_pre == B_pre || A_nxt == B_nxt) {
+    return false;
+  }
+  if (A_pre > B_pre && A_nxt < B_nxt) {
+    *pre = std::accumulate(
+        B_dims + B_pre, B_dims + A_pre, 1, std::multiplies<int>());
+    *nxt = std::accumulate(
+        B_dims + A_nxt, B_dims + B_nxt, 1, std::multiplies<int>());
+    *broadcast_1st = true;
+  } else if (A_pre < B_pre && A_nxt > B_nxt) {
+    *pre = std::accumulate(
+        A_dims + A_pre, A_dims + B_pre, 1, std::multiplies<int>());
+    *nxt = std::accumulate(
+        A_dims + B_nxt, A_dims + A_nxt, 1, std::multiplies<int>());
+    *broadcast_1st = false;
+  } else {
+    return false;
+  }
+  const int l = std::max(A_pre, B_pre);
+  const int r = std::min(A_nxt, B_nxt);
+  *mid = 1;
+  for (int i = l; i < r; ++i) {
+    if (A_dims[i] != B_dims[i]) {
+      return false;
+    }
+    *mid *= A_dims[i];
+  }
+  return true;
 }
 
 void ComputeTransposeAxesForReduceOp(
