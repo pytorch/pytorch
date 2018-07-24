@@ -110,6 +110,7 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
 
   # These are fixed in rocm 1.8.2, re-enable them once our CI docker images are upgraded
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/recurrent_net_executor_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/conv_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/group_conv_test.py")
 fi
@@ -118,6 +119,7 @@ fi
 echo "Running Python tests.."
 "$PYTHON" \
   -m pytest \
+  -x \
   -v \
   --junit-xml="$TEST_DIR/python/result.xml" \
   --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
