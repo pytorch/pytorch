@@ -156,7 +156,7 @@ inline bool THTensor_isZeroDim(const THTensor *tensor) {
 }
 
 inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
-  tensor->is_zero_dim_ = tensor;
+  tensor->is_zero_dim_ = is_zero_dim;
 }
 
 TH_API void THTensor_free(THTensor *self);
