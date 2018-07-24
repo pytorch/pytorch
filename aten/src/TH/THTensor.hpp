@@ -17,6 +17,7 @@ struct THTensor
       , storage_offset_(0)
       , sizes_{0}
       , strides_{1}
+      , is_zero_dim_(false)
       {}
 
     ~THTensor() {
@@ -34,6 +35,9 @@ struct THTensor
 
     std::vector<int64_t> sizes_;
     std::vector<int64_t> strides_;
+
+    // TODO: get rid of this, use the sizes_/strides_ .size() instead
+    bool is_zero_dim_;
 
     template <typename T>
     inline T * data() const {
@@ -142,6 +146,14 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
 // NB: Steals ownership of storage
 inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   tensor->storage_ = storage;
+}
+
+inline bool THTensor_isZeroDim(const THTensor *tensor) {
+  return tensor->is_zero_dim_;
+}
+
+inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
+  tensor->is_zero_dim_ = tensor;
 }
 
 TH_API void THTensor_free(THTensor *self);
