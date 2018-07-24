@@ -1,6 +1,7 @@
 #pragma once
 
-#include "Exceptions.h"
+#include "ATen/cuda/CUDAContext.h"
+#include "ATen/cuda/Exceptions.h"
 
 #include "cudnn-wrapper.h"
 #include <ATen/ATen.h>
@@ -304,7 +305,7 @@ struct AT_CUDA_API RNNDescriptor
           CUDNN_RNN_ALGO_STANDARD,
           datatype));
 #if CUDNN_VERSION >= 7000 && CUDA_VERSION >= 9000
-    cudaDeviceProp* prop = globalContext().getCurrentDeviceProperties();
+    cudaDeviceProp* prop = at::cuda::getCurrentDeviceProperties();
     if (prop->major >= 7) {
       if (datatype == CUDNN_DATA_HALF) {
         cudnnSetRNNMatrixMathType(mut_desc(), CUDNN_TENSOR_OP_MATH);

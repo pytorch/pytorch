@@ -7,7 +7,6 @@
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <ATen/ATen.h>
 #include <ATen/Error.h>
@@ -20,19 +19,9 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
-struct Function;
-} // namespace autograd
-namespace jit { namespace tracer {
-// Has to be forward declared because tracer_state.h has a dependency on
-// variable.h.
-struct ValueTracingStateElem;
-using ValueTracingState = std::list<ValueTracingStateElem>;
-}} // namespace jit::tracer
-} // namespace torch
-
 namespace torch { namespace autograd {
+
+struct Function;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
@@ -88,7 +77,7 @@ namespace torch { namespace autograd {
 /// free function instead. To create a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable : public at::Tensor {
+struct TORCH_API Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
 
@@ -227,15 +216,6 @@ struct Variable : public at::Tensor {
   void add_hook(std::shared_ptr<FunctionPreHook> hook);
   const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const noexcept;
   void clear_hooks();
-
-  // JIT Tracing
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  void set_tracing_state(jit::tracer::ValueTracingState* new_tracing_state);
-  jit::tracer::ValueTracingState& tracing_state() const noexcept;
-
-  /// Returns true if the `Variable`'s tracing state is not null.
-  bool has_tracing_state() const noexcept;
 
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -379,9 +359,6 @@ struct Variable::Impl : public at::TensorImpl {
   // state are still thread-safe. Used by get_grad_fn and
   // get_grad_accumulator.
   std::mutex mutex_;
-
-  // For use in torch::jit::tracer
-  auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state_;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -562,13 +539,6 @@ inline const std::vector<std::shared_ptr<FunctionPreHook>>& Variable::hooks()
 
 inline void Variable::clear_hooks() {
   get()->hooks_.clear();
-}
-
-// JIT Tracing
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline bool Variable::has_tracing_state() const noexcept {
-  return get()->tracing_state_ != nullptr;
 }
 
 // View Variables

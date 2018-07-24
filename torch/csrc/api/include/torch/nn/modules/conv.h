@@ -32,9 +32,11 @@ struct ConvOptions {
 template <size_t D, typename Derived>
 class ConvImpl : public torch::nn::Cloneable<Derived> {
  public:
-  template <typename... Ts>
-  explicit ConvImpl(Ts&&... ts)
-      : ConvImpl(ConvOptions<D>(std::forward<Ts>(ts)...)) {}
+  ConvImpl(
+      int64_t input_channels,
+      int64_t output_channels,
+      ExpandingArray<D> kernel_size)
+      : ConvImpl(ConvOptions<D>(input_channels, output_channels, kernel_size)) {}
   explicit ConvImpl(ConvOptions<D> options);
 
   void reset() override;

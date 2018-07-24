@@ -46,6 +46,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
+
+  # ROCm builds experience OOM issues when buliding with sscache. (HCC Issue #785)
+  export MAX_JOBS=`expr $(nproc) - 1`
+
   USE_ROCM=1 python setup.py install
   exit
 fi

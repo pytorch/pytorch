@@ -95,9 +95,12 @@ def export(model, args, f, export_params=True, verbose=False, training=False,
 
 
 def _optimize_graph(graph, operator_export_type):
-    # run dce first to eliminate dead parts of the graph that might have been
-    # left behind by things like symbolic_override
 
+    # onnx only supports tensors, so we turn all out number types into tensors
+    torch._C._jit_pass_erase_number_types(graph)
+
+    # run dce to eliminate dead parts of the graph that might have been
+    # left behind by things like symbolic_override
     torch._C._jit_pass_dce(graph)
     torch._C._jit_pass_lint(graph)
 
@@ -168,7 +171,6 @@ def _model_to_graph(model, args, f, verbose=False, training=False,
             graph = method.propagate_and_assign_input_and_output_shapes(
                 args, example_outputs, False, propagate)
             # Erase number types to bring the graph to a pre-NumberType state
-            torch._C._jit_pass_erase_number_types(graph)
             params = method.params()
         except AttributeError:
             # TODO: just trace it
@@ -451,7 +453,9 @@ def _run_symbolic_function(g, n, inputs, env, operator_export_type=OperatorExpor
         elif ns == "prim":
             if op_name == "Constant":
                 return g.op("Constant", value_t=n["value"])
-
+            elif op_name == "ListConstruct":
+                unsqueezed = [g.op("Unsqueeze", input, axes_i=[0]) for input in inputs]
+                return g.op("Concat", *unsqueezed, axis_i=0)
             elif op_name == "Undefined":
                 # Undefined is not an ONNX operator; keep it as prim::Undefined
                 # and let the exporter handle finally eliminating these

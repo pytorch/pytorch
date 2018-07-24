@@ -465,7 +465,7 @@ def disable_asserts(input_string):
 
 
 def replace_forceinline(input_string):
-    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP. 
+    """__forceinline__'d methods can cause 'symbol multiply defined' errors in HIP.
     Adding 'static' to all such methods leads to compilation errors, so
     replacing '__forceinline__' with 'inline' as a workaround
     https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_faq.md#what-if-hip-generates-error-of-symbol-multiply-defined-only-on-amd-machine
@@ -484,6 +484,22 @@ def replace_math_functions(input_string):
     output_string = re.sub("std::exp\(", "::exp(", output_string)
     output_string = re.sub("std::log\(", "::log(", output_string)
     output_string = re.sub("std::pow\(", "::pow(", output_string)
+    return output_string
+
+
+def replace_extern_shared(input_string):
+    """Match extern __shared__ type foo[]; syntax and use HIP_DYNAMIC_SHARED() MACRO instead.
+       https://github.com/ROCm-Developer-Tools/HIP/blob/master/docs/markdown/hip_kernel_language.md#__shared__
+    Example:
+        "extern __shared__ char smemChar[];" => "HIP_DYNAMIC_SHARED( char, smemChar)"
+        "extern __shared__ unsigned char smem[];" => "HIP_DYNAMIC_SHARED( unsigned char, my_smem)"
+    """
+    output_string = input_string
+    output_string = re.sub(
+        r"extern\s+([\w\(\)]+)?\s*__shared__\s+([\w:<>\s]+)\s+(\w+)\s*\[\s*\]\s*;",
+        lambda inp: "HIP_DYNAMIC_SHARED({0} {1}, {2})".format(
+            inp.group(1) or "", inp.group(2), inp.group(3)), output_string)
+
     return output_string
 
 
@@ -681,9 +697,9 @@ def preprocessor(filepath, stats, hipify_caffe2):
 
                 if cuda_type in output_source:
                     if hipify_caffe2:
-                        pattern = r'({0})'.format(cuda_type)
+                        pattern = r'({0})'.format(re.escape(cuda_type))
                     else:
-                        pattern = r'(\b{0}\b)'.format(cuda_type)
+                        pattern = r'(\b{0}\b)'.format(re.escape(cuda_type))
                     output_source = re.sub(pattern, hip_type, output_source)
 
         # Perform Kernel Launch Replacements
@@ -699,6 +715,9 @@ def preprocessor(filepath, stats, hipify_caffe2):
         # Replace __forceinline__ with inline
         output_source = replace_forceinline(output_source)
 
+        # Replace the extern __shared__
+        output_source = replace_extern_shared(output_source)
+
         fout.write(output_source)
 
 
@@ -706,7 +725,7 @@ def file_specific_replacement(filepath, search_string, replace_string, strict=Fa
     with openf(filepath, "r+") as f:
         contents = f.read()
         if strict:
-            contents = re.sub(r'\b({0})\b'.format(search_string), lambda x: replace_string, contents)
+            contents = re.sub(r'\b({0})\b'.format(re.escape(search_string)), lambda x: replace_string, contents)
         else:
             contents = contents.replace(search_string, replace_string)
         f.seek(0)
@@ -824,7 +843,7 @@ def disable_unsupported_function_call(function, input_string, replacement):
     output_string = input_string
 
     # Find all calls to the function
-    calls = re.finditer(r"\b{0}\b".format(function), input_string)
+    calls = re.finditer(r"\b{0}\b".format(re.escape(function)), input_string)
 
     # Do replacements
     for call in calls:
@@ -983,7 +1002,7 @@ def add_static_casts(filepath, KernelTemplateParams):
                 if "THCUNN" in filepath.split("/") and "generic" not in filepath.split("/"):
                     kernel_name_with_template = kernel_name_with_template.replace("<real>", "<Dtype>")
 
-                full_new_kernel_launch = re.sub(r'\b{0}\b'.format(original_kernel_name_with_template),
+                full_new_kernel_launch = re.sub(r'\b{0}\b'.format(re.escape(original_kernel_name_with_template)),
                                                 lambda x: kernel_name_with_template, full_new_kernel_launch)
 
                 # Replace Launch
@@ -1181,7 +1200,7 @@ def main():
 
                 # Disable Constants w\ Boundary.
                 for const in constants:
-                    txt = re.sub(r"\b{0}\b".format(const), constants[const], txt)
+                    txt = re.sub(r"\b{0}\b".format(re.escape(const)), constants[const], txt)
 
                 # Disable Constants
                 for s_const in s_constants:

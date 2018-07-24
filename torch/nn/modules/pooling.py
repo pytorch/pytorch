@@ -691,7 +691,7 @@ class _LPPoolNd(Module):
         self.ceil_mode = ceil_mode
 
     def extra_repr(self):
-        return 'norm_type={norm_type}, kernel_size{kernel_size}, stride={stride}, ' \
+        return 'norm_type={norm_type}, kernel_size={kernel_size}, stride={stride}, ' \
             'ceil_mode={ceil_mode}'.format(**self.__dict__)
 
 
