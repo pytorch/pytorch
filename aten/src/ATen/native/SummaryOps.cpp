@@ -22,7 +22,7 @@ Tensor _bincount_cpu_template(
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
   if (self.numel() == 0) {
-    return at::zeros(minlength, self.options());
+    return native::zeros({minlength}, kLong);
   }
 
   bool has_weights = weights.defined();

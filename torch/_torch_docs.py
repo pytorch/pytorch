@@ -609,6 +609,9 @@ The number of bins (size 1) is one larger than the largest value in
 :math:`out[n] += weights[i]` if :attr:`weights` is specified else
 :math:`out[n] += 1`.
 
+If the number of elements in :attr:`input` is 0, then the result is a tensor of size
+:attr:`minlength` filled with zeros.
+
 Arguments:
     input (Tensor): 1-d int tensor
     weights (Tensor): optional, weight for each value in the input tensor.
@@ -616,7 +619,7 @@ Arguments:
     minlength (int): optional, min number of bins. Should be non-negative.
 
 Shape:
-    output (Tensor): ``Size([max(input) + 1])``
+    output (Tensor): ``Size([max(input) + 1])`` if :attr:`input` is non-empty.
 
 Example::
 

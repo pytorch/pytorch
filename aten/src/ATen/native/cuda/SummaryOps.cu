@@ -249,8 +249,8 @@ Tensor _bincount_cuda_template(
        *self.min().toBackend(kCPU).data<input_t>() < 0)) {
     AT_ERROR("bincount only supports 1-d non-negative integral inputs.");
   }
-  if (self.numel == 0) {
-    return at::zeros(minlength, self.options());
+  if (self.numel() == 0) {
+    return native::zeros({minlength}, device(kCUDA).dtype(kLong));
   }
 
   bool has_weights = weights.defined();
