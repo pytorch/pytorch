@@ -328,7 +328,7 @@ at::optional<AttributeKind> attributeKindOf(TypePtr type) {
     case TypeKind::FloatType: return AttributeKind::f;
     case TypeKind::NumberType: return AttributeKind::t;
     case TypeKind::ListType:
-      if(type->isSubtypeOf(*ListType::ofInts()))
+      if(type->isSubtypeOf(ListType::ofInts()))
         return AttributeKind::is;
       else
         return at::nullopt;
@@ -338,7 +338,7 @@ at::optional<AttributeKind> attributeKindOf(TypePtr type) {
 }
 
 bool typeMatches(TypePtr actual, TypePtr formal) {
-  return actual->isSubtypeOf(*formal);
+  return actual->isSubtypeOf(formal);
 }
 
 bool Operator::matches(const Node* node) const {

@@ -86,7 +86,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
                              << "of arguments: expected " << arguments.size() << ", but got "
                              << inputs.size();
     for (size_t i = 0; i < arguments.size(); ++i) {
-      if (!inputs[i]->type()->isSubtypeOf(*arguments[i]))
+      if (!inputs[i]->type()->isSubtypeOf(arguments[i]))
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
                                << arguments[i]->str() << ", but got " << inputs[i]->type()->str();
     }
@@ -135,7 +135,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
     // to do it.
     for (auto & ret_type_elem : returns) {
-      if (!ret_type_elem->isSubtypeOf(*DynamicType::get())) {
+      if (!ret_type_elem->isSubtypeOf(DynamicType::get())) {
         throw ErrorReport(loc) << "Python functions can currently only return Tensors";
       }
     }

@@ -265,7 +265,7 @@ void pushPackingPastRnn(Block *b) {
     // unhygenic way, Pytorch ends up propagating an incorrect type.
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
-    TensorType* oldType = rnn->inputs()[0]->type()->cast<TensorType>();
+    TensorTypePtr oldType = rnn->inputs()[0]->type()->cast<TensorType>();
     if (oldType) {
       std::vector<int64_t> new_sizes;
       new_sizes.push_back(oldType->sizes()[0]);

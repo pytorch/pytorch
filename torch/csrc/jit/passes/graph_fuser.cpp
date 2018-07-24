@@ -83,12 +83,12 @@ bool isSimpleMap(Node *node) {
     return false;
   // Make sure that the node doesn't broadcast.
   JIT_ASSERT(node->inputs().size() > 0);
-  TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
+  TensorTypePtr expected_type = node->inputs()[0]->type()->cast<TensorType>();
   if (!expected_type) return false;
 //type checking is intentionally dropped from isSimpleMap
 //isFusable is checking input/output types as there are some exceptions from allFloatIO requirement
-  static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
-     TensorType* actual = _actual->cast<TensorType>();
+  static const auto equal_modulo_strides = [](TensorTypePtr expected, const TypePtr& _actual) {
+     TensorTypePtr actual = _actual->cast<TensorType>();
      return actual &&
            expected->device() == actual->device() &&
            expected->sizes() == actual->sizes();
@@ -182,7 +182,7 @@ struct GraphFuser {
   }
 
   bool allOutputsHaveSameSize(Node * node) {
-    TensorType *tt_ptr = nullptr;
+    TensorTypePtr tt_ptr = nullptr;
     for (const auto i : node->inputs()) {
       auto cur_tt_ptr = i->type()->cast<TensorType>();
       if (!cur_tt_ptr) {

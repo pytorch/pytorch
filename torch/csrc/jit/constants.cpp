@@ -38,14 +38,14 @@ RegisterOperators reg({
       prim::Constant,
       [](Node* node) -> Operation {
         TypePtr type = node->output()->type();
-        if(type->isSubtypeOf(*DynamicType::get())) {
+        if(type->isSubtypeOf(DynamicType::get())) {
           auto t = autograd::make_variable(node->t(attr::value));
           return [t](Stack& stack) {
             stack.push_back(t);
             return 0;
           };
         } else if (
-            type->isSubtypeOf(*NumberType::get()) &&
+            type->isSubtypeOf(NumberType::get()) &&
             node->kindOf(attr::value) == AttributeKind::i) {
           auto i = node->i(attr::value);
           return [i](Stack& stack) {
@@ -53,14 +53,14 @@ RegisterOperators reg({
             return 0;
           };
         } else if (
-            type->isSubtypeOf(*NumberType::get()) &&
+            type->isSubtypeOf(NumberType::get()) &&
             node->kindOf(attr::value) == AttributeKind::f) {
           auto f = node->f(attr::value);
           return [f](Stack& stack) {
             push(stack, f);
             return 0;
           };
-        } else if(type->isSubtypeOf(*ListType::ofInts())) {
+        } else if(type->isSubtypeOf(ListType::ofInts())) {
           auto is = node->is(attr::value);
           return [is](Stack& stack) {
             push(stack, is);

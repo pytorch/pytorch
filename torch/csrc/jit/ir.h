@@ -1001,7 +1001,7 @@ public:
     return n;
   }
   Node* createTupleUnpack(Value * v) {
-    TupleType* tt = v->type()->expect<TupleType>();
+    TupleTypePtr tt = v->type()->expect<TupleType>();
     auto n = create(prim::TupleUnpack, {v}, 0);
     for(auto & element : tt->elements()) {
       n->addOutput()->setType(element);
@@ -1011,7 +1011,7 @@ public:
   Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
     auto n = create(prim::ListConstruct, values);
     for(const auto & v : values) {
-      JIT_ASSERT(v->type()->isSubtypeOf(*elem_type));
+      JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
     }
     n->output()->setType(std::make_shared<ListType>(elem_type));
     return n;

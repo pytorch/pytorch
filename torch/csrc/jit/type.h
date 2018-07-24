@@ -31,7 +31,7 @@ struct Type;
 using TypePtr = std::shared_ptr<Type>;
 
 
-struct TORCH_API Type {
+struct TORCH_API Type : std::enable_shared_from_this<Type> {
 private:
   TypeKind kind_;
 
@@ -44,8 +44,8 @@ public:
 
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal
-  virtual bool isSubtypeOf(const Type& rhs) const {
-    return *this == rhs;
+  virtual bool isSubtypeOf(const TypePtr rhs) const {
+    return *shared_from_this() == *rhs;
   }
   // user-friendly form of the type, separate from
   // operator<< which is verbose and unambiguous
@@ -58,26 +58,26 @@ public:
   // Dynamically cast this object to the subclass indicated by the
   // template variable, returning nullptr if the cast is invalid..
   template<typename T>
-  T* cast() {
+  std::shared_ptr<T> cast() {
     if (T::Kind == kind())
-      return static_cast<T*>(this);
+      return std::static_pointer_cast<T>(shared_from_this());
     return nullptr;
   }
   template<typename T>
-  const T* cast() const {
+  std::shared_ptr<const T> cast() const {
     if (T::Kind == kind())
-      return static_cast<const T*>(this);
+      return std::static_pointer_cast<const T>(shared_from_this());
     return nullptr;
   }
   template<typename T>
-  T* expect() {
+  std::shared_ptr<T> expect() {
     JIT_ASSERT(T::Kind == kind());
-    return static_cast<T*>(this);
+    return std::static_pointer_cast<T>(shared_from_this());
   }
   template<typename T>
-  const T* expect() const {
+  std::shared_ptr<const T> expect() const {
     JIT_ASSERT(T::Kind == kind());
-    return static_cast<const T*>(this);
+    return std::static_pointer_cast<const T>(shared_from_this());
   }
   virtual ~Type() {}
 };
@@ -158,8 +158,8 @@ struct TORCH_API TensorType : public Type {
            strides() == rt->strides() &&
            device() == rt->device();
   }
-  bool isSubtypeOf(const Type& rhs) const override {
-    return *this == rhs || rhs.kind() == TypeKind::DynamicType;
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *shared_from_this() == *rhs || rhs->kind() == TypeKind::DynamicType;
   }
   std::string str() const override {
     // str is used for user-facing error messages, where we
@@ -192,6 +192,9 @@ private:
   std::vector<int64_t> strides_;
 };
 
+struct ListType;
+using ListTypePtr = std::shared_ptr<ListType>;
+
 struct TORCH_API ListType : public Type {
   friend struct Type;
   static const TypeKind Kind = TypeKind::ListType;
@@ -218,6 +221,9 @@ private:
   TypePtr elem;
 };
 
+struct TupleType;
+using TupleTypePtr = std::shared_ptr<TupleType>;
+
 struct TORCH_API TupleType : public Type {
   friend struct Type;
   TupleType(std::vector<TypePtr> elements_)
@@ -228,22 +234,22 @@ struct TORCH_API TupleType : public Type {
     return elements_;
   }
   bool operator==(const Type& rhs) const override {
-    return compare(rhs, [](const Type& a, const Type& b) {
-      return a == b;
+    return compare(rhs, [](const TypePtr a, const TypePtr b) {
+      return *a == *b;
     });
   }
-  bool isSubtypeOf(const Type& rhs) const override {
+  bool isSubtypeOf(const TypePtr rhs) const override {
     // e.g. (Tensor, Tensor, Tensor) <: List[Tensor]
-    if(auto lt = rhs.cast<ListType>()) {
+    if(auto lt = rhs->cast<ListType>()) {
       for(auto e : elements()) {
-        if(!e->isSubtypeOf(*lt->getElementType()))
+        if(!e->isSubtypeOf(lt->getElementType()))
           return false;
       }
       return true;
     }
     // co-variant rules for tuples
-    return compare(rhs, [](const Type& a, const Type&b) {
-      return a.isSubtypeOf(b);
+    return compare(*rhs, [](const TypePtr a, const TypePtr b) {
+      return a->isSubtypeOf(b);
     });
   }
   std::string str() const override {
@@ -258,7 +264,7 @@ struct TORCH_API TupleType : public Type {
     return ss.str();
   }
 private:
-  bool compare(const Type& rhs, std::function<bool(const Type&, const Type&)> fn) const {
+  bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
       return false;
     const auto & l_elements = elements();
@@ -266,7 +272,7 @@ private:
     if(l_elements.size() != r_elements.size())
       return false;
     for(size_t i = 0; i < l_elements.size(); ++i) {
-      if(!fn(*l_elements[i], *r_elements[i]))
+      if(!fn(l_elements[i], r_elements[i]))
         return false;
     }
     return true;
@@ -299,8 +305,8 @@ struct TORCH_API FloatType : public Type {
   std::string str() const override {
     return "float";
   }
-  bool isSubtypeOf(const Type& rhs) const override {
-    return *this == rhs || rhs.kind() == TypeKind::NumberType;
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *shared_from_this() == *rhs || rhs->kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
@@ -317,8 +323,8 @@ struct TORCH_API IntType : public Type {
   std::string str() const override {
     return "int";
   }
-  bool isSubtypeOf(const Type& rhs) const override {
-    return *this == rhs || rhs.kind() == TypeKind::NumberType;
+  bool isSubtypeOf(const TypePtr rhs) const override {
+    return *shared_from_this() == *rhs || rhs->kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
@@ -331,9 +337,9 @@ TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 // e.g. Tensor(2x3) -> Dynamic, and Tuple(Tensor(2x3),...) -> Tuple(Dynamic,...)
 
 inline TypePtr unshapedType(const TypePtr& type) {
-  if(TupleType* t = type->cast<TupleType>()) {
+  if(TupleTypePtr t = type->cast<TupleType>()) {
     return std::make_shared<TupleType>(fmap(t->elements(), unshapedType));
-  } else if(ListType* t = type->cast<ListType>()) {
+  } else if(ListTypePtr t = type->cast<ListType>()) {
     return std::make_shared<ListType>(unshapedType(t->getElementType()));
   } else if(type->kind() == TypeKind::TensorType) {
     return DynamicType::get();
@@ -343,11 +349,11 @@ inline TypePtr unshapedType(const TypePtr& type) {
 }
 
 inline TypePtr TensorType::fromNumberType(TypePtr typ) {
-  JIT_ASSERT(typ->isSubtypeOf(*NumberType::get()));
-  if(typ->isSubtypeOf(*IntType::get())) {
+  JIT_ASSERT(typ->isSubtypeOf(NumberType::get()));
+  if(typ->isSubtypeOf(IntType::get())) {
     TensorType tt(at::kLong, -1, {});
     return std::make_shared<TensorType>(std::move(tt));
-  } else if(typ->isSubtypeOf(*FloatType::get())) {
+  } else if(typ->isSubtypeOf(FloatType::get())) {
     TensorType tt(at::kFloat, -1, {});
     return std::make_shared<TensorType>(std::move(tt));
   }
