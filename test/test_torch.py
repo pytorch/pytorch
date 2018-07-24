@@ -6722,6 +6722,10 @@ class TestTorch(TestCase):
         self.assertEqual(flip0_result, data.flip(0))
         self.assertEqual(flip1_result, data.flip(1))
 
+        # test empty tensor, should just return an empty tensor of the same shape
+        data = torch.tensor([])
+        self.assertEqual(data, data.flip(0))
+
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
 
