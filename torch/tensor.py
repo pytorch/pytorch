@@ -219,18 +219,6 @@ class Tensor(torch._C._TensorBase):
         self.storage().share_memory_()
         return self
 
-    def view_as(self, tensor):
-        r"""view_as(other) -> Tensor
-
-        View this tensor as the same size as :attr:`other`.
-        ``self.view_as(other)`` is equivalent to ``self.view(other.size())``.
-
-        Args:
-            other (:class:`torch.Tensor`): The result tensor has the same size
-                as :attr:`other.size()`.
-        """
-        return self.view(tensor.size())
-
     def __reversed__(self):
         r"""Reverses the tensor along dimension 0."""
         if self.dim() == 0:
@@ -259,6 +247,17 @@ class Tensor(torch._C._TensorBase):
             return factorization, pivots
         else:
             return super(Tensor, self).btrifact(pivot=pivot)
+
+    def stft(self, n_fft, hop_length=None, win_length=None, window=None,
+             center=True, pad_mode='reflect', normalized=False, onesided=True):
+        r"""See :func:`torch.stft`
+
+        .. warning::
+          This function changed signature at version 0.4.1. Calling with
+          the previous signature may cause error or return incorrect result.
+        """
+        return torch.stft(self, n_fft, hop_length, win_length, window, center,
+                          pad_mode, normalized, onesided)
 
     def resize(self, *sizes):
         warnings.warn("non-inplace resize is deprecated")

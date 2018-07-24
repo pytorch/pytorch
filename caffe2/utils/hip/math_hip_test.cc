@@ -271,8 +271,11 @@ class GemmBatchedGPUTest
     trans_W_ = std::get<1>(GetParam());
   }
 
-  void RunGemmBatched(const float alpha, const float beta) {
-    math::GemmBatched(
+  void RunGemmStridedBatched(const float alpha, const float beta) {
+    const int X_stride = 5 * 10;
+    const int W_stride = 10 * 6;
+    const int Y_stride = 5 * 6;
+    math::GemmStridedBatched(
         trans_X_ ? CblasTrans : CblasNoTrans,
         trans_W_ ? CblasTrans : CblasNoTrans,
         3,
@@ -281,9 +284,12 @@ class GemmBatchedGPUTest
         10,
         alpha,
         X_->template data<float>(),
+        X_stride,
         W_->template data<float>(),
+        W_stride,
         beta,
         Y_->template mutable_data<float>(),
+        Y_stride,
         hip_context_.get());
   }
 
@@ -308,11 +314,11 @@ TEST_P(GemmBatchedGPUTest, GemmBatchedGPUFloatTest) {
   if (!HasHipGPU()) {
     return;
   }
-  RunGemmBatched(1.0f, 0.0f);
+  RunGemmStridedBatched(1.0f, 0.0f);
   VerifyOutput(10.0f);
-  RunGemmBatched(1.0f, 0.5f);
+  RunGemmStridedBatched(1.0f, 0.5f);
   VerifyOutput(15.0f);
-  RunGemmBatched(0.5f, 1.0f);
+  RunGemmStridedBatched(0.5f, 1.0f);
   VerifyOutput(20.0f);
 }
 

@@ -87,8 +87,8 @@ void THNN_(SpatialReplicationPadding_updateGradInput)(
     dimh++;
     dimw++;
   }
-  int iheight = input->size[dimh];
-  int iwidth = input->size[dimw];
+  int iheight = input->size(dimh);
+  int iwidth = input->size(dimw);
   int oheight = iheight + padT + padB;
   int owidth  = iwidth + padL + padR;
 

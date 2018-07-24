@@ -28,7 +28,7 @@ struct DeviceGuard {
     }
   }
 
-  /// Calls `set_device` with the given index.
+  /// Calls `set_index` with the given index.
   explicit DeviceGuard(int32_t index) {
     set_index(index);
   }
@@ -44,6 +44,29 @@ struct DeviceGuard {
     if (!tensors.empty()) {
       set_index_from(tensors.front());
     }
+  }
+
+  /// Copy is disallowed.
+  DeviceGuard(const DeviceGuard&) = delete;
+  DeviceGuard& operator=(const DeviceGuard&) = delete;
+
+  /// Move-constructs this `DeviceGuard` from another `DeviceGuard`. The
+  /// moved-from `DeviceGuard` is modified such that its destruction has no
+  /// effect (does not reset the device).
+  DeviceGuard(DeviceGuard&& other) noexcept {
+    *this = std::move(other);
+  }
+
+  /// Move-assigns this `DeviceGuard` from another `DeviceGuard`. The
+  /// moved-from `DeviceGuard` is modified such that its destruction has no
+  /// effect (does not reset the device).
+  DeviceGuard& operator=(DeviceGuard&& other) noexcept {
+    this->original_index_ = other.original_index_;
+    this->last_index_ = other.last_index_;
+    // Set other's original index to the unspecified/default state, so that it
+    // doesn't also reset the device in its constructor.
+    other.original_index_ = -1;
+    return *this;
   }
 
   /// Resets the device to the index that was active at construction of the
@@ -88,7 +111,7 @@ struct DeviceGuard {
     return original_index_;
   }
 
-  // /// Returns the last device that was set via `set_device`, if any.
+  /// Returns the last device that was set via `set_index`, if any.
   int32_t last_index() const noexcept {
     return last_index_;
   }
@@ -96,7 +119,7 @@ struct DeviceGuard {
  private:
   /// The original device that was active at construction of this object.
   int32_t original_index_ = -1;
-  /// The last index that was set via `set_device`.
+  /// The last index that was set via `set_index`.
   int32_t last_index_ = -1;
 };
 } // namespace at

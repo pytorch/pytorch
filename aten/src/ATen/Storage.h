@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ATen/Scalar.h"
+#include <TH/THStorageFunctions.hpp>
 
 namespace at {
 
@@ -10,32 +11,43 @@ struct Storage {
   static const char RESIZABLE = 2;
 
   Storage() {}
+  Storage(THStorage* storage)
+      : storage(storage) {}
   Storage(const Storage& other) = delete;
+  virtual ~Storage() {
+    THStorage_free(storage);
+  }
   void operator=(const Storage&) = delete;
 
-  virtual ~Storage() {};
   virtual size_t elementSize() const = 0;
-  virtual size_t size() const = 0;
-  virtual void* data() = 0;
-  virtual const void* data() const = 0;
-  virtual Storage& retain() = 0;
-  virtual Storage& free() = 0;
-  virtual void * unsafeGetTH(bool retain) const = 0;
-
-  virtual Storage& resize(int64_t new_size) = 0;
-
+  size_t size() const {
+    return storage->size;
+  };
+  void* data() {
+    return storage->data_ptr.get();
+  };
+  const void* data() const {
+    return storage->data_ptr.get();
+  };
+  void* unsafeGetTH(bool retain_) const {
+    if (retain_) {
+      THStorage_retain(storage);
+    }
+    return storage;
+  }
+  void retain() {
+    THStorage_retain(storage);
+  }
   virtual Type & type() const = 0;
-  virtual int getDevice() const = 0;
-  virtual const char * toString() const = 0;
+  int getDevice() const {
+    return storage->data_ptr.device().index();
+  }
+  void clear_flag(char flag) {
+    THStorage_clearFlag(storage, flag);
+  }
 
-  virtual Storage& fill(Scalar value) = 0;
-  virtual Storage& set(size_t ind, Scalar value) = 0;
-  virtual Storage& fast_set(size_t ind, Scalar value) = 0;
-  virtual Scalar get(size_t ind) = 0;
-  virtual Scalar fast_get(size_t ind) = 0;
-
-  virtual void set_flag(char flag) = 0;
-  virtual void clear_flag(char flag) = 0;
+ protected:
+  THStorage *storage;
 };
 
 } // namespace at

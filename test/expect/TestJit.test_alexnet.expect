@@ -28,22 +28,25 @@ graph(%0 : Double(1, 3, 224, 224)
   %29 : Double(1, 256, 13, 13) = aten::_convolution[stride=[1, 1], padding=[1, 1], dilation=[1, 1], transposed=0, output_padding=[0, 0], groups=1, benchmark=0, deterministic=0, cudnn_enabled=1](%28, %9, %10), scope: AlexNet/Sequential[features]/Conv2d[10]
   %30 : Double(1, 256, 13, 13) = aten::threshold[threshold={0}, value={0}](%29), scope: AlexNet/Sequential[features]/ReLU[11]
   %31 : Double(1, 256, 6, 6), %32 : Long(1, 256, 6, 6) = aten::max_pool2d_with_indices[kernel_size=[3, 3], stride=[2, 2], padding=[0, 0], dilation=[1, 1], ceil_mode=0](%30), scope: AlexNet/Sequential[features]/MaxPool2d[12]
-  %33 : Long() = aten::size[dim=0](%31), scope: AlexNet
-  %34 : Long() = prim::Constant[value={9216}](), scope: AlexNet
-  %35 : Dynamic = aten::stack[dim=0](%33, %34), scope: AlexNet
-  %36 : Double(1, 9216) = aten::view(%31, %35), scope: AlexNet
-  %37 : Double(1, 9216) = ^Dropout(0.5, True, False)(%36), scope: AlexNet/Sequential[classifier]/Dropout[0]
-  %38 : Double(9216!, 4096!) = aten::t(%11), scope: AlexNet/Sequential[classifier]/Linear[1]
-  %39 : Double(1, 4096) = aten::expand[size=[1, 4096], implicit=1](%12), scope: AlexNet/Sequential[classifier]/Linear[1]
-  %40 : Double(1, 4096) = aten::addmm[beta={1}, alpha={1}](%39, %37, %38), scope: AlexNet/Sequential[classifier]/Linear[1]
-  %41 : Double(1, 4096) = aten::threshold[threshold={0}, value={0}](%40), scope: AlexNet/Sequential[classifier]/ReLU[2]
-  %42 : Double(1, 4096) = ^Dropout(0.5, True, False)(%41), scope: AlexNet/Sequential[classifier]/Dropout[3]
-  %43 : Double(4096!, 4096!) = aten::t(%13), scope: AlexNet/Sequential[classifier]/Linear[4]
-  %44 : Double(1, 4096) = aten::expand[size=[1, 4096], implicit=1](%14), scope: AlexNet/Sequential[classifier]/Linear[4]
-  %45 : Double(1, 4096) = aten::addmm[beta={1}, alpha={1}](%44, %42, %43), scope: AlexNet/Sequential[classifier]/Linear[4]
-  %46 : Double(1, 4096) = aten::threshold[threshold={0}, value={0}](%45), scope: AlexNet/Sequential[classifier]/ReLU[5]
-  %47 : Double(4096!, 1000!) = aten::t(%15), scope: AlexNet/Sequential[classifier]/Linear[6]
-  %48 : Double(1, 1000) = aten::expand[size=[1, 1000], implicit=1](%16), scope: AlexNet/Sequential[classifier]/Linear[6]
-  %49 : Double(1, 1000) = aten::addmm[beta={1}, alpha={1}](%48, %46, %47), scope: AlexNet/Sequential[classifier]/Linear[6]
-  return (%49);
+  %33 : int = prim::Constant[value=0](), scope: AlexNet
+  %34 : int = aten::size(%31, %33), scope: AlexNet
+  %35 : Long() = prim::NumToTensor(%34), scope: AlexNet
+  %36 : int = prim::TensorToNum(%35), scope: AlexNet
+  %37 : int = prim::Constant[value=9216](), scope: AlexNet
+  %38 : int[] = prim::ListConstruct(%36, %37), scope: AlexNet
+  %39 : Double(1, 9216) = aten::view(%31, %38), scope: AlexNet
+  %40 : Double(1, 9216) = ^Dropout(0.5, True, False)(%39), scope: AlexNet/Sequential[classifier]/Dropout[0]
+  %41 : Double(9216!, 4096!) = aten::t(%11), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %42 : Double(1, 4096) = aten::expand[size=[1, 4096], implicit=1](%12), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %43 : Double(1, 4096) = aten::addmm[beta={1}, alpha={1}](%42, %40, %41), scope: AlexNet/Sequential[classifier]/Linear[1]
+  %44 : Double(1, 4096) = aten::threshold[threshold={0}, value={0}](%43), scope: AlexNet/Sequential[classifier]/ReLU[2]
+  %45 : Double(1, 4096) = ^Dropout(0.5, True, False)(%44), scope: AlexNet/Sequential[classifier]/Dropout[3]
+  %46 : Double(4096!, 4096!) = aten::t(%13), scope: AlexNet/Sequential[classifier]/Linear[4]
+  %47 : Double(1, 4096) = aten::expand[size=[1, 4096], implicit=1](%14), scope: AlexNet/Sequential[classifier]/Linear[4]
+  %48 : Double(1, 4096) = aten::addmm[beta={1}, alpha={1}](%47, %45, %46), scope: AlexNet/Sequential[classifier]/Linear[4]
+  %49 : Double(1, 4096) = aten::threshold[threshold={0}, value={0}](%48), scope: AlexNet/Sequential[classifier]/ReLU[5]
+  %50 : Double(4096!, 1000!) = aten::t(%15), scope: AlexNet/Sequential[classifier]/Linear[6]
+  %51 : Double(1, 1000) = aten::expand[size=[1, 1000], implicit=1](%16), scope: AlexNet/Sequential[classifier]/Linear[6]
+  %52 : Double(1, 1000) = aten::addmm[beta={1}, alpha={1}](%51, %49, %50), scope: AlexNet/Sequential[classifier]/Linear[6]
+  return (%52);
 }

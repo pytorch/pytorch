@@ -40,6 +40,18 @@ inline AttributeProto MakeAttribute(
   return attr;
 }
 
+inline AttributeProto MakeAttribute(
+    const std::string& name,
+    const std::vector<float>& vals) {
+  AttributeProto attr;
+  attr.set_name(name);
+  for (const auto v : vals) {
+    attr.add_floats(v);
+  }
+  attr.set_type(AttributeProto::FLOATS);
+  return attr;
+}
+
 inline AttributeProto MakeAttribute(const std::string& name, int64_t val) {
   AttributeProto attr;
   attr.set_name(name);

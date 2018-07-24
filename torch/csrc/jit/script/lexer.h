@@ -30,10 +30,6 @@ namespace script {
   _(TK_NEWLINE, "newline", "")                   \
   _(TK_INDENT, "indent", "")                     \
   _(TK_DEDENT, "dedent", "")                     \
-  _(TK_FLOAT, "float", "float")                  \
-  _(TK_DOUBLE, "double", "double")               \
-  _(TK_LONG, "long", "long")                     \
-  _(TK_INT, "int", "int")                        \
   _(TK_DEF, "def", "def")                        \
   _(TK_EQUIVALENT, "equivalent", "<=>")          \
   _(TK_IDENT, "ident", "")                       \
@@ -47,7 +43,6 @@ namespace script {
   _(TK_RANGE_CONSTRAINT, "range_constraint", "") \
   _(TK_PARAM, "param", "")                       \
   _(TK_INFERRED, "inferred", "")                 \
-  _(TK_BOOL, "bool", "bool")                     \
   _(TK_ACCESS, "access", "")                     \
   _(TK_ASSIGN, "assign", "")                     \
   _(TK_ATTRIBUTE, "attribute", "")               \

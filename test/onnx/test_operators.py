@@ -432,7 +432,7 @@ class TestOperators(TestCase):
             return g.op('Sum', x, y[0], y[1]), (
                 g.op('Neg', x), g.op('Neg', y[0]))
 
-        @torch.onnx.symbolic_override_first_arg_based(symb)
+        @torch.onnx.symbolic_override(symb)
         def foo(x, y):
             return x + y[0] + y[1], (-x, -y[0])
 

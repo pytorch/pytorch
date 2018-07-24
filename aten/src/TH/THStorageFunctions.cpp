@@ -1,6 +1,6 @@
 #include <climits>
 
-#include "THStorage.hpp"
+#include "THStorageFunctions.hpp"
 
 #include "generic/THStorage.cpp"
 #include "THGenerateAllTypes.h"
@@ -25,8 +25,8 @@ void THStorage_free(THStorage *storage) {
       if (storage->finalizer) {
         (*storage->finalizer)();
       }
-      storage->finalizer.~unique_ptr<THFinalizer>();
-      storage->data_ptr.~DataPtr();
+      storage->finalizer = nullptr;
+      storage->data_ptr.clear();
       THStorage_weakFree(storage);
     }
   }
@@ -40,9 +40,7 @@ void THStorage_weakRetain(THStorage *weak_storage) {
 // Releases a weak reference
 void THStorage_weakFree(THStorage *weak_storage) {
   if (--weak_storage->weakcount == 0) {
-    weak_storage->refcount.~atomic<int>();
-    weak_storage->weakcount.~atomic<int>();
-    THFree(weak_storage);
+    delete weak_storage;
   }
 }
 
@@ -91,60 +89,9 @@ THLongStorage *THLongStorage_newInferSize(THLongStorage *size, ptrdiff_t nElemen
   return copy;
 }
 
-THStorage* THStorage_new(at::ScalarType scalar_type)
-{
-  return THStorage_newWithSize(scalar_type, 0);
-}
-
-THStorage* THStorage_newWithSize(at::ScalarType scalar_type, ptrdiff_t size)
-{
-  return THStorage_newWithAllocator(scalar_type, size, getTHDefaultAllocator());
-}
-
-THStorage* THStorage_newWithAllocator(at::ScalarType scalar_type, ptrdiff_t size,
-                                      at::Allocator *allocator)
-{
-  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::DataPtr(allocator->allocate(at::elementSize(scalar_type)*size));
-  storage->size = size;
-  new (&storage->refcount) std::atomic<int>(1);
-  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
-  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
-  storage->allocator = allocator;
-  return storage;
-}
-
 ptrdiff_t THStorage_size(const THStorage *self)
 {
   return self->size;
-}
-
-size_t THStorage_elementSize(const THStorage *self)
-{
-  return at::elementSize(self->scalar_type);
-}
-
-THStorage* THStorage_newWithMapping(at::ScalarType scalar_type, const char *filename, ptrdiff_t size, int flags)
-{
-  size_t actual_size = -1;
-  THStorage *storage = THStorage_newWithDataAndAllocator(scalar_type,
-                                                         THMapAllocator::makeDataPtr(
-                                                            filename,
-                                                            flags,
-                                                            size * at::elementSize(scalar_type),
-                                                            &actual_size),
-                                                         size,
-                                                         /* allocator */ nullptr);
-
-  if (size <= 0) {
-    storage->size = actual_size/THStorage_elementSize(storage);
-  }
-
-  THStorage_clearFlag(storage, TH_STORAGE_RESIZABLE);
-
-  return storage;
 }
 
 void THStorage_setFlag(THStorage *storage, const char flag)
@@ -172,21 +119,6 @@ THStorage* THStorage_newWithData(at::ScalarType scalar_type, std::unique_ptr<at:
                                            getTHDefaultAllocator());
 }
 */
-
-THStorage* THStorage_newWithDataAndAllocator(at::ScalarType scalar_type,
-                                             at::DataPtr&& data, ptrdiff_t size,
-                                             THAllocator* allocator) {
-  THStorage *storage = static_cast<THStorage*>(THAlloc(sizeof(THStorage)));
-  storage->scalar_type = scalar_type;
-  new (&storage->data_ptr) at::DataPtr(std::move(data));
-  storage->size = size;
-  new (&storage->refcount) std::atomic<int>(1);
-  new (&storage->weakcount) std::atomic<int>(1); // from the strong reference
-  new (&storage->finalizer) std::unique_ptr<THFinalizer>(nullptr);
-  storage->flag = TH_STORAGE_REFCOUNTED | TH_STORAGE_RESIZABLE;
-  storage->allocator = allocator;
-  return storage;
-}
 
 void THStorage_resize(THStorage *storage, ptrdiff_t size)
 {

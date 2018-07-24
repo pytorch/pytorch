@@ -2,6 +2,40 @@
 
 namespace at { namespace native {
 
+Tensor& _clamp__cuda(Tensor& self, Scalar min, Scalar max) {
+  return _th_clamp_(self, min, max);
+}
+
+Tensor& _clamp_out_cuda(
+    Tensor& result,
+    const Tensor& self,
+    Scalar min,
+    Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_(result, min, max);
+}
+
+Tensor& _clamp_max__cuda(Tensor& self, Scalar max) {
+  return _th_clamp_max_(self, max);
+}
+
+Tensor& _clamp_max_out_cuda(Tensor& result, const Tensor& self, Scalar max) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_max_(result, max);
+}
+
+Tensor& _clamp_min__cuda(Tensor& self, Scalar min) {
+  return _th_clamp_min_(self, min);
+}
+
+Tensor& _clamp_min_out_cuda(Tensor& result, const Tensor& self, Scalar min) {
+  result.resize_(self.sizes());
+  result.copy_(self);
+  return _th_clamp_min_(result, min);
+}
+
 // These are just forwarding stubs
 
 #define IMPLEMENT_UNARY_OP_PREQUEL(op)                           \

@@ -26,13 +26,13 @@ void THNN_(PReLU_updateOutput)(
   int64_t bs = 1, ks = 1;
   {
     int64_t input_ndim = THTensor_(_nDimension)(input);
-    if (input->size[input_ndim > 1] != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[input_ndim > 1]);
+    if (input->size(input_ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(input_ndim > 1));
 
     if (input_ndim > 1) {
-        bs = input->size[0];
+        bs = input->size(0);
         for (int d = 2; d < input_ndim; d++) {
-            ks *= input->size[d];
+            ks *= input->size(d);
         }
     }
   }
@@ -91,13 +91,13 @@ void THNN_(PReLU_updateGradInput)(
   int64_t bs = 1, ks = 1;
   {
     int64_t input_ndim = THTensor_(_nDimension)(input);
-    if (input->size[input_ndim > 1] != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[input_ndim > 1]);
+    if (input->size(input_ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(input_ndim > 1));
 
     if (input_ndim > 1) {
-        bs = input->size[0];
+        bs = input->size(0);
         for (int d = 2; d < input_ndim; d++) {
-            ks *= input->size[d];
+            ks *= input->size(d);
         }
     }
   }
@@ -162,13 +162,13 @@ void THNN_(PReLU_accGradParameters)(
   int64_t bs = 1, ks = 1;
   {
     int64_t input_ndim = THTensor_(_nDimension)(input);
-    if (input->size[input_ndim > 1] != nOutputPlane)
-      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size[input_ndim > 1]);
+    if (input->size(input_ndim > 1) != nOutputPlane)
+      THError("Wrong number of input planes. Expected %d but got %d.", nOutputPlane, input->size(input_ndim > 1));
 
     if (input_ndim > 1) {
-        bs = input->size[0];
+        bs = input->size(0);
         for (int d = 2; d < input_ndim; d++) {
-          ks *= input->size[d];
+          ks *= input->size(d);
         }
     }
   }
