@@ -72,6 +72,33 @@ static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
   }
 }
 
+static std::tuple<Tensor&,Tensor&> _gesv_single_helper(
+    const Tensor& self, const Tensor& A, Tensor& sol, Tensor& lu) {
+#ifndef USE_LAPACK
+  AT_ERROR("gesv: LAPACK library not found in compilation");
+#endif
+  int64_t bx = self.size(0);
+  int64_t by = (self.dim() == 1) ? 1 : self.size(1);
+  int info = 0;
+
+  lu = A.t().clone();
+  sol = self.view({bx, by}).t().clone();
+
+  AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
+    auto A_ptr = lu.data<scalar_t>();
+    auto b_ptr = sol.data<scalar_t>();
+    auto ipiv = at::empty({bx}, sol.type().toScalarType(kInt));
+
+    lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
+  });
+
+  sol = sol.t();
+  lu = lu.t();
+
+  checkErrors({info});
+  return std::tuple<Tensor&, Tensor&>(sol, lu);
+}
+
 std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
   std::vector<int64_t> infos(batchCount(A), 0);
   auto A_working_copy = cloneBatchedColumnMajor(A);
@@ -85,14 +112,14 @@ std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) 
 
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
-  if (self.dim() <= 2 && A.dim() <= 2) {
-    // TODO: #7102: It's not necessary to have gesv (single) bindings for both
-    // TH and ATen. We should remove the TH gesv bindings, especially
-    // since the lapackGesv function is already in ATen.
-    return at::_gesv_single(self, A);
-  }
+  bool batched = !(self.dim() <= 2 && A.dim() <= 2);
+  checkInputs(self, A, batched);
 
-  checkInputs(self, A);
+  if (!batched) {
+    Tensor A_;
+    Tensor b_;
+    return _gesv_single_helper(self, A, b_, A_);
+  }
 
   // broadcast the batch dimensions of self and A.
   IntList self_batch_sizes(self.sizes().data(), self.ndimension() - 2);
@@ -120,7 +147,7 @@ std::tuple<Tensor&,Tensor&> gesv_out(
                   "b.dim() (%lld) and A.dim() (%lld) must both be 2.",
                   (long long)self.dim(), (long long)A.dim());
   }
-  return at::_gesv_single_out(solution, lu, self, A);
+  return _gesv_single_helper(self, A, solution, lu);
 }
 
 }}  // namespace at::native
