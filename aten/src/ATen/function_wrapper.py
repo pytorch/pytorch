@@ -1409,16 +1409,16 @@ def create_derived(backend_type_env, declarations):
                 else:
                     body += initializers
 
-                # for out-of-place: isScalar() for all input tensors is and'd to form
+                # for out-of-place: dim() == 0 for all input tensors is and'd to form
                 # the test for whether the output is also a scalar
-                # for in-place: isScalar() shouldn't change as a result of the operation
+                # for in-place: dim() == 0 shouldn't change as a result of the operation
                 if (not arg.get('output') and 'Tensor' in arg['type'] and
                         'TensorList' not in arg['type'] and
                         'THS' not in arg['type'] and
                         not scalar_check_is_from_size and
                         not scalar_check_is_from_option and
                         not option['inplace']):
-                    check = '{}->isScalar()'.format(arg['name'] + '_')
+                    check = '{}->dim() == 0'.format(arg['name'] + '_')
                     if nullable_argument(arg):
                         check = '(!{} || {})'.format(arg['name'] + '_', check)
                     scalar_check = (check if scalar_check is None

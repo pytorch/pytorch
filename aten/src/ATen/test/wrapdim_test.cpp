@@ -37,7 +37,7 @@ TEST_CASE( "wrapdim test", "[]" ) {
     auto a = randn(1, T);
     REQUIRE(a.prod(0).equal(a.prod(-1)));
     a.get()->maybeScalar(true);
-    REQUIRE(a.get()->isScalar());
+    REQUIRE(a.get()->dim() == 0);
     REQUIRE(a.prod(0).equal(a.prod(-1)));
   }
 }
