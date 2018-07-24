@@ -9,10 +9,6 @@ UndefinedTensor::UndefinedTensor()
 : TensorImpl(&(globalContext().getType(Backend::Undefined,ScalarType::Undefined)), nullptr) {
 }
 
-const char * UndefinedTensor::toString() const {
-  return "UndefinedTensor";
-}
-
 IntList UndefinedTensor::sizes() const {
   AT_ERROR("sizes() called on undefined Tensor");
 }
