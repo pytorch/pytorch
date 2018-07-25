@@ -40,6 +40,9 @@ void addCUDAGlobalMethods(py::module& m) {
   m.def("num_cuda_devices", &NumCudaDevices);
   m.def("get_cuda_version", &CudaVersion);
   m.def("get_cudnn_version", &cudnnCompiledVersion);
+  m.def("cudnn_convolution_fwd_algo_count", &CudnnConvolutionFwdAlgoCount);
+  m.def("cudnn_convolution_bwd_data_algo_count", &CudnnConvolutionBwdDataAlgoCount);
+  m.def("cudnn_convolution_bwd_filter_algo_count", &CudnnConvolutionBwdFilterAlgoCount);
   m.def("get_cuda_peer_access_pattern", []() {
     std::vector<std::vector<bool>> pattern;
     CAFFE_ENFORCE(caffe2::GetCudaPeerAccessPattern(&pattern));
