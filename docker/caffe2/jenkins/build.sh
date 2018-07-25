@@ -76,7 +76,7 @@ if [ -n "${JENKINS:-}" ]; then
 fi
 
 # Build image
-docker build $(if [[ "$image" == *rocm* ]]; then echo "--memory-swap -1"; fi) \
+docker build \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
        --build-arg "EC2=${EC2:-}" \
        --build-arg "JENKINS=${JENKINS:-}" \
