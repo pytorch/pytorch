@@ -83,7 +83,7 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
     const bool is_tensor = val.isTensor();
     is_var_capture.push_back(is_tensor);
     if (is_tensor) {
-      var_captures.emplace_back(autograd::as_variable_ref(val.toTensor()), false);
+      var_captures.emplace_back(Variable(val.toTensor()), false);
     } else {
       ivalue_captures.push_back(val);
     }
@@ -163,7 +163,7 @@ private:
       grad.df_input_captured_inputs.size() + grad.df_input_captured_outputs.size());
     // hook up the outputs of df to the gradient functions of the inputs that require gradients
     for(auto idx : grad.df_output_vjps) {
-      auto & v = autograd::as_variable_ref(stack[idx].toTensor());
+      auto v = Variable(stack[idx].toTensor());
       grad_fn->add_next_edge(v.gradient_edge());
     }
     captureInputs(*grad_fn, stack);
