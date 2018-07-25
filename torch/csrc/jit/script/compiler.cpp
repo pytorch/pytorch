@@ -697,14 +697,14 @@ std::shared_ptr<SugaredValue> BuiltinFunction::call(
 
 struct to_ir {
   to_ir(
-      Def def,
+      TypedDef typed_def,
       FunctionTable& function_table,
       const Resolver& resolver,
       SugaredValuePtr self,
       Method& method) // method being constructed
       : method(method)
       , graph(method.graph())
-      , def(def)
+      , def(typed_def.def)
       , function_table(function_table)
       , resolver(resolver)
       , environment_stack(nullptr) {
@@ -714,16 +714,37 @@ struct to_ir {
     // inputs
     auto it = def.params().begin();
     auto end = def.params().end();
+    // Type annotations exclude explicitly typing the "self" parameter, so in the
+    // case that this is a method with self we expect one fewer parameter annotation
+    // than the number of parameters this Def takes.
+    auto expected_annotation_size = self ? def.params().size() - 1 : def.params().size();
+    if (typed_def.schema && typed_def.schema->arguments.size() != expected_annotation_size) {
+      throw ErrorReport(def.params().range()) << "Number of type annotations for"
+        << " function parameters (" << typed_def.schema->arguments.size() << ")"
+        << " does not match the number of parameters on the function ("
+        << expected_annotation_size << ")!";
+    }
     if(self) {
       if(it == end)
         throw ErrorReport(def.params().range()) << "methods must have a self argument";
       environment_stack->setSugaredVar(def.range(), (*it).ident().name(), self);
       ++it;
     }
+    size_t arg_annotation_idx = 0;
     for(;it != end; ++it) {
       auto& name = (*it).ident().name();
-      arguments.push_back({name, DynamicType::get()});
-      environment_stack->setVar((*it).ident().range(), name, graph->addInput(name));
+      // Add the input to the graph
+      Value *new_input = graph->addInput(name);
+      environment_stack->setVar((*it).ident().range(), name, new_input);
+
+      // Record the type for the schema and set the Type on the Value*
+      // TypePtr arg_type = DynamicType::get();
+      if (typed_def.schema) {
+        arguments.push_back(typed_def.schema->arguments.at(arg_annotation_idx++));
+      } else {
+        arguments.emplace_back(name, DynamicType::get());
+      }
+      new_input->setType(arguments.back().type);
     }
     // body
     auto stmts = def.statements();
@@ -749,7 +770,13 @@ struct to_ir {
           results = createTupleUnpack(result);
         }
       }
+      if (typed_def.schema && typed_def.schema->returns.size() != results.size()) {
+        throw ErrorReport(def.range()) << "Number of type annotations for function"
+          << " return (" << typed_def.schema->returns.size() << ") does not match"
+          << " the number of returns from the function (" << results.size() << ")!";
+      }
       auto range = return_stmt.range();
+      size_t return_type_idx = 0;
       for (auto& r : results) {
         if(r->type()->isSubtypeOf(*NumberType::get())) {
           graph->registerOutput(numToTensor(range, r));
@@ -757,7 +784,17 @@ struct to_ir {
           ensureTensor(range, r);
           graph->registerOutput(r);
         }
-        returns.push_back({"", DynamicType::get()});
+        TypePtr type = DynamicType::get();
+        if (typed_def.schema) {
+          type = typed_def.schema->returns.at(return_type_idx).type;
+          if (!r->type()->isSubtypeOf(*type)) {
+            throw ErrorReport(return_stmt.range()) << "Return value at position "
+              << return_type_idx << " was annotated as having type " << type->str()
+              << " but is actually of type " << r->type()->str();
+          }
+          return_type_idx++;
+        }
+        returns.push_back({"", type});
       }
     }
 
@@ -1499,16 +1536,16 @@ std::vector<Value*> inlineCallTo(Graph& g, Graph& callee, ArrayRef<Value*> input
   return outputs;
 }
 
-void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
+void defineMethodsInModule(Module & m, const std::vector<TypedDef>& definitions, const std::vector<Resolver>& resolvers, SugaredValuePtr self) {
   FunctionTable table;
   JIT_ASSERT(definitions.size() == resolvers.size());
   auto resolver_it = resolvers.begin();
   std::vector<Method*> methods;
-  for(Def def : definitions) {
-    const std::string& name = def.name().name();
+  for(TypedDef typed_def : definitions) {
+    const std::string& name = typed_def.def.name().name();
     Resolver resolver = *resolver_it++;
-    auto creator = [def, &table, resolver, self](Method& method) {
-      to_ir(def, table, resolver, self,  method);
+    auto creator = [typed_def, &table, resolver, self](Method& method) {
+      to_ir(typed_def, table, resolver, self,  method);
     };
     Method& method = m.create_method(name, creator);
     // if self is defined, then these are methods and do not go into the global namespace
@@ -1527,19 +1564,20 @@ void defineMethodsInModule(Module & m, const std::vector<Def>& definitions, cons
 
 void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, SugaredValuePtr self) {
   Parser p(source);
-  std::vector<Def> definitions;
+  std::vector<TypedDef> definitions;
   std::vector<Resolver> resolvers;
   while (p.lexer().cur().kind != TK_EOF) {
-    definitions.push_back(Def(p.parseFunction()));
+    // TODO: Function schema
+    definitions.emplace_back(Def(p.parseFunction()), at::nullopt);
     resolvers.push_back(resolver);
   }
   defineMethodsInModule(m, definitions, resolvers, self);
 }
 
-std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver) {
-  Module m; //note: we don't use 'm' to execute so this setting is unused
-  defineMethodsInModule(m, {def}, {resolver}, nullptr);
-  return m.get_method(def.name().name()).graph();
+std::shared_ptr<Graph> compileFunction(TypedDef typed_def, const Resolver& resolver) {
+  Module m;
+  defineMethodsInModule(m, {typed_def}, {resolver}, nullptr);
+  return m.get_method(typed_def.def.name().name()).graph();
 }
 
 std::vector<std::shared_ptr<SugaredValue>> SimpleValue::asTuple(SourceRange loc, Method& m) {
