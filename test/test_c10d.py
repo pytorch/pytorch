@@ -1,19 +1,59 @@
+import copy
 import math
 import multiprocessing
 import socket
 import sys
 import tempfile
 import unittest
+
 from functools import wraps
+from collections import namedtuple
 
 import torch
-import torch.distributed.c10d as c10d
+from torch import nn
+import torch.nn.functional as F
+from torch.distributed import c10d
+from torch.nn.parallel import distributed_c10d
 
 from common import TestCase
 
 
+if not c10d.is_available():
+    print('c10d not available, skipping tests')
+    sys.exit(0)
+
+
 TIMEOUT_DEFAULT = 5
 TIMEOUT_OVERRIDE = {}
+
+TestSkip = namedtuple('TestSkip', 'exit_code, message')
+
+TEST_SKIPS = {
+    "multi-gpu": TestSkip(75, "Need at least 2 CUDA devices"),
+    "nccl": TestSkip(76, "c10d not compiled with NCCL support"),
+}
+
+
+def skip_if_not_multigpu(func):
+    """Multi-GPU tests requires at least 2 GPUS. Skip if this is not met."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if torch.cuda.is_available() and torch.cuda.device_count() >= 2:
+            return func(*args, **kwargs)
+        sys.exit(TEST_SKIPS['multi-gpu'].exit_code)
+
+    return wrapper
+
+
+def skip_if_not_nccl(func):
+    """Skips a test if NCCL is not available (for c10d)."""
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        if hasattr(c10d, "ProcessGroupNCCL"):
+            return func(*args, **kwargs)
+        sys.exit(TEST_SKIPS['nccl'].exit_code)
+
+    return wrapper
 
 
 def get_timeout(test_id):
@@ -29,9 +69,18 @@ def find_free_port():
     return sockname[1]
 
 
-if not c10d.is_available():
-    print('c10d not available, skipping tests')
-    sys.exit(0)
+def gpus_for_rank(world_size):
+    """Multigpu tests are designed to simulate the multi nodes with multi
+    GPUs on each node. Nccl backend requires equal #GPUs in each process.
+    On a single node, all visible GPUs are evenly
+    divided to subsets, each process only uses a subset.
+    """
+    visible_devices = list(range(torch.cuda.device_count()))
+    gpus_per_process = torch.cuda.device_count() // world_size
+    gpus_for_rank = []
+    for rank in range(world_size):
+        gpus_for_rank.append(visible_devices[rank * gpus_per_process: (rank + 1) * gpus_per_process])
+    return gpus_for_rank
 
 
 class StoreTestBase(object):
@@ -141,8 +190,12 @@ class RendezvousTCPTest(TestCase):
         self.assertEqual(b"value1", store0.get("key1"))
 
 
-class ProcessGroupGlooTest(TestCase):
+class MultiProcessTestCase(TestCase):
     MAIN_PROCESS_RANK = -1
+
+    @property
+    def world_size(self):
+        return 4
 
     @staticmethod
     def join_or_run(fn):
@@ -167,9 +220,9 @@ class ProcessGroupGlooTest(TestCase):
 
     def setUp(self):
         self.rank = self.MAIN_PROCESS_RANK
-        self.size = 4
         self.file = tempfile.NamedTemporaryFile()
-        self.processes = [self._spawn_process(rank) for rank in range(int(self.size))]
+        self.port = find_free_port()
+        self.processes = [self._spawn_process(rank) for rank in range(int(self.world_size))]
 
     def tearDown(self):
         for p in self.processes:
@@ -194,7 +247,23 @@ class ProcessGroupGlooTest(TestCase):
         timeout = get_timeout(self.id())
         for p in self.processes:
             p.join(timeout)
+        self._check_return_codes()
 
+    def _check_return_codes(self):
+        """
+        Checks that the return codes of all spawned processes match, and skips
+        tests if they returned a return code indicating a skipping condition.
+        """
+        first_process = self.processes[0]
+        for p in self.processes:
+            self.assertEqual(p.exitcode, first_process.exitcode)
+        for skip in TEST_SKIPS.values():
+            if first_process.exitcode == skip.exit_code:
+                raise unittest.SkipTest(skip.message)
+        self.assertEqual(first_process.exitcode, 0)
+
+
+class ProcessGroupGlooTest(MultiProcessTestCase):
     def opts(self):
         opts = c10d.ProcessGroupGloo.Options()
         opts.timeout = 1.0
@@ -203,7 +272,7 @@ class ProcessGroupGlooTest(TestCase):
 
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.size, self.opts())
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
@@ -213,16 +282,16 @@ class ProcessGroupGlooTest(TestCase):
             work.wait()
 
         # Every rank is root once, every tensor index is root once
-        for i in range(self.size):
+        for i in range(self.world_size):
             for j in range(2):
                 xs = [
-                    torch.Tensor([self.rank * self.size + 0.0]),
-                    torch.Tensor([self.rank * self.size + 1.0]),
+                    torch.Tensor([self.rank * self.world_size + 0.0]),
+                    torch.Tensor([self.rank * self.world_size + 1.0]),
                 ]
 
                 broadcast(xs, i, j)
-                self.assertEqual(torch.Tensor([i * self.size + j]), xs[0])
-                self.assertEqual(torch.Tensor([i * self.size + j]), xs[1])
+                self.assertEqual(torch.Tensor([i * self.world_size + j]), xs[0])
+                self.assertEqual(torch.Tensor([i * self.world_size + j]), xs[1])
 
         # Test overloaded convenience function
         x = torch.Tensor([self.rank + 1.0])
@@ -232,7 +301,7 @@ class ProcessGroupGlooTest(TestCase):
 
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupGloo(store, self.rank, self.size, self.opts())
+        pg = c10d.ProcessGroupGloo(store, self.rank, self.world_size, self.opts())
 
         def allreduce(x, op):
             opts = c10d.AllreduceOptions()
@@ -243,12 +312,12 @@ class ProcessGroupGlooTest(TestCase):
         # Sum
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.SUM)
-        self.assertEqual(torch.Tensor([float(self.size * (self.size + 1) / 2)]), x)
+        self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
         # Product
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.PRODUCT)
-        self.assertEqual(torch.Tensor([float(math.factorial(self.size))]), x)
+        self.assertEqual(torch.Tensor([float(math.factorial(self.world_size))]), x)
 
         # Min
         x = torch.Tensor([self.rank + 1.0])
@@ -258,13 +327,13 @@ class ProcessGroupGlooTest(TestCase):
         # Max
         x = torch.Tensor([self.rank + 1.0])
         allreduce(x, c10d.ReduceOp.MAX)
-        self.assertEqual(torch.Tensor([self.size]), x)
+        self.assertEqual(torch.Tensor([self.world_size]), x)
 
         # Test overloaded convenience function (defaults to using sum)
         x = torch.Tensor([self.rank + 1.0])
         work = pg.allreduce(x)
         work.wait()
-        self.assertEqual(torch.Tensor([float(self.size * (self.size + 1) / 2)]), x)
+        self.assertEqual(torch.Tensor([float(self.world_size * (self.world_size + 1) / 2)]), x)
 
 
 class ProcessGroupNCCLTest(TestCase):
@@ -276,23 +345,17 @@ class ProcessGroupNCCLTest(TestCase):
                                     " skipping test")
 
         self.rank = self.MAIN_PROCESS_RANK
-        self.size = 1
+        self.world_size = 1
         self.file = tempfile.NamedTemporaryFile()
-
-        if not torch.cuda.is_available():
-            raise unittest.SkipTest("torch.cuda not available, skipping test")
-
         self.num_gpus = torch.cuda.device_count()
-
-        if self.num_gpus < 2:
-            raise unittest.SkipTest("Requires at least 2 GPUs, skipping test")
 
     def tearDown(self):
         self.file.close()
 
+    @skip_if_not_nccl
     def test_broadcast_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def broadcast(xs, rootRank, rootTensor):
             opts = c10d.BroadcastOptions()
@@ -312,9 +375,10 @@ class ProcessGroupNCCLTest(TestCase):
             for i in range(self.num_gpus):
                 self.assertEqual(tensors[i], tensors[rt])
 
+    @skip_if_not_nccl
     def test_allreduce_ops(self):
         store = c10d.FileStore(self.file.name)
-        pg = c10d.ProcessGroupNCCL(store, self.rank, self.size)
+        pg = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
 
         def allreduce(tensors, op):
             opts = c10d.AllreduceOptions()
@@ -367,5 +431,89 @@ class ProcessGroupNCCLTest(TestCase):
             self.assertEqual(torch.Tensor([self.num_gpus]), tensors[i])
 
 
+class Net(nn.Module):
+    def __init__(self):
+        super(Net, self).__init__()
+        self.fc1 = nn.Linear(2, 10, bias=False)
+        self.fc2 = nn.Linear(10, 50, bias=False)
+        self.fc3 = nn.Linear(50, 4, bias=False)
+        self.relu = nn.ReLU()
+
+    def forward(self, x):
+        x = self.relu(self.fc1(x))
+        x = self.relu(self.fc2(x))
+        x = self.fc3(x)
+        return F.softmax(x, dim=1)
+
+
+class DistributedDataParallelTest(MultiProcessTestCase):
+
+    @property
+    def world_size(self):
+        return 2
+
+    def _test_ddp_with_process_group(self, process_group):
+        gpus = gpus_for_rank(self.world_size)[self.rank]
+        model = Net()
+        ddp_model = distributed_c10d._DistributedDataParallelC10d(
+            copy.deepcopy(model).cuda(gpus[0]),
+            process_group,
+            device_ids=gpus)
+        model.cuda(gpus[0])
+
+        local_batch_size = len(gpus)
+        global_batch_size = self.world_size * local_batch_size
+        input = torch.randn(global_batch_size, 2).cuda(gpus[0])
+        target = torch.randn(global_batch_size, 4).cuda(gpus[0])
+
+        def step_model(model, input, target):
+            model.train()
+            output = model(input)
+            loss = F.mse_loss(output, target)
+            loss.backward()
+
+        def update_parameters(model):
+            for param in model.parameters():
+                param.data -= param.grad
+                param.grad = None
+
+        # check two model parameters over 2 iterations
+        for iteration in range(2):
+            # single cpu/gpu training
+            step_model(model, input, target)
+
+            # DDP training, DDP scatters subsets of input_cpu to nodes/GPUs
+            step_model(ddp_model,
+                       input[self.rank * local_batch_size: (self.rank + 1) * local_batch_size],
+                       target[self.rank * local_batch_size: (self.rank + 1) * local_batch_size])
+
+            # Update weights and run a second iteration to shake out errors
+            update_parameters(model)
+            update_parameters(ddp_model)
+            self.assertEqual(len(list(model.parameters())), len(list(ddp_model.parameters())))
+            for i, j in zip(model.parameters(), ddp_model.parameters()):
+                self.assertEqual(i, j)
+
+            # Shuffle the input so that DDP input is different
+            torch.manual_seed(1337 + iteration)
+            input = input[torch.randperm(global_batch_size)]
+
+    @skip_if_not_multigpu
+    def test_gloo_backend(self):
+        store = c10d.TCPStore('localhost', self.port, self.rank == 0)
+        options = c10d.ProcessGroupGloo.Options()
+        options.devices = [c10d.ProcessGroupGloo.create_tcp_device(interface="lo")]
+        process_group = c10d.ProcessGroupGloo(store, self.rank, self.world_size, options)
+        self._test_ddp_with_process_group(process_group)
+
+    @skip_if_not_multigpu
+    @skip_if_not_nccl
+    def test_nccl_backend(self):
+        store = c10d.TCPStore('localhost', self.port, self.rank == 0)
+        process_group = c10d.ProcessGroupNCCL(store, self.rank, self.world_size)
+        self._test_ddp_with_process_group(process_group)
+
 if __name__ == '__main__':
+    assert not torch.cuda._initialized, "test_distributed must not have initialized CUDA context on main process"
+
     unittest.main()

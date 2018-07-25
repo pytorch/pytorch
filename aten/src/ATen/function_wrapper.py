@@ -255,25 +255,39 @@ TYPE_RETURN = {
 CHECKED_CAST = {
     'THTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Tensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Tensor}>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THSTensor*':
-    CodeTemplate(
-        'checked_cast_tensor<Sparse${Tensor}>(${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false)'),
+        CodeTemplate(
+            'checked_cast_tensor<Sparse${Tensor}>('
+            '${arg_name}.tref.pImpl,"${arg_name}",${arg_pos},false, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'THBoolTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}ByteTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}ByteTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Byte)'),
     'THIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}LongTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Long)'),
     'THIntegerTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${Backend}IntTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${Backend}IntTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${Backend}, ScalarType::Int)'),
     'THDenseTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseTensor}>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${DenseTensor}>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${DenseBackend}, ScalarType::${ScalarName})'),
     'THDenseIndexTensor*':
         CodeTemplate(
-            'checked_cast_tensor<${DenseBackend}LongTensor>(${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay})'),
+            'checked_cast_tensor<${DenseBackend}LongTensor>('
+            '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
+            'Backend::${DenseBackend}, ScalarType::Long)'),
     'THStorage*': CodeTemplate('checked_cast_storage<${Storage}>(&${arg_name},"${arg_name}",${arg_pos})'),
     'THGenerator*':
         CodeTemplate(
@@ -284,8 +298,10 @@ CHECKED_CAST = {
     'THStride*': CodeTemplate('THLongStorageView ${result_name}(${arg_name}, THLongStorageViewKind::STRIDE);'),
     'real': CodeTemplate('${arg_name}.to${ScalarName}()'),
     'accreal': CodeTemplate('${arg_name}.to${AccScalarName}()'),
-    'TensorList': CodeTemplate('tensor_list_checked_cast<${Tensor}, Tensor, '
-                               '${THTensor}>(${arg_name},"${arg_name}",${arg_pos})'),
+    'TensorList': CodeTemplate(
+            'tensor_list_checked_cast<${Tensor}, Tensor, '
+            '${THTensor}>(${arg_name},"${arg_name}",${arg_pos}, '
+            'Backend::${Backend}, ScalarType::${ScalarName})'),
     'IntList': CodeTemplate('check_intlist<${size}>(${arg_name}, "${arg_name}", ${arg_pos}${,default_init})')
 }
 
@@ -1393,16 +1409,16 @@ def create_derived(backend_type_env, declarations):
                 else:
                     body += initializers
 
-                # for out-of-place: isScalar() for all input tensors is and'd to form
+                # for out-of-place: dim() == 0 for all input tensors is and'd to form
                 # the test for whether the output is also a scalar
-                # for in-place: isScalar() shouldn't change as a result of the operation
+                # for in-place: dim() == 0 shouldn't change as a result of the operation
                 if (not arg.get('output') and 'Tensor' in arg['type'] and
                         'TensorList' not in arg['type'] and
                         'THS' not in arg['type'] and
                         not scalar_check_is_from_size and
                         not scalar_check_is_from_option and
                         not option['inplace']):
-                    check = '{}->isScalar()'.format(arg['name'] + '_')
+                    check = '{}->dim() == 0'.format(arg['name'] + '_')
                     if nullable_argument(arg):
                         check = '(!{} || {})'.format(arg['name'] + '_', check)
                     scalar_check = (check if scalar_check is None

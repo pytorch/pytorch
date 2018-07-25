@@ -28,9 +28,9 @@ struct AT_API TensorImpl : public Retainable {
   Type & type() const {
     return *type_;
   }
-  virtual const char * toString() const = 0;
+  const char * toString() const;
   virtual IntList sizes() const;
-  virtual IntList strides() const = 0;
+  virtual IntList strides() const;
   virtual int64_t dim() const;
   /**
    * Perform a conversion of this tensor to a scalar, if numel() == 1.
@@ -49,14 +49,6 @@ struct AT_API TensorImpl : public Retainable {
     return n;
   }
 
-  // 0-dim patchup of TH requires us to have a flag marking
-  // if a Tensor should be treated as 0-dim.
-  // the generated wrapper manipulates this flag.
-  // the setter should never be exposed in Tensor's public API
-  // because eventually we would like isScalar() to just be dim() == 0;
-  bool isScalar() const {
-    return is_scalar;
-  }
   // this is called by the generated wrapper code when there are conditions
   // when this output tensor should be a scalar. e.g. when all inputs
   // to a function 'add' were scalars, then condition_when_scalar == true.

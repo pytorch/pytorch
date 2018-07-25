@@ -2,6 +2,7 @@
 #pragma once
 
 #include "torch/csrc/jit/attributes.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/generic_if.h"
 #include "torch/csrc/jit/graph_node_list.h"
 #include "torch/csrc/jit/interned_strings.h"
@@ -15,8 +16,6 @@
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
-
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <ATen/ATen.h>
@@ -668,7 +667,10 @@ public:
   }
   template<typename T>
   T* expect() {
-    JIT_ASSERTM(T::Kind == kind(), "expected a %s but found a %s", T::Kind.toDisplayString(), kind().toDisplayString());
+    JIT_ASSERTM(
+        T::Kind == kind(),
+        "expected a ", T::Kind.toDisplayString(),
+        " but found a ", kind().toDisplayString());
     return static_cast<T*>(this);
   }
 
