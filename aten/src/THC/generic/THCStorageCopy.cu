@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/THCStorageCopy.cu"
 #else
 
-void THCStorage_(rawCopy)(THCState *state, THCStorage *self, real *src)
+void THCStorage_(rawCopy)(THCState *state, THCStorage *self, const real *src)
 {
   THCudaCheck(cudaMemcpyAsync(THCStorage_(data)(state, self), src, self->size * sizeof(real), cudaMemcpyDeviceToDevice, THCState_getCurrentStream(state)));
 }

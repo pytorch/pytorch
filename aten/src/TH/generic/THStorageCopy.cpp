@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/THStorageCopy.cpp"
 #else
 
-void THStorage_(rawCopy)(THStorage *storage, real *src)
+void THStorage_(rawCopy)(THStorage *storage, const real *src)
 {
   ptrdiff_t i;
   real *data = THStorage_(data)(storage);

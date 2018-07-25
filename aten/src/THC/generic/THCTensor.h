@@ -75,7 +75,7 @@ THC_API THCTensor *THCTensor_(newFoldBatchDim)(THCState *state, THCTensor *input
 // This is especially likely to happen when the tensor is not contiguous. In general, if you still need the
 // values, unless you are doing some size and stride tricks, do not use resize*.
 THC_API void THCTensor_(resize)(THCState *state, THCTensor *tensor, THLongStorage *size, THLongStorage *stride);
-THC_API void THCTensor_(resizeNd)(THCState *state, THCTensor *tensor, int nDimension, int64_t *size, int64_t *stride);
+THC_API void THCTensor_(resizeNd)(THCState *state, THCTensor *tensor, int nDimension, const int64_t *size, const int64_t *stride);
 THC_API void THCTensor_(resizeAs)(THCState *state, THCTensor *tensor, THCTensor *src);
 THC_API void THCTensor_(resize1d)(THCState *state, THCTensor *tensor, int64_t size0_);
 THC_API void THCTensor_(resize2d)(THCState *state, THCTensor *tensor, int64_t size0_, int64_t size1_);
@@ -85,7 +85,7 @@ THC_API void THCTensor_(resize5d)(THCState *state, THCTensor *tensor, int64_t si
 
 THC_API void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src);
 THC_API void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_);
-THC_API void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride);
+THC_API void THCTensor_(setStorageNd)(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride);
 THC_API void THCTensor_(setStorage1d)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_,
                                     int64_t size0_, int64_t stride0_);
 THC_API void THCTensor_(setStorage2d)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_,

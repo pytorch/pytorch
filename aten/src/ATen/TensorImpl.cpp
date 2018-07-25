@@ -64,6 +64,25 @@ void TensorImpl::release_resources() {
   }
 }
 
+int64_t TensorImpl::numel() const {
+  if (tensor) {
+#ifdef DEBUG
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    AT_ASSERT(n == tensor->numel());
+#endif
+    return tensor->numel();
+  } else {
+    int64_t n = 1;
+    for (auto s : sizes()) {
+      n *= s;
+    }
+    return n;
+  }
+}
+
 int64_t TensorImpl::dim() const {
   if(is_scalar) {
     return 0;

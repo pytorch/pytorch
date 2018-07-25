@@ -688,7 +688,7 @@ void THTensor_(freeCopyTo)(THTensor *self, THTensor *dst)
 
 /*******************************************************************************/
 
-void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
+void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
 {
   /* storage */
   if(THTensor_getStoragePtr(self) != storage)
@@ -714,7 +714,7 @@ void THTensor_(setStorageNd)(THTensor *self, THStorage *storage, ptrdiff_t stora
   THTensor_(resizeNd)(self, nDimension, size, stride);
 }
 
-void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t *stride)
+void THTensor_(resizeNd)(THTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   int d;
   ptrdiff_t totalSize;

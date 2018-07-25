@@ -85,7 +85,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
     THCTensor_resizeNd(state, self, src->dim(), THTensor_getSizePtr(src), NULL);
 }
 
-void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_t *size, int64_t *stride)
+void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, const int64_t *size, const int64_t *stride)
 {
   int d;
   ptrdiff_t totalSize;
@@ -171,7 +171,7 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
                            THTensor_getStridePtr(src));
 }
 
-void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
+void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, const int64_t *size, const int64_t *stride)
 {
   /* storage */
   if(THTensor_getStoragePtr(self) != storage)
