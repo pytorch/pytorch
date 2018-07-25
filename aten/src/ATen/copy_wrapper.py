@@ -70,7 +70,7 @@ Tensor & ${Type}::s_copy_(Tensor & dst, const Tensor & src, bool non_blocking) c
     default:
       ${function_fallthrough}
   }
-  dst.pImpl->setScalar(src.pImpl->dim() == 0);
+  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
   return dst;
 }
 """)
@@ -91,7 +91,7 @@ Tensor & ${Type}::_s_copy_from(const Tensor & src, Tensor & dst, bool non_blocki
       AT_ERROR("copy does not support ", toString(), " to ", dst.type().toString(), " copy.");
       break;
   }
-  dst.pImpl->setScalar(src.pImpl->dim() == 0);
+  dst.pImpl->maybe_zero_dim(src.pImpl->dim() == 0);
   return dst; // NB! dst
 }
 """)
