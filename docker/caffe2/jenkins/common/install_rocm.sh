@@ -54,7 +54,15 @@ install_centos() {
     echo "Not implemented yet"
     exit 1
 }
-  
+ 
+install_hip_thrust() {
+    # Needed for now, will be replaced soon
+    git clone --recursive https://github.com/ROCmSoftwarePlatform/Thrust.git /data/Thrust
+    rm -rf /data/Thrust/thrust/system/cuda/detail/cub-hip
+    git clone --recursive https://github.com/ROCmSoftwarePlatform/cub-hip.git /data/Thrust/thrust/system/cuda/detail/cub-hip
+    cd /data/Thrust/thrust/system/cuda/detail/cub-hip && git checkout hip_port_1.7.4_caffe2 && cd -
+}
+
 # This will be removed after merging an upcoming PR.
 install_hcrng() {
     mkdir -p /opt/rocm/debians
@@ -78,5 +86,6 @@ else
   exit 1
 fi
 
+install_hip_thrust
 install_hcrng
 install_hcsparse
