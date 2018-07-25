@@ -57,6 +57,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
+.. autofunction:: narrow
 .. autofunction:: nonzero
 .. autofunction:: reshape
 .. autofunction:: split

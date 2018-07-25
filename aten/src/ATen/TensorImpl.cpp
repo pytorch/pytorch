@@ -65,10 +65,17 @@ void TensorImpl::release_resources() {
 }
 
 int64_t TensorImpl::dim() const {
-  if(is_scalar) {
+  if(THTensor_isZeroDim(tensor)) {
     return 0;
   }
   return tensor->dim();
+}
+
+TensorImpl* TensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
+  AT_CHECK(tensor, "TensorImpl without THTensor in maybe_zero_dim");
+  bool is_zero_dim = condition_when_zero_dim && tensor->sizes().size() == 1 && tensor->size(0) == 1;
+  THTensor_setIsZeroDim(tensor, is_zero_dim);
+  return this;
 }
 
 void * TensorImpl::unsafeGetTH(bool retain) {
