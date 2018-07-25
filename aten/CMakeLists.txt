@@ -13,7 +13,7 @@ else()
   cmake_dependent_option(
       USE_CUDNN "Use cuDNN" ON
       "USE_CUDA" OFF)
-  option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
+  option(ATEN_NO_TEST "Do not build ATen test binaries" ON)
 
   # Flag for shared dependencies
   set(BUILD_ATEN ON)
