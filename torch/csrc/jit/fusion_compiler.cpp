@@ -91,6 +91,12 @@ struct TensorInfo {
   IndexType strides[N];
 };
 )");
+
+// The reason why we used TensorFlow's philox implementation is that currently
+// NVRTC couldn't resolve the curand.h header file correctly, as curand.h will
+// include lots of other header files which will break the NVRTC preprocessor.
+// The TF's version is standalone and thus we don't need to worry too much
+// about including in stuff that we don't need.
 constexpr auto rand_support_literal = R"(
   /* Copyright 2015 The TensorFlow Authors. All Rights Reserved.
 
@@ -371,7 +377,7 @@ constexpr auto rand_support_literal = R"(
   #endif  // TENSORFLOW_LIB_RANDOM_PHILOX_RANDOM_H_
 )";
 
-constexpr auto rand_param = ", uint64 seed, uint64 offset";
+constexpr auto rand_param = ",uint64 seed, uint64 offset";
 constexpr auto rand_init = R"(
   int idx = blockIdx.x*blockDim.x + threadIdx.x;
   PhiloxWrapper rnd(seed, idx, offset);
@@ -600,11 +606,12 @@ std::string encodeRHS(Node * n) {
 }
 
 std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
-                                            bool& has_random,
+                                            bool* has_random,
                                             const std::string & name,
                                             AnnotatedGraph & agraph,
                                             bool use_cuda) {
-  has_random = false;
+  JIT_ASSERT(has_random != NULL);
+  *has_random = false;
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -678,7 +685,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     if (n->kind() == prim::FusedConcat)
       continue;
     if(n->kind() == aten::rand_like) {
-      has_random = true;
+      *has_random = true;
       if(!use_cuda)
         throw std::runtime_error("Fusion doesn't support rand on CPU");
     }
@@ -709,7 +716,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     env.s("HalfHeader", "");
   }
 
-  if (has_random) {
+  if (*has_random) {
     env.s("RandHeader", rand_support_literal);
     env.s("RandParam", rand_param);
     env.s("RandInit", rand_init);
@@ -905,7 +912,7 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     checkCUDAVersion(prop);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, has_random, name, agraph, true);
+    concat_desc = codegen::emitCompilationUnit(cu, &has_random, name, agraph, true);
     compilation_unit = cu.str();
     nvrtcProgram program;
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
@@ -1101,7 +1108,7 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, has_random, name, agraph, false);
+    concat_desc = codegen::emitCompilationUnit(cu, &has_random, name, agraph, false);
     JIT_ASSERT(!has_random);
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
