@@ -120,8 +120,8 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
   // initialized; we never have tensors that don't have any storage.
   // However, for Caffe2, this is not true, because they have permitted
   // tensors to be allocated without specifying what scalar type
-  // they should be, only to be filled with GetMutableData is called
-  // for the first time with the actual value.  It is an ERROR to
+  // they should be, only to be filled when GetMutableData is called
+  // for the first time (providing the necessary type).  It is an ERROR to
   // invoke any PyTorch operations on such a half-constructed storage,
   // and this check tests for that case.
   AT_CHECK(tensor->storage_, "Cannot use PyTorch operations on a half-constructed "
