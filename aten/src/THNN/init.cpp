@@ -241,6 +241,9 @@
 #include "generic/SpatialUpSamplingBilinear.c"
 #include "THGenerateFloatTypes.h"
 
+#include "generic/SpatialUpSamplingBicubic.c"
+#include "THGenerateFloatTypes.h"
+
 #include "generic/VolumetricAveragePooling.c"
 #include "THGenerateFloatTypes.h"
 

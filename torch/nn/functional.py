@@ -1927,7 +1927,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for upsampling are: `nearest`, `linear` (3D-only),
-    `bilinear` (4D-only), `trilinear` (5D-only)
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only)
 
     Args:
         input (Tensor): the input tensor
@@ -1935,7 +1935,7 @@ def upsample(input, size=None, scale_factor=None, mode='nearest', align_corners=
             output spatial size.
         scale_factor (int): multiplier for spatial size. Has to be an integer.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'trilinear'. Default: 'nearest'
+            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear'. Default: 'nearest'
         align_corners (bool, optional): if True, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is `linear`,
@@ -1968,7 +1968,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
     `mini-batch x channels x [optional depth] x [optional height] x width`.
 
     The modes available for resizing are: `nearest`, `linear` (3D-only),
-    `bilinear` (4D-only), `trilinear` (5D-only), `area`
+    `bilinear`, `bicubic` (4D-only), `trilinear` (5D-only), `area`
 
     Args:
         input (Tensor): the input tensor
@@ -1976,7 +1976,7 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
             output spatial size.
         scale_factor (float or Tuple[float]): multiplier for spatial size. Has to match input size if it is a tuple.
         mode (string): algorithm used for upsampling:
-            'nearest' | 'linear' | 'bilinear' | 'trilinear' | 'area'. Default: 'nearest'
+            'nearest' | 'linear' | 'bilinear' | 'bicubic' | 'trilinear' | 'area'. Default: 'nearest'
         align_corners (bool, optional): if True, the corner pixels of the input
             and output tensors are aligned, and thus preserving the values at
             those pixels. This only has effect when :attr:`mode` is `linear`,
@@ -2055,6 +2055,8 @@ def interpolate(input, size=None, scale_factor=None, mode='nearest', align_corne
         raise NotImplementedError("Got 5D input, but bilinear mode needs 4D input")
     elif input.dim() == 5 and mode == 'trilinear':
         return torch._C._nn.upsample_trilinear3d(input, _output_size(3), align_corners)
+    elif input.dim() == 4 and mode == 'bicubic':
+        return torch._C._nn.upsample_bicubic2d(input, _output_size(2), align_corners)
     else:
         raise NotImplementedError("Input Error: Only 3D, 4D and 5D input Tensors supported"
                                   " (got {}D) for the modes: nearest | linear | bilinear | trilinear"

@@ -38,4 +38,3 @@ static int nearest_neighbor_compute_source_index(
   return src_index;
 }
 #endif
-

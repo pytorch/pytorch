@@ -48,4 +48,3 @@ static inline int nearest_neighbor_compute_source_index(
 
 
 #endif
-

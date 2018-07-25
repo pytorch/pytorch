@@ -5148,6 +5148,21 @@ class TestNN(NNTestCase):
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
                 gradcheck(lambda x: F.upsample(x, out_size, **kwargs), [input])
 
+    def test_upsamplingBicubic2d(self):
+        for align_corners in [True, False]:
+            kwargs = dict(mode='bicubic', align_corners=align_corners)
+
+            # test float scale factor up & downsampling
+            for scale_factor in [0.5, 1.5, 2]:
+                in_t = torch.ones(1, 1, 2, 2)
+                out_t = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
+                out_size = int(math.floor(in_t.shape[-1] * scale_factor))
+                self.assertEqual(torch.ones(1, 1, out_size, out_size), out_t.data)
+
+                input = torch.randn(1, 1, 2, 2, requires_grad=True)
+                gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
+
+
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
