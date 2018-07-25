@@ -180,9 +180,9 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
   int64_t tg_target_stride;
 
   int64_t max_target_length;
-  auto tg_batch_offsets = at::empty(at::CPU(kLong), {batch_size});
-  auto target_lengths_t = at::empty(at::CPU(kLong), {batch_size});
-  auto input_lengths_t = at::empty(at::CPU(kLong), {batch_size});
+  auto tg_batch_offsets = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
+  auto target_lengths_t = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
+  auto input_lengths_t = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
   auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
   auto input_lengths_data = input_lengths_t.data<int64_t>();
   auto target_lengths_data = target_lengths_t.data<int64_t>();
@@ -239,7 +239,7 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 
   dim3 block(threads_target, threads_batch);
   dim3 grid((2*max_target_length+1 + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   ctc_loss_log_alpha_gpu_kernel<scalar_t><<<grid, block, 0, stream>>>(
 		      log_alpha.data<scalar_t>(),
@@ -476,9 +476,9 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   int64_t tg_target_stride;
 
   int64_t max_target_length;
-  auto tg_batch_offsets = at::empty(at::CPU(kLong), {batch_size});
-  auto target_lengths_t = at::empty(at::CPU(kLong), {batch_size});
-  auto input_lengths_t = at::empty(at::CPU(kLong), {batch_size});
+  auto tg_batch_offsets = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
+  auto target_lengths_t = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
+  auto input_lengths_t = at::empty({batch_size}, TensorOptions(at::CPU(kLong)));
   auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
   auto input_lengths_data = input_lengths_t.data<int64_t>();
   auto target_lengths_data = target_lengths_t.data<int64_t>();
@@ -521,7 +521,7 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
   }
   int threads_batch = std::min(max_threads / threads_target, (int) batch_size);
 
-  cudaStream_t stream = globalContext().getCurrentCUDAStream();
+  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
   {
     dim3 block(threads_target, threads_batch);
