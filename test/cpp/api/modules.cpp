@@ -28,9 +28,9 @@ class TestModel : public torch::nn::Module {
 class NestedModel : public torch::nn::Module {
  public:
   NestedModel()
-      : l1(register_module("l1", Linear(5, 20))),
-        t(register_module("test", std::make_shared<TestModel>())),
-        param_(register_parameter("param", torch::empty({3, 2, 21}))) {}
+      : param_(register_parameter("param", torch::empty({3, 2, 21}))),
+        l1(register_module("l1", Linear(5, 20))),
+        t(register_module("test", std::make_shared<TestModel>())) {}
 
   torch::Tensor param_;
   Linear l1;

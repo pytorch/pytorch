@@ -432,7 +432,7 @@ void initPythonIRBindings(PyObject * module_) {
         case TypeKind::TupleType:
           return "TupleType";
         default:
-          torch::barf("unknown type kind");
+          AT_ERROR("unknown type kind");
           return "";
         }
     })

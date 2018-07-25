@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/interpreter.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/script/parser.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/utils/object_ptr.h"
 #include "torch/csrc/jit/operator.h"
 

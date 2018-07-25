@@ -1,13 +1,16 @@
 #ifndef _WIN32
 #include "torch/csrc/jit/fusion_compiler.h"
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include <torch/csrc/jit/assertions.h>
 
 #include "ATen/ATen.h"
+
 #ifdef USE_CUDA
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
@@ -16,6 +19,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #endif
+
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -717,7 +721,7 @@ private:
 
 static void* checkDL(void * x) {
   if(!x) {
-    barf("error in dlopen or dlsym: %s", dlerror());
+    AT_ERROR("error in dlopen or dlsym: ", dlerror());
   }
   return x;
 }
@@ -733,10 +737,7 @@ struct DynamicLibrary {
   }
   ~DynamicLibrary() {
     if(!handle) return;
-    int r = dlclose(handle);
-    if(r) {
-      barf("error in dlclose: %s", dlerror());
-    }
+    dlclose(handle);
   }
 private:
   void * handle = nullptr;

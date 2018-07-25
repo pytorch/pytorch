@@ -1,7 +1,11 @@
 #pragma once
+
 #include <torch/csrc/jit/ir.h>
 #include "torch/csrc/utils/disallow_copy.h"
+#include <torch/csrc/jit/assertions.h>
+
 #include "ATen/ATen.h"
+
 #include <string>
 #include <algorithm>
 #include <unordered_map>
