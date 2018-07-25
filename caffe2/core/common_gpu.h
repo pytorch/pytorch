@@ -76,9 +76,6 @@ class TensorCoreEngine {};
  * A runtime function to report the cuda version that Caffe2 is built with.
  */
 inline int CudaVersion() { return CUDA_VERSION; }
-inline int CudnnConvolutionFwdAlgoCount() { return CUDNN_CONVOLUTION_FWD_ALGO_COUNT; }
-inline int CudnnConvolutionBwdDataAlgoCount() { return CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT; }
-inline int CudnnConvolutionBwdFilterAlgoCount() { return CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT; }
 
 /**
  * Returns the number of devices.
