@@ -859,6 +859,16 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THTensor_(free)(cmat);
   }
 
+  // In gemv (x,0).mv(0) does not
+  // handle beta, whereas gemm does for case where (x,0).mm(0,y).
+  if (vec->size(0) == 0 && mat->size(0) != 0) {
+    if (beta == 0) {
+      THTensor_(zero)(r_);
+    } else if (beta != 1) {
+      THTensor_(mul)(r_, r_, beta);
+    }
+  }
+
   #undef LDA_COND
 }
 

@@ -18,6 +18,11 @@ Tensor TensorImpl::detach() const {
   AT_ERROR("detach is not implemented for Tensor");
 }
 
+const char* TensorImpl::toString() const {
+  // This matches behavior with VariableImpl
+  return type().toString();
+}
+
 void TensorImpl::backward(
     at::optional<Tensor> gradient,
     bool keep_graph,
@@ -46,6 +51,12 @@ IntList TensorImpl::sizes() const {
   return IntList(THTensor_getSizePtr(tensor), dim());
 }
 
+IntList TensorImpl::strides() const {
+  // NB: dim in tensor is not synchronized with THTensor, so it's
+  // important to apply dim here
+  return IntList(THTensor_getStridePtr(tensor), dim());
+}
+
 void TensorImpl::release_resources() {
   if (tensor) {
       tensor->release();
@@ -54,7 +65,7 @@ void TensorImpl::release_resources() {
 }
 
 int64_t TensorImpl::dim() const {
-  if (isScalar()) {
+  if(is_scalar) {
     return 0;
   }
   return tensor->dim();

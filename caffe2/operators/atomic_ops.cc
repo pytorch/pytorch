@@ -93,7 +93,8 @@ OPERATOR_SCHEMA(CreateMutex)
     .NumInputs(0)
     .NumOutputs(1)
     .SetDoc("Creates an unlocked mutex and returns it in a unique_ptr blob.")
-    .Output(0, "mutex_ptr", "Blob containing a std::unique_ptr<mutex>.");
+    .Output(0, "mutex_ptr", "Blob containing a std::unique_ptr<mutex>.")
+    .ScalarType(TensorProto_DataType_UNDEFINED);
 
 OPERATOR_SCHEMA(AtomicFetchAdd)
     .NumInputs(3)
