@@ -251,7 +251,7 @@ void resize_sparse(const SparseTensor& self, ArrayRef<int64_t> size) {
 }
 
 // TODO: remove this function when USE_TH_SIZE_ZERO_DIM is enabled by default
-SparseTensor& raw_resize_sparse_legacy_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
+SparseTensor& sparse_raw_resize_legacy_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
   if (sparseDims == -1) {
     sparseDims = self._indices().size(0);
   }
