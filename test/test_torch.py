@@ -3489,6 +3489,17 @@ class TestTorch(TestCase):
     def test_cat_empty(self):
         self._test_cat_empty(self)
 
+    def test_narrow(self):
+        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, 0, 1), torch.Tensor([[0, 1, 2]]))
+        self.assertEqual(x.narrow(0, 0, 2), torch.Tensor([[0, 1, 2], [3, 4, 5]]))
+        self.assertEqual(x.narrow(0, 1, 1), torch.Tensor([[3, 4, 5]]))
+        self.assertEqual(x.narrow(0, -1, 1), torch.Tensor([[6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -2, 2), torch.Tensor([[3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -3, 3), torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
+        self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
+
     def test_narrow_empty(self):
         if not torch._C._use_zero_size_dim():
             return
