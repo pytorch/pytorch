@@ -443,7 +443,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
     auto indices_original = _get_sparse_impl(self)->indices();
     auto values_original = _get_sparse_impl(self)->values();
     auto coalesced = self.is_coalesced();
-    self.sparse_resize_and_clear_(sizes, -1, -1);
+    self.sparse_resize_and_clear_(sizes, indices_original.size(0), values_original.dim() - 1);
     _get_sparse_impl(self)->set_indices_and_values_unsafe(indices_original, values_original);
     _get_sparse_impl(self)->set_coalesced(coalesced);
 

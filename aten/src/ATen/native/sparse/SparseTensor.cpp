@@ -263,13 +263,6 @@ SparseTensor& raw_resize_sparse_legacy_(SparseTensor& self, ArrayRef<int64_t> si
 }
 
 SparseTensor& sparse_resize_and_clear_(SparseTensor& self, ArrayRef<int64_t> size, int64_t sparseDims, int64_t denseDims) {
-  if (sparseDims == -1) {
-    sparseDims = self._indices().size(0);
-  }
-  if (denseDims == -1) {
-    denseDims = self._values().dim() - 1;
-  }
-
 #ifdef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(self)->resize_and_clear_(sparseDims, denseDims, size);
 #endif
