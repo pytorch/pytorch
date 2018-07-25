@@ -231,7 +231,7 @@ on [our website](http://pytorch.org/previous-versions/).
 ## Getting Started
 
 Three pointers to get you started:
-- [Tutorials: get you started with understanding and using PyTorch](http://pytorch.org/tutorials/)
+- [Tutorials: get you started with understanding and using PyTorch](https://pytorch.org/tutorials/)
 - [Examples: easy to understand pytorch code across all domains](https://github.com/pytorch/examples)
 - [The API Reference](http://pytorch.org/docs/)
 
