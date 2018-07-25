@@ -1,7 +1,7 @@
 #pragma once
 
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/utils/functional.h"
 

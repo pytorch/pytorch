@@ -74,7 +74,7 @@ auto CopySlices::apply(variable_list&& inputs) -> variable_list {
   variable_list grad_inputs(num_outputs());
   for (size_t i = 0; i < res.size(); i++) {
     if (should_compute_output(i)) {
-      TORCH_ASSERT(res[i].defined());
+      AT_ASSERT(res[i].defined());
       if (i == 0) {
         grad_slice.copy_(res[i]);
         grad_inputs[i] = std::move(result);
