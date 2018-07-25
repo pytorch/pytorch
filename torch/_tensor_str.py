@@ -226,7 +226,10 @@ def _str(self):
         size_str = str(tuple(self.shape)).replace(' ', '')
         suffix = ""
         if self.grad_fn is not None:
-            suffix += '\nand grad_fn=<{}>'.format(type(self.grad_fn).__name__)
+            suffix = '\nand grad_fn=<{}>'.format(type(self.grad_fn).__name__)
+        elif self.requires_grad:
+            suffix = '\nand requires_grad=True'
+
         with torch.no_grad():
             return '{} of size {} with indices:\n{}\nand values:\n{}{}'.format(
                 self.type(), size_str, self._indices(), self._values(), suffix)
