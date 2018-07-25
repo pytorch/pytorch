@@ -1038,7 +1038,7 @@ void THDTensor_(addcdiv)(THDTensor *self, THDTensor *src1, real value, THDTensor
 
 void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *mat,  THDTensor *vec) {
   if ((mat->nDimension != 2) || (vec->nDimension != 1))
-    THError("matrix and vector expected, got %dD, %dD", mat->nDimension, vec->nDimension);
+    THError("2D tensor and 1D tensor expected, got %dD, %dD tensors", mat->nDimension, vec->nDimension);
 
   if (mat->size[1] != vec->size[0]) {
     THDDescBuff bm = THDTensor_(sizeDesc)(mat);
@@ -1047,7 +1047,7 @@ void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, T
   }
 
   if (src->nDimension != 1)
-    THError("vector expected, got src: %dD", src->nDimension);
+    THError("1D tensor expected, got src: %dD tensor", src->nDimension);
 
   if (src->size[0] != mat->size[0]) {
     THDDescBuff bt = THDTensor_(sizeDesc)(src);
@@ -1067,7 +1067,7 @@ void THDTensor_(addmv)(THDTensor *self, real beta, THDTensor *src, real alpha, T
 
 void THDTensor_(addmm)(THDTensor *self, real beta, THDTensor *src, real alpha, THDTensor *mat1, THDTensor *mat2) {
   if ((mat1->nDimension != 2) || (mat2->nDimension != 2))
-    THError("matrices expected, got %dD, %dD tensors", mat1->nDimension, mat2->nDimension);
+    THError("2D tensors expected, got %dD, %dD tensors", mat1->nDimension, mat2->nDimension);
 
   if (mat1->size[1] != mat2->size[0]) {
     THDDescBuff bm1 = THDTensor_(sizeDesc)(mat1);
@@ -1076,7 +1076,7 @@ void THDTensor_(addmm)(THDTensor *self, real beta, THDTensor *src, real alpha, T
   }
 
   if (src->nDimension != 2)
-    THError("matrix expected, got %dD tensor for t", src->nDimension);
+    THError("2D tensors expected, got %dD tensor for t", src->nDimension);
 
   if ((src->size[0] != mat1->size[0]) || (src->size[1] != mat2->size[1])) {
     THDDescBuff bt  = THDTensor_(sizeDesc)(src);
@@ -1246,7 +1246,7 @@ void THDTensor_(sign)(THDTensor *self, THDTensor *src) {
 }
 
 accreal THDTensor_(trace)(THDTensor *self) {
-  THArgCheck(self->nDimension == 2, 1, "expected a matrix");
+  THArgCheck(self->nDimension == 2, 1, "expected a 2D tensor");
 
   masterCommandChannel->sendMessage(
     packMessage(Functions::tensorTrace, self),

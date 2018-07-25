@@ -1,3 +1,4 @@
+#include <array>
 #include <iostream>
 #include <memory>
 #include <vector>
@@ -272,7 +273,19 @@ class GemmBatchedGPUTest
   }
 
   void RunGemmBatched(const float alpha, const float beta) {
-    math::GemmBatched(
+    const float* X_data = X_->template data<float>();
+    const float* W_data = W_->template data<float>();
+    float* Y_data = Y_->template mutable_data<float>();
+    const int X_stride = 5 * 10;
+    const int W_stride = 6 * 10;
+    const int Y_stride = 5 * 6;
+    std::array<const float*, 3> X_array = {
+        X_data, X_data + X_stride, X_data + 2 * X_stride};
+    std::array<const float*, 3> W_array = {
+        W_data, W_data + W_stride, W_data + 2 * W_stride};
+    std::array<float*, 3> Y_array = {
+        Y_data, Y_data + Y_stride, Y_data + 2 * Y_stride};
+    math::GemmBatched<float, CUDAContext>(
         trans_X_ ? CblasTrans : CblasNoTrans,
         trans_W_ ? CblasTrans : CblasNoTrans,
         3,
@@ -280,10 +293,35 @@ class GemmBatchedGPUTest
         6,
         10,
         alpha,
-        X_->template data<float>(),
-        W_->template data<float>(),
+        X_array.data(),
+        W_array.data(),
         beta,
-        Y_->template mutable_data<float>(),
+        Y_array.data(),
+        cuda_context_.get());
+  }
+
+  void RunGemmStridedBatched(const float alpha, const float beta) {
+    const float* X_data = X_->template data<float>();
+    const float* W_data = W_->template data<float>();
+    float* Y_data = Y_->template mutable_data<float>();
+    const int X_stride = 5 * 10;
+    const int W_stride = 6 * 10;
+    const int Y_stride = 5 * 6;
+    math::GemmStridedBatched<float, CUDAContext>(
+        trans_X_ ? CblasTrans : CblasNoTrans,
+        trans_W_ ? CblasTrans : CblasNoTrans,
+        3,
+        5,
+        6,
+        10,
+        alpha,
+        X_data,
+        X_stride,
+        W_data,
+        W_stride,
+        beta,
+        Y_data,
+        Y_stride,
         cuda_context_.get());
   }
 
@@ -313,6 +351,18 @@ TEST_P(GemmBatchedGPUTest, GemmBatchedGPUFloatTest) {
   RunGemmBatched(1.0f, 0.5f);
   VerifyOutput(15.0f);
   RunGemmBatched(0.5f, 1.0f);
+  VerifyOutput(20.0f);
+}
+
+TEST_P(GemmBatchedGPUTest, GemmStridedBatchedGPUFloatTest) {
+  if (!HasCudaGPU()) {
+    return;
+  }
+  RunGemmStridedBatched(1.0f, 0.0f);
+  VerifyOutput(10.0f);
+  RunGemmStridedBatched(1.0f, 0.5f);
+  VerifyOutput(15.0f);
+  RunGemmStridedBatched(0.5f, 1.0f);
   VerifyOutput(20.0f);
 }
 
@@ -402,12 +452,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
         num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
-  RunRedcueTensorTest(
-      reduce_min,
-      {3},
-      {0},
-      {1.0f, 2.0f, 3.0f},
-      {1.0f});
+  RunRedcueTensorTest(reduce_min, {3}, {0}, {1.0f, 2.0f, 3.0f}, {1.0f});
 
   // Test for 2D Tensor.
   RunRedcueTensorTest(
@@ -423,11 +468,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMinGPUTest) {
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {1.0f, 2.0f, 3.0f});
   RunRedcueTensorTest(
-      reduce_min,
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {1.0f});
+      reduce_min, {2, 3}, {0, 1}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, {1.0f});
 
   // Test for 3D tensor.
   RunRedcueTensorTest(
@@ -465,12 +506,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMaxGPUTest) {
         num_dims, dims, num_axes, axes, X, Y, context);
   };
   // Test for 1D tensor.
-  RunRedcueTensorTest(
-      reduce_max,
-      {3},
-      {0},
-      {1.0f, 2.0f, 3.0f},
-      {3.0f});
+  RunRedcueTensorTest(reduce_max, {3}, {0}, {1.0f, 2.0f, 3.0f}, {3.0f});
 
   // Test for 2D Tensor.
   RunRedcueTensorTest(
@@ -486,11 +522,7 @@ TEST_F(ReduceTensorGPUTest, ReduceMaxGPUTest) {
       {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
       {4.0f, 5.0f, 6.0f});
   RunRedcueTensorTest(
-      reduce_max,
-      {2, 3},
-      {0, 1},
-      {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f},
-      {6.0f});
+      reduce_max, {2, 3}, {0, 1}, {1.0f, 2.0f, 3.0f, 4.0f, 5.0f, 6.0f}, {6.0f});
 
   // Test for 3D tensor.
   RunRedcueTensorTest(

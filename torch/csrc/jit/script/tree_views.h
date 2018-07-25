@@ -51,7 +51,6 @@ namespace script {
 //       |     Not                                                      TK_NOT
 //       |     USub                                                     '-'
 //       | Const(String value)                                          TK_CONST
-//       | Cast(ScalarType type, Expr expr)                             TK_CAST
 //       -- NB: x.name(y) is desugared into name(x, y)
 //       | Apply(Ident name, List<Expr> args, List<Attribute> kwargs)   TK_APPLY
 //       | Select(Expr base, Ident attr_name)                           '.'
@@ -71,10 +70,6 @@ namespace script {
 //            | Mul()                                                   TK_TIMES_EQ
 //            | Div()                                                   TK_DIV_EQ
 //
-// ScalarType = IntType()                                               TK_INT
-//            | FloatType()                                             TK_FLOAT
-//            | LongType()                                              TK_LONG
-//            | DoubleType()                                            TK_DOUBLE
 
 // Each subclass of TreeView should provide:
 // 1. Constructor that takes a TreeRef, and checks that it's of the right type.
@@ -321,20 +316,6 @@ struct TensorType : public Type {
   }
 };
 
-struct ScalarType : public TreeView {
-  explicit ScalarType(const TreeRef& tree) : TreeView(tree) {
-    switch (tree->kind()) {
-      case TK_INT:
-      case TK_LONG:
-      case TK_FLOAT:
-      case TK_DOUBLE:
-        return;
-      default:
-        throw ErrorReport(tree) << kindToString(tree->kind()) << " is not a valid ScalarType";
-    }
-  }
-};
-
 ////////////////////////////////////////////////////////////////////////////////
 // Top level definitions
 ////////////////////////////////////////////////////////////////////////////////
@@ -577,21 +558,6 @@ struct Const : public Expr {
   }
   static Const create(const SourceRange& range, const std::string& value) {
     return Const(Compound::create(TK_CONST, range, {String::create(value)}));
-  }
-};
-
-struct Cast : public Expr {
-  explicit Cast(const TreeRef& tree) : Expr(tree) {
-    tree_->match(TK_CAST);
-  }
-  ScalarType type() const {
-    return ScalarType(subtree(0));
-  }
-  Expr input() const {
-    return Expr(subtree(1));
-  }
-  static Cast create(const SourceRange& range, const Type& type, const Expr& input) {
-    return Cast(Compound::create(TK_CAST, range, {type, input}));
   }
 };
 
