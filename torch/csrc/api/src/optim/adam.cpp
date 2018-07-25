@@ -25,7 +25,7 @@ void Adam::step() {
     auto exp_average = buffer_at(exp_average_buffers_, i).data();
     auto exp_average_sq = buffer_at(exp_average_sq_buffers_, i).data();
 
-    step_buffers_.at(i) += 1;
+    buffer_at(step_buffers_, i) += 1;
 
     auto d_p = torch::autograd::as_variable_ref(grad).data();
     if (options.weight_decay_ > 0) {
@@ -47,9 +47,9 @@ void Adam::step() {
     }
 
     const auto bias_correction1 =
-        1 - std::pow(options.beta1_, step_buffers_.at(i));
+        1 - std::pow(options.beta1_, buffer_at(step_buffers_, i));
     const auto bias_correction2 =
-        1 - std::pow(options.beta2_, step_buffers_.at(i));
+        1 - std::pow(options.beta2_, buffer_at(step_buffers_, i));
     const auto step_size = options.learning_rate_ *
         std::sqrt(bias_correction2) / bias_correction1;
 

@@ -25,13 +25,13 @@ void Adagrad::step() {
     if (options.weight_decay_ > 0) {
       d_p.add_(p, options.weight_decay_);
     }
-    step_.at(i) += 1.0;
+    buffer_at(step_, i) += 1.0;
     auto clr = options.learning_rate_ /
-        (1.0 + (step_.at(i) - 1.0) * options.lr_decay_);
+        (1.0 + (buffer_at(step_, i) - 1.0) * options.lr_decay_);
 
     auto sum = buffer_at(sum_, i);
     sum.data().addcmul_(d_p, d_p, 1.0);
-    auto std = sum_.at(i).data().sqrt().add_(1e-10);
+    auto std = buffer_at(sum_, i).data().sqrt().add_(1e-10);
     p.addcdiv_(d_p, std, -clr);
   }
 }
