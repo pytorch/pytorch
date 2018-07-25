@@ -29,11 +29,13 @@ std::vector<int64_t> infer_size(IntList a, IntList b) {
 }
 
 std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
-    const Tensor& tensor,
+    IntList tensor_sizes,
+    IntList tensor_strides,
     IntList sizes) {
   int64_t ndim = sizes.size();
+  int64_t tensor_dim = tensor_sizes.size();
 
-  if (tensor.dim() == 0) {
+  if (tensor_dim == 0) {
     std::vector<int64_t> expandedStrides(ndim, 0);
     return std::tuple<std::vector<int64_t>, std::vector<int64_t>>(
         sizes.vec(), expandedStrides);
@@ -44,9 +46,9 @@ std::tuple<std::vector<int64_t>, std::vector<int64_t>> inferExpandGeometry(
   // create a new geometry for the tensors
   for (int64_t i = ndim - 1; i >= 0; --i) {
     int64_t offset = ndim - 1 - i;
-    int64_t dim = tensor.dim() - 1 - offset;
-    int64_t size = (dim >= 0) ? tensor.sizes()[dim] : 1;
-    int64_t stride = (dim >= 0) ? tensor.strides()[dim]
+    int64_t dim = tensor_dim - 1 - offset;
+    int64_t size = (dim >= 0) ? tensor_sizes[dim] : 1;
+    int64_t stride = (dim >= 0) ? tensor_strides[dim]
                                 : expandedSizes[i + 1] * expandedStrides[i + 1];
     int64_t targetSize = sizes[i];
     if (targetSize == -1) {

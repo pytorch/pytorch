@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <ATen/optional.h>
 
@@ -258,6 +259,22 @@ void pushPackingPastRnn(Block *b) {
     // setup the new PackPadded's inputs
     newPackPadded->addInput(next->outputs()[0]);
     newPackPadded->addInput(n->inputs()[1]);
+
+    // See https://github.com/pytorch/pytorch/issues/9043 for a full
+    // description.  Since PackPadded is for now treated in an
+    // unhygenic way, Pytorch ends up propagating an incorrect type.
+    // Until a long-term cleanup comes around, we can fix this by
+    // resetting the size to the correct value.
+    TensorType* oldType = rnn->inputs()[0]->type()->cast<TensorType>();
+    if (oldType) {
+      std::vector<int64_t> new_sizes;
+      new_sizes.push_back(oldType->sizes()[0]);
+      new_sizes.push_back(oldType->sizes()[1]);
+      new_sizes.push_back(rnn->i(attr::hidden_size));
+      TensorTypePtr newType = std::make_shared<TensorType>(
+          oldType->scalarType(), oldType->device(), new_sizes);
+      next->outputs()[0]->setType(newType);
+    }
 
     it.destroyCurrent();
   }

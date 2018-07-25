@@ -5,6 +5,7 @@
 #include <unordered_map>
 #include <algorithm>
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/jit/generated/aten_interned_strings.h"
 
 namespace torch { namespace jit {
@@ -42,6 +43,7 @@ _(prim, Undefined) \
 _(prim, Starred) \
 _(prim, TupleConstruct) \
 _(prim, TupleUnpack) \
+_(prim, ListConstruct) \
 _(prim, NumToTensor) \
 _(prim, TensorToNum) \
 _(prim, AutogradAdd) \
@@ -132,7 +134,7 @@ static const std::string domain_prefix = "org.pytorch.";
 // A Symbol is like an interned string, but with a little extra
 // structure; it is namespaced via SymbolNamespace and the resulting
 // intern pointers support efficient namespace testing.
-struct Symbol {
+struct TORCH_API Symbol {
   explicit constexpr Symbol() : value(0) {};
   explicit constexpr Symbol(unique_t uniq)
   : value(uniq) {}

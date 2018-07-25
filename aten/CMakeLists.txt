@@ -80,14 +80,20 @@ add_subdirectory(src/TH)
 set(TH_CPU_INCLUDE
   # dense
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
   ${CMAKE_CURRENT_BINARY_DIR}/src/TH
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THC
-
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src
   ${CMAKE_BINARY_DIR}/aten/src)
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
+
+if(USE_CUDA OR USE_ROCM)
+  set(TH_CUDA_INCLUDE
+    # dense
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
+    ${CMAKE_CURRENT_BINARY_DIR}/src/THC)
+  list(APPEND ATen_CUDA_INCLUDE ${TH_CUDA_INCLUDE})
+endif()
+
 add_subdirectory(src/THNN)
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.

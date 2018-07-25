@@ -1,4 +1,4 @@
-#include "adam_op.h"
+#include "caffe2/sgd/adam_op.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context_gpu.h"
 
@@ -21,7 +21,7 @@ __global__ void AdamUpdate(
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    ng[i] = lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
+    ng[i] = lr[0] * correction * mi / (sqrtf(vi) + eps_hat);
   }
 }
 
@@ -66,7 +66,7 @@ __global__ void AdamCompute(
     float gi = g[i];
     float mi = nm[i] = m[i] * beta1 + gi * (1 - beta1);
     float vi = nv[i] = v[i] * beta2 + gi * gi * (1 - beta2);
-    float ng = lr[0] * correction * mi / (std::sqrt(vi) + eps_hat);
+    float ng = lr[0] * correction * mi / (sqrtf(vi) + eps_hat);
     nw[i] = w[i] + ng;
   }
 }
@@ -130,7 +130,7 @@ bool SparseAdamOp<float, CUDAContext>::DoRunWithType() {
   auto grad_slice_sz = Input(GRAD).size_from_dim(Input(INDICES).ndim());
   const auto iter =
       OperatorBase::Input<TensorCPU>(ITER).template data<int64_t>()[0];
-  const float correction = std::sqrt(1.0f - std::pow(beta2_, iter + 1)) /
+  const float correction = sqrtf(1.0f - std::pow(beta2_, iter + 1)) /
       (1.0f - std::pow(beta1_, iter + 1));
 
   SparseAdamKernel<SIndex>

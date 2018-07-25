@@ -35,7 +35,7 @@
   return: argument 0
   options:
     - cname: set
-      scalar_check: source_->isScalar()
+      scalar_check: source_->dim() == 0
       arguments:
         - THTensor* self
         - THTensor* source
@@ -181,7 +181,7 @@
   variants:
     - function
   return: self
-  scalar_check: the_template_->isScalar()
+  scalar_check: the_template_->dim() == 0
   arguments:
     - THTensor* self
     - THTensor* the_template
@@ -219,7 +219,7 @@
     - method
     - function
   return: argument 0
-  scalar_check: index_->isScalar()
+  scalar_check: index_->dim() == 0
   arguments:
     - arg: THTensor* result
       output: True
@@ -837,7 +837,7 @@
   options:
     - cname: min
       return: argument 0,1
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* min
           output: True
@@ -876,7 +876,7 @@
   options:
     - cname: max
       return: argument 0,1
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* max
           output: True
@@ -897,7 +897,7 @@
     - function
   cname: kthvalue
   return: argument 0,1
-  scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+  scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
   arguments:
     - arg: THTensor* values
       output: True
@@ -918,7 +918,7 @@
     - function
   cname: mode
   return: argument 0,1
-  scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+  scalar_check: self_->dim() == 0|| (keepdim == false && self_->dim() == 1)
   arguments:
     - arg: THTensor* values
       output: True
@@ -952,7 +952,7 @@
   return: argument 0,1
   options:
     - cname: median
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* values
           output: True
@@ -1032,7 +1032,7 @@
   options:
     - cname: logicalAnd
       return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -1071,7 +1071,7 @@
   options:
     - cname: logicalAny
       return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -1669,7 +1669,7 @@
           default: 0
     - cname: var
       return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -1704,7 +1704,7 @@
           default: 0
     - cname: std
       return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -1749,7 +1749,7 @@
   options:
     - cname: norm
       return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -2097,7 +2097,7 @@
   options:
     - cname: sum
       return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -2126,7 +2126,7 @@
   options:
     - cname: prod
       return: argument 0
-      scalar_check: self_->isScalar() || (keepdim == false && self_->dim() == 1)
+      scalar_check: self_->dim() == 0 || (keepdim == false && self_->dim() == 1)
       arguments:
         - arg: THTensor* result
           output: True
@@ -2479,21 +2479,7 @@
         - THTensor* other
 ]]
 [[
-  name: clamp
-  cname: clamp
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-    - real max
-]]
-[[
-  name: clamp_
+  name: _th_clamp_
   cname: clamp
   variants:
     - method
@@ -2506,20 +2492,7 @@
     - real max
 ]]
 [[
-  name: clamp_min
-  cname: cmaxValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real min
-]]
-[[
-  name: clamp_min_
+  name: _th_clamp_min_
   cname: cmaxValue
   variants:
     - method
@@ -2531,20 +2504,7 @@
     - real min
 ]]
 [[
-  name: clamp_max
-  cname: cminValue
-  variants:
-    - method
-    - function
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - real max
-]]
-[[
-  name: clamp_max_
+  name: _th_clamp_max_
   cname: cminValue
   variants:
     - method
@@ -2640,11 +2600,11 @@
     - arg: long diagonal
       default: 0
   aten_custom_call: |
-    if (self_->isScalar()) {
+    if (self_->dim() == 0) {
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
     ${THTensor}_diag(${state,}result_->tensor, self_->tensor, diagonal);
-    result_->maybeScalar(self_->isScalar());
+    result_->maybeScalar(self_->dim() == 0);
 ]]
 [[
   name: th_addmm
@@ -3689,38 +3649,6 @@
   arguments:
     - THTensor* self
     - THTensor* src
-]]
-
-[[
-  name: as_strided
-  variants: [method,function]
-  cpu_half: True
-  return: argument 0
-  arguments:
-    - arg: THTensor* result
-      output: True
-    - THTensor* self
-    - THSize* size
-    - THStride* stride
-    - arg: int64_t storage_offset
-  aten_custom_call: |
-    ${THTensor}_setStorage(${state,}result_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
-    result_->maybeScalar(size.size() == 0);
-]]
-
-[[
-  name: as_strided_
-  variants: [method]
-  cpu_half: True
-  return: argument 0
-  arguments:
-    - THTensor* self
-    - THSize* size
-    - THStride* stride
-    - arg: int64_t storage_offset
-  aten_custom_call: |
-    ${THTensor}_setStorage(${state,}self_->tensor, self_->tensor->storage, storage_offset, size_, stride_);
-    self_->maybeScalar(size.size() == 0);
 ]]
 
 [[

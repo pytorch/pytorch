@@ -696,6 +696,78 @@ class WngradOptimizer(Optimizer):
         return
 
 
+class AdadeltaOptimizer(Optimizer):
+    def __init__(self, alpha=0.01, epsilon=1e-4, decay=0.95, policy="fixed",
+                 sparse_dedup_aggregator=None, engine='', **kwargs):
+        """Constructor function to add Adadelta Optimizer
+
+        Args:
+            alpha: learning rate
+            epsilon: attribute of Adadelta to avoid numerical issues
+            decay: attribute of Adadelta to decay the squared gradient sum
+            policy: specifies how learning rate should be applied, options are
+              "fixed", "step", "exp", etc.
+            sparse_dedup_aggregator: specifies deduplication strategy for
+              gradient slices. Works while using sparse gradients. Options
+              include "mean" and "sum".
+            engine: the engine used, options include "", "CUDNN", etc.
+        """
+        super(AdadeltaOptimizer, self).__init__()
+        self.alpha = alpha
+        self.epsilon = epsilon
+        self.decay = decay
+        self.policy = policy
+        self.sparse_dedup_aggregator = sparse_dedup_aggregator
+        self.engine = engine
+        self.init_kwargs = kwargs
+
+    def _run(self, net, param_init_net, param_info):
+        param = param_info.blob
+        grad = param_info.grad
+
+        if self.alpha <= 0:
+            return
+
+        lr, _ = self.build_lr(
+            net, param_init_net,
+            base_learning_rate=self.alpha,
+            policy=self.policy,
+            **(self.init_kwargs)
+        )
+
+        moment = param_init_net.ConstantFill(
+            [param], str(param) + "_squared_moment", value=0.0)
+
+        moment_update = param_init_net.ConstantFill(
+            [param], str(param) + "_squared_moment_update", value=0.0)
+
+        self._aux_params.local.append(moment)
+        self._aux_params.local.append(moment_update)
+
+        if isinstance(grad, core.GradientSlice):
+            grad = self.dedup(net, self.sparse_dedup_aggregator, grad)
+            net.SparseAdadelta(
+                [
+                    param, moment, moment_update, grad.indices,
+                    grad.values, lr
+                ], [param, moment, moment_update],
+                epsilon=self.epsilon,
+                decay=self.decay,
+                engine=self.engine)
+        else:
+            net.Adadelta(
+                [param, moment, moment_update, grad, lr],
+                [param, moment, moment_update],
+                epsilon=self.epsilon,
+                decay=self.decay,
+                engine=self.engine
+            )
+
+    def scale_learning_rate(self, scale):
+        self.alpha *= scale
+        return
+
+
 class FtrlOptimizer(Optimizer):
     def __init__(self, alpha=0.01, beta=1e-4, lambda1=0, lambda2=0,
                  sparse_dedup_aggregator=None, engine=''):
@@ -1386,6 +1458,24 @@ def build_wngrad(
         max_gradient_norm=max_gradient_norm,
         allow_lr_injection=allow_lr_injection,
     )
+
+
+def build_adadelta(
+    model,
+    base_learning_rate,
+    parameters=None,
+    max_gradient_norm=None,
+    allow_lr_injection=False,
+    **kwargs
+):
+    adadelta_optimizer = AdadeltaOptimizer(alpha=base_learning_rate, **kwargs)
+    return _build(
+        model,
+        adadelta_optimizer,
+        max_gradient_norm=max_gradient_norm,
+        allow_lr_injection=allow_lr_injection,
+    )
+
 
 def build_adam(
     model,

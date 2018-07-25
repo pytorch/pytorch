@@ -3,6 +3,7 @@
 #include "torch/csrc/cuda/Stream.h"
 #include "torch/csrc/cuda/THCP.h"
 #include "torch/csrc/utils/auto_gil.h"
+#include "torch/csrc/utils/functional.h"
 
 #include <ATen/ATen.h>
 
@@ -27,10 +28,15 @@ void initCommMethods(PyObject *module) {
      at::optional<std::vector<int64_t>> chunk_sizes,
      int64_t dim,
      at::optional<py::object> py_streams) {
-     at::optional<std::vector<THCStream*>> streams;
+     at::optional<std::vector<at::cuda::CUDAStream>> streams;
      if (py_streams) {
        py::handle handle = *py_streams;
-       streams = THPUtils_PySequence_to_THCStreamList(handle.ptr());
+       streams = fmap(
+           THPUtils_PySequence_to_THCStreamList(handle.ptr()),
+           [](THCStream* stream) {
+             at::cuda::detail::CUDAStream_retain(stream);
+             return at::cuda::CUDAStream(stream);
+           });
      }
      // Note: We're holding the GIL up to here.
      AutoNoGIL no_gil;

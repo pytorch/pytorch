@@ -182,6 +182,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: mul
+.. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
 .. autofunction:: reciprocal
@@ -251,6 +252,7 @@ Spectral Ops
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: bincount
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diagflat
@@ -258,6 +260,7 @@ Other Operations
 .. autofunction:: einsum
 .. autofunction:: flip
 .. autofunction:: histc
+.. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: trace
 .. autofunction:: tril

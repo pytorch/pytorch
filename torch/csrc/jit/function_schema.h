@@ -1,6 +1,8 @@
 #pragma once
 #include "ATen/ATen.h"
-#include "torch/csrc/jit/ir.h"
+
+#include "torch/csrc/jit/type.h"
+#include "torch/csrc/jit/ivalue.h"
 
 namespace torch { namespace jit {
 
@@ -12,7 +14,7 @@ struct Argument {
       std::string name = "",
       TypePtr type = nullptr,
       at::optional<int32_t> N = at::nullopt,
-      at::optional<at::Tensor> default_value = at::nullopt,
+      at::optional<IValue> default_value = at::nullopt,
       bool kwarg_only = true)
       : name(std::move(name)),
         type(type? type : DynamicType::get()),
@@ -28,8 +30,7 @@ struct Argument {
   // become a list.
   at::optional<int32_t> N;
 
-  // encoded using as_tensor, use tensor_as<T> to get value for attribute
-  at::optional<at::Tensor> default_value;
+  at::optional<IValue> default_value;
   // is this only specifyable as a keyword argument?
   bool kwarg_only;
 };
@@ -85,21 +86,30 @@ inline std::ostream& operator<<(std::ostream& out, const Argument& arg) {
 inline std::ostream& operator<<(std::ostream& out, const FunctionSchema& schema) {
   // eventually this should look almost identical to python arg parser, but
   // it is simpler for now to work directly on this schema
-  auto emitList = [&](const std::vector<Argument>& args) {
-    out << "(";
-    for(size_t i = 0; i < args.size(); ++i) {
-      if(i > 0)
-        out << ", ";
-      out << args[i];
-    }
-    out << ")";
-  };
 
   out << schema.name;
-  emitList(schema.arguments);
-  if(schema.returns.size() > 1) {
-    out << " -> ";
-    emitList(schema.returns);
+  out << "(";
+
+  bool seen_kwarg_only = false;
+  for(size_t i = 0; i < schema.arguments.size(); ++i) {
+    if (i > 0) out << ", ";
+    if (schema.arguments[i].kwarg_only && !seen_kwarg_only) {
+      out << "*, ";
+      seen_kwarg_only = true;
+    }
+    out << schema.arguments[i];
+  }
+
+  out << ") -> ";
+  if (schema.returns.size() == 1) {
+    out << schema.returns.at(0).type->str();
+  } else if (schema.returns.size() > 1) {
+    out << "(";
+    for (size_t i = 0; i < schema.returns.size(); ++i) {
+      if (i > 0) out << ", ";
+      out << schema.returns[i].type->str();
+    }
+    out << ")";
   }
   return out;
 }

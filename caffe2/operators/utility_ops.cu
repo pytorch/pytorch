@@ -1,9 +1,3 @@
-#include <math.h>
-#include <cfloat>
-// TODO(jamesreed): I would use <cmath> here but std::isnan
-// and std::isinf are declared constexpr there and the nvidia
-// compiler throws an error because of it
-
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/flatten_op.h"
 #include "caffe2/operators/minmax_ops.h"
@@ -169,7 +163,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
         std::cerr << "NaN idxs:" << std::endl;
         auto* cpu_X_data = cpu_X.data<float>();
         for (size_t i = 0; i < cpu_X.size(); ++i) {
-          if (isnan(cpu_X_data[i]) || isinf(cpu_X_data[i])) {
+          if (std::isnan(cpu_X_data[i]) || std::isinf(cpu_X_data[i])) {
             std::cerr << i << " ";
           }
         }
@@ -192,7 +186,7 @@ REGISTER_CUDA_OPERATOR(NanCheck, NanCheckOp<CUDAContext>);
 __global__ void
 ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    maxout[i] = max(X[i], Y[i]);
+    maxout[i] = fmaxf(X[i], Y[i]);
   }
 }
 
@@ -223,7 +217,7 @@ REGISTER_CUDA_OPERATOR(MaxGradient, MaxGradientOp<float, CUDAContext>);
 __global__ void
 ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    minout[i] = min(X[i], Y[i]);
+    minout[i] = fminf(X[i], Y[i]);
   }
 }
 
@@ -404,7 +398,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   TIndex K = indices.size();
   TIndex block_size = M / N;
 
-  T* data = output->template mutable_data<T>();
+  float* data = output->template mutable_data<float>();
 
   // In order to have all device pointers of x_i (and weight_i similarly)
   // consecutively in device memory, copy pointers to a host vector and then

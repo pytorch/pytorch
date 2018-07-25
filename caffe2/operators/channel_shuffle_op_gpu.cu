@@ -1,5 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "channel_shuffle_op.h"
+#include "caffe2/operators/channel_shuffle_op.h"
 
 namespace caffe2 {
 
@@ -42,7 +42,7 @@ __global__ void ChannelShuffleNHWCKernel(
 }
 
 template <>
-bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
+bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
@@ -61,7 +61,7 @@ bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
 }
 
 template <>
-bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
+bool ChannelShuffleOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& X = Input(0);
   auto* Y = Output(0);
   Y->ResizeLike(X);
@@ -79,7 +79,7 @@ bool ChannelShuffleOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
 }
 
 template <>
-bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
+bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto& dY = Input(0);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
@@ -98,7 +98,7 @@ bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNCHW() {
 }
 
 template <>
-bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
+bool ChannelShuffleGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto& dY = Input(0);
   auto* dX = Output(0);
   dX->ResizeLike(dY);
@@ -115,8 +115,9 @@ bool ChannelShuffleGradientOp<CUDAContext>::RunOnDeviceWithOrderNHWC() {
   return true;
 }
 
-REGISTER_CUDA_OPERATOR(ChannelShuffle, ChannelShuffleOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(ChannelShuffle, ChannelShuffleOp<float, CUDAContext>);
 REGISTER_CUDA_OPERATOR(
     ChannelShuffleGradient,
-    ChannelShuffleGradientOp<CUDAContext>);
+    ChannelShuffleGradientOp<float, CUDAContext>);
+
 } // namespace caffe2

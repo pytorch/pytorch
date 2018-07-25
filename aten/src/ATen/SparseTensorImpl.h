@@ -5,7 +5,7 @@
 #include "ATen/Error.h"
 
 namespace at {
-struct SparseTensorImpl : public TensorImpl {
+struct AT_API SparseTensorImpl : public TensorImpl {
   // Stored in COO format, indices + values.
 
   // Ideal INVARIANTS:
@@ -57,7 +57,6 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  const char * toString() const override;
   IntList sizes() const override;
   IntList strides() const override;
   int64_t dim() const override;

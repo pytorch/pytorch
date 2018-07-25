@@ -59,7 +59,6 @@ CAFFE2_DEFINE_int(
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(Tensor<CUDAContext>);
 
 thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
 

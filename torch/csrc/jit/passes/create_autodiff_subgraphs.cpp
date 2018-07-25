@@ -1,6 +1,7 @@
 #include <cstddef>
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/assertions.h"
 
 namespace torch { namespace jit {
 
