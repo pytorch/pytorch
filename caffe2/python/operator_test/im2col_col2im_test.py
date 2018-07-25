@@ -9,6 +9,7 @@ from hypothesis import assume, given
 import caffe2.python.hypothesis_test_util as hu
 import hypothesis.strategies as st
 import numpy as np
+import unittest
 
 
 class TestReduceFrontSum(hu.HypothesisTestCase):
