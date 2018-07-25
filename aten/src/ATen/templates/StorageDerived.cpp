@@ -11,8 +11,8 @@ $extra_cuda_headers
 
 namespace at {
 
-${Storage}::${Storage}()
-  : Storage(
+${Storage}::${Storage}() {
+  storage_impl_ = new StorageImpl(
       ScalarType::${ScalarName}, 
       0,
 #if ${isCUDA}
@@ -20,12 +20,12 @@ ${Storage}::${Storage}()
 #else
       getTHDefaultAllocator(),
 #endif
-      RESIZABLE) {
-  clear_flag(RESIZABLE);
+      StorageImpl::RESIZABLE);
+  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
 }
 
-${Storage}::${Storage}(size_t size)
-  : Storage(
+${Storage}::${Storage}(size_t size) {
+  storage_impl_ = new StorageImpl(
       ScalarType::${ScalarName}, 
       size,
 #if ${isCUDA}
@@ -33,17 +33,17 @@ ${Storage}::${Storage}(size_t size)
 #else
       getTHDefaultAllocator(),
 #endif
-      RESIZABLE) {
-  clear_flag(RESIZABLE);
+      StorageImpl::RESIZABLE);
+  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
 }
 
-${Storage}::${Storage}(size_t size, Allocator* allocator)
-  : Storage(
+${Storage}::${Storage}(size_t size, Allocator* allocator) {
+  storage_impl_ = new StorageImpl(
       ScalarType::${ScalarName}, 
       size,
       allocator,
-      RESIZABLE) {
-  clear_flag(RESIZABLE);
+      StorageImpl::RESIZABLE);
+  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
 }
 
 // TODO: Take in Device as an input to the std::function constructor
@@ -57,8 +57,10 @@ static int getPointerDevice(void* ptr) {
 #endif
 
 ${Storage}::${Storage}(
-  void * data, size_t size, const std::function<void(void*)> & deleter)
-  : Storage(
+  void * data, 
+  size_t size, 
+  const std::function<void(void*)> & deleter) {
+  storage_impl_ = new StorageImpl(
       ScalarType::${ScalarName},
       size,
       InefficientStdFunctionContext::makeDataPtr(data, deleter,
@@ -69,12 +71,10 @@ ${Storage}::${Storage}(
 #endif
        ),
      /* allocator */ nullptr,
-     RESIZABLE
-    ) {
-  clear_flag(RESIZABLE);
+     StorageImpl::RESIZABLE
+    );
+  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
 }
-
-${Storage}::~${Storage}() { }
 
 const char * ${Storage}::typeString() {
   return "${Type}";

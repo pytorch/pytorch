@@ -4,7 +4,7 @@
 
 #ifdef __cplusplus
 #include <ATen/Allocator.h>
-#include <ATen/Storage.h>
+#include <ATen/StorageImpl.h>
 #endif
 
 /* on pourrait avoir un liste chainee
@@ -28,10 +28,10 @@
 // typedef struct THStorage THStorage;
 
 #ifdef __cplusplus
-#define THStorage at::Storage
+#define THStorage at::StorageImpl
 #else
 typedef struct at_Storage at_Storage;
-#define THStorage at_Storage
+#define THStorage at_Storage_Impl
 #endif
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation

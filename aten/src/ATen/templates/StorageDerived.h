@@ -14,17 +14,18 @@ namespace at {
 struct Allocator;
 
 struct ${Storage} final : public Storage {
-public:
   ${Storage}();
+  ${Storage}(StorageImpl* storage_impl) : storage_impl_(storage_impl){};
   ${Storage}(size_t size);
   ${Storage}(size_t size, Allocator* allocator);
   ${Storage}(
-    void * data, size_t size, const std::function<void(void*)> & deleter);
-  ~${Storage}();
+      void* data,
+      size_t size,
+      const std::function<void(void*)>& deleter);
+  static const char* typeString();
+  StorageImpl* storage_impl_;
 
-  static const char * typeString();
-
-protected:
+ protected:
   friend struct ${Type};
 };
 

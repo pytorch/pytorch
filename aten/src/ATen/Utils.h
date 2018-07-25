@@ -24,9 +24,9 @@ AT_API int _crash_if_asan(int);
 
 template <typename T, typename Base>
 static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
-  if (typeid(*expr) != typeid(T))
-    AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
-             " for argument #", pos, " '", name, "'");
+//  if (typeid(*expr) != typeid(T))
+//    AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
+//             " for argument #", pos, " '", name, "'");
   return static_cast<T*>(expr);
 }
 

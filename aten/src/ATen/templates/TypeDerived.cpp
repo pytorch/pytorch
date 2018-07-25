@@ -65,7 +65,7 @@ Tensor ${Type}::unsafeTensorFromTH(void * th_pointer, bool retain) const {
 std::unique_ptr<Storage> ${Type}::unsafeStorageFromTH(void * th_pointer, bool retain) const {
   if (retain)
     ${THStorage}_retain(${state,} (${THStorage}*) th_pointer);
-  return std::unique_ptr<Storage>((${THStorage}*) th_pointer);
+  return std::unique_ptr<Storage>(new ${Storage}((${THStorage}*) th_pointer));
 }
 std::unique_ptr<Generator> ${Type}::generator() const {
   return std::unique_ptr<Generator>(new ${Generator}(context));
