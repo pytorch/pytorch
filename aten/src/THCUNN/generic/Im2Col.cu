@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/Im2Col.cu"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(Im2Col_shapeCheck)(
                          THCState *state,
                          THCTensor *input,
@@ -29,8 +31,8 @@ static inline void THNN_(Im2Col_shapeCheck)(
   int64_t nInputPlane  = THCTensor_(size)(state, input, dim_batch + 1);
   int64_t inputHeight  = THCTensor_(size)(state, input, dim_batch + 2);
   int64_t inputWidth   = THCTensor_(size)(state, input, dim_batch + 3);
-  int64_t outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
-  int64_t outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
+  int64_t outputHeight = div_rtn<int64_t>(inputHeight + 2 * padH - (dH * (kH - 1) + 1),  sH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(inputWidth + 2 * padW - (dW * (kW - 1) + 1), sW) + 1;
 
   if (outputHeight < 1 || outputWidth < 1) {
     THError("Given input with spatial size (%d, %d), kernel_size=(%d, %d), "

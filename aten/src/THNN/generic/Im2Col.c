@@ -2,6 +2,8 @@
 #define TH_GENERIC_FILE "generic/Im2Col.c"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(Im2Col_shapeCheck)(
                          THNNState *state,
                          THTensor *input,
@@ -27,8 +29,8 @@ static inline void THNN_(Im2Col_shapeCheck)(
   int64_t nInputPlane  = THTensor_(size)(input, dim_batch + 1);
   int64_t inputHeight  = THTensor_(size)(input, dim_batch + 2);
   int64_t inputWidth   = THTensor_(size)(input, dim_batch + 3);
-  int64_t outputHeight = (inputHeight + 2 * padH - (dH * (kH - 1) + 1)) / sH + 1;
-  int64_t outputWidth  = (inputWidth + 2 * padW - (dW * (kW - 1) + 1)) / sW + 1;
+  int64_t outputHeight = div_rtn<int64_t>(inputHeight + 2 * padH - (dH * (kH - 1) + 1), sH) + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(inputWidth + 2 * padW - (dW * (kW - 1) + 1), sW) + 1;
   int64_t nOutputPlane = nInputPlane * kW * kH;
   int64_t outputLength = outputHeight * outputWidth;
 
