@@ -50,22 +50,13 @@ test_python_all() {
 test_cpp_api() {
   # C++ API
 
-  # NB: Install outside of source directory (at the same level as the root
-  # pytorch folder) so that it doesn't get cleaned away prior to docker push.
-  # But still clean it before we perform our own build.
-  #
-  CPP_BUILD="$PWD/../cpp-build"
-  rm -rf $CPP_BUILD
-  mkdir -p $CPP_BUILD
-  WERROR=1 VERBOSE=1 tools/cpp_build/build_caffe2.sh "$CPP_BUILD"
-
   python tools/download_mnist.py --quiet -d test/cpp/api/mnist
 
   # Unfortunately it seems like the test can't load from miniconda3
   # without these paths being set
   export DYLD_LIBRARY_PATH="$DYLD_LIBRARY_PATH:$PWD/miniconda3/lib"
   export LD_LIBRARY_PATH="$LD_LIBRARY_PATH:$PWD/miniconda3/lib"
-  "$CPP_BUILD"/caffe2/bin/test_api
+  ${PYTORCH_ENV_DIR}/miniconda3/lib/python3.6/site-packages/torch/test_binaries/build/bin/test_api
 }
 
 if [ -z "${JOB_BASE_NAME}" ] || [[ "${JOB_BASE_NAME}" == *-test ]]; then
