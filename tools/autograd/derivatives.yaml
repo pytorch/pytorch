@@ -305,6 +305,10 @@
   self: grad.mv(vec2)
   vec2: grad.t().mv(self)
 
+- name: _gesv_single(Tensor self, Tensor A)
+  self: gesv_backward_self(grad, self, A)
+  A: gesv_backward_A(grad, self, A, result0)
+
 - name: _gesv_helper(Tensor self, Tensor A)
   self: gesv_backward_self(grad, self, A)
   A: gesv_backward_A(grad, self, A, result0)

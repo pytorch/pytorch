@@ -72,7 +72,7 @@ static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
   }
 }
 
-std::tuple<Tensor&,Tensor&> _gesv_single_helper_out_cpu(
+std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
     Tensor& result0, Tensor& result1,
     const Tensor& self, const Tensor& A) {
 #ifndef USE_LAPACK
@@ -100,6 +100,12 @@ std::tuple<Tensor&,Tensor&> _gesv_single_helper_out_cpu(
   return std::tuple<Tensor&, Tensor&>(result0, result1);
 }
 
+std::tuple<Tensor,Tensor> _gesv_single_cpu(const Tensor& self, const Tensor& A) {
+  auto A_ = self.type().tensor();
+  auto b_ = self.type().tensor();
+  return _gesv_single_out_cpu(b_, A_, self, A);
+}
+
 std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
   std::vector<int64_t> infos(batchCount(A), 0);
   auto A_working_copy = cloneBatchedColumnMajor(A);
@@ -117,9 +123,7 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
   checkInputs(self, A, batched);
 
   if (!batched) {
-    auto A_ = self.type().tensor();
-    auto b_ = self.type().tensor();
-    return self.type()._gesv_single_helper_out(b_, A_, self, A);
+    return self.type()._gesv_single(self, A);
   }
 
   // broadcast the batch dimensions of self and A.
@@ -149,7 +153,7 @@ std::tuple<Tensor&,Tensor&> gesv_out(
                   (long long)self.dim(), (long long)A.dim());
   }
 
-  return self.type()._gesv_single_helper_out(result0, result1, self, A);
+  return self.type()._gesv_single_out(result0, result1, self, A);
 }
 
 }}  // namespace at::native
