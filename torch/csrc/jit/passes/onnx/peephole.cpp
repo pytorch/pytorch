@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <ATen/optional.h>
 

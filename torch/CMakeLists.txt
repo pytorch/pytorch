@@ -107,7 +107,6 @@ add_custom_command(
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
-  ${TORCH_SRC_DIR}/csrc/assertions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp

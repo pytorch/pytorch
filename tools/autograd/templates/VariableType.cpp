@@ -163,7 +163,7 @@ std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 // XXX - this is not threadsafe with uses of Variables
 void register_variable_type_for(Type* baseType) {
-  TORCH_ASSERT(baseType);
+  AT_ASSERT(baseType);
   size_t base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
     type_to_variable_type.resize(base_id + 1);

@@ -3,6 +3,7 @@
 // it now to implement correct semantic checking for script
 #pragma once
 #include "ATen/ATen.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/function_schema.h"
 #include "torch/csrc/jit/stack.h"
