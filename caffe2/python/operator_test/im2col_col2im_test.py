@@ -111,6 +111,7 @@ class TestReduceFrontSum(hu.HypothesisTestCase):
             atol=1e-4,
             rtol=1e-4)
 
+    @unittest.skip("flaky test, see https://github.com/pytorch/pytorch/issues/9832")
     @given(batch_size=st.integers(1, 3),
            stride=st.integers(1, 3),
            pad=st.integers(0, 3),

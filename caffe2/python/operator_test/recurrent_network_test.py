@@ -12,6 +12,7 @@ import numpy as np
 
 
 class RecurrentNetworkTest(hu.HypothesisTestCase):
+    @unittest.skip("flaky test, see https://github.com/pytorch/pytorch/issues/9833")
     @given(T=st.integers(1, 4),
            n=st.integers(1, 5),
            d=st.integers(1, 5))
