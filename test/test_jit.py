@@ -4307,7 +4307,7 @@ def func(t):
                 return x, x
 
     def test_annotated_script_fn_arg_mismatch(self):
-        with self.assertRaisesRegex(RuntimeError, r"expected a Number or Tensor value but found a Tuple"):
+        with self.assertRaisesRegex(RuntimeError, r"arguments for call are not valid"):
             @torch.jit.script
             def tuple_arg(x):
                 # type: (Tuple[Tensor, Tensor]) -> Tensor

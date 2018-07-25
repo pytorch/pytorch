@@ -382,14 +382,14 @@ void initJitScriptBindings(PyObject* module) {
   py::class_<TypedDef>(m, "TypedDef")
     .def(py::init<Def>());
 
-  m.def("_pack_typed_def", [](Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types) {
+  m.def("_pack_typed_def", [](Def &def, std::vector<TypePtr> arg_types, std::vector<TypePtr> return_types, bool method=false) {
     std::vector<Argument> arguments, returns;
-    size_t i = 0;
+    size_t i = method ? 1 : 0;
     for (auto arg_type : arg_types) {
-      arguments.push_back(Argument(def.params()[i++].ident().name(), arg_type));
+      arguments.push_back(Argument(def.params()[i++].ident().name(), arg_type, {}, {}, false));
     }
     for (auto ret_type : return_types) {
-      returns.push_back(Argument("", ret_type));
+      returns.push_back(Argument("", ret_type, {}, {}, false));
     }
 
     return TypedDef(def, FunctionSchema(def.name().name(), arguments, returns));
@@ -532,15 +532,15 @@ void initJitScriptBindings(PyObject* module) {
     .def("graph_for", [](Method& self, py::args args) {
       return self.graph_for(createVariableTensorList(args));
     })
-    .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def) {
+    .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def, bool method) {
       std::vector<Argument> arg_type_args, return_type_args;
       size_t i = 0;
       if (typed_def.schema) {
         for (const auto &arg_type : typed_def.schema->arguments) {
-          arg_type_args.push_back(Argument(typed_def.def.params()[i++].ident().name(), arg_type.type));
+          arg_type_args.push_back(Argument(typed_def.def.params()[i++].ident().name(), arg_type.type, {}, {}, false));
         }
         for (const auto &return_type : typed_def.schema->returns) {
-          return_type_args.push_back(Argument("", return_type.type));
+          return_type_args.push_back(Argument("", return_type.type, {}, {}, false));
         }
         self.setSchema(FunctionSchema(self.name(), arg_type_args, return_type_args));
       }

@@ -738,12 +738,13 @@ struct to_ir {
       environment_stack->setVar((*it).ident().range(), name, new_input);
 
       // Record the type for the schema and set the Type on the Value*
-      TypePtr arg_type = DynamicType::get();
+      // TypePtr arg_type = DynamicType::get();
       if (typed_def.schema) {
-        arg_type = typed_def.schema->arguments.at(arg_annotation_idx++).type;
+        arguments.push_back(typed_def.schema->arguments.at(arg_annotation_idx++));
+      } else {
+        arguments.emplace_back(name, DynamicType::get());
       }
-      arguments.push_back({name, arg_type});
-      new_input->setType(arg_type);
+      new_input->setType(arguments.back().type);
     }
     // body
     auto stmts = def.statements();
@@ -775,6 +776,7 @@ struct to_ir {
           << " the number of returns from the function (" << results.size() << ")!";
       }
       auto range = return_stmt.range();
+      size_t return_type_idx = 0;
       for (auto& r : results) {
         if(r->type()->isSubtypeOf(*NumberType::get())) {
           graph->registerOutput(numToTensor(range, r));
