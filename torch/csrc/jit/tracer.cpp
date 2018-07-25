@@ -45,15 +45,13 @@ PreTraceInfo preRecordTrace(Symbol op,
 
 void postRecordTrace(const PreTraceInfo& info,
                      at::ArrayRef<Variable> outputs) {
-  auto assignOutput = [&info](const Variable & output, Value * value) {
+  for (size_t i = 0; i < outputs.size(); i++) {
+    auto & output = outputs[i];
+    Value * value = info.n->addOutput();
     if (output.defined()) {
       value->inferTypeFrom(output.data());
       setValueTrace(output, value);
     }
-  };
-
-  for (size_t i = 0; i < outputs.size(); i++) {
-    assignOutput(outputs[i], info.n->addOutput());
   }
 }
 
