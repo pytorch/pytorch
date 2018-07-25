@@ -44,21 +44,21 @@ if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
     # CMake must find these wrapper scripts
     export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
+fi
 
-  # Setup ccache if configured to use it (and not sccache)
-  if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
-    mkdir -p ./ccache
-    ln -sf "$(which ccache)" ./ccache/cc
-    ln -sf "$(which ccache)" ./ccache/c++
-    ln -sf "$(which ccache)" ./ccache/gcc
-    ln -sf "$(which ccache)" ./ccache/g++
-    ln -sf "$(which ccache)" ./ccache/x86_64-linux-gnu-gcc
-    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-      ln -sf "$(which ccache)" ./ccache/nvcc
-    fi
-    export CACHE_WRAPPER_DIR="$PWD/ccache"
-    export PATH="$CACHE_WRAPPER_DIR:$PATH"
+# Setup ccache if configured to use it (and not sccache)
+if [ -z "${SCCACHE}" ] && which ccache > /dev/null; then
+  mkdir -p ./ccache
+  ln -sf "$(which ccache)" ./ccache/cc
+  ln -sf "$(which ccache)" ./ccache/c++
+  ln -sf "$(which ccache)" ./ccache/gcc
+  ln -sf "$(which ccache)" ./ccache/g++
+  ln -sf "$(which ccache)" ./ccache/x86_64-linux-gnu-gcc
+  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+    ln -sf "$(which ccache)" ./ccache/nvcc
   fi
+  export CACHE_WRAPPER_DIR="$PWD/ccache"
+  export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
 report_compile_cache_stats() {
