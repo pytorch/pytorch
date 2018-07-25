@@ -22,6 +22,7 @@ install_ubuntu() {
                    rocblas \
                    hipblas \
                    rocrand \
+                   hcsparse \
                    rocm-profiler \
                    cxlactivitylogger
 
@@ -30,11 +31,6 @@ install_ubuntu() {
     curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o hcrng.deb
     dpkg -i hcrng.deb
     rm hcrng.deb
-
-    # install hcsparse
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o hcsparse.deb
-    dpkg -i hcsparse.deb
-    rm hcsparse.deb
 
     # hotfix a bug in hip's cmake files, this has been fixed in
     # https://github.com/ROCm-Developer-Tools/HIP/pull/516 but for
@@ -70,12 +66,6 @@ install_hcrng() {
     dpkg -i /opt/rocm/debians/hcrng.deb
 }
 
-install_hcsparse() {
-    mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcsparse-master-907a505-Linux.deb -o /opt/rocm/debians/hcsparse.deb
-    dpkg -i /opt/rocm/debians/hcsparse.deb
-}
-
 # Install Python packages depending on the base OS
 if [ -f /etc/lsb-release ]; then
   install_ubuntu
@@ -88,4 +78,3 @@ fi
 
 install_hip_thrust
 install_hcrng
-install_hcsparse
