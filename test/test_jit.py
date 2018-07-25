@@ -452,7 +452,6 @@ class TestJit(JitTestCase):
                 return x * x + x + torch.rand_like(x)
 
         x = torch.zeros([3, 4, 5], dtype=torch.float, device='cuda')
-        y = torch.ones([3, 4, 5], dtype=torch.float, device='cuda')
         m = M()
         out1 = m.create(x)
         out2 = m.create(x)
