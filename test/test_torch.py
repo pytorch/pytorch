@@ -6720,6 +6720,8 @@ class TestTorch(TestCase):
         self.assertEqual(torch.tensor([7, 8, 5, 6, 3, 4, 1, 2]).view(2, 2, 2), data.flip(0, 1))
         self.assertEqual(torch.tensor([8, 7, 6, 5, 4, 3, 2, 1]).view(2, 2, 2), data.flip(0, 1, 2))
 
+        # check for wrap dim
+        self.assertEqual(torch.tensor([2, 1, 4, 3, 6, 5, 8, 7]).view(2, 2, 2), data.flip(-1))
         # check for permute
         self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(0, 2))
         self.assertEqual(torch.tensor([6, 5, 8, 7, 2, 1, 4, 3]).view(2, 2, 2), data.flip(2, 0))
@@ -6730,8 +6732,6 @@ class TestTorch(TestCase):
         self.assertRaises(TypeError, lambda: data.flip())
         # not allow size of flip dim > total dims
         self.assertRaises(RuntimeError, lambda: data.flip(0, 1, 2, 3))
-        # not allow dim < 0
-        self.assertRaises(RuntimeError, lambda: data.flip(-1))
         # not allow dim > max dim
         self.assertRaises(RuntimeError, lambda: data.flip(3))
 
@@ -6756,6 +6756,10 @@ class TestTorch(TestCase):
         self.assertEqual(flip0_result, data.flip(0))
         self.assertEqual(flip1_result, data.flip(1))
 
+        # test empty tensor, should just return an empty tensor of the same shape
+        data = torch.tensor([])
+        self.assertEqual(data, data.flip(0))
+
     def test_flip(self):
         self._test_flip(self, use_cuda=False)
 
@@ -6768,6 +6772,44 @@ class TestTorch(TestCase):
 
         val = torch.tensor(42)
         self.assertEqual(reversed(val), torch.tensor(42))
+
+    @staticmethod
+    def _test_rot90(self, use_cuda=False):
+        device = torch.device("cuda" if use_cuda else "cpu")
+        data = torch.arange(1, 5, device=device).view(2, 2)
+        self.assertEqual(torch.tensor([1, 2, 3, 4]).view(2, 2), data.rot90(0, [0, 1]))
+        self.assertEqual(torch.tensor([2, 4, 1, 3]).view(2, 2), data.rot90(1, [0, 1]))
+        self.assertEqual(torch.tensor([4, 3, 2, 1]).view(2, 2), data.rot90(2, [0, 1]))
+        self.assertEqual(torch.tensor([3, 1, 4, 2]).view(2, 2), data.rot90(3, [0, 1]))
+
+        # test for default args k=1, dims=[0, 1]
+        self.assertEqual(data.rot90(), data.rot90(1, [0, 1]))
+
+        # test for reversed order of dims
+        self.assertEqual(data.rot90(3, [0, 1]), data.rot90(1, [1, 0]))
+
+        # test for modulo of k
+        self.assertEqual(data.rot90(5, [0, 1]), data.rot90(1, [0, 1]))
+        self.assertEqual(data.rot90(3, [0, 1]), data.rot90(-1, [0, 1]))
+        self.assertEqual(data.rot90(-5, [0, 1]), data.rot90(-1, [0, 1]))
+
+        # test for dims out-of-range error
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, -3]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 2]))
+
+        # test tensor with more than 2D
+        data = torch.arange(1, 9, device=device).view(2, 2, 2)
+        self.assertEqual(torch.tensor([2, 4, 1, 3, 6, 8, 5, 7]).view(2, 2, 2), data.rot90(1, [1, 2]))
+        self.assertEqual(data.rot90(1, [1, -1]), data.rot90(1, [1, 2]))
+
+        # test for errors
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 3]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))
+
+    def test_rot90(self):
+        self._test_rot90(self, use_cuda=False)
 
     def test_storage(self):
         v = torch.randn(3, 5)
