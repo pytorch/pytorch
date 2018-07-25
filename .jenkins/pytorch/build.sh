@@ -30,6 +30,8 @@ cmake --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  # ROCm 1.8.2 OOMs when MAX_JOBS is too high
+  export MAX_JOBS=1
   export HCC_AMDGPU_TARGET=gfx900
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
