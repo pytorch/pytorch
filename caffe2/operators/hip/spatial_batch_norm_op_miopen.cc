@@ -125,7 +125,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   CAFFE_ENFORCE_EQ(bias.dim32(0), C);
   // See if we need to reshape.
-  if (X.dims() != miopen_input_dims_) {
+  if (N > 0 && X.dims() != miopen_input_dims_) {
     VLOG(1) << "Setting descriptors.";
     miopen_input_dims_ = X.dims();
     vector<int> dims = {N, C, H, W, D};
@@ -149,6 +149,10 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
 
     auto* Y = Output(OUTPUT);
     Y->ResizeLike(X);
+    T* Y_data = Y->template mutable_data<T>();
+    if (N == 0) {
+      return true;
+    }
     MIOPEN_ENFORCE(miopenBatchNormalizationForwardInference(
         miopen_wrapper_.inline_miopen_handle(),
         // Note: PERSISTENT not implemented for inference
@@ -158,7 +162,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
         data_desc_,
         X.template data<T>(),
         data_desc_,
-        Y->template mutable_data<T>(),
+        Y_data,
         bn_param_desc_,
         const_cast<float*>(scale.template data<BNParamType>()),
         const_cast<float*>(bias.template data<BNParamType>()),
@@ -169,6 +173,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
     // Run training mode.
     auto* Y = Output(OUTPUT);
     Y->ResizeLike(X);
+    T* Y_data = Y->template mutable_data<T>();
     // obtain running mean and running inv var, and see if we need to
     // initialize them.
     auto* running_mean = Output(RUNNING_MEAN);
@@ -208,6 +213,14 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
     void* save_mean_data = save_mean->template mutable_data<BNParamType>();
     void* save_var_data = save_var->template mutable_data<BNParamType>();
 
+    if (N == 0) {
+      // set empty batch's mean / var output to zeros
+      math::Set<BNParamType, HIPContext>(
+          C, 0, (BNParamType*)save_mean_data, &context_);
+      math::Set<BNParamType, HIPContext>(
+          C, 0, (BNParamType*)save_var_data, &context_);
+      return true;
+    }
     MIOPEN_ENFORCE(miopenBatchNormalizationForwardTraining(
         miopen_wrapper_.inline_miopen_handle(),
         mode_,
@@ -216,7 +229,7 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
         data_desc_,
         X.template data<T>(),
         data_desc_,
-        Y->template mutable_data<T>(),
+        Y_data,
         bn_param_desc_,
         const_cast<float*>(scale.template data<BNParamType>()),
         const_cast<float*>(bias.template data<BNParamType>()),
@@ -255,7 +268,7 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   CAFFE_ENFORCE_EQ(scale.ndim(), 1);
   CAFFE_ENFORCE_EQ(scale.dim32(0), C);
   // See if we need to reshape.
-  if (X.dims() != miopen_input_dims_) {
+  if (N > 0 && X.dims() != miopen_input_dims_) {
     vector<int> dims = {N, C, H, W, D};
     vector<int> strides = {C * H * W * D, H * W * D, W * D, D, 1};
     MIOPEN_ENFORCE(miopenSet4dTensorDescriptor(
@@ -266,17 +279,28 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
   }
 
   auto* dX = Output(INPUT_GRAD);
+  dX->ResizeLike(X);
+  T* dX_data = dX->template mutable_data<T>();
   auto* dScale = Output(SCALE_GRAD);
   auto* dBias = Output(BIAS_GRAD);
   dX->ResizeLike(X);
   dScale->ResizeLike(scale);
   dBias->ResizeLike(scale);
+  auto* dScale_data = dScale->template mutable_data<BNParamType>();
+  auto* dBias_data = dBias->template mutable_data<BNParamType>();
 
   const auto& saved_mean = Input(SAVED_MEAN);
   const auto& saved_var = Input(SAVED_INV_VAR);
   const void* saved_mean_data = saved_mean.template data<BNParamType>();
   const void* saved_var_data = saved_var.template data<BNParamType>();
 
+if (N == 0) {
+    // set gradients to zeros
+    math::Set<BNParamType, HIPContext>(C, 0, dScale_data, &context_);
+    math::Set<BNParamType, HIPContext>(C, 0, dBias_data, &context_);
+    return true;
+  }
+  
   MIOPEN_ENFORCE(miopenBatchNormalizationBackward(
       miopen_wrapper_.inline_miopen_handle(),
       mode_,
@@ -289,11 +313,11 @@ bool MIOpenSpatialBNGradientOp::DoRunWithType() {
       data_desc_,
       dY.template data<T>(),
       data_desc_,
-      dX->template mutable_data<T>(),
+      dX_data,
       bn_param_desc_,
       scale.template data<BNParamType>(),
-      dScale->template mutable_data<BNParamType>(),
-      dBias->template mutable_data<BNParamType>(),
+      dScale_data,
+      dBias_data,
       epsilon_,
       saved_mean_data,
       saved_var_data));
