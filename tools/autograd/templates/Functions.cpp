@@ -1544,6 +1544,43 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   return u_term + sigma_term + v_term;
 }
 
+// http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
+Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                    bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
+    auto glambda = grads[0];
+    auto gv = grads[1];
+    
+    auto vt = v.t();
+    
+    if (!eigenvectors) {
+        throw std::runtime_error(std::string("cannot compute backward without "
+                                             "computing eigenvectors in forward pass"));
+    }
+    
+    Tensor result;
+    if (gv.defined()) {
+        Tensor F = lambda.unsqueeze(0).expand_as(self).clone();
+        F.sub_(at::unsqueeze(lambda, 1));
+        F.diagonal().fill_(INFINITY);
+        F.pow_(-1);
+        
+        F.mul_(vt.mm(gv));
+        result = v.mm(F.mm(vt));
+    } else {
+        result = at::zeros_like(self);
+    }
+    
+    if (glambda.defined()) {
+        result.add_((v * glambda).mm(vt));
+    }
+    if (upper) {
+        result = at::triu(result) + at::triu(result.t(), 1);
+    } else {
+        result = at::tril(result) + at::tril(result.t(), -1);
+    }
+    return result;
+}
+
 // Invertible case is derived from Jacobi's formula, and also can be found at:
 // http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
 Tensor det_backward(const Tensor & grad, const Tensor& self, const Tensor& det) {
