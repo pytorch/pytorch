@@ -355,12 +355,15 @@ at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, 
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
     return std::vector<int64_t>(list.value()->elements());
+
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
     return at::nullopt;
+
   auto r = constant_as<int64_t>(input);
   if(!r)
     return at::nullopt;
+
   // broadcast to attribute size
   return std::vector<int64_t>(*N, *r);
 }
@@ -487,8 +490,16 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
   at::ArrayRef<NamedValue> attributes) {
 
   auto graph = method.graph();
+<<<<<<< HEAD
   auto matched_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
   if(!matched_inputs)
+||||||| merged common ancestors
+  auto flat_inputs = tryMatchSchema(op->schema, loc, *graph, inputs, attributes, failure_messages);
+  if(!flat_inputs)
+=======
+  auto flat_inputs = tryMatchSchema(op->schema(), loc, *graph, inputs, attributes, failure_messages);
+  if(!flat_inputs)
+>>>>>>> Parse and register schema declarations lazily
     return nullptr;
   // we successfully matched this schema, construct the node
 
@@ -507,11 +518,21 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
     for(int64_t i = 0; i < *value; ++i)
       n->addOutput();
   } else {
-    for(auto & ret : op->schema.returns) {
+    for(auto & ret : op->schema().returns) {
       n->addOutput()->setType(ret.type);
     }
   }
 
+<<<<<<< HEAD
+||||||| merged common ancestors
+  if(op->hasAttributedVersion())
+    liftConstantAttributes(op->schema, n);
+
+=======
+  if(op->hasAttributedVersion())
+    liftConstantAttributes(op->schema(), n);
+
+>>>>>>> Parse and register schema declarations lazily
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
   getOperation(n);

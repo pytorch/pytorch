@@ -16,12 +16,14 @@ using OperationCreator = std::function<Operation(Node*)>;
 
 struct TORCH_API Operator {
   Operator(FunctionSchema schema, OperationCreator op, OperationCreator op_const_attributes = nullptr)
-    : schema(std::move(schema))
+    : schema_(std::move(schema))
     , op(std::move(op))
     , op_const_attributes(std::move(op_const_attributes)) {}
 
   Operator(const std::string& schema, OperationCreator op, OperationCreator op_const_attributes = nullptr)
-    : Operator(parseSchema(schema), std::move(op), std::move(op_const_attributes)) {}
+    : schema_string_(schema)
+    , op(std::move(op))
+    , op_const_attributes(std::move(op_const_attributes)) {}
 
   // Helper constructor to regsiter `op` to run
   // run for _every_ IR Node where n.kind() == name, regardless of arguments.
@@ -31,7 +33,6 @@ struct TORCH_API Operator {
   Operator(Symbol name, OperationCreator op)
   : Operator(FunctionSchema(name, {}, {}, true), op, op) {}
 
-  FunctionSchema schema;
 
   bool matches(const Node* node) const;
   // Operators have different versions depending on if some inputs are encoded
@@ -50,7 +51,18 @@ struct TORCH_API Operator {
   bool hasAttributedVersion() const {
     return op_const_attributes != nullptr;
   }
+  const FunctionSchema & schema() const {
+    // we lazily parse schema initialized from strings so that
+    // we do less work during static operator registration
+    if(!schema_) {
+      schema_.emplace(parseSchema(schema_string_.value()));
+      schema_string_ = at::nullopt;
+    }
+    return schema_.value();
+  }
 private:
+  mutable at::optional<std::string> schema_string_;
+  mutable at::optional<FunctionSchema> schema_;
   OperationCreator op;
   OperationCreator op_const_attributes;
 };
