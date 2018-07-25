@@ -2604,7 +2604,7 @@
       throw std::runtime_error("Input must be 1-d or 2-d");
     }
     ${THTensor}_diag(${state,}result_->tensor, self_->tensor, diagonal);
-    result_->maybeScalar(self_->dim() == 0);
+    result_->maybe_zero_dim(self_->dim() == 0);
 ]]
 [[
   name: th_addmm
