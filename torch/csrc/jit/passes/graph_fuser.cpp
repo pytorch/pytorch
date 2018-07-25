@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/assertions.h"
 #include <unordered_map>
 
 #ifdef USE_CUDA

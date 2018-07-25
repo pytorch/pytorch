@@ -1,6 +1,7 @@
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/symbolic_variable.h"
 
 #include "torch/csrc/jit/passes/dead_code_elimination.h"

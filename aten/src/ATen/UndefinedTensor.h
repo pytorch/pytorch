@@ -14,7 +14,6 @@ public:
   int64_t dim() const override;
   void * unsafeGetTH(bool retain) override;
   std::unique_ptr<Storage> storage() override;
-  static const char * typeString();
 private:
   UndefinedTensor();
   static UndefinedTensor _singleton;

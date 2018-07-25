@@ -14,7 +14,6 @@ struct ${Tensor} final : public TensorImpl {
 public:
   ${Tensor}(THTensor * tensor);
   virtual std::unique_ptr<Storage> storage() override;
-  static const char * typeString();
 };
 
 namespace detail {

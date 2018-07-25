@@ -25,10 +25,6 @@ ${Tensor}::${Tensor}(${THTensor} * tensor)
 : TensorImpl(&globalContext().getType(Backend::${Backend},ScalarType::${ScalarName}), tensor)
 {}
 
-const char * ${Tensor}::typeString() {
-  return "${Type}";
-}
-
 ${TensorDenseOrSparse}
 
 }

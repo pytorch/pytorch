@@ -424,6 +424,23 @@ class TestTorch(TestCase):
             return math.lgamma(x)
         self._test_math(torch.lgamma, lgamma)
 
+    @unittest.skipIf(not TEST_SCIPY, "Scipy not found")
+    def test_mvlgamma(self):
+        from scipy.special import multigammaln
+        for d in range(1, 5):
+            input = torch.empty(10).uniform_(d, 10)
+            res_torch = torch.mvlgamma(input, d)
+            res_scipy = multigammaln(input.numpy(), d)
+            self.assertEqual(res_torch.numpy(), res_scipy)
+
+    def test_mvlgamma_argcheck(self):
+        def run_test(d):
+            input = torch.linspace((d - 2) / 2, 10, 10)
+            torch.mvlgamma(input, d)
+
+        with self.assertRaisesRegex(RuntimeError, "Condition for computing multivariate log-gamma not met"):
+            run_test(3)
+
     def _digamma_input(self, test_poles=True):
         input = []
         input.append((torch.randn(10).abs() + 1e-4).tolist())
@@ -939,6 +956,11 @@ class TestTorch(TestCase):
         expected = logsumexp(a.numpy(), 1)
         self.assertEqual(expected.shape, actual.shape)
         self.assertTrue(np.allclose(expected, actual.numpy()))
+        # check that out is actually inplace
+        b = torch.zeros(5, 2)
+        c = b[:, 0]
+        torch.logsumexp(a, 1, out=c)
+        self.assertTrue(np.allclose(expected, b[:, 0].numpy()))
 
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_cpu_parallel(self):
@@ -2229,6 +2251,7 @@ class TestTorch(TestCase):
             self.assertEqual((0,), torch.logspace(1, 1, 0, device=device).shape)
             self.assertEqual((0,), torch.randperm(0, device=device).shape)
             self.assertEqual((0,), torch.bartlett_window(0, device=device).shape)
+            self.assertEqual((0,), torch.bartlett_window(0, periodic=False, device=device).shape)
             self.assertEqual((0,), torch.hamming_window(0, device=device).shape)
             self.assertEqual((0,), torch.hann_window(0, device=device).shape)
             self.assertEqual((1, 1, 0), torch.tensor([[[]]], device=device).shape)
@@ -3466,6 +3489,17 @@ class TestTorch(TestCase):
 
     def test_cat_empty(self):
         self._test_cat_empty(self)
+
+    def test_narrow(self):
+        x = torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]])
+        self.assertEqual(x.narrow(0, 0, 1), torch.Tensor([[0, 1, 2]]))
+        self.assertEqual(x.narrow(0, 0, 2), torch.Tensor([[0, 1, 2], [3, 4, 5]]))
+        self.assertEqual(x.narrow(0, 1, 1), torch.Tensor([[3, 4, 5]]))
+        self.assertEqual(x.narrow(0, -1, 1), torch.Tensor([[6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -2, 2), torch.Tensor([[3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(0, -3, 3), torch.Tensor([[0, 1, 2], [3, 4, 5], [6, 7, 8]]))
+        self.assertEqual(x.narrow(-1, -1, 1), torch.Tensor([[2], [5], [8]]))
+        self.assertEqual(x.narrow(-2, -1, 1), torch.Tensor([[6, 7, 8]]))
 
     def test_narrow_empty(self):
         if not torch._C._use_zero_size_dim():
@@ -7930,8 +7964,8 @@ class TestTorch(TestCase):
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
                 RuntimeError,
-                # message includes both torch.DoubleTensor and torch.LongTensor
-                '(?=.*torch\.DoubleTensor)(?=.*torch\.LongTensor)'):
+                # message includes both Double and Long
+                '(?=.*Double)(?=.*Long)'):
 
             # Calls model with a DoubleTensor input but LongTensor weights
             input = torch.autograd.Variable(torch.randn(1, 1, 1, 6).double())

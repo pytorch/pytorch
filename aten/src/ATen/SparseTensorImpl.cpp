@@ -37,6 +37,13 @@ IntList SparseTensorImpl::strides() const {
 int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
 }
+TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
+  AT_CHECK(condition_when_zero_dim == (dim() == 0),
+           "Attempted to maybe_zero_dim on a SparseTensorImpl to ", condition_when_zero_dim,
+           " but the SparseTensor's dim() is ", dim(), " and SparseTensors do not support"
+           " changing dimensionality via maybe_zero_dim");
+  return this;
+}
 void * SparseTensorImpl::unsafeGetTH(bool retain) {
   AT_ERROR("unsafeGetTH not supported for new style TensorImpl");
 }

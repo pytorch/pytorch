@@ -17,9 +17,6 @@ int64_t UndefinedTensor::dim() const {
   AT_ERROR("dim() called on undefined Tensor");
 }
 
-const char * UndefinedTensor::typeString() {
-  return "UndefinedType";
-}
 void * UndefinedTensor::unsafeGetTH(bool retain) {
   AT_ERROR("unsafeGetTH(bool retain) called on undefined Tensor");
 }
