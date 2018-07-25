@@ -15,7 +15,6 @@ public:
   ${Tensor}(THTensor * tensor);
   virtual Scalar localScalar() override;
   virtual std::unique_ptr<Storage> storage() override;
-  static const char * typeString();
 };
 
 namespace detail {
