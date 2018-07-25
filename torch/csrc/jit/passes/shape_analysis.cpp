@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>

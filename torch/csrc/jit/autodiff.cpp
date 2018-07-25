@@ -4,6 +4,8 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/utils/functional.h"
 
+#include <torch/csrc/jit/assertions.h>
+
 #include <algorithm>
 
 namespace torch { namespace jit {
@@ -504,9 +506,10 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
   Gradient grad_desc;
   // Take ownership of the graph
-  JIT_ASSERTM(_graph.use_count() == 1,
-              "differentiate will mutate and destroy the graph, so it requires "
-              "graph.use_count() == 1, but found %d", _graph.use_count());
+  JIT_ASSERTM(
+      _graph.use_count() == 1,
+      "differentiate will mutate and destroy the graph, so it requires "
+      "graph.use_count() == 1, but found ", _graph.use_count());
   std::swap(_graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
