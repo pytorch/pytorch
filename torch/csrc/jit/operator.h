@@ -16,7 +16,7 @@ using OperationCreator = std::function<Operation(Node*)>;
 
 struct TORCH_API Operator {
   Operator(FunctionSchema schema, OperationCreator op, OperationCreator op_const_attributes = nullptr)
-    : schema_(std::move(schema))
+    : schema_(std::make_shared<FunctionSchema>(std::move(schema)))
     , op(std::move(op))
     , op_const_attributes(std::move(op_const_attributes)) {}
 
@@ -55,14 +55,16 @@ struct TORCH_API Operator {
     // we lazily parse schema initialized from strings so that
     // we do less work during static operator registration
     if(!schema_) {
-      schema_.emplace(parseSchema(schema_string_.value()));
+      schema_ = std::make_shared<FunctionSchema>(parseSchema(schema_string_.value()));
       schema_string_ = at::nullopt;
     }
-    return schema_.value();
+    return *schema_;
   }
 private:
   mutable at::optional<std::string> schema_string_;
-  mutable at::optional<FunctionSchema> schema_;
+  // cannot use at::optional because windows has issues that require an assignment operator to be generated
+  // cannot use std::unique_ptr because initializer lists of Operators end up copying the Operator
+  mutable std::shared_ptr<FunctionSchema> schema_;
   OperationCreator op;
   OperationCreator op_const_attributes;
 };
