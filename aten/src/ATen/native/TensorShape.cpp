@@ -154,8 +154,8 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
-  if (start < 0) {
-    AT_ERROR("start out of range");
+  if (start != cur_size) {  // start being the end is valid, but not a valid dim specification.
+    start = maybe_wrap_dim(start, cur_size);
   }
 #ifndef USE_TH_SIZE_ZERO_DIM
   if (length <= 0 || start > cur_size - length) {
