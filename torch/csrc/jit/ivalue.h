@@ -94,7 +94,7 @@ using DoubleList = ConstantList<double>;
 // retain/release calls.
 
 #define TORCH_FORALL_TAGS(_) \
-  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(TensorList)
+  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList) _(String) _(TensorList)
 
 struct IValue {
   IValue()
@@ -151,6 +151,12 @@ struct IValue {
     JIT_ASSERT(isTensor());
     return at::Tensor(as_tensor_impl, /*retain=*/true);
   }
+  std::string formatTensor() const {
+    JIT_ASSERT(isTensor());
+    std::ostringstream ss;
+    ss << toTensor();
+    return ss.str();
+  }
 
   // Tuple
   IValue(Shared<Tuple> v);
@@ -163,6 +169,12 @@ struct IValue {
     JIT_ASSERT(isTuple());
     return toRetainable<Tuple>();
   }
+  std::string formatTuple() const {
+    JIT_ASSERT(isTuple());
+    std::ostringstream ss;
+    ss << toRetainable<Tuple>();
+    return ss.str();
+  }
 
   // Double
   IValue(double d)
@@ -173,6 +185,12 @@ struct IValue {
   double toDouble() const {
     JIT_ASSERT(isDouble());
     return as_double;
+  }
+  std::string formatDouble() const {
+    JIT_ASSERT(isDouble());
+    std::ostringstream ss;
+    ss << as_double;
+    return ss.str();
   }
 
   // Int
@@ -193,6 +211,27 @@ struct IValue {
     JIT_ASSERT(isInt());
     return as_int;
   }
+  std::string formatInt() const {
+    JIT_ASSERT(isInt());
+    std::ostringstream ss;
+    ss << as_int;
+    return ss.str();
+  }
+
+  // String
+  IValue(std::string s)
+  : tag(Tag::String), retainable(false) {
+    as_string = s;
+  }
+  bool isString() const { return Tag::String == tag; }
+  std::string toString() const {
+    JIT_ASSERT(isString());
+    return as_string;
+  }
+  std::string formatString() const {
+    JIT_ASSERT(isString());
+    return as_string;
+  }
 
   // IntList
   IValue(Shared<IntList> v);
@@ -210,6 +249,12 @@ struct IValue {
   }
 
   std::vector<int64_t> copyToIntList() const;
+  std::string formatIntList() const {
+    JIT_ASSERT(isIntList());
+    std::ostringstream ss;
+    ss << toRetainable<IntList>();
+    return ss.str();
+  }
 
   // DoubleList
   IValue(Shared<DoubleList> v);
@@ -223,6 +268,13 @@ struct IValue {
     JIT_ASSERT(isDoubleList());
     return toRetainable<DoubleList>();
   }
+  std::string formatDoubleList() const {
+    JIT_ASSERT(isDoubleList());
+    std::ostringstream ss;
+    ss << toRetainable<IntList>();
+    return ss.str();
+  }
+
 
   //TensorList
   IValue(Shared<TensorList> v);
@@ -236,10 +288,19 @@ struct IValue {
     JIT_ASSERT(isTensorList());
     return toRetainable<TensorList>();
   }
+  std::string formatTensorList() const {
+    JIT_ASSERT(isTensorList();
+    std::ostringstream ss;
+    ss << toTensorList();
+    return ss.str();
+  }
 
   // None
   bool isNone() {
     return Tag::None == tag;
+  }
+  std::string formatNone() const {
+    return "None";
   }
 
   // Scalar, which gets encoded as either an Int or a Double
@@ -272,6 +333,17 @@ struct IValue {
     }
     return "Invalid Tag";
   }
+
+  // for printing
+  std::string format() const {
+    switch(tag) {
+      #define DEFINE_CASE(x) case Tag::x: return format ## x();
+      TORCH_FORALL_TAGS(DEFINE_CASE)
+      #undef DEFINE_CASE
+    }
+    return "Invalid Tag";
+  }
+
 
   // generic v.to<at::Tensor>() implementations
   // that can be used in special functions like pop/push
@@ -312,6 +384,7 @@ private:
     at::TensorImpl* as_tensor_impl;
     at::Retainable* as_retainable;
     double as_double;
+    std::string as_string;
     int64_t as_int;
     // this type should be as big as all the other types because it will
     // be used to copy the union's value in certain cases
@@ -322,7 +395,6 @@ private:
 };
 
 #undef TORCH_FORALL_TAGS
-
 
 #define DEFINE_TO(type, method_name) \
 template<> \
@@ -342,6 +414,7 @@ DEFINE_TO(Shared<IntList>, toIntList)
 DEFINE_TO(at::Scalar, toScalar)
 DEFINE_TO(bool, toInt)
 DEFINE_TO(std::vector<int64_t>, copyToIntList)
+DEFINE_TO(std::string, toString)
 
 #undef DEFINE_TO
 
@@ -393,6 +466,11 @@ inline IValue::IValue(std::vector<at::Tensor> v)
 
 inline std::vector<int64_t> IValue::copyToIntList() const {
   return std::vector<int64_t>(toIntList()->elements());
+}
+
+inline std::ostream & operator<<(std::ostream & out, const IValue &i) {
+  out << i.format();
+  return out;
 }
 
 }}

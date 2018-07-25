@@ -96,19 +96,11 @@ RegisterOperators reg({
           size_t num_inputs = node->inputs().size();
           return [num_inputs](Stack& stack) {
             bool first = true;
-            for (const IValue& i_ : last(stack, num_inputs)) {
-              auto i = i_.toTensor();
+            for (const IValue& i : last(stack, num_inputs)) {
               if (!first)
                 std::cout << " ";
               first = false;
-              if (auto tensor_impl = dynamic_cast<at::TensorImpl*>(i.get())) {
-                std::cout << at::Tensor(tensor_impl, true);
-              } else if (!i.defined()) {
-                std::cout << "<undefined tensor>";
-              } else {
-                auto& r = *i.get();
-                std::cout << "<" << typeid(r).name() << " at " << i << ">";
-              }
+              std::cout << i;
             }
             drop(stack, num_inputs);
             std::cout << std::endl;
@@ -118,8 +110,9 @@ RegisterOperators reg({
     Operator(
         prim::StringLiteral,
         [](Node* node) {
-          return [](Stack& stack) {
-            stack.push_back(at::Tensor());
+          std::string s = node->s(attr::string);
+          return [s](Stack& stack) {
+            stack.push_back(IValue(s));
             return 0;
           };
         }),

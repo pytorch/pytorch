@@ -47,7 +47,6 @@ struct PrintValue : public SugaredValue {
       if (!attributes.empty())
         throw ErrorReport(loc) << "print doesn't accept any keyword arguments";
       auto values = toValues(inputs);
-      ensureTensors(loc, values);
       g.insertNode(g.create(prim::Print, values, 0)
                        ->setSourceLocation(std::make_shared<SourceRange>(loc)));
       return std::make_shared<NoneValue>();
@@ -1276,29 +1275,6 @@ private:
     return emitApplyExpr(Var::create(ident.range(), ident), inputs, attributes, n_binders);
   }
 
-
-  std::shared_ptr<SugaredValue> emitPrint(Ident ident, const List<torch::jit::script::Expr> inputs) {
-    std::string format;
-    std::vector<Value*> values;
-    for(size_t i = 0; i < inputs.size(); i++) {
-      if (inputs[i].kind() == TK_STRINGLITERAL) {
-        values.push_back(emitStringLiteral(StringLiteral(inputs[i])));
-        format += "s";
-      } else {
-        TreeList single_;
-        single_.push_back(inputs[i]);
-        auto filtered_inputs = getNamedValues(single_, true, identity);
-        auto v = toValues(filtered_inputs)[0];
-        values.push_back(v);
-        format += "t";
-      }
-    }
-    Node* n = emitNode(prim::Print, ident.range(), values, 0);
-    n->s_(attr::string, format);
-    return std::make_shared<NoneValue>();
-  }
-
-
   std::shared_ptr<SugaredValue> emitApplyExpr(Expr callee, const std::vector<NamedValue>& inputs, at::ArrayRef<NamedValue> attributes, size_t n_binders) {
     // otherwise we evaluate the callee and then desugar it
     auto sv = emitSugaredExpr(callee, 1);
@@ -1335,9 +1311,6 @@ private:
       }
       case TK_APPLY: {
         auto apply = Apply(tree);
-        if (apply.callee().kind() == TK_VAR && Var(apply.callee()).name().name() == "print") {
-          return emitPrint(Var(apply.callee()).name(), apply.inputs());
-        }
         auto inputs = getNamedValues(apply.inputs(), true, identity);
         auto attributes = fmap(apply.attributes(), [&](const Attribute& attr) {
           return NamedValue(attr.range(), attr.name().name(), emitExpr(attr.value(), identity));
@@ -1439,6 +1412,10 @@ private:
       return insertConstant(*graph, c.asFloatingPoint(), c.range());
     else
       return insertConstant(*graph, c.asIntegral(), c.range());
+  }
+
+  Value* emitStringLiteral(const StringLiteral& c) {
+    return createStringLiteral(*graph, c.range(), c.text());
   }
 
   // Desugars slice syntactic sugar tensor[begin:end] -> tensor.slice(begin,
