@@ -354,6 +354,8 @@ class TestDataLoader(TestCase):
         next(loader1_it)
         next(loader2_it)
 
+    @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
+                     don't support multiprocessing with spawn start method")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
