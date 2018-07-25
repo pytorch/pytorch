@@ -136,6 +136,17 @@ inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset
 
 // NB: Non-retaining
 inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
+  // Within PyTorch, the invariant is that storage_ is always
+  // initialized; we never have tensors that don't have any storage.
+  // However, for Caffe2, this is not true, because they have permitted
+  // tensors to be allocated without specifying what scalar type
+  // they should be, only to be filled with GetMutableData is called
+  // for the first time with the actual value.  It is an ERROR to
+  // invoke any PyTorch operations on such a half-constructed storage,
+  // and this check tests for that case.
+  AT_CHECK(tensor->storage_, "Cannot use PyTorch operations on a half-constructed "
+           "tensor.  If this tensor came from Caffe2, please call GetMutableData on "
+           "it first; otherwise, this is a bug, please report it.");
   return tensor->storage_;
 }
 
