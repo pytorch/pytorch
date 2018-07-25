@@ -52,27 +52,50 @@ using autograd::variable_list;
 struct ExecutionPlanAutogradFunction : public autograd::Function {
   ExecutionPlanAutogradFunction(GraphExecutor graph, size_t capture_size)
   : graph(std::move(graph)) {
-    captures.reserve(capture_size);
+    is_var_capture.reserve(capture_size);
+    var_captures.reserve(capture_size);
+    ivalue_captures.reserve(capture_size);
   }
 
   virtual variable_list apply(variable_list&& inputs) override {
     Stack stack;
-    stack.reserve(captures.size() + inputs.size());
+    stack.reserve(is_var_capture.size() + inputs.size());
     stack.insert(stack.end(), std::make_move_iterator(inputs.begin()),
                               std::make_move_iterator(inputs.end()));
-    for (auto & sv : captures) {
-      stack.push_back(sv.unpack(this->shared_from_this()));
+    auto var_capture_it = var_captures.begin();
+    auto ivalue_capture_it = ivalue_captures.begin();
+    for (bool is_var : is_var_capture) {
+      if (is_var) {
+        stack.push_back(var_capture_it->unpack(this->shared_from_this()));
+        ++var_capture_it;
+      } else {
+        stack.push_back(*ivalue_capture_it);
+        ++ivalue_capture_it;
+      }
     }
     graph.run(stack);
     return fmap(stack, [](IValue & val) {
       return autograd::Variable(std::move(val).toTensor());
     });
   }
+
+  void capture(IValue & val) {
+    const bool is_tensor = val.isTensor();
+    is_var_capture.push_back(is_tensor);
+    if (is_tensor) {
+      var_captures.emplace_back(autograd::as_variable_ref(val.toTensor()), false);
+    } else {
+      ivalue_captures.push_back(val);
+    }
+  }
 private:
   friend struct ExecutionPlan;
   GraphExecutor graph;
-  // TODO (apaszke): how to cpature scalars?
-  std::vector<autograd::SavedVariable> captures;
+
+  // INVARIANT: is_var_capture.size() == var_captures.size() + ivalue_captures.size()
+  std::vector<bool> is_var_capture;
+  std::vector<autograd::SavedVariable> var_captures;
+  std::vector<IValue> ivalue_captures;
 };
 
 // an optimized way of executing the subgraph computed directly on
@@ -124,15 +147,14 @@ private:
     }
   }
   // Capture (save) inputs that would be required to subsequently run backwards
-  // TODO (apaszke): how to capture scalars?!
   void captureInputs(ExecutionPlanAutogradFunction & grad_fn, Stack & inputs) const {
     for (size_t offset : grad.df_input_captured_inputs) {
-      grad_fn.captures.emplace_back(autograd::as_variable_ref(inputs[offset].toTensor()), false);
+      grad_fn.capture(inputs[offset]);
     }
   }
   void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, Stack & outputs) const {
     for (size_t offset : grad.df_input_captured_outputs) {
-      grad_fn.captures.emplace_back(autograd::as_variable_ref(outputs[offset].toTensor()), true);
+      grad_fn.capture(outputs[offset]);
     }
   }
 
