@@ -31,7 +31,9 @@
 #include <dlfcn.h>
 #include <unistd.h>
 
+#ifdef USE_CUDA
 THCGenerator* THCRandom_getGenerator(THCState* state);
+#endif
 
 namespace torch { namespace jit {
 
@@ -869,14 +871,18 @@ void CompiledFusionFunction::launch_with_tensors(at::ArrayRef<at::Tensor> inputs
       }
     }
   }
-  // If the kernel call contains a random op, we need to pass in random seeds as
-  // well.
-  if(has_random) {
-    auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
-    uint64_t offset = gen_->state.philox_seed_offset.fetch_add(20);
-    arguments.push_back(&gen_->state.initial_seed);
-    arguments.push_back(&offset);
-  }
+
+  #ifdef USE_CUDA
+    // If the kernel call contains a random op, we need to pass in random seeds as
+    // well.
+    if(has_random && this->backend() == at::kCUDA) {
+      auto gen_ = THCRandom_getGenerator(at::globalContext().getTHCState());
+      uint64_t offset = gen_->state.philox_seed_offset.fetch_add(20);
+      arguments.push_back(&gen_->state.initial_seed);
+      arguments.push_back(&offset);
+    }
+  #endif
+
   launch_raw(numel, arguments.data());
 }
 
