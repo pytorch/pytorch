@@ -257,9 +257,22 @@ class TestConvolution(hu.HypothesisTestCase):
                 self.assertDeviceChecks(dc, op, inputs, [0])
             return
 
-        self.assertDeviceChecks(dc, op, inputs, [0])
+        try:
+            self.assertDeviceChecks(dc, op, inputs, [0])
+        except RuntimeError as e:
+            es = str(e)
+            if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
+               or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+                raise e
+
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0])
+            try:
+                self.assertGradientChecks(gc, op, inputs, i, [0])
+            except RuntimeError as e:
+                es = str(e)
+                if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
+                   or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+                    raise e
 
     def _nd_convolution_nchw(self, n, input_channels, output_channels,
                              batch_size, stride, size, kernel, dilation, pad,
@@ -404,9 +417,22 @@ class TestConvolution(hu.HypothesisTestCase):
                 self.assertDeviceChecks(dc, op, inputs, [0])
             return
 
-        self.assertDeviceChecks(dc, op, inputs, [0])
+        try:
+            self.assertDeviceChecks(dc, op, inputs, [0])
+        except RuntimeError as e:
+            es = str(e)
+            if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
+               or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+                raise e
+
         for i in range(len(inputs)):
-            self.assertGradientChecks(gc, op, inputs, i, [0])
+            try:
+                self.assertGradientChecks(gc, op, inputs, i, [0])
+            except RuntimeError as e:
+                es = str(e)
+                if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
+                   or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+                    raise e
 
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
            stride=st.integers(1, 3),
