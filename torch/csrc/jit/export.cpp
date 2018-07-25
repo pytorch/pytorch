@@ -65,9 +65,9 @@ void validateGraph(const std::shared_ptr<Graph>& graph, onnx_torch::OperatorExpo
   }
 }
 
-class JitEncoder {
+class EncoderBase {
  public:
-  JitEncoder(onnx::ModelProto *model_proto,
+  EncoderBase(onnx::ModelProto *model_proto,
              int64_t onnx_opset_version,
              onnx_torch::OperatorExportTypes operator_export_type,
              bool defer_weight_export = false);
@@ -139,7 +139,7 @@ void EncodeValueInfo(onnx::ValueInfoProto* v, const Value* n) {
   EncodeTypeProtoTensorType(tensor_type, n);
 }
 
-JitEncoder::JitEncoder(
+EncoderBase::EncoderBase(
     onnx::ModelProto *model_proto,
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type,
@@ -155,14 +155,14 @@ JitEncoder::JitEncoder(
   imp->set_version(onnx_opset_version);
 }
 
-void JitEncoder::EncodeGraph(
+void EncoderBase::EncodeGraph(
     onnx::GraphProto *graph_proto,
     const std::shared_ptr<Graph> &graph,
     const std::vector<at::Tensor> &initializers) {
   EncodeBlock(graph_proto, graph->block(), initializers);
 }
 
-void JitEncoder::EncodeBlock(
+void EncoderBase::EncodeBlock(
     onnx::GraphProto *graph_proto, const Block *block,
     const std::vector<at::Tensor> &initializers) {
   JIT_ASSERT(graph_proto != nullptr);
@@ -263,7 +263,7 @@ void JitEncoder::EncodeBlock(
   }
 }
 
-void JitEncoder::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *node, const jit::Symbol name) {
+void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *node, const jit::Symbol name) {
   auto attr = node_proto->add_attribute();
   JIT_ASSERT(name.is_attr());
   attr->set_name(name.toUnqualString());
@@ -322,7 +322,7 @@ void JitEncoder::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *node
   }
 }
 
-void JitEncoder::EncodeTensor(
+void EncoderBase::EncodeTensor(
     onnx::TensorProto *tensor_proto,
     const at::Tensor &tensor,
     const at::optional<std::string> external_ref) {
@@ -348,7 +348,7 @@ void JitEncoder::EncodeTensor(
   }
 }
 
-class GraphEncoder: public JitEncoder {
+class GraphEncoder: public EncoderBase {
  public:
   GraphEncoder(onnx::ModelProto *model_proto,
                const std::shared_ptr<Graph> &graph,
@@ -366,7 +366,7 @@ GraphEncoder::GraphEncoder(
     onnx_torch::OperatorExportTypes operator_export_type,
     const std::vector<at::Tensor> &initializers,
     bool defer_weight_export)
-    : JitEncoder(model_proto, onnx_opset_version, operator_export_type, defer_weight_export) {
+    : EncoderBase(model_proto, onnx_opset_version, operator_export_type, defer_weight_export) {
   if (operator_export_type != onnx_torch::OperatorExportTypes::RAW) {
     validateGraph(graph, operator_export_type);
   }
@@ -374,7 +374,7 @@ GraphEncoder::GraphEncoder(
   EncodeGraph(model_proto->mutable_graph(), graph, initializers);
 }
 
-class ModuleEncoder: public JitEncoder {
+class ModuleEncoder: public EncoderBase {
  public:
   ModuleEncoder(onnx::ModelProto *model_proto,
                 const std::shared_ptr<script::Module> &module,
@@ -419,7 +419,7 @@ ModuleEncoder::ModuleEncoder(
     const std::shared_ptr<script::Module> &module,
     int64_t onnx_opset_version,
     onnx_torch::OperatorExportTypes operator_export_type)
-    : JitEncoder(model_proto, onnx_opset_version, operator_export_type,
+    : EncoderBase(model_proto, onnx_opset_version, operator_export_type,
                  /*defer_weight_export*/ true) {
   EncodeModule(model_proto->mutable_graph(), module);
 }

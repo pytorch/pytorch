@@ -18,7 +18,7 @@ namespace {
 
 // IR graph construction
 
-class JitDecoder {
+class DecoderBase {
  protected:
   std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto);
 
@@ -33,7 +33,7 @@ class JitDecoder {
   virtual at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto);
 };
 
-at::ScalarType JitDecoder::onnxTypeToATenType(onnx_torch::TensorProto_DataType onnx_type) {
+at::ScalarType DecoderBase::onnxTypeToATenType(onnx_torch::TensorProto_DataType onnx_type) {
   switch(onnx_type) {
     case onnx_torch::TensorProto_DataType_UINT8:
       return at::kByte;
@@ -56,7 +56,7 @@ at::ScalarType JitDecoder::onnxTypeToATenType(onnx_torch::TensorProto_DataType o
   }
 }
 
-at::Tensor JitDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
+at::Tensor DecoderBase::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
   at::Tensor tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor();
   tensor.resize_({tensor_proto.dims().begin(), tensor_proto.dims().end()});
 
@@ -69,7 +69,7 @@ at::Tensor JitDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) 
   return tensor;
 }
 
-void JitDecoder::buildBlocks(
+void DecoderBase::buildBlocks(
     const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
     std::unordered_map<std::string, Value*>& value_map) {
   for (auto g_ : graphs_) {
@@ -78,7 +78,7 @@ void JitDecoder::buildBlocks(
   }
 }
 
-std::shared_ptr<Graph> JitDecoder::buildGraph(const onnx_torch::GraphProto& graph_proto) {
+std::shared_ptr<Graph> DecoderBase::buildGraph(const onnx_torch::GraphProto& graph_proto) {
   auto graph = std::make_shared<Graph>();
   std::unordered_map<std::string, Value*> value_map;
 
@@ -87,7 +87,7 @@ std::shared_ptr<Graph> JitDecoder::buildGraph(const onnx_torch::GraphProto& grap
   return graph;
 }
 
-void JitDecoder::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
+void DecoderBase::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
                 std::unordered_map<std::string, Value*>& value_map) {
 
   for (auto & input : graph_proto.input()) {
@@ -167,7 +167,7 @@ void JitDecoder::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* bl
   }
 }
 
-class GraphDecoder : JitDecoder {
+class GraphDecoder : DecoderBase {
  public:
   std::shared_ptr<Graph> decode(const std::string& serialized_graph,
                                 std::vector<at::Tensor>& initializers);
@@ -187,7 +187,7 @@ std::shared_ptr<Graph> GraphDecoder::decode(
   return graph;
 }
 
-class ModuleDecoder : JitDecoder {
+class ModuleDecoder : DecoderBase {
  public:
   std::shared_ptr<script::Module> decode(
       std::shared_ptr<script::Module> root_module,
@@ -199,48 +199,48 @@ class ModuleDecoder : JitDecoder {
 
   at::Tensor buildParameter(const onnx_torch::TensorProto& tensor_proto);
 
-  at::Storage* getStorage(at::ScalarType type, std::string name);
+  at::Tensor* getStorageTensor(at::ScalarType type, std::string name);
 
   std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
       std::shared_ptr<script::Module> root_module,
       const std::string fullname);
 
   const std::unordered_map<std::string, std::string> *storage_export_map_;
-  std::unordered_map<std::string, std::unique_ptr<at::Storage>> storage_map_;
+  std::unordered_map<std::string, std::shared_ptr<at::Tensor>> storage_map_;
 };
 
 at::Tensor ModuleDecoder::buildParameter(const onnx_torch::TensorProto& tensor_proto) {
-  auto storage = getStorage(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
+  auto storage = getStorageTensor(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
   std::vector<int64_t> dims, strides;
   std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
   std::move(tensor_proto.int32_data().begin() + 3, tensor_proto.int32_data().end(), std::back_inserter(strides));
   auto tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      *storage, tensor_proto.int64_data(2), dims, strides);
+      *storage->storage(), tensor_proto.int64_data(2), dims, strides);
   autograd::Variable var = autograd::make_variable(tensor, tensor_proto.int64_data(0));
   return var;
 }
 
 at::Tensor ModuleDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
-  auto storage = getStorage(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
+  auto storage = getStorageTensor(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
   std::vector<int64_t> dims, strides;
   std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
   std::move(tensor_proto.int32_data().begin() + 1, tensor_proto.int32_data().end(), std::back_inserter(strides));
   auto tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      *storage, tensor_proto.int64_data(0), dims, strides);
+      *storage->storage().get(), tensor_proto.int64_data(0), dims, strides);
   return tensor;
 }
 
-at::Storage* ModuleDecoder::getStorage(at::ScalarType type, std::string name) {
+at::Tensor* ModuleDecoder::getStorageTensor(at::ScalarType type, std::string name) {
   auto storage_it = storage_map_.find(name);
   if (storage_it == storage_map_.end()) {
-    auto storage = at::CPU(type).storage();
+    auto storage = std::make_shared<at::Tensor>(at::CPU(type).tensor());
     auto string_it = storage_export_map_->find(name);
     JIT_ASSERT(string_it != storage_export_map_->end());
-    storage->resize(string_it->second.size());
-    std::memcpy(storage->data(), string_it->second.data(), string_it->second.size());
-    storage_map_.insert(std::make_pair(name, std::move(storage)));
+    storage->resize_({ string_it->second.size() });
+    std::memcpy(storage->storage()->data(), string_it->second.data(), string_it->second.size());
+    storage_map_.insert(std::make_pair(name, storage));
+    return storage.get();
   }
-  storage_it = storage_map_.find(name);
   return storage_it->second.get();
 }
 
