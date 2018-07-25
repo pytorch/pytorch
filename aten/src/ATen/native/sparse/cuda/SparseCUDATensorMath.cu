@@ -501,7 +501,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   int64_t r_nnz = cpu_resultNnz.accessor<int64_t, 1>()[0];
   r_indices_ = r_indices_.narrow(1, 0, r_nnz);
   r_values_ = r_values_.narrow(0, 0, r_nnz);
-  _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);  // TODO: sigh
+  _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);
 #endif
   _get_sparse_impl(r_)->set_coalesced(true);
 

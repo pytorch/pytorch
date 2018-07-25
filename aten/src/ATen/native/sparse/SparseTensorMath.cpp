@@ -301,7 +301,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
 #else
   r_indices = r_indices.narrow(1, 0, r_i);
   r_values = r_values.narrow(0, 0, r_i);
-  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);  // TODO: sigh
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
 #endif
 
   // TODO: I think it may be possible to track inside the loop and
@@ -486,7 +486,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
 #else
   r_indices = r_indices.narrow(1, 0, r_i);
   r_values = r_values.narrow(0, 0, r_i);
-  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);  // TODO: sigh
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
 #endif
   _get_sparse_impl(r)->set_coalesced(true);
 
@@ -710,7 +710,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
 #ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(r)->set_indices_and_values(indices, values);  // TODO: sigh
 #else
-  _get_sparse_impl(r)->set_indices_and_values_unsafe(indices, values);  // TODO: sigh
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(indices, values);
 #endif
 
   return r;

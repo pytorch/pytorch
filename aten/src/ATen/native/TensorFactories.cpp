@@ -81,11 +81,7 @@ Tensor _dim_arange(const Tensor& like, int64_t dim) {
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ empty ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Tensor empty(IntList size, const TensorOptions& options) {
-#ifndef USE_TH_SIZE_ZERO_DIM
   return options.type().tensor(size);
-#else
-  return options.type().tensor(size);
-#endif
 }
 
 Tensor& empty_out(Tensor& result, IntList size) {
