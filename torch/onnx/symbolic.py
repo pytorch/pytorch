@@ -134,10 +134,12 @@ _onnx_opset_version = 6
 
 # used to represent "missing" optional inputs
 def unused(g):
+    raise RuntimeError('lol')
     return g.op("prim::Undefined")
 
 
 def add(g, self, other, alpha):
+    raise RuntimeError('lol')
     if _scalar(alpha) != 1:
         return _unimplemented("add", "alpha != 1")
     # See Note [Pointwise by scalar]
@@ -145,6 +147,8 @@ def add(g, self, other, alpha):
 
 
 def sub(g, self, other, alpha):
+    raise RuntimeError('lol')
+
     if _scalar(alpha) != 1:
         return _unimplemented("sub", "alpha != 1")
     # See Note [Pointwise by scalar]
@@ -152,27 +156,37 @@ def sub(g, self, other, alpha):
 
 
 def mul(g, self, other):
+    raise RuntimeError('lol')
+
     # See Note [Pointwise by scalar]
     return g.op("Mul", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
 def div(g, self, other):
+    raise RuntimeError('lol')
+
     # See Note [Pointwise by scalar]
     return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
 
 
 def reciprocal(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Div", _if_scalar_type_as(torch.ones(1), self), self, broadcast_i=1)
 
 
 # This syntax is Python 2 portable
 def cat(g, *tensors, **kwargs):
+    raise RuntimeError('lol')
+
     dim = kwargs.pop("dim")
     assert not kwargs
     return g.op("Concat", *tensors, axis_i=dim)
 
 
 def mm(g, self, other):
+    raise RuntimeError('lol')
+
     # Create a dummy C tensor. Only needed for API purposes, the value is
     # since beta = 0
     ty = self.type().scalarType().lower()
@@ -181,35 +195,50 @@ def mm(g, self, other):
 
 
 def bmm(g, self, other):
+    raise RuntimeError('lol')
+
     return g.op("MatMul", self, other)
 
 
 def matmul(g, self, other):
+    raise RuntimeError('lol')
+
     return g.op("MatMul", self, other)
 
 
 def addmm(g, self, mat1, mat2, beta, alpha):
+    raise RuntimeError('lol')
+
     return g.op("Gemm", mat1, mat2, self, beta_f=_scalar(beta), alpha_f=_scalar(alpha))
 
 
 def neg(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Neg", self)
 
 
 def sqrt(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Sqrt", self)
 
 
 def tanh(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Tanh", self)
 
 
 def sigmoid(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Sigmoid", self)
 
 
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
+        raise RuntimeError('lol')
         params = {}
         if dim is not None:
             if isinstance(dim, numbers.Number):
@@ -225,19 +254,27 @@ prod = _reduce_op_symbolic('ReduceProd')
 
 
 def cumsum(g, input, dim):
+    raise RuntimeError('lol')
+
     return g.op("ATen", input, operator_s="cumsum", dim_i=dim)
 
 
 def t(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Transpose", self, perm_i=(1, 0))
 
 
 # There is no translation for it, but we don't want to raise an error yet
 def expand(g, self, size, implicit):
+    raise RuntimeError('lol')
+
     return None
 
 
 def embedding(g, weight, indices, padding_idx, scale_grad_by_freq, sparse):
+    raise RuntimeError('lol')
+
     return g.op("Gather", weight, indices)
 
 
@@ -248,6 +285,8 @@ def embedding_bag(g,
                   scale_grad_by_freq,
                   mode,
                   sparse):
+    raise RuntimeError('lol')
+
     return g.op("ATen",
                 embedding_matrix,
                 indices,
@@ -269,6 +308,8 @@ def size(g, self, dim):
 
 
 def transpose(g, self, dim0, dim1):
+    raise RuntimeError('lol')
+
     if dim0 == dim1:  # micro-optimization
         return self
 
@@ -279,12 +320,16 @@ def transpose(g, self, dim0, dim1):
 
 
 def permute(g, self, dims):
+    raise RuntimeError('lol')
+
     if dims == list(range(0, len(dims))):
         return self
     return g.op("Transpose", self, perm_i=dims)
 
 
 def view(g, self, size):
+    raise RuntimeError('lol')
+
     if _is_value(size):
         shape = size
     else:
@@ -297,6 +342,8 @@ def view(g, self, size):
 
 
 def stack(g, *tensors, **kwargs):
+    raise RuntimeError('lol')
+
     dim = kwargs.pop('dim')
     if kwargs:
         raise RuntimeError("Unexpected kwargs: " + ','.join(kwargs.keys()))
@@ -307,6 +354,8 @@ def stack(g, *tensors, **kwargs):
 
 
 def split(g, self, split_size, dim):
+    raise RuntimeError('lol')
+
     size = self.type().sizes()[dim]
     splits = [split_size] * (size // split_size)
     leftover = size % split_size
@@ -320,16 +369,22 @@ def split(g, self, split_size, dim):
 # TODO: Once we have proper scoping, stop reimplementing chunk, delete this
 # method, and use the desugared version
 def chunk(g, self, chunks, dim):
+    raise RuntimeError('lol')
+
     split_size = (self.type().sizes()[dim] + chunks - 1) // chunks
     return split(g, self, split_size, dim)
 
 
 def select(g, self, dim, index):
+    raise RuntimeError('lol')
+
     slice_node = g.op("Slice", self, axes_i=[dim], starts_i=[index], ends_i=[index + 1])
     return g.op("Squeeze", slice_node, axes_i=[dim])
 
 
 def squeeze(g, self, dim=None):
+    raise RuntimeError('lol')
+
     if dim is None:
         dims = []
         for i, size in enumerate(self.type().sizes()):
@@ -341,14 +396,20 @@ def squeeze(g, self, dim=None):
 
 
 def prelu(g, self, weight):
+    raise RuntimeError('lol')
+
     return g.op("PRelu", self, weight)
 
 
 def relu(g, input):
+    raise RuntimeError('lol')
+
     return g.op("Relu", input)
 
 
 def threshold(g, self, threshold, value):
+    raise RuntimeError('lol')
+
     # See Note [Export inplace]
     if _scalar(threshold) != 0:
         return _unimplemented("threshold", "non-zero threshold")
@@ -358,12 +419,16 @@ def threshold(g, self, threshold, value):
 
 
 def leaky_relu(g, input, negative_slope, inplace=False):
+    raise RuntimeError('lol')
+
     # See Note [Export inplace]
     # TODO: Talk to ONNX about unconditional cast of scalar to float
     return g.op("LeakyRelu", input, alpha_f=_scalar(negative_slope))
 
 
 def glu(g, input, dim):
+    raise RuntimeError('lol')
+
     assert input.type().sizes()[dim] % 2 == 0
 
     first, second = g.op('Split', input, axis_i=dim, outputs=2)
@@ -371,6 +436,8 @@ def glu(g, input, dim):
 
 
 def softmax(g, input, dim=None):
+    raise RuntimeError('lol')
+
     # Softmax does normalization at vector level.
     # PyTorch and ONNX use different strategies to split the input tensor into vectors.
     # Thus dim and axis have different meanings.
@@ -395,12 +462,16 @@ def softmax(g, input, dim=None):
 
 
 def softplus(g, self, beta, threshold):
+    raise RuntimeError('lol')
+
     if beta != 1:
         return _unimplemented("beta", "has to be 1")
     return g.op('Softplus', self)
 
 
 def max_pool1d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    raise RuntimeError('lol')
+
     if ceil_mode:
         return _unimplemented("max_pool1d_with_indices", "ceil_mode")
     if set(_single(dilation)) != {1}:
@@ -429,6 +500,8 @@ def max_pool2d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 
 
 def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ceil_mode):
+    raise RuntimeError('lol')
+
     if ceil_mode:
         return _unimplemented("max_pool3d_with_indices", "ceil_mode")
     if set(_triple(dilation)) != {1}:
@@ -444,6 +517,8 @@ def max_pool3d_with_indices(g, input, kernel_size, stride, padding, dilation, ce
 
 def _avg_pool(name, tuple_fn):
     def symbolic_fn(g, input, kernel_size, stride, padding, ceil_mode, count_include_pad):
+        raise RuntimeError('lol')
+
         if ceil_mode:
             return _unimplemented("avg_pool2d", "ceil_mode")
         if not stride:
@@ -470,6 +545,8 @@ avg_pool3d = _avg_pool('avg_pool3d', _triple)
 
 
 def reflection_pad(g, input, padding):
+    raise RuntimeError('lol')
+
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "reflect"
     paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
@@ -477,6 +554,8 @@ def reflection_pad(g, input, padding):
 
 
 def replication_pad(g, input, padding):
+    raise RuntimeError('lol')
+
     from torch.autograd._functions.utils import prepare_onnx_paddings
     mode = "edge"
     paddings = prepare_onnx_paddings(len(input.type().sizes()), padding)
@@ -492,6 +571,8 @@ replication_pad3d = replication_pad
 
 
 def upsample_nearest2d(g, input, output_size):
+    raise RuntimeError('lol')
+
     return g.op("Upsample", input,
                 height_scale_f=float(output_size[-2]) / input.type().sizes()[-2],
                 width_scale_f=float(output_size[-1]) / input.type().sizes()[-1],
@@ -499,6 +580,8 @@ def upsample_nearest2d(g, input, output_size):
 
 
 def upsample_bilinear2d(g, input, output_size, align_corners):
+    raise RuntimeError('lol')
+
     if align_corners:
         return _unimplemented("upsample_bilinear2d", "align_corners == True")
     w_scale = float(output_size[-1]) / input.type().sizes()[-1]
@@ -508,27 +591,39 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
 
 
 def gt(g, input, other):
+    raise RuntimeError('lol')
+
     return g.op("Greater", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
 
 
 def lt(g, input, other):
+    raise RuntimeError('lol')
+
     return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
 
 
 def ge(g, input, other):
+    raise RuntimeError('lol')
+
     return g.op("Not", lt(g, other, input))
 
 
 def le(g, input, other):
+    raise RuntimeError('lol')
+
     return g.op("Not", gt(g, other, input))
 
 
 def log_softmax(g, input, dim=None):
+    raise RuntimeError('lol')
+
     return g.op("LogSoftmax", input, axis_i=dim)
 
 
 def _convolution(g, input, weight, bias, stride, padding, dilation,
                  transposed, output_padding, groups, benchmark, deterministic, cudnn_enabled):
+    raise RuntimeError('lol')
+
     weight_size = weight.type().sizes()
 
     args = [input, weight]
@@ -561,6 +656,8 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
 
 
 def batch_norm(g, input, weight, bias, running_mean, running_var, training, momentum, eps, cudnn_enabled):
+    raise RuntimeError('lol')
+
     input_sizes = input.type().sizes()
     if len(input_sizes) == 2:
         # batchnorm1d accepts 2d and 3d array, but ONNX only accepts 3d
@@ -587,10 +684,14 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
 
 
 def unfold(g, input, dimension, size, step):
+    raise RuntimeError('lol')
+
     return g.op("ATen", input, operator_s="unfold", dimension_i=dimension, size_i=size, step_i=step)
 
 
 def elu(g, input, alpha, scale):
+    raise RuntimeError('lol')
+
     if scale and scale != 1.:
         return _unimplemented("scale", "does not support scale in Elu")
     # See Note [Export inplace]
@@ -598,18 +699,26 @@ def elu(g, input, alpha, scale):
 
 
 def selu(g, input):
+    raise RuntimeError('lol')
+
     return g.op("Selu", input)
 
 
 def index_select(g, self, index, dim):
+    raise RuntimeError('lol')
+
     return g.op("Gather", self, index, axis_i=dim)
 
 
 def index_put(g, *inputs, **kwargs):
+    raise RuntimeError('lol')
+
     return g.op("ATen", *inputs, operator_s='index_put', **kwargs)
 
 
 def type_as(g, self, other):
+    raise RuntimeError('lol')
+
     if self.isTensor() and other.isTensor() and self.type().scalarType() == other.type().scalarType():
         return self
 
@@ -623,32 +732,46 @@ def type_as(g, self, other):
 
 # ignore clone operators that are inserted by PyTorch autograd
 def clone(g, input):
+    raise RuntimeError('lol')
+
     return input
 
 
 def abs(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Abs", self)
 
 
 def pow(g, self, exponent):
+    raise RuntimeError('lol')
+
     return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
 
 
 def clamp(g, self, min, max):
+    raise RuntimeError('lol')
+
     return g.op("Clip", self, min_f=min, max_f=max)
 
 
 def clamp_min(g, self, min):
+    raise RuntimeError('lol')
+
     return g.op("Clip", self, min_f=min)
 
 
 def clamp_max(g, self, max):
+    raise RuntimeError('lol')
+
     return g.op("Clip", self, max_f=max)
 
 
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 def max(g, self, *args, **kwargs):
+    raise RuntimeError('lol')
+
     dim = kwargs.get("dim", None)
     if dim is None and isinstance(args[0], numbers.Number):
         dim = args[0]
@@ -667,6 +790,8 @@ def max(g, self, *args, **kwargs):
 
 
 def min(g, self, *args, **kwargs):
+    raise RuntimeError('lol')
+
     dim = kwargs.get("dim", None)
     if dim is None and isinstance(args[0], numbers.Number):
         dim = args[0]
@@ -685,14 +810,20 @@ def min(g, self, *args, **kwargs):
 
 
 def eq(g, self, other):
+    raise RuntimeError('lol')
+
     return g.op("Equal", self, other)
 
 
 def exp(g, self):
+    raise RuntimeError('lol')
+
     return g.op("Exp", self)
 
 
 def norm(g, self, p, dim, keepdim):
+    raise RuntimeError('lol')
+
     if p == 1:
         f = _reduce_op_symbolic("ReduceL1")
     elif p == 2:
@@ -703,10 +834,14 @@ def norm(g, self, p, dim, keepdim):
 
 
 def conv_tbc(g, input, weight, bias, pad):
+    raise RuntimeError('lol')
+
     return g.op("ATen", input, weight, bias, operator_s="conv_tbc", pad_i=pad)
 
 
 def _unique(g, input, sorted, return_inverse):
+    raise RuntimeError('lol')
+
     return g.op("ATen", input, operator_s="_unique", sorted_i=sorted,
                 return_inverse_i=return_inverse, outputs=2)
 
@@ -741,6 +876,8 @@ scalar_name_to_pytorch = {
 
 
 def _cast_func_template(to_i, g, input, non_blocking):
+    raise RuntimeError('lol')
+
     return g.op("Cast", input, to_i=to_i)
 
 
@@ -750,6 +887,8 @@ for k, v in cast_pytorch_to_onnx.items():
 
 
 def zeros_like(g, input):
+    raise RuntimeError('lol')
+
     return g.op("Sub", input, input).setType(input.type().contiguous())
 
 
@@ -759,12 +898,16 @@ def full_like(g, input, fill_value):
 
 
 def slice(g, self, dim, start, end, step):
+    raise RuntimeError('lol')
+
     if step != 1:
         _unimplemented("slice", "step!=1 is currently not supported")
     return g.op("Slice", self, axes_i=[dim], starts_i=[start], ends_i=[end])
 
 
 def hardtanh(g, self, min_val, max_val):
+    raise RuntimeError('lol')
+
     return g.op("Clip", self, min_f=min_val, max_f=max_val)
 
 
@@ -773,10 +916,14 @@ def alias(g, self):
 
 
 def unsqueeze(g, self, dim):
+    raise RuntimeError('lol')
+
     return g.op("Unsqueeze", self, axes_i=[dim])
 
 
 def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
+    raise RuntimeError('lol')
+
     if out is not None:
         _unimplemented("TopK", "Out parameter is not supported for topk")
     if not largest:
@@ -786,6 +933,8 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
 
 
 def repeat(g, self, repeats):
+    raise RuntimeError('lol')
+
     if self.isTensor():
         sizes = self.type().sizes()
         diff_dims = len(repeats) - len(sizes)
@@ -795,6 +944,8 @@ def repeat(g, self, repeats):
 
 
 def instance_norm(g, input, **kwargs):
+    raise RuntimeError('lol')
+
     input_type = input.type().scalarType()
     weight = kwargs.get("weight", None)
     bias = kwargs.get("bias", None)
