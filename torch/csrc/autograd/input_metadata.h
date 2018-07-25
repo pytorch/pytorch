@@ -1,7 +1,6 @@
 #pragma once
 
 #include <ATen/ATen.h>
-#include "torch/csrc/assertions.h"
 
 #include <cstdint>
 
@@ -24,7 +23,7 @@ struct InputMetadata {
   }
 
   const at::Type& type() const {
-    TORCH_ASSERT(type_);
+    AT_ASSERT(type_);
     return *type_;
   }
 
