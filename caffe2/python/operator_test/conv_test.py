@@ -13,6 +13,7 @@ from caffe2.proto import caffe2_pb2
 from caffe2.python import brew, core, workspace
 import caffe2.python.hypothesis_test_util as hu
 from caffe2.python.model_helper import ModelHelper
+import caffe2.python._import_c_extension as C
 
 
 def _cudnn_supports(
@@ -39,14 +40,11 @@ def _cudnn_supports(
 
 def _cudnn_convolution_algo_count(direction):
     if direction == "fwd":
-        # grep CUDNN_CONVOLUTION_FWD_ALGO_COUNT /usr/local/cuda/include/cudnn.h
-        return 8
+        return C.cudnn_convolution_fwd_algo_count
     elif direction == "dgrad":
-        # grep CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT /usr/local/cuda/include/cudnn.h
-        return 6
+        return C.cudnn_convolution_bwd_data_algo_count
     elif direction == "wgrad":
-        # grep CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT /usr/local/cuda/include/cudnn.h
-        return 7
+        return C.cudnn_convolution_bwd_filter_algo_count
     else:
         assert False
 
