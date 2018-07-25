@@ -49,7 +49,7 @@ def _cudnn_convolution_algo_count(direction):
         else:
             assert False
     except Exception:
-        return -1
+        return st.sampled_from([-1])
 
 
 class TestConvolution(hu.HypothesisTestCase):
