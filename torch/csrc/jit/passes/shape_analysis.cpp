@@ -451,7 +451,8 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
   }
 }
 
-}
+} // anonymous namespace
+
 void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   JIT_ASSERT(graph.inputs().size() == spec.size());
   for(size_t i = 0; i < spec.size(); ++i) {
@@ -460,6 +461,31 @@ void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
     graph.inputs()[i]->setType(argspec);
   }
   PropagateShapeOnBlock(graph.block());
+}
+
+namespace {
+
+void EraseShapeInformation(at::ArrayRef<Value*> vals) {
+  for (Value * v : vals) {
+    v->setType(unshapedType(v->type()));
+  }
+}
+
+void EraseShapeInformation(Block * b) {
+  EraseShapeInformation(b->inputs());
+  EraseShapeInformation(b->outputs());
+  for (Node * n : b->nodes()) {
+    EraseShapeInformation(n->outputs());
+    for (Block *sb : n->blocks()) {
+      EraseShapeInformation(sb);
+    }
+  }
+}
+
+} // anonymous namespace
+
+void EraseShapeInformation(Graph & graph) {
+  EraseShapeInformation(graph.block());
 }
 
 }}
