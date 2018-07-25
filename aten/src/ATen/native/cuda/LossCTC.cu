@@ -158,46 +158,56 @@ __global__ void ctc_loss_log_alpha_gpu_kernel(scalar_t* __restrict__ log_alpha_d
 // We return log_alpha (currently, might change to (log_alpha+log_beta) to be passed to the
 // backward. The dispatch function will only return the loss.
 template<typename scalar_t>
-std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK) {
+std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths, int64_t BLANK) {
   // log_probs: input_len x batch_size x num_labels
   // targets [int64]: batch_size x target_length OR sum(target_lengths)
   CheckedFrom c = "ctc_loss_gpu";
   auto log_probs_arg = TensorArg(log_probs, "log_probs", 1);
   auto targets_arg = TensorArg(targets, "targets", 2);
-  auto input_lengths_arg = TensorArg(input_lengths, "input_lengths", 3);
-  auto target_lengths_arg = TensorArg(target_lengths, "target_lengths", 4);
-  checkAllSameGPU(c, {log_probs_arg, targets_arg, input_lengths_arg, target_lengths_arg});
+  checkAllSameGPU(c, {log_probs_arg, targets_arg});
   checkScalarType(c, targets_arg, kLong);
-  checkScalarType(c, input_lengths_arg, kLong);
-  checkScalarType(c, target_lengths_arg, kLong);
   checkDim(c, log_probs_arg, 3);
   checkDimRange(c, targets_arg, 1, 3);
 
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
   AT_CHECK(BLANK < num_labels, "blank must be in label range");
-  checkSize(c, input_lengths_arg, {batch_size});
-  checkContiguous(c, input_lengths_arg);
-  checkSize(c, target_lengths_arg, {batch_size});
-  checkContiguous(c, target_lengths_arg);
+  AT_CHECK(input_lengths.size() == batch_size, "input_lengths must be of size batch_size");
+  AT_CHECK(target_lengths.size() == batch_size, "target_lengths must be of size batch_size");
 
-  size_t lp_input_stride = log_probs.stride(0);
-  size_t lp_char_stride = log_probs.stride(2);
-  size_t tg_target_stride;
+  int64_t lp_input_stride = log_probs.stride(0);
+  int64_t lp_char_stride = log_probs.stride(2);
+  int64_t tg_target_stride;
 
   int64_t max_target_length;
-  Tensor tg_batch_offsets;
+  auto tg_batch_offsets = at::empty(at::CPU(kLong), {batch_size});
+  auto target_lengths_t = at::empty(at::CPU(kLong), {batch_size});
+  auto input_lengths_t = at::empty(at::CPU(kLong), {batch_size});
+  auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
+  auto input_lengths_data = input_lengths_t.data<int64_t>();
+  auto target_lengths_data = target_lengths_t.data<int64_t>();
+  for (int i = 0; i < batch_size; i++) {
+    input_lengths_data[i] = input_lengths[i];
+    target_lengths_data[i] = target_lengths[i];
+  }
   if (targets.dim() == 1) { // concatenated targets
-    tg_batch_offsets = at::zeros_like(target_lengths);
-    auto tmp = tg_batch_offsets.narrow(0, 1, batch_size-1);
-    at::cumsum_out(tmp, target_lengths, 0);
-    max_target_length = at::max(target_lengths).toCLong();
+    int64_t pos = 0;
+    max_target_length = 0;
+    for (int64_t i = 0; i < batch_size; i++) {
+      tg_batch_offsets_data[i] = pos;
+      pos += target_lengths[i];
+      if (max_target_length < target_lengths[i])
+	max_target_length = target_lengths[i];
+    }
     tg_target_stride = targets.stride(0);
-    checkSize(c, targets_arg, 0, tmp[batch_size-1].toCLong()+target_lengths[batch_size-1].toCLong());
+    checkSize(c, targets_arg, 0, pos);
   }
   else { // batch x max_target_length
     // dim is 2
-    tg_batch_offsets = at::arange(0, targets.stride(0)*batch_size, targets.stride(0), target_lengths.options());
+    int64_t tg_batch_stride = targets.stride(0);
+    for (int64_t i = 0; i < batch_size; i++) {
+      tg_batch_offsets_data[i] = i * tg_batch_stride;
+    }
     tg_target_stride = targets.stride(1);
     max_target_length = targets.size(1);
     checkSize(c, targets_arg, 0, batch_size);
@@ -205,10 +215,16 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
              "Expected tensor to have size at least ", max_target_length, " at dimension 1, but got size ", targets.size(1), " for ", targets_arg,
              " (while checking arguments for ", c, ")");
   }
-  int max_input_length = at::max(input_lengths).toCLong();
-  AT_CHECK(log_probs.size(0) >= max_input_length,
-           "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", targets.size(0), " for ", targets_arg,
-           " (while checking arguments for ", c, ")");
+  int64_t max_input_length = log_probs.size(0);
+  for (int64_t b = 0; b < batch_size; b++) {
+    AT_CHECK(input_lengths[b] <= max_input_length,
+	     "Expected tensor to have size at least ", max_input_length, " at dimension 1, but got size ", targets.size(0), " for ", targets_arg,
+	     " (while checking arguments for ", c, ")");
+  }
+
+  input_lengths_t = input_lengths_t.toType(CUDA(kLong));
+  target_lengths_t = target_lengths_t.toType(CUDA(kLong));
+  tg_batch_offsets = tg_batch_offsets.toType(CUDA(kLong));
 
   Tensor log_alpha = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor neg_log_likelihood = at::empty({batch_size}, log_probs.options());
@@ -227,8 +243,8 @@ std::tuple<Tensor, Tensor> ctc_loss_gpu_template(const Tensor& log_probs, const 
 
   ctc_loss_log_alpha_gpu_kernel<scalar_t><<<grid, block, 0, stream>>>(
 		      log_alpha.data<scalar_t>(),
-                      log_probs.data<scalar_t>(), input_lengths.data<int64_t>(), log_probs.size(0),
-                      targets.data<int64_t>(), target_lengths.data<int64_t>(), max_target_length,
+                      log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
+                      targets.data<int64_t>(), target_lengths_t.data<int64_t>(), max_target_length,
                       neg_log_likelihood.data<scalar_t>(),
                       log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
                       log_alpha.stride(0), log_alpha.stride(1), log_alpha.stride(2),
@@ -450,30 +466,49 @@ __global__ void ctc_loss_backward_collect_gpu_kernel(scalar_t* __restrict__ grad
 // The backward. It essentially computes eq 16 by using the above kernels.
 // We don't do a lot of checking as we envision this to be called only when backpropagating through a (well-checked) forward.
 template<typename scalar_t>
-Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths,
+Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths,
 				      const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK) {
   constexpr scalar_t neginf = -std::numeric_limits<scalar_t>::infinity();
   int64_t batch_size = log_probs.size(1);
   int64_t num_labels = log_probs.size(2);
-  size_t lp_input_stride = log_probs.stride(0);
-  size_t lp_char_stride = log_probs.stride(2);
-  size_t tg_target_stride;
+  int64_t lp_input_stride = log_probs.stride(0);
+  int64_t lp_char_stride = log_probs.stride(2);
+  int64_t tg_target_stride;
 
   int64_t max_target_length;
-  Tensor tg_batch_offsets;
+  auto tg_batch_offsets = at::empty(at::CPU(kLong), {batch_size});
+  auto target_lengths_t = at::empty(at::CPU(kLong), {batch_size});
+  auto input_lengths_t = at::empty(at::CPU(kLong), {batch_size});
+  auto tg_batch_offsets_data = tg_batch_offsets.data<int64_t>();
+  auto input_lengths_data = input_lengths_t.data<int64_t>();
+  auto target_lengths_data = target_lengths_t.data<int64_t>();
+  for (int i = 0; i < batch_size; i++) {
+    input_lengths_data[i] = input_lengths[i];
+    target_lengths_data[i] = target_lengths[i];
+  }
   if (targets.dim() == 1) { // concatenated targets
-    tg_batch_offsets = at::zeros_like(target_lengths);
-    auto tmp = tg_batch_offsets.narrow(0, 1, batch_size-1);
-    at::cumsum_out(tmp, target_lengths, 0);
-    max_target_length = at::max(target_lengths).toCLong();
+    int64_t pos = 0;
+    max_target_length = 0;
+    for (int64_t i = 0; i < batch_size; i++) {
+      tg_batch_offsets_data[i] = pos;
+      pos += target_lengths[i];
+      if (max_target_length < target_lengths[i])
+	max_target_length = target_lengths[i];
+    }
     tg_target_stride = targets.stride(0);
   }
   else { // batch x max_target_length
-    // dim shoudl be 2
-    tg_batch_offsets = at::arange(0, targets.stride(0)*batch_size, targets.stride(0), target_lengths.options());
+    // dim is 2
+    int64_t tg_batch_stride = targets.stride(0);
+    for (int64_t i = 0; i < batch_size; i++) {
+      tg_batch_offsets_data[i] = i * tg_batch_stride;
+    }
     tg_target_stride = targets.stride(1);
     max_target_length = targets.size(1);
   }
+  input_lengths_t = input_lengths_t.toType(CUDA(kLong));
+  target_lengths_t = target_lengths_t.toType(CUDA(kLong));
+  tg_batch_offsets = tg_batch_offsets.toType(CUDA(kLong));
 
   Tensor log_beta = at::empty({batch_size, log_probs.size(0), 2*max_target_length+1}, log_probs.options());
   Tensor grad = at::full_like(log_probs, neginf); // initialization for log(sum (alpha beta))
@@ -494,8 +529,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
 
     ctc_loss_backward_log_beta_gpu_kernel<scalar_t><<<grid, block, 0, stream>>>
       (log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths.data<int64_t>(), log_probs.size(0),
-       targets.data<int64_t>(), target_lengths.data<int64_t>(), max_target_length,
+       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
+       targets.data<int64_t>(), target_lengths_t.data<int64_t>(), max_target_length,
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data<int64_t>(), tg_target_stride,
@@ -537,8 +572,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       (grad.data<scalar_t>(),
        grad_out.data<scalar_t>(), grad_out.stride(0),
        log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths.data<int64_t>(), log_probs.size(0),
-       targets.data<int64_t>(), target_lengths.data<int64_t>(), max_target_length,
+       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
+       targets.data<int64_t>(), target_lengths_t.data<int64_t>(), max_target_length,
        neg_log_likelihood.data<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
@@ -560,8 +595,8 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
       (grad.data<scalar_t>(),
        grad_out.data<scalar_t>(), grad_out.stride(0),
        log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
-       log_probs.data<scalar_t>(), input_lengths.data<int64_t>(), log_probs.size(0),
-       targets.data<int64_t>(), target_lengths.data<int64_t>(), max_target_length,
+       log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
+       targets.data<int64_t>(), target_lengths_t.data<int64_t>(), max_target_length,
        neg_log_likelihood.data<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
@@ -575,13 +610,13 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
 
 } // namespace
 
-std::tuple<Tensor, Tensor> ctc_loss_gpu(const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths, int64_t BLANK) {
+std::tuple<Tensor, Tensor> ctc_loss_gpu(const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths, int64_t BLANK) {
   return AT_DISPATCH_FLOATING_TYPES(log_probs.type(), "ctc_loss", [&] {
       return ctc_loss_gpu_template<scalar_t>(log_probs, targets, input_lengths, target_lengths, BLANK);
     });
 }
 
-Tensor ctc_loss_backward_gpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, const Tensor& input_lengths, const Tensor& target_lengths,
+Tensor ctc_loss_backward_gpu(const Tensor& grad, const Tensor& log_probs, const Tensor& targets, IntList input_lengths, IntList target_lengths,
                              const Tensor& neg_log_likelihood, const Tensor& log_alpha, int64_t BLANK) {
   return AT_DISPATCH_FLOATING_TYPES(log_probs.type(), "ctc_loss_backward", [&] {
       return ctc_loss_backward_gpu_template<scalar_t>(grad, log_probs, targets, input_lengths, target_lengths, neg_log_likelihood, log_alpha, BLANK);
