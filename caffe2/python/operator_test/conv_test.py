@@ -38,16 +38,6 @@ def _cudnn_supports(
     return True
 
 
-def _cudnn_convolution_algo_count(direction):
-    if direction == "fwd":
-        return C.cudnn_convolution_fwd_algo_count
-    elif direction == "dgrad":
-        return C.cudnn_convolution_bwd_data_algo_count
-    elif direction == "wgrad":
-        return C.cudnn_convolution_bwd_filter_algo_count
-    else:
-        assert False
-
 class TestConvolution(hu.HypothesisTestCase):
     # CUDNN does NOT support different padding values and we skip it
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
@@ -66,9 +56,9 @@ class TestConvolution(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "EIGEN"]),
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
-           force_algo_fwd=st.integers(0, _cudnn_convolution_algo_count("fwd") - 1),
-           force_algo_dgrad=st.integers(0, _cudnn_convolution_algo_count("dgrad") - 1),
-           force_algo_wgrad=st.integers(0, _cudnn_convolution_algo_count("wgrad") - 1),
+           force_algo_fwd=st.integers(0, C.cudnn_convolution_fwd_algo_count - 1),
+           force_algo_dgrad=st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1),
+           force_algo_wgrad=st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1),
            **hu.gcs)
     def test_convolution_separate_stride_pad_gradients(self, op_type,
                                                        stride_h, stride_w,
@@ -137,9 +127,9 @@ class TestConvolution(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            engine=st.sampled_from(["", "EIGEN"]),
            use_bias=st.booleans(),
-           force_algo_fwd=st.integers(0, _cudnn_convolution_algo_count("fwd") - 1),
-           force_algo_dgrad=st.integers(0, _cudnn_convolution_algo_count("dgrad") - 1),
-           force_algo_wgrad=st.integers(0, _cudnn_convolution_algo_count("wgrad") - 1),
+           force_algo_fwd=st.integers(0, C.cudnn_convolution_fwd_algo_count - 1),
+           force_algo_dgrad=st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1),
+           force_algo_wgrad=st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1),
            **hu.gcs)
     def test_convolution_separate_stride_pad_layout(self, op_type,
                                                     stride_h, stride_w,
@@ -206,9 +196,9 @@ class TestConvolution(hu.HypothesisTestCase):
            order=st.sampled_from(["NCHW", "NHWC"]),
            engine=st.sampled_from(["", "CUDNN", "MKLDNN"]),
            use_bias=st.booleans(),
-           force_algo_fwd=st.integers(0, _cudnn_convolution_algo_count("fwd") - 1),
-           force_algo_dgrad=st.integers(0, _cudnn_convolution_algo_count("dgrad") - 1),
-           force_algo_wgrad=st.integers(0, _cudnn_convolution_algo_count("wgrad") - 1),
+           force_algo_fwd=st.integers(0, C.cudnn_convolution_fwd_algo_count - 1),
+           force_algo_dgrad=st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1),
+           force_algo_wgrad=st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1),
            **hu.gcs)
     def test_convolution_gradients(self, op_type, stride, pad, kernel, dilation,
                                    size, input_channels, output_channels,
@@ -322,9 +312,9 @@ class TestConvolution(hu.HypothesisTestCase):
            dilation=st.integers(1, 3),
            pad=st.integers(0, 3),
            use_bias=st.booleans(),
-           force_algo_fwd=st.integers(0, _cudnn_convolution_algo_count("fwd") - 1),
-           force_algo_dgrad=st.integers(0, _cudnn_convolution_algo_count("dgrad") - 1),
-           force_algo_wgrad=st.integers(0, _cudnn_convolution_algo_count("wgrad") - 1),
+           force_algo_fwd=st.integers(0, C.cudnn_convolution_fwd_algo_count - 1),
+           force_algo_dgrad=st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1),
+           force_algo_wgrad=st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1),
            **hu.gcs)
     def test_1d_convolution_nchw(self, input_channels, output_channels,
                                  batch_size, stride, size, kernel, dilation,
@@ -347,9 +337,9 @@ class TestConvolution(hu.HypothesisTestCase):
            dilation=st.integers(1, 2),
            pad=st.integers(0, 2),
            use_bias=st.booleans(),
-           force_algo_fwd=st.integers(0, _cudnn_convolution_algo_count("fwd") - 1),
-           force_algo_dgrad=st.integers(0, _cudnn_convolution_algo_count("dgrad") - 1),
-           force_algo_wgrad=st.integers(0, _cudnn_convolution_algo_count("wgrad") - 1),
+           force_algo_fwd=st.integers(0, C.cudnn_convolution_fwd_algo_count - 1),
+           force_algo_dgrad=st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1),
+           force_algo_wgrad=st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1),
            **hu.gcs)
     def test_3d_convolution_nchw(self, input_channels, output_channels,
                                  batch_size, stride, size, kernel, dilation,
@@ -371,9 +361,9 @@ class TestConvolution(hu.HypothesisTestCase):
            dilation=st.integers(1, 2),
            pad=st.integers(0, 2),
            use_bias=st.booleans(),
-           force_algo_fwd=st.integers(0, _cudnn_convolution_algo_count("fwd") - 1),
-           force_algo_dgrad=st.integers(0, _cudnn_convolution_algo_count("dgrad") - 1),
-           force_algo_wgrad=st.integers(0, _cudnn_convolution_algo_count("wgrad") - 1),
+           force_algo_fwd=st.integers(0, C.cudnn_convolution_fwd_algo_count - 1),
+           force_algo_dgrad=st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1),
+           force_algo_wgrad=st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1),
            **hu.gcs)
     def test_3d_convolution_cudnn_nchw(self, op_type, batch_size, stride, size,
                                        kernel, dilation, pad, use_bias,
@@ -637,9 +627,9 @@ class TestConvolution(hu.HypothesisTestCase):
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]), N=st.integers(1, 4),
            G=st.integers(1, 4), DX=st.integers(1, 4), DY=st.integers(1, 4),
            H=st.integers(1, 4), W=st.integers(1, 4), use_bias=st.booleans(),
-           force_algo_fwd=st.integers(0, _cudnn_convolution_algo_count("fwd") - 1),
-           force_algo_dgrad=st.integers(0, _cudnn_convolution_algo_count("dgrad") - 1),
-           force_algo_wgrad=st.integers(0, _cudnn_convolution_algo_count("wgrad") - 1),
+           force_algo_fwd=st.integers(0, C.cudnn_convolution_fwd_algo_count - 1),
+           force_algo_dgrad=st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1),
+           force_algo_wgrad=st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1),
            **hu.gcs)
     def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias,
                       force_algo_fwd, force_algo_dgrad,
