@@ -95,6 +95,10 @@ inline size_t cudnnCompiledVersion() {
 inline size_t cudnnRuntimeVersion() {
   return cudnnGetVersion();
 }
+// report convolution algorithm counts
+inline int CudnnConvolutionFwdAlgoCount() { return CUDNN_CONVOLUTION_FWD_ALGO_COUNT; }
+inline int CudnnConvolutionBwdDataAlgoCount() { return CUDNN_CONVOLUTION_BWD_DATA_ALGO_COUNT; }
+inline int CudnnConvolutionBwdFilterAlgoCount() { return CUDNN_CONVOLUTION_BWD_FILTER_ALGO_COUNT; }
 
 // Check compatibility of compiled and runtime cuDNN versions
 inline void CheckCuDNNVersions() {
