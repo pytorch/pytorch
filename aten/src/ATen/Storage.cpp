@@ -3,23 +3,6 @@
 
 namespace at {
 
-// Storage::Storage(
-//     at::ScalarType scalar_type,
-//     ptrdiff_t size,
-//     at::DataPtr data_ptr,
-//     at::Allocator* allocator,
-//     char flag) {
-//   storage_impl_ = new StorageImpl(scalar_type, size, data_ptr, allocator, flag);
-// }
-// 
-// Storage::Storage(
-//     at::ScalarType scalar_type,
-//     ptrdiff_t size,
-//     at::Allocator* allocator,
-//     char flag) {
-//   storage_impl_ = new StorageImpl(scalar_type, size, allocator, flag);
-// }
-
 Storage::~Storage() {
   if (!storage_impl_) {
     return;

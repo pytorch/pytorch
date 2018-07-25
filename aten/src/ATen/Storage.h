@@ -23,11 +23,19 @@ namespace at {
 
 struct Storage {
   Storage() : storage_impl_(nullptr){};
-  Storage(StorageImpl* storage_impl) : storage_impl_(storage_impl){};
+  Storage(StorageImpl* storage_impl) {
+    storage_impl_ = storage_impl;
+    if (storage_impl_)
+      storage_impl_->retain();
+  };
   ~Storage();
+  Storage(Storage&) = delete;
+  Storage(const Storage&) = delete;
+  Storage(Storage&&) = delete;
+  Storage(const Storage&&) = delete;
   StorageImpl* storage_impl_;
   void* unsafeGetTH(bool retain_) const {
-    if (retain_)
+    if (retain_ && storage_impl_)
       storage_impl_->retain();
     return storage_impl_;
   }
