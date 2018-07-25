@@ -1115,7 +1115,8 @@ class TestBatched(TestCase):
     # generate random examples and create an batchtensor with them
     def rand_batch(self, *dims):
         dims = [dim for dim in dims if dim != ()]
-        xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:])) for i in range(dims[0])]
+        xs = [torch.rand(1, *(random.randint(1, size) if b else size for b, size in dims[1:]),
+                         requires_grad=True) for i in range(dims[0])]
         xb = BatchTensor(xs, torch.tensor([b for b, d in dims[1:]]).byte())
         return xs, xb
 
@@ -1219,6 +1220,18 @@ class TestBatched(TestCase):
         res = [torch.select(xs[j], 1, 0) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+    def test_batch_index_select(self):
+        @torch.jit.batch(batch_size=4)
+        def index_select(x, ind):
+            return x.index_select(1, ind)
+
+        xs, batch = self.rand_batch(4, (False, 5), (True, 2))
+        ind = [torch.randint(0, 4, (1,), dtype=torch.long) for i in range(4)]
+        ind_batch = BatchTensor(ind, torch.tensor([]).byte())
+        res_batch = index_select(batch, ind_batch)
+        res = [torch.index_select(xs[j], 1, ind[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
     def test_batch_where(self):
         @torch.jit.batch(batch_size=4)
         def where(c, a, b):
@@ -1299,6 +1312,212 @@ class TestBatched(TestCase):
         res = [torch.softmax(xs[j], 2) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+    def test_batch_view(self):
+        @torch.jit.batch(batch_size=4)
+        def view(a):
+            return a.view([4, -1, 3])
+
+        xs, batch = self.rand_batch(4, (True, 5), (False, 3))
+        res_batch = view(batch)
+        res = [xs[j].view([1, -1, 3]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_cat(self):
+        @torch.jit.batch(batch_size=4)
+        def cat2(a, b):
+            return torch.cat([a, b], 2)
+
+        xs, batch = self.rand_batch(4, (True, 5), (False, 3))
+        xs2, batch2 = xs, batch
+        res_batch = cat2(batch, batch2)
+        res = [torch.cat([xs[j], xs2[j]], 2) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_batch_sum(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_sum(a):
+            return a.sum()
+
+        xs, batch = self.rand_batch(4, (True, 5), (False, 3))
+        res_batch = batch_sum(batch)
+        res = [xs[j].sum().unsqueeze(0) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+    def test_if_else(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > b:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        def single_if(a, b):
+            if a > b:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > b:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_if_else_with_scalar(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > 0.1:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        def single_if(a, b):
+            if a > 0.1:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > 0.1:
+                a = a + b
+            else:
+                a = a - b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_if_noelse(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > b:
+                a = a + b
+            return a
+
+        def single_if(a, b):
+            if a > b:
+                a = a + b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > b:
+                a = a + b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_if_noelse_with_scalar(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_if(a, b):
+            if a > 0.1:
+                a = a + b
+            return a
+
+        def single_if(a, b):
+            if a > 0.1:
+                a = a + b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_if(batch_a, batch_b)
+        res = [single_if(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_if(a, b):
+            if a > 0.1:
+                a = a + b
+            return a
+
+        graph = torch.to_batch_graph(batch_if.graph)
+        self.assertExpected(str(graph))
+
+    def test_while(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_while(a, b):
+            while a > b:
+                a = a - b
+            return a
+
+        def single_while(a, b):
+            while a > b:
+                a = a - b
+            return a
+
+        a, batch_a = self.rand_batch(4, ())
+        b = [torch.abs(torch.rand(1)) for i in range(4)]
+        batch_b = BatchTensor(b, torch.tensor([]).byte())
+        res_batch = batch_while(batch_a, batch_b)
+        res = [single_while(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_while(a, b):
+            while a > b:
+                a = a - b
+            return a
+
+        graph = torch.to_batch_graph(batch_while.graph)
+        self.assertExpected(str(graph))
+
+    def test_for(self):
+        @torch.jit.batch(batch_size=4)
+        def batch_for(x, y):
+            for _ in range(10):
+                x = x + y
+            return x
+
+        def single_for(x, y):
+            for _ in range(10):
+                x = x + y
+            return x
+
+        a, batch_a = self.rand_batch(4, ())
+        b, batch_b = self.rand_batch(4, ())
+        res_batch = batch_for(batch_a, batch_b)
+        res = [single_for(a[j], b[j]) for j in range(4)]
+        self.assertEqual(res, res_batch.examples())
+
+        @torch.jit.script
+        def batch_for(x, y):
+            for _ in range(10):
+                x = x + y
+            return x
+
+        graph = torch.to_batch_graph(batch_for.graph)
+        self.assertExpected(str(graph))
+
     def test_lstm(self):
         def LSTM(x_all, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
             for i in range(x_all.size(1)):
@@ -1337,6 +1556,7 @@ class TestBatched(TestCase):
                 h_t = torch.mul(o_t, torch.tanh(c_t))
                 h = h_t
                 c = c_t
+                # h = x
             return h
 
         batch_size, input_size, hidden_size = 4, 3, 2
@@ -1366,203 +1586,215 @@ class TestBatched(TestCase):
                          w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c)
         self.assertEqual(ys, ybs.examples())
 
-    def test_numToTensor(self):
+    def test_greedy_search(self):
+        def greedy(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                   b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
+            iter_count = torch.zeros_like(iter_num)
+            while(iter_count < iter_num):
+                iter_count += 1
+                # LSTM Cell
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
+                # calculate feature with max probability
+                s_t = torch.matmul(h_t, w_hs) + b_s
+                p_t = torch.softmax(s_t, 1)
+                # print(p_t)
+                i_t = torch.argmax(p_t, 1)
+                x = embed.index_select(0, i_t)
+            return h
+
         @torch.jit.batch(batch_size=4)
-        def batch_numToTensor(a):
-            a = a + 1
-            return a
+        def greedy_batch(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                         b_i, b_f, b_o, b_c, w_hs, b_s, iter_num):
+            iter_count = torch.zeros_like(iter_num)
+            while(iter_count < iter_num):
+                iter_count += 1
+                # LSTM Cell
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
+                # calculate feature with max probability
+                s_t = torch.matmul(h_t, w_hs) + b_s
+                p_t = torch.softmax(s_t, 1)
+                i_t = torch.argmax(p_t, 1)
+                x = embed.index_select(1, i_t).squeeze(1)
+            return h
 
-        def single_numToTensor(a):
-            a = a + 1
-            return a
+        batch_size, input_size, hidden_size, vocab_size = 4, 6, 8, 7
+        xs, batch = self.rand_batch(batch_size, (False, input_size))
+        hx, h_batch = self.rand_batch(batch_size, (False, hidden_size))
+        cx, c_batch = self.rand_batch(batch_size, (False, hidden_size))
+        embed, embed_batch = self.rand_batch(batch_size, (False, vocab_size), (False, input_size))
+        iter_num = [torch.randint(2, 5, (1,)) for i in range(batch_size)]
+        iter_num_batch = BatchTensor(iter_num, torch.tensor([]).byte())
 
-        a, batch = self.rand_batch(4, ())
-        res_batch = batch_numToTensor(batch)
-        res = [single_numToTensor(a[j]) for j in range(4)]
-        self.assertEqual(res, res_batch.examples())
+        # input to hidden weights
+        w_xi = torch.rand(input_size, hidden_size)
+        w_xf = torch.rand(input_size, hidden_size)
+        w_xo = torch.rand(input_size, hidden_size)
+        w_xc = torch.rand(input_size, hidden_size)
+        # hidden to hidden weights
+        w_hi = torch.rand(hidden_size, hidden_size)
+        w_hf = torch.rand(hidden_size, hidden_size)
+        w_ho = torch.rand(hidden_size, hidden_size)
+        w_hc = torch.rand(hidden_size, hidden_size)
+        # bias terms
+        b_i = torch.rand(hidden_size)
+        b_f = torch.rand(hidden_size)
+        b_o = torch.rand(hidden_size)
+        b_c = torch.rand(hidden_size)
+        # hidden to vocab weights, bias
+        w_hs = torch.rand(hidden_size, vocab_size)
+        b_s = torch.rand(vocab_size)
 
-        @torch.jit.script
-        def batch_numToTensor(a):
-            a = a + 1
-            return a
+        ys = [greedy(xs[j], hx[j], cx[j], embed[j].squeeze(0), w_xi, w_xf, w_xo, w_xc,
+                     w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num[j]) for j in range(batch_size)]
+        ybs = greedy_batch(batch, h_batch, c_batch, embed_batch, w_xi, w_xf, w_xo, w_xc,
+                           w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch)
+        self.assertEqual(ys, ybs.examples())
 
-        graph = torch.to_batch_graph(batch_numToTensor.graph)
-        self.assertExpected(str(graph))
+    def test_beam_search(self):
+        def beam(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                 b_i, b_f, b_o, b_c, w_hs, b_s, iter_num, idx):
+            k = 5
+            vocab_size = embed.size(0)
+            iter_count = torch.zeros_like(iter_num)
+            max_len = idx.size(2)
+            while(iter_count < iter_num):
+                iter_count += 1
+                # LSTM Cell
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
+                # calculate features with max probability
+                s_t = torch.matmul(h_t, w_hs) + b_s
+                s_t = s_t.view([1, -1])
+                p_t = torch.softmax(s_t, 1)
+                # print(p_t)
+                prob_t, i_t = torch.topk(p_t, k, 1)
+                x = embed.index_select(0, i_t.squeeze(0) % vocab_size)
+                h = h_t.index_select(1, i_t.squeeze(0) / vocab_size)
+                c = c_t.index_select(1, i_t.squeeze(0) / vocab_size)
+                iter = int(iter_count[0])
+                idx = torch.cat([idx.narrow(2, 0, iter).index_select(1, i_t.squeeze(0) / vocab_size),
+                                torch.fmod(i_t, vocab_size).unsqueeze(-1),
+                                idx.narrow(2, iter, max_len - iter)], 2)
+                idx = idx.narrow(2, 0, max_len)
+            return idx.narrow(2, 0, int(iter_count))
 
-    def test_if_else(self):
         @torch.jit.batch(batch_size=4)
-        def batch_if(a, b):
-            if a > b:
-                a += b
-            else:
-                a -= b
-            return a
+        def beam_batch(x, h, c, embed, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                       b_i, b_f, b_o, b_c, w_hs, b_s, iter_num, idx):
+            k = 5
+            batch_size = x.size(0)
+            vocab_size = embed.size(1)
+            iter_count = torch.zeros_like(iter_num)
+            max_len = idx.size(2)
+            while(iter_count < iter_num):
+                iter_count += 1
+                # LSTM Cell
+                i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i
+                f_t = torch.matmul(x, w_xf) + torch.matmul(h, w_hf) + b_f
+                o_t = torch.matmul(x, w_xo) + torch.matmul(h, w_ho) + b_o
+                # activations
+                i_t = torch.sigmoid(i_t)
+                f_t = torch.sigmoid(f_t)
+                o_t = torch.sigmoid(o_t)
+                # cell computations
+                c_t = torch.matmul(x, w_xc) + torch.matmul(h, w_hc) + b_c
+                c_t = torch.tanh(c_t)
+                c_t = torch.mul(c_t, f_t) + torch.mul(i_t, c_t)
+                h_t = torch.mul(o_t, torch.tanh(c_t))
+                h = h_t
+                c = c_t
+                # calculate features with max probability
+                s_t = torch.matmul(h_t, w_hs) + b_s
+                s_t = s_t.view([batch_size, s_t.size(1) * s_t.size(2)])
+                p_t = torch.softmax(s_t, 1)
+                prob_t, i_t = torch.topk(p_t, k, 1)
+                x = embed.index_select(1, torch.fmod(i_t, vocab_size))
+                h = h_t.index_select(1, i_t / vocab_size)
+                c = c_t.index_select(1, i_t / vocab_size)
+                iter = int(iter_count[0])
+                idx = torch.cat([idx.narrow(2, 0, iter).index_select(1, i_t / vocab_size),
+                                torch.fmod(i_t, vocab_size).unsqueeze(-1),
+                                idx.narrow(2, iter, max_len - iter)], 2)
+                idx = idx.narrow(2, 0, max_len)
+            return idx
 
-        def single_if(a, b):
-            if a > b:
-                a += b
-            else:
-                a -= b
-            return a
+        k = 5
+        batch_size, input_size, hidden_size, vocab_size = 4, 6, 8, 7
+        max_len = 5
+        xs, batch = self.rand_batch(batch_size, (False, 1), (False, input_size))
+        hx, h_batch = self.rand_batch(batch_size, (False, 1), (False, hidden_size))
+        cx, c_batch = self.rand_batch(batch_size, (False, 1), (False, hidden_size))
+        embed, embed_batch = self.rand_batch(batch_size, (False, vocab_size), (False, input_size))
+        iter_num = [torch.randint(2, max_len + 1, (1,)) for i in range(batch_size)]
+        iter_num_batch = BatchTensor(iter_num, torch.tensor([]).byte())
 
-        a, batch_a = self.rand_batch(4, ())
-        b, batch_b = self.rand_batch(4, ())
-        res_batch = batch_if(batch_a, batch_b)
-        res = [single_if(a[j], b[j]) for j in range(4)]
-        self.assertEqual(res, res_batch.examples())
+        # input to hidden weights
+        w_xi = torch.rand(input_size, hidden_size)
+        w_xf = torch.rand(input_size, hidden_size)
+        w_xo = torch.rand(input_size, hidden_size)
+        w_xc = torch.rand(input_size, hidden_size)
+        # hidden to hidden weights
+        w_hi = torch.rand(hidden_size, hidden_size)
+        w_hf = torch.rand(hidden_size, hidden_size)
+        w_ho = torch.rand(hidden_size, hidden_size)
+        w_hc = torch.rand(hidden_size, hidden_size)
+        # bias terms
+        b_i = torch.rand(1, hidden_size)
+        b_f = torch.rand(1, hidden_size)
+        b_o = torch.rand(1, hidden_size)
+        b_c = torch.rand(1, hidden_size)
+        # hidden to vocab weights, bias
+        w_hs = torch.rand(hidden_size, vocab_size)
+        b_s = torch.rand(1, vocab_size)
 
-        @torch.jit.script
-        def batch_if(a, b):
-            if a > b:
-                a += b
-            else:
-                a -= b
-            return a
+        idx_batch = torch.jit.BatchTensor(torch.zeros([batch_size, k, max_len], dtype=torch.long),
+                                          torch.zeros([batch_size, 1, max_len]).byte(),
+                                          torch.tensor([0, 1]).byte())
+        idx = [torch.zeros([1, k, max_len], dtype=torch.long) for _ in range(batch_size)]
 
-        graph = torch.to_batch_graph(batch_if.graph)
-        self.assertExpected(str(graph))
-
-    def test_if_else_with_scalar(self):
-        @torch.jit.batch(batch_size=4)
-        def batch_if(a, b):
-            if a > 0.1:
-                a += b
-            else:
-                a -= b
-            return a
-
-        def single_if(a, b):
-            if a > 0.1:
-                a += b
-            else:
-                a -= b
-            return a
-
-        a, batch_a = self.rand_batch(4, ())
-        b, batch_b = self.rand_batch(4, ())
-        res_batch = batch_if(batch_a, batch_b)
-        res = [single_if(a[j], b[j]) for j in range(4)]
-        self.assertEqual(res, res_batch.examples())
-
-        @torch.jit.script
-        def batch_if(a, b):
-            if a > 0.1:
-                a += b
-            else:
-                a -= b
-            return a
-
-        graph = torch.to_batch_graph(batch_if.graph)
-        self.assertExpected(str(graph))
-
-    def test_if_noelse(self):
-        @torch.jit.batch(batch_size=4)
-        def batch_if(a, b):
-            if a > b:
-                a += b
-            return a
-
-        def single_if(a, b):
-            if a > b:
-                a += b
-            return a
-
-        a, batch_a = self.rand_batch(4, ())
-        b, batch_b = self.rand_batch(4, ())
-        res_batch = batch_if(batch_a, batch_b)
-        res = [single_if(a[j], b[j]) for j in range(4)]
-        self.assertEqual(res, res_batch.examples())
-
-        @torch.jit.script
-        def batch_if(a, b):
-            if a > b:
-                a += b
-            return a
-
-        graph = torch.to_batch_graph(batch_if.graph)
-        self.assertExpected(str(graph))
-
-    def test_if_noelse_with_scalar(self):
-        @torch.jit.batch(batch_size=4)
-        def batch_if(a, b):
-            if a > 0.1:
-                a += b
-            return a
-
-        def single_if(a, b):
-            if a > 0.1:
-                a += b
-            return a
-
-        a, batch_a = self.rand_batch(4, ())
-        b, batch_b = self.rand_batch(4, ())
-        res_batch = batch_if(batch_a, batch_b)
-        res = [single_if(a[j], b[j]) for j in range(4)]
-        self.assertEqual(res, res_batch.examples())
-
-        @torch.jit.script
-        def batch_if(a, b):
-            if a > 0.1:
-                a += b
-            return a
-
-        graph = torch.to_batch_graph(batch_if.graph)
-        self.assertExpected(str(graph))
-
-    def test_while(self):
-        @torch.jit.batch(batch_size=4)
-        def batch_while(a, b):
-            while a > b:
-                a -= b
-            return a
-
-        def single_while(a, b):
-            while a > b:
-                a -= b
-            return a
-
-        a, batch_a = self.rand_batch(4, ())
-        b = [torch.abs(torch.rand(1)) for i in range(4)]
-        batch_b = BatchTensor(b, torch.tensor([]).byte())
-        res_batch = batch_while(batch_a, batch_b)
-        res = [single_while(a[j], b[j]) for j in range(4)]
-        self.assertEqual(res, res_batch.examples())
-
-        @torch.jit.script
-        def batch_while(a, b):
-            while a > b:
-                a -= b
-            return a
-
-        graph = torch.to_batch_graph(batch_while.graph)
-        self.assertExpected(str(graph))
-
-    def test_for(self):
-        @torch.jit.batch(batch_size=4)
-        def batch_for(x, y):
-            for _i in range(10):
-                x += y
-            return x
-
-        def single_for(x, y):
-            for _i in range(10):
-                x += y
-            return x
-
-        a, batch_a = self.rand_batch(4, ())
-        b, batch_b = self.rand_batch(4, ())
-        res_batch = batch_for(batch_a, batch_b)
-        res = [single_for(a[j], b[j]) for j in range(4)]
-        self.assertEqual(res, res_batch.examples())
-
-        @torch.jit.script
-        def batch_for(x, y):
-            for _i in range(10):
-                x += y
-            return x
-
-        graph = torch.to_batch_graph(batch_for.graph)
-        self.assertExpected(str(graph))
+        ys = [beam(xs[j], hx[j], cx[j], embed[j].squeeze(0), w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc,
+                   b_i, b_f, b_o, b_c, w_hs, b_s, iter_num[j], idx[j]) for j in range(batch_size)]
+        ybs = beam_batch(batch, h_batch, c_batch, embed_batch, w_xi, w_xf, w_xo, w_xc,
+                         w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c, w_hs, b_s, iter_num_batch, idx_batch)
+        self.assertEqual(ys, ybs.examples())
 
 
 class TestScript(JitTestCase):
