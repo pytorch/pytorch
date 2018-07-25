@@ -374,7 +374,7 @@ static bool isTensorSubtype(Value* v) {
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
   auto list = constant_as<Shared<jit::IntList>>(input);
   if(list)
-    return std::vector<int64_t>(*list);
+    return std::vector<int64_t>(list.value()->elements());
   // broadcast IntList[3] with value 4 -> {4, 4, 4}
   if(!N)
     return at::nullopt;
