@@ -6772,6 +6772,7 @@ class TestTorch(TestCase):
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 3]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [1, 1]))
         self.assertRaises(RuntimeError, lambda: data.rot90(1, [0, 1, 2]))
+        self.assertRaises(RuntimeError, lambda: data.rot90(1, [0]))
 
     def test_rot90(self):
         self._test_rot90(self, use_cuda=False)
