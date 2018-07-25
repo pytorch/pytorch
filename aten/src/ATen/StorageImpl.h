@@ -16,7 +16,7 @@
 //    weakcount == number of weak references to the object,
 //      plus one more if refcount > 0
 //
-//  - THStorageImpl stays live as long as there are any strong
+//  - StorageImpl stays live as long as there are any strong
 //    or weak pointers to it (weakcount > 0, since strong
 //    references count as a +1 to weakcount)
 //
@@ -25,7 +25,7 @@
 //  - Once refcount == 0, it can never again be > 0 (the transition
 //    from > 0 to == 0 is monotonic)
 //
-//  - When you access THStorageImpl via a weak pointer, you must
+//  - When you access StorageImpl via a weak pointer, you must
 //    atomically increment the use count, if it is greater than 0.
 //    If it is not, you must report that the storage is dead.
 //
@@ -39,36 +39,18 @@ namespace at {
 
 struct Type;
 
-
-// OPtions: Use retainable
-// Use strorage ptr == unique ptr <custom destructor calls release on storage>
-//  - custom destructor will just decrease refcount
-// Could rename this to StorageImplImpl and then create StorageImpl that maintains StorageImplImpl and decrease refcount
-
-
-// StorageImpl/StorageImplImpl thing
-// Inherit from retainable
-// StorageImpl has deleter, ; assignment and move deleted, pretty much like StorageImpl and THStorageImpl before
-// - - don't have to deleted unique ptr - will use intrusive and retainable
-
-
-// Details:
-// Forward the constructor just like before
-// Deconstructor just calls free on StorageImpl
-// Create a StorageImpl free function
-
 struct StorageImpl {
 
   StorageImpl() = delete;
   virtual ~StorageImpl() {};
-  StorageImpl(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, char);
-  StorageImpl(at::ScalarType, ptrdiff_t, at::Allocator*, char);
+  StorageImpl(at::ScalarType, ptrdiff_t, at::DataPtr, at::Allocator*, bool);
+  StorageImpl(at::ScalarType, ptrdiff_t, at::Allocator*, bool);
   at::ScalarType scalar_type;
   at::DataPtr data_ptr;
   ptrdiff_t size;
   std::atomic<int> refcount;
   std::atomic<int> weakcount;
-  char flag;
+  bool resizeable;
   at::Allocator* allocator;
   std::unique_ptr<THFinalizer> finalizer;
   StorageImpl(StorageImpl&) = delete;
@@ -93,14 +75,21 @@ struct StorageImpl {
   inline T* unsafe_data() const {
     return static_cast<T*>(this->data_ptr.get());
   }
-  static const char REFCOUNTED = 1;
-  static const char RESIZABLE = 2;
+
+  void* unsafeGetTH(bool retain_) {
+    if (retain_)
+      ++refcount;
+    return this;
+  }
 
   void operator=(const StorageImpl&) = delete;
 
   virtual size_t elementSize() const {
     return at::elementSize(scalar_type);
   }
+
+  Type& type();
+
   //TODO: Rename to size() and size to size_
   size_t get_size() const { 
     return size;
@@ -112,17 +101,14 @@ struct StorageImpl {
     return data_ptr.get();
   };
   void retain() {
-    if (flag & REFCOUNTED) {
-      ++refcount;
-    }
+    ++refcount;
   }
-  Type& type() const;
 
   int getDevice() const {
     return data_ptr.device().index();
   }
-  void clear_flag(char flag_) {
-    flag &= ~flag_;
+  void set_resizeable(bool resizeable_) {
+    resizeable = resizeable_;
   }
 };
 

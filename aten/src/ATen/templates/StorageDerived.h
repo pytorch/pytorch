@@ -22,7 +22,6 @@ struct ${Storage} final : public Storage {
       void* data,
       size_t size,
       const std::function<void(void*)>& deleter);
-  static const char* typeString();
   StorageImpl* storage_impl_;
 
  protected:

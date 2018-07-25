@@ -79,7 +79,7 @@ PyObject* tensor_to_numpy(const at::Tensor& tensor) {
   if (PyArray_SetBaseObject((PyArrayObject*)array.get(), py_tensor) == -1) {
     return NULL;
   }
-  tensor.storage()->storage_impl_->clear_flag(StorageImpl::RESIZABLE);
+  tensor.storage()->pImpl()->set_resizeable(false);
 
   return array.release();
 }

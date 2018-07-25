@@ -20,8 +20,7 @@ ${Storage}::${Storage}() {
 #else
       getTHDefaultAllocator(),
 #endif
-      StorageImpl::RESIZABLE);
-  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
+      true);
 }
 
 ${Storage}::${Storage}(size_t size) {
@@ -33,8 +32,7 @@ ${Storage}::${Storage}(size_t size) {
 #else
       getTHDefaultAllocator(),
 #endif
-      StorageImpl::RESIZABLE);
-  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
+      true);
 }
 
 ${Storage}::${Storage}(size_t size, Allocator* allocator) {
@@ -42,8 +40,7 @@ ${Storage}::${Storage}(size_t size, Allocator* allocator) {
       ScalarType::${ScalarName}, 
       size,
       allocator,
-      StorageImpl::RESIZABLE);
-  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
+      true);
 }
 
 // TODO: Take in Device as an input to the std::function constructor
@@ -71,13 +68,7 @@ ${Storage}::${Storage}(
 #endif
        ),
      /* allocator */ nullptr,
-     StorageImpl::RESIZABLE
-    );
-  storage_impl_->clear_flag(StorageImpl::RESIZABLE);
-}
-
-const char * ${Storage}::typeString() {
-  return "${Type}";
+      true);
 }
 
 }

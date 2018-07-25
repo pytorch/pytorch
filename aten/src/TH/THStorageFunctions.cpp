@@ -15,20 +15,18 @@
 #include "THGenerateHalfType.h"
 
 // Free a non-weak pointer to THStorage
-void THStorage_free(THStorage *storage) {
+void THStorage_free(THStorage* storage) {
   if (!storage) {
     return;
   }
 
-  if (storage->flag & TH_STORAGE_REFCOUNTED) {
-    if (--storage->refcount == 0) {
-      if (storage->finalizer) {
-        (*storage->finalizer)();
-      }
-      storage->finalizer = nullptr;
-      storage->data_ptr.clear();
-      THStorage_weakFree(storage);
+  if (--storage->refcount == 0) {
+    if (storage->finalizer) {
+      (*storage->finalizer)();
     }
+    storage->finalizer = nullptr;
+    storage->data_ptr.clear();
+    THStorage_weakFree(storage);
   }
 }
 
@@ -94,19 +92,9 @@ ptrdiff_t THStorage_size(const THStorage *self)
   return self->size;
 }
 
-void THStorage_setFlag(THStorage *storage, const char flag)
-{
-  storage->flag |= flag;
-}
-
-void THStorage_clearFlag(THStorage *storage, const char flag)
-{
-  storage->flag &= ~flag;
-}
-
 void THStorage_retain(THStorage *storage)
 {
-  if (storage && (storage->flag & TH_STORAGE_REFCOUNTED)) {
+  if (storage) {
     ++storage->refcount;
   }
 }
@@ -122,7 +110,7 @@ THStorage* THStorage_newWithData(at::ScalarType scalar_type, std::unique_ptr<at:
 
 void THStorage_resize(THStorage *storage, ptrdiff_t size)
 {
-  if (storage->flag & TH_STORAGE_RESIZABLE)
+  if (storage->resizeable)
   {
     /* case when the allocator does not have a realloc defined */
     at::DataPtr old_data;
@@ -153,7 +141,7 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
     SWAP(data_ptr);
     SWAP(size);
     // don't swap refcount!
-    SWAP(flag);
+    SWAP(resizeable);
     SWAP(allocator);
     SWAP(finalizer);
 #undef SWAP

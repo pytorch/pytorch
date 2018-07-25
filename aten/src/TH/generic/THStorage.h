@@ -21,11 +21,7 @@
    primitives??
  */
 
-#define TH_STORAGE_REFCOUNTED 1
-#define TH_STORAGE_RESIZABLE  2
-
 // Struct definition is moved to THStorage.hpp (so this file stays C compatible)
-// typedef struct THStorage THStorage;
 
 #ifdef __cplusplus
 #define THStorage at::StorageImpl
