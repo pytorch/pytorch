@@ -1,7 +1,5 @@
 #pragma once
 
-#include "torch/csrc/assertions.h"
-#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
@@ -13,6 +11,7 @@
 #include "torch/csrc/utils/variadic.h"
 
 #include <ATen/ATen.h>
+#include <ATen/Error.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -205,7 +204,7 @@ struct TORCH_API Function : std::enable_shared_from_this<Function> {
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
-    TORCH_ASSERTM(output_edge_index < num_outputs(), "Index out of range");
+    AT_CHECK(output_edge_index < num_outputs(), "Index out of range");
     return next_edges_[output_edge_index].is_valid();
   }
 

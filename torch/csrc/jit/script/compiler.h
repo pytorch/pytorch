@@ -17,6 +17,17 @@ struct CallsiteDescriptor {
   bool allow_varargs;
 };
 
+struct TypedDef {
+  TypedDef(Def def, at::optional<FunctionSchema> schema)
+    : def(std::move(def)), schema(std::move(schema)) {}
+
+  TypedDef(Def def)
+    : def(std::move(def)), schema(at::nullopt) {}
+
+  Def def;
+  at::optional<FunctionSchema> schema;
+};
+
 static inline std::vector<Value*> toValues(at::ArrayRef<NamedValue> nvs) {
   return fmap(nvs, [](const NamedValue& v) {
     return v.value;
@@ -123,14 +134,14 @@ struct TORCH_API BuiltinFunction : public SugaredValue {
 using Resolver = std::function<std::shared_ptr<SugaredValue>(const std::string& name)>;
 TORCH_API void defineMethodsInModule(
   Module & m,
-  const std::vector<Def>& definitions,
+  const std::vector<TypedDef>& definitions,
   const std::vector<Resolver>& resolvers, /* determines how we handle free variables in each definition*/
   std::shared_ptr<SugaredValue> self /* if non-null, the first argument to each def, is bound to this value */
 );
 
 // same as above but parse the definitions from source
 TORCH_API void defineMethodsInModule(Module & m, const std::string& source, const Resolver& resolver, std::shared_ptr<SugaredValue> self);
-TORCH_API std::shared_ptr<Graph> compileFunction(Def def, const Resolver& resolver);
+TORCH_API std::shared_ptr<Graph> compileFunction(TypedDef def, const Resolver& resolver);
 
 // pack outputs of a function following python rules. If there is a single value return
 // a SimpleValue, otherwise pack all the values into a Tuple.

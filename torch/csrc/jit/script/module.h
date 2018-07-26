@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
@@ -136,6 +137,13 @@ struct Method {
   Method& setSchema(FunctionSchema schema_) {
     schema.reset(new FunctionSchema(std::move(schema_)));
     return *this;
+  }
+
+  std::string prettyPrintSchema() const {
+    JIT_ASSERT(schema);
+    std::stringstream ss;
+    ss << *schema;
+    return ss.str();
   }
 
 private:

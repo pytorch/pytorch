@@ -2,6 +2,7 @@
 #include "torch/csrc/onnx/onnx.npb.h"
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/utils/functional.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <ATen/ATen.h>
 
@@ -390,7 +391,7 @@ at::Tensor buildTensor(const Tensor_& tensor_) {
 
   tensor.resize_(tensor_.dims);
 
-  TORCH_ASSERT(tensor.storage()->size() * tensor.storage()->elementSize() == tensor_.raw_data.size());
+  JIT_ASSERT(tensor.storage()->size() * tensor.storage()->elementSize() == tensor_.raw_data.size());
 
   std::memcpy(tensor.data_ptr(), tensor_.raw_data.data(), tensor_.raw_data.size());
 
@@ -431,7 +432,7 @@ void buildBlock(const Graph_& graph_, Block* block,
   }
 
   for (auto & node_ : graph_.nodes) {
-    TORCH_ASSERT(node_.op_type != "PythonOp");
+    JIT_ASSERT(node_.op_type != "PythonOp");
 
     auto node = block->owningGraph()->create(Symbol::fromDomainAndUnqualString(node_.domain, node_.op_type),
                                              node_.outputs.size());

@@ -66,13 +66,13 @@ __global__ void SimpleBinaryOpHIPKernel(
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
 __global__ void RowwiseBinaryOpHIPKernel(
     const int size,
-    const FixedDivisor<int> cols,
+    const int cols,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
   HIP_1D_KERNEL_LOOP(C_index, size) {
-    const int j = cols.Mod(C_index);
+    const int j = C_index % cols;
     const int A_index = broadcast_1st ? j : C_index;
     const int B_index = broadcast_1st ? C_index : j;
     C[C_index] = op(A[A_index], B[B_index]);
@@ -82,13 +82,13 @@ __global__ void RowwiseBinaryOpHIPKernel(
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
 __global__ void ColwiseBinaryOpHIPKernel(
     const int size,
-    const FixedDivisor<int> cols,
+    const int cols,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
   HIP_1D_KERNEL_LOOP(C_index, size) {
-    const int i = cols.Div(C_index);
+    const int i = C_index / cols;
     const int A_index = broadcast_1st ? i : C_index;
     const int B_index = broadcast_1st ? C_index : i;
     C[C_index] = op(A[A_index], B[B_index]);
@@ -135,7 +135,6 @@ void BinaryOpWith2DBroadcasting(
     return;
   }
   const int size = rows * cols;
-  const FixedDivisor<int> cols_div(cols);
   if (rowwise_broadcast) {
     if (broadcast_1st) {
       hipLaunchKernelGGL(
@@ -145,7 +144,7 @@ void BinaryOpWith2DBroadcasting(
           0,
           context->hip_stream(),
           size,
-          cols_div,
+          cols,
           op,
           A,
           B,
@@ -158,7 +157,7 @@ void BinaryOpWith2DBroadcasting(
           0,
           context->hip_stream(),
           size,
-          cols_div,
+          cols,
           op,
           A,
           B,
@@ -173,7 +172,7 @@ void BinaryOpWith2DBroadcasting(
           0,
           context->hip_stream(),
           size,
-          cols_div,
+          cols,
           op,
           A,
           B,
@@ -186,7 +185,7 @@ void BinaryOpWith2DBroadcasting(
           0,
           context->hip_stream(),
           size,
-          cols_div,
+          cols,
           op,
           A,
           B,
@@ -498,7 +497,6 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       return;                                                          \
     }                                                                  \
     const int size = rows * cols;                                      \
-    const FixedDivisor<int> cols_div(cols);                            \
     hipLaunchKernelGGL(                                                \
         RowwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, true>,            \
         CAFFE_GET_BLOCKS(size),                                        \
@@ -506,7 +504,7 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
         0,                                                             \
         context->hip_stream(),                                         \
         size,                                                          \
-        cols_div,                                                      \
+        cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
         B,                                                             \
@@ -524,7 +522,6 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       return;                                                          \
     }                                                                  \
     const int size = rows * cols;                                      \
-    const FixedDivisor<int> cols_div(cols);                            \
     hipLaunchKernelGGL(                                                \
         RowwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, false>,           \
         CAFFE_GET_BLOCKS(size),                                        \
@@ -532,7 +529,7 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
         0,                                                             \
         context->hip_stream(),                                         \
         size,                                                          \
-        cols_div,                                                      \
+        cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
         B,                                                             \
@@ -550,7 +547,6 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       return;                                                          \
     }                                                                  \
     const int size = rows * cols;                                      \
-    const FixedDivisor<int> cols_div(cols);                            \
     hipLaunchKernelGGL(                                                \
         ColwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, true>,            \
         CAFFE_GET_BLOCKS(size),                                        \
@@ -558,7 +554,7 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
         0,                                                             \
         context->hip_stream(),                                         \
         size,                                                          \
-        cols_div,                                                      \
+        cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
         B,                                                             \
@@ -576,7 +572,6 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       return;                                                          \
     }                                                                  \
     const int size = rows * cols;                                      \
-    const FixedDivisor<int> cols_div(cols);                            \
     hipLaunchKernelGGL(                                                \
         ColwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, false>,           \
         CAFFE_GET_BLOCKS(size),                                        \
@@ -584,7 +579,7 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
         0,                                                             \
         context->hip_stream(),                                         \
         size,                                                          \
-        cols_div,                                                      \
+        cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
         B,                                                             \
