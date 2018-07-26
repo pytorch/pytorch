@@ -4350,7 +4350,8 @@ def func(t):
         import tempfile
         filename = tempfile.mktemp()
         writer = torch._C.PyTorchFileWriter(filename)
-        import os, random
+        import os
+        import random
         buffers = [os.urandom(size) for size in [random.randint(1, 100) for i in range(20)]]
         offsets = []
         for buf in buffers:
