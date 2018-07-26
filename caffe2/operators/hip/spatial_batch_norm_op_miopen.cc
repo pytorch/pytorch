@@ -33,6 +33,8 @@ class MIOpenSpatialBNOp final : public SpatialBNOp<HIPContext> {
         alpha_(OperatorBase::GetSingleArgument<float>("alpha", 1.0)),
         beta_(OperatorBase::GetSingleArgument<float>("beta", 0.0)),
         mode_(miopenBNSpatial) {
+    CAFFE_ENFORCE_EQ(
+        order_, StorageOrder::NCHW, "Only NCHW order is supported right now.");
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&data_desc_));
     MIOPEN_ENFORCE(miopenCreateTensorDescriptor(&bn_param_desc_));
     if (epsilon_ <= MIOPEN_BN_MIN_EPSILON) {
@@ -114,7 +116,9 @@ bool MIOpenSpatialBNOp::DoRunWithType() {
   auto& scale = Input(SCALE);
   auto& bias = Input(BIAS);
 
-  CAFFE_ENFORCE_GE(X.ndim(), 3);
+  // Only 2D BatchNorm is supported in MIopen for now
+  // @petrex will follow up on adding 1D and 3D support
+  CAFFE_ENFORCE_EQ(X.ndim(), 4, "Only 2D input is supported in MIOpen BatchNormalization right now.");
   const int N = X.dim32(0);
   const int C = X.dim32(1);
   const int H = X.dim32(2);
