@@ -65,7 +65,7 @@ CAFFE2_DEFINE_bool(
 CAFFE2_DEFINE_int(
     sleep_before_run,
     0,
-    "The seconds to sleep before starting the benchmarking.")
+    "The seconds to sleep before starting the benchmarking.");
 CAFFE2_DEFINE_bool(
     text_output,
     false,
