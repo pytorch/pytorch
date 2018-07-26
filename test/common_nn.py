@@ -447,23 +447,25 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='ele
         return output.sum()
     return output
 
+
 # this directly follows Graves et al's paper, in contrast to the production implementation, it does not use log-space
 def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='elementwise_mean'):
     input_lengths = torch.tensor(input_lengths, dtype=torch.long)
     target_lengths = torch.tensor(target_lengths, dtype=torch.long)
+    targets = targets.long()
     cum_target_lengths = target_lengths.cumsum(0)
     losses = []
     for i in range(log_probs.size(1)):
         input_length = input_lengths[i].item()
         target_length = target_lengths[i].item()
         cum_target_length = cum_target_lengths[i].item()
-        targets_prime = torch.full((2 * target_length + 1,), blank, dtype=torch.long)
-        if targets.dim()==2:
+        targets_prime = targets.new_full((2 * target_length + 1,), blank)
+        if targets.dim() == 2:
             targets_prime[1::2] = targets[i, :target_length]
         else:
-            targets_prime[1::2] = targets[cum_target_length-target_length:cum_target_length]
+            targets_prime[1::2] = targets[cum_target_length - target_length:cum_target_length]
         probs = log_probs[:input_length, i].exp()
-        alpha = torch.zeros((target_length*2+1,), dtype=log_probs.dtype)
+        alpha = log_probs.new_zeros((target_length * 2 + 1,))
         alpha[0] = probs[0, blank]
         alpha[1] = probs[0, targets_prime[1]]
         mask_third = (targets_prime[:-2] != targets_prime[2:])
@@ -471,7 +473,7 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
             alpha_next = alpha.clone()
             alpha_next[1:] += alpha[:-1]
             alpha_next[2:] += torch.where(mask_third, alpha[:-2], alpha.new_zeros(1))
-            alpha = probs[t, targets_prime]*alpha_next
+            alpha = probs[t, targets_prime] * alpha_next
         losses.append(-alpha[-2:].sum().log()[None])
     output = torch.cat(losses, 0)
     if reduction == 'elementwise_mean':

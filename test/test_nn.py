@@ -470,6 +470,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def extra_args(self):
         return self._get_arg('extra_args', False)
 
+
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
 
@@ -3576,6 +3577,19 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
+    def test_CTCLoss_cudnn(self):
+        target_lengths = [30, 25, 20]
+        input_lengths = [50, 50, 50]
+        targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
+        log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
+        res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
+        # we need to make this double as the (non-logspace) reference calculation is not accurate enough otherwise
+        expected = ctcloss_reference(log_probs.double(), targets.cuda(), input_lengths, target_lengths).float()
+        with torch.backends.cudnn.flags(enabled=False):
+            res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
+        self.assertEqual(res, expected)
+        self.assertEqual(res2, res)
+
     def test_RNN_cell_no_broadcasting(self):
         def test(cell_module, input, hx, input_size, hidden_size):
             cell = cell_module(input_size, hidden_size)
@@ -6004,16 +6018,20 @@ def add_test(test, decorator=None):
     add(test_name, lambda self, test=test: test(self))
     cuda_test_name = test_name + '_cuda'
     # With dtype enable, it's good enough to test against three floating types
+    kwargs = {}
+    if 'extra_args' in get_function_arglist(test.test_cuda):
+        kwargs['extra_args'] = test.extra_args
+
     if 'dtype' in get_function_arglist(test.test_cuda):
         add(cuda_test_name + '_float', lambda self,
-            test=test: test.test_cuda(self, dtype=torch.float, extra_args=test.extra_args))
+            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.float, **kwargs))
         add(cuda_test_name + '_double', lambda self,
-            test=test: test.test_cuda(self, dtype=torch.double, extra_args=test.extra_args))
+            test=test, kwargs=kwargs: test.test_cuda(self, dtype=torch.double, **kwargs))
         if getattr(test, 'check_half', True):
             add(cuda_test_name + '_half', lambda self,
-                test=test: test.test_cuda(self, dtype=torch.half, extra_args=test.extra_args))
+                test=test: test.test_cuda(self, dtype=torch.half, **kwargs))
     else:
-        add(cuda_test_name, lambda self, test=test: test.test_cuda(self, extra_args=test.extra_args))
+        add(cuda_test_name, lambda self, test=test, kwargs=kwargs: test.test_cuda(self, **kwargs))
 
 
 def wrap_functional(fn, **kwargs):
@@ -6175,16 +6193,28 @@ new_criterion_tests = [
     ),
     dict(
         module_name='CTCLoss',
-        constructor_args=(0,), # blank=0
-        extra_args=([50, 50, 50], [30, 25, 20]), # input_lengths, target_lengths
+        constructor_args=(14,),  # blank=14
+        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
         input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.long),
+        target_fn=lambda: torch.randint(0, 14, (3, 30), dtype=torch.long),
         reference_fn=lambda i, t, il, tl, m:
-            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
-        desc='ctc',
+            ctcloss_reference(i, t, il, tl, blank=14, reduction=get_reduction(m)),
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        constructor_args=(0,),  # blank=0
+        extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(1, 15, (30 + 25 + 20,), dtype=torch.long),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
+        desc='1d_target'
     ),
 ]
 
