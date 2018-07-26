@@ -18,20 +18,14 @@ message(STATUS "Caffe2: CUDA detected: " ${CUDA_VERSION})
 message(STATUS "Caffe2: CUDA nvcc is: " ${CUDA_NVCC_EXECUTABLE})
 message(STATUS "Caffe2: CUDA toolkit directory: " ${CUDA_TOOLKIT_ROOT_DIR})
 
+set(CUDA_CMAKE_FILE ${CMAKE_CURRENT_LIST_DIR})
+
 if(CUDA_FOUND)
   # Sometimes, we may mismatch nvcc with the CUDA headers we are
   # compiling with, e.g., if a ccache nvcc is fed to us by CUDA_NVCC_EXECUTABLE
   # but the PATH is not consistent with CUDA_HOME.  It's better safe
   # than sorry: make sure everything is consistent.
-  set(file "${PROJECT_BINARY_DIR}/detect_cuda_version.cc")
-  file(WRITE ${file} ""
-    "#include <cuda.h>\n"
-    "#include <cstdio>\n"
-    "int main() {\n"
-    "  printf(\"%d.%d\", CUDA_VERSION / 1000, (CUDA_VERSION / 10) % 100);\n"
-    "  return 0;\n"
-    "}\n"
-    )
+  set(file "${CUDA_CMAKE_FILE}/detect_cuda_version.cc")
   try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
     CMAKE_FLAGS "-DINCLUDE_DIRECTORIES=${CUDA_INCLUDE_DIRS}"
     LINK_LIBRARIES ${CUDA_LIBRARIES}

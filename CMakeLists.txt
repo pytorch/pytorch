@@ -228,7 +228,7 @@ if(NOT MSVC)
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-missing-braces")
   endif()
   if ((APPLE AND (NOT ("${CLANG_VERSION_STRING}" VERSION_LESS "9.0")))
-    OR (CMAKE_COMPILER_IS_GNUCXX 
+    OR (CMAKE_COMPILER_IS_GNUCXX
     AND (CMAKE_CXX_COMPILER_VERSION VERSION_GREATER 7.0 AND NOT APPLE)))
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -faligned-new")
   endif()
@@ -379,6 +379,7 @@ if (BUILD_SHARED_LIBS)
       COMPONENT dev)
   install(FILES
       ${PROJECT_SOURCE_DIR}/cmake/public/cuda.cmake
+      ${PROJECT_SOURCE_DIR}/cmake/public/detect_cuda_version.cc
       ${PROJECT_SOURCE_DIR}/cmake/public/glog.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/gflags.cmake
       ${PROJECT_SOURCE_DIR}/cmake/public/protobuf.cmake

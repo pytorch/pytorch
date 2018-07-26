@@ -48,6 +48,8 @@ else()
   list(APPEND CUDA_COMMON_GPU_ARCHITECTURES "6.1+PTX")
 endif()
 
+set(SELECT_COMPUTE_ARCH_CMAKE_FILE ${CMAKE_CURRENT_LIST_DIR})
+
 ################################################################################################
 # A function for automatic detection of GPUs installed  (if autodetection is enabled)
 # Usage:
@@ -56,27 +58,10 @@ endif()
 function(CUDA_DETECT_INSTALLED_GPUS OUT_VARIABLE)
   if(NOT CUDA_GPU_DETECT_OUTPUT)
     if(CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
-      set(file "${PROJECT_BINARY_DIR}/detect_cuda_compute_capabilities.cu")
+      set(file "${SELECT_COMPUTE_ARCH_CMAKE_FILE}/detect_cuda_compute_capabilities.cu")
     else()
-      set(file "${PROJECT_BINARY_DIR}/detect_cuda_compute_capabilities.cpp")
+      set(file "${SELECT_COMPUTE_ARCH_CMAKE_FILE}/detect_cuda_compute_capabilities.cpp")
     endif()
-
-    file(WRITE ${file} ""
-      "#include <cuda_runtime.h>\n"
-      "#include <cstdio>\n"
-      "int main()\n"
-      "{\n"
-      "  int count = 0;\n"
-      "  if (cudaSuccess != cudaGetDeviceCount(&count)) return -1;\n"
-      "  if (count == 0) return -1;\n"
-      "  for (int device = 0; device < count; ++device)\n"
-      "  {\n"
-      "    cudaDeviceProp prop;\n"
-      "    if (cudaSuccess == cudaGetDeviceProperties(&prop, device))\n"
-      "      std::printf(\"%d.%d \", prop.major, prop.minor);\n"
-      "  }\n"
-      "  return 0;\n"
-      "}\n")
 
     if(CMAKE_CUDA_COMPILER_LOADED) # CUDA as a language
       try_run(run_result compile_result ${PROJECT_BINARY_DIR} ${file}
