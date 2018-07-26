@@ -131,6 +131,9 @@ class PyTorchFileReader {
     seekToNextAlignmentBoundary();
     return {retval, size};
   }
+  ~PyTorchFileReader() {
+    std::fclose(fp);
+  }
  private:
   FILE *fp;
   size_t cursor = 0;
