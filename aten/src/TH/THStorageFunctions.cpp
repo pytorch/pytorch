@@ -110,7 +110,7 @@ THStorage* THStorage_newWithData(at::ScalarType scalar_type, std::unique_ptr<at:
 
 void THStorage_resize(THStorage *storage, ptrdiff_t size)
 {
-  if (storage->resizeable)
+  if (storage->resizable)
   {
     /* case when the allocator does not have a realloc defined */
     at::DataPtr old_data;
@@ -141,7 +141,7 @@ void THStorage_swap(THStorage *storage1, THStorage *storage2)
     SWAP(data_ptr);
     SWAP(size);
     // don't swap refcount!
-    SWAP(resizeable);
+    SWAP(resizable);
     SWAP(allocator);
     SWAP(finalizer);
 #undef SWAP

@@ -8,13 +8,13 @@ StorageImpl::StorageImpl(
     ptrdiff_t size,
     at::DataPtr data_ptr,
     at::Allocator* allocator,
-    bool resizeable)
+    bool resizable)
     : scalar_type(scalar_type),
       data_ptr(std::move(data_ptr)),
       size(size),
       refcount(1),
       weakcount(1), // from the strong reference
-      resizeable(resizeable),
+      resizable(resizable),
       allocator(allocator),
       finalizer(nullptr) {}
 
@@ -22,13 +22,13 @@ StorageImpl::StorageImpl(
     at::ScalarType scalar_type,
     ptrdiff_t size,
     at::Allocator* allocator,
-    bool resizeable)
+    bool resizable)
     : StorageImpl(
           scalar_type,
           size,
           allocator->allocate(at::elementSize(scalar_type) * size),
           allocator,
-          resizeable) {}
+          resizable) {}
 
 Type& StorageImpl::type() {
   if (data_ptr.device().is_cuda()) {

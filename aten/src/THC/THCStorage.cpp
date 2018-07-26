@@ -15,7 +15,7 @@ void THCStorage_resize(THCState *state, THCStorage *self, ptrdiff_t size)
   int device;
   THCudaCheck(cudaGetDevice(&device));
 
-  if (!self->resizeable)
+  if (!self->resizable)
     THError("Trying to resize storage that is not resizable");
 
   size_t elementSize = at::elementSize(self->scalar_type);

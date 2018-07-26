@@ -50,7 +50,7 @@ struct TH_CPP_API StorageImpl {
   ptrdiff_t size;
   std::atomic<int> refcount;
   std::atomic<int> weakcount;
-  bool resizeable;
+  bool resizable;
   at::Allocator* allocator;
   std::unique_ptr<THFinalizer> finalizer;
   StorageImpl(StorageImpl&) = delete;
@@ -101,8 +101,8 @@ struct TH_CPP_API StorageImpl {
   int getDevice() const {
     return data_ptr.device().index();
   }
-  void set_resizeable(bool resizeable_) {
-    resizeable = resizeable_;
+  void set_resizable(bool resizable_) {
+    resizable = resizable_;
   }
 };
 

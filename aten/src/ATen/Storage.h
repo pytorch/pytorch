@@ -21,6 +21,10 @@ public:
   StorageImpl* pImpl() const {
     return storage_impl_;
   }
+  StorageImpl* retained_pImpl() const {
+    storage_impl_->retain();
+    return storage_impl_;
+  }
 
  protected:
   StorageImpl* storage_impl_;
