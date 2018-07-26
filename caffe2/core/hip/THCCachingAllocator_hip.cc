@@ -1,4 +1,4 @@
-#include "caffe2/core/THCCachingAllocator.h"
+#include "caffe2/core/hip/THCCachingAllocator_hip.h"
 
 #include <deque>
 #include <map>
