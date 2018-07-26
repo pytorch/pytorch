@@ -31,7 +31,6 @@ REGISTER_CUDA_OPERATOR(
     PythonDLPackGradient,
     PythonGradientOp<CUDAContext, true>);
 
-REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorCUDA>()), TensorFetcher<CUDAContext>);
 REGISTER_BLOB_FEEDER(CUDA, TensorFeeder<CUDAContext>);
 
 namespace py = pybind11;

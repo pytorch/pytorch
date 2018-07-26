@@ -157,7 +157,7 @@ class SumReduceDimsGradientOp final : public Operator<Context> {
       T* dXdata);
   int num_reduce_dims_;
   // scratch space used for former version of this reducer
-  Tensor<CPUContext> shape_;
+  Tensor shape_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context, bool FIRSTDIMS>

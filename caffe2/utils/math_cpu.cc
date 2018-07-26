@@ -807,28 +807,28 @@ DEFINE_SIMPLE_BINARY_FUNCTION(Div, /)
 // Eigen or via custom code.
 ////////////////////////////////////////////////////////////////////////////////
 
-#define CAFFE2_SPECIALIZED_REDUCEMIN(T)    \
-  template <>                              \
-  void ReduceMin<T, CPUContext>(           \
-      const int N,                         \
-      const T* x,                          \
-      T* y,                                \
-      Tensor<CPUContext>* /*scratch_ptr*/, \
-      CPUContext* /*context*/) {           \
-    *y = *std::min_element(x, x + N);      \
+#define CAFFE2_SPECIALIZED_REDUCEMIN(T) \
+  template <>                           \
+  void ReduceMin<T, CPUContext>(        \
+      const int N,                      \
+      const T* x,                       \
+      T* y,                             \
+      Tensor* /*scratch_ptr*/,          \
+      CPUContext* /*context*/) {        \
+    *y = *std::min_element(x, x + N);   \
   }
 CAFFE2_SPECIALIZED_REDUCEMIN(float)
 #undef CAFFE2_SPECIALIZED_REDUCEMIN
 
-#define CAFFE2_SPECIALIZED_REDUCEMAX(T)    \
-  template <>                              \
-  void ReduceMax<T, CPUContext>(           \
-      const int N,                         \
-      const T* x,                          \
-      T* y,                                \
-      Tensor<CPUContext>* /*scratch_ptr*/, \
-      CPUContext* /*context*/) {           \
-    *y = *std::max_element(x, x + N);      \
+#define CAFFE2_SPECIALIZED_REDUCEMAX(T) \
+  template <>                           \
+  void ReduceMax<T, CPUContext>(        \
+      const int N,                      \
+      const T* x,                       \
+      T* y,                             \
+      Tensor* /*scratch_ptr*/,          \
+      CPUContext* /*context*/) {        \
+    *y = *std::max_element(x, x + N);   \
   }
 CAFFE2_SPECIALIZED_REDUCEMAX(float)
 CAFFE2_SPECIALIZED_REDUCEMAX(int32_t)
@@ -1899,7 +1899,7 @@ void RandGaussian<float, CPUContext>(
       const T* x,                            \
       T* y,                                  \
       CPUContext* /* unused */,              \
-      Tensor<CPUContext>* /* unused */) {    \
+      Tensor* /* unused */) {                \
     *y = ConstEigenVectorMap<T>(x, N).sum(); \
   }
 
@@ -1915,7 +1915,7 @@ void SumSqr<float, CPUContext>(
     const float* x,
     float* y,
     CPUContext* /*context*/ /* unused */,
-    Tensor<CPUContext>* /*scratch_ptr*/ /* unused */) {
+    Tensor* /*scratch_ptr*/ /* unused */) {
   *y = ConstEigenVectorMap<float>(x, N).squaredNorm();
 }
 

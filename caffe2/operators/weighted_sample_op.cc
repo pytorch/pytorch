@@ -85,33 +85,33 @@ OPERATOR_SCHEMA(WeightedSample)
     .SetDoc(R"DOC(
 The operator performs sampling based on the input sampling weights for
 each batch. All weights must be non-negative numbers.
-The input is a 2-D tensor (Tensor<float>) of size (batch_size x weights_dim).
+The input is a 2-D tensor (Tensor) of size (batch_size x weights_dim).
 For each batch, an index is randomly sampled from the distribution given by
 the weights of the corresponding batch.
-The output is a 1-D tensor (Tensor<int>) of size (batch_size x 1) and
+The output is a 1-D tensor (Tensor) of size (batch_size x 1) and
 contains the index(es) of the sampled output.
 )DOC")
     .Input(
         0,
         "sampling_weights",
-        "A 2-D Tensor<float> of size (batch_size x weights_dim)."
+        "A 2-D Tensor of size (batch_size x weights_dim)."
         "All weights must be non-negative numbers.")
     .Input(
         1,
         "sampling_values",
-        "An optional 2-D Tensor<float> of size (batch_size x weights_dim)."
+        "An optional 2-D Tensor of size (batch_size x weights_dim)."
         "Its values correspond to the sampling weights.")
     .Output(
         0,
         "sampled_indexes",
         "The output tensor contains index(es) sampled from distribution given"
         "by the weight vector(s) in the input tensor"
-        "The output is a 1-D Tensor<int> of size (batch_size x 1)")
+        "The output is a 1-D Tensor of size (batch_size x 1)")
     .Output(
         1,
         "sampled_values",
         "The output tensor contains value(s) selected by the sampled index(es)"
-        "It is a 1-D Tensor<float> of size (batch_size x 1)");
+        "It is a 1-D Tensor of size (batch_size x 1)");
 
 SHOULD_NOT_DO_GRADIENT(WeightedSample);
 } // namespace caffe2
