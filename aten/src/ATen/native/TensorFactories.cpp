@@ -486,6 +486,7 @@ Tensor& zeros_out(Tensor& result, IntList size) {
     result.sparse_raw_resize_legacy_(size, size.size(), 0);
 #else
     result.sparse_resize_and_clear_(size, size.size(), 0);
+    return result;
 #endif
   } else {
     result.resize_(size);

@@ -58,7 +58,7 @@ SparseTensor& zero_sparse_(SparseTensor& self) {
   }
   _get_sparse_impl(self)->set_nnz(0);
 #else
-  at::empty_out(self, _get_sparse_impl(self)->sizes());
+  at::zeros_out(self, _get_sparse_impl(self)->sizes());
 #endif
   _get_sparse_impl(self)->set_coalesced(true); // NB: This is new
   return self;
