@@ -57,7 +57,7 @@ static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
   auto n = A.size(-2);
   auto nrhs = b.size(-1);
 
-  auto ipiv = at::empty({n}, b.type().toScalarType(kInt));
+  auto ipiv = at::empty({n}, b.options().dtype(kInt));
 
   for (int64_t i = 0; i < batch_size; i++) {
     int info;
@@ -88,7 +88,7 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
     auto A_ptr = result1.data<scalar_t>();
     auto b_ptr = result0.data<scalar_t>();
-    auto ipiv = at::empty({bx}, result0.type().toScalarType(kInt));
+    auto ipiv = at::empty({bx}, result0.options().dtype(kInt));
 
     lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
   });
