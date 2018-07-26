@@ -27,7 +27,7 @@
     switch (the_type.scalarType()) {                                          \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Double, double, __VA_ARGS__)       \
       AT_PRIVATE_CASE_TYPE(at::ScalarType::Float, float, __VA_ARGS__)         \
-      AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, Half, __VA_ARGS__)           \
+      AT_PRIVATE_CASE_TYPE(at::ScalarType::Half, at::Half, __VA_ARGS__)       \
       default:                                                                \
         AT_ERROR(#NAME, " not implemented for '", the_type.toString(), "'");  \
     }                                                                         \
