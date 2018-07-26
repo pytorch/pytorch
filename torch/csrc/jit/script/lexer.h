@@ -195,19 +195,22 @@ struct SharedParserData {
 
   // python conconcatenates all adjacent strings "a" "b" == "ab"
   // strings can be enclosed with 1 or 3 single or double quotes
-  // if enclosed 3 quotes newlines are valid
+  // if enclosed with 3 quotes newlines are valid
   // as elsewhere, backslash and new line should be ignored
   bool isString(const std::string& str, size_t start, size_t* len) {
     char quote = str[start];
     if (quote != '\"' && quote != '\'')
       return false;
     int quote_len = isCharCount(quote, str, start, 3) ? 3 : 1;
+
+    //end is now set past the opening quotation marks
     size_t end = start + quote_len;
     while(end < str.size() && !isCharCount(quote, str, end, quote_len)) {
       if (str[end] == '\n' && quote_len != 3) {
         return false;
       }
-      //handle escaped characters
+      //handle escaped characters. advances past escaped quotation marks,
+      //escaped newlines and escaped backslashes
       if (str[end] == '\\') {
         end++;
       }
