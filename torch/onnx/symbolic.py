@@ -277,7 +277,7 @@ def _reduce_op_symbolic(onnx_op_name):
         else:
             # dim-reduce path
             dim, keepdim = _get_const(dim, 'i', 'dim'), _get_const(keepdim, 'i', 'keepdim')
-            return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=0)
+            return g.op(onnx_op_name, self, axes_i=[dim], keepdims_i=keepdim)
     return symbolic
 
 mean = _reduce_op_symbolic('ReduceMean')
@@ -712,7 +712,7 @@ def abs(g, self):
 
 
 def pow(g, self, exponent):
-    exponent = _maybe_get_scalar(exponent, 't')
+    exponent = _maybe_get_scalar(exponent)
     return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
 
 
@@ -734,11 +734,11 @@ def clamp_max(g, self, max):
 # torch.max (same for torch.min) actually has two interfaces smashed together:
 # torch.max(x, dim, keepdim) and torch.max(x, y)
 def max(g, self, dim_or_y, keepdim=None):
-    if keepdim is not None:
+    if keepdim is None:
         return g.op("Max", self, dim_or_y)
     else:
         dim = _get_const(dim_or_y, 'i', 'dim')
-        keepdim = _get_const(dim_or_y, 'i', 'keepdim')
+        keepdim = _get_const(keepdim, 'i', 'keepdim')
         # TODO: export it as ReduceMax
         return g.op("ATen",
                     self,
@@ -749,11 +749,11 @@ def max(g, self, dim_or_y, keepdim=None):
 
 
 def min(g, self, dim_or_y, keepdim=None):
-    if keepdim is not None:
+    if keepdim is None:
         return g.op("Min", self, dim_or_y)
     else:
         dim = _get_const(dim_or_y, 'i', 'dim')
-        keepdim = _get_const(dim_or_y, 'i', 'keepdim')
+        keepdim = _get_const(keepdim, 'i', 'keepdim')
         # TODO: export it as ReduceMax
         return g.op("ATen",
                     self,
