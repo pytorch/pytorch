@@ -29,7 +29,7 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   ConvPoolOpBase::SetOutputSize(X, Y, channels);
 
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
   // The main loop
   int padded_height = Y->dim32(2);
   int padded_width = Y->dim32(3);
@@ -166,7 +166,7 @@ bool PadImageOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   int channels = X.dim32(3);
   ConvPoolOpBase::SetOutputSize(X, Y, channels);
   const float* Xdata = X.data<float>();
-  float* Ydata = Y->mutable_data<float>();
+  float* Ydata = Y->template mutable_data<float>();
 
   // The main loop
   int padded_height = Y->dim32(1);
@@ -259,7 +259,7 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNCHW() {
   int width = dX->dim32(3);
 
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   math::Set<float, CPUContext>(dX->size(), 0, dXdata, &context_);
   // The main loop
   switch (mode_) {
@@ -339,7 +339,7 @@ bool PadImageGradientOp<float, CPUContext>::RunOnDeviceWithOrderNHWC() {
   int width = dX->dim32(2);
 
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   math::Set<float, CPUContext>(dX->size(), 0, dXdata, &context_);
 
   switch (mode_) {

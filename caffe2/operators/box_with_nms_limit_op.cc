@@ -77,8 +77,8 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
   out_boxes->Resize(0, box_dim);
   out_classes->Resize(0);
 
-  TensorCPU* out_keeps = nullptr;
-  TensorCPU* out_keeps_size = nullptr;
+  Tensor* out_keeps = nullptr;
+  Tensor* out_keeps_size = nullptr;
   if (OutputSize() > 4) {
     out_keeps = Output(4);
     out_keeps_size = Output(5);
@@ -194,7 +194,8 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
       auto cur_boxes = boxes.block(0, j * box_dim, boxes.rows(), box_dim);
       auto& cur_keep = keeps[j];
       Eigen::Map<EArrXf> cur_out_scores(
-          out_scores->mutable_data<float>() + cur_start_idx + cur_out_idx,
+          out_scores->template mutable_data<float>() + cur_start_idx +
+              cur_out_idx,
           cur_keep.size());
       Eigen::Map<ERArrXXf> cur_out_boxes(
           out_boxes->mutable_data<float>() +
@@ -202,7 +203,8 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
           cur_keep.size(),
           box_dim);
       Eigen::Map<EArrXf> cur_out_classes(
-          out_classes->mutable_data<float>() + cur_start_idx + cur_out_idx,
+          out_classes->template mutable_data<float>() + cur_start_idx +
+              cur_out_idx,
           cur_keep.size());
 
       utils::GetSubArray(
@@ -220,9 +222,11 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
       out_keeps->Extend(total_keep_count, 50, &context_);
 
       Eigen::Map<EArrXi> out_keeps_arr(
-          out_keeps->mutable_data<int>() + cur_start_idx, total_keep_count);
+          out_keeps->template mutable_data<int>() + cur_start_idx,
+          total_keep_count);
       Eigen::Map<EArrXi> cur_out_keeps_size(
-          out_keeps_size->mutable_data<int>() + b * num_classes, num_classes);
+          out_keeps_size->template mutable_data<int>() + b * num_classes,
+          num_classes);
 
       cur_out_idx = 0;
       for (int j = 0; j < num_classes; j++) {
@@ -240,7 +244,7 @@ bool BoxWithNMSLimitOp<CPUContext>::RunOnDevice() {
     auto* batch_splits_out = Output(3);
     batch_splits_out->Resize(batch_size);
     Eigen::Map<EArrXf> batch_splits_out_map(
-        batch_splits_out->mutable_data<float>(), batch_size);
+        batch_splits_out->template mutable_data<float>(), batch_size);
     batch_splits_out_map =
         Eigen::Map<const EArrXi>(total_keep_per_batch.data(), batch_size)
             .cast<float>();

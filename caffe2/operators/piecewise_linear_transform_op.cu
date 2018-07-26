@@ -137,27 +137,27 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
       }
 
       int length = num_group * num_func_per_group;
-      TensorCPU bounds_host;
+      Tensor bounds_host{CPU};
       bounds_host.Resize(length + num_group);
       memcpy(
           bounds_host.mutable_data<float>(),
           bounds,
           (length + num_group) * sizeof(float));
 
-      TensorCPU intercepts_host;
+      Tensor intercepts_host{CPU};
       intercepts_host.Resize(length);
       memcpy(
           intercepts_host.mutable_data<float>(),
           intercepts,
           (length) * sizeof(float));
-      TensorCPU slopes_host;
+      Tensor slopes_host{CPU};
       slopes_host.Resize(length);
       memcpy(
           slopes_host.mutable_data<float>(), slopes, (length) * sizeof(float));
 
-      bounds_device_.CopyFrom<CPUContext>(bounds_host);
-      intercepts_device_.CopyFrom<CPUContext>(intercepts_host);
-      slopes_device_.CopyFrom<CPUContext>(slopes_host);
+      bounds_device_.CopyFrom(bounds_host);
+      intercepts_device_.CopyFrom(intercepts_host);
+      slopes_device_.CopyFrom(slopes_host);
 
       gpu_copied_ = true;
     }
@@ -185,9 +185,9 @@ void PiecewiseLinearTransformOp<float, CUDAContext>::setUpTensors(
       CAFFE_ENFORCE_EQ(num_group, M);
     }
 
-    bounds_device_.CopyFrom<CUDAContext>(bounds_input);
-    slopes_device_.CopyFrom<CUDAContext>(slopes_input);
-    intercepts_device_.CopyFrom<CUDAContext>(intercepts_input);
+    bounds_device_.CopyFrom(bounds_input);
+    slopes_device_.CopyFrom(slopes_input);
+    intercepts_device_.CopyFrom(intercepts_input);
   }
 }
 
@@ -218,7 +218,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformGeneral() {
       slopes_device_.data<float>(),
       intercepts_device_.data<float>(),
       X.data<float>(),
-      Y->mutable_data<float>());
+      Y->template mutable_data<float>());
 
   return true;
 }
@@ -254,7 +254,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         slopes_device_.data<float>(),
         intercepts_device_.data<float>(),
         X.data<float>(),
-        Y->mutable_data<float>());
+        Y->template mutable_data<float>());
   } else {
     // don't want N*M threads, only N*M/2
     PieceWiseLinearTransformBinaryKernel2<<<
@@ -270,7 +270,7 @@ bool PiecewiseLinearTransformOp<float, CUDAContext>::TransformBinary() {
         slopes_device_.data<float>(),
         intercepts_device_.data<float>(),
         X.data<float>(),
-        Y->mutable_data<float>());
+        Y->template mutable_data<float>());
   }
 
   return true;
