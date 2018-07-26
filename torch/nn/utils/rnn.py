@@ -30,14 +30,18 @@ class PackedSequence(PackedSequence_):
             information about the batch size at each sequence step
 
     """
-    def __new__(cls, *args):
+    def __new__(cls, data, batch_sizes=None):
+        # Using an `*args` and an if statement on `len(args)` breaks BC of the
+        # calling pattern `PackedSequence(data=..., batch_sizes=...)`, so we
+        # have to provide two arguments with names `data` and `batch_sizes`.
+        #
         # support being called as `PackedSequence(data, batch_sizes)`
-        if len(args) == 2:
-            return super(PackedSequence, cls).__new__(cls, *args)
+        if batch_sizes is not None:
+            return super(PackedSequence, cls).__new__(cls, data, batch_sizes)
         # support being called as `PackedSequence((data, batch_sizes))`
         else:
-            assert len(args) == 1
-            return super(PackedSequence, cls).__new__(cls, *args[0])
+            assert isinstance(data, (list, tuple)) and len(data) == 2
+            return super(PackedSequence, cls).__new__(cls, *data)
 
     def cuda(self, *args, **kwargs):
         """Returns a GPU copy if `self.data` not already on the GPU"""
