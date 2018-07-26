@@ -189,12 +189,6 @@ AT_ERROR("gesv: MAGMA library not found in "
   return std::tuple<Tensor&,Tensor&>(result0, result1);
 #endif
 }
-
-std::tuple<Tensor,Tensor> _gesv_single_cuda(const Tensor& self, const Tensor& A) {
-  auto A_ = self.type().tensor();
-  auto b_ = self.type().tensor();
-  return _gesv_single_out_cuda(b_, A_, self, A);
-}
 }}  // namespace at::native
 
 #undef ALLOCATE_ARRAY

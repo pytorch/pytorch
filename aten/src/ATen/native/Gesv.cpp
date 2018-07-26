@@ -100,12 +100,6 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   return std::tuple<Tensor&, Tensor&>(result0, result1);
 }
 
-std::tuple<Tensor,Tensor> _gesv_single_cpu(const Tensor& self, const Tensor& A) {
-  auto A_ = self.type().tensor();
-  auto b_ = self.type().tensor();
-  return _gesv_single_out_cpu(b_, A_, self, A);
-}
-
 std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
   std::vector<int64_t> infos(batchCount(A), 0);
   auto A_working_copy = cloneBatchedColumnMajor(A);
@@ -123,7 +117,9 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
   checkInputs(self, A, batched);
 
   if (!batched) {
-    return self.type()._gesv_single(self, A);
+    auto A_ = self.type().tensor();
+    auto b_ = self.type().tensor();
+    return self.type()._gesv_single_out(b_, A_, self, A);
   }
 
   // broadcast the batch dimensions of self and A.
