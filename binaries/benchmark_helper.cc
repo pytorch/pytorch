@@ -215,7 +215,8 @@ void runNetwork(
     const bool wipe_cache,
     const bool run_individual,
     const int warmup,
-    const int iter) {
+    const int iter,
+    const int sleep_before_run) {
   if (!net_def.has_name()) {
     net_def.set_name("benchmark");
   }
@@ -233,6 +234,9 @@ void runNetwork(
 
   if (wipe_cache) {
     caffe2::wipe_cache();
+  }
+  if (sleep_before_run > 0) {
+    sleep(sleep_before_run);
   }
   LOG(INFO) << "Main runs.";
   CAFFE_ENFORCE(
