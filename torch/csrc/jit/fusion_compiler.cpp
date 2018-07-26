@@ -362,8 +362,8 @@ constexpr auto rand_support_literal = R"(
       if(i == 0) buf = philox();
       uint32 ret = buf[i];
       i = (i + 1) % 4;
-      static uint32 FLOAT_MASK = (1 << 24) - 1;
-      static float FLOAT_DIVISOR = 1.0f / (1 << 24);
+      const uint32 FLOAT_MASK = (1 << 24) - 1;
+      const float FLOAT_DIVISOR = 1.0f / (1 << 24);
       return (ret & FLOAT_MASK) * FLOAT_DIVISOR;
     }
   private:
@@ -607,13 +607,12 @@ std::string encodeRHS(Node * n) {
   return format(str, env);
 }
 
-std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
-                                            bool* has_random,
-                                            const std::string & name,
-                                            AnnotatedGraph & agraph,
-                                            bool use_cuda) {
-  JIT_ASSERT(has_random != NULL);
-  *has_random = false;
+std::pair<std::vector<ConcatDesc>, bool> emitCompilationUnit(
+    std::ostream& out,
+    const std::string& name,
+    AnnotatedGraph& agraph,
+    bool use_cuda) {
+  bool has_random = false;
   Graph& subgraph = *agraph.graph;
   TemplateEnv env;
   env.s("kernelName",name);
@@ -687,7 +686,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     if (n->kind() == prim::FusedConcat)
       continue;
     if(n->kind() == aten::rand_like) {
-      *has_random = true;
+      has_random = true;
       if(!use_cuda)
         throw std::runtime_error("Fusion doesn't support rand on CPU");
     }
@@ -718,7 +717,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     env.s("HalfHeader", "");
   }
 
-  if (*has_random) {
+  if (has_random) {
     env.s("RandHeader", rand_support_literal);
     env.s("RandParam", rand_param);
     env.s("RandInit", rand_init);
@@ -739,7 +738,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     out << cpu_compilation_unit_template.format(env);
   }
 
-  return concat_desc;
+  return std::make_pair(std::move(concat_desc), has_random);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -918,7 +917,9 @@ struct CUDAFusionFunction : public CompiledFusionFunction {
     checkCUDAVersion(prop);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, &has_random, name, agraph, true);
+    auto ret = codegen::emitCompilationUnit(cu, name, agraph, true);
+    concat_desc = std::move(ret.first);
+    has_random = ret.second;
     compilation_unit = cu.str();
     nvrtcProgram program;
     TORCH_NVRTC_CHECK(nvrtcCreateProgram(&program, compilation_unit.c_str(), NULL, 0, nullptr, nullptr));
@@ -1114,7 +1115,9 @@ struct CPUFusionFunction : public CompiledFusionFunction {
     TempFile cpp_file(cpp_template, 4);
 
     std::stringstream cu;
-    concat_desc = codegen::emitCompilationUnit(cu, &has_random, name, agraph, false);
+    auto ret = codegen::emitCompilationUnit(cu, name, agraph, false);
+    concat_desc = std::move(ret.first);
+    has_random = ret.second;
     JIT_ASSERT(!has_random);
     compilation_unit = cu.str();
     cpp_file.write(compilation_unit);
