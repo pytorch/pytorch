@@ -95,6 +95,25 @@ public:
     denseDims_ = denseDims;
   }
 #else
+  // NOTE: This function preserves invariants of sparseDims/denseDims with respect to
+  // indices and values
+  void resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
+    AT_CHECK(sparseDims + denseDims == size.size(), "number of dimensions must be sparseDims (", sparseDims, ") + denseDims (", denseDims, "), but got ", size.size());
+    AT_CHECK(indices().size(0) == sparseDims, "indices has incorrect first dimension, expected ", sparseDims, ", got ", indices().size(0));
+    AT_CHECK(values().dim() == denseDims + 1, "values has incorrect number of dimensions, expected ", denseDims + 1, ", got ", values().dim());
+
+    auto dense_size_original = sizes().slice(sparseDims_);
+    auto dense_size_new = size.slice(sparseDims);
+    AT_CHECK(
+      dense_size_original.equals(dense_size_new),
+      "dense dim sizes don't match, expected ", dense_size_original, ", got ", dense_size_new
+    );
+
+    size_ = size;
+    sparseDims_ = sparseDims;
+    denseDims_ = denseDims;
+  }
+
   // NOTE: this function will resize the sparse tensor and also set `indices` and `values` to empty.
   // The reason we do this is that it's difficult to preserve the dim invariants when we change the
   // sparse tensor size but it doesn't agree with the dims of the existing indices or values, so we

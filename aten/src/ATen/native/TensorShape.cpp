@@ -414,13 +414,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
 #ifndef USE_TH_SIZE_ZERO_DIM
     return self.sparse_raw_resize_legacy_(sizes, self._sparseDims(), self._denseDims());
 #else
-    auto indices_original = _get_sparse_impl(self)->indices();
-    auto values_original = _get_sparse_impl(self)->values();
-    auto coalesced = self.is_coalesced();
-    self.sparse_resize_and_clear_(sizes, self._sparseDims(), self._denseDims());
-    _get_sparse_impl(self)->set_indices_and_values_unsafe(indices_original, values_original);
-    _get_sparse_impl(self)->set_coalesced(coalesced);
-
+    _get_sparse_impl(self)->resize_(self._sparseDims(), self._denseDims(), sizes);
     return self;
 #endif    
   } else {
@@ -440,13 +434,7 @@ static inline Tensor & sparse_transpose_(Tensor & self, int64_t dim0, int64_t di
 #ifndef USE_TH_SIZE_ZERO_DIM
     return self.sparse_raw_resize_legacy_(sizes, -1, -1);
 #else
-    auto indices_original = _get_sparse_impl(self)->indices();
-    auto values_original = _get_sparse_impl(self)->values();
-    auto coalesced = self.is_coalesced();
-    self.sparse_resize_and_clear_(sizes, indices_original.size(0), values_original.dim() - 1);
-    _get_sparse_impl(self)->set_indices_and_values_unsafe(indices_original, values_original);
-    _get_sparse_impl(self)->set_coalesced(coalesced);
-
+    _get_sparse_impl(self)->resize_(self._indices().size(0), self._values().dim() - 1, sizes);
     return self;
 #endif
   }
