@@ -21,7 +21,6 @@ install_ubuntu() {
                    miopengemm \
                    rocblas \
                    hipblas \
-                   rocrand \
                    hcsparse \
                    rocm-profiler \
                    cxlactivitylogger
@@ -55,7 +54,7 @@ install_hip_thrust() {
 install_rocrand() {
     mkdir -p /opt/rocm/tmp/
     cd /opt/rocm/tmp/
-    git clone -b v1.8.0 https://github.com/ROCmSoftwarePlatform/rocRAND.git
+    git clone https://github.com/ROCmSoftwarePlatform/rocRAND.git
     mkdir build && cd build
     cmake ..
     make
