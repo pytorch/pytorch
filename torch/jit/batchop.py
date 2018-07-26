@@ -214,6 +214,15 @@ def batch_where(data, mask, dims, data1, mask1, dims1, data2, mask2, dims2):
 
 
 @torch.jit.script
+def batch_where_scalar(cond_, data1, mask1, dims1, data2, mask2, dims2):
+    cond = torch.zeros([1], dtype=torch.uint8) * cond_
+    res_data = torch.where(cond, data1, data2)
+    res_mask = torch.where(cond, mask1, mask2)
+    res_dims = torch.where(cond, dims1, dims2)
+    return res_data, res_mask, res_dims
+
+
+@torch.jit.script
 def batch_update(batch_data, batch_mask, batch_dims, new_data, new_mask, new_dims):
     data = torch.where(new_mask, new_data, batch_data)
     return data, new_mask, new_dims  # TODO: consider whether return new_mask and new_dims
@@ -235,7 +244,12 @@ def batch_gt(data, mask, dims, data1, mask1, dims1):
 
 
 @torch.jit.script
-def batch_gt_scalar(data, mask, dims, other):
+def batch_gt_scalar(data1, data2):
+    return torch.gt(data1, data2)
+
+
+@torch.jit.script
+def batch_gt_one_scalar(data, mask, dims, other):
     return torch.gt(data, other), mask, dims
 
 
@@ -253,6 +267,11 @@ def batch_eq(data, mask, dims, data1, mask1, dims1):
 def batch_size(data, mask, dims, dim_):
     dim = int(dim_)
     return data.size(dim)
+
+
+@torch.jit.script
+def batch_dim(data, mask, dims):
+    return data.dim()
 
 
 @torch.jit.script
@@ -484,14 +503,17 @@ torch.register_batch_operator("select", batch_select.graph)
 torch.register_batch_operator("index_select", batch_index_select.graph)
 torch.register_batch_operator("view_as", batch_view_as.graph)
 torch.register_batch_operator("where", batch_where.graph)
+torch.register_batch_operator("where", batch_where_scalar.graph)
 torch.register_batch_operator("update", batch_update.graph)
 torch.register_batch_operator("any", batch_any.graph)
 torch.register_batch_operator("type_as", batch_type_as.graph)
 torch.register_batch_operator("gt", batch_gt.graph)
 torch.register_batch_operator("gt", batch_gt_scalar.graph)
+torch.register_batch_operator("gt", batch_gt_one_scalar.graph)
 torch.register_batch_operator("lt", batch_lt.graph)
 torch.register_batch_operator("eq", batch_eq.graph)
 torch.register_batch_operator("size", batch_size.graph)
+torch.register_batch_operator("dim", batch_dim.graph)
 torch.register_batch_operator("squeeze", batch_squeeze.graph)
 torch.register_batch_operator("unsqueeze", batch_unsqueeze.graph)
 torch.register_batch_operator("argmax", batch_argmax.graph)

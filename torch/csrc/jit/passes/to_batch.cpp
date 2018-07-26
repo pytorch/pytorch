@@ -5,18 +5,18 @@ namespace torch { namespace jit {
 
 std::unordered_map<std::string, std::vector<std::shared_ptr<Graph>>> ToBatch::batch_operator_table;
 
-std::shared_ptr<Graph> ToBatch::getBatchOperator(std::string name, int64_t input_num){
+std::shared_ptr<Graph> ToBatch::getBatchOperator(std::string name, int64_t num_inputs){
   if(batch_operator_table.find(name) == batch_operator_table.end()){
     throw std::runtime_error("function " + name + " is not supported in batched tensor yet");
   }
   auto ops = batch_operator_table.at(name);
-  if(input_num == -1)  // default function
+  if(num_inputs == -1)  // default function
     return ops[0];
   for(auto op : ops){
-    if(size_t(input_num) == op->inputs().size())
+    if(size_t(num_inputs) == op->inputs().size())
       return op;
   }
-  throw std::runtime_error("function " + name + " with " + std::to_string(input_num) + " inputs is not supported in batched tensor yet");
+  throw std::runtime_error("function " + name + " with " + std::to_string(num_inputs) + " inputs is not supported in batched tensor yet");
 }
 
 // replace aten operator node with BatchTensor operator graph
@@ -191,37 +191,34 @@ void ToBatch::visitListConstruct(Node* n, Block* block, Block* res_block){
 //   %7 : Dynamic = aten::mul(%a.1_mask, %b_mask)
 //   %8 : Dynamic = aten::__or__(%a.1_dims, %b_dims)
 //   %9 : int = prim::TensorToNum(%6)
-//   %10 : Dynamic = aten::mul(%6, %7)
-//   %11 : Dynamic = aten::sum(%10)
-//   %12 : Dynamic = aten::gt[other={0}](%11)
-//   %13 : Long() = prim::Constant[value={1}]()  // if_block
-//   %alpha.1 : float = prim::TensorToNum(%13)
+//   %10 : Long() = prim::Constant[value={1}]()  // if_block
+//   %alpha.1 : float = prim::TensorToNum(%10)
 //   %data.1 : Dynamic = aten::add(%a.1_data, %b_data, %alpha.1)
 //   %mask.1 : Dynamic = aten::mul(%a.1_mask, %b_mask)
 //   %dims.1 : Dynamic = aten::__or__(%a.1_dims, %b_dims)
-//   %18 : Long() = prim::Constant[value={1}]()  // else_block
-//   %alpha : float = prim::TensorToNum(%18)
+//   %15 : Long() = prim::Constant[value={1}]()  // else_block
+//   %alpha : float = prim::TensorToNum(%15)
 //   %data.4 : Dynamic = aten::sub(%a.1_data, %b_data, %alpha)
 //   %mask : Dynamic = aten::mul(%a.1_mask, %b_mask)
 //   %dims : Dynamic = aten::__or__(%a.1_dims, %b_dims)
-//   %23 : Dynamic = aten::type_as(%7, %6)   // combine two outputs (batch_where)
-//   %cond_mask.1 : Dynamic = aten::mul(%6, %23)
-//   %25 : int = aten::dim(%cond_mask.1)
-//   %26 : int = prim::Constant[value=1]()
-//   %27 : int = aten::eq(%25, %26)
-//   %cond_data : Dynamic, %cond_mask : Dynamic, %data : Dynamic = prim::If(%27)
+//   %20 : Dynamic = aten::type_as(%7, %6)   // combine two outputs (batch_where)
+//   %cond_mask.1 : Dynamic = aten::mul(%6, %20)
+//   %22 : int = aten::dim(%cond_mask.1)
+//   %23 : int = prim::Constant[value=1]()
+//   %24 : int = aten::eq(%22, %23)
+//   %cond_data : Dynamic, %cond_mask : Dynamic, %data : Dynamic = prim::If(%24)
 //     block0() {
-//       %31 : int = aten::dim(%data.1)
-//       %32 : int = prim::Constant[value=1]()
-//       %33 : int = aten::sub(%31, %32)
-//       %34 : int = prim::Constant[value=1]()
-//       %data.3 : Dynamic = prim::Loop(%33, %34, %cond_mask.1)
-//         block0(%_ : int, %37 : Dynamic) {
+//       %28 : int = aten::dim(%data.1)
+//       %29 : int = prim::Constant[value=1]()
+//       %30 : int = aten::sub(%28, %29)
+//       %31 : int = prim::Constant[value=1]()
+//       %data.3 : Dynamic = prim::Loop(%30, %31, %cond_mask.1)
+//         block0(%_ : int, %34 : Dynamic) {
+//           %35 : int = prim::Constant[value=1]()
+//           %36 : int = aten::neg(%35)
+//           %data.2 : Dynamic = aten::unsqueeze(%34, %36)
 //           %38 : int = prim::Constant[value=1]()
-//           %39 : int = aten::neg(%38)
-//           %data.2 : Dynamic = aten::unsqueeze(%37, %39)
-//           %41 : int = prim::Constant[value=1]()
-//           -> (%41, %data.2)
+//           -> (%38, %data.2)
 //         }
 //       %cond_data.1 : Dynamic = aten::expand_as(%data.3, %data.1)
 //       %cond_mask.2 : Dynamic = aten::expand_as(%data.3, %mask.1)
@@ -236,20 +233,24 @@ void ToBatch::visitListConstruct(Node* n, Block* block, Block* res_block){
 //   return (%res_data, %res_mask, %res_dims);
 // }
 void ToBatch::visitIf(Node* n, Block* block, Block* res_block){
-  auto cond = batch_map.at(n->input());
-  auto cond_any = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("any"), cond);
   toBatch(n->blocks()[0], res_block);
   toBatch(n->blocks()[1], res_block);
 
   // combine results from two if paths
   for(size_t i = 0; i < n->outputs().size(); i++){
     std::vector<Value*> inputs;
-    inputs.insert(inputs.end(), cond.begin(), cond.end());
+    if(batch_map.find(n->input()) == batch_map.end()){  // cond is scalar
+      inputs.push_back(rn_env.at(n->input()));
+    }
+    else{  // cond is tensor
+      auto cond = batch_map.at(n->input());
+      inputs.insert(inputs.end(), cond.begin(), cond.end());
+    }
     auto if_output = batch_map.at(n->blocks()[0]->outputs()[i]);
     inputs.insert(inputs.end(), if_output.begin(), if_output.end());
     auto else_output = batch_map.at(n->blocks()[1]->outputs()[i]);
     inputs.insert(inputs.end(), else_output.begin(), else_output.end());
-    auto outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("where"), inputs);
+    auto outputs = script::inlineCallTo(*res_block->owningGraph(), *getBatchOperator("where", inputs.size()), inputs);
     batch_map[n->outputs()[i]] = outputs;
   }
 }
