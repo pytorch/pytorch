@@ -1,6 +1,6 @@
 version: 2
 jobs:
-  linux-trusty-py3-6-gcc7-build:
+  linux_trusty_py3_6_gcc7_build:
     docker:
       - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/linux-trusty-py3.6-gcc7:226
         user: jenkins
@@ -15,9 +15,9 @@ jobs:
           whoami
 workflows:
   version: 2
-  linux-trusty-py3-6-gcc7:
+  linux_trusty_py3_6_gcc7:
     jobs:
-      - linux-trusty-py3-6-gcc7-build
+      - linux_trusty_py3_6_gcc7_build
           - filters:
               branches:
                 only: circleci
