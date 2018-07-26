@@ -148,13 +148,13 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
     totalSize += (self->size(d)-1)*self->stride(d);
   }
 
-  if(totalSize+self->storageOffset > 0)
+  if(totalSize+self->storage_offset() > 0)
   {
-    if(!self->storage) {
+    if(!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    if(totalSize+self->storageOffset > self->storage->size) {
-      THCStorage_resize(state, self->storage, totalSize+self->storageOffset);
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size) {
+      THCStorage_resize(state, THTensor_getStoragePtr(self), totalSize+self->storage_offset());
     }
   }
 }
@@ -164,8 +164,8 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
   if(self != src)
     THCTensor_setStorageNd(state,
                            self,
-                           src->storage,
-                           src->storageOffset,
+                           THTensor_getStoragePtr(src),
+                           src->storage_offset(),
                            src->dim(),
                            THTensor_getSizePtr(src),
                            THTensor_getStridePtr(src));
@@ -174,27 +174,27 @@ void THCTensor_set(THCState *state, THCTensor *self, THCTensor *src)
 void THCTensor_setStorageNd(THCState *state, THCTensor *self, THCStorage *storage, ptrdiff_t storageOffset, int nDimension, int64_t *size, int64_t *stride)
 {
   /* storage */
-  if(self->storage != storage)
+  if(THTensor_getStoragePtr(self) != storage)
   {
-    if (!self->storage) {
+    if (!THTensor_getStoragePtr(self)) {
       THError("Tensor: invalid null storage");
     }
-    auto scalar_type = self->storage->scalar_type;
-    THStorage_free(self->storage);
+    auto scalar_type = THTensor_getStoragePtr(self)->scalar_type;
+    THStorage_free(THTensor_getStoragePtr(self));
 
-    if(storage)
-    {
-      self->storage = storage;
-      THStorage_retain(self->storage);
+    if (storage) {
+      THTensor_stealAndSetStoragePtr(self, storage);
+      THStorage_retain(THTensor_getStoragePtr(self));
+    } else {
+      THTensor_stealAndSetStoragePtr(self, THCStorage_new(state, scalar_type));
     }
-    else
-      self->storage = THCStorage_new(state, scalar_type);
   }
 
   /* storageOffset */
-  if(storageOffset < 0)
+  if (storageOffset < 0) {
     THError("Tensor: invalid storage offset");
-  self->storageOffset = storageOffset;
+  }
+  THTensor_setStorageOffset(self, storageOffset);
 
   /* size and stride */
   THCTensor_resizeNd(state, self, nDimension, size, stride);
@@ -222,7 +222,7 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
       THTensor_setSizeAtDim(self, d, self->size(d+1));
       THTensor_setStrideAtDim(self, d, self->stride(d+1));
     }
-    THTensor_resizeDim(self, self->dim_ - 1);
+    THTensor_resizeDim(self, self->dim() - 1);
   }
 }
 
@@ -294,17 +294,16 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
 }
 
 void THCTensor_retain(THCState *state, THCTensor *self) {
-  self->refcount++;
+  self->retain();
 }
-
 
 void THCTensor_free(THCState *state, THCTensor *self) {
   THTensor_free(self);
 }
 
 int THCTensor_getDevice(THCState* state, const THCTensor* tensor) {
-  if (!tensor->storage) return -1;
-  return THCStorage_getDevice(state, tensor->storage);
+  if (!THTensor_getStoragePtr(tensor)) return -1;
+  return THCStorage_getDevice(state, THTensor_getStoragePtr(tensor));
 }
 
 bool THCTensor_allSameDevice(THCState* state, THCTensor ** inputs, int numInputs) {

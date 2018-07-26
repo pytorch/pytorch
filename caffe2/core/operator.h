@@ -968,6 +968,11 @@ TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
     const vector<NetDef*>& nets);
 
+TensorShapes InferBlobShapesAndTypesFromMap(
+    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, TensorProto_DataType>& blob_types,
+    const vector<NetDef*>& nets);
+
 std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(
     OperatorBase& op,
     const OperatorDef& op_def);

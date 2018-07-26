@@ -214,10 +214,10 @@ Tensor log_softmax_backward_cpu(
   return grad_input;
 }
 
-DispatchStub<forward_fn> softmax_lastdim_kernel;
-DispatchStub<forward_fn> log_softmax_lastdim_kernel;
-DispatchStub<backward_fn> softmax_backward_lastdim_kernel;
-DispatchStub<backward_fn> log_softmax_backward_lastdim_kernel;
+DEFINE_DISPATCH(softmax_lastdim_kernel);
+DEFINE_DISPATCH(log_softmax_lastdim_kernel);
+DEFINE_DISPATCH(softmax_backward_lastdim_kernel);
+DEFINE_DISPATCH(log_softmax_backward_lastdim_kernel);
 
 }
 }

@@ -1,11 +1,12 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/assertions.h"
 #include <unordered_map>
 
 #ifdef USE_CUDA
   #include "cuda.h" // for CUDA_VERSION
-#endif 
+#endif
 
 namespace torch { namespace jit {
 
@@ -136,13 +137,13 @@ struct GraphFuser {
       #ifdef USE_CUDA
         // Checks for half tensor on GPU
         // const auto device = tt->device();
-        if (tt->device() != kCPUDevice 
+        if (tt->device() != kCPUDevice
           && CUDA_VERSION >= 9
           && tt->scalarType() == at::ScalarType::Half) {
           return true;
         }
-      #endif 
-    } 
+      #endif
+    }
 
     return false;
   }
@@ -204,8 +205,9 @@ struct GraphFuser {
     if(isFusable(node))
       return true;
     // this concat fusion only works when all the inputs are the same size
+    // and we can statically infer the dimension along which we should concat
     // otherwise they cannot partipate in the same map
-    if(node->kind() == aten::cat && allOutputsHaveSameSize(node))
+    if(node->kind() == aten::cat && node->get<int64_t>(attr::dim) && allOutputsHaveSameSize(node))
       return true;
 
     return false;

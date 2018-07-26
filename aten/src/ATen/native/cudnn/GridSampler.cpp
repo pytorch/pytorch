@@ -27,6 +27,7 @@ std::tuple<Tensor, Tensor> cudnn_grid_sampler_backward(
 #include <ATen/cudnn/Descriptors.h>
 #include <ATen/cudnn/Types.h>
 #include <ATen/cudnn/Utils.h>
+#include <ATen/cuda/Exceptions.h>
 
 #include <ATen/TensorUtils.h>
 

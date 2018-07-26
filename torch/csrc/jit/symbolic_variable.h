@@ -165,6 +165,13 @@ struct SymbolicVariable {
      ->i_(a("length"), length);
     return r;
   }
+  static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, Value* dim) {
+    Node* n;
+    std::vector<SymbolicVariable> all_inputs = inputs;
+    all_inputs.push_back(dim);
+    auto r = create(aten::cat, all_inputs, 1, &n)[0];
+    return r;
+  }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int32_t dim) {
     Node* n;
     auto r = create(aten::cat, inputs, 1, &n)[0];
@@ -186,6 +193,11 @@ struct SymbolicVariable {
     auto r = create(t("sum"), {*this}, 1, &n)[0];
     n->is_(a("dim"), {dim})
      ->i_(a("keepdim"), keepdim);
+    return r;
+  }
+  SymbolicVariable squeeze(Value* dim) const {
+    Node * n;
+    auto r = create(t("squeeze"), {*this, dim}, 1, &n)[0];
     return r;
   }
   SymbolicVariable squeeze(int dim) const {

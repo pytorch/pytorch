@@ -1,5 +1,8 @@
 #include "pybind_state.h"
 
+#include <chrono>
+#include <future>
+
 #include <pybind11/pybind11.h>
 #include <pybind11/stl.h>
 
@@ -21,6 +24,7 @@
 #include "caffe2/opt/converter.h"
 #include "caffe2/opt/fusion.h"
 #include "caffe2/opt/mobile.h"
+#include "caffe2/opt/onnxifi_transformer.h"
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/sink.h"
@@ -244,6 +248,33 @@ OPERATOR_SCHEMA(PythonDLPackGradient).AllowInplace([](int, int) {
   return true;
 });
 REGISTER_GRADIENT(PythonDLPack, GetPythonGradient);
+
+class BackgroundPlan {
+ public:
+  BackgroundPlan(Workspace* ws, PlanDef def) : ws_(ws), def_(def) {}
+
+  void run() {
+    fut_ =
+        std::async(std::launch::async, [this]() { return ws_->RunPlan(def_); });
+  }
+
+  bool isDone() {
+    CAFFE_ENFORCE(fut_.valid());
+    auto status = fut_.wait_for(std::chrono::milliseconds(0));
+    return status == std::future_status::ready;
+  }
+
+  bool isSucceeded() {
+    CAFFE_ENFORCE(isDone());
+    return fut_.get();
+  }
+
+ private:
+  Workspace* ws_;
+  PlanDef def_;
+
+  std::future<bool> fut_;
+};
 
 void addObjectMethods(py::module& m) {
   py::class_<NetBase>(m, "Net").def("run", [](NetBase* net) {
@@ -504,6 +535,11 @@ void addObjectMethods(py::module& m) {
         CAFFE_ENFORCE(ws->second.get());
         return py::cast(ws->second.get(), py::return_value_policy::reference);
       });
+
+  py::class_<BackgroundPlan, std::shared_ptr<BackgroundPlan>>(
+      m, "BackgroundPlan")
+      .def("is_done", &BackgroundPlan::isDone)
+      .def("is_succeeded", &BackgroundPlan::isSucceeded);
 
   // Gradients
   py::class_<GradientWrapper>(m, "GradientWrapper")
@@ -1183,6 +1219,17 @@ void addGlobalMethods(py::module& m) {
     CAFFE_ENFORCE(gWorkspace->RunPlan(def));
     return true;
   });
+  m.def("run_plan_in_background", [](const py::bytes& plan_def) {
+    CAFFE_ENFORCE(gWorkspace);
+    PlanDef def;
+    CAFFE_ENFORCE(
+        ParseProtoFromLargeString(plan_def.cast<std::string>(), &def));
+    py::gil_scoped_release g;
+
+    auto background_plan = std::make_shared<BackgroundPlan>(gWorkspace, def);
+    background_plan->run();
+    return background_plan;
+  });
   m.def(
       "apply_transform",
       [](const string& transform_key, const py::bytes& net_def) {
@@ -1306,6 +1353,33 @@ void addGlobalMethods(py::module& m) {
         }
 
         auto blob_info = InferBlobShapesAndTypesFromMap(blob_dimensions, nets_ptr);
+
+        std::string protob;
+        CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
+  m.def(
+      "infer_shapes_and_types_from_map",
+      [](const std::vector<py::bytes>& net_protos,
+         const std::map<std::string, std::vector<TIndex>> blob_dimensions,
+         const std::map<std::string, int> int_blob_types) {
+        // Parse protobuffers to NetDefs
+        std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        std::vector<caffe2::NetDef*> nets_ptr;
+        for (auto proto : net_protos) {
+          std::unique_ptr<NetDef> def(new NetDef());
+          CAFFE_ENFORCE(def->ParseFromString(proto));
+          nets_ptr.push_back(def.get());
+          nets.push_back(std::move(def));
+        }
+        std::map<std::string, TensorProto_DataType> blob_types;
+        for (auto blob_type : int_blob_types) {
+          blob_types[blob_type.first] =
+              static_cast<TensorProto_DataType>(blob_type.second);
+        }
+
+        auto blob_info = InferBlobShapesAndTypesFromMap(
+            blob_dimensions, blob_types, nets_ptr);
 
         std::string protob;
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
@@ -1509,6 +1583,27 @@ void addGlobalMethods(py::module& m) {
     new_proto.SerializeToString(&out);
     return py::bytes(out);
   });
+  m.def(
+      "onnxifi",
+      [](const py::bytes& pred_net_str,
+         const std::unordered_map<std::string, std::vector<int>>& shapes,
+         bool debug_builder) -> py::bytes {
+        caffe2::NetDef pred_net;
+        CAFFE_ENFORCE(
+            ParseProtoFromLargeString(
+                pred_net_str.cast<std::string>(), &pred_net),
+            "broken pred_net protobuf");
+        std::unordered_map<std::string, TensorShape> tensor_shapes;
+        for (const auto& it : shapes) {
+          tensor_shapes.emplace(
+              it.first, CreateTensorShape(it.second, TensorProto::FLOAT));
+        }
+        OnnxifiTransformer ts(debug_builder);
+        ts.Transform(GetCurrentWorkspace(), &pred_net, tensor_shapes);
+        std::string pred_net_str2;
+        pred_net.SerializeToString(&pred_net_str2);
+        return py::bytes(pred_net_str2);
+      });
   m.def(
       "run_workspace_transform",
       [](const std::string& transform_name, py::bytes def) {

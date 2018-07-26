@@ -1,4 +1,5 @@
 #include "ATen/ATen.h"
+#include "ATen/cuda/CUDAContext.h"
 #include "ATen/Config.h"
 #include "ATen/native/cuda/CuFFTUtils.h"
 #include "ATen/native/utils/ParamsHash.h"
@@ -105,7 +106,7 @@ public:
     // contiguous, only need to check real-to-complex case.
     if (input.type().scalarType() == ScalarType::Half) {
       // cuFFT on half requires compute capability of at least SM_53
-      auto dev_prop = at::globalContext().getCurrentDeviceProperties();
+      auto dev_prop = at::cuda::getCurrentDeviceProperties();
       if (dev_prop->major < 5 || (dev_prop->major == 5 && dev_prop->minor < 3)) {
         std::ostringstream ss;
         ss << "cuFFT doesn't support signals of half type with compute "

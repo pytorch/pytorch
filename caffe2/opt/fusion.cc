@@ -15,11 +15,7 @@ using namespace nom;
 // $$ W' = W\frac{s}{\sqrt{\sigma + \epsilon}}$$
 // $$ b' = (b_{conv} - m)\frac{s}{\sqrt{\sigma + \epsilon}} + b_{bn}$$
 bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
-  for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
-    repr::NNGraph::NodeRef convNode;
-    repr::Conv* conv;
-    std::tie(conv, convNode) = node_pair;
-
+  for (auto convNode : repr::nn::nodeIterator<repr::Conv>(nn->dataFlow)) {
     auto output = repr::nn::getOutputs(convNode).front();
     auto consumers = repr::nn::getConsumers(output);
     if (consumers.size() != 1) {

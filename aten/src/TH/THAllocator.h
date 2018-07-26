@@ -1,6 +1,6 @@
 #pragma once
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #ifdef __cplusplus
 #include <ATen/Allocator.h>

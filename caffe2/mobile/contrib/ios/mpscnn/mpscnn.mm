@@ -68,6 +68,14 @@
 - (void*)weights {
   return self.weights_;
 }
+
+- (id)copyWithZone:(NSZone*)zone {
+  ConvDataSource* newDataSource = [[self class] allocWithZone:zone];
+  newDataSource.weights_ = self.weights_;
+  newDataSource.bias_ = self.bias_;
+  newDataSource.desc_ = self.desc_;
+  return newDataSource;
+}
 @end
 
 namespace caffe2 {

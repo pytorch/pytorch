@@ -35,7 +35,7 @@ inline Tensor from_blob(
     void* data,
     IntList sizes,
     const TensorOptions& options = {}) {
-  return native::from_blob(data, sizes, [](void*) {}, options);
+  return native::from_blob(data, sizes, /*deleter=*/[](void*) {}, options);
 }
 
 // These functions are defined in native/TensorFactories.cpp.

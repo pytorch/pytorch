@@ -1,4 +1,5 @@
 #include "torch/csrc/jit/passes/onnx/peephole.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <ATen/optional.h>
 
@@ -265,13 +266,15 @@ void pushPackingPastRnn(Block *b) {
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
     TensorType* oldType = rnn->inputs()[0]->type()->cast<TensorType>();
-    std::vector<int64_t> new_sizes;
-    new_sizes.push_back(oldType->sizes()[0]);
-    new_sizes.push_back(oldType->sizes()[1]);
-    new_sizes.push_back(rnn->i(attr::hidden_size));
-    TensorTypePtr newType = std::make_shared<TensorType>(
-        oldType->scalarType(), oldType->device(), new_sizes);
-    next->outputs()[0]->setType(newType);
+    if (oldType) {
+      std::vector<int64_t> new_sizes;
+      new_sizes.push_back(oldType->sizes()[0]);
+      new_sizes.push_back(oldType->sizes()[1]);
+      new_sizes.push_back(rnn->i(attr::hidden_size));
+      TensorTypePtr newType = std::make_shared<TensorType>(
+          oldType->scalarType(), oldType->device(), new_sizes);
+      next->outputs()[0]->setType(newType);
+    }
 
     it.destroyCurrent();
   }

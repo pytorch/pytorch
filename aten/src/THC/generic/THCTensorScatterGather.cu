@@ -12,25 +12,25 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(THCudaLongTensor__nDimension(state, index) == THCTensor_(_nDimension)(state, src), 4,
+  THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 4,
              "Index tensor must have same dimensions as input tensor");
   THLongStorage *indexSize = THCudaLongTensor_newSizeOf(state, index);
   THArgCheck(THCTensor_(isSize)(state, tensor, indexSize), 4,
              "Index tensor must have the same size as output tensor.");
   THLongStorage_free(indexSize);
-  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 3,
+  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 3,
              "Index dimension is out of bounds");
-  THArgCheck(THCTensor_(_nDimension)(state, src) == THCTensor_(_nDimension)(state, tensor), 2,
+  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 2,
              "Input tensor must have same dimensions as output tensor");
 
-  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
     if (d != dim) {
       THArgCheck(THCTensor_(size)(state, tensor, d) == THCTensor_(size)(state, src, d), 2,
                  "Input tensor must have same size as output tensor apart from the specified dimension");
     }
   }
 
-  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
 
@@ -47,44 +47,46 @@ void THCTensor_(gather)(THCState* state, THCTensor *tensor,
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
 
-  if (THCTensor_canUse32BitIndexMath(state, tensor) &&
-      THCTensor_canUse32BitIndexMath(state, src) &&
-      THCTensor_canUse32BitIndexMath(state, index)) {
-    TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
-    TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<real, THCTensor, unsigned int>(state, src);
-    TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
+  if (totalElements > 0) {
+    if (THCTensor_canUse32BitIndexMath(state, tensor) &&
+        THCTensor_canUse32BitIndexMath(state, src) &&
+        THCTensor_canUse32BitIndexMath(state, index)) {
+      TensorInfo<real, unsigned int> tensorInfo =
+        getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
+      TensorInfo<real, unsigned int> srcInfo =
+        getTensorInfo<real, THCTensor, unsigned int>(state, src);
+      TensorInfo<int64_t, unsigned int> indexInfo =
+        getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
-    // Specialize for a small number of dimensions.
-    switch (indexInfo.dims) {
-      case 1:
-        RUN(unsigned int, 1, real);
-        THCudaCheck(cudaGetLastError());
-        break;
-      case 2:
-        RUN(unsigned int, 2, real);
-        THCudaCheck(cudaGetLastError());
-        break;
-      case 3:
-        RUN(unsigned int, 3, real);
-        THCudaCheck(cudaGetLastError());
-        break;
-      default:
-        RUN(unsigned int, -1, real);
-        THCudaCheck(cudaGetLastError());
-        break;
+      // Specialize for a small number of dimensions.
+      switch (indexInfo.dims) {
+        case 1:
+          RUN(unsigned int, 1, real);
+          THCudaCheck(cudaGetLastError());
+          break;
+        case 2:
+          RUN(unsigned int, 2, real);
+          THCudaCheck(cudaGetLastError());
+          break;
+        case 3:
+          RUN(unsigned int, 3, real);
+          THCudaCheck(cudaGetLastError());
+          break;
+        default:
+          RUN(unsigned int, -1, real);
+          THCudaCheck(cudaGetLastError());
+          break;
+      }
+    } else {
+      TensorInfo<real, uint64_t> tensorInfo =
+        getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
+      TensorInfo<real, uint64_t> srcInfo =
+        getTensorInfo<real, THCTensor, uint64_t>(state, src);
+      TensorInfo<int64_t, uint64_t> indexInfo =
+        getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
+      RUN(uint64_t, -1, real);
+      THCudaCheck(cudaGetLastError());
     }
-  } else {
-    TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
-    TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<real, THCTensor, uint64_t>(state, src);
-    TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
-    RUN(uint64_t, -1, real);
-    THCudaCheck(cudaGetLastError());
   }
 
   if (oldTensor) {
@@ -107,14 +109,14 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 2,
+  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor__nDimension(state, index) == THCTensor_(_nDimension)(state, src), 3,
+  THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 3,
              "Index tensor must have same dimensions as input tensor");
-  THArgCheck(THCTensor_(_nDimension)(state, src) == THCTensor_(_nDimension)(state, tensor), 4,
+  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
 
-  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
     int64_t indexSizeD = THCudaLongTensor_size(state, index, d);
     if (d != dim) {
       THArgCheck(indexSizeD <= THCTensor_(size)(state, tensor, d), 3,
@@ -126,7 +128,7 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
                THCudaLongTensor_sizeDesc(state, index).str, THCTensor_(sizeDesc)(state, src).str);
   }
 
-  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
@@ -142,40 +144,42 @@ void THCTensor_(scatter)(THCState* state, THCTensor *tensor, int dim, THCudaLong
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
 
-  if (THCTensor_canUse32BitIndexMath(state, tensor) &&
-      THCTensor_canUse32BitIndexMath(state, src) &&
-      THCTensor_canUse32BitIndexMath(state, index)) {
-    TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
-    TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<real, THCTensor, unsigned int>(state, src);
-    TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
+  if (totalElements > 0) {
+    if (THCTensor_canUse32BitIndexMath(state, tensor) &&
+        THCTensor_canUse32BitIndexMath(state, src) &&
+        THCTensor_canUse32BitIndexMath(state, index)) {
+      TensorInfo<real, unsigned int> tensorInfo =
+        getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
+      TensorInfo<real, unsigned int> srcInfo =
+        getTensorInfo<real, THCTensor, unsigned int>(state, src);
+      TensorInfo<int64_t, unsigned int> indexInfo =
+        getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
-    // Specialize for a small number of dimensions.
-    switch (indexInfo.dims) {
-      case 1:
-        RUN(unsigned int, 1, real);
-        break;
-      case 2:
-        RUN(unsigned int, 2, real);
-        break;
-      case 3:
-        RUN(unsigned int, 3, real);
-        break;
-      default:
-        RUN(unsigned int, -1, real);
-        break;
+      // Specialize for a small number of dimensions.
+      switch (indexInfo.dims) {
+        case 1:
+          RUN(unsigned int, 1, real);
+          break;
+        case 2:
+          RUN(unsigned int, 2, real);
+          break;
+        case 3:
+          RUN(unsigned int, 3, real);
+          break;
+        default:
+          RUN(unsigned int, -1, real);
+          break;
+      }
+    } else {
+      TensorInfo<real, uint64_t> tensorInfo =
+        getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
+      TensorInfo<real, uint64_t> srcInfo =
+        getTensorInfo<real, THCTensor, uint64_t>(state, src);
+      TensorInfo<int64_t, uint64_t> indexInfo =
+        getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
+
+      RUN(uint64_t, -1, real)
     }
-  } else {
-    TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
-    TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<real, THCTensor, uint64_t>(state, src);
-    TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
-
-    RUN(uint64_t, -1, real)
   }
 
   if (oldTensor) {
@@ -197,25 +201,26 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, tensor, src));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 2,
+  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor__nDimension(state, index) == THCTensor_(_nDimension)(state, src), 3,
+  THArgCheck(THCudaLongTensor_nDimension(state, index) == THCTensor_(nDimension)(state, src), 3,
              "Index tensor must have same dimensions as input tensor");
-  THArgCheck(THCTensor_(_nDimension)(state, src) == THCTensor_(_nDimension)(state, tensor), 4,
+  THArgCheck(THCTensor_(nDimension)(state, src) == THCTensor_(nDimension)(state, tensor), 4,
              "Input tensor must have same dimensions as output tensor");
-  THLongStorage *indexDims = THCudaLongTensor_newSizeOf(state, index);
-  THArgCheck(THCTensor_(isSize)(state, src, indexDims), 3,
-             "Index tensor must have the same size as input tensor.");
-  THLongStorage_free(indexDims);
 
-  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
+    int64_t indexSizeD = THCudaLongTensor_size(state, index, d);
     if (d != dim) {
-      THArgCheck(THCTensor_(size)(state, tensor, d) == THCTensor_(size)(state, src, d), 4,
-                 "Input tensor must have same size as output tensor apart from the specified dimension");
+      THArgCheck(indexSizeD <= THCTensor_(size)(state, tensor, d), 3,
+                 "Index tensor must not have larger size than output tensor apart from the specified dimension %d, but got index %s output %s",
+                 dim, THCudaLongTensor_sizeDesc(state, index).str, THCTensor_(sizeDesc)(state, tensor).str);
     }
+    THArgCheck(indexSizeD <= THCTensor_(size)(state, src, d), 3,
+               "Index tensor must not have larger size than input tensor, but got index %s input %s",
+               THCudaLongTensor_sizeDesc(state, index).str, THCTensor_(sizeDesc)(state, src).str);
   }
 
-  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);
@@ -231,40 +236,42 @@ void THCTensor_(scatterAdd)(THCState* state, THCTensor *tensor, int dim, THCudaL
     tensor = THCTensor_(newContiguous)(state, tensor);
   }
 
-  if (THCTensor_canUse32BitIndexMath(state, tensor) &&
-      THCTensor_canUse32BitIndexMath(state, src) &&
-      THCTensor_canUse32BitIndexMath(state, index)) {
-    TensorInfo<real, unsigned int> tensorInfo =
-      getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
-    TensorInfo<real, unsigned int> srcInfo =
-      getTensorInfo<real, THCTensor, unsigned int>(state, src);
-    TensorInfo<int64_t, unsigned int> indexInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
+  if (totalElements > 0) {
+    if (THCTensor_canUse32BitIndexMath(state, tensor) &&
+        THCTensor_canUse32BitIndexMath(state, src) &&
+        THCTensor_canUse32BitIndexMath(state, index)) {
+      TensorInfo<real, unsigned int> tensorInfo =
+        getTensorInfo<real, THCTensor, unsigned int>(state, tensor);
+      TensorInfo<real, unsigned int> srcInfo =
+        getTensorInfo<real, THCTensor, unsigned int>(state, src);
+      TensorInfo<int64_t, unsigned int> indexInfo =
+        getTensorInfo<int64_t, THCudaLongTensor, unsigned int>(state, index);
 
-    // Specialize for a small number of dimensions.
-    switch (indexInfo.dims) {
-      case 1:
-        RUN(unsigned int, 1, real);
-        break;
-      case 2:
-        RUN(unsigned int, 2, real);
-        break;
-      case 3:
-        RUN(unsigned int, 3, real);
-        break;
-      default:
-        RUN(unsigned int, -1, real);
-        break;
+      // Specialize for a small number of dimensions.
+      switch (indexInfo.dims) {
+        case 1:
+          RUN(unsigned int, 1, real);
+          break;
+        case 2:
+          RUN(unsigned int, 2, real);
+          break;
+        case 3:
+          RUN(unsigned int, 3, real);
+          break;
+        default:
+          RUN(unsigned int, -1, real);
+          break;
+      }
+    } else {
+      TensorInfo<real, uint64_t> tensorInfo =
+        getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
+      TensorInfo<real, uint64_t> srcInfo =
+        getTensorInfo<real, THCTensor, uint64_t>(state, src);
+      TensorInfo<int64_t, uint64_t> indexInfo =
+        getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
+
+      RUN(uint64_t, -1, real)
     }
-  } else {
-    TensorInfo<real, uint64_t> tensorInfo =
-      getTensorInfo<real, THCTensor, uint64_t>(state, tensor);
-    TensorInfo<real, uint64_t> srcInfo =
-      getTensorInfo<real, THCTensor, uint64_t>(state, src);
-    TensorInfo<int64_t, uint64_t> indexInfo =
-      getTensorInfo<int64_t, THCudaLongTensor, uint64_t>(state, index);
-
-    RUN(uint64_t, -1, real)
   }
 
   if (oldTensor) {
@@ -288,13 +295,13 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 1, tensor));
   THCAssertSameGPU(THCudaLongTensor_checkGPU(state, 1, index));
 
-  THArgCheck(dim >= 0 && dim < THCTensor_(_nDimension)(state, tensor), 2,
+  THArgCheck(dim >= 0 && dim < THCTensor_(nDimension)(state, tensor), 2,
              "Index dimension is out of bounds");
-  THArgCheck(THCudaLongTensor__nDimension(state, index) ==
-             THCTensor_(_nDimension)(state, tensor), 3,
+  THArgCheck(THCudaLongTensor_nDimension(state, index) ==
+             THCTensor_(nDimension)(state, tensor), 3,
              "Index tensor must have same dimensions as output tensor");
 
-  for (int d = 0; d < THCTensor_(_nDimension)(state, tensor); d++) {
+  for (int d = 0; d < THCTensor_(nDimension)(state, tensor); d++) {
     if (d != dim) {
       THArgCheck(THCTensor_(size)(state, tensor, d) ==
                  THCudaLongTensor_size(state, index, d), 4,
@@ -302,7 +309,7 @@ THCTensor_(scatterFill)(THCState* state, THCTensor *tensor,
     }
   }
 
-  THArgCheck(THCTensor_(_nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
+  THArgCheck(THCTensor_(nDimension)(state, tensor) <= MAX_CUTORCH_DIMS,
              1, CUTORCH_DIM_WARNING);
 
   const ptrdiff_t totalElements = THCudaLongTensor_nElement(state, index);

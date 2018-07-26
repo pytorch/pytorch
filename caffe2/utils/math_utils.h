@@ -63,14 +63,25 @@ bool IsRowwiseBroadcastBinaryOp(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
-    int* pivot,
+    int* rows,
+    int* cols,
     bool* broadcast_1st);
 
 bool IsColwiseBroadcastBinaryOp(
     const int ndim,
     const int* A_dims,
     const int* B_dims,
-    int* pivot,
+    int* rows,
+    int* cols,
+    bool* broadcast_1st);
+
+bool IsMiddleBroadcastBinaryOp(
+    const int ndim,
+    const int* A_dims,
+    const int* B_dims,
+    int* pre,
+    int* mid,
+    int* nxt,
     bool* broadcast_1st);
 
 void ComputeTransposeAxesForReduceOp(
