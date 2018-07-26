@@ -448,21 +448,9 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         err() << "argument '" << schema.arguments[i].name << "' not provided.\n" << loc;
         return at::nullopt;
       }
-      // There's little point in instantiating nodes of NumberType, since they will
-      // always emit a value of a concrete type. That's why we specialize them here.
-      auto arg_type = schema.arguments[i].type;
-      if (*arg_type == *NumberType::get()) {
-        if ((*default_value).isDouble()) {
-          arg_type = FloatType::get();
-        } else if ((*default_value).isInt()) {
-          arg_type = IntType::get();
-        } else {
-          throw std::runtime_error("Unexpected default value type. File a bug report.");
-        }
-      }
       positional_inputs[i] = NamedValue(
           loc, i,
-          insertConstant(graph, *default_value, loc)->setType(arg_type));
+          insertConstant(graph, *default_value, loc));
     }
 
     // check input types

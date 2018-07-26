@@ -72,11 +72,10 @@ def _get_const(value, desc, arg_name):
 
 def parse_args(*arg_descriptors):
     def decorator(fn):
-        def wrapper(*args):
-            # + 1 for the graph argument
-            assert 1 + len(arg_descriptors) == len(args)
-            args = [args[0]] + [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args[1:], arg_descriptors)]
-            return fn(*args)
+        def wrapper(g, *args):
+            assert len(arg_descriptors) == len(args)
+            args = [_parse_arg(arg, arg_desc) for arg, arg_desc in zip(args, arg_descriptors)]
+            return fn(g, *args)
         # In Python 2 functools.wraps chokes on partially applied functions, so we need this as a workaround
         try:
             wrapper = wraps(fn)(wrapper)
@@ -269,7 +268,6 @@ def sigmoid(g, self):
     return g.op("Sigmoid", self)
 
 
-# TODO (apaszke): FIX FIX FIX FIX
 def _reduce_op_symbolic(onnx_op_name):
     def symbolic(g, self, dim=None, keepdim=None):
         params = {}

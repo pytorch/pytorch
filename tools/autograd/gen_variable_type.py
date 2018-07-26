@@ -382,20 +382,6 @@ def emit_body(declaration):
             return ('', '')
 
         local = {}
-
-        def prepare_arg(arg):
-            if arg['simple_type'] == 'Tensor':
-                return 'trace_inputs.push_back({});'.format(arg['name'])
-            elif arg['simple_type'] == 'TensorList':
-                return 'trace_inputs.insert(trace_inputs.end(), {n}.begin(), {n}.end());'.format(n=arg['name'])
-            elif arg['simple_type'] == 'IntList':
-                return 'trace_inputs.push_back(make_variable(getIntListTensor("{n}", {n}), false));'.format(
-                    n=arg['name'])
-            elif arg['simple_type'] in {'bool', 'double', 'int64_t', 'Scalar'}:
-                return 'trace_inputs.push_back(make_variable(jit::as_tensor({}), false));'.format(arg['name'])
-            else:
-                return 'throw std::runtime_error("Unsupported argument type found in the tracer: {}");'.format(
-                    arg['simple_type'])
         local['trace_inputs'] = sum([['"{}"'.format(arg['name']), arg['name']] for arg in declaration['arguments']], [])
 
         # Record inplace operations as out-of-place operations (e.g.,

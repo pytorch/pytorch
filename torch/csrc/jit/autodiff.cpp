@@ -79,7 +79,6 @@ bool isDifferentiable(Node * n) {
 
   // linear blocks may appear as inputs to graph executors, but they are removed
   // before differentiation occurs
-  // TODO (apaszke): is this really needed?
   if (n->kind() == prim::GradOf) {
     auto body = n->blocks().at(0);
     return std::all_of(
@@ -411,6 +410,11 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
   return ReverseDetails(std::move(grad_map), std::move(requires_grad_set), reverse_block);
 }
 
+// Any temporary value from the primal graphs needs to be captured for later use in the
+// reverse graph, to avoid costly recomputations. However, a lot of the nodes we have
+// in our graphs are simply constants, which are cheap to execute and replicate, and so
+// it's better to just copy them into the reverse graph, without polluting the output
+// lists unnecessarily.
 static void liftConstants(Gradient& grad_desc, ReverseDetails& rev_info) {
   static const auto err = [](Value*) -> Value* {
     throw std::runtime_error("unexpected input");

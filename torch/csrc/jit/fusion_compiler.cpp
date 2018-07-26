@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/constants.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/variable_tensor_functions.h"
@@ -289,12 +290,12 @@ std::string encodeRHS(Node * n) {
   };
 
   if (n->kind() == prim::Constant) {
-    JIT_ASSERT(n->output()->type()->isSubtypeOf(*NumberType::get()));
-    if (n->kindOf(attr::value) == AttributeKind::f) {
-      return scalarValue(n->f(attr::value));
+    auto val = toIValue(n->output()).value();
+    if (val.isDouble()) {
+      return scalarValue(val.toDouble());
     } else {
-      JIT_ASSERT(n->kindOf(attr::value) == AttributeKind::i);
-      return scalarValue(n->i(attr::value));
+      JIT_ASSERT(val.isInt());
+      return scalarValue(val.toInt());
     }
   }
 
