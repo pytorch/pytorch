@@ -81,7 +81,7 @@ class GatherByKeyOp : public Operator<CPUContext> {
         if (currentShard != -1) {
           auto inStartOffset = inStartOffsets_[currentShard];
           auto numItems = i - outStartOffset;
-          context_.template CopyItems<CPUContext, CPUContext>(
+          context_.CopyItemsSameDevice(
               meta,
               numItems * blockSize,
               inputDatas_[currentShard] +
@@ -183,7 +183,7 @@ class PartitionOpBase : public Operator<CPUContext> {
         auto bs = block_sizes_[i];
         auto meta = metas_[i];
         // special case for small bs?
-        context_.template CopyItems<CPUContext, CPUContext>(
+        context_.CopyItemsSameDevice(
             meta,
             bs,
             static_cast<const char*>(raw_datas_[i]) + p * bs * meta.itemsize(),

@@ -7,8 +7,8 @@
 #include <ATen/ATen.h>
 #include "ATen/Utils.h"
 
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/assertions.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/interned_strings.h>
 
 namespace torch { namespace jit {
 

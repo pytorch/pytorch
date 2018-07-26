@@ -30,6 +30,7 @@ cmake --version
 pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
+  export MAX_JOBS=4
   export HCC_AMDGPU_TARGET=gfx900
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8

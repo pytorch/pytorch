@@ -15,11 +15,7 @@ using namespace nom;
 // $$ W' = W\frac{s}{\sqrt{\sigma + \epsilon}}$$
 // $$ b' = (b_{conv} - m)\frac{s}{\sqrt{\sigma + \epsilon}} + b_{bn}$$
 bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
-  for (auto node_pair : repr::nn::dataIterator<repr::Conv>(nn->dataFlow)) {
-    repr::NNGraph::NodeRef convNode;
-    repr::Conv* conv;
-    std::tie(conv, convNode) = node_pair;
-
+  for (auto convNode : repr::nn::nodeIterator<repr::Conv>(nn->dataFlow)) {
     auto output = repr::nn::getOutputs(convNode).front();
     auto consumers = repr::nn::getConsumers(output);
     if (consumers.size() != 1) {
@@ -44,10 +40,10 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-#define EXPOSE_TENSOR_DATA(name, index, inputs)                              \
-  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                    \
-  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");           \
-  auto name##Tensor = ws->GetBlob(name->getName())->GetMutable<TensorCPU>(); \
+#define EXPOSE_TENSOR_DATA(name, index, inputs)                            \
+  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                  \
+  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");         \
+  auto name##Tensor = ws->GetBlob(name->getName())->GetMutableTensor(CPU); \
   auto name##Data = name##Tensor->mutable_data<float>();
 
     EXPOSE_TENSOR_DATA(filter, 1, convInputs);

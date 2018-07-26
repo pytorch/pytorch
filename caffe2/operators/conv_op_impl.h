@@ -19,9 +19,9 @@ namespace caffe2 {
 
 template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
-  const Tensor<Context>& X = Input(INPUT);
+  const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor<Context>* Y = Output(0);
+  Tensor* Y = Output(0);
   const int N = X.dim32(0), C = X.dim32(1);
   CAFFE_ENFORCE_EQ(X.ndim(), filter.ndim());
   const int M = filter.dim32(0);
@@ -96,7 +96,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
         N, C, HxW, M, X_data, filter_data, bias_data, Y_data);
   }
 
-  auto f = [&](Tensor<Context>* col_buffer) {
+  auto f = [&](Tensor* col_buffer) {
     col_buffer->Resize(buffer_shape);
     T* col_buffer_data = col_buffer->template mutable_data<T>();
     // Im2Col, followed by gemm.
@@ -180,9 +180,9 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNCHW() {
 // The implementations.
 template <typename T, class Context>
 bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
-  const Tensor<Context>& X = Input(INPUT);
+  const Tensor& X = Input(INPUT);
   auto& filter = Input(FILTER);
-  Tensor<Context>* Y = Output(0);
+  Tensor* Y = Output(0);
   const int N = X.dim32(0), H = X.dim32(1), W = X.dim32(2), C = X.dim32(3);
 
   CAFFE_ENFORCE_EQ(
@@ -233,7 +233,7 @@ bool ConvOp<T, Context>::RunOnDeviceWithOrderNHWC() {
     ConvPoolOpBase<Context>::template SetBiasMultiplier<T>(
         output_image_size, &bias_multiplier_);
   }
-  auto f = [&](Tensor<Context>* col_buffer) {
+  auto f = [&](Tensor* col_buffer) {
     col_buffer->Resize(
         vector<TIndex>{Y->dim32(1), Y->dim32(2), kernel_h(), kernel_w(), C});
     T* col_buffer_data = col_buffer->template mutable_data<T>();

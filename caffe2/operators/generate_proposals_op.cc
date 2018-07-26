@@ -290,8 +290,8 @@ bool GenerateProposalsOp<CPUContext>::RunOnDevice() {
   }
   out_rois->Extend(roi_counts, 50, &context_);
   out_rois_probs->Extend(roi_counts, 50, &context_);
-  float* out_rois_ptr = out_rois->mutable_data<float>();
-  float* out_rois_probs_ptr = out_rois_probs->mutable_data<float>();
+  float* out_rois_ptr = out_rois->template mutable_data<float>();
+  float* out_rois_probs_ptr = out_rois_probs->template mutable_data<float>();
   for (int i = 0; i < num_images; i++) {
     const ERArrXXf& im_i_boxes = im_boxes[i];
     const EArrXf& im_i_probs = im_probs[i];
