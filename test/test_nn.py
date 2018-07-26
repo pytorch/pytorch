@@ -36,7 +36,7 @@ from common_cuda import TEST_CUDA, TEST_MULTIGPU, TEST_CUDNN, \
     TEST_CUDNN_VERSION
 from common_nn import NNTestCase, ModuleTest, CriterionTest, TestBase, \
     module_tests, criterion_tests, loss_reference_fns, get_reduction, \
-    get_weight, smoothl1loss_reference, kldivloss_reference
+    get_weight, smoothl1loss_reference, kldivloss_reference, ctcloss_reference
 
 
 if TEST_SCIPY:
@@ -383,6 +383,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def __init__(self, *args, **kwargs):
         super(NewCriterionTest, self).__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
+        self.check_half = kwargs.get('check_half', True)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
@@ -407,7 +408,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
         gradcheck(apply_fn, inputs)
         gradgradcheck(apply_fn, inputs)
 
-    def test_cuda(self, test_case, dtype=None):
+    def test_cuda(self, test_case, dtype=None, extra_args=None):
         def convert_dtype(obj, dtype, requires_grad=False):
             if isinstance(obj, torch.Tensor):
                 return torch.tensor(obj.data, dtype=dtype, requires_grad=requires_grad)
@@ -447,13 +448,13 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
                 # Loss modules with weights require consistent input/module weight types
                 cpu_module = self.constructor(*self.constructor_args)
 
-            cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target)
-            gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target)
+            cpu_output = test_case._forward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
+            gpu_output = test_case._forward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             # dtype can be None, so set precision in this way instead of a precision map
             test_case.assertEqual(cpu_output, gpu_output, 1e-1 if dtype == torch.half else 4e-4)
 
-            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target)
-            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target)
+            cpu_gradInput = test_case._backward_criterion(cpu_module, cpu_input, cpu_target, extra_args=extra_args)
+            gpu_gradInput = test_case._backward_criterion(gpu_module, gpu_input, gpu_target, extra_args=extra_args)
             test_case.assertEqual(cpu_gradInput, gpu_gradInput, 1e-1 if dtype == torch.half else 4e-4)
         except NotImplementedError:
             pass
@@ -465,6 +466,9 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
     def constructor_args(self):
         return self._get_arg('constructor_args', False)
 
+    @property
+    def extra_args(self):
+        return self._get_arg('extra_args', False)
 
 class TestNN(NNTestCase):
     _do_cuda_memory_leak_check = True
@@ -479,20 +483,24 @@ class TestNN(NNTestCase):
             return None
         return input.grad.data
 
-    def _forward_criterion(self, criterion, input, target):
+    def _forward_criterion(self, criterion, input, target, extra_args=None):
+        if extra_args is None:
+            extra_args = tuple()
         if isinstance(input, tuple):
-            args = input + (target,)
+            args = input + (target,) + extra_args
             output = criterion(*args)
         else:
-            output = criterion(input, target)
+            output = criterion(input, target, *extra_args)
         return output.item()
 
-    def _backward_criterion(self, criterion, input, target, gradOutput=None):
+    def _backward_criterion(self, criterion, input, target, gradOutput=None, extra_args=None):
+        if extra_args is None:
+            extra_args = tuple()
         input_tuple = input if isinstance(input, tuple) else (input,)
         for i in input_tuple:
             if i.grad is not None:
                 i.grad.data.zero_()
-        args = input_tuple + (target,)
+        args = input_tuple + (target,) + extra_args
         if gradOutput is None:
             gradOutput = torch.ones(())
         criterion(*args).backward(gradOutput.type_as(input_tuple[0]))
@@ -5998,13 +6006,14 @@ def add_test(test, decorator=None):
     # With dtype enable, it's good enough to test against three floating types
     if 'dtype' in get_function_arglist(test.test_cuda):
         add(cuda_test_name + '_float', lambda self,
-            test=test: test.test_cuda(self, dtype=torch.float))
+            test=test: test.test_cuda(self, dtype=torch.float, extra_args=test.extra_args))
         add(cuda_test_name + '_double', lambda self,
-            test=test: test.test_cuda(self, dtype=torch.double))
-        add(cuda_test_name + '_half', lambda self,
-            test=test: test.test_cuda(self, dtype=torch.half))
+            test=test: test.test_cuda(self, dtype=torch.double, extra_args=test.extra_args))
+        if getattr(test, 'check_half', True):
+            add(cuda_test_name + '_half', lambda self,
+                test=test: test.test_cuda(self, dtype=torch.half, extra_args=test.extra_args))
     else:
-        add(cuda_test_name, lambda self, test=test: test.test_cuda(self))
+        add(cuda_test_name, lambda self, test=test: test.test_cuda(self, extra_args=test.extra_args))
 
 
 def wrap_functional(fn, **kwargs):
@@ -6163,6 +6172,19 @@ new_criterion_tests = [
         desc='weights',
         check_sum_reduction=True,
         check_gradgrad=False,
+    ),
+    dict(
+        module_name='CTCLoss',
+        constructor_args=(0,), # blank=0
+        extra_args=([50, 50, 50], [30, 25, 20]), # input_lengths, target_lengths
+        input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
+        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.long),
+        reference_fn=lambda i, t, il, tl, m:
+            ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
+        desc='ctc',
+        check_sum_reduction=True,
+        check_gradgrad=False,
+        check_half=False,
     ),
 ]
 
