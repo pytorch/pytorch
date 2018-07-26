@@ -54,13 +54,13 @@ struct Method {
     }
   }
 
-  variable_tensor_list run(variable_tensor_list && inputs) {
-    for(auto tp : member_inputs) {
-      inputs.push_back(*tp);
+  void run(Stack & stack) {
+    for(at::Tensor* tp : member_inputs) {
+      stack.push_back(*tp);
     }
-    return get_executor().run(std::move(inputs));
+    get_executor().run(stack);
   }
-  std::shared_ptr<Graph> graph_for(const variable_tensor_list& inputs) {
+  std::shared_ptr<Graph> graph_for(const Stack& inputs) {
     return get_executor().graphFor(inputs);
   }
   std::shared_ptr<Graph> graph() const {
@@ -95,12 +95,15 @@ struct Method {
 
   std::shared_ptr<Graph> propagate_shapes(std::vector<at::Tensor> inputs, bool with_grad=false) {
     auto retval = graph_->copy();
-    for (auto inp : member_inputs) {
-      inputs.push_back(*inp);
+    Stack stack;
+    stack.reserve(inputs.size() + member_inputs.size());
+    for (at::Tensor & i : inputs) {
+      stack.emplace_back(std::move(i));
     }
-    PropagateInputShapes(
-      *retval,
-      ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+    for (at::Tensor* inp : member_inputs) {
+      stack.push_back(*inp);
+    }
+    PropagateInputShapes(*retval, ArgumentSpec(with_grad, std::move(stack)));
     return retval;
   }
 
@@ -110,8 +113,7 @@ struct Method {
       inputs.push_back(*inp);
     }
     if (propagate) {
-      auto inputs_copy = inputs;
-      PropagateInputShapes(*retval, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs_copy))));
+      PropagateInputShapes(*retval, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
     }
     JIT_ASSERT(retval->inputs().size() == inputs.size());
     for (size_t i=0; i < retval->inputs().size(); ++i) {

@@ -25,8 +25,6 @@ namespace onnx {
 
 namespace {
 
-constexpr static int kKnownOpsetVersion = 6;
-
 bool AlmostEqual(double a, double b) {
   constexpr static double kEps = 1e-15;
   return (fabs(a - b) < kEps);
@@ -367,17 +365,19 @@ Caffe2Backend::get_special_operators() const {
 
 Caffe2Ops Caffe2Backend::CreateArgMaxMin(
     OnnxNode* onnx_node,
-    int opset_version) {
+    const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
   if (!attributes.HasAttribute("axis")) {
     auto* attr = attributes.AddRewrittenAttribute("axis");
     attr->set_i(0);
   }
-  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
-Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+Caffe2Ops Caffe2Backend::CreateCast(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 
   auto onnx_dtype =
       onnx_node->attributes.get<int64_t>("to", TensorProto::UNDEFINED);
@@ -443,7 +443,7 @@ Caffe2Ops Caffe2Backend::CreateCast(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateConstant(
     OnnxNode* onnx_node,
-    int opset_version) {
+    const ConversionContext& ctx) {
   CAFFE_ENFORCE_EQ(onnx_node->node.output_size(), 1);
 
   Caffe2Ops ret;
@@ -486,7 +486,7 @@ Caffe2Ops Caffe2Backend::CreateConstant(
 //  differently.
 Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
     OnnxNode* onnx_node,
-    int opset_version) {
+    const ConversionContext& ctx) {
   const auto& node = onnx_node->node;
   auto& attributes = onnx_node->attributes;
   if (node.op_type().find("Global") == 0) {
@@ -512,16 +512,18 @@ Caffe2Ops Caffe2Backend::CreateConvPoolOpBase(
     }
   }
 
-  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
-Caffe2Ops Caffe2Backend::CreatePadPool(OnnxNode* onnx_node, int opset_version) {
+Caffe2Ops Caffe2Backend::CreatePadPool(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
   auto& node = onnx_node->node;
   auto& attributes = onnx_node->attributes;
   Caffe2Ops ret;
   // Pad
   bool padding = false;
-  const std::string pad_name = opset_version < 2 ? "paddings" : "pads";
+  const std::string pad_name = ctx.opset_version() < 2 ? "paddings" : "pads";
   const auto pad_input = dummy_->NewDummyName();
   if (attributes.HasAttribute("count_include_pad") &&
       attributes.HasAttribute(pad_name)) {
@@ -561,7 +563,7 @@ Caffe2Ops Caffe2Backend::CreatePadPool(OnnxNode* onnx_node, int opset_version) {
     }
   }
   // Pool
-  auto c2_ops = Caffe2Backend::CreateConvPoolOpBase(onnx_node, opset_version);
+  auto c2_ops = Caffe2Backend::CreateConvPoolOpBase(onnx_node, ctx);
   auto* pool_op = c2_ops.ops.Mutable(0);
   if (padding) {
     pool_op->set_input(0, pad_input);
@@ -572,8 +574,10 @@ Caffe2Ops Caffe2Backend::CreatePadPool(OnnxNode* onnx_node, int opset_version) {
   return ret;
 }
 
-Caffe2Ops Caffe2Backend::CreateReshape(OnnxNode* onnx_node, int opset_version) {
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+Caffe2Ops Caffe2Backend::CreateReshape(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
   op->add_output(dummy_->NewDummyName());
@@ -583,7 +587,7 @@ Caffe2Ops Caffe2Backend::CreateReshape(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateReciprocal(
     OnnxNode* onnx_node,
-    int /*opset_version*/) {
+    const ConversionContext& ctx) {
   const auto& node = onnx_node->node;
   if (node.input_size() != 1 || node.output_size() != 1) {
     CAFFE_THROW("Caffe2 Reciprocal should have 1 input and 1 output");
@@ -599,7 +603,9 @@ Caffe2Ops Caffe2Backend::CreateReciprocal(
   return ret;
 }
 
-Caffe2Ops Caffe2Backend::CreateGather(OnnxNode* onnx_node, int opset_version) {
+Caffe2Ops Caffe2Backend::CreateGather(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
   const auto& node = onnx_node->node;
   if (node.input_size() < 2 || node.output_size() < 1) {
     CAFFE_THROW("Caffe2 Gather should have 2 inputs and 1 output");
@@ -629,7 +635,9 @@ Caffe2Ops Caffe2Backend::CreateGather(OnnxNode* onnx_node, int opset_version) {
   return ret;
 }
 
-Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
+Caffe2Ops Caffe2Backend::CreateGemm(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
   const auto& node = onnx_node->node;
   if (node.input_size() < 3 || node.output_size() < 1) {
     CAFFE_THROW("Caffe2 Gemm should have 3 inputs and 1 output");
@@ -667,7 +675,22 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
   auto trans_a = onnx_node->attributes.get<int64_t>("transA", 0L);
   auto trans_b = onnx_node->attributes.get<int64_t>("transB", 0L);
   auto broadcast = onnx_node->attributes.get<int64_t>("broadcast", 0L);
-  if ((!trans_a) && trans_b && broadcast) {
+
+  bool use_fc = false;
+  if ((!trans_a) && trans_b) {
+    if (broadcast) {
+      use_fc = true;
+    } else {
+      const auto input_c_vi_iter = ctx.value_infos().find(node.input(2));
+      if (input_c_vi_iter != ctx.value_infos().end() &&
+          input_c_vi_iter->second.type().tensor_type().shape().dim_size() ==
+              1) {
+        use_fc = true;
+      }
+    }
+  }
+
+  if (use_fc) {
     auto* c2_op = ret.ops.Add();
     BuildOperator(c2_op, "FC", {input_a, input_b, input_c}, {output});
   } else {
@@ -683,7 +706,7 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
     BuildOperator(
         c2_op, "MatMul", {input_a, input_b}, {ab}, {arg_trans_a, arg_trans_b});
     c2_op = ret.ops.Add();
-    if (opset_version >= 7) {
+    if (ctx.opset_version() >= 7) {
       BuildOperator(c2_op, "Add", {ab, input_c}, {output});
     } else {
       caffe2::Argument arg_broadcast;
@@ -696,10 +719,12 @@ Caffe2Ops Caffe2Backend::CreateGemm(OnnxNode* onnx_node, int opset_version) {
   return ret;
 }
 
-Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
+Caffe2Ops Caffe2Backend::CreatePad(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
   ::google::protobuf::RepeatedField<::google::protobuf::int64> pads;
-  std::string pad_name = opset_version < 2 ? "paddings" : "pads";
+  std::string pad_name = ctx.opset_version() < 2 ? "paddings" : "pads";
   pads = attributes
              .get<::google::protobuf::RepeatedField<::google::protobuf::int64>>(
                  pad_name);
@@ -734,14 +759,16 @@ Caffe2Ops Caffe2Backend::CreatePad(OnnxNode* onnx_node, int opset_version) {
   attr->add_ints(pads.Get(6));
   attr->add_ints(pads.Get(7));
 
-  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
 // TODO: Caffe2 Concat has an extra output. It should be only
 // used when doing training, so we should change Caffe2 to allow
 // 1 output.
-Caffe2Ops Caffe2Backend::CreateConcat(OnnxNode* onnx_node, int opset_version) {
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+Caffe2Ops Caffe2Backend::CreateConcat(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
   op->add_output(dummy_->NewDummyName());
@@ -751,7 +778,7 @@ Caffe2Ops Caffe2Backend::CreateConcat(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateLogSoftmax(
     OnnxNode* onnx_node,
-    int opset_version) {
+    const ConversionContext& ctx) {
   const auto& node = onnx_node->node;
   if (node.input_size() < 1 || node.output_size() < 1) {
     CAFFE_THROW("LogSoftmax should have 1 input and 1 output");
@@ -771,8 +798,10 @@ Caffe2Ops Caffe2Backend::CreateLogSoftmax(
   return ret;
 }
 
-Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
-  auto op_tmp = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+Caffe2Ops Caffe2Backend::CreateSlice(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto op_tmp = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   CAFFE_ENFORCE_EQ(op_tmp.ops.size(), 1);
   auto* op = op_tmp.ops.Mutable(0);
   std::unordered_map<std::string, caffe2::Argument*> args;
@@ -922,40 +951,42 @@ Caffe2Ops Caffe2Backend::CreateSlice(OnnxNode* onnx_node, int opset_version) {
 
 Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     OnnxNode* onnx_node,
-    int opset_version) {
-  if (opset_version < 6) {
+    const ConversionContext& ctx) {
+  if (ctx.opset_version() < 6) {
     auto& attributes = onnx_node->attributes;
     attributes.remove("consumed_inputs");
   }
 
-  if (opset_version >= 7) {
+  if (ctx.opset_version() >= 7) {
     auto& attributes = onnx_node->attributes;
     auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
   }
 
-  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
 Caffe2Ops Caffe2Backend::CreateSplit(
     OnnxNode* onnx_node,
-    int opset_version) {
+    const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
   if (!attributes.HasAttribute("axis")) {
     auto* attr = attributes.AddRewrittenAttribute("axis");
     attr->set_i(0);
   }
 
-  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
-Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
+Caffe2Ops Caffe2Backend::CreateMatMul(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
   const auto& node = onnx_node->node;
   if (node.input_size() != 2) {
     CAFFE_THROW("MatMul should have 2 inputs");
   }
 
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   CAFFE_ENFORCE_EQ(c2_op.ops.size(), 1);
   auto* op = c2_op.ops.Mutable(0);
   auto* broadcast_arg = op->add_arg();
@@ -965,10 +996,12 @@ Caffe2Ops Caffe2Backend::CreateMatMul(OnnxNode* onnx_node, int opset_version) {
   return c2_op;
 }
 
-Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) {
+Caffe2Ops Caffe2Backend::CreateUpsample(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
   auto& attributes = onnx_node->attributes;
   attributes.remove("mode");
-  if (opset_version >= 7) {
+  if (ctx.opset_version() >= 7) {
     const auto& scales = attributes.get<::google::protobuf::RepeatedField<float>>("scales");
     if (scales.size() != 4) {
       CAFFE_THROW("The scales argument should have size 4");
@@ -976,7 +1009,7 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
       CAFFE_THROW("The first two elements in the scales argument must be 1");
     }
     attributes.remove("scales");
-    auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+    auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
     auto* op = c2_op.ops.Mutable(0);
     auto* c2_height = op->add_arg();
     c2_height->set_name("height_scale");
@@ -986,21 +1019,25 @@ Caffe2Ops Caffe2Backend::CreateUpsample(OnnxNode* onnx_node, int opset_version) 
     c2_width->set_f(scales.Get(3));
     return c2_op;
   }
-  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
-Caffe2Ops Caffe2Backend::CreateDropout(OnnxNode* onnx_node, int opset_version) {
-  if (opset_version >= 7) {
+Caffe2Ops Caffe2Backend::CreateDropout(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  if (ctx.opset_version() >= 7) {
     auto& attributes = onnx_node->attributes;
     auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
   }
 
-  return CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+  return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
 }
 
-Caffe2Ops Caffe2Backend::CreateLRN(OnnxNode* onnx_node, int opset_version) {
-  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+Caffe2Ops Caffe2Backend::CreateLRN(
+    OnnxNode* onnx_node,
+    const ConversionContext& ctx) {
+  auto c2_op = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   const auto& attributes = onnx_node->attributes;
   if (!attributes.HasAttribute("alpha")) {
       auto* arg = c2_op.ops.Mutable(0)->add_arg();
@@ -1052,7 +1089,7 @@ Caffe2Backend::AllNamesInGraph(const GraphProto &graph) {
 //  and then fixing things up further.
 Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
     OnnxNode* onnx_node,
-    int opset_version) {
+    const ConversionContext& ctx) {
   Caffe2Ops ret;
   auto* c2_op = ret.ops.Add();
 
@@ -1064,12 +1101,12 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
   const auto onnx_op_type = node.op_type();
   auto broken_version = caffe2::get_default(
       get_broken_operators(), onnx_op_type, std::numeric_limits<int>::max());
-  if (broken_version <= opset_version) {
+  if (broken_version <= ctx.opset_version()) {
     CAFFE_THROW(
         "Don't know how to translate op ",
         onnx_op_type,
         " in ONNX operator set v",
-        opset_version,
+        ctx.opset_version(),
         " (I only support prior to v",
         broken_version);
   }
@@ -1102,14 +1139,14 @@ Caffe2Ops Caffe2Backend::CommonOnnxNodeToCaffe2Ops(
 
 Caffe2Ops Caffe2Backend::ConvertNode(
     const std::string& node_str,
-    int opset_version) {
+    const ConversionContext& ctx) {
   ::google::protobuf::RepeatedPtrField<NodeProto> nodes;
   auto* n = nodes.Add();
   ParseProtoFromLargeString(node_str, n);
   ModelProto init_model;
   ModelProto pred_model;
   OnnxNode onnx_node = OnnxNode(nodes.Get(0));
-  return OnnxNodeToCaffe2Ops(init_model, pred_model, &onnx_node, opset_version);
+  return OnnxNodeToCaffe2Ops(init_model, pred_model, ctx, &onnx_node);
 }
 
 void Caffe2Backend::CheckOpSchemaArguments(
@@ -1142,14 +1179,14 @@ void Caffe2Backend::CheckOpSchemaArguments(
 Caffe2Ops Caffe2Backend::OnnxNodeToCaffe2Ops(
     const ModelProto& init_model,
     const ModelProto& pred_model,
-    OnnxNode* onnx_node,
-    int opset_version) {
+    const ConversionContext& ctx,
+    OnnxNode* onnx_node) {
   Caffe2Ops res;
   if (get_special_operators().count(onnx_node->node.op_type())) {
     res = (this->*get_special_operators().at(onnx_node->node.op_type()))(
-        onnx_node, opset_version);
+        onnx_node, ctx);
   } else {
-    res = CommonOnnxNodeToCaffe2Ops(onnx_node, opset_version);
+    res = CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);
   }
 
   for (const auto& result_op: res.ops){
@@ -1198,6 +1235,17 @@ void Caffe2Backend::OnnxToCaffe2(
   name_set.insert(name_set_pred.begin(), name_set_pred.end());
   dummy_->Reset(name_set);
 
+  ValueInfoMap graph_value_infos{};
+  for (const auto& vi : pred_model.graph().input()) {
+    graph_value_infos[vi.name()].CopyFrom(vi);
+  }
+  for (const auto& vi : pred_model.graph().output()) {
+    graph_value_infos[vi.name()].CopyFrom(vi);
+  }
+  for (const auto& vi : pred_model.graph().value_info()) {
+    graph_value_infos[vi.name()].CopyFrom(vi);
+  }
+
   size_t idx_extra = 0;
   auto converter = [&](const ModelProto& model, caffe2::NetDef* net) mutable {
     net->mutable_device_option()->CopyFrom(device_option);
@@ -1230,9 +1278,16 @@ void Caffe2Backend::OnnxToCaffe2(
               " without enough extra preconverted string");
         }
       } else {
+        ValueInfoMap value_infos{};
+        for (const auto& name : node.input()) {
+          auto iter = graph_value_infos.find(name);
+          if (iter != graph_value_infos.end()) {
+            value_infos[name].CopyFrom(iter->second);
+          }
+        }
         auto onnx_node = OnnxNode(node);
         auto c2ops = OnnxNodeToCaffe2Ops(
-            init_model, pred_model, &onnx_node, opset_version);
+            init_model, pred_model, {value_infos, opset_version}, &onnx_node);
         init_net_tmp->mutable_op()->MergeFrom(c2ops.init_ops);
         net->mutable_op()->MergeFrom(c2ops.ops);
         net->mutable_external_input()->MergeFrom(c2ops.interface_blobs);
