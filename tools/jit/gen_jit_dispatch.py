@@ -419,7 +419,9 @@ def signature(decl):
                 .replace('false', 'False') \
                 .replace('nullptr', 'None') \
                 .replace('Reduction::ElementwiseMean', 'ElementwiseMean') \
-                .replace('{}', 'None' if is_tensor_arg(arg) else '[]')
+                .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
+                .replace('{', '[') \
+                .replace('}', ']')
 
             default = default_map.get(default, default)
             decl = '{}={}'.format(decl, default)

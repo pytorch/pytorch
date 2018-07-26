@@ -293,6 +293,8 @@ view of a storage and defines numeric operations on it.
    .. automethod:: mul_
    .. automethod:: multinomial
    .. automethod:: mv
+   .. automethod:: mvlgamma
+   .. automethod:: mvlgamma_
    .. automethod:: narrow
    .. automethod:: ndimension
    .. automethod:: ne

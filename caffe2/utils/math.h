@@ -582,6 +582,16 @@ void CopyMatrix(
     TypeMeta::TypedCopy copy = nullptr);
 
 template <typename T, class Context>
+void CopyMatrix(
+    const int M,
+    const int N,
+    const T* A,
+    const int lda,
+    T* B,
+    const int ldb,
+    Context* context);
+
+template <typename T, class Context>
 void CopyVector(const int N, const T* A, T* B, Context* context);
 
 // Function uses casting from int to unsigned to compare if value of
