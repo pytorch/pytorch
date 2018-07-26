@@ -769,6 +769,15 @@ DELEGATE_CUBE_FUNCTION(std::int32_t)
 DELEGATE_CUBE_FUNCTION(std::int64_t)
 #undef DELEGATE_CUBE_FUNCTION
 
+#define DELEGATE_INV_FUNCTION(T)                                        \
+  template <>                                                           \
+  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse();\
+  }
+DELEGATE_INV_FUNCTION(float)
+DELEGATE_INV_FUNCTION(double)
+#undef DELEGATE_INV_FUNCTION
+
 #define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
   template <>                                                   \
   void Func<T, CPUContext>(                                     \

@@ -355,6 +355,17 @@ DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
     Sign,
     utils::Sign<std::int64_t>)
 
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(float, Inv, utils::Inv<float>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int32_t,
+    Inv,
+    utils::Inv<std::int32_t>)
+DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION(
+    std::int64_t,
+    Inv,
+    utils::Inv<std::int64_t>)
+
 #undef DELEGATE_SIMPLE_CUDA_UNARY_FUNCTION
 
 #define CAFFE2_SPECIALIZED_CUDA_SINCOS(T)                            \
