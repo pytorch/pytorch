@@ -367,12 +367,8 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
     res = std::get<0>(at::_ctc_loss(log_probs, targets, input_lengths, target_lengths, BLANK));
   }
   if (reduction == Reduction::ElementwiseMean) {
-    auto target_lengths_t = at::empty({static_cast<int64_t>(target_lengths.size())}, TensorOptions(at::CPU(kLong))); // we cannot use IntList directly. The tensor may outlive the function for the backward.
-    auto target_lengths_data = target_lengths_t.data<int64_t>();
-    for (int i = 0; i < target_lengths.size(); i++) {
-      target_lengths_data[i] = target_lengths[i];
-    }
-    return (res / target_lengths_t.toType(res.type())).mean();
+    auto target_lengths_t = at::tensor(target_lengths, res.options().device(at::Device(at::Device::Type::CPU)).dtype(kLong)).toType(res.type());
+    return (res / target_lengths_t).mean();
   } else if (reduction == Reduction::Sum) {
     return res.sum();
   }
