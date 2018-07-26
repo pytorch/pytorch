@@ -13,8 +13,8 @@ namespace {
 void inclusive_scan_wrapper(
     const int* length_data,
     int len_length,
-    Tensor* temp_buffer,
-    Tensor* prefix_sum_out,
+    Tensor<CUDAContext>* temp_buffer,
+    Tensor<CUDAContext>* prefix_sum_out,
     CUDAContext* context_) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -22,20 +22,19 @@ void inclusive_scan_wrapper(
       NULL,
       temp_storage_bytes,
       length_data,
-      prefix_sum_out->template mutable_data<int>(),
+      prefix_sum_out->mutable_data<int>(),
       len_length,
       context_->cuda_stream());
   // Allocate temporary storage
   auto buffer_size = (temp_storage_bytes + sizeof(int)) / sizeof(int);
   temp_buffer->Resize(buffer_size);
-  void* d_temp_storage =
-      static_cast<void*>(temp_buffer->template mutable_data<int>());
+  void* d_temp_storage = static_cast<void*>(temp_buffer->mutable_data<int>());
   // Run inclusive prefix sum
   cub::DeviceScan::InclusiveSum(
       d_temp_storage,
       temp_storage_bytes,
       length_data,
-      prefix_sum_out->template mutable_data<int>(),
+      prefix_sum_out->mutable_data<int>(),
       len_length,
       context_->cuda_stream());
 }
@@ -524,8 +523,8 @@ class CUDASparseLengthsSumOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename T, class Context = CUDAContext, bool SparseFused = true>
@@ -646,8 +645,8 @@ class CUDASparseLengthsMeanOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename T, class Context = CUDAContext, bool SparseFused = true>
@@ -780,8 +779,8 @@ class CUDASparseLengthsMaxOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename T, class Context = CUDAContext, bool SparseFused = true>
@@ -880,8 +879,8 @@ class CUDASparseLengthsWeightedSumOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename SIndex>
@@ -989,7 +988,7 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
     }
 
     SIndex K = 0;
-    context_.CopyBytesToCPU(
+    context_.CopyBytes<CUDAContext, CPUContext>(
         sizeof(SIndex), K_tensor_.template data<SIndex>(), &K);
     context_.FinishDeviceComputation();
 
@@ -1047,9 +1046,9 @@ class CUDAUnsortedSegmentSumOp : public Operator<CUDAContext> {
   }
 
  private:
-  Tensor buffer_tensor_{CUDA};
-  Tensor K_tensor_{CUDA};
-  Tensor scaling_factors_{CUDA}; // for mean
+  Tensor<CUDAContext> buffer_tensor_;
+  Tensor<CUDAContext> K_tensor_;
+  Tensor<CUDAContext> scaling_factors_; // for mean
 };
 
 template <typename SIndex>
@@ -1098,7 +1097,7 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
     auto* output = Output(0);
     auto dims = input.dims();
     SIndex K = 0;
-    context_.CopyBytesToCPU(
+    context_.template CopyBytes<Context, CPUContext>(
         sizeof(SIndex),
         indices.template data<SIndex>() + indices.size() - 1,
         &K);
@@ -1157,9 +1156,9 @@ class SortedSegmentRangeMeanOp : public Operator<Context> {
   }
 
  private:
-  Tensor segment_len_{CUDA}; // for mean
-  Tensor segment_len_prefix_sum_{CUDA};
-  Tensor prefix_buffer_{CUDA};
+  Tensor<CUDAContext> segment_len_; // for mean
+  Tensor<CUDAContext> segment_len_prefix_sum_;
+  Tensor<CUDAContext> prefix_buffer_;
 };
 
 template <typename T, typename SIndex, bool LOGEXP = false>
@@ -1202,7 +1201,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
     const int N = X.size_from_dim(1);
 
     SIndex K = 0;
-    context_.CopyBytesToCPU(
+    context_.template CopyBytes<Context, CPUContext>(
         sizeof(SIndex), I.template data<SIndex>() + I.size() - 1, &K);
 
     K += 1;
@@ -1242,7 +1241,7 @@ class SortedSegmentRangeMeanGradientOp : public Operator<Context> {
   }
 
  private:
-  Tensor segment_len_{CUDA}; // for mean
+  Tensor<CUDAContext> segment_len_; // for mean
 };
 
 REGISTER_CUDA_OPERATOR_STR(
@@ -1359,8 +1358,8 @@ class CUDASparseLengthsSumGradientWithIndicesOp : public Operator<CUDAContext> {
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename T, class Context = CUDAContext>
@@ -1438,8 +1437,8 @@ class CUDASparseLengthsMeanGradientWithIndicesOp
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename T, class Context = CUDAContext>
@@ -1527,8 +1526,8 @@ class CUDASparseLengthsWeightedSumGradientWithIndicesOp
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename T, bool ExactBlock = false>
@@ -1665,8 +1664,8 @@ class CUDALengthsMaxWithMainInputAndForwardOutputGradientOp
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 template <typename T, class Context = CUDAContext>
@@ -1793,8 +1792,8 @@ class CUDASparseLengthsIndicesInGradientWeightedSumWithMainInputGradientOp
 
  private:
   // menber field to manage memory
-  Tensor inclusive_scan_buffer_{CUDA};
-  Tensor inclusive_scan_length_buffer_{CUDA};
+  Tensor<Context> inclusive_scan_buffer_;
+  Tensor<Context> inclusive_scan_length_buffer_;
 };
 
 // Needed because name is auto-generated in segment_reduction_op.cc:224

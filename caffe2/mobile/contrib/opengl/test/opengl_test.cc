@@ -178,7 +178,7 @@ void testOpenGLCopyOps(int N, int C, int H, int W, float error, int tile_x = 1, 
   LOG(INFO) << "OPENGLCopyFrom/To Test";
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
@@ -275,7 +275,7 @@ void testOpenGLConv(int N,
             << " Op: " << glPoolOperationName[poolOp];
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     if (random_input) {
@@ -301,7 +301,7 @@ void testOpenGLConv(int N,
   }
 
   if (poolOp != AveragePool && poolOp != MaxPool) {
-    auto* t = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
     if (poolOp != ConvTranspose && poolOp != ConvTransposePRelu && poolOp != ConvTransposeRelu) {
       t->Resize(K, C, kernel_h, kernel_w);
     } else {
@@ -343,7 +343,7 @@ void testOpenGLConv(int N,
 
     // bias
     {
-      auto* t = ws.CreateBlob("b")->GetMutableTensor(CPU);
+      auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
       t->Resize(K);
       CPUContext ctx;
       if (random_input) {
@@ -367,7 +367,7 @@ void testOpenGLConv(int N,
   }
 
   if (poolOp == ConvPRelu || poolOp == ConvTransposePRelu) {
-    auto* t = ws.CreateBlob("p")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("p")->GetMutable<TensorCPU>();
     t->Resize(K);
     CPUContext ctx;
     if (random_input) {
@@ -532,7 +532,7 @@ void testOpenGLPRelu(
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     // Too noisy.
@@ -541,7 +541,7 @@ void testOpenGLPRelu(
 
   // prelu scale
   {
-    auto* t = ws.CreateBlob("p")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("p")->GetMutable<TensorCPU>();
     t->Resize(prelu_size);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
@@ -603,7 +603,7 @@ void testOpenGLRelu(int N, int C, int H, int W, int input_tile_x, int input_tile
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     // Too noisy.
@@ -664,13 +664,13 @@ void testOpenGLAdd(int N, int C, int H, int W, float error = 0.1, int input_tile
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t0 = ws.CreateBlob("X_cpu0")->GetMutableTensor(CPU);
+    auto* t0 = ws.CreateBlob("X_cpu0")->GetMutable<TensorCPU>();
     t0->Resize(N, C, H, W);
     CPUContext ctx0;
     // Too noisy.
     math::RandGaussian<float, CPUContext>(t0->size(), 0, 30, t0->mutable_data<float>(), &ctx0);
 
-    auto* t1 = ws.CreateBlob("X_cpu1")->GetMutableTensor(CPU);
+    auto* t1 = ws.CreateBlob("X_cpu1")->GetMutable<TensorCPU>();
     t1->Resize(N, C, H, W);
     CPUContext ctx1;
     // Too noisy.
@@ -750,13 +750,13 @@ void testOpenGLSub(int N, int C, int H, int W, float error = 0.1) {
 
   Workspace ws;
   {
-    auto* t0 = ws.CreateBlob("X_cpu0")->GetMutableTensor(CPU);
+    auto* t0 = ws.CreateBlob("X_cpu0")->GetMutable<TensorCPU>();
     t0->Resize(N, C, H, W);
     CPUContext ctx0;
     // Too noisy.
     math::RandGaussian<float, CPUContext>(t0->size(), 0, 30, t0->mutable_data<float>(), &ctx0);
 
-    auto* t1 = ws.CreateBlob("X_cpu1")->GetMutableTensor(CPU);
+    auto* t1 = ws.CreateBlob("X_cpu1")->GetMutable<TensorCPU>();
     t1->Resize(N, C, H, W);
     CPUContext ctx1;
     // Too noisy.
@@ -814,8 +814,7 @@ void testOpenGLConcat(int N, std::vector<int> Cs, int H, int W, bool tiling = fa
             << "H: " << H << ", W: " << W;
   Workspace ws;
   for (int i = 0; i < Cs.size(); i++) {
-    auto* t =
-        ws.CreateBlob("X_cpu" + caffe2::to_string(i))->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu" + caffe2::to_string(i))->GetMutable<TensorCPU>();
     t->Resize(N, Cs[i], H, W);
     CPUContext ctx0;
     // Too noisy.
@@ -891,7 +890,7 @@ void testOpenGLSigmoid(int N, int C, int H, int W, float error) {
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     // Too noisy.
@@ -942,7 +941,7 @@ void testOpenGLTanh(int N, int C, int H, int W, float error) {
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(t->size(), 0, 2, t->mutable_data<float>(), &ctx);
@@ -992,14 +991,14 @@ void testOpenGLMul(int N, int C, int H, int W, float error) {
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(t->size(), -10, 10, t->mutable_data<float>(), &ctx);
   }
 
   {
-    auto* t = ws.CreateBlob("B")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("B")->GetMutable<TensorCPU>();
     t->Resize(1);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(t->size(), -10, 10, t->mutable_data<float>(), &ctx);
@@ -1060,7 +1059,7 @@ void testOpenGLSoftmax(int N, int D, float error, bool tiled = false) {
   LOG(INFO) << "OpenGL Softmax Test "
             << "N: " << N << " D: " << D << " Tiled:" << tiled;
   Workspace ws;
-  auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+  auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
   {
     t->Resize(N, D);
     CPUContext ctx;
@@ -1151,7 +1150,7 @@ void testOpenGLInstanceNorm(int N, int C, int H, int W, float error) {
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     // Too noisy.
@@ -1163,7 +1162,7 @@ void testOpenGLInstanceNorm(int N, int C, int H, int W, float error) {
 
   // scale
   {
-    auto* t = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
     t->Resize(C);
     CPUContext ctx;
     for (auto i = 0; i < t->size(); ++i) {
@@ -1172,7 +1171,7 @@ void testOpenGLInstanceNorm(int N, int C, int H, int W, float error) {
   }
   // bias
   {
-    auto* t = ws.CreateBlob("b")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
     t->Resize(C);
     CPUContext ctx;
     for (auto i = 0; i < t->size(); ++i) {
@@ -1254,7 +1253,7 @@ void testOpenGLInstanceNormPRelu(int N, int C, int H, int W, float error) {
             << "C: " << C << ", H: " << H << ", W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     // Too noisy.
@@ -1266,7 +1265,7 @@ void testOpenGLInstanceNormPRelu(int N, int C, int H, int W, float error) {
 
   // scale
   {
-    auto* t = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
     t->Resize(C);
     CPUContext ctx;
     for (auto i = 0; i < t->size(); ++i) {
@@ -1275,7 +1274,7 @@ void testOpenGLInstanceNormPRelu(int N, int C, int H, int W, float error) {
   }
   // bias
   {
-    auto* t = ws.CreateBlob("b")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
     t->Resize(C);
     CPUContext ctx;
     for (auto i = 0; i < t->size(); ++i) {
@@ -1284,7 +1283,7 @@ void testOpenGLInstanceNormPRelu(int N, int C, int H, int W, float error) {
   }
   // prelu scale
   {
-    auto* t = ws.CreateBlob("p")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("p")->GetMutable<TensorCPU>();
     t->Resize(C);
     CPUContext ctx;
     math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
@@ -1385,7 +1384,7 @@ void OpenGL_speedtest(int N,
             << " C: " << C << " H: " << H << " W: " << W;
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     if (random_input) {
@@ -1399,7 +1398,7 @@ void OpenGL_speedtest(int N,
   }
 
   {
-    auto* t = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
     t->Resize(K, C, kernel_h, kernel_w);
     CPUContext ctx;
     if (random_input) {
@@ -1413,7 +1412,7 @@ void OpenGL_speedtest(int N,
   }
 
   {
-    auto* t = ws.CreateBlob("b")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
     t->Resize(K);
     CPUContext ctx;
     if (random_input) {
@@ -1479,7 +1478,7 @@ void testOpenGLPadImage(
   {
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
       t->Resize(N, C, H, W);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
@@ -1593,7 +1592,7 @@ void testOpenGLResize(int N,
   {
     Workspace ws;
     {
-      auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+      auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
       t->Resize(N, C, H, W);
       CPUContext ctx;
       math::RandGaussian<float, CPUContext>(t->size(), 0, 1, t->mutable_data<float>(), &ctx);
@@ -1675,7 +1674,7 @@ void testOpenGLPreprocess(int N, int C, int H, int W, float error) {
   LOG(INFO) << "OpenGL Preprocess Test";
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, H, W, C);
     CPUContext ctx;
     for (auto i = 0; i < t->size(); ++i) {
@@ -1684,7 +1683,7 @@ void testOpenGLPreprocess(int N, int C, int H, int W, float error) {
   }
 
   {
-    auto* t = ws.CreateBlob("mean")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("mean")->GetMutable<TensorCPU>();
     t->Resize(3);
     CPUContext ctx;
     t->mutable_data<float>()[0] = 100;
@@ -1748,7 +1747,7 @@ void testOpenGLDeprocess(int N, int C, int H, int W, float error) {
   LOG(INFO) << "OpenGLDeprocess Test";
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     for (auto i = 0; i < t->size(); ++i) {
@@ -1757,7 +1756,7 @@ void testOpenGLDeprocess(int N, int C, int H, int W, float error) {
   }
 
   {
-    auto* t = ws.CreateBlob("mean")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("mean")->GetMutable<TensorCPU>();
     t->Resize(3);
     CPUContext ctx;
     t->mutable_data<float>()[0] = 30;
@@ -1800,7 +1799,7 @@ void testOpenGLNormPlanarYUV(int N, int C, int H, int W, float error) {
   LOG(INFO) << "OpenGLNormPlanarYUV Test";
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, 3, H, W);
     CPUContext ctx;
     for (auto i = 0; i < t->size(); ++i) {
@@ -1809,7 +1808,7 @@ void testOpenGLNormPlanarYUV(int N, int C, int H, int W, float error) {
   }
 
   {
-    auto* t = ws.CreateBlob("mean")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("mean")->GetMutable<TensorCPU>();
     t->Resize(1, 3);
     CPUContext ctx;
     t->mutable_data<float>()[0] = 30;
@@ -1818,7 +1817,7 @@ void testOpenGLNormPlanarYUV(int N, int C, int H, int W, float error) {
   }
 
   {
-    auto* t = ws.CreateBlob("stdev")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("stdev")->GetMutable<TensorCPU>();
     t->Resize(1, 3);
     CPUContext ctx;
     t->mutable_data<float>()[0] = 6;
@@ -1879,7 +1878,7 @@ void OpenGL_copyops_speedtest(int N,
   LOG(INFO) << "OpenGL CopyOps Speed Test";
   Workspace ws;
   {
-    auto* t = ws.CreateBlob("X_cpu")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("X_cpu")->GetMutable<TensorCPU>();
     t->Resize(N, C, H, W);
     CPUContext ctx;
     if (random_input) {
@@ -1893,7 +1892,7 @@ void OpenGL_copyops_speedtest(int N,
   }
 
   {
-    auto* t = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("W")->GetMutable<TensorCPU>();
     t->Resize(K, C, kernel_h, kernel_w);
     CPUContext ctx;
     if (random_input) {
@@ -1907,7 +1906,7 @@ void OpenGL_copyops_speedtest(int N,
   }
 
   {
-    auto* t = ws.CreateBlob("b")->GetMutableTensor(CPU);
+    auto* t = ws.CreateBlob("b")->GetMutable<TensorCPU>();
     t->Resize(K);
     CPUContext ctx;
     if (random_input) {
@@ -1990,8 +1989,7 @@ void compareModelsForOpenGL(std::string name,
     Workspace cws;
     cws.RunNetOnce(initNet);
 
-    auto* t_cpu = cws.CreateBlob(truncatedPredictNet.external_input(0))
-                      ->GetMutableTensor(CPU);
+    auto* t_cpu = cws.CreateBlob(truncatedPredictNet.external_input(0))->GetMutable<TensorCPU>();
     if (name == "styleTransfer") {
       CAFFE_ENFORCE_EQ(input_order, "NHWC");
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");
@@ -2032,8 +2030,8 @@ void compareModelsForOpenGL(std::string name,
     Workspace mws;
     mws.RunNetOnce(initNet);
 
-    auto* t_gl = mws.CreateBlob(truncatedOpenGLPredictNet.external_input(0))
-                     ->GetMutableTensor(CPU);
+    auto* t_gl =
+        mws.CreateBlob(truncatedOpenGLPredictNet.external_input(0))->GetMutable<TensorCPU>();
     if (name == "styleTransfer") {
       CAFFE_ENFORCE_EQ(input_order, "NHWC");
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");
@@ -2115,8 +2113,7 @@ void compareBatchedToTiledModels(std::string name,
     Workspace tws;
     tws.RunNetOnce(initNet);
 
-    auto* t_batch =
-        tws.CreateBlob(bachedNet.external_input(0))->GetMutableTensor(CPU);
+    auto* t_batch = tws.CreateBlob(bachedNet.external_input(0))->GetMutable<TensorCPU>();
     if (name == "styleTransfer") {
       CAFFE_ENFORCE_EQ(input_order, "NHWC");
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");
@@ -2142,8 +2139,7 @@ void compareBatchedToTiledModels(std::string name,
     Workspace bws;
     bws.RunNetOnce(initNet);
 
-    auto* t_tiling =
-        bws.CreateBlob(tiledNet.external_input(0))->GetMutableTensor(CPU);
+    auto* t_tiling = bws.CreateBlob(tiledNet.external_input(0))->GetMutable<TensorCPU>();
     if (name == "styleTransfer") {
       CAFFE_ENFORCE_EQ(input_order, "NHWC");
       CAFFE_ENFORCE_EQ(input_type, "uint8_t");

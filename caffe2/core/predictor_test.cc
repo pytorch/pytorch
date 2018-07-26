@@ -135,7 +135,7 @@ std::unique_ptr<Blob> randomTensor(
     const std::vector<TIndex>& dims,
     CPUContext* ctx) {
   auto blob = make_unique<Blob>();
-  auto* t = blob->GetMutableTensor(CPU);
+  auto* t = blob->GetMutable<TensorCPU>();
   t->Resize(dims);
   math::RandUniform<float, CPUContext>(
       t->size(), -1.0, 1.0, t->template mutable_data<float>(), ctx);
@@ -178,7 +178,7 @@ class PredictorTest : public testing::Test {
 
 TEST_F(PredictorTest, SimpleBatchSized) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
-  Predictor::TensorVector input{inputData->GetMutableTensor(CPU)};
+  Predictor::TensorVector input{inputData->template GetMutable<TensorCPU>()};
   Predictor::TensorVector output;
   p_->run(input, &output);
   EXPECT_EQ(output.size(), 1);
@@ -190,7 +190,8 @@ TEST_F(PredictorTest, SimpleBatchSized) {
 
 TEST_F(PredictorTest, SimpleBatchSizedMapInput) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
-  Predictor::TensorMap input{{"data", inputData->GetMutableTensor(CPU)}};
+  Predictor::TensorMap input{
+      {"data", inputData->template GetMutable<TensorCPU>()}};
   Predictor::TensorVector output;
   p_->run_map(input, &output);
   EXPECT_EQ(output.size(), 1);
@@ -215,7 +216,8 @@ class PredictorMetaNetDefTest : public testing::Test {
 
 TEST_F(PredictorMetaNetDefTest, SimpleMetaNetDefInitializer) {
   auto inputData = randomTensor({1, 4}, ctx_.get());
-  Predictor::TensorMap input{{"data", inputData->GetMutableTensor(CPU)}};
+  Predictor::TensorMap input{
+      {"data", inputData->template GetMutable<TensorCPU>()}};
   Predictor::TensorVector output;
   p_->run_map(input, &output);
   EXPECT_EQ(output.size(), 1);

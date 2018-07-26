@@ -33,14 +33,13 @@ class LengthsPadOp : public Operator<Context> {
 
     // Context::CopyFrom and math::Sum need the same context to avoid race
     // conditions
-    // why? CPUContext is not used in Sum
-    lengths_host_.CopyFrom(lengths);
+    CPUContext cpuContext;
+    lengths_host_.CopyFrom(lengths, &cpuContext);
 
     auto lengths_size = lengths_host_.size();
-    auto* lengths_data = lengths_host_.template data<int32_t>();
+    auto* lengths_data = lengths_host_.data<int32_t>();
 
     int32_t total_length = 0;
-    CPUContext cpuContext;
     math::Sum<int32_t, CPUContext>(
         lengths_size, lengths_data, &total_length, &cpuContext);
 
@@ -66,7 +65,7 @@ class LengthsPadOp : public Operator<Context> {
           i,
           " is larger than target length");
 
-      context_.template CopySameDevice<T>(
+      context_.template Copy<T, Context, Context>(
           block_size * length, src_data, out_data);
 
       out_data += block_size * target_length_;
@@ -80,7 +79,7 @@ class LengthsPadOp : public Operator<Context> {
  private:
   double padding_value_;
   int target_length_;
-  Tensor lengths_host_{CPU};
+  TensorCPU lengths_host_;
 };
 
 } // namespace caffe2

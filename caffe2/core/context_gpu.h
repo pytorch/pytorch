@@ -7,7 +7,6 @@
 #include "caffe2/core/common.h"
 #include "caffe2/core/common_gpu.h"
 #include "caffe2/core/context.h"
-#include "caffe2/core/context_base.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/tensor.h"
@@ -135,46 +134,37 @@ class ThreadLocalCUDAObjects {
 #endif // CAFFE2_USE_CUDNN
 };
 
-BaseStaticContext* GetCUDAStaticContext();
-
-class CUDAContext final : public BaseContext {
+class CUDAContext final {
  public:
   // The default cuda context constructor.
   explicit CUDAContext(const int gpu_id = -1);
   explicit CUDAContext(const DeviceOption& option);
 
-  ~CUDAContext() override {
+  ~CUDAContext() {
     if (curand_generator_) {
       CURAND_CHECK(curandDestroyGenerator(curand_generator_));
     }
     FinishDeviceComputation();
   }
 
-  BaseStaticContext* GetStaticContext() const override {
-    return GetCUDAStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetCUDAStaticContext();
-  }
-
-  inline void SwitchToDevice(int stream_id) override {
+  inline void SwitchToDevice(int stream_id) {
     set_stream_id(stream_id);
     CaffeCudaSetDevice(gpu_id_);
   }
+  inline void SwitchToDevice() {
+    SwitchToDevice(0);
+  }
 
-  using BaseContext::SwitchToDevice;
-
-  inline void WaitEvent(const Event& ev) override {
+  inline void WaitEvent(const Event& ev) {
     ev.Wait(CUDA, this);
   }
 
-  inline void Record(Event* ev, const char* err_msg = nullptr) const override {
+  inline void Record(Event* ev, const char* err_msg = nullptr) const {
     CAFFE_ENFORCE(ev, "Event must not be null.");
     ev->Record(CUDA, this, err_msg);
   }
 
-  void FinishDeviceComputation() override {
+  void FinishDeviceComputation() {
     cudaStreamSynchronize(cuda_objects_.GetStream(gpu_id_, stream_id_));
     cudaError_t error = cudaGetLastError();
     if (error != cudaSuccess) {
@@ -221,9 +211,7 @@ class CUDAContext final : public BaseContext {
     return curand_generator_;
   }
 
-  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
-  }
+  static std::pair<void*, MemoryDeleter> New(size_t nbytes);
 
   // Get a mutex to lock out cudaMalloc / cudaFree calls when
   // NCCL kernels are being launched. Should remove threat of
@@ -243,21 +231,6 @@ class CUDAContext final : public BaseContext {
         nbytes,
         cudaMemcpyDefault,
         cuda_objects_.GetStream(gpu_id_, stream_id_)));
-  }
-
-  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst)
-      override {
-    CopyBytes<CUDAContext, CUDAContext>(nbytes, src, dst);
-  }
-
-  void CopyBytesToCPU(size_t nbytes, const void* src, void* dst)
-      override {
-    CopyBytes<CUDAContext, CPUContext>(nbytes, src, dst);
-  }
-
-  void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst)
-      override {
-    CopyBytes<CPUContext, CUDAContext>(nbytes, src, dst);
   }
 
   template <typename T, class SrcContext, class DstContext>
@@ -288,15 +261,8 @@ class CUDAContext final : public BaseContext {
     return cudaStreamQuery(stream) == cudaSuccess;
   }
 
-  DeviceType GetDevicetype() const override {
-    return CUDA;
-  }
-
-  static constexpr DeviceType GetDeviceType() {
-    return CUDA;
-  }
-
  protected:
+  static void Delete(void* data);
   void set_stream_id(int stream_id) {
     stream_id_ = stream_id;
   }
@@ -384,37 +350,8 @@ struct PinnedCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator baseAllocator_;
 };
 
-class CUDAStaticContext final : public BaseStaticContext {
- public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<CUDAContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<CUDAContext>(option);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(int gpu_id = -1) {
-    return caffe2::make_unique<CUDAContext>(gpu_id);
-  }
-
-  DeviceType GetDeviceType() override {
-    return CUDA;
-  }
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(GetDeviceType());
-    device->set_cuda_gpu_id(GetGPUIDForPointer(data));
-  }
-
- protected:
-  static void Delete(void* data);
-};
-
-using TensorCUDA = Tensor;
+// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
+typedef Tensor<CUDAContext> TensorCUDA;
 
 }  // namespace caffe2
 

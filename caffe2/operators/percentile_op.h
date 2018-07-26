@@ -25,8 +25,8 @@ class PercentileOp final : public Operator<Context> {
  protected:
   INPUT_TAGS(X, VAL_PCT_PAIRS, LENS);
   OUTPUT_TAGS(PCT);
-  Tensor values_tensor{Context::GetDeviceType()};
-  Tensor percentiles_tensor{Context::GetDeviceType()};
+  Tensor<Context> values_tensor;
+  Tensor<Context> percentiles_tensor;
 };
 
 } // namespace caffe2

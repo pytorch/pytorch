@@ -48,10 +48,8 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
   // dX = (1. / N) * scale * inv_var * (N * dY - np.sum(dY, axis=0) - (X - mean)
   //   * inv_var * inv_var * np.sum(dY * (X - mean), axis=0))
 
-  EigenVectorArrayMap<float> dBias_arr(
-      dBias->template mutable_data<float>(), C);
-  EigenVectorArrayMap<float> dScale_arr(
-      dScale->template mutable_data<float>(), C);
+  EigenVectorArrayMap<float> dBias_arr(dBias->mutable_data<float>(), C);
+  EigenVectorArrayMap<float> dScale_arr(dScale->mutable_data<float>(), C);
 
   if (num_batches_ == 1) {
     dBias_arr.setZero();
@@ -65,7 +63,7 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
       ConstEigenArrayMap<float> X_arr(X.data<float>(), sample_size, N * C);
       ConstEigenArrayMap<float> dY_arr(dY.data<float>(), sample_size, N * C);
       EigenArrayMap<float> dX_arr(
-          dX->template mutable_data<float>(), sample_size, N * C);
+          dX->mutable_data<float>(), sample_size, N * C);
       dX_arr.setZero();
       if (N == 0) {
         return true;
@@ -96,7 +94,7 @@ bool SpatialBNGradientOp<CPUContext>::RunOnDevice() {
       ConstEigenArrayMap<float> X_arr(X.data<float>(), C, N * sample_size);
       ConstEigenArrayMap<float> dY_arr(dY.data<float>(), C, N * sample_size);
       EigenArrayMap<float> dX_arr(
-          dX->template mutable_data<float>(), C, N * sample_size);
+          dX->mutable_data<float>(), C, N * sample_size);
       dX_arr.setZero();
       if (N == 0) {
         return true;

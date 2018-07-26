@@ -47,9 +47,9 @@ class UniqueOp : public Operator<Context> {
 
  private:
   vector<int> order_;
-  Tensor thrust_unique_buffer_{Context::GetDeviceType()};
-  Tensor cuda_order_buffer_{Context::GetDeviceType()};
-  Tensor second_order_buffer_{Context::GetDeviceType()};
+  Tensor<Context> thrust_unique_buffer_;
+  Tensor<Context> cuda_order_buffer_;
+  Tensor<Context> second_order_buffer_;
 
  public:
   OUTPUT_TAGS(UNIQUE, REMAPPING);

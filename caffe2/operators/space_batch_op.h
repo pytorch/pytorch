@@ -10,11 +10,11 @@ namespace caffe2 {
 
 template <typename Context>
 void spaceToBatch(
-    const Tensor& input,
+    const Tensor<Context>& input,
     int pad_t,
     int pad_l,
     int block_size,
-    Tensor* output,
+    Tensor<Context>* output,
     Context* /*context*/) {
   CAFFE_ENFORCE(input.ndim() == 4);
   CAFFE_ENFORCE(output->ndim() == 4);
@@ -60,11 +60,11 @@ void spaceToBatch(
 
 template <typename Context>
 void batchToSpace(
-    const Tensor& input,
+    const Tensor<Context>& input,
     int pad_t,
     int pad_l,
     int block_size,
-    Tensor* output,
+    Tensor<Context>* output,
     Context* /*context*/) {
   CAFFE_ENFORCE(input.ndim() == 4);
   CAFFE_ENFORCE(output->ndim() == 4);

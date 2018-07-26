@@ -55,11 +55,7 @@ bool SquaredL2DistanceOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      N,
-      D,
-      X.data<float>(),
-      Y.data<float>(),
-      distance->template mutable_data<float>());
+      N, D, X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
   return true;
 }
 
@@ -101,27 +97,23 @@ bool SquaredL2DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
       X.size(),
       X.data<float>(),
       Y.data<float>(),
-      dX->template mutable_data<float>(),
+      dX->mutable_data<float>(),
       &context_);
 
-  StripedScaleKernel<float>
-      <<<CAFFE_GET_BLOCKS(N * D),
-         CAFFE_CUDA_NUM_THREADS,
-         0,
-         context_.cuda_stream()>>>(
-          N,
-          D,
-          dDistance.data<float>(),
-          dX->data<float>(),
-          dX->template mutable_data<float>());
+  StripedScaleKernel<float><<<
+      CAFFE_GET_BLOCKS(N * D),
+      CAFFE_CUDA_NUM_THREADS,
+      0,
+      context_.cuda_stream()>>>(
+      N,
+      D,
+      dDistance.data<float>(),
+      dX->data<float>(),
+      dX->mutable_data<float>());
 
   // The gradient of the other side is basically the negative.
   math::Scale<float, CUDAContext>(
-      X.size(),
-      -1,
-      dX->data<float>(),
-      dY->template mutable_data<float>(),
-      &context_);
+      X.size(), -1, dX->data<float>(), dY->mutable_data<float>(), &context_);
   return true;
 }
 
@@ -170,11 +162,7 @@ bool L1DistanceOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      N,
-      D,
-      X.data<float>(),
-      Y.data<float>(),
-      distance->template mutable_data<float>());
+      N, D, X.data<float>(), Y.data<float>(), distance->mutable_data<float>());
 
   return true;
 }
@@ -240,8 +228,8 @@ bool L1DistanceGradientOp<float, CUDAContext>::RunOnDevice() {
       X.data<float>(),
       Y.data<float>(),
       dDistance.data<float>(),
-      dX->template mutable_data<float>(),
-      dY->template mutable_data<float>());
+      dX->mutable_data<float>(),
+      dY->mutable_data<float>());
 
   return true;
 }
@@ -312,7 +300,7 @@ bool CosineSimilarityOp<float, CUDAContext>::RunOnDevice() {
   const int N = X.ndim() > 0 ? X.dim32(0) : 1;
   const int D = X.size_from_dim(1);
   result->Resize(N);
-  float* result_data = result->template mutable_data<float>();
+  float* result_data = result->mutable_data<float>();
   const float* X_data = X.data<float>();
   const float* Y_data = Y.data<float>();
   // Auxiliary arrays, one allocation of memory
@@ -367,8 +355,8 @@ bool CosineSimilarityGradientOp<float, CUDAContext>::RunOnDevice() {
   const auto* X_data = X.data<float>();
   const auto* Y_data = Y.data<float>();
   const auto* dCos_data = dCos.data<float>();
-  auto* dX_data = dX->template mutable_data<float>();
-  auto* dY_data = dY->template mutable_data<float>();
+  auto* dX_data = dX->mutable_data<float>();
+  auto* dY_data = dY->mutable_data<float>();
 
   // one memory allocation, a few arrays
   aux_.Resize(6 * N);
@@ -466,11 +454,7 @@ bool DotProductOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      N,
-      D,
-      X.data<float>(),
-      Y.data<float>(),
-      result->template mutable_data<float>());
+      N, D, X.data<float>(), Y.data<float>(), result->mutable_data<float>());
 
   return true;
 }
@@ -526,8 +510,8 @@ bool DotProductGradientOp<float, CUDAContext>::RunOnDevice() {
       X.data<float>(),
       Y.data<float>(),
       dDot.data<float>(),
-      dX->template mutable_data<float>(),
-      dY->template mutable_data<float>());
+      dX->mutable_data<float>(),
+      dY->mutable_data<float>());
   return true;
 }
 

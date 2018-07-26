@@ -23,10 +23,10 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
   int pads[2] = {0, 0};
 
   // Creating Input and output tensors
-  Tensor X(vector<TIndex>{16, 8, 32, 32}, CPU);
-  Tensor W(vector<TIndex>{64, 8, 3, 3}, CPU);
-  Tensor b(vector<TIndex>{64}, CPU);
-  Tensor Y(vector<TIndex>{16, 64, 30, 30}, CPU);
+  TensorCPU X(vector<TIndex>{16, 8, 32, 32});
+  TensorCPU W(vector<TIndex>{64, 8, 3, 3});
+  TensorCPU b(vector<TIndex>{64});
+  TensorCPU Y(vector<TIndex>{16, 64, 30, 30});
 
   float* data = X.mutable_data<float>();
   for (int i = 0; i < X.size(); ++i) {
@@ -56,7 +56,7 @@ TEST(MKLDNNTest, SimpleConvolutionTest) {
   // Test if the resource wrapper works.
   MKLMemory<float> X_wrapper(X.dims(), primitive, dnnResourceSrc);
   X_wrapper.CopyFrom(X);
-  Tensor X_recover(X.dims(), CPU);
+  TensorCPU X_recover(X.dims());
   X_wrapper.CopyTo(&X_recover);
   const float* recover_data = X_recover.data<float>();
   for (int i = 0; i < X_recover.size(); ++i) {
@@ -93,7 +93,7 @@ TEST(MKLDNNTest, MKLMemoryCopyTest) {
   // layout?). Test both cases.
   vector<vector<TIndex>> dims_list{{10, 3, 20, 20}, {0}, {0, 10}};
   for (const auto& dims : dims_list) {
-    auto X_cpu_in = caffe2::make_unique<Tensor>(dims, CPU);
+    auto X_cpu_in = caffe2::make_unique<TensorCPU>(dims);
     CPUContext ctx;
     math::RandUniform<float, CPUContext>(
         X_cpu_in->size(),
@@ -117,7 +117,7 @@ TEST(MKLDNNTest, MKLMemoryCopyTest) {
     EXPECT_EQ(X_mkl1->size(), X_cpu_in->size());
 
     // CPU <- MKL1
-    auto X_cpu_out = caffe2::make_unique<Tensor>(CPU);
+    auto X_cpu_out = caffe2::make_unique<TensorCPU>();
     X_mkl1->CopyTo(X_cpu_out.get());
     EXPECT_EQ(X_cpu_out->dims(), dims);
     EXPECT_EQ(X_cpu_out->size(), X_cpu_in->size());

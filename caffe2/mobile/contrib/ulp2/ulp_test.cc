@@ -63,7 +63,7 @@ int randInt(int a, int b) {
 }
 
 TensorCPU genTensor11(std::vector<TIndex> shape) {
-  Tensor r(CPU);
+  TensorCPU r;
   r.Resize(shape);
 
   std::random_device rd;
@@ -77,7 +77,7 @@ TensorCPU genTensor11(std::vector<TIndex> shape) {
 }
 
 TensorCPU genTensorUniform11(std::vector<TIndex> shape) {
-  Tensor r(CPU);
+  TensorCPU r;
   r.Resize(shape);
 
   std::random_device rd;
@@ -91,7 +91,7 @@ TensorCPU genTensorUniform11(std::vector<TIndex> shape) {
 }
 
 TensorCPU genTensor0123(std::vector<TIndex> shape) {
-  Tensor r(CPU);
+  TensorCPU r;
   r.Resize(shape);
 
   std::random_device rd;
@@ -114,7 +114,7 @@ TEST(ULP, QPadZero) {
   const auto ICQ = 1;
 
   auto X = genTensor11({1, 10, 10, ICQ * 8});
-  Tensor XQ(CPU), XQPad(CPU);
+  TensorCPU XQ, XQPad;
   signQuantize(X, &XQ);
   qpad_zero(args, XQ, &XQPad);
 
@@ -174,7 +174,7 @@ inline void qgemmNT(int M, int N, int K, const uint8_t* A, const uint8_t* B, flo
 void gemmTest(TIndex M, TIndex N, TIndex K) {
   auto X = genTensor11({M, K});
   auto W = genTensor11({N, K});
-  Tensor XQ(CPU), WQ(CPU), YQ(CPU), Y(CPU);
+  TensorCPU XQ, WQ, YQ, Y;
   {
     signQuantize(X, &XQ);
     signQuantize(W, &WQ);
@@ -207,7 +207,7 @@ TEST(QConv, ConvTest) {
   int K = 3;
   auto X = genTensor11({1, S, S, IC});
   auto W = genTensor11({OC, K, K, IC});
-  Tensor XQ(CPU), WQ(CPU), YQ(CPU), Y(CPU);
+  TensorCPU XQ, WQ, YQ, Y;
   {
     signQuantize(X, &XQ);
     signQuantize(W, &WQ);
@@ -235,16 +235,16 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
   auto X = genTensor0123({N, H, W, IC});
   auto W_ = genTensor11({OC, KH, KW, IC});
   auto bias = genTensorUniform11({OC});
-  Tensor Y(CPU), YQ(CPU), Y2b1b(CPU), YOP(CPU);
+  TensorCPU Y, YQ, Y2b1b, YOP;
 
   {
     std::vector<std::unique_ptr<TensorCPU>> XQs(k2b1bXBits);
     std::vector<std::unique_ptr<TensorCPU>> YQs(k2b1bXBits);
     for (auto i = 0; i < k2b1bXBits; ++i) {
-      XQs[i] = caffe2::make_unique<Tensor>(CPU);
-      YQs[i] = caffe2::make_unique<Tensor>(CPU);
+      XQs[i] = caffe2::make_unique<TensorCPU>();
+      YQs[i] = caffe2::make_unique<TensorCPU>();
     }
-    Tensor WQN(CPU), WQ(CPU);
+    TensorCPU WQN, WQ;
     uniformQuantize2b1b(X, XQs, 0.5, 1.0);
     signQuantize(W_, &WQ);
     filterNormalization11(WQ, &WQN);
@@ -289,17 +289,17 @@ void ConvTest2b1b(int IC, int KH, int KW, int H, int W, int OC, int N, ConvArgs 
     def.add_arg()->CopyFrom(MakeArgument("pad_r", args.pad_r));
     def.add_arg()->CopyFrom(MakeArgument("pad_t", args.pad_t));
     def.add_arg()->CopyFrom(MakeArgument("pad_b", args.pad_b));
-    auto* Xws = ws.CreateBlob("X")->GetMutableTensor(CPU);
+    auto* Xws = ws.CreateBlob("X")->GetMutable<TensorCPU>();
     Xws->ResizeLike(X);
     Xws->ShareExternalPointer(X.mutable_data<float>(), X.size());
-    auto* Wws = ws.CreateBlob("W")->GetMutableTensor(CPU);
+    auto* Wws = ws.CreateBlob("W")->GetMutable<TensorCPU>();
     Wws->ResizeLike(W_);
     Wws->ShareExternalPointer(W_.mutable_data<float>(), W_.size());
-    auto* bws = ws.CreateBlob("b")->GetMutableTensor(CPU);
+    auto* bws = ws.CreateBlob("b")->GetMutable<TensorCPU>();
     bws->ResizeLike(bias);
     bws->ShareExternalPointer(bias.mutable_data<float>(), bias.size());
     ws.RunOperatorOnce(def);
-    YOP.CopyFrom(ws.GetBlob("Y")->Get<TensorCPU>());
+    YOP.CopyFrom<CPUContext>(ws.GetBlob("Y")->Get<TensorCPU>());
   }
 
   { conv(args, X, W_, &bias, &Y); }

@@ -191,7 +191,8 @@ class TreeWalker {
 
 using SharedTensorVectorPtr = std::shared_ptr<std::vector<TensorCPU>>;
 
-using TensorVectorPtr = std::unique_ptr<std::vector<Tensor>>;
+template <class Context>
+using TensorVectorPtr = std::unique_ptr<std::vector<Tensor<Context>>>;
 
 class SharedTensorVectorPtrSerializer : public BlobSerializerBase {
  public:

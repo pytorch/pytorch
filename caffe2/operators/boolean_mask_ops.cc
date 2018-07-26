@@ -91,7 +91,8 @@ bool BooleanMaskOp<CPUContext>::RunOnDevice() {
       const auto* src = inPtr + lastStart * innerSizeBytes;
       auto* dst = outPtr + outStart * innerSizeBytes;
       int numItems = i - lastStart;
-      context_.CopyItemsSameDevice(data.meta(), numItems * innerSize, src, dst);
+      context_.template CopyItems<CPUContext, CPUContext>(
+          data.meta(), numItems * innerSize, src, dst);
       outStart += numItems;
       lastStart = -1;
     }
@@ -355,9 +356,9 @@ bool SequenceMaskOp<CPUContext>::RunOnDevice() {
 template <>
 template <class T>
 bool SequenceMaskOp<CPUContext>::DoRunWithType() {
-  const Tensor* input = &Input(0);
-  const Tensor* sequence_lengths = nullptr;
-  const Tensor* window_centers = nullptr;
+  const Tensor<CPUContext>* input = &Input(0);
+  const Tensor<CPUContext>* sequence_lengths = nullptr;
+  const Tensor<CPUContext>* window_centers = nullptr;
 
   if (mode_ == "sequence") {
     sequence_lengths = &Input(1);
@@ -412,7 +413,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           SequenceFunctor(
               sequence_lengths->data<int>(), sequence_lengths->size()),
           fill_val,
-          output->template mutable_data<T>());
+          output->mutable_data<T>());
     } else {
       MaskWithFunctor(
           left,
@@ -422,7 +423,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
           SequenceFunctor(
               sequence_lengths->data<int>(), sequence_lengths->size()),
           fill_val,
-          output->template mutable_data<T>());
+          output->mutable_data<T>());
     }
   } else if (mode_ == "window") {
     MaskWithFunctor(
@@ -432,7 +433,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         WindowFunctor(window_centers->data<int>(), radius_),
         fill_val,
-        output->template mutable_data<T>());
+        output->mutable_data<T>());
   } else if (mode_ == "upper") {
     MaskWithFunctor(
         left,
@@ -441,7 +442,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperFunctor(),
         fill_val,
-        output->template mutable_data<T>());
+        output->mutable_data<T>());
   } else if (mode_ == "lower") {
     MaskWithFunctor(
         left,
@@ -450,7 +451,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerFunctor(),
         fill_val,
-        output->template mutable_data<T>());
+        output->mutable_data<T>());
   } else if (mode_ == "upperdiag") {
     MaskWithFunctor(
         left,
@@ -459,7 +460,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         UpperDiagFunctor(),
         fill_val,
-        output->template mutable_data<T>());
+        output->mutable_data<T>());
   } else if (mode_ == "lowerdiag") {
     MaskWithFunctor(
         left,
@@ -468,7 +469,7 @@ bool SequenceMaskOp<CPUContext>::DoRunWithType() {
         input->data<T>(),
         LowerDiagFunctor(),
         fill_val,
-        output->template mutable_data<T>());
+        output->mutable_data<T>());
   } else {
     CAFFE_ENFORCE(false, "Unsupported mode for SequenceMaskOp!");
     return false;

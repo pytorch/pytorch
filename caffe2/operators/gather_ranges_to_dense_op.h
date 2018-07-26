@@ -30,7 +30,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(RANGES, CPU));
+        this, OperatorBase::Input<TensorCPU>(RANGES));
   }
 
   template <typename Index>
@@ -88,7 +88,7 @@ class GatherRangesToDenseOp final : public Operator<Context> {
             j);
 
         if (InputSize() == 2) {
-          context_.CopyItemsSameDevice(
+          context_.template CopyItems<Context, Context>(
               data.meta(),
               rangeLength,
               rawData + rangeStart * itemsize,

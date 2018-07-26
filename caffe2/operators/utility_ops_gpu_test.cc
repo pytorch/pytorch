@@ -19,10 +19,10 @@ static void AddConstInput(
   option.set_device_type(CUDA);
   CUDAContext context(option);
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CUDA);
+  auto* tensor = blob->GetMutable<Tensor<CUDAContext>>();
   tensor->Resize(shape);
   math::Set<float, CUDAContext>(
-      tensor->size(), value, tensor->template mutable_data<float>(), &context);
+      tensor->size(), value, tensor->mutable_data<float>(), &context);
   return;
 }
 
@@ -43,7 +43,7 @@ TEST(UtilityOpGPUTest, testReshapeWithScalar) {
   unique_ptr<OperatorBase> op(CreateOperator(def, &ws));
   EXPECT_TRUE(op->Run());
   Blob* XNew = ws.GetBlob("XNew");
-  const Tensor& XNewTensor = XNew->Get<Tensor>();
+  const Tensor<CUDAContext>& XNewTensor = XNew->Get<Tensor<CUDAContext>>();
   EXPECT_EQ(1, XNewTensor.ndim());
   EXPECT_EQ(1, XNewTensor.size());
 }

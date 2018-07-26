@@ -32,13 +32,12 @@ class SoftmaxWithLossOp final : public Operator<Context> {
   StorageOrder order_;
   int axis_;
 
-  Tensor losses_{Context::GetDeviceType()}; // Per example loss
-  Tensor rowmax_{Context::GetDeviceType()}; // per example row max
-  Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor sum_multiplier_{
-      Context::GetDeviceType()}; // Vector of ones for summing via dot prod
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
-  Tensor scratch_{Context::GetDeviceType()};
+  Tensor<Context> losses_; // Per example loss
+  Tensor<Context> rowmax_; // per example row max
+  Tensor<Context> weights_; // unignored weights
+  Tensor<Context> sum_multiplier_; // Vector of ones for summing via dot prod
+  Tensor<Context> total_weight_ptr_;
+  Tensor<Context> scratch_;
 };
 
 template <typename T, class Context>
@@ -63,13 +62,13 @@ class SoftmaxWithLossGradientOp final : public Operator<Context> {
  protected:
   float scale_;
   int label_prob_mode_;
-  Tensor sum_multiplier_{Context::GetDeviceType()};
-  Tensor weights_{Context::GetDeviceType()}; // unignored weights
-  Tensor total_weight_ptr_{Context::GetDeviceType()};
+  Tensor<Context> sum_multiplier_;
+  Tensor<Context> weights_; // unignored weights
+  Tensor<Context> total_weight_ptr_;
   StorageOrder order_;
   bool only_loss_;
   int axis_;
-  Tensor scratch_{Context::GetDeviceType()};
+  Tensor<Context> scratch_;
 };
 
 } // namespace caffe2
