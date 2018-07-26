@@ -111,8 +111,7 @@ class SNPEOp final : public Operator<CPUContext> {
     X(snpe_copy_output_to);
     snpe_copy_output_to_f(ctx_.get(), Output(0)->mutable_data<float>());
 
-    CAFFE_ENFORCE(
-        Output(0)->data<float>(), "nullptr where output should be!\n");
+    CAFFE_ENFORCE(Output(0)->data<float>(), "nullptr where output should be!\n");
     return true;
   }
 

@@ -52,14 +52,14 @@ class VideoInputOp final : public PrefetchOperator<Context> {
 
   const db::DBReader* reader_;
   CPUContext cpu_context_;
-  Tensor prefetched_clip_rgb_{CPU};
-  Tensor prefetched_clip_of_{CPU};
-  Tensor prefetched_label_{CPU};
-  Tensor prefetched_video_id_{CPU};
-  Tensor prefetched_clip_rgb_on_device_{Context::GetDeviceType()};
-  Tensor prefetched_clip_of_on_device_{Context::GetDeviceType()};
-  Tensor prefetched_label_on_device_{Context::GetDeviceType()};
-  Tensor prefetched_video_id_on_device_{Context::GetDeviceType()};
+  TensorCPU prefetched_clip_rgb_;
+  TensorCPU prefetched_clip_of_;
+  TensorCPU prefetched_label_;
+  TensorCPU prefetched_video_id_;
+  Tensor<Context> prefetched_clip_rgb_on_device_;
+  Tensor<Context> prefetched_clip_of_on_device_;
+  Tensor<Context> prefetched_label_on_device_;
+  Tensor<Context> prefetched_video_id_on_device_;
   int batch_size_;
   int clip_per_video_;
   std::vector<float> mean_rgb_;
@@ -826,8 +826,7 @@ template <class Context>
 bool VideoInputOp<Context>::CopyPrefetched() {
   int index = 0;
   if (get_rgb_) {
-    auto* clip_rgb_output =
-        OperatorBase::Output<Tensor>(index++, Context::GetDeviceType());
+    auto* clip_rgb_output = OperatorBase::Output<Tensor<Context>>(index++);
     if (std::is_same<Context, CPUContext>::value) {
       clip_rgb_output->CopyFrom(prefetched_clip_rgb_, &context_);
     } else {
@@ -835,24 +834,21 @@ bool VideoInputOp<Context>::CopyPrefetched() {
     }
   }
   if (get_optical_flow_) {
-    auto* clip_of_output =
-        OperatorBase::Output<Tensor>(index++, Context::GetDeviceType());
+    auto* clip_of_output = OperatorBase::Output<Tensor<Context>>(index++);
     if (std::is_same<Context, CPUContext>::value) {
       clip_of_output->CopyFrom(prefetched_clip_of_, &context_);
     } else {
       clip_of_output->CopyFrom(prefetched_clip_of_on_device_, &context_);
     }
   }
-  auto* label_output =
-      OperatorBase::Output<Tensor>(index++, Context::GetDeviceType());
+  auto* label_output = OperatorBase::Output<Tensor<Context>>(index++);
   if (std::is_same<Context, CPUContext>::value) {
     label_output->CopyFrom(prefetched_label_, &context_);
   } else {
     label_output->CopyFrom(prefetched_label_on_device_, &context_);
   }
   if (get_video_id_) {
-    auto* video_id_output =
-        OperatorBase::Output<Tensor>(index, Context::GetDeviceType());
+    auto* video_id_output = OperatorBase::Output<Tensor<Context>>(index);
     if (std::is_same<Context, CPUContext>::value) {
       video_id_output->CopyFrom(prefetched_video_id_, &context_);
     } else {

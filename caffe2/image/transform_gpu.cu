@@ -50,12 +50,9 @@ __global__ void transform_kernel(
 
 template <typename T_IN, typename T_OUT, class Context>
 
-bool TransformOnGPU(
-    Tensor& X,
-    Tensor* Y,
-    Tensor& mean,
-    Tensor& std,
-    Context* context) {
+bool TransformOnGPU(Tensor<Context>& X, Tensor<Context> *Y,
+                    Tensor<Context>& mean, Tensor<Context>& std,
+                    Context *context) {
   // data comes in as NHWC
   const int N = X.dim32(0), C = X.dim32(3), H = X.dim32(1), W = X.dim32(2);
   // data goes out as NCHW
@@ -71,18 +68,16 @@ bool TransformOnGPU(
   return true;
 };
 
-template bool TransformOnGPU<uint8_t, float, CUDAContext>(
-    Tensor& X,
-    Tensor* Y,
-    Tensor& mean,
-    Tensor& std,
-    CUDAContext* context);
+template bool TransformOnGPU<uint8_t, float, CUDAContext>(Tensor<CUDAContext>& X,
+                                                          Tensor<CUDAContext> *Y,
+                                                          Tensor<CUDAContext>& mean,
+                                                          Tensor<CUDAContext>& std,
+                                                          CUDAContext *context);
 
-template bool TransformOnGPU<uint8_t, float16, CUDAContext>(
-    Tensor& X,
-    Tensor* Y,
-    Tensor& mean,
-    Tensor& std,
-    CUDAContext* context);
+template bool TransformOnGPU<uint8_t, float16, CUDAContext>(Tensor<CUDAContext>& X,
+                                                            Tensor<CUDAContext> *Y,
+                                                            Tensor<CUDAContext>& mean,
+                                                            Tensor<CUDAContext>& std,
+                                                            CUDAContext *context);
 
 }  // namespace caffe2

@@ -18,7 +18,7 @@ void AddConstInput(
     Context* context,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(Context::GetDeviceType());
+  auto* tensor = blob->GetMutable<Tensor<Context>>();
   tensor->Resize(shape);
   math::Set<float, Context>(
       tensor->size(), value, tensor->template mutable_data<float>(), context);
@@ -39,10 +39,10 @@ void AddInput<CPUContext>(
     const string& name,
     Workspace* ws) {
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CPU);
+  auto* tensor = blob->GetMutable<TensorCPU>();
   tensor->Resize(shape);
   EigenVectorMap<float> tensor_vec(
-      tensor->template mutable_data<float>(), tensor->size());
+      tensor->mutable_data<float>(), tensor->size());
   tensor_vec.array() = utils::AsEArrXt(values);
 }
 
@@ -52,12 +52,12 @@ void AddInput<CUDAContext>(
     const vector<float>& values,
     const string& name,
     Workspace* ws) {
-  Tensor tmp(shape, CPU);
+  TensorCPU tmp(shape);
   EigenVectorMap<float> tmp_vec(tmp.mutable_data<float>(), tmp.size());
   tmp_vec.array() = utils::AsEArrXt(values);
 
   Blob* blob = ws->CreateBlob(name);
-  auto* tensor = blob->GetMutableTensor(CUDA);
+  auto* tensor = blob->template GetMutable<Tensor<CUDAContext>>();
   tensor->CopyFrom(tmp);
 }
 
@@ -186,7 +186,7 @@ void CreateAndRun(
   Blob* Y_blob = ws.GetBlob("Y");
   EXPECT_NE(nullptr, Y_blob);
 
-  auto& Y = Y_blob->Get<Tensor>();
+  auto& Y = Y_blob->Get<Tensor<Context>>();
   outResult->CopyFrom(Y, &context);
 }
 
@@ -196,9 +196,9 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
   if (!caffe2::HasCudaGPU())
     return;
 
-  Tensor y_cpu(CPU);
-  Tensor y_gpu(CPU);
-  Tensor y_cpu_nhwc(CPU);
+  TensorCPU y_cpu;
+  TensorCPU y_gpu;
+  TensorCPU y_cpu_nhwc;
 
   // tests using FAIR example
   {

@@ -37,7 +37,7 @@ class NumpyTileOp : public Operator<Context> {
     // Alternate inputs and outputs between two buffers. Repeatedly apply the
     // Tile kernel along each axis. Then copy out the resulting data into the
     // output tensor.
-    Tensor *src = &buffer, *dst = output;
+    Tensor<Context> *src = &buffer, *dst = output;
     src->CopyFrom(input);
     vector<TIndex> output_dims(input.dims());
     for (size_t i = 0; i < repeats.size(); ++i) {
@@ -98,14 +98,15 @@ class NumpyTileOp : public Operator<Context> {
       char* output_data) {
     for (auto i = 0; i < outer_dim; ++i) {
       for (auto t = 0; t < num_tiles; ++t) {
-        context_.CopyItemsSameDevice(meta, inner_dim, input_data, output_data);
+        context_.template CopyItems<Context, Context>(
+            meta, inner_dim, input_data, output_data);
         output_data += inner_dim * item_size;
       }
       input_data += inner_dim * item_size;
     }
   }
 
-  Tensor buffer{Context::GetDeviceType()};
+  Tensor<Context> buffer;
 };
 
 } // namespace caffe2

@@ -25,9 +25,9 @@ class HSoftmaxOpBase : public Operator<Context> {
 
  protected:
   std::unordered_map<int, PathProto> hierarchy_all_map_;
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor sum_multiplier_{Context::GetDeviceType()};
-  Tensor bias_multiplier_{Context::GetDeviceType()};
+  Tensor<Context> scale_;
+  Tensor<Context> sum_multiplier_;
+  Tensor<Context> bias_multiplier_;
   static constexpr T kLOG_THRESHOLD() {
     return 1e-20f;
   }
