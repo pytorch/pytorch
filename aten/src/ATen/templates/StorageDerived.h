@@ -15,7 +15,7 @@ struct Allocator;
 
 struct ${Storage} final : public Storage {
   ${Storage}();
-  ${Storage}(StorageImpl* storage_impl) : storage_impl_(storage_impl){};
+  ${Storage}(StorageImpl* storage_impl) : Storage(storage_impl){};
   ${Storage}(size_t size);
   ${Storage}(size_t size, Allocator* allocator);
   ${Storage}(

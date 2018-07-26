@@ -11,8 +11,8 @@ $extra_cuda_headers
 
 namespace at {
 
-${Storage}::${Storage}() {
-  storage_impl_ = new StorageImpl(
+${Storage}::${Storage}()
+  : Storage(new StorageImpl(
       ScalarType::${ScalarName}, 
       0,
 #if ${isCUDA}
@@ -20,11 +20,10 @@ ${Storage}::${Storage}() {
 #else
       getTHDefaultAllocator(),
 #endif
-      true);
-}
+      true)) {}
 
-${Storage}::${Storage}(size_t size) {
-  storage_impl_ = new StorageImpl(
+${Storage}::${Storage}(size_t size)
+  : Storage(new StorageImpl(
       ScalarType::${ScalarName}, 
       size,
 #if ${isCUDA}
@@ -32,16 +31,14 @@ ${Storage}::${Storage}(size_t size) {
 #else
       getTHDefaultAllocator(),
 #endif
-      true);
-}
+      true)) {}
 
-${Storage}::${Storage}(size_t size, Allocator* allocator) {
-  storage_impl_ = new StorageImpl(
+${Storage}::${Storage}(size_t size, Allocator* allocator)
+  : Storage(new StorageImpl(
       ScalarType::${ScalarName}, 
       size,
       allocator,
-      true);
-}
+      true)) {}
 
 // TODO: Take in Device as an input to the std::function constructor
 
@@ -56,8 +53,8 @@ static int getPointerDevice(void* ptr) {
 ${Storage}::${Storage}(
   void * data, 
   size_t size, 
-  const std::function<void(void*)> & deleter) {
-  storage_impl_ = new StorageImpl(
+  const std::function<void(void*)> & deleter)
+  : Storage(new StorageImpl(
       ScalarType::${ScalarName},
       size,
       InefficientStdFunctionContext::makeDataPtr(data, deleter,
@@ -68,7 +65,5 @@ ${Storage}::${Storage}(
 #endif
        ),
      /* allocator */ nullptr,
-      true);
-}
-
+      true)) {}
 }

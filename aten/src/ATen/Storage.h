@@ -6,7 +6,7 @@ namespace at {
 
 struct Storage {
 public:
-  Storage() : storage_impl_(nullptr){};
+  Storage() = delete;
   Storage(StorageImpl* storage_impl) {
     storage_impl_ = storage_impl;
     if (storage_impl_)

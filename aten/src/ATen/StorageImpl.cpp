@@ -1,5 +1,5 @@
-#include <ATen/StorageImpl.h>
 #include <ATen/Context.h>
+#include <ATen/StorageImpl.h>
 
 namespace at {
 
@@ -31,8 +31,9 @@ StorageImpl::StorageImpl(
           resizeable) {}
 
 Type& StorageImpl::type() {
-  if (data_ptr.device().is_cuda())
+  if (data_ptr.device().is_cuda()) {
     return globalContext().getType(Backend::CUDA, scalar_type);
+  }
   return globalContext().getType(Backend::CPU, scalar_type);
 }
 
