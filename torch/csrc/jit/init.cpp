@@ -26,6 +26,7 @@
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/function_schema.h"
 
 namespace torch  { namespace jit {
 

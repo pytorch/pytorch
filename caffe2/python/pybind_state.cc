@@ -1358,6 +1358,33 @@ void addGlobalMethods(py::module& m) {
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
         return py::bytes(protob);
       });
+  m.def(
+      "infer_shapes_and_types_from_map",
+      [](const std::vector<py::bytes>& net_protos,
+         const std::map<std::string, std::vector<TIndex>> blob_dimensions,
+         const std::map<std::string, int> int_blob_types) {
+        // Parse protobuffers to NetDefs
+        std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        std::vector<caffe2::NetDef*> nets_ptr;
+        for (auto proto : net_protos) {
+          std::unique_ptr<NetDef> def(new NetDef());
+          CAFFE_ENFORCE(def->ParseFromString(proto));
+          nets_ptr.push_back(def.get());
+          nets.push_back(std::move(def));
+        }
+        std::map<std::string, TensorProto_DataType> blob_types;
+        for (auto blob_type : int_blob_types) {
+          blob_types[blob_type.first] =
+              static_cast<TensorProto_DataType>(blob_type.second);
+        }
+
+        auto blob_info = InferBlobShapesAndTypesFromMap(
+            blob_dimensions, blob_types, nets_ptr);
+
+        std::string protob;
+        CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
   m.def("create_blob", [](const std::string& name) {
     CAFFE_ENFORCE(gWorkspace);
     CAFFE_ENFORCE(gWorkspace->CreateBlob(name));

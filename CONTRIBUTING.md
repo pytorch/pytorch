@@ -139,17 +139,17 @@ not very optimized for incremental rebuilds, this will actually be very slow.
 Far better is to only request rebuilds of the parts of the project you are
 working on:
 
-- Working on `torch/csrc`?  Run `python setup.py develop` to rebuild
+- Working on the Python bindings?  Run `python setup.py develop` to rebuild
   (NB: no `build` here!)
 
-- Working on `torch/lib/TH`, did not make any cmake changes, and just want to
-  see if it compiles?  Run `(cd torch/lib/build/TH && make install -j$(getconf _NPROCESSORS_ONLN))`.  This
-  applies for any other subdirectory of `torch/lib`.  **Warning: Changes you
-  make here will not be visible from Python.**  See below.
+- Working on `torch/csrc` or `aten`?  Run `python setup.py build_caffe2` to
+  rebuild and avoid having to rebuild other dependent libraries we
+  depend on.  The other valid targets are listed in `dep_libs` in `setup.py`
+  (prepend `build_` to get a target).
 
-- Working on `torch/lib` and want to run your changes / rerun cmake?  Run
-  `python setup.py build_deps`.  Note that this will rerun cmake for
-  every subdirectory in TH.
+- Working on a test binary?  Run `(cd build && ninja bin/test_binary_name)` to
+  rebuild only that test binary (without rerunning cmake).  (Replace `ninja` with
+  `make` if you don't have ninja installed).
 
 On the initial build, you can also speed things up with the environment
 variables `DEBUG` and `NO_CUDA`.

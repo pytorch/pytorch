@@ -283,6 +283,15 @@ Probability distributions - torch.distributions
     :members:
     :undoc-members:
     :show-inheritance:
+    
+:hidden:`Weibull`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. currentmodule:: torch.distributions.weibull
+.. autoclass:: Weibull
+    :members:
+    :undoc-members:
+    :show-inheritance:
 
 `KL Divergence`
 ~~~~~~~~~~~~~~~~~~~~~~~

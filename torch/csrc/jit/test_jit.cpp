@@ -9,6 +9,7 @@
 
 #endif
 
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
@@ -26,8 +27,6 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/variable_tensor_functions.h"
-
-#include "torch/csrc/assertions.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/engine.h"
