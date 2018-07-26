@@ -17,17 +17,17 @@ nccl::NCCLExecution getNCCLElements(
   ex.elements.resize(op->InputSize());
   for (auto i = 0; i < op->InputSize(); ++i) {
     auto& el = ex.elements[i];
-    el.src = &(op->Input<TensorCUDA>(i));
+    el.src = &(op->Input<Tensor>(i, CUDA));
     if (op->OutputSize() == 1) {
       // Reduce op
       if (i == ex.root) {
-        el.dst = op->Output<TensorCUDA>(0);
+        el.dst = op->Output<Tensor>(0, CUDA);
       }
     } else if (i < op->OutputSize()) {
-      el.dst = op->Output<TensorCUDA>(i);
+      el.dst = op->Output<Tensor>(i, CUDA);
     }
     // TODO - expensive (>1ms) - cache these.
-    el.device = GetGPUIDForPointer(op->Input<TensorCUDA>(i).raw_data());
+    el.device = GetGPUIDForPointer(op->Input<Tensor>(i, CUDA).raw_data());
   }
 
   return ex;
@@ -38,7 +38,7 @@ namespace {
 template <typename T>
 bool AllInputsAre(OperatorBase* op) {
   for (auto i = 0; i < op->InputSize(); ++i) {
-    if (op->Input<TensorCUDA>(i).IsType<T>()) {
+    if (op->Input<Tensor>(i, CUDA).IsType<T>()) {
       continue;
     } else {
       return false;

@@ -66,8 +66,8 @@ class LRNOp final : public LRNOpBase<T, Context> {
  protected:
   // Input: X; Output: Y, scale.
   OUTPUT_TAGS(OUTPUT, SCALE);
-  Tensor<Context>* scale_ = nullptr;
-  Tensor<Context> local_scale_tensor_;
+  Tensor* scale_ = nullptr;
+  Tensor local_scale_tensor_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -83,8 +83,8 @@ class LRNGradientOp final : public LRNOpBase<T, Context> {
  protected:
   // Input: X, Y, scale, dY; Output: dX
   INPUT_TAGS(INPUT, OUTPUT, SCALE, OUTPUT_GRAD);
-  Tensor<Context>* scale_ = nullptr;
-  Tensor<Context> local_scale_tensor_;
+  Tensor* scale_ = nullptr;
+  Tensor local_scale_tensor_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

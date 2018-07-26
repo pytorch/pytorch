@@ -22,3 +22,4 @@
 #include "ATen/Layout.h"
 #include "ATen/OptionsGuard.h"
 #include "ATen/CUDAGuard.h"
+#include "ATen/Error.h"

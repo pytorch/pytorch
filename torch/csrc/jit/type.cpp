@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/type.h"
 
+#include "torch/csrc/jit/assertions.h"
+
 #include <iostream>
 
 namespace torch { namespace jit {
@@ -37,7 +39,7 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
   } else {
-    barf("unknown type kind");
+    AT_ERROR("unknown type kind");
   }
   return out;
 }

@@ -168,7 +168,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   // Returns the input image dimensions for the current storage order type.
-  vector<int> GetDims(const Tensor<Context>& input) {
+  vector<int> GetDims(const Tensor& input) {
     vector<int> dims;
     switch (order_) {
       case StorageOrder::NCHW:
@@ -184,7 +184,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   // Returns the size of the input image for the current storage type.
-  int GetDimsSize(const Tensor<Context>& input) {
+  int GetDimsSize(const Tensor& input) {
     int size = 0;
     switch (order_) {
       case StorageOrder::NCHW:
@@ -214,12 +214,8 @@ class ConvPoolOpBase : public Operator<Context> {
   // Note(jiayq): the templatization of this function is mainly to help
   // implementations that do not use first-class Tensor objects, such as the
   // MKL operator. One can still call this function with dummy
-  // Tensor<CPUContext> objects in order to obtain the sizes.
-  template <typename AlternativeContext>
-  void SetOutputSize(
-      const Tensor<AlternativeContext>& input,
-      Tensor<AlternativeContext>* output,
-      int output_channel) {
+  // Tensor objects in order to obtain the sizes.
+  void SetOutputSize(const Tensor& input, Tensor* output, int output_channel) {
     CAFFE_ENFORCE(input.size() > 0);
     vector<int> output_dims;
     int N = input.dim32(0);
@@ -319,7 +315,23 @@ class ConvPoolOpBase : public Operator<Context> {
     }
   }
 
-  void SetDeviceTensor(const std::vector<int>& data, Tensor<Context>* tensor) {
+  bool HasPad() const {
+    if (kernel_.size() == 2) {
+      return pad_t() > 0 || pad_b() > 0 || pad_l() > 0 || pad_r() > 0;
+    }
+    return std::any_of(
+        pads_.cbegin(), pads_.cend(), [](const int x) { return x > 0; });
+  }
+
+  bool HasStride() const {
+    if (kernel_.size() == 2) {
+      return stride_h() > 1 || stride_w() > 1;
+    }
+    return std::any_of(
+        stride_.cbegin(), stride_.cend(), [](const int x) { return x > 1; });
+  }
+
+  void SetDeviceTensor(const std::vector<int>& data, Tensor* tensor) {
     bool reset_tensor_device_ = false;
 
     if (tensor->size() != data.size()) {
@@ -342,7 +354,7 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
   template <typename T>
-  void SetBiasMultiplier(const int size, Tensor<Context>* bias_multiplier_) {
+  void SetBiasMultiplier(const int size, Tensor* bias_multiplier_) {
     if (bias_multiplier_->size() != size) {
       // If the helper bias multiplier is not image size, reshape and fill it
       // with one.
@@ -719,36 +731,38 @@ class ConvPoolOpBase : public Operator<Context> {
   }
 
  private:
- inline void AllocateAndCopy(const vector<int>& vec, Tensor<Context>& tensor) {
-      tensor.Resize(vec.size());
-      context_.template Copy<int, CPUContext, Context>(
-          vec.size(), vec.data(), tensor.template mutable_data<int>());
- }
+  inline void AllocateAndCopy(const vector<int>& vec, Tensor& tensor) {
+    tensor.Resize(vec.size());
+    context_.template CopyFromCPU<int>(
+        vec.size(), vec.data(), tensor.template mutable_data<int>());
+  }
 
-#define USE_CONV_POOL_BASE_FUNCTIONS(Context)      \
-  USE_OPERATOR_FUNCTIONS(Context);                 \
-  using ConvPoolOpBase<Context>::pads_;            \
-  using ConvPoolOpBase<Context>::pad_t;            \
-  using ConvPoolOpBase<Context>::pad_l;            \
-  using ConvPoolOpBase<Context>::pad_b;            \
-  using ConvPoolOpBase<Context>::pad_r;            \
-  using ConvPoolOpBase<Context>::legacy_pad_;      \
-  using ConvPoolOpBase<Context>::global_pooling_;  \
-  using ConvPoolOpBase<Context>::kernel_;          \
-  using ConvPoolOpBase<Context>::kernel_h;         \
-  using ConvPoolOpBase<Context>::kernel_w;         \
-  using ConvPoolOpBase<Context>::dilation_;        \
-  using ConvPoolOpBase<Context>::dilation_h;       \
-  using ConvPoolOpBase<Context>::dilation_w;       \
-  using ConvPoolOpBase<Context>::stride_;          \
-  using ConvPoolOpBase<Context>::stride_h;         \
-  using ConvPoolOpBase<Context>::stride_w;         \
-  using ConvPoolOpBase<Context>::group_;           \
-  using ConvPoolOpBase<Context>::order_;           \
-  using ConvPoolOpBase<Context>::shared_buffer_;   \
-  using ConvPoolOpBase<Context>::GetDims;          \
-  using ConvPoolOpBase<Context>::GetDimsSize;      \
-  using ConvPoolOpBase<Context>::SetDeviceTensor;  \
+#define USE_CONV_POOL_BASE_FUNCTIONS(Context)     \
+  USE_OPERATOR_FUNCTIONS(Context);                \
+  using ConvPoolOpBase<Context>::pads_;           \
+  using ConvPoolOpBase<Context>::pad_t;           \
+  using ConvPoolOpBase<Context>::pad_l;           \
+  using ConvPoolOpBase<Context>::pad_b;           \
+  using ConvPoolOpBase<Context>::pad_r;           \
+  using ConvPoolOpBase<Context>::legacy_pad_;     \
+  using ConvPoolOpBase<Context>::global_pooling_; \
+  using ConvPoolOpBase<Context>::kernel_;         \
+  using ConvPoolOpBase<Context>::kernel_h;        \
+  using ConvPoolOpBase<Context>::kernel_w;        \
+  using ConvPoolOpBase<Context>::dilation_;       \
+  using ConvPoolOpBase<Context>::dilation_h;      \
+  using ConvPoolOpBase<Context>::dilation_w;      \
+  using ConvPoolOpBase<Context>::stride_;         \
+  using ConvPoolOpBase<Context>::stride_h;        \
+  using ConvPoolOpBase<Context>::stride_w;        \
+  using ConvPoolOpBase<Context>::group_;          \
+  using ConvPoolOpBase<Context>::order_;          \
+  using ConvPoolOpBase<Context>::shared_buffer_;  \
+  using ConvPoolOpBase<Context>::GetDims;         \
+  using ConvPoolOpBase<Context>::GetDimsSize;     \
+  using ConvPoolOpBase<Context>::SetDeviceTensor; \
+  using ConvPoolOpBase<Context>::HasPad;          \
+  using ConvPoolOpBase<Context>::HasStride;       \
   using ConvPoolOpBase<Context>::ws_
 };
 

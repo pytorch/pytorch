@@ -1,6 +1,8 @@
 #pragma once
+
+#include "torch/csrc/jit/assertions.h"
+
 #include <ATen/ATen.h>
-#include "torch/csrc/assertions.h"
 
 namespace torch { namespace jit {
 

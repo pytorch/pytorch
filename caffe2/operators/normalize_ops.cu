@@ -112,7 +112,12 @@ bool NormalizeGradientOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      M, N, SF, X.data<float>(), dY.data<float>(), dX->mutable_data<float>());
+      M,
+      N,
+      SF,
+      X.data<float>(),
+      dY.data<float>(),
+      dX->template mutable_data<float>());
   return true;
 }
 

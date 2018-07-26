@@ -3,6 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
+import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -338,22 +339,33 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def _script_graph(fn, _frames_up=0):
-    rcb = createResolutionCallback(_frames_up + 1)
+def _fn_to_typed_def(fn, method=False):
+    schema = annotations.get_signature(fn)
     ast = get_jit_ast(fn)
-    return _jit_script_compile(ast, rcb)
+    if schema:
+        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1], method)
+    else:
+        typed_def = torch._C.TypedDef(ast)
+    return typed_def
 
 
 def script(fn, optimize=True, _frames_up=0):
-    graph = _script_graph(fn, _frames_up=_frames_up + 1)
+    rcb = createResolutionCallback(_frames_up + 1)
+    typed_def = _fn_to_typed_def(fn)
+    graph = _jit_script_compile(typed_def, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
+    # TODO: refactor everything so we're not 1) creating a ScriptModule
+    # 2) Throwing everything away except for the graph 3) Creating a new
+    # ScriptModule and dumping that graph in 4) Re-populating the schema
+    # because it was lost doing the previous
+    mod.__getattr__('forward').set_arg_and_return_types(typed_def, False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'typed_def', 'original_method'))
 
 
 def script_method(fn):
@@ -369,7 +381,8 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    return ScriptMethodStub(createResolutionCallback(frames_up=2), get_jit_ast(fn), fn)
+    typed_def = _fn_to_typed_def(fn, method=True)
+    return ScriptMethodStub(createResolutionCallback(frames_up=2), typed_def, fn)
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -573,9 +586,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            asts = [m.ast for m in methods]
+            typed_defs = [m.typed_def for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(asts, rcbs)
+            self._create_methods(typed_defs, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)

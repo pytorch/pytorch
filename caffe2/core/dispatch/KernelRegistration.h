@@ -133,8 +133,6 @@ public:
 } // namespace c10
 
 // TODO Can the builder logic be moved to compile time?
-#define CONCAT_IMPL( x, y ) x##y
-#define MACRO_CONCAT( x, y ) CONCAT_IMPL( x, y )
 // NB: Semicolon after applying this macro is MANDATORY
 #define C10_REGISTER_KERNEL(OpSchemaDef)                                                           \
   static KernelRegistrar<OpSchemaDef> MACRO_CONCAT(__kernelRegistrationBuilder_, __COUNTER__) = KernelRegistrationBuilder<OpSchemaDef, 0>()

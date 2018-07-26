@@ -104,7 +104,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     int32_t sparse_indices_length = sparse_indices.dim32(0);
     const int32_t* lengths_vec = nullptr;
     auto* output = Output(OUTPUTVALUE);
-    Tensor<Context>* presence_mask = nullptr;
+    Tensor* presence_mask = nullptr;
     if (returnPresenceMask_) {
       presence_mask = Output(PRESENCEMASK);
     }
@@ -135,7 +135,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
     char* output_data =
         static_cast<char*>(output->raw_mutable_data(sparse_values.meta()));
     for (int i = 0; i < cols * rows; i++) {
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           default_value.meta(),
           block_size,
           default_val,
@@ -162,7 +162,7 @@ class SparseToDenseMaskOp : public SparseToDenseMaskBase<Context> {
         }
         int idx = this->getFeatureIdx(sparse_index);
         if (idx != -1) {
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               sparse_values.meta(),
               block_size,
               sparse_values_vec + (offset + c) * block_nbytes,
@@ -266,7 +266,7 @@ class SparseToDenseMaskGradientOp : public SparseToDenseMaskBase<Context> {
         int idx = this->getFeatureIdx(sparse_indices_vec[offset + c]);
         if (idx != -1 && !gradient_used[idx]) {
           gradient_used[idx] = true;
-          context_.template CopyItems<Context, Context>(
+          context_.CopyItemsSameDevice(
               gradient_output.meta(),
               block_size,
               gradient_output_vec + (r * cols + idx) * block_nbytes,
