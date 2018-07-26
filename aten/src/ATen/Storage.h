@@ -7,11 +7,7 @@ namespace at {
 struct Storage {
 public:
   Storage() = delete;
-  Storage(StorageImpl* storage_impl) {
-    storage_impl_ = storage_impl;
-    if (storage_impl_)
-      storage_impl_->retain();
-  };
+  Storage(StorageImpl* storage_impl) : storage_impl_(storage_impl) {}
   ~Storage();
   // There are reasonable interpretations of these constructors, but they're to
   // be implemented on demand.
@@ -19,11 +15,6 @@ public:
   Storage(const Storage&) = delete;
   Storage(Storage&&) = delete;
   Storage(const Storage&&) = delete;
-  void* unsafeGetTH(bool retain_) const {
-    if (retain_ && storage_impl_)
-      storage_impl_->retain();
-    return storage_impl_;
-  }
   StorageImpl* pImpl() {
     return storage_impl_;
   }

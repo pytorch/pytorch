@@ -76,12 +76,6 @@ struct TH_CPP_API StorageImpl {
     return static_cast<T*>(this->data_ptr.get());
   }
 
-  void* unsafeGetTH(bool retain_) {
-    if (retain_)
-      ++refcount;
-    return this;
-  }
-
   void operator=(const StorageImpl&) = delete;
 
   virtual size_t elementSize() const {
