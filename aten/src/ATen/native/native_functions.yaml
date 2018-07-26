@@ -991,6 +991,11 @@
 - func: mv_out(Tensor result, Tensor self, Tensor vec) -> Tensor
   variants: function
 
+- func: mvlgamma(Tensor self, int64_t p) -> Tensor
+
+- func: mvlgamma_(Tensor self, int64_t p) -> Tensor
+  variants: method
+
 - func: narrow(Tensor self, int64_t dim, int64_t start, int64_t length) -> Tensor
 
 - func: ones(IntList size, TensorOptions options={}) -> Tensor
@@ -1444,6 +1449,9 @@
   dispatch:
     CPU: flip_cpu
     CUDA: flip_cuda
+
+# default IntList value {0,1} should not add space after comma, since native_parse.py uses ', ' to split args
+- func: rot90(Tensor self, int64_t k=1, IntList dims={0,1}) -> Tensor
 
 - func: _trilinear(Tensor i1, Tensor i2, Tensor i3, IntList expand1, IntList expand2, IntList expand3, IntList sumdim, int64_t unroll_dim=1) -> Tensor
   variants: function
@@ -1970,3 +1978,20 @@
 
 - func: meshgrid(TensorList tensors) -> TensorList
   variants: function
+
+# This has a method dispatch to work around circular include problems
+- func: _local_scalar(Tensor self) -> Scalar
+  variants:
+    - function
+    - method
+
+# NB: Does NOT check precondition that numel == 1
+# WARNING: Use of cpu_half here is generally not supported; please
+# don't use it.
+- func: _local_scalar_dense(Tensor self) -> Scalar
+  cpu_half: True
+  dispatch:
+    CPU: _local_scalar_dense_cpu
+    CUDA: _local_scalar_dense_cuda
+  variants:
+    - function

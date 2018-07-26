@@ -31,6 +31,7 @@ pip install -r requirements.txt || true
 
 if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # This is necessary in order to cross compile (or else we'll have missing GPU device).
+  export MAX_JOBS=4
   export HCC_AMDGPU_TARGET=gfx900
 
   # These environment variables are not set on CI when we were running as the Jenkins user.
@@ -46,9 +47,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
-
-  # ROCm builds experience OOM issues when buliding with sscache. (HCC Issue #785)
-  export MAX_JOBS=`expr $(nproc) / 2`
 
   USE_ROCM=1 python setup.py install
   exit

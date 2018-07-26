@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -405,7 +406,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+          JIT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
       JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -520,7 +521,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value *) -> Value* {
-    barf("Graph::copy() encountered a use of a value not in scope. Run lint!");
+    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;

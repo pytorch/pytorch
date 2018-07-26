@@ -1313,6 +1313,20 @@ mv(vec) -> Tensor
 See :func:`torch.mv`
 """)
 
+add_docstr_all('mvlgamma',
+               r"""
+mvlgamma(p) -> Tensor
+
+See :func:`torch.mvlgamma`
+""")
+
+add_docstr_all('mvlgamma_',
+               r"""
+mvlgamma_(p) -> Tensor
+
+In-place version of :meth:`~Tensor.mvlgamma`
+""")
+
 add_docstr_all('narrow',
                r"""
 narrow(dimension, start, length) -> Tensor
