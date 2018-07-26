@@ -147,10 +147,7 @@ void GemmEx<float, CPUContext>(
     float* C,
     const int ldc,
     CPUContext*) {
-  using OuterStride = Eigen::OuterStride<Eigen::Dynamic>;
-  using StridedMap = Eigen::Map<Eigen::MatrixXf, 0, OuterStride>;
-  using ConstStridedMap = Eigen::Map<const Eigen::MatrixXf, 0, OuterStride>;
-  auto C_mat = StridedMap(C, N, M, OuterStride(ldc));
+  EigenOuterStridedMatrixMap<float> C_mat(C, N, M, EigenOuterStride(ldc));
   if (beta == 0) {
     C_mat.setZero();
   } else {
@@ -161,13 +158,18 @@ void GemmEx<float, CPUContext>(
       switch (trans_B) {
         case CblasNoTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-               ConstStridedMap(A, K, M, OuterStride(lda)));
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, N, K, EigenOuterStride(ldb)) *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, K, M, EigenOuterStride(lda)));
           return;
         case CblasTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-               ConstStridedMap(A, K, M, OuterStride(lda)));
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, K, N, EigenOuterStride(ldb))
+                   .transpose() *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, K, M, EigenOuterStride(lda)));
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
@@ -177,13 +179,20 @@ void GemmEx<float, CPUContext>(
       switch (trans_B) {
         case CblasNoTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, N, K, EigenOuterStride(ldb)) *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, M, K, EigenOuterStride(lda))
+                   .transpose());
           return;
         case CblasTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, K, N, EigenOuterStride(ldb))
+                   .transpose() *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, M, K, EigenOuterStride(lda))
+                   .transpose());
           return;
         default:
           LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
@@ -2488,6 +2497,73 @@ void CopyMatrix<CPUContext>(
     }
   }
 }
+
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_COPY_MATRIX_FUNCTION(T, Func)  \
+  template <>                                   \
+  void CopyMatrix<T, CPUContext>(               \
+      const int M,                              \
+      const int N,                              \
+      const T* A,                               \
+      const int lda,                            \
+      T* B,                                     \
+      const int ldb,                            \
+      CPUContext* /* context */) {              \
+    Func('R', 'N', M, N, T(1), A, lda, B, ldb); \
+  }
+DELEGATE_COPY_MATRIX_FUNCTION(float, mkl_somatcopy)
+DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
+#undef DELEGATE_COPY_MATRIX_FUNCTION
+
+#endif // CAFFE2_USE_MKL
+
+#define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
+  template <>                                                            \
+  void CopyMatrix<T, CPUContext>(                                        \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int lda,                                                     \
+      T* B,                                                              \
+      const int ldb,                                                     \
+      CPUContext* /* context */) {                                       \
+    if (M == 0 || N == 0) {                                              \
+      return;                                                            \
+    }                                                                    \
+    if (lda == N) {                                                      \
+      if (ldb == N) {                                                    \
+        std::memcpy(B, A, sizeof(T) * M * N);                            \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenMatrixMap<T>(A, N, M);                             \
+      }                                                                  \
+    } else {                                                             \
+      if (ldb == N) {                                                    \
+        EigenMatrixMap<T>(B, N, M) = ConstEigenOuterStridedMatrixMap<T>( \
+            A, N, M, EigenOuterStride(lda));                             \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenOuterStridedMatrixMap<T>(                          \
+                A, N, M, EigenOuterStride(lda));                         \
+      }                                                                  \
+    }                                                                    \
+  }
+
+#ifndef CAFFE2_USE_MKL
+CAFFE2_SPECIALIZED_COPY_MATRIX(float)
+CAFFE2_SPECIALIZED_COPY_MATRIX(double)
+#endif // CAFFE2_USE_MKL
+
+CAFFE2_SPECIALIZED_COPY_MATRIX(int)
+CAFFE2_SPECIALIZED_COPY_MATRIX(TIndex)
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE2_SPECIALIZED_COPY_MATRIX(long)
+#endif
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint8_t)
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
+
+#undef CAFFE2_SPECIALIZXED_COPY_MATRIX
 
 #define CAFFE2_SPECIALIZED_COPYVECTOR(T)                            \
   template <>                                                       \

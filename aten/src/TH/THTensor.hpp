@@ -17,6 +17,7 @@ struct THTensor
       , storage_offset_(0)
       , sizes_{0}
       , strides_{1}
+      , is_zero_dim_(false)
       {}
 
     ~THTensor() {
@@ -34,6 +35,12 @@ struct THTensor
 
     std::vector<int64_t> sizes_;
     std::vector<int64_t> strides_;
+
+    // TODO: get rid of this, use the sizes_/strides_ .size() instead.
+    // This requires making sure TH code can handle zero dims (empty sizes, strides).
+    // Short-term plan is to dispatch dim/size/stride through a function that gives these
+    // in a "legacy" format, i.e. 0-dim becomes 1-dim.  Then medium term we remove the legacy calls.
+    bool is_zero_dim_;
 
     template <typename T>
     inline T * data() const {
@@ -107,9 +114,6 @@ struct THTensor
     }
 };
 
-#include "generic/THTensorFastGetSet.hpp"
-#include "THGenerateAllTypes.h"
-
 inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
   return tensor->sizes_.data();
 }
@@ -117,6 +121,14 @@ inline int64_t* THTensor_getSizePtr(THTensor* tensor) {
 inline int64_t* THTensor_getStridePtr(THTensor* tensor) {
   return tensor->strides_.data();
 }
+
+// NB: Non-retaining
+inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
+  return tensor->storage_;
+}
+
+#include "generic/THTensorFastGetSet.hpp"
+#include "THGenerateAllTypes.h"
 
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   // NB: This is *truly* a resize; calling code (e.g., squeeze)
@@ -142,14 +154,17 @@ inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset
   tensor->storage_offset_ = storage_offset;
 }
 
-// NB: Non-retaining
-inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
-  return tensor->storage_;
-}
-
 // NB: Steals ownership of storage
 inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
   tensor->storage_ = storage;
+}
+
+inline bool THTensor_isZeroDim(const THTensor *tensor) {
+  return tensor->is_zero_dim_;
+}
+
+inline void THTensor_setIsZeroDim(THTensor *tensor, bool is_zero_dim) {
+  tensor->is_zero_dim_ = is_zero_dim;
 }
 
 TH_API void THTensor_free(THTensor *self);

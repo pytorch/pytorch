@@ -349,12 +349,16 @@ Tensor _prod(const Tensor &self, int64_t dim_, bool keepdim) {
 Tensor& logsumexp_out(Tensor& result, const Tensor &self, int64_t dim_, bool keepdim) {
   int64_t dim = maybe_wrap_dim(dim_, self.dim());
   // can't take max of empty tensor
-  AT_CHECK(self.numel() != 0, "logsumexp only works on nonempty tensors");
-  auto maxes = at::max_values(self, dim, true);
-  auto maxes_squeezed = (keepdim ? maxes : maxes.squeeze(dim));
-  maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
-  at::sum_out(result, at::exp(self - maxes), dim, keepdim);
-  result.log_().add_(maxes_squeezed);
+  if (self.numel() != 0) {
+    auto maxes = at::max_values(self, dim, true);
+    auto maxes_squeezed = (keepdim ? maxes : maxes.squeeze(dim));
+    maxes_squeezed.masked_fill_(maxes_squeezed.abs() == INFINITY, 0);
+    at::sum_out(result, at::exp(self - maxes), dim, keepdim);
+    result.log_().add_(maxes_squeezed);
+  } else {
+    at::sum_out(result, at::exp(self), dim, keepdim);
+    result.log_();
+  }
   return result;
 }
 

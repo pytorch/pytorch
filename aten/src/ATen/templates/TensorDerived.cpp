@@ -25,10 +25,6 @@ ${Tensor}::${Tensor}(${THTensor} * tensor)
 : TensorImpl(Backend::${Backend}, ScalarType::${ScalarName}, tensor, /* is variable */ false)
 {}
 
-const char * ${Tensor}::typeString() {
-  return "${Type}";
-}
-
 ${TensorDenseOrSparse}
 
 }
