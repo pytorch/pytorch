@@ -51,7 +51,7 @@ class GivenTensorFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor* output) override {
+  bool Fill(Tensor<Context>* output) override {
     return (this->*body_)(output);
   }
 
@@ -69,20 +69,20 @@ class GivenTensorFillOp final : public FillerOp<Context> {
   }
 
   template <typename Type>
-  bool FillWithType(Tensor* output) {
+  bool FillWithType(Tensor<Context>* output) {
     DCHECK_EQ(output->size(), values_.size())
         << "output size: " << output->size()
         << " given size: " << values_.size();
     auto* data = output->template mutable_data<Type>();
     const Type* values_data = values_.template data<Type>();
     if (output->size()) {
-      context_.CopyItemsFromCPU(
-          TypeMeta::Make<Type>(), output->size(), values_data, data);
+      context_.template Copy<Type, CPUContext, Context>(
+          output->size(), values_data, data);
     }
     return true;
   }
 
-  bool (GivenTensorFillOp::*body_)(Tensor* output);
-  Tensor values_{CPU};
+  bool (GivenTensorFillOp::*body_)(Tensor<Context>* output);
+  TensorCPU values_;
 };
 } // namespace caffe2

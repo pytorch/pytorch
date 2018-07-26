@@ -140,15 +140,16 @@ class ONNXWhileOp final : public Operator<Context> {
         for (int i = 0; i < num_loop_carried_deps; ++i) {
           Blob* b = cur_ws->GetBlob(
               scope_->net()->external_output()[i + 1]);
-          const Tensor& t = b->template Get<Tensor>();
+          const Tensor<Context>& t = b->template Get<Tensor<Context>>();
           scope_->lcd_tensor(i)->CopyFrom(t);
         }
         // Copy out scan_outputs
         for (int i = 0; i < num_scan_outputs; ++i) {
           int net_output_idx = i + 1 + num_loop_carried_deps;
-          const Tensor& scan_output =
-              cur_ws->GetBlob(scope_->net()->external_output()[net_output_idx])
-                  ->template Get<Tensor>();
+          const Tensor<Context>& scan_output =
+              cur_ws->GetBlob(
+                  scope_->net()->external_output()[net_output_idx])
+                  ->template Get<Tensor<Context>>();
           auto* scan_output_target = Output(i + num_loop_carried_deps);
           if (itr == 0) {
             auto dims = scan_output.dims();
@@ -213,23 +214,22 @@ class ONNXWhileOp final : public Operator<Context> {
       lcd_tensors_.clear();
       for (int i = 2; i < body_net_def.external_input_size(); ++i) {
         Blob* b = loop_ws_->CreateBlob(body_net_def.external_input(i));
-        Tensor* t = b->GetMutableTensor(Context::GetDeviceType());
+        Tensor<Context>* t = b->template GetMutable<Tensor<Context>>();
         lcd_tensors_.push_back(t);
       }
       // First output is the iteration variable
       auto* iteration_var_blob = loop_ws_->CreateBlob(
           body_net_def.external_input(0));
       iteration_var_ =
-          iteration_var_blob->GetMutableTensor(Context::GetDeviceType());
+          iteration_var_blob->template GetMutable<Tensor<Context>>();
 
-      input_condition_var_ =
-          loop_ws_->CreateBlob(body_net_def.external_input(1))
-              ->GetMutableTensor(Context::GetDeviceType());
+      input_condition_var_ = loop_ws_->CreateBlob(
+          body_net_def.external_input(1))
+          ->template GetMutable<Tensor<Context>>();
 
       auto* condition_var_blob =
           loop_ws_->CreateBlob(body_net_def.external_output(0));
-      condition_var_ =
-          condition_var_blob->GetMutableTensor(Context::GetDeviceType());
+      condition_var_ = condition_var_blob->template GetMutable<Tensor<Context>>();
       condition_var_->Resize(1);
       condition_var_->template mutable_data<bool>();
 
@@ -254,7 +254,7 @@ class ONNXWhileOp final : public Operator<Context> {
       return *iteration_var_ptr;
     }
 
-    Tensor* lcd_tensor(int idx) {
+    Tensor<Context>* lcd_tensor(int idx) {
       return lcd_tensors_[idx];
     }
 
@@ -284,11 +284,11 @@ class ONNXWhileOp final : public Operator<Context> {
     Workspace *loop_ws_;
 
     NetBase* body_net_; // owned by a workspace
-    Tensor* iteration_var_;
-    Tensor* input_condition_var_;
-    Tensor* condition_var_;
+    Tensor<Context>* iteration_var_;
+    Tensor<Context>* input_condition_var_;
+    Tensor<Context>* condition_var_;
 
-    std::vector<Tensor*> lcd_tensors_;
+    std::vector<Tensor<Context>*> lcd_tensors_;
   };
 
   NetDef body_net_def_;

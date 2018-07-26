@@ -24,12 +24,12 @@ class BatchMatMulOpTest : public testing::Test {
       const float value,
       const string& name) {
     Blob* blob = ws_.CreateBlob(name);
-    auto* tensor = blob->GetMutableTensor(CPU);
+    auto* tensor = blob->GetMutable<TensorCPU>();
     tensor->Resize(dims);
     math::Set<float, CPUContext>(
         tensor->size(),
         value,
-        tensor->template mutable_data<float>(),
+        tensor->mutable_data<float>(),
         cpu_context_.get());
   }
 

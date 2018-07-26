@@ -19,6 +19,7 @@ extern "C" {
 
 namespace caffe2 {
 
+template <class Context>
 class Tensor;
 
 // An empty class as a placeholder for a math function that has no specific
@@ -167,7 +168,7 @@ void ReduceMin(
     const int N,
     const T* x,
     T* y,
-    Tensor* scratch_ptr,
+    Tensor<Context>* scratch_ptr,
     Context* context);
 
 template <typename T, class Context>
@@ -175,7 +176,7 @@ void ReduceMax(
     const int N,
     const T* x,
     T* y,
-    Tensor* scratch_ptr,
+    Tensor<Context>* scratch_ptr,
     Context* context);
 
 template <typename T, class Context>
@@ -440,7 +441,7 @@ void Sum(
     const T* x,
     T* y,
     Context* context,
-    Tensor* scratch_ptr = nullptr);
+    Tensor<Context>* scratch_ptr = nullptr);
 
 // Sum of squares of vector x, and writes the result to a single value y.
 template <typename T, class Context>
@@ -449,7 +450,7 @@ void SumSqr(
     const T* x,
     T* y,
     Context* context,
-    Tensor* scratch_ptr = nullptr);
+    Tensor<Context>* scratch_ptr = nullptr);
 
 // Select does index selection of the rows a N*D matrix x, and gives the N
 // dimensional vector y that contains the selected data.

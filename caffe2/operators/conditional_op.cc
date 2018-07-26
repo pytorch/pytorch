@@ -34,10 +34,10 @@ bool ConditionalOp<CPUContext>::RunOnDevice() {
   for (TIndex i = 0; i < condition.size(); i++) {
     auto* dst = outPtr + i * innerSizeBytes;
     if (condPtr[i]) {
-      context_.CopyItemsSameDevice(
+      context_.template CopyItems<CPUContext, CPUContext>(
           dataT.meta(), innerSize, ptrT + i * innerSizeBytes, dst);
     } else {
-      context_.CopyItemsSameDevice(
+      context_.template CopyItems<CPUContext, CPUContext>(
           dataF.meta(), innerSize, ptrF + i * innerSizeBytes, dst);
     }
   }

@@ -28,7 +28,8 @@
 
 int main(int /* unused */, char** /* unused */) {
   PRINT_SIZE(caffe2::Blob);
-  PRINT_SIZE(caffe2::Tensor);
+  PRINT_SIZE(caffe2::Tensor<caffe2::CPUContext>);
+  PRINT_SIZE(caffe2::Tensor<caffe2::CUDAContext>);
   PRINT_SIZE(caffe2::CPUContext);
   PRINT_SIZE(caffe2::CUDAContext);
   PRINT_SIZE(caffe2::OperatorBase);
