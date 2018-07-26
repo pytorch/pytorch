@@ -455,7 +455,9 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
 void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   JIT_ASSERT(graph.inputs().size() == spec.size());
   for(size_t i = 0; i < spec.size(); ++i) {
-    graph.inputs()[i]->setType(spec.tensorInfo(i));
+    auto argspec = spec.at(i);
+    if (!argspec.isTensor()) continue;
+    graph.inputs()[i]->setType(argspec);
   }
   PropagateShapeOnBlock(graph.block());
 }

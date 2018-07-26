@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <type_traits>
+
 namespace torch { namespace jit {
 
 // smart pointer to hold onto at::Retainable objects in a generic way
