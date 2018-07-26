@@ -103,11 +103,11 @@ class PyTorchFileReader {
     }
     readAndValidateFileFooter();
   }
-  std::string getLastRecord() {
+  std::tuple<std::shared_ptr<void>, size_t> getLastRecord() {
     return getRecordWithKey(last_record_offset);
   }
-  std::string getRecordWithKey(uint64_t key) {
-    if (key > file_size) {
+  std::tuple<std::shared_ptr<void>, size_t> getRecordWithKey(uint64_t key) {
+    if (key + kFieldAlignment > file_size) {
       throw std::runtime_error("Provided key is larger than the size of the file.");
     }
     if (key % kFieldAlignment != 0) {
@@ -122,14 +122,14 @@ class PyTorchFileReader {
     }
     auto size = read64BitIntegerLittleEndian();
     seekToNextAlignmentBoundary();
-    std::string retval;
-    retval = std::string(size, '\0');
-    if (!std::fread(reinterpret_cast<void*>(&retval[0]), size, 1, fp)) {
+    std::shared_ptr<void> retval;
+    retval.reset((char*)malloc(size));
+    if (!std::fread(retval.get(), size, 1, fp)) {
       wrapPErrorAndThrow("Failed to read data from record");
     }
     cursor += size;
     seekToNextAlignmentBoundary();
-    return retval;
+    return {retval, size};
   }
  private:
   FILE *fp;
@@ -244,12 +244,9 @@ class PyTorchFileWriter {
   }
 
   void writePad(const size_t num_bytes) {
-    uint8_t pad_val = kPadValue;
-    // TODO is there a more efficient way to do this?
-    for (size_t i = 0; i < num_bytes; ++i) {
-      if (!std::fwrite(&pad_val, 1u, 1u, fp)) {
-        wrapPErrorAndThrow("Unable to write to file!");
-      }
+    static std::vector<char> pad_buffer(kPadValue, kFieldAlignment);
+    if (!std::fwrite(pad_buffer.data(), num_bytes, 1u, fp)) {
+      wrapPErrorAndThrow("Unable to write to file!");
     }
     cursor += num_bytes;
   }
