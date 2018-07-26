@@ -10,9 +10,10 @@ jobs:
     resource_class: large
     steps:
     - run:
-        name: Hello World
+        name: Build
         command: |
-          whoami
+          export SCCACHE_BUCKET=ossci-compiler-cache
+          .jenkins/pytorch/build.sh
 workflows:
   version: 2
   linux_trusty_py3_6_gcc7:
