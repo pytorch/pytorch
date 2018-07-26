@@ -27,6 +27,7 @@
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/serialization.h"
 
 namespace torch  { namespace jit {
 
@@ -190,6 +191,21 @@ void initJITBindings(PyObject *module) {
         auto stack = createStack(args);
         ge.run(stack);
         return wrapStack(std::move(stack));
+      });
+
+
+    py::class_<PyTorchFileWriter>(m, "PyTorchFileWriter")
+      .def(py::init<std::string>())
+      .def("write_record", &PyTorchFileWriter::writeRecord)
+      .def("write_end_of_file", &PyTorchFileWriter::writeEndOfFile);
+
+    py::class_<PyTorchFileReader>(m, "PyTorchFileReader")
+      .def(py::init<std::string>())
+      .def("get_record_with_key", [](PyTorchFileReader &self, uint64_t key) {
+        return py::bytes(self.getRecordWithKey(key));
+      })
+      .def("get_last_record", [](PyTorchFileReader &self){
+        return py::bytes(self.getLastRecord());
       });
 
   initPythonIRBindings(module);
