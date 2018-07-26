@@ -35,7 +35,7 @@ void writeTextOutput(
     const string& output_prefix,
     const string& name) {
   string output_name = output_prefix + "/" + name + ".txt";
-  caffe2::TensorSerializer<ContextType> ser;
+  caffe2::TensorSerializer ser;
   caffe2::BlobProto blob_proto;
   ser.Serialize(
       *tensor, output_name, blob_proto.mutable_tensor(), 0, tensor->size());

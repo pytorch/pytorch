@@ -153,7 +153,7 @@ class ReservoirSamplingOp final : public Operator<Context> {
         CAFFE_ENFORCE_GE(*num_visited, numToCollect_);
       } else {
         // replace
-        context_.template CopyItems<Context, Context>(
+        context_.CopyItemsSameDevice(
             input.meta(),
             block_size,
             input_data + i * block_bytesize,

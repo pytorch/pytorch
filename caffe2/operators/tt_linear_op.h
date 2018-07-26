@@ -52,7 +52,7 @@ class TTLinearOp final : public Operator<Context> {
     int cores_idx = 0;
 
     // Temporary buffer to facilitate multiplication of TT-cores with input
-    auto Y_buf = Y_temp_->GetMutable<Tensor<Context>>();
+    auto Y_buf = Y_temp_->GetMutableTensor(Context::GetDeviceType());
     Y_buf->ResizeLike(X);
     Y_buf->CopyFrom(X);
 
@@ -104,7 +104,7 @@ class TTLinearOp final : public Operator<Context> {
 
       // Resize operation
       Y_buf->Resize(Y->dim32(0), Y->dim32(1));
-      context_.template Copy<float, CPUContext, CPUContext>(
+      context_.template CopyFromCPU<float>(
           Y->size(),
           Y->template data<float>(),
           Y_buf->template mutable_data<float>());
@@ -160,7 +160,7 @@ class TTLinearOp final : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
   std::vector<int> inp_sizes_;
   std::vector<int> out_sizes_;
   std::vector<int> tt_ranks_;
@@ -181,7 +181,7 @@ class TTLinearGradientOp : public Operator<Context> {
   }
 
  protected:
-  Tensor<Context> bias_multiplier_;
+  Tensor bias_multiplier_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

@@ -27,19 +27,17 @@ class SmartTensorPrinter {
       const std::string& file_name,
       int limit);
 
-  void Print(const Tensor<CPUContext>& tensor);
+  void Print(const Tensor& tensor);
 
-  template <class Context>
-  void PrintMeta(const Tensor<Context>& tensor) {
+  void PrintMeta(const Tensor& tensor) {
     tensorPrinter_.PrintMeta(tensor);
   }
 
   // Uses a default constructed SmartTensorPrinter
-  static void PrintTensor(const Tensor<CPUContext>& tensor);
+  static void PrintTensor(const Tensor& tensor);
 
   // Uses a default constructed SmartTensorPrinter
-  template <class Context>
-  void PrintTensorMeta(const Tensor<Context>& tensor) {
+  void PrintTensorMeta(const Tensor& tensor) {
     DefaultTensorPrinter().PrintMeta(tensor);
   }
 
