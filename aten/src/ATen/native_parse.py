@@ -131,6 +131,7 @@ def run(paths):
                 output_arguments = [x for x in arguments if x.get('output')]
                 declaration['return'] = return_type if len(output_arguments) == 0 else output_arguments
                 declaration['variants'] = func.get('variants', ['method', 'function'])
+                declaration['cpu_half'] = func.get('cpu_half', False)
                 declaration['deprecated'] = func.get('deprecated', False)
                 declaration['device_guard'] = func.get('device_guard', True)
                 declaration['arguments'] = func.get('arguments', arguments)
