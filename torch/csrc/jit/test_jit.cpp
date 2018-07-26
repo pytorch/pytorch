@@ -715,7 +715,7 @@ bool isEqual(at::IntList lhs, at::IntList rhs) {
 }
 
 bool isEqual(const ArgumentInfo & ti, const autograd::Variable & v) {
-  REQUIRE(ti.kind() == IValueKind::Tensor);
+  REQUIRE(ti.isTensor());
   if(!ti.defined())
     return ti.defined() == v.defined();
   return

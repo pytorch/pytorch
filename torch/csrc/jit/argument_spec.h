@@ -21,7 +21,7 @@ namespace torch { namespace jit {
 // API users should use ArgumentInfo
 struct ArgumentInfoPOD {
   // total size is 64-bit
-  unsigned kind : 8; // kind of the IValue
+  unsigned is_tensor : 8; // all other fields are invalid if this is false
   unsigned type : 8; // scalar type
   unsigned defined : 1;
   unsigned requires_grad : 1;
@@ -40,7 +40,7 @@ static_assert(sizeof(ArgumentInfoPOD) == sizeof(int64_t),
 struct ArgumentInfo;
 
 struct ArgumentSpec {
-  ArgumentSpec(bool with_grad, const Stack & inputs)
+  ArgumentSpec(bool with_grad, at::ArrayRef<IValue> inputs)
   :  hash_code(0), ninputs(inputs.size()) {
     int32_t all_dims = 0;
     const int32_t num_inputs = inputs.size();
@@ -58,9 +58,9 @@ struct ArgumentSpec {
     int32_t total_dims = 0;
     for(int32_t i = 0; i < num_inputs; i++) {
       auto & pod = pods[i];
-      pod.kind = static_cast<uint32_t>(inputs[i].kind());
-      if (!inputs[i].isTensor()) continue;
-      const auto & t = inputs[i].toTensor();
+      pod.is_tensor = static_cast<uint32_t>(inputs[i].isTensor());
+      if (!pod.is_tensor) continue;
+      at::Tensor t = inputs[i].toTensor();
       pod.defined = t.defined();
       if (pod.defined) {
         pod.type = static_cast<int>(t.type().scalarType());
@@ -124,8 +124,8 @@ private:
 struct ArgumentInfo {
   ArgumentInfo(const ArgumentSpec & spec, const int i)
   : spec(spec), i(i) {}
-  IValueKind kind() const {
-    return IValueKind(pod(i).kind);
+  bool isTensor() const {
+    return pod(i).is_tensor;
   }
   at::ScalarType type() const {
     return at::ScalarType(pod(i).type);

@@ -95,16 +95,10 @@ using DoubleList = ConstantList<double>;
 #define TORCH_FORALL_TAGS(_) \
   _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList)
 
-enum class IValueKind : uint32_t {
-  #define DEFINE_TAG(x) x,
-  TORCH_FORALL_TAGS(DEFINE_TAG)
-  #undef DEFINE_TAG
-};
-
 struct IValue {
   IValue()
   : payload(0)
-  , tag(IValueKind::None)
+  , tag(Tag::None)
   , retainable(false) {}
   IValue(const IValue& rhs)
       : payload(rhs.payload),
@@ -140,12 +134,12 @@ struct IValue {
 
   // Tensor
   IValue(at::Tensor t)
-  : tag(IValueKind::Tensor), retainable(t.defined())  {
+  : tag(Tag::Tensor), retainable(t.defined())  {
     // note: the undefined tensor is not refcounted, so while it
     // is tagged as a tensor, retainable is set to false.
     as_tensor_impl = t.at::detail::TensorBase::detach();
   }
-  bool isTensor() const { return IValueKind::Tensor == tag; }
+  bool isTensor() const { return Tag::Tensor == tag; }
   at::Tensor toTensor() && {
     JIT_ASSERT(isTensor());
     at::Tensor t(as_tensor_impl, /*retain=*/false);
@@ -159,7 +153,7 @@ struct IValue {
 
   // Tuple
   IValue(Shared<Tuple> v);
-  bool isTuple() const { return IValueKind::Tuple == tag; }
+  bool isTuple() const { return Tag::Tuple == tag; }
   Shared<Tuple> toTuple() && {
     JIT_ASSERT(isTuple());
     return moveToRetainable<Tuple>();
@@ -171,10 +165,10 @@ struct IValue {
 
   // Double
   IValue(double d)
-  : tag(IValueKind::Double), retainable(false) {
+  : tag(Tag::Double), retainable(false) {
     as_double = d;
   }
-  bool isDouble() const { return IValueKind::Double == tag; }
+  bool isDouble() const { return Tag::Double == tag; }
   double toDouble() const {
     JIT_ASSERT(isDouble());
     return as_double;
@@ -182,7 +176,7 @@ struct IValue {
 
   // Int
   IValue(int64_t i)
-  : tag(IValueKind::Int), retainable(false) {
+  : tag(Tag::Int), retainable(false) {
     as_int = i;
   }
 
@@ -192,7 +186,7 @@ struct IValue {
   IValue(bool b)
   : IValue(static_cast<int64_t>(b)) {}
 
-  bool isInt() const { return IValueKind::Int == tag; }
+  bool isInt() const { return Tag::Int == tag; }
 
   int64_t toInt() const {
     JIT_ASSERT(isInt());
@@ -204,7 +198,7 @@ struct IValue {
   IValue(std::vector<int64_t> v);
   IValue(at::ArrayRef<int64_t> v)
   : IValue(std::vector<int64_t>(v.begin(), v.end())) {}
-  bool isIntList() const { return IValueKind::IntList == tag; }
+  bool isIntList() const { return Tag::IntList == tag; }
   Shared<IntList> toIntList() && {
     JIT_ASSERT(isIntList());
     return moveToRetainable<IntList>();
@@ -219,7 +213,7 @@ struct IValue {
   // DoubleList
   IValue(Shared<DoubleList> v);
   IValue(std::vector<double> v);
-  bool isDoubleList() const { return IValueKind::DoubleList == tag; }
+  bool isDoubleList() const { return Tag::DoubleList == tag; }
   Shared<DoubleList> toDoubleList() && {
     JIT_ASSERT(isDoubleList());
     return moveToRetainable<DoubleList>();
@@ -230,7 +224,7 @@ struct IValue {
   }
 
   bool isNone() {
-    return IValueKind::None == tag;
+    return Tag::None == tag;
   }
 
   // Scalar, which gets encoded as either an Int or a Double
@@ -257,7 +251,7 @@ struct IValue {
   // for debugging
   std::string tagKind() {
     switch(tag) {
-      #define DEFINE_CASE(x) case IValueKind::x: return #x;
+      #define DEFINE_CASE(x) case Tag::x: return #x;
       TORCH_FORALL_TAGS(DEFINE_CASE)
       #undef DEFINE_CASE
     }
@@ -278,10 +272,6 @@ struct IValue {
   template<typename T>
   T to() const &;
 
-  IValueKind kind() const {
-    return tag;
-  }
-
 private:
   template<typename T>
   Shared<T> moveToRetainable() {
@@ -295,9 +285,14 @@ private:
   }
   void clearToNone() {
     payload = 0;
-    tag = IValueKind::None;
+    tag = Tag::None;
     retainable = false;
   }
+  enum class Tag : uint32_t {
+    #define DEFINE_TAG(x) x,
+    TORCH_FORALL_TAGS(DEFINE_TAG)
+    #undef DEFINE_TAG
+  };
   union {
     at::TensorImpl* as_tensor_impl;
     at::Retainable* as_retainable;
@@ -307,7 +302,7 @@ private:
     // be used to copy the union's value in certain cases
     int64_t payload;
   };
-  IValueKind tag;
+  Tag tag;
   bool retainable;
 };
 
@@ -356,19 +351,19 @@ struct ConstantList : at::Retainable {
 };
 
 inline IValue::IValue(Shared<Tuple> v)
-: tag(IValueKind::Tuple), retainable(true) {
+: tag(Tag::Tuple), retainable(true) {
   as_retainable = v.detach();
 }
 
 inline IValue::IValue(Shared<IntList> v)
-: tag(IValueKind::IntList), retainable(true) {
+: tag(Tag::IntList), retainable(true) {
   as_retainable = v.detach();
 }
 inline IValue::IValue(std::vector<int64_t> v)
 : IValue(IntList::create(std::move(v))) {}
 
 inline IValue::IValue(Shared<DoubleList> v)
-: tag(IValueKind::DoubleList), retainable(true) {
+: tag(Tag::DoubleList), retainable(true) {
   as_retainable = v.detach();
 }
 inline IValue::IValue(std::vector<double> v)

@@ -79,7 +79,7 @@ struct ExecutionPlanAutogradFunction : public autograd::Function {
     });
   }
 
-  void capture(IValue & val) {
+  void capture(const IValue & val) {
     const bool is_tensor = val.isTensor();
     is_var_capture.push_back(is_tensor);
     if (is_tensor) {
@@ -105,12 +105,17 @@ private:
 // to the output Variables if present.
 struct ExecutionPlan {
   ExecutionPlan(std::shared_ptr<Graph>& graph)
-      : f(graph), graph(graph) {}
+      : f(graph),
+        graph(graph),
+        num_inputs(graph->inputs().size()),
+        num_outputs(graph->outputs().size()) {}
   ExecutionPlan(std::shared_ptr<Graph>& graph, Gradient grad)
       : f(graph),
         graph(graph),
         grad(std::move(grad)),
-        grad_executor(this->grad.df) {}
+        grad_executor(this->grad.df),
+        num_inputs(graph->inputs().size()),
+        num_outputs(graph->outputs().size()) {}
 
   void run(Stack & stack) const {
     if (grad) {
@@ -140,56 +145,70 @@ struct ExecutionPlan {
 
 private:
   void detachVariables(Stack & stack) const {
-    for (IValue & v : stack) {
+    // It would be nice to use an ArrayRef here, but unfortunately those can only
+    // return const references, so we need to do a bunch of indexing ourselves.
+    const int64_t stack_size = stack.size();
+    const int64_t stack_offset = stack_size - num_inputs;
+    for (int64_t i = stack_offset; i < stack_size; ++i) {
+      auto & v = stack[i];
       if (!v.isTensor()) continue;
       auto t = std::move(v).toTensor();
       v = IValue{t.defined() ? autograd::as_variable_ref(t).detach() : std::move(t)};
     }
   }
   // Capture (save) inputs that would be required to subsequently run backwards
-  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, Stack & inputs) const {
+  void captureInputs(ExecutionPlanAutogradFunction & grad_fn, at::ArrayRef<IValue> inputs) const {
     for (size_t offset : grad.df_input_captured_inputs) {
       grad_fn.capture(inputs[offset]);
     }
   }
-  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, Stack & outputs) const {
+  void captureOutputs(ExecutionPlanAutogradFunction & grad_fn, at::ArrayRef<IValue> outputs) const {
     for (size_t offset : grad.df_input_captured_outputs) {
       grad_fn.capture(outputs[offset]);
     }
   }
 
+  // XXX: keep in mind that stack can be larger than the inputs we need!
   void runWithGrad(Stack & stack) const {
     auto grad_fn = std::make_shared<ExecutionPlanAutogradFunction>(grad_executor,
       grad.df_input_captured_inputs.size() + grad.df_input_captured_outputs.size());
-    // hook up the outputs of df to the gradient functions of the inputs that require gradients
-    for(auto idx : grad.df_output_vjps) {
-      auto v = Variable(stack[idx].toTensor());
-      grad_fn->add_next_edge(v.gradient_edge());
+
+    {
+      auto inputs = last(stack, num_inputs);
+      // hook up the outputs of df to the gradient functions of the inputs that require gradients
+      for(auto idx : grad.df_output_vjps) {
+        auto v = Variable(inputs[idx].toTensor());
+        grad_fn->add_next_edge(v.gradient_edge());
+      }
+      captureInputs(*grad_fn, inputs);
     }
-    captureInputs(*grad_fn, stack);
 
     detachVariables(stack);
     InterpreterState(f).runOneStage(stack);
 
-    // hookup the gradients for the output tensors that require gradients
-    // to the inputs to our gradient function df
-    // TODO - XXX - if any output is the same tensor multiple times, views have to be
-    // setup here. We need to refactor autograd until it is safe for
-    // tensors to be constructed without all the viewing infrastructure.
-    // this is currently intentionally not done here so we can get an idea of our
-    // perf before introducing overhead for correctness
-    for(auto idx : grad.df_input_vjps) {
-      // Note: we have to set this up in place, or we have to throw away and
-      // reallocate variables that were already created in wrapTensors. We
-      // should add an API for this.
-      Variable output = stack[idx].toTensor();
-      autograd::create_gradient_edge(output, grad_fn);
-      output.set_requires_grad(true);
+    {
+      auto outputs = last(stack, num_outputs);
+      // hookup the gradients for the output tensors that require gradients
+      // to the inputs to our gradient function df
+      // TODO - XXX - if any output is the same tensor multiple times, views have to be
+      // setup here. We need to refactor autograd until it is safe for
+      // tensors to be constructed without all the viewing infrastructure.
+      // this is currently intentionally not done here so we can get an idea of our
+      // perf before introducing overhead for correctness
+      for(auto idx : grad.df_input_vjps) {
+        // Note: we have to set this up in place, or we have to throw away and
+        // reallocate variables that were already created in wrapTensors. We
+        // should add an API for this.
+        Variable output = outputs[idx].toTensor();
+        autograd::create_gradient_edge(output, grad_fn);
+        output.set_requires_grad(true);
+      }
+      captureOutputs(*grad_fn, outputs);
+      // drop the temporary outputs so that we return the same number of
+      // outputs as if we were not also calculating gradient
+      const size_t num_temporary_outputs = num_outputs - grad.f_real_outputs;
+      stack.erase(stack.end() - num_temporary_outputs, stack.end());
     }
-    captureOutputs(*grad_fn, stack);
-    // drop the temporary outputs so that we return the same number of
-    // outputs as if we were not also calculating gradient
-    stack.erase(stack.begin() + grad.f_real_outputs, stack.end());
   }
 
   Code f;
@@ -199,6 +218,9 @@ private:
   Gradient grad; // if(grad) is false when this is unused
   // executor for df, including code caches
   GraphExecutor grad_executor;
+
+  const size_t num_inputs;
+  const size_t num_outputs;
 };
 
 } // anonymous namespace
@@ -214,6 +236,7 @@ struct GraphExecutorImpl {
   : graph(std::move(graph))
   , optimize(optimize)
   , num_inputs(this->graph->inputs().size())
+  , num_outputs(this->graph->outputs().size())
   , symbolically_differentiable(symbolically_differentiable)
   , may_introduce_gradient(calcMayIntroduceGradient(this->graph->block())) {}
   GraphExecutorImpl(std::shared_ptr<Graph> graph, bool optimize)
@@ -227,34 +250,36 @@ struct GraphExecutorImpl {
   }
 
   // entry point where execution begins
-  void run(Stack & inputs) {
-    if(inputs.size() != num_inputs) {
+  void run(Stack & stack) {
+    if(stack.size() < num_inputs) {
       std::stringstream ss;
-      ss << "expected " << num_inputs << " inputs but got " << inputs.size() << " inputs";
+      ss << "expected " << num_inputs << " inputs but got " << stack.size() << " inputs";
       throw std::runtime_error(ss.str());
     }
+    auto inputs = last(stack, num_inputs);
 
     // the tracer has called a graph executor
     // there is no need to optimize, but we do need to splice the graph of
     // this excutor into the trace. Otherwise we might unroll control-flow
     // operations.
     if(tracer::isTracing()) {
-      return runTraced(inputs);
+      return runTraced(stack);
     }
 
     // this is the fallback pathway, when we cannot differentiate
     if(!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
-      return runFallback(inputs);
+      return runFallback(stack);
     }
 
     // either we can symbolically differentiate, or we do not need a gradient.
     // go down the route where we treat the inputs as tensors
     // and fully optimize
     auto & implementation = getOrCompile(inputs);
-    return implementation.run(inputs);
+    return implementation.run(stack);
   }
 
-  std::shared_ptr<Graph> graphFor(const Stack& inputs) const {
+  std::shared_ptr<Graph> graphFor(const Stack& stack) const {
+    auto inputs = last(stack, num_inputs);
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
 
     if (!optimize || (!symbolically_differentiable && needsGradient(inputs))) {
@@ -288,11 +313,12 @@ private:
 
   void runTraced(Stack & stack) {
     auto state = tracer::getTracingState();
-    auto input_values = fmap(stack, [](IValue & v) {
+    auto inputs = last(stack, num_inputs);
+    auto input_values = fmap(inputs, [](const IValue & v) {
       return tracer::getValueTrace(v.toTensor());
     });
 
-    ArgumentSpec spec(autograd::GradMode::is_enabled(), stack);
+    ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
     runFallback(stack);
 
     auto all_dynamic = [](const at::ArrayRef<Value*> xs) {
@@ -314,11 +340,12 @@ private:
     }
     auto output_values = script::inlineCallTo(*state->graph, *local_graph, input_values);
 
-    for(size_t i = 0; i < stack.size(); ++i) {
+    auto outputs = last(stack, num_outputs);
+    for (size_t i = 0; i < outputs.size(); ++i) {
       // We can't attach tracing states to scalars, so we have to skip them here
-      // TODO (apaszke): Should we reinterpret them as scalar tensors instead?
-      if (!stack[i].isTensor()) continue;
-      tracer::setValueTrace(stack[i].toTensor(), output_values[i]);
+      // TODO: Should we reinterpret them as scalar tensors instead?
+      if (!outputs[i].isTensor()) continue;
+      tracer::setValueTrace(outputs[i].toTensor(), output_values[i]);
     }
   }
 
@@ -338,7 +365,7 @@ private:
     }
     return false;
   }
-  bool needsGradient(const Stack & inputs) const {
+  bool needsGradient(at::ArrayRef<IValue> inputs) const {
     if (!autograd::GradMode::is_enabled()) {
       return false;
     }
@@ -369,7 +396,7 @@ private:
     autograd_fallback = Code(graph_);
     return autograd_fallback;
   }
-  const ExecutionPlan & getOrCompile(const Stack & inputs) {
+  const ExecutionPlan & getOrCompile(at::ArrayRef<IValue> inputs) {
     // outside lock guard, to minimize the time holding the lock on the fast path
     // ArgumentSpec even computes its hashCode here.
     ArgumentSpec spec(autograd::GradMode::is_enabled(), inputs);
@@ -420,8 +447,9 @@ private:
   // true - do everything we can to make this graph run fast
   // false - do not modifiy the graph at all and just use the interpreter
   // to run the graph. Useful for debugging correctness issues in the implementation
-  bool optimize;
-  size_t num_inputs;
+  const bool optimize;
+  const size_t num_inputs;
+  const size_t num_outputs;
 
   // GraphExecutor optimizes more aggresively when we _know_ the graph will be
   // symbolically differentiable.
