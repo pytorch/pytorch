@@ -790,6 +790,9 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
   bool free_rinfo_ = !rinfo_;
   if (rinfo_ == NULL) rinfo_ = THCudaIntTensor_new(state);
   THCudaIntTensor_resize1d(state, rinfo_, num_batches);
+  // THCudaBlas_Sgetrf,THCudaBlas_Dgetrf will NOT write out the info if the dimensionality is 0;
+  // we could check this explicitly, but this seems safer.
+  THCudaIntTensor_zero(state, rinfo_);
   int *info_gpu = THCudaIntTensor_data(state, rinfo_);
 
   // Copy pointers to device.
