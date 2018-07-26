@@ -123,7 +123,7 @@ class PyTorchFileReader {
     auto size = read64BitIntegerLittleEndian();
     seekToNextAlignmentBoundary();
     std::shared_ptr<void> retval;
-    retval.reset((char*)malloc(size));
+    retval.reset(new char[size]);
     if (!std::fread(retval.get(), size, 1, fp)) {
       wrapPErrorAndThrow("Failed to read data from record");
     }
