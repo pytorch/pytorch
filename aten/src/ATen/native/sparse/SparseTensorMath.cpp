@@ -146,9 +146,13 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Sca
   r._indices().copy_(t._indices());
   Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
   at::pow_out(r_values, t._values(), value);
+#ifndef USE_TH_SIZE_ZERO_DIM
+  _get_sparse_impl(r)->set_nnz(t._nnz());
+#else
   auto r_indices = r._indices().narrow(1, 0, t._nnz());
   r_values = r_values.narrow(0, 0, t._nnz());
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+#endif
   _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
 
   return r;
@@ -292,9 +296,13 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
       }
   );
 
+#ifndef USE_TH_SIZE_ZERO_DIM
+  _get_sparse_impl(r)->set_nnz(r_i);
+#else
   r_indices = r_indices.narrow(1, 0, r_i);
   r_values = r_values.narrow(0, 0, r_i);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+#endif
 
   // TODO: I think it may be possible to track inside the loop and
   // detect when we are uncoalesced (e.g., by observing that an
@@ -473,9 +481,13 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
     );
   }
 
+#ifndef USE_TH_SIZE_ZERO_DIM
+  _get_sparse_impl(r)->set_nnz(r_i);
+#else
   r_indices = r_indices.narrow(1, 0, r_i);
   r_values = r_values.narrow(0, 0, r_i);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
+#endif
   _get_sparse_impl(r)->set_coalesced(true);
 
   return r;
@@ -811,9 +823,15 @@ SparseTensor& _sspaddmm_out_cpu(
   );
 
   // to avoid a clone
+#ifndef USE_TH_SIZE_ZERO_DIM
+  _get_sparse_impl(r)->set_indices(newi);
+  _get_sparse_impl(r)->set_values(newv);
+  _get_sparse_impl(r)->set_nnz(p);
+#else
   newi = newi.narrow(1, 0, p);
   newv = newv.narrow(0, 0, p);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(newi, newv);
+#endif
 
   return r;
 }
