@@ -129,7 +129,7 @@ class PyTorchFileReader {
     }
     cursor += size;
     seekToNextAlignmentBoundary();
-    return {retval, size};
+    return std::tuple<std::shared_ptr<void>, size_t>(retval, size);
   }
   ~PyTorchFileReader() {
     std::fclose(fp);
