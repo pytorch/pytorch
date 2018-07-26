@@ -130,9 +130,9 @@ class Broadcast(CWrapPlugin):
         return self.getExpandTemplate(size_check, expand_code, success_code, raise_errors)
 
     OUT_PLACE_PRE_EXPAND_PRE_DIM_TEMPLATE = Template(
-        """if(THTensor_(nDimension)(LIBRARY_STATE ${arg_op_dim}) <= ${arg_op_dim_value}) {
+        """if(THTensor_(nDimensionLegacyNoScalars)(LIBRARY_STATE ${arg_op_dim}) <= ${arg_op_dim_value}) {
              THError("Argument %s requires at least %d dimensions, but only has %d",
-                     "${op_dim}", ${arg_op_dim_value} + 1, THTensor_(nDimension)(LIBRARY_STATE ${arg_op_dim}));
+                     "${op_dim}", ${arg_op_dim_value} + 1, THTensor_(nDimensionLegacyNoScalars)(LIBRARY_STATE ${arg_op_dim}));
            }
            int64_t ${arg_op_a}_dim${idx}_size = THTensor_(size)(LIBRARY_STATE ${arg_op_dim}, ${arg_op_dim_value});\n""")
 
