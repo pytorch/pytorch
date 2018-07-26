@@ -2,7 +2,7 @@
 #define TH_GENERIC_FILE "generic/SpatialUpSamplingNearest.c"
 #else
 
-#include "linear_upsampling.h"
+#include "upsampling.h"
 
 static inline void THNN_(SpatialUpSamplingNearest_shapeCheck)
      (THTensor *input, THTensor *gradOutput,

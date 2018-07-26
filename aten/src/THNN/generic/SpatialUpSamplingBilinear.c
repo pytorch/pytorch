@@ -5,7 +5,7 @@
 #define TH_GENERIC_FILE "generic/SpatialUpSamplingBilinear.c"
 #else
 
-#include "linear_upsampling.h"
+#include "upsampling.h"
 
 static inline void THNN_(SpatialUpSamplingBilinear_shapeCheck)
      (THTensor *input, THTensor *gradOutput,
