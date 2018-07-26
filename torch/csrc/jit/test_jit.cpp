@@ -641,7 +641,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -668,7 +668,7 @@ void testDifferentiate(std::ostream & out) {
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);

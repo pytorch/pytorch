@@ -87,7 +87,7 @@ bool isSimpleMap(Node *node) {
   if (!expected_type) return false;
 //type checking is intentionally dropped from isSimpleMap
 //isFusable is checking input/output types as there are some exceptions from allFloatIO requirement
-  static const auto equal_modulo_strides = [](TensorTypePtr expected, const TypePtr& _actual) {
+  static const auto equal_modulo_strides = [](const TensorTypePtr& expected, const TypePtr& _actual) {
      TensorTypePtr actual = _actual->cast<TensorType>();
      return actual &&
            expected->device() == actual->device() &&

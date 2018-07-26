@@ -144,7 +144,7 @@ struct TensorInfo {
   operator TypePtr() const {
     if(!defined())
       return DynamicType::get();
-    return std::make_shared<TensorType>(type(), device(), sizes(), strides());
+    return TensorType::create(type(), device(), sizes(), strides());
   }
 private:
   // offsetinto sizes_strides() array where the sizes start for tensor j

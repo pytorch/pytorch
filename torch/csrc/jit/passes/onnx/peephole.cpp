@@ -271,7 +271,7 @@ void pushPackingPastRnn(Block *b) {
       new_sizes.push_back(oldType->sizes()[0]);
       new_sizes.push_back(oldType->sizes()[1]);
       new_sizes.push_back(rnn->i(attr::hidden_size));
-      TensorTypePtr newType = std::make_shared<TensorType>(
+      TensorTypePtr newType = TensorType::create(
           oldType->scalarType(), oldType->device(), new_sizes);
       next->outputs()[0]->setType(newType);
     }

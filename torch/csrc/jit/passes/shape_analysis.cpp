@@ -296,7 +296,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     auto lhs_type = tensor_types.at(0);
     auto rhs_type = tensor_types.at(1);
     SHAPE_ASSERT(lhs_type->sizes().size() == 2 && rhs_type->sizes().size() == 2);
-    node->output()->setType(std::make_shared<TensorType>(
+    node->output()->setType(TensorType::create(
       lhs_type->scalarType(), lhs_type->device(),
       at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
     return;
@@ -419,7 +419,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     std::vector<int64_t> dim_vec = {(int64_t)tensor_types.at(0)->sizes().size()};
     at::IntList dims(dim_vec);
     node->output()->setType(
-        std::make_shared<TensorType>(at::kLong, -1, dims));
+        TensorType::create(at::kLong, -1, dims));
     return;
   } else if (node->kind() == onnx::Reshape) {
     setUnshapedType(node);

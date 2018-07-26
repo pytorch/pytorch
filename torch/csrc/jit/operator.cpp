@@ -65,7 +65,7 @@ struct SchemaParser {
   void parseType(Argument& arg) {
     arg.type = parseBaseType();
     if(L.nextIf('[')) {
-      arg.type = std::make_shared<ListType>(arg.type);
+      arg.type = ListType::create(arg.type);
       if(L.cur().kind == TK_NUMBER) {
         arg.N = std::stoll(L.next().text());
       }

@@ -45,7 +45,7 @@ public:
   // subtyping relation. By default, we return true for the case
   // when the type is exactly equal
   virtual bool isSubtypeOf(const TypePtr rhs) const {
-    return *shared_from_this() == *rhs;
+    return *this == *rhs;
   }
   // user-friendly form of the type, separate from
   // operator<< which is verbose and unambiguous
@@ -86,10 +86,15 @@ inline bool operator!=(const Type & lhs, const Type & rhs) {
   return !(lhs == rhs);
 }
 
+struct DynamicType;
+using DynamicTypePtr = std::shared_ptr<DynamicType>;
 // This node represents a single Tensor value, with an unknown shape.
 struct TORCH_API DynamicType : public Type {
-  DynamicType()
-  : Type(TypeKind::DynamicType) {}
+  template<typename ... T>
+  static DynamicTypePtr create( T&& ... all ) {
+    return DynamicTypePtr(new DynamicType( std::forward<T>(all)... ));
+  }
+
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -99,6 +104,9 @@ struct TORCH_API DynamicType : public Type {
   static const TypeKind Kind = TypeKind::DynamicType;
   // global singleton
   static TypePtr get();
+private:
+  DynamicType()
+  : Type(TypeKind::DynamicType) {}
 };
 
 struct TensorType;
@@ -106,21 +114,18 @@ using TensorTypePtr = std::shared_ptr<TensorType>;
 // This node represents a single Tensor value with a specific size
 struct TORCH_API TensorType : public Type {
   friend struct Type;
-  TensorType(const at::Tensor& tensor)
-    : Type(TypeKind::TensorType)
-    , scalar_type_(tensor.type().scalarType())
-    , device_(tensor.type().is_cuda() ? tensor.get_device() : -1)
-    , sizes_(tensor.sizes())
-    , strides_(tensor.strides()) {}
-  TensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
-    : TensorType(scalar_type, device, sizes, TensorType::contiguousStridesOf(sizes)) {}
-  TensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
-    : Type(TypeKind::TensorType)
-    , scalar_type_(scalar_type)
-    , device_(device)
-    , sizes_(sizes)
-    , strides_(strides)
-    {}
+  template<typename ... T>
+  static TensorTypePtr create( T&& ... all ) {
+    return TensorTypePtr(new TensorType( std::forward<T>(all)... ));
+  }
+
+  // overloaded create variadic template argument as it could not distinguish initializer list
+  static TensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes) {
+    return TensorTypePtr(new TensorType(scalar_type, device, sizes));
+  }
+  static TensorTypePtr create(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides) {
+    return TensorTypePtr(new TensorType(scalar_type, device, sizes, strides));
+  }
 
   static const TypeKind Kind = TypeKind::TensorType;
 
@@ -130,7 +135,7 @@ struct TORCH_API TensorType : public Type {
   const std::vector<int64_t>& strides() const { return strides_; }
 
   TypePtr withSizesStrides(at::IntList sizes, at::IntList strides) const {
-    return std::make_shared<TensorType>(scalar_type_, device_, sizes, strides);
+    return TensorType::create(scalar_type_, device_, sizes, strides);
   }
 
   TypePtr withSizes(at::IntList sizes) const {
@@ -138,13 +143,13 @@ struct TORCH_API TensorType : public Type {
   }
 
   TensorTypePtr contiguous() const {
-    auto t = std::make_shared<TensorType>(*this);
+    auto t = TensorType::create(*this);
     t->strides_ = TensorType::contiguousStridesOf(sizes_);
     return t;
   }
 
   TensorTypePtr toScalarType(at::ScalarType type){
-    auto t = std::make_shared<TensorType>(*this);
+    auto t = TensorType::create(*this);
     t->scalar_type_ = type;
     return t;
   }
@@ -159,7 +164,7 @@ struct TORCH_API TensorType : public Type {
            device() == rt->device();
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    return *shared_from_this() == *rhs || rhs->kind() == TypeKind::DynamicType;
+    return *this == *rhs || rhs->kind() == TypeKind::DynamicType;
   }
   std::string str() const override {
     // str is used for user-facing error messages, where we
@@ -176,6 +181,21 @@ struct TORCH_API TensorType : public Type {
   static TypePtr fromNumberType(TypePtr typ);
 
 private:
+  TensorType(const at::Tensor& tensor)
+    : Type(TypeKind::TensorType)
+    , scalar_type_(tensor.type().scalarType())
+    , device_(tensor.type().is_cuda() ? tensor.get_device() : -1)
+    , sizes_(tensor.sizes())
+    , strides_(tensor.strides()) {}
+  TensorType(at::ScalarType scalar_type, int device, at::IntList sizes)
+    : TensorType(scalar_type, device, sizes, TensorType::contiguousStridesOf(sizes)) {}
+  TensorType(at::ScalarType scalar_type, int device, at::IntList sizes, at::IntList strides)
+    : Type(TypeKind::TensorType)
+    , scalar_type_(scalar_type)
+    , device_(device)
+    , sizes_(sizes)
+    , strides_(strides)
+    {}
   static std::vector<int64_t> contiguousStridesOf(at::IntList sizes) {
     std::vector<int64_t> strides(sizes.size());
     if(sizes.size() == 0) // zero-dim case
@@ -197,9 +217,10 @@ using ListTypePtr = std::shared_ptr<ListType>;
 
 struct TORCH_API ListType : public Type {
   friend struct Type;
-  static const TypeKind Kind = TypeKind::ListType;
-  ListType(TypePtr elem)
-  : Type(TypeKind::ListType), elem(elem) {}
+  template<typename ... T>
+  static ListTypePtr create( T&& ... all ) {
+    return ListTypePtr(new ListType( std::forward<T>(all)... ));
+  }
   bool operator==(const Type& rhs) const override {
     if(auto rhs_ = rhs.cast<ListType>()) {
       return *getElementType() == *rhs_->getElementType();
@@ -218,6 +239,9 @@ struct TORCH_API ListType : public Type {
   static TypePtr ofTensors();
   static TypePtr ofInts();
 private:
+  ListType(TypePtr elem)
+  : Type(TypeKind::ListType), elem(elem) {}
+  static const TypeKind Kind = TypeKind::ListType;
   TypePtr elem;
 };
 
@@ -226,10 +250,10 @@ using TupleTypePtr = std::shared_ptr<TupleType>;
 
 struct TORCH_API TupleType : public Type {
   friend struct Type;
-  TupleType(std::vector<TypePtr> elements_)
-  : Type(TypeKind::TupleType)
-  , elements_(std::move(elements_)) {}
-  static const TypeKind Kind = TypeKind::TupleType;
+  template<typename ... T>
+  static TupleTypePtr create( T&& ... all ) {
+    return TupleTypePtr(new TupleType( std::forward<T>(all)... ));
+  }
   at::ArrayRef<TypePtr> elements() const {
     return elements_;
   }
@@ -264,6 +288,11 @@ struct TORCH_API TupleType : public Type {
     return ss.str();
   }
 private:
+  TupleType(std::vector<TypePtr> elements_)
+  : Type(TypeKind::TupleType)
+  , elements_(std::move(elements_)) {}
+  static const TypeKind Kind = TypeKind::TupleType;
+
   bool compare(const Type& rhs, std::function<bool(const TypePtr, const TypePtr)> fn) const {
     if(rhs.kind() != kind())
       return false;
@@ -280,10 +309,14 @@ private:
   std::vector<TypePtr> elements_;
 };
 
+struct NumberType;
+using NumberTypePtr = std::shared_ptr<NumberType>;
 // This node represents a Python number value
 struct TORCH_API NumberType : public Type {
-  NumberType()
-  : Type(TypeKind::NumberType) {}
+  template<typename ... T>
+  static NumberTypePtr create( T&& ... all ) {
+    return NumberTypePtr(new NumberType( std::forward<T>(all)... ));
+  }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -293,12 +326,19 @@ struct TORCH_API NumberType : public Type {
   static const TypeKind Kind = TypeKind::NumberType;
   // global singleton
   static TypePtr get();
+private:
+  NumberType()
+  : Type(TypeKind::NumberType) {}
 };
 
+struct FloatType;
+using FloatTypePtr = std::shared_ptr<FloatType>;
 // This node represents a Python float number value
 struct TORCH_API FloatType : public Type {
-  FloatType()
-  : Type(TypeKind::FloatType) {}
+  template<typename ... T>
+  static FloatTypePtr create( T&& ... all ) {
+    return FloatTypePtr(new FloatType( std::forward<T>(all)... ));
+  }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -306,17 +346,24 @@ struct TORCH_API FloatType : public Type {
     return "float";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    return *shared_from_this() == *rhs || rhs->kind() == TypeKind::NumberType;
+    return *this == *rhs || rhs->kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::FloatType;
   // global singleton
   static TypePtr get();
+private:
+  FloatType()
+  : Type(TypeKind::FloatType) {}
 };
 
+struct IntType;
+using IntTypePtr = std::shared_ptr<IntType>;
 // This node represents a Python int number value
 struct TORCH_API IntType : public Type {
-  IntType()
-  : Type(TypeKind::IntType) {}
+  template<typename ... T>
+  static IntTypePtr create( T&& ... all ) {
+    return IntTypePtr(new IntType( std::forward<T>(all)... ));
+  }
   bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
@@ -324,11 +371,14 @@ struct TORCH_API IntType : public Type {
     return "int";
   }
   bool isSubtypeOf(const TypePtr rhs) const override {
-    return *shared_from_this() == *rhs || rhs->kind() == TypeKind::NumberType;
+    return *this == *rhs || rhs->kind() == TypeKind::NumberType;
   }
   static const TypeKind Kind = TypeKind::IntType;
   // global singleton
   static TypePtr get();
+private:
+  IntType()
+  : Type(TypeKind::IntType) {}
 };
 
 
@@ -338,9 +388,9 @@ TORCH_API std::ostream& operator<<(std::ostream & out, const Type & t);
 
 inline TypePtr unshapedType(const TypePtr& type) {
   if(TupleTypePtr t = type->cast<TupleType>()) {
-    return std::make_shared<TupleType>(fmap(t->elements(), unshapedType));
+    return TupleType::create(fmap(t->elements(), unshapedType));
   } else if(ListTypePtr t = type->cast<ListType>()) {
-    return std::make_shared<ListType>(unshapedType(t->getElementType()));
+    return ListType::create(unshapedType(t->getElementType()));
   } else if(type->kind() == TypeKind::TensorType) {
     return DynamicType::get();
   } else {
@@ -351,11 +401,9 @@ inline TypePtr unshapedType(const TypePtr& type) {
 inline TypePtr TensorType::fromNumberType(TypePtr typ) {
   JIT_ASSERT(typ->isSubtypeOf(NumberType::get()));
   if(typ->isSubtypeOf(IntType::get())) {
-    TensorType tt(at::kLong, -1, {});
-    return std::make_shared<TensorType>(std::move(tt));
+    return TensorType::create(at::kLong, -1, {});
   } else if(typ->isSubtypeOf(FloatType::get())) {
-    TensorType tt(at::kFloat, -1, {});
-    return std::make_shared<TensorType>(std::move(tt));
+    return TensorType::create(at::kFloat, -1, {});
   }
   AT_ERROR("unknown number type", typ->str());
 }
