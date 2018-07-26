@@ -793,13 +793,21 @@ void addObjectMethods(py::module& m) {
           "convert_node",
           [](caffe2::onnx::Caffe2Backend& instance,
              const py::bytes& node_str,
+             const std::vector<py::bytes>& value_infos_bytes,
              int opset_version) -> std::vector<std::vector<py::bytes>> {
             // Note that we return two lists of serialized ops. The first set is
             // init_ops and the second set is ops for pred net. When converting
             // RNN related op, it is possible that we will create ops in the
             // init_net. Hence the return structure here
+            caffe2::onnx::ValueInfoMap value_infos{};
+            for (const auto& vi_bytes : value_infos_bytes) {
+              ::ONNX_NAMESPACE::ValueInfoProto vi{};
+              vi.ParseFromString(vi_bytes);
+              auto name = vi.name();
+              value_infos.emplace(std::move(name), std::move(vi));
+            }
             auto c2ops = instance.ConvertNode(
-                node_str.cast<std::string>(), opset_version);
+                node_str.cast<std::string>(), {value_infos, opset_version});
             std::vector<std::vector<py::bytes>> vals;
             vals.emplace_back();
             auto& init_vals = vals.back();
@@ -816,12 +824,15 @@ void addObjectMethods(py::module& m) {
               normal_vals.emplace_back(py::bytes(out));
             }
             return vals;
-          })
+          },
+          py::arg("node_str"),
+          py::arg("value_infos_bytes") = std::vector<py::bytes>{},
+          py::arg("opset_version") = kKnownOpsetVersion)
       .def(
-        "_build_tensor_filling_op",
-        [](caffe2::onnx::Caffe2Backend& instance,
-           const py::bytes& tensor_proto_str,
-           const std::string& name="") -> py::bytes {
+          "_build_tensor_filling_op",
+          [](caffe2::onnx::Caffe2Backend& instance,
+             const py::bytes& tensor_proto_str,
+             const std::string& name = "") -> py::bytes {
             caffe2::OperatorDef op;
             ::ONNX_NAMESPACE::TensorProto tp;
             ParseProtoFromLargeString(tensor_proto_str, &tp);
@@ -829,7 +840,7 @@ void addObjectMethods(py::module& m) {
             std::string out;
             op.SerializeToString(&out);
             return py::bytes(out);
-        });
+          });
 
   py::class_<Predictor>(m, "Predictor")
       .def(
