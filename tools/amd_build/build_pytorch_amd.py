@@ -16,7 +16,7 @@ includes = [
 # List of operators currently disabled
 yaml_file = os.path.join(amd_build_dir, "disabled_features.yaml")
 
-# Apply patch files on output directory.
+# Apply patch files in place.
 patch_folder = os.path.join(amd_build_dir, "patches")
 for filename in os.listdir(os.path.join(amd_build_dir, "patches")):
     subprocess.Popen(["git", "apply", os.path.join(patch_folder, filename)], cwd=proj_dir)
