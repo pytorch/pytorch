@@ -49,11 +49,7 @@ std::unique_ptr<Storage> SparseTensorImpl::storage() {
   AT_ERROR("sparse tensors do not have storage");
 }
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-void SparseTensorImpl::set_indices_and_values(const Tensor& indices, const Tensor& values) {
-#else
 void SparseTensorImpl::set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values) {
-#endif
   AT_CHECK(values.type().toSparse() == type(), "values type must match sparse tensor type");
   AT_CHECK(indices.type().scalarType() == kLong, "indices must be an int64 tensor");
   AT_CHECK(indices.type().backend() == values.type().backend(), "backend of indices (", indices.type().backend(), ") must match backend of values (", values.type().backend(), ")");

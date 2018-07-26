@@ -243,11 +243,7 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
 #endif
 
   s_addmm_out_sparse_dense_cuda(values, values, newSparse, dense, 0, /*alpha*/ 1);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r_)->set_indices_and_values(indices, values);
-#else
   _get_sparse_impl(r_)->set_indices_and_values_unsafe(indices, values);
-#endif
 
   return r_;
 #else
@@ -461,7 +457,7 @@ SparseTensor& mul_out_sparse_cuda(SparseTensor& r_, const SparseTensor& t_, cons
   Tensor r_values_ = _new_values_with_size_of(t_values_, max_nnz).zero_();
   r_.resize_as_(src);
 #ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r_)->set_indices_and_values(r_indices_, r_values_);  // TODO: sigh
+  _get_sparse_impl(r_)->set_indices_and_values_unsafe(r_indices_, r_values_);  // TODO: sigh
 #endif
 
   int64_t valueSize = t_values_.stride(0);

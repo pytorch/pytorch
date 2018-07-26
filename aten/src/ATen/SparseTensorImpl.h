@@ -158,11 +158,7 @@ public:
   // This used to be called THSTensor_(_move)
   // NB: This used to be able to avoid a refcount bump, but I was too lazy to
   // make it happen
-#ifndef USE_TH_SIZE_ZERO_DIM
-  void set_indices_and_values(const Tensor& indices, const Tensor& values);
-#else
   void set_indices_and_values_unsafe(const Tensor& indices, const Tensor& values);
-#endif
 };
 
 } // namespace at

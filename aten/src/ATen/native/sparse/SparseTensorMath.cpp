@@ -146,13 +146,9 @@ SparseTensor& pow_out_sparse_scalar(SparseTensor& r, const SparseTensor& t_, Sca
   r._indices().copy_(t._indices());
   Tensor r_values = r._values(); // Sigh... needed because pow_out takes Tensor&
   at::pow_out(r_values, t._values(), value);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_nnz(t._nnz());
-#else
   auto r_indices = r._indices().narrow(1, 0, t._nnz());
   r_values = r_values.narrow(0, 0, t._nnz());
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
-#endif
   _get_sparse_impl(r)->set_coalesced(t.is_coalesced());
 
   return r;
@@ -237,7 +233,7 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
   Tensor r_values = _new_values_with_size_of(s_values, max_nnz).zero_();
   r.resize_as_(src);
 #ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);  // TODO: sigh
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);  // TODO: sigh
 #endif
 
   int64_t blockSize = r_values.stride(0);
@@ -296,13 +292,9 @@ SparseTensor& add_out_sparse_cpu(SparseTensor& r, const SparseTensor& t, const S
       }
   );
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_nnz(r_i);
-#else
   r_indices = r_indices.narrow(1, 0, r_i);
   r_values = r_values.narrow(0, 0, r_i);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
-#endif
 
   // TODO: I think it may be possible to track inside the loop and
   // detect when we are uncoalesced (e.g., by observing that an
@@ -420,7 +412,7 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
   Tensor r_values = _new_values_with_size_of(t_values, max_nnz).zero_();
   r.resize_as_(src);
 #ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_indices_and_values(r_indices, r_values);  // TODO: sigh
+  _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);  // TODO: sigh
 #endif
 
   int64_t match, d;
@@ -481,13 +473,9 @@ SparseTensor& mul_out_sparse_cpu(SparseTensor& r, const Tensor& t_, const Tensor
     );
   }
 
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_nnz(r_i);
-#else
   r_indices = r_indices.narrow(1, 0, r_i);
   r_values = r_values.narrow(0, 0, r_i);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(r_indices, r_values);
-#endif
   _get_sparse_impl(r)->set_coalesced(true);
 
   return r;
@@ -653,7 +641,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
 #ifndef USE_TH_SIZE_ZERO_DIM
   r.sparse_raw_resize_legacy_({m, n}, 1, 1);
 #else
-  r.sparse_resize_and_clear_({m, n}, 1, 1);
+  _get_sparse_impl(r)->resize_(1, 1, {m, n});
 #endif
 
   SparseTensor sparse = sparse_.coalesce();
@@ -693,25 +681,14 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
 #ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(newSparse)->_sizes_mut()[0] = outNnz; // TODO: use something safer
 #else
-  auto sparseDims = _get_sparse_impl(newSparse)->sparseDims();
-  auto denseDims = _get_sparse_impl(newSparse)->denseDims();
-  auto newSparse_indices = _get_sparse_impl(newSparse)->indices();
-  auto newSparse_values = _get_sparse_impl(newSparse)->values();
-  std::vector<int64_t> new_size = {outNnz};
-  auto size_remaining = _get_sparse_impl(newSparse)->sizes().slice(1);
-  new_size.insert(new_size.end(), size_remaining.begin(), size_remaining.end());
-
-  _get_sparse_impl(newSparse)->resize_and_clear_(sparseDims, denseDims, new_size);
-  _get_sparse_impl(newSparse)->set_indices_and_values_unsafe(newSparse_indices, newSparse_values);
+  std::vector<int64_t> new_size = _get_sparse_impl(newSparse)->sizes();
+  new_size[0] = outNnz;
+  _get_sparse_impl(newSparse)->resize_(_get_sparse_impl(newSparse)->sparseDims(), _get_sparse_impl(newSparse)->denseDims(), new_size);
 #endif
 
   // Compute output values tensor with sparse * dense multiplication
   s_addmm_out_sparse_dense_cpu(values, values, newSparse, dense, 0, alpha);
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_indices_and_values(indices, values);  // TODO: sigh
-#else
   _get_sparse_impl(r)->set_indices_and_values_unsafe(indices, values);
-#endif
 
   return r;
 }
@@ -758,7 +735,7 @@ SparseTensor& _sspaddmm_out_cpu(
 #ifndef USE_TH_SIZE_ZERO_DIM
   r.sparse_raw_resize_legacy_({dim_i, dim_k}, 2, 0);
 #else
-  r.sparse_resize_and_clear_({dim_i, dim_k}, 2, 0);
+  _get_sparse_impl(r)->resize_(2, 0, {dim_i, dim_k});
 #endif
 
   AT_CHECK(dense.size(0) == dim_j,
@@ -834,15 +811,9 @@ SparseTensor& _sspaddmm_out_cpu(
   );
 
   // to avoid a clone
-#ifndef USE_TH_SIZE_ZERO_DIM
-  _get_sparse_impl(r)->set_indices(newi);
-  _get_sparse_impl(r)->set_values(newv);
-  _get_sparse_impl(r)->set_nnz(p);
-#else
   newi = newi.narrow(1, 0, p);
   newv = newv.narrow(0, 0, p);
   _get_sparse_impl(r)->set_indices_and_values_unsafe(newi, newv);
-#endif
 
   return r;
 }

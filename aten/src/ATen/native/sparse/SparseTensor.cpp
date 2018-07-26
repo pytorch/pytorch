@@ -93,6 +93,8 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
 
   std::vector<int64_t> computed_sizes(sparseDims + denseDims);
   if (indices.numel() > 0) {
+    // If the indices has elements in it, we infer the minimum sparse dimension sizes
+    // as the max value of each dim in indices.
     // NB: It used to keepdim. I think that was wrong.
     LongTensor computed_indices_sizes = std::get</* values */ 0>(indices.max(/* dim */ 1, /* keepdim */ false));
     computed_indices_sizes.add_(1); // len = max_index + 1
@@ -108,6 +110,9 @@ SparseTensor new_with_tensor_sparse(const LongTensor& indices, const Tensor& val
       computed_sizes[static_cast<size_t>(d)] = cpu_computed_indices_sizes_accessor[d];
     }
   } else {
+    // If the indices doesn't have elements in it, there is not enough information
+    // to know what the minimum sparse dimension sizes should be, and in this case
+    // we set them to 0
     for (int64_t d = 0; d < sparseDims; d++) {
       computed_sizes[static_cast<size_t>(d)] = 0;
     }
