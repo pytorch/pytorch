@@ -52,6 +52,9 @@ class RandomSampler(Sampler):
         self.replacement = replacement
         if self.num_samples is None:
             self.num_samples = len(self.data_source)
+        elif replacement is False:
+            raise ValueError("num_samples should not be specified, since a random permute will "
+                             "be performed with replacement == False")
 
     def __iter__(self):
         n = len(self.data_source)

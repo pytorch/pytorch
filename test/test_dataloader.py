@@ -467,6 +467,8 @@ class TestDataLoader(TestCase):
         self.assertTrue(minval == 0)
         self.assertTrue(maxval == n - 1)
 
+        self.assertRaises(ValueError, lambda: RandomSampler(self.dataset, n))
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_batch_sampler(self):
