@@ -16,7 +16,7 @@ static inline void THNN_(Im2Col_shapeCheck)(
   THArgCheck(sW > 0 && sH > 0, 10,
              "stride should be greater than zero, but got sH: %d sW: %d", sH, sW);
 
-  int64_t ndim = THTensor_(nDimension)(input);
+  int64_t ndim = THTensor_(nDimensionLegacyNoScalars)(input);
   THNN_ARGCHECK(!input->is_empty() && (ndim == 3 || ndim == 4), 2, input,
                 "Expected non-empty 3D or 4D input tensor, but got input of shape %s");
 
