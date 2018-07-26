@@ -1242,6 +1242,9 @@ void Caffe2Backend::OnnxToCaffe2(
   for (const auto& vi : pred_model.graph().output()) {
     graph_value_infos[vi.name()].CopyFrom(vi);
   }
+  for (const auto& vi : pred_model.graph().value_info()) {
+    graph_value_infos[vi.name()].CopyFrom(vi);
+  }
 
   size_t idx_extra = 0;
   auto converter = [&](const ModelProto& model, caffe2::NetDef* net) mutable {

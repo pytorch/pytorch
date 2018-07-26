@@ -751,7 +751,9 @@ class Caffe2Backend(Backend):
             value_infos = []
             for name in node_def.input:
                 if pred_model is not None:
-                    for vi in itertools.chain(pred_model.graph.input, pred_model.graph.output):
+                    for vi in itertools.chain(pred_model.graph.input,
+                                              pred_model.graph.output,
+                                              pred_model.graph.value_info):
                         if vi.name == name:
                             value_infos.append(vi.SerializeToString())
 
