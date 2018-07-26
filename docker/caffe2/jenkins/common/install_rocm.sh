@@ -22,7 +22,6 @@ install_ubuntu() {
                    rocblas \
                    hipblas \
                    rocrand \
-                   hcsparse \
                    rocm-profiler \
                    cxlactivitylogger
 
