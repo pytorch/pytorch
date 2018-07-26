@@ -12,10 +12,8 @@ class CTCGreedyDecoderOp : public Operator<Context> {
   USE_OPERATOR_CONTEXT_FUNCTIONS;
   CTCGreedyDecoderOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {
-    if (OperatorBase::HasArgument("merge_repeated")) {
-      merge_repeated_ =
-          OperatorBase::GetSingleArgument<bool>("merge_repeated", true);
-    }
+    merge_repeated_ =
+        OperatorBase::GetSingleArgument<bool>("merge_repeated", true);
   }
 
   bool RunOnDevice() override;
