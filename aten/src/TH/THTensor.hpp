@@ -109,8 +109,6 @@ public:
       }
     }
 
-    friend const int64_t* THTensor_getSizePtr(THTensor* tensor);
-    friend const int64_t* THTensor_getStridePtr(THTensor* tensor);
     friend void THTensor_resizeDim(THTensor* tensor, int64_t ndim);
     friend void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride);
     friend void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size);
@@ -121,11 +119,11 @@ public:
 };
 
 inline const int64_t* THTensor_getSizePtr(THTensor* tensor) {
-  return tensor->sizes_.data();
+  return tensor->sizes().data();
 }
 
 inline const int64_t* THTensor_getStridePtr(THTensor* tensor) {
-  return tensor->strides_.data();
+  return tensor->strides().data();
 }
 
 // NB: Non-retaining
