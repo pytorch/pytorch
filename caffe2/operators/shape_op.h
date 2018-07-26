@@ -19,13 +19,13 @@ class ShapeOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     auto& data = Input(DATA);
-    auto* output = OperatorBase::Output<Tensor<Context>>(0);
+    auto* output = Output(0);
     int numDims = data.ndim();
     int numAxes = axes_.size();
     if (numAxes == 0) {
       output->Resize(numDims);
       TIndex* output_data = output->template mutable_data<TIndex>();
-      context_.template CopyBytes<Context, Context>(
+      context_.CopyBytesSameDevice(
           numDims * sizeof(TIndex), data.dims().data(), output_data);
       return true;
     }
@@ -37,7 +37,7 @@ class ShapeOp : public Operator<Context> {
       auto axis = axes_[i];
       CAFFE_ENFORCE_LT(axis, numDims, "Axis out of range");
       CAFFE_ENFORCE_GE(axis, 0, "Each axis should be non-negative");
-      context_.template CopyBytes<Context, Context>(
+      context_.CopyBytesSameDevice(
           sizeof(TIndex), src + axis * sizeof(TIndex), out);
       out += sizeof(TIndex);
     }

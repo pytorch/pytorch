@@ -56,7 +56,7 @@ class FillerOp : public Operator<Context> {
       auto shape = vector<TIndex>{};
       if (input_as_shape_) {
         // Shape input must be in CPU context
-        auto& input = OperatorBase::Input<Tensor<CPUContext>>(0);
+        auto& input = OperatorBase::Input<Tensor>(0, CPU);
         CAFFE_ENFORCE_EQ(
             input.ndim(),
             1,
@@ -76,7 +76,7 @@ class FillerOp : public Operator<Context> {
     return Fill(output);
   }
 
-  virtual bool Fill(Tensor<Context>* output) = 0;
+  virtual bool Fill(Tensor* output) = 0;
 
  protected:
   vector<TIndex> shape_;
@@ -105,7 +105,7 @@ class UniformFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     T min = min_;
     T max = max_;
     if (InputSize() == 3) {
@@ -163,7 +163,7 @@ class UniqueUniformFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     return (this->*body_)(output);
   }
 
@@ -179,7 +179,7 @@ class UniqueUniformFillOp final : public FillerOp<Context> {
   }
 
   template <typename T>
-  bool FillWithType(Tensor<Context>* output) {
+  bool FillWithType(Tensor* output) {
     T min = OperatorBase::GetSingleArgument<T>("min", 0);
     T max = OperatorBase::GetSingleArgument<T>("max", 0);
 
@@ -201,7 +201,7 @@ class UniqueUniformFillOp final : public FillerOp<Context> {
     return true;
   }
 
-  bool (UniqueUniformFillOp::*body_)(Tensor<Context>* output);
+  bool (UniqueUniformFillOp::*body_)(Tensor* output);
 };
 
 template <class Context>
@@ -268,12 +268,12 @@ class ConstantFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     return (this->*body_)(output);
   }
 
   template <typename T>
-  bool FillWithType(Tensor<Context>* output) {
+  bool FillWithType(Tensor* output) {
     T value = OperatorBase::GetSingleArgument<T>("value", 0);
     auto* data = output->template mutable_data<T>();
     if (output->size()) {
@@ -282,7 +282,7 @@ class ConstantFillOp final : public FillerOp<Context> {
     return true;
   }
 
-  bool FillWithString(Tensor<Context>* output) {
+  bool FillWithString(Tensor* output) {
     auto value = OperatorBase::GetSingleArgument<std::string>("value", "");
     auto* data = output->template mutable_data<std::string>();
     for (int i = 0; i < output->size(); ++i) {
@@ -292,7 +292,7 @@ class ConstantFillOp final : public FillerOp<Context> {
   }
 
  private:
-  bool (ConstantFillOp::*body_)(Tensor<Context>* output);
+  bool (ConstantFillOp::*body_)(Tensor* output);
 };
 
 template <class Context>
@@ -355,19 +355,19 @@ class DiagonalFillOp final : public FillerOp<Context> {
     }
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     return (this->*body_)(output);
   }
 
   template <typename T>
-  bool FillWithType(Tensor<Context>* output);
+  bool FillWithType(Tensor* output);
 
  private:
-  void VerifyOutputShape(Tensor<Context>* output) {
+  void VerifyOutputShape(Tensor* output) {
     CAFFE_ENFORCE(output->ndim() >= 2, "Input shape must be >= 2D");
   }
 
-  TIndex GetStepSize(Tensor<Context>* output) {
+  TIndex GetStepSize(Tensor* output) {
     TIndex step;
     if (output->ndim() == 2) {
       step = output->dim(1) + 1;
@@ -393,7 +393,7 @@ class DiagonalFillOp final : public FillerOp<Context> {
     return step;
   }
 
-  bool (DiagonalFillOp::*body_)(Tensor<Context>* output);
+  bool (DiagonalFillOp::*body_)(Tensor* output);
 };
 
 template <typename T, class Context>
@@ -407,7 +407,7 @@ class GaussianFillOp final : public FillerOp<Context> {
     DCHECK_GT(std_, 0) << "Standard deviation should be nonnegative.";
   }
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     math::RandGaussian<T, Context>(
         output->size(),
         mean_,
@@ -429,7 +429,7 @@ class XavierFillOp final : public FillerOp<Context> {
   XavierFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     const int fan_in = output->size() / output->dim32(0);
     T scale = std::sqrt(T(3) / fan_in);
     math::RandUniform<T, Context>(
@@ -449,7 +449,7 @@ class MSRAFillOp final : public FillerOp<Context> {
   MSRAFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 
-  bool Fill(Tensor<Context>* output) override {
+  bool Fill(Tensor* output) override {
     const int fan_out = output->size() / output->dim32(1);
     T scale = std::sqrt(T(2) / fan_out);
     math::RandGaussian<T, Context>(
@@ -472,7 +472,7 @@ class RangeFillOp final : public FillerOp<Context> {
   RangeFillOp(const OperatorDef& operator_def, Workspace* ws)
       : FillerOp<Context>(operator_def, ws) {}
 
-  bool Fill(Tensor<Context>* output) override;
+  bool Fill(Tensor* output) override;
 };
 
 template <class Context>

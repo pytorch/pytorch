@@ -23,7 +23,7 @@ const TypeMeta& DLTypeToCaffe(const DLDataType& dl_type);
 template <class Context>
 class DLPackWrapper {
  public:
-  DLPackWrapper(Tensor<Context>* tensor, DeviceOption device_option)
+  DLPackWrapper(Tensor* tensor, DeviceOption device_option)
       : tensor(tensor), device_option(device_option) {}
 
   py::object data() {
@@ -120,7 +120,7 @@ class DLPackWrapper {
         });
   }
 
-  Tensor<Context>* tensor;
+  Tensor* tensor;
   DeviceOption device_option;
   DLManagedTensor managed_tensor;
 };
