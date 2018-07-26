@@ -681,8 +681,8 @@ def selu(g, input):
     return g.op("Selu", input)
 
 
-@parse_args('v', 'v', 'i')
-def index_select(g, self, index, dim):
+@parse_args('v', 'i', 'v')
+def index_select(g, self, dim, index):
     return g.op("Gather", self, index, axis_i=dim)
 
 
