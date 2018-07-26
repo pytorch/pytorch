@@ -786,6 +786,7 @@ def topk(g, self, k, dim=None, largest=True, sorted=True, out=None):
 
 
 def repeat(g, self, repeats):
+    raise "foo"
     if self.isTensor():
         sizes = self.type().sizes()
         diff_dims = len(repeats) - len(sizes)
