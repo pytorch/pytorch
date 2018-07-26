@@ -111,15 +111,19 @@ std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) 
   return std::tuple<Tensor,Tensor>(b_working_copy, A_working_copy);
 }
 
+std::tuple<Tensor,Tensor> _gesv_single(const Tensor& self, const Tensor& A) {
+  auto A_ = self.type().tensor();
+  auto b_ = self.type().tensor();
+  return self.type()._gesv_single_out(b_, A_, self, A);
+}
+
 // Supports arbitrary batch dimensions for self and A
 std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
   bool batched = !(self.dim() <= 2 && A.dim() <= 2);
   checkInputs(self, A, batched);
 
   if (!batched) {
-    auto A_ = self.type().tensor();
-    auto b_ = self.type().tensor();
-    return self.type()._gesv_single_out(b_, A_, self, A);
+    return at::_gesv_single(self, A);
   }
 
   // broadcast the batch dimensions of self and A.

@@ -720,6 +720,8 @@
     CPU: _gesv_helper_cpu
     CUDA: _gesv_helper_cuda
 
+- func: _gesv_single(Tensor self, Tensor A) -> (Tensor, Tensor)
+
 - func: _gesv_single_out(Tensor result0, Tensor result1, Tensor self, Tensor A) -> (Tensor, Tensor)
   variants: function
   dispatch:
