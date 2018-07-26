@@ -15,12 +15,6 @@
 
 namespace at {
 
-enum class IsVariable {
-  NotVariable,
-  Variable,
-  NumOptions
-};
-
 class AT_API Context {
 public:
   Context();
@@ -79,58 +73,6 @@ public:
     return thc_state.get();
   }
 
-  CUDAStream createCUDAStream() const {
-    return detail::CUDAStream_createAndRetainWithOptions(
-      CUDAStream::DEFAULT_FLAGS
-    , CUDAStream::DEFAULT_PRIORITY
-    );
-  }
-
-  CUDAStream createCUDAStreamWithOptions(int32_t flags, int32_t priority) const {
-    return detail::CUDAStream_createAndRetainWithOptions(flags, priority);
-  }
-
-  CUDAStream getDefaultCUDAStream() const {
-    return detail::CUDAStream_getDefaultStream();
-  }
-
-  CUDAStream getDefaultCUDAStreamOnDevice(int64_t device) const {
-    return detail::CUDAStream_getDefaultStreamOnDevice(device);
-  }
-
-  CUDAStream getCurrentCUDAStream() const {
-    return detail::CUDAStream_getAndRetainCurrentStream();
-  }
-
-  CUDAStream getCurrentCUDAStreamOnDevice(int64_t device) const {
-    return detail::CUDAStream_getAndRetainCurrentStreamOnDevice(device);
-  }
-
-  void setCurrentCUDAStream(CUDAStream stream) const {
-    return detail::CUDAStream_setStream(stream.internals());
-  }
-
-  void setCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream) const {
-    return detail::CUDAStream_setStreamOnDevice(device, stream.internals());
-  }
-
-  void uncheckedSetCurrentCUDAStreamOnDevice(int64_t device, CUDAStream stream)
-      const {
-    return detail::CUDAStream_uncheckedSetStreamOnDevice(
-        device, stream.internals());
-  }
-
-#ifndef __HIP_PLATFORM_HCC__
-  cusparseHandle_t getCurrentCUDASparseHandle() const {
-    return detail::getCUDAHooks().getCurrentCUDASparseHandle(thc_state.get());
-  }
-#endif
-  cudaDeviceProp* getCurrentDeviceProperties() const {
-    return detail::getCUDAHooks().getCurrentDeviceProperties(thc_state.get());
-  }
-  cudaDeviceProp* getDeviceProperties(int device) const {
-    return detail::getCUDAHooks().getDeviceProperties(thc_state.get(), device);
-  }
   int getNumGPUs() const {
     return detail::getCUDAHooks().getNumGPUs();
   }

@@ -36,14 +36,8 @@ std::vector<std::shared_ptr<ModuleType>> replicate(
   std::vector<std::shared_ptr<ModuleType>> replicas;
   replicas.reserve(devices.size());
   for (const auto& device : devices) {
-    // Here we rely on the property tensors are never (or should never be)
-    // allocated on any particular device, but always the default device, e.g.
-    // in `torch::ones({3, 4})`, the device is unspecified and pulled from the
-    // current thread local default options. As such, we can here modify these
-    // thread local default options and thereby cause all tensors in the cloned
-    // module to be constructed directly on the device we want.
-    OptionsGuard guard(device);
-    replicas.push_back(std::static_pointer_cast<ModuleType>(module->clone()));
+    replicas.push_back(
+        std::static_pointer_cast<ModuleType>(module->clone(device)));
   }
   return replicas;
 }
@@ -161,6 +155,7 @@ Tensor data_parallel(
     return module->forward(std::move(input)).to(*output_device);
   }
 
+#ifdef USE_CUDA
   autograd::Scatter scatter(*devices, /*chunk_sizes=*/at::nullopt, dim);
   auto scattered_inputs = scatter.apply({std::move(input)});
 
@@ -169,6 +164,9 @@ Tensor data_parallel(
   return autograd::Gather(*output_device, dim)
       .apply(std::move(outputs))
       .front();
+#else
+  AT_ERROR("data_parallel not supported without CUDA");
+#endif
 }
 
 } // namespace parallel

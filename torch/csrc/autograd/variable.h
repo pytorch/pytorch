@@ -3,7 +3,6 @@
 #include "torch/csrc/utils/python_stub.h"
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable_version.h"
@@ -77,7 +76,7 @@ struct Function;
 /// free function instead. To create a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable : public at::Tensor {
+struct TORCH_API Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
 
@@ -112,14 +111,14 @@ struct Variable : public at::Tensor {
   // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
   // know are Variables.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
-    TORCH_ASSERTM(
+    AT_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
-  /*implicit*/ Variable(at::Tensor&& rhs) noexcept
+  /*implicit*/ Variable(at::Tensor&& rhs)
       : at::Tensor(std::move(rhs)) {
-    TORCH_ASSERTM(
+    AT_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
@@ -253,7 +252,7 @@ struct Variable : public at::Tensor {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   Variable(Variable::Impl* self, bool retain);
-  Impl* get() const noexcept;
+  Impl* get() const;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -268,11 +267,9 @@ struct Variable::Impl : public at::TensorImpl {
 
   ~Impl() override;
 
-  const char* toString() const override;
   at::IntList sizes() const override;
   at::IntList strides() const override;
   int64_t dim() const override;
-  at::Scalar localScalar() override;
   void* unsafeGetTH(bool retain) override;
   std::unique_ptr<at::Storage> storage() override;
   static const char* typeString();
@@ -577,8 +574,8 @@ inline PyObject* Variable::pyobj() const noexcept {
 inline Variable::Variable(Variable::Impl* self, bool retain)
     : at::Tensor(self, retain) {}
 
-inline Variable::Impl* Variable::get() const noexcept {
-  TORCH_ASSERTM(defined(), "Called Variable::get() on an undefined Variable");
+inline Variable::Impl* Variable::get() const {
+  AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(pImpl);
 }
 }} // namespace torch::autograd

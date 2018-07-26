@@ -343,6 +343,8 @@ tests = [
     ('mode', small_3d, lambda t: [],),
     ('mode', small_3d, lambda t: [1], 'dim'),
     ('mode', small_3d, lambda t: [-1], 'neg_dim'),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.1, 10), lambda t: [1], '2d_p=1', float_types_no_half),
+    ('mvlgamma', lambda t: tensor_clamp(small_2d(t), 0.6, 10), lambda t: [2], '2d_p=2', float_types_no_half),
     ('remainder', small_3d, lambda t: [3], 'value'),
     ('remainder', small_3d, lambda t: [-3], 'negative_value', signed_types),
     ('remainder', small_3d, lambda t: [small_3d_positive(t)], 'tensor'),
@@ -420,6 +422,11 @@ tests = [
     ('flip', small_3d, lambda t: [0, 1, 2], 'd012', types, True),
     ('flip', small_3d, lambda t: [0, 2], 'd02', types, True),
     ('flip', small_3d, lambda t: [2, 0], 'd20', types, True),
+    ('flip', small_3d, lambda t: [-1], 'neg_d', types, True),
+    ('rot90', small_2d, lambda t: [1, [0, 1]], 'k1_d01', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, 2]], 'k1_d12', types, True),
+    ('rot90', small_3d, lambda t: [1, [1, -1]], 'k1_neg_d', types, True),
+    ('rot90', small_3d, lambda t: [], 'default', types, True),
     ('rsqrt', lambda t: constant_tensor_add(1, small_3d(t)), lambda t: [], None, float_types),
     ('sinh', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
     ('tan', lambda t: tensor_clamp(small_3d(t), -1, 1), lambda t: [], None, float_types),
@@ -1414,6 +1421,9 @@ class TestCuda(TestCase):
 
     def test_flip(self):
         TestTorch._test_flip(self, use_cuda=True)
+
+    def test_rot90(self):
+        TestTorch._test_rot90(self, use_cuda=True)
 
     def test_signal_window_functions(self):
         TestTorch._test_signal_window_functions(self, device=torch.device('cuda'))

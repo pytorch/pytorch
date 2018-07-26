@@ -126,7 +126,7 @@ Tensor expand(const Tensor& self, IntList size, bool implicit) {
 
   std::vector<int64_t> expandedSizes;
   std::vector<int64_t> expandedStrides;
-  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self, size);
+  std::tie(expandedSizes, expandedStrides) = inferExpandGeometry(self.sizes(), self.strides(), size);
 
   return self.as_strided(expandedSizes, expandedStrides);
 }
@@ -154,9 +154,7 @@ Tensor &as_strided_(Tensor& self, IntList size, IntList stride) {
 Tensor narrow(const Tensor& self, int64_t dim, int64_t start, int64_t length) {
   AT_CHECK(self.dim() > 0, "narrow() cannot be applied to a 0-dim tensor.");
   auto cur_size = self.size(dim);
-  if (start < 0) {
-    AT_ERROR("start out of range");
-  }
+  start = maybe_wrap_dim(start, cur_size);
 #ifndef USE_TH_SIZE_ZERO_DIM
   if (length <= 0 || start > cur_size - length) {
 #else

@@ -5,6 +5,7 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/function_schema.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/named_value.h"
 
 #include <torch/csrc/api/include/torch/detail/ordered_dict.h>
@@ -138,6 +139,13 @@ struct Method {
     return *this;
   }
 
+  std::string prettyPrintSchema() const {
+    JIT_ASSERT(schema);
+    std::stringstream ss;
+    ss << *schema;
+    return ss.str();
+  }
+
 private:
   std::string name_;
   std::shared_ptr<Graph> graph_; // for debugging and for inlining
@@ -207,7 +215,7 @@ private:
   std::unique_ptr<at::Tensor> parameter;
 };
 
-struct Module : public std::enable_shared_from_this<Module> {
+struct Module {
   TH_DISALLOW_COPY_AND_ASSIGN(Module);
   Module()
   : modules("Module")

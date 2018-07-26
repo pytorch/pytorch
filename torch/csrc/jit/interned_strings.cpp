@@ -7,8 +7,8 @@
 #include <unordered_map>
 #include <vector>
 #include "ATen/optional.h"
+#include "ATen/Error.h"
 #include "string.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/jit/interned_strings_class.h"
 
 namespace torch { namespace jit {
@@ -55,8 +55,9 @@ Symbol InternedStrings::_symbol(const std::string& s) {
 
   auto pos = s.find("::");
   if (pos == std::string::npos) {
-    throw std::runtime_error(
-        "all symbols must have a namespace, <namespace>::<string>");
+    std::stringstream ss;
+    ss << "all symbols must have a namespace, <namespace>::<string>, but found: " << s;
+    throw std::runtime_error(ss.str());
   }
   Symbol ns = _symbol("namespaces::" + s.substr(0, pos));
 

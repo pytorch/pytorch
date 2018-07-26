@@ -43,7 +43,7 @@ struct SigmoidCPUFunctor {
 REGISTER_IDEEP_OPERATOR(Softmax, IDEEPFallbackOp<SoftmaxOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     ChannelShuffle,
-    IDEEPFallbackOp<ChannelShuffleOp<CPUContext>>);
+    IDEEPFallbackOp<ChannelShuffleOp<float, CPUContext>>);
 REGISTER_IDEEP_OPERATOR(
     LabelCrossEntropy,
     IDEEPFallbackOp<LabelCrossEntropyOp<float, CPUContext>>);

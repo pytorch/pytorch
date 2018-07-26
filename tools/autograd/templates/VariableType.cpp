@@ -11,8 +11,9 @@
 #include "torch/csrc/autograd/functions/tensor.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/jit/tracer.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/utils/variadic.h"
 #include "torch/csrc/autograd/functions/utils.h"
 
@@ -55,14 +56,13 @@ static void setattr(jit::Node* n, jit::Symbol name, std::string v)         { n->
 template<std::size_t N>
 static void setattr(jit::Node* n, jit::Symbol name, std::array<bool, N> v) { n->is_(name, std::vector<int64_t>(v.begin(), v.end())); }
 
-template<typename T>
-static jit::Value* createConstant(jit::Node* n, T value) {
-  return n->owningGraph()->createConstant(jit::as_tensor(value))->insertBefore(n)->output();
+static jit::Value* insertConstant(jit::Node* n, jit::IValue value) {
+  jit::WithInsertPoint guard(n);
+  return insertConstant(*n->owningGraph(), std::move(value));
 }
 
-template<typename T>
-static void genericInsertInput(jit::Node* n, size_t idx, T value) {
-  n->insertInput(idx, createConstant(n, value));
+static void genericInsertInput(jit::Node* n, size_t idx, jit::IValue value) {
+  n->insertInput(idx, insertConstant(n, std::move(value)));
 }
 
 void failPositionalAttr() {
@@ -78,19 +78,18 @@ static void setposattr(jit::Node* n, size_t idx, const char *name, const at::Int
     auto info = ArgumentStash::popIntList(name);
     for (size_t i = 0; i < info.size(); ++i) {
       if (info[i] != nullptr) continue;
-      info[i] = createConstant(n, v[i]);
+      info[i] = insertConstant(n, v[i]);
     }
-    jit::TensorType expected_type {at::kLong, -1, {}};
     for (jit::Value* v : info) {
-      if (*v->type() != expected_type) {
+      if (*v->type() != *jit::IntType::get()) {
         throw std::runtime_error(
           "Type mismatch in setposattr for IntList. Check that your program "
           "is valid without tracing, and please file a bug report if it is.");
       }
     }
     jit::WithInsertPoint insert_point{n};
-    auto symbolic_info = fmap<jit::SymbolicVariable>(info);
-    auto size = jit::SymbolicVariable::stack(symbolic_info, 0);
+    auto& g = *n->owningGraph();
+    auto size = g.insertNode(g.createList(jit::IntType::get(), info))->output();
     n->insertInput(idx, size);
   } else {
     return genericInsertInput(n, idx, v);
@@ -164,7 +163,7 @@ std::vector<std::unique_ptr<Type>> type_to_variable_type;
 
 // XXX - this is not threadsafe with uses of Variables
 void register_variable_type_for(Type* baseType) {
-  TORCH_ASSERT(baseType);
+  AT_ASSERT(baseType);
   size_t base_id = static_cast<size_t>(baseType->ID());
   if(type_to_variable_type.size() <= base_id) {
     type_to_variable_type.resize(base_id + 1);

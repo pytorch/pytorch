@@ -2,7 +2,7 @@
 
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/utils/functional.h"
 #include "torch/csrc/variable_tensor_functions.h"
 #include "torch/csrc/autograd/generated/variable_factories.h"
@@ -54,6 +54,10 @@ std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   JIT_ASSERT(vec.size() == N);
   std::copy(vec.begin(), vec.end(), res.begin());
   return res;
+}
+
+at::Device as_device(const std::vector<int64_t>& elements) {
+  return at::Device(static_cast<at::Device::Type>(elements[0]), elements[1]);
 }
 
 RegisterOperators reg({

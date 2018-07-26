@@ -14,9 +14,12 @@
 //
 // Example:
 //
-// In native/cpu/MyKernel.h:
+// In native/MyKernel.h:
 //   using fn_type = void(*)(const Tensor& x);
-//   DispatchStub<fn_type> stub;
+//   DECLARE_DISPATCH(fn_type, stub);
+//
+// In native/MyKernel.cpp
+//   DEFINE_DISPATCH(stub);
 //
 // In native/cpu/MyKernel.cpp:
 //   void kernel(const Tensor& x) { ... }
@@ -24,10 +27,14 @@
 //
 // To call:
 //   stub(kCPU, tensor);
-//
 
-namespace at {
-namespace native {
+// ignore warnings about DispatchStub::DEFAULT, AVX, AVX2 defined elsewhere
+#if defined(__clang__)
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wundefined-var-template"
+#endif
+
+namespace at { namespace native {
 
 enum class CPUCapability {
   DEFAULT = 0,
@@ -38,17 +45,17 @@ enum class CPUCapability {
 
 CPUCapability get_cpu_capability();
 
-template <typename FnPtr>
+template <typename FnPtr, typename T>
 struct DispatchStub {
   static_assert(std::is_pointer<FnPtr>::value, "FnPtr should be a pointer type");
 
   template <typename... ArgTypes>
   void operator()(Backend backend, ArgTypes... args) {
     if (backend == Backend::CPU) {
-      if (!dispatch_ptr) {
-        dispatch_ptr = choose_cpu_impl();
+      if (!cpu_dispatch_ptr) {
+        cpu_dispatch_ptr = choose_cpu_impl();
       }
-      (*dispatch_ptr)(args...);
+      (*cpu_dispatch_ptr)(args...);
     } else if (backend == Backend::CUDA) {
       AT_ASSERTM(cuda_dispatch_ptr, "DispatchStub: missing CUDA kernel");
       (*cuda_dispatch_ptr)(args...);
@@ -58,50 +65,61 @@ struct DispatchStub {
   }
 
   FnPtr choose_cpu_impl() {
-    int def = static_cast<int>(CPUCapability::DEFAULT);
-    int avx = static_cast<int>(CPUCapability::AVX);
-    int avx2 = static_cast<int>(CPUCapability::AVX2);
-
     auto capability = static_cast<int>(get_cpu_capability());
-    if (capability >= avx2 && table[avx2]) {
-      return table[avx2];
+    (void)capability;
+#ifdef HAVE_AVX2_CPU_DEFINITION
+    if (capability >= static_cast<int>(CPUCapability::AVX2)) {
+      AT_ASSERTM(AVX2, "DispatchStub: missing AVX2 kernel");
+      return AVX2;
     }
-    if (capability >= avx && table[avx]) {
-      return table[avx];
+#endif
+#ifdef HAVE_AVX_CPU_DEFINITION
+    if (capability >= static_cast<int>(CPUCapability::AVX)) {
+      AT_ASSERTM(AVX, "DispatchStub: missing AVX kernel");
+      return AVX;
     }
-    AT_ASSERTM(table[def], "DispatchStub: missing default kernel");
-    return table[def];
+#endif
+    AT_ASSERTM(DEFAULT, "DispatchStub: missing default kernel");
+    return DEFAULT;
   }
 
-  FnPtr dispatch_ptr = nullptr;
+  FnPtr cpu_dispatch_ptr = nullptr;
   FnPtr cuda_dispatch_ptr = nullptr;
-  FnPtr table[static_cast<int>(CPUCapability::NUM_OPTIONS)];
+  static FnPtr DEFAULT;
+#ifdef HAVE_AVX_CPU_DEFINITION
+  static FnPtr AVX;
+#endif
+#ifdef HAVE_AVX2_CPU_DEFINITION
+  static FnPtr AVX2;
+#endif
 };
-
-
-#if defined(CPU_CAPABILITY) || defined(__CUDACC__)
 
 namespace {
-
-template <typename FnPtr>
+template <typename FnPtr, typename T>
 struct RegisterDispatch {
-  RegisterDispatch(DispatchStub<FnPtr>& stub, FnPtr value) {
-#if defined(__CUDACC__)
+  RegisterDispatch(DispatchStub<FnPtr, T>& stub, FnPtr value) {
     stub.cuda_dispatch_ptr = value;
-#else
-    int cap = static_cast<int>(CPUCapability::CPU_CAPABILITY);
-    AT_ASSERT(!stub.table[cap])
-    stub.table[cap] = value;
-#endif
   }
 };
-
 } // anonymous namespace
 
-#define REGISTER_DISPATCH(stub, fn) \
-  static RegisterDispatch<decltype(fn)> stub ## __register(stub, fn);
+#define DECLARE_DISPATCH(fn, name) \
+  extern struct name : DispatchStub<fn, name> {} name
 
+#define DEFINE_DISPATCH(name) struct name name
+
+#if defined(__CUDACC__)
+#define REGISTER_DISPATCH(name, fn) \
+  static RegisterDispatch<decltype(fn), struct name> name ## __register(name, fn);
+#elif defined(CPU_CAPABILITY)
+#define REGISTER_DISPATCH(name, fn) \
+  template <> decltype(fn) DispatchStub<decltype(fn), struct name>::CPU_CAPABILITY = fn;
 #endif
 
-}
-}
+
+}} // namespace at::native
+
+
+#if defined(__clang__)
+#pragma clang diagnostic pop
+#endif

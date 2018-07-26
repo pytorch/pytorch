@@ -57,6 +57,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
+.. autofunction:: narrow
 .. autofunction:: nonzero
 .. autofunction:: reshape
 .. autofunction:: split
@@ -182,6 +183,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: mul
+.. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
 .. autofunction:: reciprocal

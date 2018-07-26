@@ -434,7 +434,7 @@ static void _wrap_outputs(THPFunction *self,
     auto var = as_variable(obj, i);
     if (cdata) {
       auto output_nr = cdata->add_input_metadata(var.type(), var.sizes());
-      TORCH_ASSERT(i == (int)output_nr);
+      AT_ASSERT(i == (int)output_nr);
     }
     set_history(var, i, is_input, is_modified, is_differentiable);
 
@@ -764,7 +764,7 @@ static void _prepare_grads(THPFunction *self, THPObjectPtr& raw_grads, bool is_g
 
   // Look for Nones and replace them with new buffers
   auto& grads_info = is_grad_output ? self->output_info : self->input_info;
-  TORCH_ASSERT(grads_info.size() == (size_t)num_grads);
+  AT_ASSERT(grads_info.size() == (size_t)num_grads);
   for (int i = 0; i < num_grads; i++) {
     PyObject *grad = PyTuple_GET_ITEM(raw_grads.get(), i);
     if (grad == Py_None) {

@@ -52,87 +52,82 @@ def jit_type_of(arg):
         typ = '{}?'.format(typ)
     return typ
 
-# map from _jit type_, generated from jit_type_of to attribute used to store it
-ATTR_METHOD_MAP = {
-    'int': 'i',
-    'float': 'f',
-    'bool': 'i',
-    'Scalar': 't',
-    'int[]': 'is',
-    'bool[]': 'is',
-    'Layout': 'i',
-    'Device': 'is',
-    'ScalarType': 'i',
-}
-
-
-def attr_of(jit_type):
-    # for attributes, we dont care about the length of an array,
-    # so strip it from the type
-    jit_type = re.sub("\\[\d+\\]", "[]", jit_type)
-    return ATTR_METHOD_MAP[jit_type]
-
 # map from aten 'simple_type' to the function that will cast a attribute value
 # to that type
 FROM_ATTRIBUTE = {
-    'std::array<bool,2>': 'as_bool_array<2>',
-    'std::array<bool,3>': 'as_bool_array<3>',
-    'std::array<bool,4>': 'as_bool_array<4>',
-    'Scalar': 'Scalar',
-    'IntList': 'std::vector<int64_t>',
-    'Layout': 'int64_t',
-    'Device': 'std::vector<int64_t>',
-    'ScalarType': 'int64_t',
+    'Device': 'as_device(node->is(attr::{}))',
+    'IntList': 'std::vector<int64_t>(node->is(attr::{}))',
+    'Layout': 'static_cast<at::Layout>(node->i(attr::{}))',
+    'Scalar': 'Scalar(node->t(attr::{}))',
+    'ScalarType': 'static_cast<at::ScalarType>(node->i(attr::{}))',
+    'Tensor': 'node->t(attr::{})',
+    'bool': 'bool(node->i(attr::{}))',
+    'double': 'node->f(attr::{})',
+    'int64_t': 'node->i(attr::{})',
+    'std::array<bool,2>': 'as_bool_array<2>(node->is(attr::{}))',
+    'std::array<bool,3>': 'as_bool_array<3>(node->is(attr::{}))',
+    'std::array<bool,4>': 'as_bool_array<4>(node->is(attr::{}))',
 }
+
+
+def from_attribute(arg):
+    simple_type = arg['simple_type']
+    return FROM_ATTRIBUTE[simple_type].format(arg['name'])
+
 
 # map from aten 'simple_type' to the function that will turn a tensor into
 # that type
-FROM_TENSOR = {
-    'Device': 'tensor_as<std::vector<int64_t>>',
-    'ScalarType': 'tensor_as<int64_t>',
-    'Layout': 'tensor_as<int64_t>',
-    'IntList': 'tensor_as<std::vector<int64_t>>',
+FROM_IVALUE = {
+    'Device': 'as_device({}.toIntList()->elements())',
+    'IntList': '{}.toIntList()->elements()',
+    'Layout': 'static_cast<at::Layout>({}.toInt())',
+    'Scalar': '{}.toScalar()',
+    'ScalarType': 'static_cast<at::ScalarType>({}.toInt())',
+    'Tensor': '{}.toTensor()',
+    'bool': '{}.toInt()',
+    'double': '{}.toDouble()',
+    'int64_t': '{}.toInt()',
+    'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
+    'std::array<bool,3>': 'as_bool_array<3>({}.toIntList()->elements())',
+    'std::array<bool,4>': 'as_bool_array<4>({}.toIntList()->elements())',
 }
 
 
-def from_tensor(arg):
+def from_ivalue(arg, value):
     simple_type = arg['simple_type']
-    if simple_type in FROM_TENSOR:
-        return FROM_TENSOR[simple_type]
-    else:
-        return 'tensor_as<{}>'.format(arg['simple_type'])
+    return FROM_IVALUE[simple_type].format(value)
 
 
-KW_ASSIGNMENT = CodeTemplate("""\
-auto ${name} = ${type_cast}(node->${method}(Symbol::attr("${name}")));\
-""")
-
-POS_ASSIGNMENT = CodeTemplate("""\
-auto ${name} = ${from_tensor}(std::move(peek(stack, ${i}, ${N})).toTensor());\
-""")
+KW_ACCESS = CodeTemplate("""(node->${method}(Symbol::attr("${name}")))""")
 
 CALL_NAMESPACE = CodeTemplate("""\
-auto result = at::${name}(${args});
+auto result = at::${name}(
+    ${args}
+);
 """)
 CALL_METHOD = CodeTemplate("""\
 DeviceGuard device_guard(deviceForInputs(stack, ${num_dynamic_inputs}));
-auto result = (${first}).${name}(${args});
+auto result = (${first}).${name}(
+    ${args}
+);
 """)
 CALL_TENSOR_OPTIONS = CodeTemplate("""\
-const auto device_index = static_cast<int32_t>(device[1]);
 const auto options = TensorOptions()
-        .dtype(static_cast<at::ScalarType>(dtype))
-        .layout(static_cast<at::Layout>(layout))
-        .device({static_cast<at::Device::Type>(device[0]), device_index});
-auto result = torch::${name}(${args}, options);
+        .dtype(${dtype})
+        .layout(${layout})
+        .device(${device});
+auto result = torch::${name}(
+    ${args},
+    options
+);
 """)
 
+# TODO (apaszke): remove the attributed codepath once we remove them
 CONSTRUCTOR = CodeTemplate("""\
 [](Node *node) {
   ${kw_assignments}
   return Operation([=](Stack & stack) {
     autograd::profiler::RecordFunction record("${name}");
-    ${pos_assignments}
     ${call}
     drop(stack, ${num_dynamic_inputs});
     pack(stack, std::move(result));
@@ -203,13 +198,23 @@ def gen_jit_dispatch(declarations, out, template_path):
     ops = []
 
     def get_invocation(decl, args, num_dynamic_inputs):
+
+        # because the arg list can get lengthy we put them on a separate line
+        def pack_arguments(args):
+            return ',\n'.join(args)
         if decl.get('has_tensor_options'):
-            return CALL_TENSOR_OPTIONS.substitute(name=decl['name'], args=args[:-3])
+            return CALL_TENSOR_OPTIONS.substitute(name=decl['name'],
+                                                  args=pack_arguments(args[:-3]),
+                                                  dtype=args[-3],
+                                                  layout=args[-2],
+                                                  device=args[-1])
         elif 'namespace' in decl['method_of']:
-            return CALL_NAMESPACE.substitute(name=decl['name'], args=args, num_dynamic_inputs=num_dynamic_inputs)
+            return CALL_NAMESPACE.substitute(name=decl['name'],
+                                             args=pack_arguments(args),
+                                             num_dynamic_inputs=num_dynamic_inputs)
         else:
             return CALL_METHOD.substitute(
-                name=decl['name'], first=args[0], args=args[1:],
+                name=decl['name'], first=args[0], args=pack_arguments(args[1:]),
                 num_dynamic_inputs=num_dynamic_inputs)
 
     def emit_decl_variant(decl, is_positional_arg, has_tensorlist):
@@ -217,7 +222,6 @@ def gen_jit_dispatch(declarations, out, template_path):
         # that indicates if the argument should come from the postional list
         # of inputs. If false, the argument comes from the constant attributes
         kw_assignments = []
-        pos_assignments = []
         arguments = []
 
         if has_tensorlist:
@@ -266,26 +270,12 @@ def gen_jit_dispatch(declarations, out, template_path):
                                  .format(real_inputs, static_inputs))
             elif arg['simple_type'] in default_only_types:
                 arguments.append(arg['default'])
-            elif is_tensor_arg(arg):
-                arguments.append('std::move(peek(stack, {}, {})).toTensor()'.format(real_inputs, view_length))
+            elif is_tensor_arg(arg) or is_positional_arg[i]:
+                value = '(std::move(peek(stack, {}, {})))'.format(real_inputs, view_length)
+                arguments.append(from_ivalue(arg, value))
                 real_inputs += 1
-            elif is_positional_arg[i]:
-                template_kwargs = dict(from_tensor=from_tensor(arg),
-                                       name=arg['name'],
-                                       i=real_inputs,
-                                       N=view_length)
-                real_inputs += 1
-
-                assign = POS_ASSIGNMENT.substitute(**template_kwargs)
-
-                pos_assignments.append(assign)
-                arguments.append(arg['name'])
             else:
-                attr_method = attr_of(jit_type_of(arg))
-                simple_type = arg['simple_type']
-                assign = KW_ASSIGNMENT.substitute(type_cast=FROM_ATTRIBUTE.get(simple_type, simple_type),
-                                                  name=arg['name'],
-                                                  method=attr_method)
+                assign = "auto {} = {};".format(arg['name'], from_attribute(arg))
                 kw_assignments.append(assign)
                 arguments.append(arg['name'])
 
@@ -295,9 +285,8 @@ def gen_jit_dispatch(declarations, out, template_path):
         all_scalars = all(r['dynamic_type'] != 'TensorList' for r in returns)
 
         constructor = CONSTRUCTOR.substitute(name=decl['name'],
-                                             call=[call],  # in an array so that substitute handles newlines correctly
+                                             call=call,
                                              kw_assignments=kw_assignments,
-                                             pos_assignments=pos_assignments,
                                              num_dynamic_inputs=num_dynamic_inputs)
         return constructor
 
@@ -430,7 +419,9 @@ def signature(decl):
                 .replace('false', 'False') \
                 .replace('nullptr', 'None') \
                 .replace('Reduction::ElementwiseMean', 'ElementwiseMean') \
-                .replace('{}', 'None' if is_tensor_arg(arg) else '[]')
+                .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
+                .replace('{', '[') \
+                .replace('}', ']')
 
             default = default_map.get(default, default)
             decl = '{}={}'.format(decl, default)

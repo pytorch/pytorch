@@ -26,12 +26,12 @@ class OnnxifiOp final : public Operator<Context> {
 
     // Setup input/output descriptor templates
     for (const auto& input : operator_def.input()) {
-      input_desc_.push_back(onnxTensorDescriptor());
+      input_desc_.push_back(onnxTensorDescriptorV1());
       input_desc_.back().name = input.c_str();
     }
     int output_idx = 0;
     for (const auto& output : operator_def.output()) {
-      output_desc_.push_back(onnxTensorDescriptor());
+      output_desc_.push_back(onnxTensorDescriptorV1());
       output_desc_.back().name = output.c_str();
 
       // For output, we try to get its output size hint
@@ -72,11 +72,6 @@ class OnnxifiOp final : public Operator<Context> {
     std::vector<std::vector<uint64_t>> weight_shapes;
     auto weight_descs = BuildInitializationList(
         &mapped_ws, &initializer_set, &weight_names, &weight_shapes);
-
-    ::ONNX_NAMESPACE::ModelProto onnx_model;
-    ParseProtoFromLargeString(onnx_model_str, &onnx_model);
-    onnx_model_str.clear();
-    onnx_model.SerializeToString(&onnx_model_str);
 
     // Build the Onnxifi engine
     // TODO: In spec, backends are hot-pluggable, so two calls to
@@ -146,7 +141,7 @@ class OnnxifiOp final : public Operator<Context> {
     property_list->push_back(ONNXIFI_BACKEND_PROPERTY_NONE);
   }
 
-  std::vector<onnxTensorDescriptor> BuildInitializationList(
+  std::vector<onnxTensorDescriptorV1> BuildInitializationList(
       Workspace* ws,
       std::unordered_set<std::string>* initialization_list,
       std::vector<std::string>* weight_names,
@@ -161,8 +156,8 @@ class OnnxifiOp final : public Operator<Context> {
   size_t num_backends_{0};
 
   // input/output descriptors
-  std::vector<onnxTensorDescriptor> input_desc_;
-  std::vector<onnxTensorDescriptor> output_desc_;
+  std::vector<onnxTensorDescriptorV1> input_desc_;
+  std::vector<onnxTensorDescriptorV1> output_desc_;
   std::vector<std::vector<uint64_t>> input_shapes_;
   std::vector<std::vector<uint64_t>> output_shapes_;
 
