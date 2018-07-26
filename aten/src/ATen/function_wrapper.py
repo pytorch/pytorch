@@ -288,7 +288,7 @@ CHECKED_CAST = {
             'checked_cast_tensor<${DenseBackend}LongTensor>('
             '${arg_name}.pImpl,"${arg_name}",${arg_pos}, ${null_okay}, '
             'Backend::${DenseBackend}, ScalarType::Long)'),
-    'THStorage*': 
+    'THStorage*':
         CodeTemplate(
             'checked_cast_storage<${Storage}>('
             '&${arg_name},"${arg_name}",${arg_pos}, '
