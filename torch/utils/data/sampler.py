@@ -42,13 +42,22 @@ class RandomSampler(Sampler):
 
     Arguments:
         data_source (Dataset): dataset to sample from
+        num_samples (int): number of samples to draw, default=len(dataset)
+        replacement (bool): if ``True``, samples are drawn with replacement, default=False
     """
 
-    def __init__(self, data_source):
+    def __init__(self, data_source, num_samples=None, replacement=False):
         self.data_source = data_source
+        self.num_samples = num_samples
+        self.replacement = replacement
+        if self.num_samples is None:
+            self.num_samples = len(self.data_source)
 
     def __iter__(self):
-        return iter(torch.randperm(len(self.data_source)).tolist())
+        n = len(self.data_source)
+        if self.replacement:
+            return iter(torch.randint(high=n, size=(self.num_samples,), dtype=torch.int64).tolist())
+        return iter(torch.randperm(n).tolist())
 
     def __len__(self):
         return len(self.data_source)

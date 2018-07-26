@@ -437,6 +437,36 @@ class TestDataLoader(TestCase):
                 self.assertEqual(len(input), 3)
                 self.assertEqual(input, self.data[offset:offset + 3])
 
+    def test_RandomSampler(self):
+
+        def sample_stat(sampler, num_samples):
+            bin = {}
+            minval, maxval = num_samples, 0
+            for s in sampler:
+                bin[s] = bin.get(s, 0) + 1
+                minval = min(minval, s)
+                maxval = max(maxval, s)
+
+            count_repeated = 0
+            for val in bin.values():
+                if val > 1:
+                    count_repeated += 1
+            return (count_repeated, minval, maxval)
+
+        from torch.utils.data import RandomSampler
+        n = len(self.dataset)
+        sampler_with_replacement = RandomSampler(self.dataset, n, True)
+        count_repeated, minval, maxval = sample_stat(sampler_with_replacement, n)
+        self.assertTrue(count_repeated > 0)
+        self.assertTrue(minval >= 0)
+        self.assertTrue(maxval < n)
+
+        sampler_without_replacement = RandomSampler(self.dataset)
+        count_repeated, minval, maxval = sample_stat(sampler_without_replacement, n)
+        self.assertTrue(count_repeated == 0)
+        self.assertTrue(minval == 0)
+        self.assertTrue(maxval == n - 1)
+
     @unittest.skipIf(NO_MULTIPROCESSING_SPAWN, "Disabled for environments that \
                      don't support multiprocessing with spawn start method")
     def test_batch_sampler(self):
