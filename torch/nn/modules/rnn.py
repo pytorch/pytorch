@@ -579,7 +579,7 @@ class RNNCell(RNNCellBase):
 
     Attributes:
         weight_ih: the learnable input-hidden weights, of shape
-            `(input_size x hidden_size)`
+            `(hidden_size x input_size)`
         weight_hh: the learnable hidden-hidden weights, of shape
             `(hidden_size x hidden_size)`
         bias_ih: the learnable input-hidden bias, of shape `(hidden_size)`
