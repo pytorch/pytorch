@@ -422,7 +422,7 @@ class TestConvolution(hu.HypothesisTestCase):
     @given(num_workers=st.integers(1, 4),
            net_type=st.sampled_from(
                ["simple", "dag"] +
-               (["async_dag"] if workspace.has_gpu_support else [])),
+               (["async_dag"] if workspace.has_gpu_support or workspace.has_hip_support else [])),
            do=st.sampled_from(hu.device_options),
            engine=st.sampled_from(["CUDNN", ""]))
     def test_convolution_sync(self, net_type, num_workers, do, engine):

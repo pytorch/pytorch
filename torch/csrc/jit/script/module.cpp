@@ -1,3 +1,4 @@
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/script/module.h"
 #include "torch/csrc/jit/script/compiler.h"
 #include "torch/csrc/jit/script/error_report.h"

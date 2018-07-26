@@ -5,10 +5,6 @@ ARG EC2
 ADD ./install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
 
-# Compile/install ccache for faster builds
-ADD ./install_ccache.sh install_ccache.sh
-RUN bash ./install_ccache.sh && rm install_ccache.sh
-
 # Install Python
 ARG PYTHON_VERSION
 ADD ./install_python.sh install_python.sh
@@ -62,6 +58,10 @@ ENV PATH /opt/rocm/opencl/bin:$PATH
 ENV THRUST_ROOT /data/Thrust
 ENV MIOPEN_DISABLE_CACHE 1
 ENV HIP_PLATFORM hcc
+
+# Compile/install ccache for faster builds
+ADD ./install_ccache.sh install_ccache.sh
+RUN bash ./install_ccache.sh && rm install_ccache.sh
 
 # (optional) Add Jenkins user
 ARG JENKINS
