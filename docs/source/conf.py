@@ -17,7 +17,7 @@
 # add these directories to sys.path here. If the directory is relative to the
 # documentation root, use os.path.abspath to make it absolute, like shown here.
 #
-# import os
+import os
 # import sys
 # sys.path.insert(0, os.path.abspath('.'))
 import torch
@@ -27,6 +27,8 @@ except ImportError:
     import warnings
     warnings.warn('unable to load "torchvision" package')
 import sphinx_rtd_theme
+
+RELEASE = os.environ.get('RELEASE', False)
 
 
 # -- General configuration ------------------------------------------------
@@ -54,6 +56,8 @@ napoleon_use_ivar = True
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ['_templates']
+if RELEASE:
+    templates_path = ['_templates-stable']
 
 # The suffix(es) of source filenames.
 # You can specify multiple suffix as a list of string:
@@ -122,6 +126,9 @@ html_theme_options = {
 }
 
 html_logo = '_static/img/pytorch-logo-dark-unstable.png'
+if RELEASE:
+    html_logo = '_static/img/pytorch-logo-dark.svg'
+
 
 # Add any paths that contain custom static files (such as style sheets) here,
 # relative to this directory. They are copied after the builtin static files,
