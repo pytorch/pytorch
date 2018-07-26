@@ -347,6 +347,7 @@ Tensor ctc_loss(const Tensor& log_probs, const Tensor& targets, IntList input_le
     ctx.userEnabledCuDNN() &&
     (BLANK == 0) && (targets.dim()==1) &&
     (log_probs.type().scalarType() == at::kFloat) &&
+    (targets.type().scalarType() == at::kInt) &&
     (log_probs.type().backend() == Backend::CUDA);
 
   if (use_cudnn) {

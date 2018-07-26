@@ -452,6 +452,8 @@ def marginrankingloss_reference(input1, input2, target, margin=0, reduction='ele
 def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0, reduction='elementwise_mean'):
     input_lengths = torch.tensor(input_lengths, dtype=torch.long)
     target_lengths = torch.tensor(target_lengths, dtype=torch.long)
+    dt = log_probs.dtype
+    log_probs = log_probs.double() # we need the accuracy as we are not in logspace
     targets = targets.long()
     cum_target_lengths = target_lengths.cumsum(0)
     losses = []
@@ -480,6 +482,7 @@ def ctcloss_reference(log_probs, targets, input_lengths, target_lengths, blank=0
         return (output / target_lengths.to(dtype=output.dtype, device=output.device)).mean()
     elif reduction == 'sum':
         return output.sum()
+    output = output.to(dt)
     return output
 
 loss_reference_fns = {

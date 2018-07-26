@@ -3577,14 +3577,14 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
+    @unittest.skipIf(not TEST_CUDNN, "needs cudnn")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
         targets = torch.randint(1, 15, (sum(target_lengths),), dtype=torch.int)
         log_probs = torch.randn(50, 3, 15, dtype=torch.float, device='cuda').log_softmax(2)
         res = torch.nn.functional.ctc_loss(log_probs, targets, input_lengths, target_lengths)
-        # we need to make this double as the (non-logspace) reference calculation is not accurate enough otherwise
-        expected = ctcloss_reference(log_probs.double(), targets.cuda(), input_lengths, target_lengths).float()
+        expected = ctcloss_reference(log_probs, targets.cuda(), input_lengths, target_lengths).float()
         with torch.backends.cudnn.flags(enabled=False):
             res2 = torch.nn.functional.ctc_loss(log_probs, targets.cuda().long(), input_lengths, target_lengths)
         self.assertEqual(res, expected)
