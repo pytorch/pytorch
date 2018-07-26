@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/SpatialUpSamplingBicubic.cu"
 #else
 
-#include "../linear_upsampling.h"
+#include "../upsampling.h"
 
 static inline void THNN_(SpatialUpSamplingBicubic_shapeCheck)
                         (THCState *state,

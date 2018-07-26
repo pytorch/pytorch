@@ -5152,24 +5152,6 @@ class TestNN(NNTestCase):
         for align_corners in [True, False]:
             kwargs = dict(mode='bicubic', align_corners=align_corners)
 
-            scale_factor = 2
-            # in_t = torch.arange(16).reshape(1, 1, 4, 4)
-            t_size = 3
-            in_t = torch.ones(1, 1, t_size, t_size)
-            count = 0
-            for i in range(t_size):
-                for j in range(t_size):
-                    in_t[0][0][i][j] = count
-                    count += 1
-            out_size = int(math.floor(in_t.shape[-1] * scale_factor))
-            out = F.interpolate(in_t, scale_factor=scale_factor, **kwargs)
-            print("in_t")
-            print(in_t)
-            print("out (align corners:", align_corners, ")")
-            print(out)
-        for align_corners in [True, False]:
-            kwargs = dict(mode='bicubic', align_corners=align_corners)
-
             # test float scale factor up & downsampling
             for scale_factor in [0.5, 1.5, 2]:
                 in_t = torch.ones(1, 1, 2, 2)

@@ -2,7 +2,7 @@
 #define THC_GENERIC_FILE "generic/TemporalUpSamplingLinear.cu"
 #else
 
-#include "../linear_upsampling.h"
+#include "../upsampling.h"
 
 static inline void THNN_(TemporalUpSamplingLinear_shapeCheck)
                         (THCState *state,

@@ -1,97 +1,13 @@
 #include "THCUNN.h"
 #include "THCTensor.hpp"
 #include "common.h"
-#include "linear_upsampling.h"
+#include "upsampling.h"
 #include "THCDeviceTensor.cuh"
 #include "THCDeviceTensorUtils.cuh"
 #include "THCDeviceUtils.cuh"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
 #include "THCAtomics.cuh"
-
-__constant__ int size = (1 << 10);
-
-template<typename Dtype>
-__device__ Dtype access_tensor(
-  const THCDeviceTensor<Dtype, 4> data,
-  int channel,
-  int batch,
-  int width,
-  int height,
-  int x,
-  int y
-) {
-  int access_x = max(min(x, width - 1), 0);
-  int access_y = max(min(y, height - 1), 0);
-  return data[batch][channel][access_y][access_x];
-}
-
-template<typename Dtype, typename Acctype>
-__device__ void inc_tensor(
-  const THCDeviceTensor<Dtype, 4> data,
-  int channel,
-  int batch,
-  int width,
-  int height,
-  int x,
-  int y,
-  Acctype value
-) {
-  int access_x = max(min(x, width - 1), 0);
-  int access_y = max(min(y, height - 1), 0);
-  atomicAdd(
-    data[batch][channel][access_y][access_x].data(),
-    ScalarConvert<Acctype, Dtype>::to(value)
-  );
-}
-
-template<typename Acctype>
-__device__ Acctype bicubic_convolution1(Acctype x, Acctype A) {
-  return ((A + 2) * x - (A + 3)) * x * x + 1;
-}
-
-template<typename Acctype>
-__device__ Acctype bicubic_convolution2(Acctype x, Acctype A) {
-  return ((A * x - 5 * A) * x + 8 * A) * x - 4 * A;
-}
-
-template<typename Acctype>
-__device__ void THNN_(get_coefficients)(
-  Acctype coeffs[4],
-  Acctype t,
-  int size
-) {
-  int offset = t * size;
-  Acctype A = -0.75;
-
-  Acctype x1 = offset * 1.0 / size;
-  coeffs[0] = bicubic_convolution2<Acctype>(x1 + 1.0, A);
-  coeffs[1] = bicubic_convolution1<Acctype>(x1, A);
-
-  // opposite coefficients
-  Acctype x2 = (size - offset) * 1.0 / size;
-  coeffs[2] = bicubic_convolution1<Acctype>(x2, A);
-  coeffs[3] = bicubic_convolution2<Acctype>(x2 + 1.0, A);
-}
-
-template<typename Dtype, typename Acctype>
-__device__ static Acctype cubic_interp1d(
-  Dtype x0,
-  Dtype x1,
-  Dtype x2,
-  Dtype x3,
-  Acctype t,
-  int size
-) {
-  Acctype coeffs[4];
-  THNN_(get_coefficients)<Acctype>(coeffs, t, size);
-
-  return x0 * coeffs[0]
-    + x1 * coeffs[1]
-    + x2 * coeffs[2]
-    + x3 * coeffs[3];
-}
-
 
 template<typename Dtype, typename Acctype>
 __global__ void bicubic_interp2d_kernel(
@@ -142,16 +58,15 @@ __global__ void bicubic_interp2d_kernel(
 
       for (int k = 0; k < 4; k++) {
         coefficients[k] = cubic_interp1d(
-          access_tensor<Dtype>(
+          upsampling_get_value_bounded<Dtype>(
             in_data, c, n, input_width, input_height, in_x - 1, in_y - 1 + k),
-          access_tensor<Dtype>(
+          upsampling_get_value_bounded<Dtype>(
             in_data, c, n, input_width, input_height, in_x + 0, in_y - 1 + k),
-          access_tensor<Dtype>(
+          upsampling_get_value_bounded<Dtype>(
             in_data, c, n, input_width, input_height, in_x + 1, in_y - 1 + k),
-          access_tensor<Dtype>(
+          upsampling_get_value_bounded<Dtype>(
             in_data, c, n, input_width, input_height, in_x + 2, in_y - 1 + k),
-          t_x,
-          size
+          t_x
         );
       }
 
@@ -160,8 +75,7 @@ __global__ void bicubic_interp2d_kernel(
         coefficients[1],
         coefficients[2],
         coefficients[3],
-        t_y,
-        size
+        t_y
       ));
     }
   }
@@ -214,15 +128,15 @@ __global__ void bicubic_interp2d_backward_kernel(
   Acctype x_coeffs[4];
   Acctype y_coeffs[4];
 
-  THNN_(get_coefficients)(x_coeffs, t_x, size);
-  THNN_(get_coefficients)(y_coeffs, t_y, size);
+  get_cubic_upsampling_coefficients(x_coeffs, t_x);
+  get_cubic_upsampling_coefficients(y_coeffs, t_y);
 
   for (int n = 0; n < batchsize ; n++){
     for (int c = 0; c < channels; ++c) {
       Dtype out_value = out_data[n][c][output_y][output_x];
       for (int i = 0; i < 4; i++) {
         for (int j = 0; j < 4; j++) {
-          inc_tensor<Dtype, Acctype>(
+          upsampling_increment_value_bounded<Dtype, Acctype>(
             in_data,
             c,
             n,
