@@ -42,7 +42,6 @@ public:
     // zero_dim_to_one converts an empty ArrayRef into [1]
     // zero_dim_to_null converts an empty ArrayRef into a null THLongStorage
     bool zero_dim_to_one = false;
-    bool noelem_to_empty = false;
     switch (kind) {
       case THLongStorageViewKind::SIZE:
         zero_dim_to_one = true;

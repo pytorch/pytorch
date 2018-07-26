@@ -39,7 +39,7 @@ namespace at {
 
 struct Type;
 
-struct StorageImpl {
+struct TH_CPP_API StorageImpl {
 
   StorageImpl() = delete;
   virtual ~StorageImpl() {};

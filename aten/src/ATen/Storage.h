@@ -30,10 +30,6 @@ public:
   StorageImpl* pImpl() const {
     return storage_impl_;
   }
- //  StorageImpl* operator->() {
- //    return storage_impl_;
- //  }
-  //  Type& type();
 
  protected:
   StorageImpl* storage_impl_;

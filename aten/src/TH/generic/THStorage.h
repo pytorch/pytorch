@@ -26,7 +26,7 @@
 #ifdef __cplusplus
 #define THStorage at::StorageImpl
 #else
-typedef struct at_Storage at_Storage;
+typedef struct at_Storage_Impl at_Storage_Impl;
 #define THStorage at_Storage_Impl
 #endif
 
