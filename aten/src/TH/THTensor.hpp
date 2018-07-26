@@ -140,24 +140,16 @@ inline THStorage* THTensor_getStoragePtr(const THTensor* tensor) {
 // a calculating cached numels perspective.
 inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   AT_ASSERT(ndim >= 0);
-  if (ndim < static_cast<int64_t>(tensor->sizes_.size())) {
-    if (tensor->numel_ != 0) {
-      for (int64_t i = static_cast<int64_t>(tensor->sizes_.size()) - 1; i >= ndim; i--) {
-        tensor->numel_ /= tensor->sizes_[i];
-      }
-    } else {
-      tensor->numel_ = 1;
-      for (int64_t i = 0; i < ndim; i++) {
-        tensor->numel_ *= tensor->sizes_[i];
-        if (tensor->numel_ == 0) break;
-      }
-    }
-  }
   // Default the new sizes and strides to 1, because (a) it gives a size
   // stride which is exactly equivalent to the old sizes/strides
   // and (b) it doesn't change numel.
   tensor->sizes_.resize(ndim, 1);
   tensor->strides_.resize(ndim, 1);
+  tensor->numel_ = 1;
+  for (int64_t i = 0; i < ndim; i++) {
+    tensor->numel_ *= tensor->sizes_[i];
+    if (tensor->numel_ == 0) break;
+  }
 }
 
 inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
