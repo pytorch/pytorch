@@ -1,9 +1,11 @@
 #include "torch/csrc/jit/passes/loop_unrolling.h"
 
 #include "torch/csrc/jit/interned_strings.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/symbolic_variable.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
+#include "torch/csrc/jit/constants.h"
 
 namespace torch { namespace jit {
 
@@ -132,20 +134,35 @@ void repeatBody(Block *body, int64_t times) {
   EliminateDeadCode(body, false);
 }
 
+//TODO(zach): we need to replace these with a generic facility for resolving overloads
+// currently we cant us SymbolicVariable because it assumes we are computing on tensors
+// once we have something like emitBuiltinCall usable outside of the compiler,
+// we can replace these with symbolic variable
+Value* intMath(Symbol sym, Value* a, Value* b) {
+  auto& g = *a->owningGraph();
+  return g.insertNode(g.create(sym, {a, b}))
+      ->output()
+      ->setType(IntType::get());
+}
+Value* intMath(Symbol sym, Value* a, int64_t b) {
+  return intMath(sym, a, insertConstant(*a->owningGraph(), b));
+}
+
 // Replaces the builtin loop counter with a "mutable" variable outside of the loop.
 void replaceLoopCounter(Node *loop) {
   Graph *graph = loop->owningGraph();
   Block *body = loop->blocks().at(0);
-  Node *init_counter_node = graph->createConstant(at::CPU(at::kLong).scalarTensor(0))
-                                 ->insertBefore(loop);
-  loop->insertInput(2, init_counter_node->output());
+  WithInsertPoint guard(loop);
+  Value* init_counter = insertConstant(*graph, 0);
+
+  loop->insertInput(2, init_counter);
   loop->insertOutput(0);
 
   Value * internal_counter = body->insertInput(1);
   body->inputs()[0]->replaceAllUsesWith(internal_counter);
 
   WithInsertPoint insertPointGuard{ body->return_node() };
-  body->insertOutput(1, SymbolicVariable(internal_counter) + at::Scalar(1));
+  body->insertOutput(1, intMath(aten::add, internal_counter, 1) );
 }
 
 void unroll(Node *loop) {
@@ -183,10 +200,10 @@ void unroll(Node *loop) {
   repeatBody(body, kUnrollFactor);
 
   // Change the iteration counts of both loops
-  SymbolicVariable iter_count = loop->inputs().at(0);
-  SymbolicVariable unrolled_iter_count = iter_count / kUnrollFactor;
+  Value* iter_count = loop->inputs().at(0);
+  Value* unrolled_iter_count = intMath(aten::div, iter_count, kUnrollFactor);
   loop->replaceInput(0, unrolled_iter_count);
-  loop_epilogue->replaceInput(0, iter_count - (unrolled_iter_count * kUnrollFactor));
+  loop_epilogue->replaceInput(0, intMath(aten::sub, iter_count, intMath(aten::mul, unrolled_iter_count , kUnrollFactor)));
 }
 
 void UnrollLoops(Block *block) {

@@ -1,7 +1,7 @@
 #ifndef TH_INC
 #define TH_INC
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 
 #include "THBlas.h"
 #ifdef USE_LAPACK
@@ -12,7 +12,7 @@
 #include "THLogAdd.h"
 #include "THRandom.h"
 #include "THSize.h"
-#include "THStorage.h"
+#include "THStorageFunctions.h"
 #include "THTensor.h"
 #include "THTensorApply.h"
 #include "THTensorDimApply.h"

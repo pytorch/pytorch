@@ -7,7 +7,7 @@ Check if self is transpose of a contiguous matrix
 */
 static int THTensor_(isTransposedContiguous)(THTensor *self)
 {
-  return self->stride[0] == 1 && self->stride[1] == self->size[0];
+  return self->stride(0) == 1 && self->stride(1) == self->size(0);
 }
 /*
 If a matrix is a regular contiguous matrix, make sure it is transposed
@@ -53,7 +53,7 @@ input space, like underdetermined gels.
 static THTensor *THTensor_(checkLapackClone)(THTensor *result, THTensor *src, int nrows)
 {
   /* check if user wants to reuse src and if it is correct shape/size */
-  if (src == result && THTensor_(isTransposedContiguous)(src) && src->size[1] == nrows)
+  if (src == result && THTensor_(isTransposedContiguous)(src) && src->size(1) == nrows)
     THTensor_(retain)(result);
   else if(src == result || result == NULL) /* in this case, user wants reuse of src, but its structure is not OK */
     result = THTensor_(new)();
@@ -77,14 +77,14 @@ static THTensor *THTensor_(cloneColumnMajorNrows)(THTensor *self, THTensor *src,
   if (src == result)
     return result;
 
-  THTensor_(resize2d)(result, src->size[1], nrows);
+  THTensor_(resize2d)(result, src->size(1), nrows);
   THTensor_(checkTransposed)(result);
 
-  if (src->size[0] == nrows)
+  if (src->size(0) == nrows)
     THTensor_(copy)(result, src);
   else
   {
-    view = THTensor_(newNarrow)(result, 0, 0, src->size[0]);
+    view = THTensor_(newNarrow)(result, 0, 0, src->size(0));
     THTensor_(copy)(view, src);
     THTensor_(free)(view);
   }
@@ -98,7 +98,7 @@ freed by calling function.
 */
 static THTensor *THTensor_(cloneColumnMajor)(THTensor *self, THTensor *src)
 {
-  return THTensor_(cloneColumnMajorNrows)(self, src, src->size[0]);
+  return THTensor_(cloneColumnMajorNrows)(self, src, src->size(0));
 }
 
 void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
@@ -106,18 +106,20 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   int free_b = 0;
   if (a == NULL) a = ra_;
   if (b == NULL) b = rb_;
-  THArgCheck(a->_dim() == 2, 2, "A should have 2 dimensions, but has %d",
-      a->_dim());
-  THArgCheck(b->_dim() == 1 || b->_dim() == 2, 1, "B should have 1 or 2 "
-      "dimensions, but has %d", b->_dim());
-  THArgCheck(a->size[0] == a->size[1], 2, "A should be square, but is %ldx%ld",
-      a->size[0], a->size[1]);
-  THArgCheck(a->size[0] == b->size[0], 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size[0], b->size[0]);
+  THArgCheck(a->dim() == 2, 2, "A should have 2 dimensions, but has %d",
+      a->dim());
+  THArgCheck(!a->is_empty(), 2, "A should not be empty");
+  THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
+      "dimensions, but has %d", b->dim());
+  THArgCheck(!b->is_empty(), 2, "B should not be empty");
+  THArgCheck(a->size(0) == a->size(1), 2, "A should be square, but is %ldx%ld",
+      a->size(0), a->size(1));
+  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
+      "rows, B has %ld", a->size(0), b->size(0));
 
-  if (b->_dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size[0],
-            b->stride[0], 1, 0);
+  if (b->dim() == 1) {
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -129,8 +131,8 @@ void THTensor_(gesv)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
   rb__ = THTensor_(cloneColumnMajor)(rb_, b);
 
-  n    = (int)ra__->size[0];
-  nrhs = (int)rb__->size[1];
+  n    = (int)ra__->size(0);
+  nrhs = (int)rb__->size(1);
   lda  = n;
   ldb  = n;
 
@@ -163,14 +165,14 @@ void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
       a->_dim());
   THArgCheck(b->_dim() == 1 || b->_dim() == 2, 1, "B should have 1 or 2 "
       "dimensions, but has %d", b->_dim());
-  THArgCheck(a->size[0] == a->size[1], 2, "A should be square, but is %ldx%ld",
-      a->size[0], a->size[1]);
-  THArgCheck(a->size[0] == b->size[0], 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size[0], b->size[0]);
+  THArgCheck(a->size(0) == a->size(1), 2, "A should be square, but is %ldx%ld",
+      a->size(0), a->size(1));
+  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
+      "rows, B has %ld", a->size(0), b->size(0));
 
   if (b->_dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size[0],
-            b->stride[0], 1, 0);
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -181,8 +183,8 @@ void THTensor_(trtrs)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a,
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
   rb__ = THTensor_(cloneColumnMajor)(rb_, b);
 
-  n    = (int)ra__->size[0];
-  nrhs = (int)rb__->size[1];
+  n    = (int)ra__->size(0);
+  nrhs = (int)rb__->size(1);
   lda  = n;
   ldb  = n;
 
@@ -209,16 +211,18 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
   // Note that a = NULL is interpreted as a = ra_, and b = NULL as b = rb_.
   if (a == NULL) a = ra_;
   if (b == NULL) b = rb_;
-  THArgCheck(a->_dim() == 2, 2, "A should have 2 dimensions, but has %d",
-      a->_dim());
-  THArgCheck(b->_dim() == 1 || b->_dim() == 2, 1, "B should have 1 or 2 "
-      "dimensions, but has %d", b->_dim());
-  THArgCheck(a->size[0] == b->size[0], 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size[0], b->size[0]);
+  THArgCheck(a->dim() == 2, 2, "A should have 2 dimensions, but has %d",
+      a->dim());
+  THArgCheck(!a->is_empty(), 2, "A should not be empty");
+  THArgCheck(b->dim() == 1 || b->dim() == 2, 1, "B should have 1 or 2 "
+      "dimensions, but has %d", b->dim());
+  THArgCheck(!b->is_empty(), 1, "B should not be empty");
+  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
+      "rows, B has %ld", a->size(0), b->size(0));
 
   if (b->_dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size[0],
-            b->stride[0], 1, 0);
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -231,14 +235,14 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  m = ra__->size[0];
-  n = ra__->size[1];
+  m = ra__->size(0);
+  n = ra__->size(1);
   lda = m;
   ldb = (m > n) ? m : n;
 
   rb__ = THTensor_(cloneColumnMajorNrows)(rb_, b, ldb);
 
-  nrhs = rb__->size[1];
+  nrhs = rb__->size(1);
   info = 0;
 
 
@@ -277,7 +281,7 @@ void THTensor_(gels)(THTensor *rb_, THTensor *ra_, THTensor *b, THTensor *a)
 void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *jobvr)
 {
   int n, lda, lwork, info, ldvr;
-  THTensor *work, *wi, *wr, *a;
+  THTensor *work=nullptr, *wi, *wr, *a;
   real wkopt;
   real *rv_data;
   int64_t i;
@@ -285,13 +289,13 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   THTensor *re__ = NULL;
   THTensor *rv__ = NULL;
 
-  THArgCheck(a_->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a_->size[0] == a_->size[1], 1,"A should be square");
+  THArgCheck(a_->dim() == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a_->size(0) == a_->size(1), 1,"A should be square");
 
   /* we want to definitely clone a_ for geev*/
   a = THTensor_(cloneColumnMajor)(NULL, a_);
 
-  n = a->size[0];
+  n = a->size(0);
   lda = n;
 
   wi = THTensor_(newWithSize1d)(n);
@@ -310,24 +314,26 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
   THTensor_(resize2d)(re_,n,2);
   re__ = THTensor_(newContiguous)(re_);
 
-  /* get optimal workspace size */
-  THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi),
-      NULL, 1, rv_data, ldvr, &wkopt, -1, &info);
+  if (n > 0) {  // lapack doesn't work with size 0
+    /* get optimal workspace size */
+    THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi),
+        NULL, 1, rv_data, ldvr, &wkopt, -1, &info);
 
-  lwork = (int)wkopt;
-  work = THTensor_(newWithSize1d)(lwork);
+    lwork = (int)wkopt;
+    work = THTensor_(newWithSize1d)(lwork);
 
-  THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi),
-      NULL, 1, rv_data, ldvr, THTensor_(data)(work), lwork, &info);
+    THLapack_(geev)('N', jobvr[0], n, THTensor_(data)(a), lda, THTensor_(data)(wr), THTensor_(data)(wi),
+        NULL, 1, rv_data, ldvr, THTensor_(data)(work), lwork, &info);
 
-  THLapackCheckWithCleanup(" Lapack Error in %s : %d off-diagonal elements of an didn't converge to zero",
-                           THCleanup(THTensor_(free)(re__);
-                                     THTensor_(free)(rv__);
-                                     THTensor_(free)(a);
-                                     THTensor_(free)(wi);
-                                     THTensor_(free)(wr);
-                                     THTensor_(free)(work);),
-                           "geev", info,"");
+    THLapackCheckWithCleanup(" Lapack Error in %s : %d off-diagonal elements of an didn't converge to zero",
+                             THCleanup(THTensor_(free)(re__);
+                                       THTensor_(free)(rv__);
+                                       THTensor_(free)(a);
+                                       THTensor_(free)(wi);
+                                       THTensor_(free)(wr);
+                                       THTensor_(free)(work);),
+                             "geev", info,"");
+  }
 
   {
     real *re_data = THTensor_(data)(re__);
@@ -355,11 +361,11 @@ void THTensor_(geev)(THTensor *re_, THTensor *rv_, THTensor *a_, const char *job
 void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz, const char *uplo)
 {
   if (a == NULL) a = rv_;
-  THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size[0] == a->size[1], 1,"A should be square");
+  THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a->size(0) == a->size(1), 1,"A should be square");
 
   int n, lda, lwork, info;
-  THTensor *work;
+  THTensor *work = nullptr;
   real wkopt;
 
   THTensor *rv__ = NULL;
@@ -367,25 +373,27 @@ void THTensor_(syev)(THTensor *re_, THTensor *rv_, THTensor *a, const char *jobz
 
   rv__ = THTensor_(cloneColumnMajor)(rv_, a);
 
-  n = rv__->size[0];
+  n = rv__->size(0);
   lda = n;
 
   THTensor_(resize1d)(re_,n);
   re__ = THTensor_(newContiguous)(re_);
 
   /* get optimal workspace size */
-  THLapack_(syev)(jobz[0], uplo[0], n, THTensor_(data)(rv__), lda,
-		  THTensor_(data)(re_), &wkopt, -1, &info);
-  lwork = (int)wkopt;
-  work = THTensor_(newWithSize1d)(lwork);
-  THLapack_(syev)(jobz[0], uplo[0], n, THTensor_(data)(rv__), lda,
-		  THTensor_(data)(re_), THTensor_(data)(work), lwork, &info);
+  if (n != 0) {
+    THLapack_(syev)(jobz[0], uplo[0], n, THTensor_(data)(rv__), lda,
+                    THTensor_(data)(re_), &wkopt, -1, &info);
+    lwork = (int)wkopt;
+    work = THTensor_(newWithSize1d)(lwork);
+    THLapack_(syev)(jobz[0], uplo[0], n, THTensor_(data)(rv__), lda,
+                    THTensor_(data)(re_), THTensor_(data)(work), lwork, &info);
 
-  THLapackCheckWithCleanup("Lapack Error %s : %d off-diagonal elements didn't converge to zero",
-                           THCleanup(THTensor_(free)(rv__);
-                                     THTensor_(free)(re__);
-                                     THTensor_(free)(work);),
-                           "syev", info,"");
+    THLapackCheckWithCleanup("Lapack Error %s : %d off-diagonal elements didn't converge to zero",
+                             THCleanup(THTensor_(free)(rv__);
+                                       THTensor_(free)(re__);
+                                       THTensor_(free)(work);),
+                             "syev", info,"");
+  }
 
   // No eigenvectors specified
   if (*jobz == 'N') {
@@ -407,7 +415,8 @@ void THTensor_(gesvd)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *a, 
 void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra_, THTensor *a, const char* jobu)
 {
   if (a == NULL) a = ra_;
-  THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
+  THArgCheck(!a->is_empty(), 1, "A should not be empty");
 
   int k,m, n, lda, ldu, ldvt, lwork, info;
   THTensor *work;
@@ -421,8 +430,8 @@ void THTensor_(gesvd2)(THTensor *ru_, THTensor *rs_, THTensor *rv_, THTensor *ra
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  m = ra__->size[0];
-  n = ra__->size[1];
+  m = ra__->size(0);
+  n = ra__->size(1);
   k = (m < n ? m : n);
 
   lda = m;
@@ -490,7 +499,7 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
   int m, n, lda, info, lwork;
   real wkopt;
@@ -500,8 +509,8 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  m = ra__->size[0];
-  n = ra__->size[1];
+  m = ra__->size(0);
+  n = ra__->size(1);
   lda = m;
   ipiv = THIntTensor_newWithSize1d((int64_t)m);
 
@@ -533,9 +542,9 @@ void THTensor_(getri)(THTensor *ra_, THTensor *a)
 void THTensor_(clearUpLoTriangle)(THTensor *a, const char *uplo)
 {
   THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
-  int n = a->size[0];
+  int n = a->size(0);
 
   /* Build full matrix */
   real *p = THTensor_(data)(a);
@@ -566,9 +575,9 @@ void THTensor_(clearUpLoTriangle)(THTensor *a, const char *uplo)
 void THTensor_(copyUpLoTriangle)(THTensor *a, const char *uplo)
 {
   THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
-  int n = a->size[0];
+  int n = a->size(0);
 
   /* Build full matrix */
   real *p = THTensor_(data)(a);
@@ -600,14 +609,14 @@ void THTensor_(potrf)(THTensor *ra_, THTensor *a, const char *uplo)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
   int n, lda, info;
   THTensor *ra__ = NULL;
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  n = ra__->size[0];
+  n = ra__->size(0);
   lda = n;
 
   /* Run Factorization */
@@ -629,14 +638,14 @@ void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
       a->_dim());
   THArgCheck(b->_dim() == 1 || b->_dim() == 2, 1, "B should have 1 or 2 "
       "dimensions, but has %d", b->_dim());
-  THArgCheck(a->size[0] == a->size[1], 2, "A should be square, but is %ldx%ld",
-      a->size[0], a->size[1]);
-  THArgCheck(a->size[0] == b->size[0], 2, "A,B size incompatible - A has %ld "
-      "rows, B has %ld", a->size[0], b->size[0]);
+  THArgCheck(a->size(0) == a->size(1), 2, "A should be square, but is %ldx%ld",
+      a->size(0), a->size(1));
+  THArgCheck(a->size(0) == b->size(0), 2, "A,B size incompatible - A has %ld "
+      "rows, B has %ld", a->size(0), b->size(0));
 
   if (b->_dim() == 1) {
-    b = THTensor_(newWithStorage2d)(b->storage, b->storageOffset, b->size[0],
-            b->stride[0], 1, 0);
+    b = THTensor_(newWithStorage2d)(THTensor_getStoragePtr(b), b->storage_offset(), b->size(0),
+            b->stride(0), 1, 0);
     free_b = 1;
   }
 
@@ -647,8 +656,8 @@ void THTensor_(potrs)(THTensor *rb_, THTensor *b, THTensor *a, const char *uplo)
   ra__ = THTensor_(cloneColumnMajor)(NULL, a);
   rb__ = THTensor_(cloneColumnMajor)(rb_, b);
 
-  n    = (int)ra__->size[0];
-  nrhs = (int)rb__->size[1];
+  n    = (int)ra__->size(0);
+  nrhs = (int)rb__->size(1);
   lda  = n;
   ldb  = n;
 
@@ -672,14 +681,14 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
 {
   if (a == NULL) a = ra_;
   THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
   int n, lda, info;
   THTensor *ra__ = NULL;
 
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  n = ra__->size[0];
+  n = ra__->size(0);
   lda = n;
 
   /* Run inverse */
@@ -710,9 +719,9 @@ void THTensor_(potri)(THTensor *ra_, THTensor *a, const char *uplo)
  */
 void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char *uplo, real tol) {
   THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
-  THArgCheck(a->size[0] == a->size[1], 1, "A should be square");
+  THArgCheck(a->size(0) == a->size(1), 1, "A should be square");
 
-  int n = a->size[0];
+  int n = a->size(0);
 
   THTensor *ra__ = THTensor_(cloneColumnMajor)(ra_, a);
   THIntTensor_resize1d(rpiv_, n);
@@ -757,17 +766,17 @@ void THTensor_(pstrf)(THTensor *ra_, THIntTensor *rpiv_, THTensor *a, const char
 */
 void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a)
 {
-  int m = a->size[0];
-  int n = a->size[1];
+  int m = a->size(0);
+  int n = a->size(1);
   int k = (m < n ? m : n);
   THTensor *ra_ = THTensor_(new)();
   THTensor *rtau_ = THTensor_(new)();
   THTensor *rr__ = THTensor_(new)();
   THTensor_(geqrf)(ra_, rtau_, a);
-  THTensor_(resize2d)(rr__, k, ra_->size[1]);
+  THTensor_(resize2d)(rr__, k, ra_->size(1));
   THTensor_(narrow)(rr__, ra_, 0, 0, k);
   THTensor_(triu)(rr_, rr__, 0);
-  THTensor_(resize2d)(rq_, ra_->size[0], k);
+  THTensor_(resize2d)(rq_, ra_->size(0), k);
   THTensor_(orgqr)(rq_, ra_, rtau_);
   THTensor_(narrow)(rq_, rq_, 1, 0, k);
   THTensor_(free)(ra_);
@@ -795,15 +804,16 @@ void THTensor_(qr)(THTensor *rq_, THTensor *rr_, THTensor *a)
 void THTensor_(geqrf)(THTensor *ra_, THTensor *rtau_, THTensor *a)
 {
   if (a == NULL) ra_ = a;
-  THArgCheck(a->_dim() == 2, 1, "A should be 2 dimensional");
+  THArgCheck(a->dim() == 2, 1, "A should be 2 dimensional");
+  THArgCheck(!a->is_empty(), 1, "A should not be empty");
 
   THTensor *ra__ = NULL;
 
   /* Prepare the input for LAPACK, making a copy if necessary. */
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  int m = ra__->size[0];
-  int n = ra__->size[1];
+  int m = ra__->size(0);
+  int n = ra__->size(1);
   int k = (m < n ? m : n);
   int lda = m;
   THTensor_(resize1d)(rtau_, k);
@@ -856,8 +866,8 @@ void THTensor_(orgqr)(THTensor *ra_, THTensor *a, THTensor *tau)
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, a);
 
-  int m = ra__->size[0];
-  int k = tau->size[0];
+  int m = ra__->size(0);
+  int k = tau->size(0);
   int lda = m;
 
   /* Dry-run to query the suggested size of the workspace. */
@@ -909,9 +919,9 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
   THTensor *ra__ = NULL;
   ra__ = THTensor_(cloneColumnMajor)(ra_, c);
 
-  int m = c->size[0];
-  int n = c->size[1];
-  int k = tau->size[0];
+  int m = c->size(0);
+  int n = c->size(1);
+  int k = tau->size(0);
   int lda;
   if (*side == 'L')
   {
@@ -948,7 +958,7 @@ void THTensor_(ormqr)(THTensor *ra_, THTensor *a, THTensor *tau, THTensor *c, co
 
 void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinfo_, int pivot, THTensor *a)
 {
-  AT_CHECK(!a->is_empty() && THTensor_(nDimension)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
+  AT_CHECK(THTensor_(nDimension)(a) == 3, "expected 3D tensor, got size: ", a->sizes());
   if (!pivot) {
     THError("btrifact without pivoting is not implemented on the CPU");
   }
@@ -958,8 +968,8 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
     THTensor_(copy)(ra_, a);
   }
 
-  int m = a->size[1];
-  int n = a->size[2];
+  int m = a->size(1);
+  int n = a->size(2);
   if (m != n) {
     THError("btrifact is only implemented for square matrices");
   }
@@ -967,9 +977,9 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
   THTensor *ra__;
   int lda;
 
-  if (ra_->stride[1] == 1) {
+  if (ra_->stride(1) == 1) {
     // column ordered, what BLAS wants
-    lda = ra_->stride[2];
+    lda = ra_->stride(2);
     ra__ = ra_;
   } else {
     // not column ordered, need to make it such (requires copy)
@@ -977,7 +987,7 @@ void THTensor_(btrifact)(THTensor *ra_, THIntTensor *rpivots_, THIntTensor *rinf
     ra__ = THTensor_(newClone)(transp_r_);
     THTensor_(free)(transp_r_);
     THTensor_(transpose)(ra__, NULL, 1, 2);
-    lda = ra__->stride[2];
+    lda = ra__->stride(2);
   }
 
   THTensor *ai = THTensor_(new)();
@@ -1039,18 +1049,18 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
     THTensor_(copy)(rb_, b);
   }
 
-  int64_t num_batches = atf->size[0];
-  int64_t n = atf->size[1];
-  int nrhs = rb_->_dim() > 2 ? rb_->size[2] : 1;
+  int64_t num_batches = atf->size(0);
+  int64_t n = atf->size(1);
+  int nrhs = rb_->_dim() > 2 ? rb_->size(2) : 1;
 
   int lda, ldb;
   THTensor *atf_;
   THTensor *rb__;
 
   // correct ordering of A
-  if (atf->stride[1] == 1) {
+  if (atf->stride(1) == 1) {
     // column ordered, what BLAS wants
-    lda = atf->stride[2];
+    lda = atf->stride(2);
     atf_ = atf;
   } else {
     // not column ordered, need to make it such (requires copy)
@@ -1061,16 +1071,16 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
     atf_ = THTensor_(newClone)(transp_r_);
     THTensor_(free)(transp_r_);
     THTensor_(transpose)(atf_, NULL, 1, 2);
-    lda = atf_->stride[2];
+    lda = atf_->stride(2);
   }
 
   // correct ordering of B
-  if (rb_->stride[1] == 1) {
+  if (rb_->stride(1) == 1) {
     // column ordered
-    if (rb_->_dim() == 2 || rb_->size[2] == 1) {
+    if (rb_->_dim() == 2 || rb_->size(2) == 1) {
       ldb = n;
     } else {
-      ldb = rb_->stride[2];
+      ldb = rb_->stride(2);
     }
     rb__ = rb_;
   } else {
@@ -1080,7 +1090,7 @@ void THTensor_(btrisolve)(THTensor *rb_, THTensor *b, THTensor *atf, THIntTensor
       rb__ = THTensor_(newClone)(transp_r_);
       THTensor_(free)(transp_r_);
       THTensor_(transpose)(rb__, NULL, 1, 2);
-      ldb = rb__->stride[2];
+      ldb = rb__->stride(2);
     } else {
       rb__ = THTensor_(newClone)(rb_);
       ldb = n;

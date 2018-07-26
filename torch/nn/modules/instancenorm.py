@@ -84,7 +84,8 @@ class InstanceNorm1d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
-            learnable affine parameters. Default: ``False``
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -148,7 +149,8 @@ class InstanceNorm2d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
-            learnable affine parameters. Default: ``False``
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch
@@ -212,7 +214,8 @@ class InstanceNorm3d(_InstanceNorm):
         eps: a value added to the denominator for numerical stability. Default: 1e-5
         momentum: the value used for the running_mean and running_var computation. Default: 0.1
         affine: a boolean value that when set to ``True``, this module has
-            learnable affine parameters. Default: ``False``
+            learnable affine parameters, initialized the same way as done for batch normalization.
+            Default: ``False``.
         track_running_stats: a boolean value that when set to ``True``, this
             module tracks the running mean and variance, and when set to ``False``,
             this module does not track such statistics and always uses batch

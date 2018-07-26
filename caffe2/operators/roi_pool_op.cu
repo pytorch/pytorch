@@ -1,7 +1,7 @@
 #include <cfloat>
 
 #include "caffe2/core/context_gpu.h"
-#include "roi_pool_op.h"
+#include "caffe2/operators/roi_pool_op.h"
 
 namespace caffe2 {
 

@@ -2,6 +2,7 @@ import torch
 from .module import Module
 from torch.nn.parameter import Parameter
 from .. import functional as F
+from .. import init
 
 
 # TODO: check contiguous in THNN
@@ -42,8 +43,8 @@ class _BatchNorm(Module):
     def reset_parameters(self):
         self.reset_running_stats()
         if self.affine:
-            self.weight.data.uniform_()
-            self.bias.data.zero_()
+            init.uniform_(self.weight)
+            init.zeros_(self.bias)
 
     def _check_input_dim(self, input):
         raise NotImplementedError
@@ -96,9 +97,10 @@ class BatchNorm1d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -167,9 +169,10 @@ class BatchNorm2d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.
@@ -238,9 +241,10 @@ class BatchNorm3d(_BatchNorm):
 
     The mean and standard-deviation are calculated per-dimension over
     the mini-batches and :math:`\gamma` and :math:`\beta` are learnable parameter vectors
-    of size `C` (where `C` is the input size).
+    of size `C` (where `C` is the input size). By default, the elements of :math:`\gamma` are sampled
+    from :math:`\mathcal{U}(0, 1)` and the elements of :math:`\beta` are set to 0.
 
-    By default, during training this layer keeps running estimates of its
+    Also by default, during training this layer keeps running estimates of its
     computed mean and variance, which are then used for normalization during
     evaluation. The running estimates are kept with a default :attr:`momentum`
     of 0.1.

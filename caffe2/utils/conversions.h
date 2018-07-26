@@ -187,7 +187,7 @@ CONVERSIONS_DECL float16 To(const float in) {
 #endif // CUDA_VERSION >= 9000
 #elif __HIP_DEVICE_COMPILE__
   float16 ret;
-  ret.x = __float2half(in);
+  ret.x = __half_as_ushort(__float2half(in));
   return ret;
 #else
   return cpu_float2half_rn(in);
@@ -206,7 +206,7 @@ CONVERSIONS_DECL float To(const float16 in) {
   return __half2float(tmp);
 #elif __HIP_DEVICE_COMPILE__
   __half tmp;
-  tmp = in.x;
+  tmp = __ushort_as_half(in.x);
   return __half2float(tmp);
 #else
   return cpu_half2float(in);

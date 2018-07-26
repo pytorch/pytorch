@@ -8,7 +8,7 @@
 #include <THPP/Type.hpp>
 
 #include "../master_worker/common/RPC.hpp"
-#include "TH/THStorage.h"
+#include "TH/THStorageFunctions.h"
 
 using namespace std;
 using namespace thd;

@@ -2863,6 +2863,35 @@ Example::
     tensor([ 1.0404, -0.6361])
 """)
 
+add_docstr(torch.mvlgamma,
+           r"""
+mvlgamma(input, p) -> Tensor
+
+Computes the multivariate log-gamma function with dimension :math:`p` element-wise, given by
+
+.. math::
+    \log(\Gamma_{p}(a)) = C + \displaystyle \sum_{i=1}^{p} \log\left(\Gamma\left(a - \frac{i - 1}{2}\right)\right)
+
+where :math:`C = \log(\pi) \times \frac{p (p - 1)}{2}` and :math:`\Gamma(.)` is the Gamma function.
+
+If any of the elements are less than or equal to :math:`\frac{p - 1}{2}`, then an error
+is thrown.
+
+Args:
+    input (Tensor): the tensor to compute the multivariate log-gamma function
+    p (int): the number of dimensions
+
+Example::
+
+    >>> a = torch.empty(2, 3).uniform_(1, 2)
+    >>> a
+    tensor([[1.6835, 1.8474, 1.1929],
+            [1.0475, 1.7162, 1.4180]])
+    >>> torch.mvlgamma(a, 2)
+    tensor([[0.3928, 0.4007, 0.7586],
+            [1.0311, 0.3901, 0.5049]])
+""")
+
 add_docstr(torch.ne,
            r"""
 ne(input, other, out=None) -> Tensor
@@ -3782,11 +3811,11 @@ Args:
     end (Number): the ending value for the set of points
     step (Number): the gap between each pair of adjacent points. Default: ``1``.
     {out}
-    {dtype}
-        If `dtype` is not given, infer the data type from the other input arguments.
-        If any of `start`, `end`, or `stop` are floating-point,
-        the `dtype` is inferred to be the default dtype, see :meth:`~torch.get_default_dtype`.
-        Otherwise, the `dtype` is inferred to be `torch.int64`.
+    {dtype} If `dtype` is not given, infer the data type from the other input
+        arguments. If any of `start`, `end`, or `stop` are floating-point, the
+        `dtype` is inferred to be the default dtype, see
+        :meth:`~torch.get_default_dtype`. Otherwise, the `dtype` is inferred to
+        be `torch.int64`.
     {layout}
     {device}
     {requires_grad}
@@ -4202,9 +4231,6 @@ dimension. If `input` is of shape: :math:`(A \times 1 \times B)`,
 `squeeze(input, 0)` leaves the tensor unchanged, but :func:`squeeze(input, 1)` will
 squeeze the tensor to the shape :math:`(A \times B)`.
 
-.. note:: As an exception to the above, a 1-dimensional tensor of size 1 will
-          not have its dimensions changed.
-
 .. note:: The returned tensor shares the storage with the input tensor,
           so changing the contents of one will change the contents of the other.
 
@@ -4499,6 +4525,43 @@ Example::
 
             [[ 2,  3],
              [ 0,  1]]])
+""")
+
+add_docstr(torch.rot90,
+           r"""
+rot90(input, k, dims) -> Tensor
+
+Rotate a n-D tensor by 90 degrees in the plane specified by dims axis.
+Rotation direction is from the first towards the second axis if k > 0, and from the second towards the first for k < 0.
+
+Args:
+    input (Tensor): the input tensor
+    k (int): number of times to rotate
+    dims (a list or tuple): axis to rotate
+
+Example::
+
+    >>> x = torch.arange(4).view(2, 2)
+    >>> x
+    tensor([[0, 1],
+            [2, 3]])
+    >>> torch.rot90(x, 1, [0, 1])
+    tensor([[1, 3],
+            [0, 2]])
+
+    >>> x = torch.arange(8).view(2, 2, 2)
+    >>> x
+    tensor([[[0, 1],
+             [2, 3]],
+
+            [[4, 5],
+             [6, 7]]])
+    >>> torch.rot90(x, 1, [1, 2])
+    tensor([[[1, 3],
+             [0, 2]],
+
+            [[5, 7],
+             [4, 6]]])
 """)
 
 add_docstr(torch.take,
@@ -5108,58 +5171,6 @@ Args:
     {requires_grad}
 """.format(**factory_like_common_args))
 
-add_docstr(torch.stft,
-           r"""
-stft(signal, frame_length, hop, fft_size=None, normalized=False, onesided=True, window=None, pad_end=0) -> Tensor
-
-Short-time Fourier transform (STFT).
-
-Ignoring the batch dimension, this method computes the following expression:
-
-.. math::
-    X[m, \omega] = \sum_{k = 0}^{\text{frame_length}}%
-                        window[k]\ signal[m \times hop + k]\ e^{- j \frac{2 \pi \cdot \omega k}{\text{frame_length}}},
-
-where :math:`m` is the index of the sliding window, and :math:`\omega` is
-the frequency that :math:`0 \leq \omega <` :attr:`fft_size`. When
-:attr:`return_onsesided` is the default value ``True``, only values for
-:math:`\omega` in range :math:`\left[0, 1, 2, \dots, \left\lfloor \frac{\text{fft_size}}{2} \right\rfloor + 1\right]`
-are returned because the real-to-complex transform satisfies the Hermitian
-symmetry, i.e., :math:`X[m, \omega] = X[m, \text{fft_size} - \omega]^*`.
-
-The input :attr:`signal` must be 1-D sequence :math:`(T)` or 2-D a batch of
-sequences :math:`(N \times T)`. If :attr:`fft_size` is ``None``, it is
-default to same value as  :attr:`frame_length`. :attr:`window` can be a
-1-D tensor of size :attr:`frame_length`, e.g., see
-:meth:`torch.hann_window`. If :attr:`window` is the default value ``None``,
-it is treated as if having :math:`1` everywhere in the frame.
-:attr:`pad_end` indicates the amount of zero padding at the end of
-:attr:`signal` before STFT. If :attr:`normalized` is set to ``True``, the
-function returns the normalized STFT results, i.e., multiplied by
-:math:`(frame\_length)^{-0.5}`.
-
-Returns the real and the imaginary parts together as one tensor of size
-:math:`(* \times N \times 2)`, where :math:`*` is the shape of input :attr:`signal`,
-:math:`N` is the number of :math:`\omega` s considered depending on
-:attr:`fft_size` and :attr:`return_onesided`, and each pair in the last
-dimension represents a complex number as real part and imaginary part.
-
-Arguments:
-    signal (Tensor): the input tensor
-    frame_length (int): the size of window frame and STFT filter
-    hop (int): the distance between neighboring sliding window frames
-    fft_size (int, optional): size of Fourier transform. Default: ``None``
-    normalized (bool, optional): controls whether to return the normalized STFT results
-         Default: ``False``
-    onesided (bool, optional): controls whether to return half of results to
-        avoid redundancy Default: ``True``
-    window (Tensor, optional): the optional window function. Default: ``None``
-    pad_end (int, optional): implicit zero padding at the end of :attr:`signal`. Default: 0
-
-Returns:
-    Tensor: A tensor containing the STFT result
-""")
-
 add_docstr(torch.det,
            r"""
 det(A) -> Tensor
@@ -5569,7 +5580,7 @@ Arguments:
     normalized (bool, optional): controls whether to return normalized results.
         Default: ``False``
     onesided (bool, optional): controls whether to return half of results to
-        avoid redundancy Default: ``True``
+        avoid redundancy. Default: ``True``
 
 Returns:
     Tensor: A tensor containing the real-to-complex Fourier transform result

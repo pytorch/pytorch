@@ -2,15 +2,17 @@
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+#include "torch/csrc/jit/ivalue.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <exception>
 #include <iostream>
@@ -60,14 +62,14 @@ Value* createTripCountConjunctiveCondition(
   // Emit initial comparison -- initial_trip_count < max_trip_count
   Value* initial_comparison_value =
       g->insertNode(g->create(aten::lt, {cur_trip_count, max_trip_count}, 1))
-          ->output();
+          ->output()->setType(IntType::get());
 
   // Replace initial condition with logical `and` of trip count and
   // initial condition
   Value* new_cond =
       g->insertNode(
            g->create(aten::__and__, {initial_comparison_value, cond}, 1))
-          ->output();
+          ->output()->setType(IntType::get());
   return new_cond;
 }
 
@@ -92,9 +94,7 @@ void desugarTripCounts(Block * b) {
       {
         WithInsertPoint guard(n);
         // int i = 0
-        Value* initial_trip_count =
-            g->insertNode(g->createConstant(at::zeros({1}, at::kLong)))
-                ->output();
+        Value* initial_trip_count = insertConstant(*g, 0);
         // Set up initial iteration number value for loop-carried dependency
         n->removeInput(0);
         // Input 0 is now initial termination condition, insert this after that.
@@ -112,14 +112,12 @@ void desugarTripCounts(Block * b) {
         // increment the trip count at the end of the body. Then, emit the same
         // conjunctive stopping condition as above.
 
-        Value* const_one =
-            g->insertNode(g->createConstant(at::ones({1}, at::kLong)))
-                ->output();
+        Value* const_one = insertConstant(*g, 1);
 
         Value* inc_trip_count =
             g->insertNode(g->create(
-                    aten::add, {block_trip_count_input, const_one, const_one}, 1))
-             ->output();
+                    aten::add, {block_trip_count_input, const_one}, 1))
+             ->output()->setType(IntType::get());
         body_block->insertOutput(1, inc_trip_count);
 
         Value* body_cond = createTripCountConjunctiveCondition(
@@ -338,12 +336,9 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined))) {}
+  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined)), nullptr) {}
 
   virtual ~ContainerTensor() {}
-  virtual const char * toString() const override {
-    throw std::runtime_error("toString() on ContainerTensor");
-  }
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
@@ -352,9 +347,6 @@ public:
   }
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
-  }
-  virtual at::Scalar localScalar() override {
-    throw std::runtime_error("localScalar() on ContainerTensor");
   }
   virtual void * unsafeGetTH(bool retain) override {
     throw std::runtime_error("unsafeGetTH() on ContainerTensor");
@@ -400,7 +392,7 @@ struct CodeImpl {
   CodeImpl(std::shared_ptr<Graph>& graph_)
       : preprocess(*graph_) {
     graph = preprocess.graph;
-    //std::cout << "into code graph:\n" << *graph << "\n";
+    // std::cout << "into code graph:\n" << *graph << "\n";
     insertNodesFromBlock(graph->block());
   }
 
@@ -410,7 +402,7 @@ struct CodeImpl {
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = pop(stack).toInt();
       return (t == 0) ? offset : 0;
     };
     inst.debug_name = prim::JumpZ;
@@ -422,7 +414,7 @@ struct CodeImpl {
     JIT_ASSERT(inst.debug_name == prim::Placeholder);
     auto offset = relativeJump(from_inst, to_inst);
     inst.callback = [offset](Stack & stack) {
-      auto t = tensor_as<int64_t>(pop(stack));
+      auto t = pop(stack).toInt();
       return (t != 0) ? offset : 0;
     };
     inst.debug_name = prim::JumpNZ;
@@ -629,7 +621,8 @@ struct CodeImpl {
     return [=](Stack& stack) mutable {
       autograd::profiler::RecordFunction record("GraphExecutor");
       auto inputs = last(stack, num_inputs);
-      variable_tensor_list tinputs(inputs.begin(), inputs.end());
+      variable_tensor_list tinputs(
+          fmap(inputs, [](const IValue& v) { return v.toTensor(); }));
       drop(stack, num_inputs);
       //TODO: has graph executor work from a stack as well
       variable_tensor_list toutputs = executor->run(variable_tensor_list(std::move(tinputs)));
@@ -774,7 +767,7 @@ struct InterpreterStateImpl {
   // in the case where it is true, then the interpreter and this array get copied
   // if this every becomes a bottleneck then we _should_ consider minimizing the
   // total number or register
-  std::vector<at::Tensor> registers;
+  std::vector<IValue> registers;
 
   // single buffer for input/output calls to ATen functions, so that we do not reallocate
   Stack stack;
@@ -799,7 +792,7 @@ InterpreterState::InterpreterState(const Code & function)
 InterpreterState::~InterpreterState() {}
 
 void InterpreterState::runOneStage(Stack & stack) {
-    return pImpl->runOneStage(stack);
+  return pImpl->runOneStage(stack);
 }
 
 const TensorType & InterpreterState::tensorTypeForInput(size_t i) const {

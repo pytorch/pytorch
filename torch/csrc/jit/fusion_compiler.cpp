@@ -1,19 +1,25 @@
 #ifndef _WIN32
 #include "torch/csrc/jit/fusion_compiler.h"
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
+
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include <torch/csrc/jit/assertions.h>
 
 #include "ATen/ATen.h"
+
 #ifdef USE_CUDA
+#include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
 #include "torch/csrc/cuda/cuda_check.h"
 #include <nvrtc.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
 #endif
+
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -125,9 +131,9 @@ void ${kernelName}(IndexType totalElements, void ** args) {
 // This snippet enables half support in the jit. Following the pattern for
 // reductions, fp16 input data is immediately upconverted to float
 // with __half2float(). All mathematical operations are done on float
-// values, and if needed the intermediate float representation is 
+// values, and if needed the intermediate float representation is
 // converted to half with __float2half() when writing to a half tensor.
-constexpr auto half_support_literal  = R"(    
+constexpr auto half_support_literal  = R"(
 #define __HALF_TO_US(var) *(reinterpret_cast<unsigned short *>(&(var)))
 #define __HALF_TO_CUS(var) *(reinterpret_cast<const unsigned short *>(&(var)))
 #if defined(__cplusplus)
@@ -169,7 +175,7 @@ size_t ${tensor}_dimIndex${d} = ${tensor}_linearIndex ${mod_sizes};
 ${tensor}_offset += ${tensor}_dimIndex${d} ${times_stride};
 )");
 
-void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, bool last_is_cont) {
+static void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, bool last_is_cont) {
   TemplateEnv env;
   env.s("tensor",tensor);
   out << format("IndexType ${tensor}_offset = 0;\n",env);
@@ -186,18 +192,22 @@ void emitIndexingFor(std::ostream & out, const std::string & tensor, int ndim, b
   }
 }
 
-std::string valueName(Value * n) {
+static std::string valueName(Value * n) {
   return "n" + std::to_string(n->unique());
 }
 
- std::string scalarValue(const at::Tensor & t) {
+static std::string scalarValue(const at::Tensor & t) {
   auto s =  at::Scalar(t);
-  return (s.isIntegral()) ?
-    std::to_string(s.toLong()) :
-    (std::to_string(s.toDouble()) + "f");
+  if (s.isIntegral()){
+    return std::to_string(s.toLong());
+  } else {
+     std::ostringstream out;
+     out << std::scientific << s.toDouble() << "f";
+     return out.str();
+  }
 }
 
-const char * scalarTypeName(at::ScalarType type) {
+static const char * scalarTypeName(at::ScalarType type) {
   if (type == at::ScalarType::Half) {
     return "half";
   }
@@ -287,8 +297,9 @@ std::string encodeRHS(Node * n) {
   TemplateEnv env;
   size_t i = 0;
   for(auto in : n->inputs()) {
-    env.s(std::to_string(i++),valueName(in));
+    env.s(std::to_string(i++), valueName(in));
   }
+  // TODO (apaszke): remove once we get rid of attributes
   // ops like div have a / b or a / 2 with the constant having the attribute other
   // so we add other as an input if it is present
   // 'pow' is the same but uses exponent as the attribute, so we handle that here as well
@@ -352,7 +363,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
       } else {
         auto cat = o->node();
         size_t nInputs = cat->inputs().size();
-        concat_desc.emplace_back(desc, nInputs, cat->i(attr::dim));
+        concat_desc.emplace_back(desc, nInputs, cat->get<int64_t>(attr::dim).value());
         for(auto c : cat->inputs()) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
@@ -377,7 +388,7 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
     } else {
       env.s("access", format("t${formal}.data[t${formal}_offset]", env));
     }
-    
+
     //TODO: actual type propagation rather than relying on auto..
     body << format("auto ${node} = ${access};\n",env);
   }
@@ -645,7 +656,7 @@ protected:
             *(THCCachingAllocator_getCudaFreeMutex()));
         cudaFree(0);
      }
-     CUstream stream = at::globalContext().getCurrentCUDAStream();
+     CUstream stream = at::cuda::getCurrentCUDAStream();
      TORCH_CU_CHECK(cuLaunchKernel(
        function,
        numBlocks, 1, 1,
@@ -710,7 +721,7 @@ private:
 
 static void* checkDL(void * x) {
   if(!x) {
-    barf("error in dlopen or dlsym: %s", dlerror());
+    AT_ERROR("error in dlopen or dlsym: ", dlerror());
   }
   return x;
 }
@@ -726,10 +737,7 @@ struct DynamicLibrary {
   }
   ~DynamicLibrary() {
     if(!handle) return;
-    int r = dlclose(handle);
-    if(r) {
-      barf("error in dlclose: %s", dlerror());
-    }
+    dlclose(handle);
   }
 private:
   void * handle = nullptr;
@@ -743,10 +751,15 @@ static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 // actually supports it or not, so we heuristically use the host
 // compiler to predict if the runtime compiler supports the option we
 // want.  This probably won't work if you're cross-compiling.
+// NB: -march=native is disabled because it has caused problems where
+// compiler and assembler do not agree on what native instruction they
+// understand for AVX512. When we need better CPU performance this
+// optimization can be re-enabled by tracking down the platforms where
+// this error occurs and only selectively disabling it.
 static const std::string compile_string =
   "\"${cxx}\" -O3 -g "
 #ifndef __PPC64__
-  "-march=native "
+//  "-march=native "
 #endif
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 

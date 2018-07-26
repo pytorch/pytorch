@@ -67,16 +67,6 @@ struct Parser {
         auto list = parseList('[', ',', ']', &Parser::parseExp);
         prefix = ListLiteral::create(list.range(), List<Expr>(list));
       } break;
-      case TK_FLOAT:
-      case TK_INT:
-      case TK_LONG: {
-        auto r = L.cur().range;
-        auto type = c(L.next().kind, r, {});
-        L.expect('(');
-        auto exp = parseExp();
-        L.expect(')');
-        prefix = Cast::create(r, Type(type), Expr(exp));
-      } break;
       default: {
         Ident name = parseIdent();
         prefix = Var::create(name.range(), name);
@@ -284,19 +274,6 @@ struct Parser {
           return ExprStmt::create(exprs[0].range(), exprs);
         }
       }
-    }
-  }
-  TreeRef parseScalarType() {
-    switch (L.cur().kind) {
-      case TK_INT:
-      case TK_FLOAT:
-      case TK_LONG:
-      case TK_DOUBLE: {
-        auto t = L.next();
-        return c(t.kind, t.range, {});
-      }
-      default:
-        return parseIdent();
     }
   }
   TreeRef parseOptionalIdentList() {

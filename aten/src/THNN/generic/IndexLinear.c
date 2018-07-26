@@ -65,7 +65,7 @@ void THNN_(IndexLinear_updateOutput)(
   real* outputData = THTensor_(data)(output);
   real* valuesData = THTensor_(data)(values);
   real* weightData = THTensor_(data)(weight);
-  int64_t weightStride0 = weight->stride[0];
+  int64_t weightStride0 = weight->stride(0);
   real* biasData = THTensor_(data)(bias);
   int64_t* keysData = THLongTensor_data(keys);
 
@@ -258,7 +258,7 @@ void THNN_(IndexLinear_updateParameters)(
   /* Access the storage data/strides */
   real* gradWeightData = THTensor_(data)(gradWeight);
   real* weightData = THTensor_(data)(weight);
-  int64_t weightStride0 = weight->stride[0];
+  int64_t weightStride0 = weight->stride(0);
   real* gradBiasData = THTensor_(data)(gradBias);
   real* biasData = THTensor_(data)(bias);
   int64_t* keysData = THLongTensor_data(runningKeys);
@@ -406,7 +406,7 @@ void THNN_(IndexLinear_accUpdateGradParameters)(
   real* valuesData =THTensor_(data)(values);
   real* weightData = THTensor_(data)(weight);
   real* biasData = THTensor_(data)(bias);
-  int64_t weightStride0 = weight->stride[0];
+  int64_t weightStride0 = weight->stride(0);
   int64_t* keysData = THLongTensor_data(keys);
   int64_t* sizesData = THLongTensor_data(sizes);
 

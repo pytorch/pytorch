@@ -294,10 +294,6 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
    AT_ERROR(
         "index_copy_(): When source is scalar, index should have one element (got ", numIndices, ")");
   }
-  if (source.dim() > 0 && numIndices != source.size(dim)) {
-   AT_ERROR(
-        "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
-  }
   if (index.type().scalarType() != ScalarType::Long) {
    AT_ERROR("index_copy_(): Expected LongTensor for index");
   }
@@ -309,7 +305,7 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
   }
   auto sourceSlicedSizes = std::vector<int64_t>(source.sizes());
   if (sourceSlicedSizes.size() > 0) {
-    sourceSlicedSizes.erase(sourceSlicedSizes.begin());
+    sourceSlicedSizes.erase(sourceSlicedSizes.begin() + dim);
   }
   if (selfSlicedSizes.size() != sourceSlicedSizes.size() ||
       !std::equal(selfSlicedSizes.begin(), selfSlicedSizes.end(),
@@ -319,6 +315,10 @@ Tensor & index_copy_(Tensor & self, int64_t dim, const Tensor & index, const Ten
     ss << "Destination slice shape: " << selfSlicedSizes << " at dimension " << dim;
     ss << " and source slice shape: " << sourceSlicedSizes << " at dimension 0.";
     throw std::runtime_error(ss.str());
+  }
+  if (source.dim() > 0 && numIndices != source.size(dim)) {
+     AT_ERROR(
+          "index_copy_(): Number of indices (", numIndices, ") should be equal to source.size(dim) (", source.size(dim), ")");
   }
 
   return self._indexCopy_(dim, index, source);

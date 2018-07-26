@@ -70,8 +70,8 @@ PerOpEnginePrefType& g_per_op_engine_pref() {
 }
 
 GlobalEnginePrefType& g_global_engine_pref() {
-  static auto* g_global_engine_pref_ =
-      new GlobalEnginePrefType{{DeviceType::CUDA, {"CUDNN"}}};
+  static auto* g_global_engine_pref_ = new GlobalEnginePrefType{
+      {DeviceType::CUDA, {"CUDNN"}}, {DeviceType::HIP, {"MIOPEN"}}};
   return *g_global_engine_pref_;
 }
 
@@ -565,6 +565,31 @@ TensorShapes InferBlobShapesAndTypesFromMap(
     for (auto d : blob.second) {
       CAFFE_ENFORCE_GE(d, 0, blob.first);
       tp.add_dims(d);
+    }
+    blob_desc[blob.first] = tp;
+  }
+  return InferBlobShapesAndTypes(blob_desc, nets);
+}
+
+TensorShapes InferBlobShapesAndTypesFromMap(
+    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, TensorProto_DataType>& blob_types,
+    const vector<NetDef*>& nets) {
+  CaffeMap<string, TensorShape> blob_desc;
+  // Populate shapes from known blobs
+  for (const auto& blob : blob_dimensions) {
+    TensorShape tp;
+    for (auto d : blob.second) {
+      CAFFE_ENFORCE_GE(d, 0, blob.first);
+      tp.add_dims(d);
+    }
+    auto blob_type = blob_types.find(blob.first);
+    if (blob_type == blob_types.end()) {
+      LOG(WARNING) << "Missing type of " << blob.first
+                   << "; assuming to be UNDEFINED";
+      tp.set_data_type(TensorProto_DataType_UNDEFINED);
+    } else {
+      tp.set_data_type(blob_type->second);
     }
     blob_desc[blob.first] = tp;
   }

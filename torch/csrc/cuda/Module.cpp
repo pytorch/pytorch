@@ -7,6 +7,7 @@
 #include <sstream>
 #include <TH/TH.h>
 #include <ATen/ATen.h>
+#include "ATen/cuda/CUDAContext.h"
 #include <THC/THCCachingAllocator.h>
 #ifdef USE_NCCL
 #include <nccl.h>
@@ -309,7 +310,7 @@ static void bindCudaDeviceProperties(PyObject* module) {
       return stream.str();
     });
   m.def("_get_device_properties", [](int device) -> cudaDeviceProp * {
-    return at::globalContext().getDeviceProperties(device);
+    return at::cuda::getDeviceProperties(device);
   }, py::return_value_policy::reference);
 }
 

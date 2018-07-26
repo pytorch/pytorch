@@ -11,9 +11,10 @@ namespace native {
 
 Tensor flip_cpu(const Tensor& self, IntList dims) {
   const int64_t total_dims = self.dim(), flip_dims_size = dims.size();
-  check_errors(total_dims, flip_dims_size, dims);
+  flip_check_errors(total_dims, flip_dims_size, dims);
 
   auto flip_dims_v = std::vector<int64_t>(dims);
+  wrap_all_dims(flip_dims_v, total_dims);
   std::sort(flip_dims_v.begin(), flip_dims_v.end());
   auto final_indices = std::vector<at::Tensor>(total_dims);
 
@@ -54,6 +55,41 @@ Tensor flip_cpu(const Tensor& self, IntList dims) {
 
   auto out_tensor = self.index(TensorList(final_indices));
   return out_tensor;
+}
+
+Tensor rot90(const Tensor& self, int64_t k, IntList dims) {
+  const int64_t total_dims = self.dim(), total_rot_dims = dims.size();
+
+  AT_CHECK(total_rot_dims == 2,
+    "expected total rotation dims == 2, but got dims = ", total_rot_dims);
+
+  AT_CHECK(total_dims >= 2,
+    "expected total dims >= 2, but got total dims = ", total_dims);
+
+  AT_CHECK(dims[0] != dims[1] && std::abs(dims[0] - dims[1]) != total_dims,
+    "expected rotation dims to be different, but got dim0 = ", dims[0],
+    " and dim1 = ", dims[1]);
+
+  // check range of dims
+  AT_CHECK(dims[0] < total_dims && dims[0] >= -total_dims,
+    "Rotation dim0 out of range, dim0 = ", dims[0]);
+
+  AT_CHECK(dims[1] < total_dims && dims[1] >= -total_dims,
+    "Rotation dim1 out of range, dim1 = ", dims[1]);
+
+  // handle modulo with negative k
+  k = (4 + (k % 4)) % 4;
+
+  switch(k) {
+    case 1:
+      return self.flip({dims[1]}).transpose_(dims[0], dims[1]);
+    case 2:
+      return self.flip(dims);
+    case 3:
+      return self.flip({dims[0]}).transpose_(dims[0], dims[1]);
+    default:
+      return self.clone();
+  }
 }
 
 }} // namespace at::native

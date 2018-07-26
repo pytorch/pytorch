@@ -40,7 +40,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   if (scaleGradByFreq)
   {
-    THIntegerTensor_(resize1d)(count, gradWeight->size[0]);
+    THIntegerTensor_(resize1d)(count, gradWeight->size(0));
     count_data = THIntegerTensor_(data)(count);
   }
 

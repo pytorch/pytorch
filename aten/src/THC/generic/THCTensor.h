@@ -2,8 +2,6 @@
 #define THC_GENERIC_FILE "generic/THCTensor.h"
 #else
 
-#define TH_TENSOR_REFCOUNTED 1
-
 typedef struct THCTensor THCTensor;
 
 // These used to be distinct types; for some measure of backwards compatibility and documentation

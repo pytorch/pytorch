@@ -90,24 +90,46 @@ if [[ $BUILD_ENVIRONMENT == conda* ]]; then
   conda_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/checkpoint_test.py")
 fi
 
+rocm_ignore_test=()
+if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
+  export LANG=C.UTF-8
+  export LC_ALL=C.UTF-8
 
-# TODO: re-enable this for rocm CI jobs once we have more rocm workers
-if [[ $BUILD_ENVIRONMENT != *rocm* ]]; then
-  # Python tests
-  echo "Running Python tests.."
-  "$PYTHON" \
-    -m pytest \
-    -x \
-    -v \
-    --junit-xml="$TEST_DIR/python/result.xml" \
-    --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
-    --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
-    --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
-    --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
-    ${conda_ignore_test[@]} \
-    "$CAFFE2_PYPATH/python" \
-    "${EXTRA_TESTS[@]}"
+  # Currently these tests are failing on ROCM platform:
+
+  # Unknown reasons, need to debug
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/arg_ops_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
+
+  # Need to go through roi ops to replace max(...) with fmaxf(...)
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
+
+  # Our cuda top_k op has some asm code, the hipified version doesn't
+  # compile yet, so we don't have top_k operator for now
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
+
+  # These are fixed in rocm 1.8.2, re-enable them once our CI docker images are upgraded
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/recurrent_net_executor_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/conv_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/group_conv_test.py")
 fi
+
+# Python tests
+echo "Running Python tests.."
+"$PYTHON" \
+  -m pytest \
+  -x \
+  -v \
+  --junit-xml="$TEST_DIR/python/result.xml" \
+  --ignore "$CAFFE2_PYPATH/python/test/executor_test.py" \
+  --ignore "$CAFFE2_PYPATH/python/operator_test/matmul_op_test.py" \
+  --ignore "$CAFFE2_PYPATH/python/operator_test/pack_ops_test.py" \
+  --ignore "$CAFFE2_PYPATH/python/mkl/mkl_sbn_speed_test.py" \
+  ${conda_ignore_test[@]} \
+  ${rocm_ignore_test[@]} \
+  "$CAFFE2_PYPATH/python" \
+  "${EXTRA_TESTS[@]}"
 
 if [[ -n "$INTEGRATED" ]]; then
   pip install --user pytest-xdist torchvision

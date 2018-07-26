@@ -11,6 +11,7 @@
 #include "caffe2/core/macros.h"
 
 #include "caffe2/core/asan.h"
+#include "caffe2/core/blob_stats.h"
 #ifdef CAFFE2_USE_CUDNN
 #include "caffe2/core/common_cudnn.h"
 #endif // CAFFE2_USE_CUDNN
@@ -58,7 +59,6 @@ CAFFE2_DEFINE_int(
 
 namespace caffe2 {
 
-CAFFE_KNOWN_TYPE(Tensor<CUDAContext>);
 
 thread_local ThreadLocalCUDAObjects CUDAContext::cuda_objects_;
 
@@ -252,7 +252,22 @@ struct Caffe2CudaInitializerHelper {
     }
   }
 };
-}  // namespace
+
+struct TensorCUDAStatGetter : BlobStatGetter {
+  size_t sizeBytes(const Blob& blob) const override {
+    const auto& tensor = blob.Get<TensorCUDA>();
+    auto nbytes = tensor.nbytes();
+    if (nbytes > 0 && tensor.IsType<std::string>()) {
+      const auto* data = tensor.data<std::string>();
+      for (int i = 0; i < tensor.size(); ++i) {
+        nbytes += data[i].size();
+      }
+    }
+    return nbytes;
+  }
+};
+REGISTER_BLOB_STAT_GETTER(TensorCUDA, TensorCUDAStatGetter);
+} // namespace
 
 /**
  * A utility function to rectify the gpu id. If the context specifies the

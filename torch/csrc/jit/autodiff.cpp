@@ -4,6 +4,8 @@
 #include "torch/csrc/jit/symbolic_variable.h"
 #include "torch/csrc/utils/functional.h"
 
+#include <torch/csrc/jit/assertions.h>
+
 #include <algorithm>
 
 namespace torch { namespace jit {
@@ -11,13 +13,15 @@ namespace torch { namespace jit {
 using value_map = std::unordered_map<Value*, Value*>;
 using value_set = std::unordered_set<Value*>;
 
-bool hasOneValuedAttribute(Node *n, torch::jit::Symbol name) {
-  return n->hasAttribute(name) && at::Scalar(n->t(name)).toDouble() == 1.0;
+bool hasOneValuedInput(Node *n, torch::jit::Symbol name) {
+  auto maybe_t = n->get<at::Scalar>(name);
+  if (!maybe_t) return false;
+  return maybe_t->toDouble() == 1.0;
 }
 
 bool isDifferentiable(Node * n) {
   static std::unordered_set<Symbol> differentiable_kinds = {
-    aten::add, aten::sub, aten::mul, prim::Constant, prim::ReplaceIfUndef,
+    aten::add, aten::sub, aten::mul, prim::Constant,
     aten::sigmoid, aten::tanh, aten::mm, aten::chunk, aten::split, aten::t, aten::neg,
     aten::unsqueeze, aten::expand, aten::addmm, aten::gt, aten::lt, aten::eq, aten::ne, aten::ge, aten::le, aten::type_as,
     aten::relu, aten::exp, prim::AutogradAdd
@@ -28,9 +32,15 @@ bool isDifferentiable(Node * n) {
   if (n->kind() == aten::addmm) {
     if (n->inputs().size() > 3)
       return false;
-    if (!hasOneValuedAttribute(n, attr::alpha) || !hasOneValuedAttribute(n, attr::beta))
+    if (!hasOneValuedInput(n, attr::alpha) || !hasOneValuedInput(n, attr::beta))
       return false;
   }
+  auto isTensor = [](Value* v) { return v->type()->isSubtypeOf(*DynamicType::get()); };
+
+  if(!std::all_of(n->inputs().begin(), n->inputs().end(), isTensor)
+    || !std::all_of(n->outputs().begin(), n->outputs().end(), isTensor))
+    return false;
+
   if (n->kind() == aten::type_as && !n->inputs().at(1)->isTensor()) {
     return false;
   }
@@ -65,7 +75,8 @@ bool outputRequiresGrad(Node* node, std::function<bool(Value*)> requires_grad) {
     case aten::eq:
       return false;
     case aten::type_as:
-    //type_as has two inputs, the second of which (setting type) might require grad, but it still won't affect the output of type_as requiring grad.
+      // type_as has two inputs, the second of which (setting type) might require grad,
+      // but it still won't affect the output of type_as requiring grad.
       return requires_grad(node->inputs().at(0));
     default:
       return std::any_of(node->inputs().begin(), node->inputs().end(), requires_grad);
@@ -80,27 +91,32 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
     auto outputs = fmap<SymbolicVariable>(node->outputs());
     switch(node->kind()) {
       case aten::add:
-        // o = a - alpha*other
-        if(inputs.size() == 1)
+        // TODO (apaszke): remove formulas for attributed nodes once they are removed
+        // o = self + alpha*other
+        if(inputs.size() == 1) {
           return { grads.at(0) };
-          // o = a + alpha*b
-        return {grads.at(0), grads.at(0) * at::Scalar(node->t(attr::alpha)) };
+        } else if (node->hasAttribute(attr::alpha)) {
+          return {grads.at(0), grads.at(0) * at::Scalar(node->t(attr::alpha))};
+        } else {
+          return {grads.at(0), nullptr, grads.at(0) * node->namedInput(attr::alpha)};
+        }
       case aten::sub:
-        // o = a - alpha*other
-        if(inputs.size() == 1)
+        // o = self - alpha*other
+        if(inputs.size() == 1) {
           return {grads.at(0)};
-        // o = a - alpha*b
-        return {grads.at(0), -grads.at(0) * at::Scalar(node->t(attr::alpha))};
+        } else if (node->hasAttribute(attr::alpha)) {
+          return {grads.at(0), -grads.at(0) * at::Scalar(node->t(attr::alpha))};
+        } else {
+          return {grads.at(0), nullptr, grads.at(0) * node->namedInput(attr::alpha)};
+        }
       case aten::mul:
-        // o = a * other
+        // o = self * other
         if(inputs.size() == 1)
           return {grads.at(0) * at::Scalar(node->t(attr::other))};
-        // o = a * b
-        return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
+        else
+          return {grads.at(0) * inputs.at(1), grads.at(0) * inputs.at(0)};
       case prim::Constant:
         return {};
-      case prim::ReplaceIfUndef:
-        return {grads.at(0), grads.at(0)};
       case aten::sigmoid:
         return {grads.at(0) * outputs.at(0) * (1 - outputs.at(0))};
       case aten::tanh:
@@ -111,17 +127,18 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         return {grads.at(0) * (outputs.at(0))};
       case aten::chunk:
       case aten::split:
-        return {SymbolicVariable::cat(grads, node->i(attr::dim))};
+        return {SymbolicVariable::cat(grads, node->namedInput(attr::dim))};
       case aten::t:
         return {grads.at(0).t()};
       case aten::neg:
         return {-grads.at(0)};
       case aten::view:
+        // TODO: if sizes are not available statically, add an operator that reutrns them as a tuple
         return {grads.at(0).view(inputs.at(0).sizes())};
       case aten::type_as:
         return {grads.at(0).type_as(inputs.at(0))};
       case aten::unsqueeze:
-        return {grads.at(0).squeeze(node->i(attr::dim))};
+        return {grads.at(0).squeeze(node->namedInput(attr::dim))};
       case aten::mm: {
         SymbolicVariable dmat1, dmat2;
         if (auto type = inputs.at(0).value()->type()->cast<TensorType>()) {
@@ -150,7 +167,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         const auto& input_sizes = inputs.at(0).sizes();
         if (input_sizes.size() == 0)
           return {grads.at(0).sum()};
-        auto grad_sizes = node->is(attr::size);
+        auto grad_sizes = node->get<std::vector<int64_t>>(attr::size).value();
         auto grad = grads.at(0);
         while (grad_sizes.size() > input_sizes.size()) {
           grad = grad.sum(0, false);
@@ -165,6 +182,7 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
       }
       case aten::squeeze: {
         const auto& sizes = inputs.at(0).sizes();
+        // TODO (apaszke): need to select the right overload here
         if (node->hasAttribute(attr::dim)) {
           int dim = node->i(attr::dim);
           return {sizes.at(dim) > 1 ? grads.at(0) : grads.at(0).unsqueeze(dim)};
@@ -181,11 +199,12 @@ static std::vector<Value*> gradientForNode(Node* node, ArrayRef<Value*> grad_val
         }
       }
       case aten::cat: {
-        int dim = node->i(attr::dim);
+        int dim = node->get<int64_t>(attr::dim).value();
         const auto& first_sizes = inputs.at(0).sizes();
         const auto has_first_sizes = [&first_sizes](SymbolicVariable var) {
           return var.sizes() == first_sizes;
         };
+        // TODO (apaszke): This will need an adjustment for the dim argument
         // NB: this is a specialization for the common case where all inputs are
         // of equal sizes. We can use a single split operation to handle that.
         if (std::all_of(inputs.begin(), inputs.end(), has_first_sizes)) {
@@ -341,6 +360,8 @@ static ReverseDetails addReverseInline(Gradient& grad_desc,
     value_list grad_inputs = linearGradientForNode(node, fmap(node->outputs(), get_grad));
     JIT_ASSERT(grad_inputs.size() == node->inputs().size());
     for (size_t i = 0, num_inputs = grad_inputs.size(); i < num_inputs; ++i) {
+      if (!requires_grad(inputs[i])) continue;
+      JIT_ASSERT(grad_inputs[i]);
       set_grad(inputs[i], grad_inputs[i]);
     }
   }
@@ -485,9 +506,10 @@ static void lambdaLiftReverse(Gradient& grad_desc, ReverseDetails& rev_info) {
 Gradient differentiate(std::shared_ptr<Graph>& _graph, const std::vector<bool>& requires_grad) {
   Gradient grad_desc;
   // Take ownership of the graph
-  JIT_ASSERTM(_graph.use_count() == 1,
-              "differentiate will mutate and destroy the graph, so it requires "
-              "graph.use_count() == 1, but found %d", _graph.use_count());
+  JIT_ASSERTM(
+      _graph.use_count() == 1,
+      "differentiate will mutate and destroy the graph, so it requires "
+      "graph.use_count() == 1, but found ", _graph.use_count());
   std::swap(_graph, grad_desc.f);
   // XXX: Take care when handling outputs - they can be duplicated!
 
