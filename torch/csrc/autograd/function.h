@@ -1,18 +1,17 @@
 #pragma once
 
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/saved_variable.h"
 #include "torch/csrc/autograd/type_and_shape.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/tracer.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
 #include "torch/csrc/utils/python_stub.h"
 #include "torch/csrc/utils/variadic.h"
 
 #include <ATen/ATen.h>
+#include <ATen/Error.h>
 
 #include <algorithm>
 #include <cstdint>
@@ -85,7 +84,7 @@ void deleteFunction(Function* function);
 /// are created in one thread and `C` is created in a new thread, there are *no
 /// guarantees* w.r.t. the ordering of `C` relative to `A` or `B`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-struct Function : std::enable_shared_from_this<Function> {
+struct TORCH_API Function : std::enable_shared_from_this<Function> {
  public:
   /// Construct a new `Function` with `num_inputs` inputs and the given
   /// `next_edges`. sequence_nr is a (currently THE) hint to prioritization
@@ -95,11 +94,14 @@ struct Function : std::enable_shared_from_this<Function> {
       uint64_t sequence_nr,
       edge_list&& next_edges = edge_list())
       : sequence_nr_(sequence_nr),
-      next_edges_(std::move(next_edges)) {}
+      next_edges_(std::move(next_edges)) {
+    if (AnomalyMode::is_enabled()) {
+      metadata()->store_stack();
+    }
+  }
 
-  explicit Function(
-      edge_list&& next_edges = edge_list())
-      : Function(next_sequence_nr_++, std::move(next_edges)) {}
+  explicit Function(edge_list&& next_edges = edge_list())
+      : Function(get_next_sequence_nr()++, std::move(next_edges)) {}
 
   /// Functions are neither copyable nor moveable.
   Function(const Function& other) = delete;
@@ -110,12 +112,9 @@ struct Function : std::enable_shared_from_this<Function> {
 
   /// Evaluates the function on the given inputs and returns the result of the
   /// function call.
-  variable_list operator()(const variable_list& inputs) {
+  variable_list operator()(variable_list&& inputs) {
     profiler::RecordFunction rec(this);
-    if (jit::tracer::isTracingVar(inputs)) {
-      return traced_apply(inputs);
-    }
-    return apply(inputs);
+    return apply(std::move(inputs));
   }
 
   // Graph Connectivity API
@@ -205,7 +204,7 @@ struct Function : std::enable_shared_from_this<Function> {
   /// Returns true if the particular output edge is active, and that particular
   /// output of this function should be computed.
   bool should_compute_output(size_t output_edge_index) const {
-    TORCH_ASSERTM(output_edge_index < num_outputs(), "Index out of range");
+    AT_CHECK(output_edge_index < num_outputs(), "Index out of range");
     return next_edges_[output_edge_index].is_valid();
   }
 
@@ -220,11 +219,6 @@ struct Function : std::enable_shared_from_this<Function> {
     });
   }
 
-  jit::tracer::FunctionTracingState& tracing_state() noexcept {
-    // Dereferencing will create the `TracingState` if the pointer is empty.
-    return *tracing_state_;
-  }
-
   /// Returns the `PyObject` stored for this `Function` (for Python
   /// interaction).
   PyObject* pyobj() const noexcept {
@@ -236,11 +230,9 @@ struct Function : std::enable_shared_from_this<Function> {
     pyobj_ = pyobj;
   }
 
-  /// Create a context edge for the JIT.
-  static void set_up_context_edge(
-      jit::Node* this_node,
-      const variable_list& inputs,
-      const variable_list& outputs);
+  /// Returns the anomaly metadata stored for this `Function`.
+  /// If none exist, creates a new empty one.
+  AnomalyMetadata* metadata() noexcept;
 
   // Hook API
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -313,12 +305,10 @@ struct Function : std::enable_shared_from_this<Function> {
   }
 
  protected:
-  /// Monotonically incrementing (thread local!) counter to supply sequence
-  /// numbers.
-  static thread_local uint64_t next_sequence_nr_;
+  static uint64_t& get_next_sequence_nr();
 
   /// Performs the `Function`'s actual operation.
-  virtual variable_list apply(const variable_list& inputs) = 0;
+  virtual variable_list apply(variable_list&& inputs) = 0;
 
   /// Calls `apply()`, but instruments it with tracing machinery.
   variable_list traced_apply(variable_list inputs);
@@ -329,9 +319,9 @@ struct Function : std::enable_shared_from_this<Function> {
 
   edge_list next_edges_;
   PyObject* pyobj_ = nullptr; // weak reference
+  std::unique_ptr<AnomalyMetadata> anomaly_metadata_ = nullptr;
   std::vector<std::unique_ptr<FunctionPreHook>> pre_hooks_;
   std::vector<std::unique_ptr<FunctionPostHook>> post_hooks_;
-  auto_unique_ptr<jit::tracer::FunctionTracingState> tracing_state_;
   at::SmallVector<TypeAndShape, 2> input_metadata_;
 };
 

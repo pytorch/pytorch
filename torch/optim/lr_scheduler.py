@@ -1,4 +1,6 @@
 import math
+import torch
+from torch._six import inf
 from bisect import bisect_right
 from functools import partial
 from .optimizer import Optimizer
@@ -367,9 +369,9 @@ class ReduceLROnPlateau(object):
             raise ValueError('threshold mode ' + threshold_mode + ' is unknown!')
 
         if mode == 'min':
-            self.mode_worse = float('inf')
+            self.mode_worse = inf
         else:  # mode == 'max':
-            self.mode_worse = (-float('inf'))
+            self.mode_worse = -inf
 
         self.is_better = partial(self._cmp, mode, threshold_mode, threshold)
 

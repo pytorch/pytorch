@@ -20,17 +20,17 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
   real *output_data;
   real *input_data;
 
-  THCUNN_argCheck(state, input->nDimension == 3 || input->nDimension == 4, 2, input,
-                  "3D or 4D (batch mode) tensor expected for input, but got: %s");
+  THCUNN_argCheck(state, !input->is_empty() && (input->dim() == 3 || input->dim() == 4), 2, input,
+                  "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 3) {
-    int64_t sizeD  = input->size[0];
-    int64_t isizeH = input->size[1];
-    int64_t isizeW = input->size[2];
+  if (input->dim() == 3) {
+    int64_t sizeD  = input->size(0);
+    int64_t isizeH = input->size(1);
+    int64_t isizeW = input->size(2);
 
-    int64_t istrideD = input->stride[0];
-    int64_t istrideH = input->stride[1];
-    int64_t istrideW = input->stride[2];
+    int64_t istrideD = input->stride(0);
+    int64_t istrideH = input->stride(1);
+    int64_t istrideW = input->stride(2);
 
     input_data = THCTensor_(data)(state, input);
 
@@ -55,14 +55,14 @@ void THNN_(SpatialAdaptiveMaxPooling_updateOutput)(
 
   } else {
     input = THCTensor_(newContiguous)(state, input);
-    int64_t sizeB  = input->size[0];
-    int64_t sizeD  = input->size[1];
-    int64_t isizeH = input->size[2];
-    int64_t isizeW = input->size[3];
+    int64_t sizeB  = input->size(0);
+    int64_t sizeD  = input->size(1);
+    int64_t isizeH = input->size(2);
+    int64_t isizeW = input->size(3);
 
-    int64_t istrideD = input->stride[1];
-    int64_t istrideH = input->stride[2];
-    int64_t istrideW = input->stride[3];
+    int64_t istrideD = input->stride(1);
+    int64_t istrideH = input->stride(2);
+    int64_t istrideW = input->stride(3);
 
     input_data = THCTensor_(data)(state, input);
 
@@ -106,13 +106,13 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);
 
-  if (input->nDimension == 3) {
-    int64_t sizeD  = input->size[0];
-    int64_t isizeH = input->size[1];
-    int64_t isizeW = input->size[2];
+  if (input->dim() == 3) {
+    int64_t sizeD  = input->size(0);
+    int64_t isizeH = input->size(1);
+    int64_t isizeW = input->size(2);
 
-    int64_t osizeH = gradOutput->size[1];
-    int64_t osizeW = gradOutput->size[2];
+    int64_t osizeH = gradOutput->size(1);
+    int64_t osizeW = gradOutput->size(2);
 
     //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 
@@ -145,13 +145,13 @@ void THNN_(SpatialAdaptiveMaxPooling_updateGradInput)(
     }
     THCudaCheck(cudaGetLastError());
   } else {
-    int64_t sizeB  = input->size[0];
-    int64_t sizeD  = input->size[1];
-    int64_t isizeH = input->size[2];
-    int64_t isizeW = input->size[3];
+    int64_t sizeB  = input->size(0);
+    int64_t sizeD  = input->size(1);
+    int64_t isizeH = input->size(2);
+    int64_t isizeW = input->size(3);
 
-    int64_t osizeH = gradOutput->size[2];
-    int64_t osizeW = gradOutput->size[3];
+    int64_t osizeH = gradOutput->size(2);
+    int64_t osizeW = gradOutput->size(3);
 
     //bool atomic = (isizeH%osizeH != 0) || (isizeW%osizeW != 0);
 

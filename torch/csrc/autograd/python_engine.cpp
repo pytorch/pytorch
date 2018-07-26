@@ -14,6 +14,7 @@
 #endif
 
 #include <unordered_set>
+#include <memory> // for unique_ptr
 
 using namespace torch::autograd;
 
@@ -44,6 +45,10 @@ void PythonEngine::thread_on_exception(FunctionTask& task, std::exception& e) {
     python_err->persist();
   }
   Engine::thread_on_exception(task, e);
+}
+
+std::unique_ptr<AnomalyMetadata> PythonEngine::make_anomaly_metadata() {
+  return std::unique_ptr<AnomalyMetadata>(new PyAnomalyMetadata());
 }
 
 variable_list PythonEngine::execute(

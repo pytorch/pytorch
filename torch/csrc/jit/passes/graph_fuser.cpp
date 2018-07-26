@@ -1,13 +1,19 @@
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/fusion_compiler.h"
+#include "torch/csrc/jit/autodiff.h"
+#include "torch/csrc/jit/assertions.h"
 #include <unordered_map>
+
+#ifdef USE_CUDA
+  #include "cuda.h" // for CUDA_VERSION
+#endif
 
 namespace torch { namespace jit {
 
 namespace {
 
 // What is a simple mappable operator?  It is:
-//    - Has an output with the same types and sizes of its input
+//    - Has an output with the same sizes as its input
 //    - Single output
 //    - Can handle non-contiguous input
 //    - Produces contiguous output
@@ -53,6 +59,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::neg,
   aten::pow,
   aten::reciprocal,
+  aten::relu,
   aten::remainder,
   aten::round,
   aten::rsqrt,
@@ -64,6 +71,7 @@ std::unordered_set<NodeKind> simple_mappable = {
   aten::tan,
   aten::tanh,
   aten::trunc,
+  aten::type_as,
   aten::_sigmoid_backward,
   aten::_tanh_backward,
 };
@@ -76,12 +84,12 @@ bool isSimpleMap(Node *node) {
   // Make sure that the node doesn't broadcast.
   JIT_ASSERT(node->inputs().size() > 0);
   TensorType* expected_type = node->inputs()[0]->type()->cast<TensorType>();
-  if (!expected_type)
-    return false;
+  if (!expected_type) return false;
+//type checking is intentionally dropped from isSimpleMap
+//isFusable is checking input/output types as there are some exceptions from allFloatIO requirement
   static const auto equal_modulo_strides = [](TensorType* expected, const TypePtr& _actual) {
-    TensorType* actual = _actual->cast<TensorType>();
-    return actual &&
-           expected->scalarType() == actual->scalarType() &&
+     TensorType* actual = _actual->cast<TensorType>();
+     return actual &&
            expected->device() == actual->device() &&
            expected->sizes() == actual->sizes();
   };
@@ -95,6 +103,7 @@ bool isSimpleMap(Node *node) {
   }
   return true;
 }
+
 
 struct GraphFuser {
   Block * block;
@@ -120,30 +129,56 @@ struct GraphFuser {
   }
   // TODO: the fusion compiler has a lot of float-specific codegen
   // so for now we only consider nodes that operate on floating point numbers
-  bool hasFloatType(Value * node) {
-    if(auto tt = node->type()->cast<TensorType>()) {
-      return tt->scalarType() == at::kFloat;
-    } else {
-      return false;
+  // and half values when running on a GPU with sufficient CUDA arch
+  bool hasSupportedType(Value* node) {
+    if (auto tt = node->type()->cast<TensorType>()) {
+      if (tt->scalarType() == at::kFloat) return true;
+
+      #ifdef USE_CUDA
+        // Checks for half tensor on GPU
+        // const auto device = tt->device();
+        if (tt->device() != kCPUDevice
+          && CUDA_VERSION >= 9
+          && tt->scalarType() == at::ScalarType::Half) {
+          return true;
+        }
+      #endif
     }
+
+    return false;
   }
-  bool allFloatIO(Node * node) {
-    for(auto & o : node->outputs()) {
-      if(!hasFloatType(o)) {
-        return false;
-      }
+
+  bool allSupportedList(at::ArrayRef<Value*> list){
+    for (auto& o: list){
+      if (!hasSupportedType(o)) return false;
     }
-    for(auto & o : node->inputs()) {
-      if(!hasFloatType(o)) {
-        return false;
-      }
-    }
+
     return true;
   }
+
+  bool allSupportedIO(Node* node) {
+    return (allSupportedList(node->inputs()) && allSupportedList(node->outputs()));
+  }
+
   bool isFusable(Node * node) {
     if (node->owningBlock() != block) return false;
     if (node->kind() == prim::FusionGroup) return true;
-    return isSimpleMap(node) && allFloatIO(node);
+    if (!isSimpleMap(node)) return false;
+    switch (node->kind()){
+//comparison operators produce Byte type, and it's ok, check only inputs
+      case aten::le:
+      case aten::ge:
+      case aten::lt:
+      case aten::gt:
+      case aten::ne:
+      case aten::eq:
+         return allSupportedList(node->inputs());
+      case aten::type_as:
+//type_as can have different input types as long as output is float, check only output
+         return allSupportedList(node->outputs());
+      default:
+         return allSupportedIO(node);
+    }
   }
 
   bool allOutputsHaveSameSize(Node * node) {
@@ -170,8 +205,9 @@ struct GraphFuser {
     if(isFusable(node))
       return true;
     // this concat fusion only works when all the inputs are the same size
+    // and we can statically infer the dimension along which we should concat
     // otherwise they cannot partipate in the same map
-    if(node->kind() == aten::cat && allOutputsHaveSameSize(node))
+    if(node->kind() == aten::cat && node->get<int64_t>(attr::dim) && allOutputsHaveSameSize(node))
       return true;
 
     return false;

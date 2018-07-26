@@ -63,6 +63,42 @@ struct SymbolicVariable {
     n->t_(attr::other, rhs.toTensor());
     return r;
   }
+  SymbolicVariable operator>(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::gt, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator<(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::lt, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator>=(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::ge, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator<=(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::le, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator==(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::eq, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
+  SymbolicVariable operator!=(at::Scalar rhs) const {
+    Node * n;
+    auto r = create(aten::ne, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
+    n->t_(attr::other, rhs.toTensor());
+    return r;
+  }
   SymbolicVariable operator+(const SymbolicVariable rhs) const {
     Node * n;
     auto r = create(aten::add, {*this, rhs}, 1, &n)[0].typeLike(*this);
@@ -118,12 +154,22 @@ struct SymbolicVariable {
      ->i_(a("dim"), dim);
     return r;
   }
+  SymbolicVariable type_as(const SymbolicVariable rhs) const {
+    return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(*this, rhs);
+  }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
     Node * n;
     auto r = create(t("narrow"), { *this }, 1, &n)[0];
     n->i_(a("dim"), dim)
      ->i_(a("start"), start)
      ->i_(a("length"), length);
+    return r;
+  }
+  static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, Value* dim) {
+    Node* n;
+    std::vector<SymbolicVariable> all_inputs = inputs;
+    all_inputs.push_back(dim);
+    auto r = create(aten::cat, all_inputs, 1, &n)[0];
     return r;
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int32_t dim) {
@@ -147,6 +193,11 @@ struct SymbolicVariable {
     auto r = create(t("sum"), {*this}, 1, &n)[0];
     n->is_(a("dim"), {dim})
      ->i_(a("keepdim"), keepdim);
+    return r;
+  }
+  SymbolicVariable squeeze(Value* dim) const {
+    Node * n;
+    auto r = create(t("squeeze"), {*this, dim}, 1, &n)[0];
     return r;
   }
   SymbolicVariable squeeze(int dim) const {
@@ -181,6 +232,22 @@ private:
   SymbolicVariable typeLike(SymbolicVariable other) {
     if (auto other_type = other.v->type()->cast<TensorType>())
       v->setType(other_type->contiguous());
+    return *this;
+  }
+  SymbolicVariable typeLikeWithScalarType(SymbolicVariable other, at::ScalarType type) {
+    if (auto other_type = other.v->type()->cast<TensorType>()){
+      auto new_type = other_type->toScalarType(type)->contiguous();
+      v->setType(new_type);
+    }
+    return *this;
+  }
+  SymbolicVariable typeLikeWithRhsScalarType(SymbolicVariable other, SymbolicVariable rhs) {
+    auto other_type = other.v->type()->cast<TensorType>();
+    auto rhs_type = rhs.v->type()->cast<TensorType>();
+    if (other_type && rhs_type){
+      auto new_type = other_type->toScalarType(rhs_type->scalarType())->contiguous();
+      v->setType(new_type);
+    }
     return *this;
   }
   static Symbol a(const char * s_) {

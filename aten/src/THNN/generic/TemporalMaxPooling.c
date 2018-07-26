@@ -15,16 +15,16 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
 
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
-  int ndims = input->nDimension;
+  int ndims = input->dim();
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
 
-  niframe = input->size[dimS];
-  framesize = input->size[dimF];
+  niframe = input->size(dimS);
+  framesize = input->size(dimF);
   noframe = (niframe - kW) / dW + 1;
 
   THArgCheck(kW > 0, 5,
@@ -32,11 +32,11 @@ static inline void THNN_(TemporalMaxPooling_shapeCheck)(
   THArgCheck(dW > 0, 6,
              "stride should be greater than zero, but got dW: %d", dW);
 
-  THNN_ARGCHECK(input->nDimension == 2 || input->nDimension == 3, 2, input,
-                  "2D or 3D (batch mode) tensor expected for input, but got: %s");
-  THArgCheck(input->size[dimS] >= kW, 2,
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+                "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
+  THArgCheck(input->size(dimS) >= kW, 2,
              "input sequence smaller than kernel size. Got: %d, Expected: %d",
-             input->size[dimS], kW);
+             input->size(dimS), kW);
 
   if (gradOutput != NULL) {
     THNN_CHECK_DIM_SIZE(gradOutput, ndims, dimS, noframe);
@@ -71,21 +71,21 @@ void THNN_(TemporalMaxPooling_updateOutput)(
 
   THNN_(TemporalMaxPooling_shapeCheck)(state, input, NULL, NULL, kW, dW);
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
 
   /* sizes */
-  niframe = input->size[dimS];
-  framesize = input->size[dimF];
+  niframe = input->size(dimS);
+  framesize = input->size(dimF);
   noframe = (niframe - kW) / dW + 1;
 
   /* get contiguous input */
   input = THTensor_(newContiguous)(input);
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     /* resize output */
     THTensor_(resize2d)(output, noframe, framesize);
@@ -129,7 +129,7 @@ void THNN_(TemporalMaxPooling_updateOutput)(
   else
   {
     /* number of batch frames */
-    int64_t nbframe = input->size[0];
+    int64_t nbframe = input->size(0);
     int64_t i;
 
     /* resize output */
@@ -215,22 +215,22 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   int dimS = 0; // sequence dimension
   int dimF = 1; // feature dimension
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
     dimS = 1;
     dimF = 2;
   }
   /* sizes */
-  niframe = input->size[dimS];
-  noframe = gradOutput->size[dimS];
-  framesize = gradOutput->size[dimF];
+  niframe = input->size(dimS);
+  noframe = gradOutput->size(dimS);
+  framesize = gradOutput->size(dimF);
 
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);
   gradOutput_data = THTensor_(data)(gradOutput);
   indices_data = THIndexTensor_(data)(indices);
 
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     for(t = 0; t < noframe; t++)
     {
@@ -250,7 +250,7 @@ void THNN_(TemporalMaxPooling_updateGradInput)(
   else
   {
     /* number of batch frames */
-    int64_t nbframe = input->size[0];
+    int64_t nbframe = input->size(0);
     int64_t i;
 
     for(i = 0; i < nbframe; i++)

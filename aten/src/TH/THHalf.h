@@ -1,7 +1,7 @@
 #ifndef TH_HALF_H
 #define TH_HALF_H
 
-#include "THGeneral.h"
+#include <TH/THGeneral.h>
 #include <stdint.h>
 
 /* Neither built-in nor included from Cutorch, use our definition lifted from CUDA */

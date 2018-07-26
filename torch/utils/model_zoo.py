@@ -81,21 +81,24 @@ def _download_url_to_file(url, dst, hash_prefix, progress):
 
     f = tempfile.NamedTemporaryFile(delete=False)
     try:
-        sha256 = hashlib.sha256()
+        if hash_prefix is not None:
+            sha256 = hashlib.sha256()
         with tqdm(total=file_size, disable=not progress) as pbar:
             while True:
                 buffer = u.read(8192)
                 if len(buffer) == 0:
                     break
                 f.write(buffer)
-                sha256.update(buffer)
+                if hash_prefix is not None:
+                    sha256.update(buffer)
                 pbar.update(len(buffer))
 
         f.close()
-        digest = sha256.hexdigest()
-        if digest[:len(hash_prefix)] != hash_prefix:
-            raise RuntimeError('invalid hash value (expected "{}", got "{}")'
-                               .format(hash_prefix, digest))
+        if hash_prefix is not None:
+            digest = sha256.hexdigest()
+            if digest[:len(hash_prefix)] != hash_prefix:
+                raise RuntimeError('invalid hash value (expected "{}", got "{}")'
+                                   .format(hash_prefix, digest))
         shutil.move(f.name, dst)
     finally:
         f.close()

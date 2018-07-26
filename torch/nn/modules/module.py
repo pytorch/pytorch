@@ -101,12 +101,15 @@ class Module(object):
             >>> self.register_buffer('running_mean', torch.zeros(num_features))
 
         """
-        if hasattr(self, name) and name not in self._buffers:
-            raise KeyError("attribute '{}' already exists".format(name))
+        if not isinstance(name, torch._six.string_classes):
+            raise TypeError("buffer name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("buffer name can't contain \".\"")
         elif name == '':
             raise KeyError("buffer name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._buffers:
+            raise KeyError("attribute '{}' already exists".format(name))
         elif tensor is not None and not isinstance(tensor, torch.Tensor):
             raise TypeError("cannot assign '{}' object to buffer '{}' "
                             "(torch Tensor or None required)"
@@ -128,12 +131,15 @@ class Module(object):
             raise AttributeError(
                 "cannot assign parameter before Module.__init__() call")
 
-        elif hasattr(self, name) and name not in self._parameters:
-            raise KeyError("attribute '{}' already exists".format(name))
+        elif not isinstance(name, torch._six.string_classes):
+            raise TypeError("parameter name should be a string. "
+                            "Got {}".format(torch.typename(name)))
         elif '.' in name:
             raise KeyError("parameter name can't contain \".\"")
         elif name == '':
             raise KeyError("parameter name can't be empty string \"\"")
+        elif hasattr(self, name) and name not in self._parameters:
+            raise KeyError("attribute '{}' already exists".format(name))
 
         if param is None:
             self._parameters[name] = None
@@ -163,6 +169,9 @@ class Module(object):
         if not isinstance(module, Module) and module is not None:
             raise TypeError("{} is not a Module subclass".format(
                 torch.typename(module)))
+        elif not isinstance(name, torch._six.string_classes):
+            raise TypeError("module name should be a string. Got {}".format(
+                torch.typename(name)))
         elif hasattr(self, name) and name not in self._modules:
             raise KeyError("attribute '{}' already exists".format(name))
         elif '.' in name:
@@ -441,16 +450,16 @@ class Module(object):
 
     def _slow_forward(self, *input, **kwargs):
         input_vars = tuple(torch.autograd.function._iter_tensors(input))
-        tracing_state = torch.jit.get_tracing_state(input_vars)
+        tracing_state = torch._C._get_tracing_state()
         if not tracing_state:
             return self.forward(*input, **kwargs)
         if not hasattr(tracing_state, '_traced_module_stack'):
             tracing_state._traced_module_stack = []
         name = self._tracing_name(tracing_state)
         if name:
-            tracing_state.push_scope('%s[%s]' % (self.__class__.__name__, name))
+            tracing_state.push_scope('%s[%s]' % (self._get_name(), name))
         else:
-            tracing_state.push_scope(self.__class__.__name__)
+            tracing_state.push_scope(self._get_name())
         tracing_state._traced_module_stack.append(self)
         try:
             result = self.forward(*input, **kwargs)
@@ -462,7 +471,7 @@ class Module(object):
     def __call__(self, *input, **kwargs):
         for hook in self._forward_pre_hooks.values():
             hook(self, input)
-        if torch.jit._tracing:
+        if torch._C._get_tracing_state():
             result = self._slow_forward(*input, **kwargs)
         else:
             result = self.forward(*input, **kwargs)
@@ -587,19 +596,20 @@ class Module(object):
                 destination[prefix + name] = param if keep_vars else param.data
         for name, buf in self._buffers.items():
             if buf is not None:
-                destination[prefix + name] = buf
+                destination[prefix + name] = buf if keep_vars else buf.data
         for name, module in self._modules.items():
             if module is not None:
                 module.state_dict(destination, prefix + name + '.', keep_vars=keep_vars)
         return destination
 
-    def _load_from_state_dict(self, state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs):
+    def _load_from_state_dict(self, state_dict, prefix, metadata, strict, missing_keys, unexpected_keys, error_msgs):
         r"""Copies parameters and buffers from :attr:`state_dict` into only
         this module, but not its descendants. This is called on every submodule
         in :meth:`~torch.nn.Module.load_state_dict`. Metadata saved for this
-        module in input :attr:`state_dict` is at ``state_dict._metadata[prefix]``.
+        module in input :attr:`state_dict` is provided as :attr`metadata`.
+        For state dicts without meta data, :attr`metadata` is empty.
         Subclasses can achieve class-specific backward compatible loading using
-        the version number at ``state_dict._metadata[prefix]["version"]``.
+        the version number at `metadata.get("version", None)`.
 
         .. note::
             :attr:`state_dict` is not the same object as the input
@@ -611,6 +621,8 @@ class Module(object):
                 persistent buffers.
             prefix (str): the prefix for parameters and buffers used in this
                 module
+            metadata (dict): a dict containing the metadata for this moodule.
+                See
             strict (bool): whether to strictly enforce that the keys in
                 :attr:`state_dict` with :attr:`prefix` match the names of
                 parameters and buffers in this module
@@ -629,6 +641,14 @@ class Module(object):
             key = prefix + name
             if key in state_dict:
                 input_param = state_dict[key]
+
+                if input_param.shape != param.shape:
+                    # local shape should match the one in checkpoint
+                    error_msgs.append('size mismatch for {}: copying a param of {} from checkpoint, '
+                                      'where the shape is {} in current model.'
+                                      .format(key, param.shape, input_param.shape))
+                    continue
+
                 if isinstance(input_param, Parameter):
                     # backwards compatibility for serialized parameters
                     input_param = input_param.data
@@ -674,8 +694,9 @@ class Module(object):
             state_dict._metadata = metadata
 
         def load(module, prefix=''):
+            local_metadata = {} if metadata is None else metadata.get(prefix[:-1], {})
             module._load_from_state_dict(
-                state_dict, prefix, strict, missing_keys, unexpected_keys, error_msgs)
+                state_dict, prefix, local_metadata, strict, missing_keys, unexpected_keys, error_msgs)
             for name, child in module._modules.items():
                 if child is not None:
                     load(child, prefix + name + '.')

@@ -8,7 +8,7 @@ namespace torch { namespace autograd {
 struct AccumulateGrad : public Function {
   explicit AccumulateGrad(Variable variable);
 
-  virtual variable_list apply(const variable_list& inputs) override;
+  variable_list apply(variable_list&& inputs) override;
 
   Variable variable;
 };

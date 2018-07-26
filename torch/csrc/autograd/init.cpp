@@ -24,14 +24,17 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
 
   auto m = py::handle(autograd_module).cast<py::module>();
 
-  py::class_<torch::autograd::profiler::Event>(m,"ProfilerEvent")
-  .def("kind",&torch::autograd::profiler::Event::kind)
-  .def("name",&torch::autograd::profiler::Event::name)
-  .def("thread_id",&torch::autograd::profiler::Event::thread_id)
-  .def("device",&torch::autograd::profiler::Event::device)
-  .def("cpu_elapsed_us",&torch::autograd::profiler::Event::cpu_elapsed_us)
-  .def("cuda_elapsed_us",&torch::autograd::profiler::Event::cuda_elapsed_us)
-  .def("has_cuda",&torch::autograd::profiler::Event::has_cuda);
+  py::class_<torch::autograd::profiler::Event>(m, "ProfilerEvent")
+      .def("kind", &torch::autograd::profiler::Event::kind)
+      .def(
+          "name",
+          [](const torch::autograd::profiler::Event& e) { return e.name(); })
+      .def("thread_id", &torch::autograd::profiler::Event::thread_id)
+      .def("device", &torch::autograd::profiler::Event::device)
+      .def("cpu_elapsed_us", &torch::autograd::profiler::Event::cpu_elapsed_us)
+      .def(
+          "cuda_elapsed_us", &torch::autograd::profiler::Event::cuda_elapsed_us)
+      .def("has_cuda", &torch::autograd::profiler::Event::has_cuda);
   py::enum_<torch::autograd::profiler::ProfilerState>(m,"ProfilerState")
   .value("Disabled", torch::autograd::profiler::ProfilerState::Disabled)
   .value("CPU", torch::autograd::profiler::ProfilerState::CPU)
@@ -41,16 +44,10 @@ PyObject * THPAutograd_initExtension(PyObject *_unused)
   m.def("_enable_profiler", torch::autograd::profiler::enableProfiler);
   m.def("_disable_profiler", torch::autograd::profiler::disableProfiler);
 
-  m.def("_push_range", [](const char *name) {
-    using namespace torch::autograd::profiler;
-    if (state  == ProfilerState::Disabled) return;
-    pushRange(name);
+  m.def("_push_range", [](const char* name) {
+    torch::autograd::profiler::pushRange(name);
   });
-  m.def("_pop_range", []() {
-    using namespace torch::autograd::profiler;
-    if (state  == ProfilerState::Disabled) return;
-    popRange();
-  });
+  m.def("_pop_range", []() { torch::autograd::profiler::popRange(); });
 
   Py_RETURN_TRUE;
 }
@@ -77,10 +74,32 @@ static PyObject * is_grad_enabled(PyObject* _unused, PyObject *arg) {
   END_HANDLE_TH_ERRORS
 }
 
+static PyObject * set_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (!PyBool_Check(arg)) {
+    throw TypeError("enabled must be a bool (got %s)", Py_TYPE(arg)->tp_name);
+  }
+  AnomalyMode::set_enabled(arg == Py_True);
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject * is_anomaly_mode_enabled(PyObject* _unused, PyObject *arg) {
+  HANDLE_TH_ERRORS
+  if (AnomalyMode::is_enabled()) {
+    Py_RETURN_TRUE;
+  } else {
+    Py_RETURN_FALSE;
+  }
+  END_HANDLE_TH_ERRORS
+}
+
 // autograd methods on torch._C
 static PyMethodDef methods[] = {
   {"set_grad_enabled", (PyCFunction)set_grad_enabled, METH_O, nullptr},
   {"is_grad_enabled", (PyCFunction)is_grad_enabled, METH_NOARGS, nullptr},
+  {"set_anomaly_enabled", (PyCFunction)set_anomaly_mode_enabled, METH_O, nullptr},
+  {"is_anomaly_enabled", (PyCFunction)is_anomaly_mode_enabled, METH_NOARGS, nullptr},
   {nullptr, nullptr, 0, nullptr}
 };
 

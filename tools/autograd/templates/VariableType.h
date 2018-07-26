@@ -4,6 +4,8 @@
 
 #include <ATen/ATen.h>
 
+#include <torch/csrc/WindowsTorchApiMacro.h>
+
 #include <cstdint> // for size_t
 #include <functional> // for function
 #include <memory> // for unique_ptr
@@ -18,6 +20,7 @@ using at::Generator;
 using at::IntList;
 using at::Scalar;
 using at::SparseTensorRef;
+using at::ScalarType;
 using at::Storage;
 using at::Tensor;
 using at::TensorList;
@@ -25,9 +28,9 @@ using at::Type;
 using at::ScalarType;
 using at::optional;
 
-void register_variable_type_for(Context*, at::Backend, at::ScalarType);
+void register_variable_type_for(at::Type* baseType);
 
-struct VariableType final : public at::Type {
+struct TORCH_API VariableType final : public at::Type {
   VariableType(Context* context, at::Type* baseType);
   virtual at::ScalarType scalarType() const override;
   virtual at::Backend backend() const override;
@@ -37,7 +40,7 @@ struct VariableType final : public at::Type {
   virtual std::unique_ptr<at::Storage> storage() const override;
   virtual std::unique_ptr<at::Storage> storage(size_t size) const override;
   virtual std::unique_ptr<at::Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter) const override;
-  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<at::Allocator> allocator) const override;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, at::Allocator* allocator) const override;
   virtual std::unique_ptr<at::Generator> generator() const override;
   virtual const char * toString() const override;
   virtual at::TypeID ID() const override;
@@ -68,6 +71,7 @@ private:
 
   at::Type* baseType;
   std::string str;
+  size_t id_;
 };
 
 }} // namespace torch::autograd

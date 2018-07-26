@@ -4,6 +4,6 @@ graph(%0 : Dynamic
   %3 : Double(1) = aten::mul(%0, %2)
   %4 : Double(1) = aten::tanh(%3)
   %5 : Double(1) = aten::sigmoid(%4)
-  %6 : Dynamic = prim::TensorTest[a= 1  1  1  1 [ CPUDoubleTensor{2,2} ]]()
+  %6 : Dynamic = prim::TensorTest[a= 1  1  1  1 [ CPUDoubleType{2,2} ]]()
   return (%5);
 }

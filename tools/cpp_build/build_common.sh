@@ -4,16 +4,13 @@ BUILD_PATH="${1:-$SCRIPTPATH/build}"
 INSTALL_PREFIX="$BUILD_PATH/install"
 PYTORCHPATH="$SCRIPTPATH/../.."
 
-NO_CUDA=1
 USE_CUDA=0
 if [ -x "$(command -v nvcc)" ]; then
-  NO_CUDA=0
   USE_CUDA=1
 fi
 
 CAFFE2_BUILDPATH="$BUILD_PATH/caffe2"
 NANOPB_BUILDPATH="$BUILD_PATH/nanopb"
-LIBTORCH_BUILDPATH="$BUILD_PATH/libtorch"
 
 # Build with Ninja if available. It has much cleaner output.
 GENERATE="Unix Makefiles"
@@ -41,4 +38,9 @@ fi
 set -e
 if [[ $? -ne 0 ]]; then
   JOBS=4
+fi
+
+# Make sure an ONNX namespace is set
+if [ -z "$ONNX_NAMESPACE" ]; then
+  ONNX_NAMESPACE="onnx_torch"
 fi

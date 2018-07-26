@@ -17,7 +17,7 @@ void THNN_(HardTanh_updateOutput)(
   else
     THTensor_(resizeAs)(output, input);
 
-  if (input->nDimension == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
+  if (input->_dim() == 1 || !THTensor_(isContiguous)(input) || !THTensor_(isContiguous)(output))
   {
     if (inplace)
     {
@@ -88,7 +88,7 @@ void THNN_(HardTanh_updateGradInput)(
   else
     THTensor_(resizeAs)(gradInput, input);
 
-  if (input->nDimension == 1 ||
+  if (input->_dim() == 1 ||
     !THTensor_(isContiguous)(input) ||
     !THTensor_(isContiguous)(gradOutput) ||
     !THTensor_(isContiguous)(gradInput))

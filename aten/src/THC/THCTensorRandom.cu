@@ -22,8 +22,8 @@ THCGenerator* THCRandom_getGenerator(THCState* state);
 /* Sets up generator. Allocates but does not create the generator states. Not thread-safe. */
 __host__ void initializeGenerator(THCState *state, THCGenerator* gen)
 {
-  THCudaCheck(THCudaMalloc(state, (void**)&gen->state.gen_states, MAX_NUM_BLOCKS * sizeof(curandStateMtgp32)));
-  THCudaCheck(THCudaMalloc(state, (void**)&gen->state.kernel_params, sizeof(mtgp32_kernel_params)));
+  gen->state.gen_states = static_cast<struct curandStateMtgp32*>(THCudaMalloc(state, MAX_NUM_BLOCKS * sizeof(curandStateMtgp32)));
+  gen->state.kernel_params = static_cast<mtgp32_kernel_params*>(THCudaMalloc(state, sizeof(mtgp32_kernel_params)));
 }
 
 /* Creates a new generator state given the seed. Not thread-safe. */
@@ -170,6 +170,7 @@ __global__ void generate_bernoulli_tensor(curandStateMtgp32 *state, int size,
 
 // NOTE: curand_uniform is (0, 1] and we want [a, b)
 GENERATE_KERNEL2(generate_uniform, float, float a, float b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
+GENERATE_KERNEL2(generate_uniform, float, double a, double b, float, curand_uniform, reverse_bounds(x) * (b-a) + a)
 GENERATE_KERNEL2(generate_uniform, double, double a, double b, double, curand_uniform_double, reverse_bounds(x) * (b-a) + a)
 
 GENERATE_KERNEL2(generate_normal, float, double mean, double stdv, float, curand_normal, (x * stdv) + mean)

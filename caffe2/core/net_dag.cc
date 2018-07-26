@@ -11,6 +11,7 @@
 #include "caffe2/core/timer.h"
 #include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/proto_utils.h"
+#include "caffe2/utils/thread_name.h"
 
 CAFFE2_DEFINE_bool(
     caffe2_disable_chaining,
@@ -200,6 +201,8 @@ void DAGNetBase::HandleException(
 }
 
 void DAGNetBase::WorkerFunction() {
+  setThreadName("CaffeDAGNet");
+
   // WorkerFunctions() is an infinite loop until there are no more jobs to run.
   while (true) {
     int idx = 0;

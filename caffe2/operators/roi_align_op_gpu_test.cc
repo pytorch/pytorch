@@ -1,8 +1,9 @@
 #include "caffe2/utils/eigen_utils.h"
-#include "roi_align_op.h"
+#include "caffe2/operators/roi_align_op.h"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/core/flags.h"
+#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 #include "gtest/gtest.h"
 
@@ -255,7 +256,7 @@ TEST(RoiAlignTest, CheckCPUGPUEqual) {
         y_cpu_nhwc.data<float>(), y_cpu_nhwc.size());
     int max_diff_idx = -1;
     (y_cpu_vec - y_gpu_vec).cwiseAbs().maxCoeff(&max_diff_idx);
-    EXPECT_FLOAT_EQ(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx]);
+    EXPECT_NEAR(y_cpu_vec[max_diff_idx], y_gpu_vec[max_diff_idx], 1e-1);
 
     max_diff_idx = -1;
     (y_cpu_vec - y_cpu_nhwc_vec).cwiseAbs().maxCoeff(&max_diff_idx);

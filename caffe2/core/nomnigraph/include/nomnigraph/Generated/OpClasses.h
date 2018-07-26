@@ -555,13 +555,32 @@ class GivenTensorFill : public NeuralNetOperator {
 
 class Concat : public NeuralNetOperator {
  public:
-  Concat() : NeuralNetOperator(NNKind::Concat) {}
+  Concat(int axis = -1, bool addAxis = false)
+      : NeuralNetOperator(NNKind::Concat), Axis(axis), AddAxis(addAxis) {}
 
   ~Concat() {}
 
   NOMNIGRAPH_DEFINE_NN_RTTI(Concat);
 
+  int getAxis() const {
+    return Axis;
+  }
+
+  bool getAddAxis() const {
+    return AddAxis;
+  }
+
+  void setAxis(int axis) {
+    Axis = axis;
+  }
+
+  void setAddAxis(bool addAxis) {
+    AddAxis = addAxis;
+  }
+
  private:
+  int Axis;
+  bool AddAxis;
 };
 
 class Softmax : public NeuralNetOperator {
@@ -619,270 +638,24 @@ class Flatten : public NeuralNetOperator {
  private:
 };
 
-class Int8Quantize : public NeuralNetOperator {
+class NCHW2NHWC : public NeuralNetOperator {
  public:
-  Int8Quantize() : NeuralNetOperator(NNKind::Int8Quantize) {}
+  NCHW2NHWC() : NeuralNetOperator(NNKind::NCHW2NHWC) {}
 
-  ~Int8Quantize() {}
+  ~NCHW2NHWC() {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Quantize);
+  NOMNIGRAPH_DEFINE_NN_RTTI(NCHW2NHWC);
 
  private:
 };
 
-class Int8Dequantize : public NeuralNetOperator {
+class NHWC2NCHW : public NeuralNetOperator {
  public:
-  Int8Dequantize() : NeuralNetOperator(NNKind::Int8Dequantize) {}
+  NHWC2NCHW() : NeuralNetOperator(NNKind::NHWC2NCHW) {}
 
-  ~Int8Dequantize() {}
+  ~NHWC2NCHW() {}
 
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Dequantize);
-
- private:
-};
-
-class Int8AveragePool : public NeuralNetOperator {
- public:
-  Int8AveragePool() : NeuralNetOperator(NNKind::Int8AveragePool) {}
-
-  Int8AveragePool(const AveragePool& averagePool)
-      : NeuralNetOperator(NNKind::Int8AveragePool) {}
-
-  ~Int8AveragePool() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8AveragePool);
-
- private:
-};
-
-class Int8Conv : public NeuralNetOperator {
- public:
-  Int8Conv() : NeuralNetOperator(NNKind::Int8Conv) {}
-
-  Int8Conv(const Conv& conv) : NeuralNetOperator(NNKind::Int8Conv) {}
-
-  ~Int8Conv() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Conv);
-
- private:
-};
-
-class Int8ConvTranspose : public NeuralNetOperator {
- public:
-  Int8ConvTranspose() : NeuralNetOperator(NNKind::Int8ConvTranspose) {}
-
-  Int8ConvTranspose(const ConvTranspose& convTranspose)
-      : NeuralNetOperator(NNKind::Int8ConvTranspose) {}
-
-  ~Int8ConvTranspose() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8ConvTranspose);
-
- private:
-};
-
-class Int8FC : public NeuralNetOperator {
- public:
-  Int8FC() : NeuralNetOperator(NNKind::Int8FC) {}
-
-  Int8FC(const FC& fC) : NeuralNetOperator(NNKind::Int8FC) {}
-
-  ~Int8FC() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8FC);
-
- private:
-};
-
-class Int8MaxPool : public NeuralNetOperator {
- public:
-  Int8MaxPool() : NeuralNetOperator(NNKind::Int8MaxPool) {}
-
-  Int8MaxPool(const MaxPool& maxPool)
-      : NeuralNetOperator(NNKind::Int8MaxPool) {}
-
-  ~Int8MaxPool() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8MaxPool);
-
- private:
-};
-
-class Int8Relu : public NeuralNetOperator {
- public:
-  Int8Relu() : NeuralNetOperator(NNKind::Int8Relu) {}
-
-  Int8Relu(const Relu& relu) : NeuralNetOperator(NNKind::Int8Relu) {}
-
-  ~Int8Relu() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Relu);
-
- private:
-};
-
-class Int8GivenTensorFill : public NeuralNetOperator {
- public:
-  Int8GivenTensorFill() : NeuralNetOperator(NNKind::Int8GivenTensorFill) {}
-
-  Int8GivenTensorFill(const GivenTensorFill& givenTensorFill)
-      : NeuralNetOperator(NNKind::Int8GivenTensorFill) {}
-
-  ~Int8GivenTensorFill() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8GivenTensorFill);
-
- private:
-};
-
-class Int8Concat : public NeuralNetOperator {
- public:
-  Int8Concat() : NeuralNetOperator(NNKind::Int8Concat) {}
-
-  Int8Concat(const Concat& concat) : NeuralNetOperator(NNKind::Int8Concat) {}
-
-  ~Int8Concat() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Concat);
-
- private:
-};
-
-class Int8Softmax : public NeuralNetOperator {
- public:
-  Int8Softmax() : NeuralNetOperator(NNKind::Int8Softmax) {}
-
-  Int8Softmax(const Softmax& softmax)
-      : NeuralNetOperator(NNKind::Int8Softmax) {}
-
-  ~Int8Softmax() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Softmax);
-
- private:
-};
-
-class Int8ChannelShuffle : public NeuralNetOperator {
- public:
-  Int8ChannelShuffle() : NeuralNetOperator(NNKind::Int8ChannelShuffle) {}
-
-  Int8ChannelShuffle(const ChannelShuffle& channelShuffle)
-      : NeuralNetOperator(NNKind::Int8ChannelShuffle) {}
-
-  ~Int8ChannelShuffle() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8ChannelShuffle);
-
- private:
-};
-
-class Int8Sum : public NeuralNetOperator {
- public:
-  Int8Sum() : NeuralNetOperator(NNKind::Int8Sum) {}
-
-  Int8Sum(const Sum& sum) : NeuralNetOperator(NNKind::Int8Sum) {}
-
-  ~Int8Sum() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Sum);
-
- private:
-};
-
-class Int8Add : public NeuralNetOperator {
- public:
-  Int8Add() : NeuralNetOperator(NNKind::Int8Add) {}
-
-  Int8Add(const Add& add) : NeuralNetOperator(NNKind::Int8Add) {}
-
-  ~Int8Add() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Add);
-
- private:
-};
-
-class Int8Reshape : public NeuralNetOperator {
- public:
-  Int8Reshape() : NeuralNetOperator(NNKind::Int8Reshape) {}
-
-  Int8Reshape(const Reshape& reshape)
-      : NeuralNetOperator(NNKind::Int8Reshape) {}
-
-  ~Int8Reshape() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Reshape);
-
- private:
-};
-
-class Int8Flatten : public NeuralNetOperator {
- public:
-  Int8Flatten() : NeuralNetOperator(NNKind::Int8Flatten) {}
-
-  Int8Flatten(const Flatten& flatten)
-      : NeuralNetOperator(NNKind::Int8Flatten) {}
-
-  ~Int8Flatten() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8Flatten);
-
- private:
-};
-
-class Int8ConvRelu : public NeuralNetOperator {
- public:
-  Int8ConvRelu() : NeuralNetOperator(NNKind::Int8ConvRelu) {}
-
-  Int8ConvRelu(const ConvRelu& convRelu)
-      : NeuralNetOperator(NNKind::Int8ConvRelu) {}
-
-  ~Int8ConvRelu() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8ConvRelu);
-
- private:
-};
-
-class Int8SumRelu : public NeuralNetOperator {
- public:
-  Int8SumRelu() : NeuralNetOperator(NNKind::Int8SumRelu) {}
-
-  Int8SumRelu(const SumRelu& sumRelu)
-      : NeuralNetOperator(NNKind::Int8SumRelu) {}
-
-  ~Int8SumRelu() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8SumRelu);
-
- private:
-};
-
-class Int8AveragePoolRelu : public NeuralNetOperator {
- public:
-  Int8AveragePoolRelu() : NeuralNetOperator(NNKind::Int8AveragePoolRelu) {}
-
-  Int8AveragePoolRelu(const AveragePoolRelu& averagePoolRelu)
-      : NeuralNetOperator(NNKind::Int8AveragePoolRelu) {}
-
-  ~Int8AveragePoolRelu() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8AveragePoolRelu);
-
- private:
-};
-
-class Int8MaxPoolRelu : public NeuralNetOperator {
- public:
-  Int8MaxPoolRelu() : NeuralNetOperator(NNKind::Int8MaxPoolRelu) {}
-
-  Int8MaxPoolRelu(const MaxPoolRelu& maxPoolRelu)
-      : NeuralNetOperator(NNKind::Int8MaxPoolRelu) {}
-
-  ~Int8MaxPoolRelu() {}
-
-  NOMNIGRAPH_DEFINE_NN_RTTI(Int8MaxPoolRelu);
+  NOMNIGRAPH_DEFINE_NN_RTTI(NHWC2NCHW);
 
  private:
 };

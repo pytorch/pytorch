@@ -3,7 +3,6 @@
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/jit/tracer_state.h"
 
 #include <ATen/Tensor.h>
 
@@ -29,10 +28,6 @@ SavedVariable::SavedVariable(const Variable& variable, bool is_output) {
     }
     version_counter_ = variable.version_counter();
     saved_version_ = version_counter_.current_version();
-    if (variable.has_tracing_state()) {
-      tracing_state_.reset(
-          new jit::tracer::ValueTracingState(variable.tracing_state()));
-    }
   }
 }
 
@@ -78,9 +73,6 @@ Variable SavedVariable::unpack(std::shared_ptr<Function> saved_for) const {
   if (requires_grad_ && !var.grad_fn() && grad_accumulator_.expired())
     throw std::logic_error("No grad accumulator for a saved leaf!");
   var.set_grad_accumulator(grad_accumulator_);
-  if (tracing_state_) {
-    var.set_tracing_state(new jit::tracer::ValueTracingState(*tracing_state_));
-  }
 
   return var;
 }

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <unordered_map>
 
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/interned_strings.h"
 #include "torch/csrc/jit/passes/common_subexpression_elimination.h"
 #include "torch/csrc/utils/functional.h"
@@ -87,21 +88,15 @@ struct EqualNodeCSE {
     if (lhs == nullptr && rhs == nullptr) return true;
     if (lhs == nullptr || rhs == nullptr) return false;
 
-    // Check whether two nodes are the same kind.
     if (lhs->kind() != rhs->kind()) return false;
-
-    // Check the stage.
     if (lhs->stage() != rhs->stage()) return false;
 
     // Check whether the inputs are the same.
     auto lhs_inputs = lhs->inputs();
     auto rhs_inputs = rhs->inputs();
-
     if (lhs_inputs.size() != rhs_inputs.size()) return false;
-
     if (!std::equal(lhs_inputs.begin(), lhs_inputs.end(), rhs_inputs.begin())) return false;
 
-    // Check the attributes.
     if (!attributesEqualCSE(lhs, rhs)) return false;
 
     return true;
@@ -117,8 +112,7 @@ void EliminateCommonSubexpression(Block * block) {
   for (auto it = block->nodes().begin(); it != block->nodes().end(); ++ it) {
     auto node = *it;
     if (node->kind() == prim::PythonOp
-        || node->kind() == prim::CppOp
-        || node->kind() == prim::Eval
+        || node->kind() == prim::Print
         || node->blocks().size() > 0
        ) {
       // Do NOT have enough information to do CSE on these nodes.

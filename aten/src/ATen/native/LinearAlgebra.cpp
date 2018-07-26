@@ -19,13 +19,9 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
   p.squeeze_(0);
   lu.squeeze_(0);
   int int_info = info.squeeze_().toCInt();
-  if (int_info < 0) {
-    std::ostringstream ss;
-    ss << "LU factorization (getrf) failed with info = " << int_info;
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(int_info >= 0, "LU factorization (getrf) failed with info = ", int_info);
   auto n = self.size(0);
-  auto num_exchanges = (p.type().arange(1, n + 1) != p).nonzero().size(0);
+  auto num_exchanges = (at::arange(1, n + 1, p.type()) != p).nonzero().size(0);
   if (num_exchanges % 2 == 1) {
     return std::make_tuple(-1., lu.diag(), int_info);
   } else {
@@ -34,38 +30,32 @@ static inline std::tuple<double, Tensor, int> _lu_det_P_diag_U_info(const Tensor
 }
 
 Tensor det(const Tensor& self) {
-  if (!at::isFloatingType(self.type().scalarType()) ||
-      self.dim() != 2 || self.size(0) != self.size(1)) {
-    std::ostringstream ss;
-    ss << "det(" << self.type() << "{" << self.sizes() << "}): expected a 2D "
-       << "square tensor of floating types";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+           self.dim() == 2 && self.size(0) == self.size(1),
+           "det(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
+           "of floating types");
   double det_P;
   Tensor diag_U;
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    return at::zeros(self.type(), {});
+    return at::zeros({}, self.type());
   } else {
     return diag_U.prod().mul_(det_P);
   }
 }
 
 Tensor logdet(const Tensor& self) {
-  if (!at::isFloatingType(self.type().scalarType()) ||
-      self.dim() != 2 || self.size(0) != self.size(1)) {
-    std::ostringstream ss;
-    ss << "logdet(" << self.type() << "{" << self.sizes() << "}): expected a "
-       << "2D square tensor of floating types";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+           self.dim() == 2 && self.size(0) == self.size(1),
+           "logdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
+           "of floating types");
   double det_P;
   Tensor diag_U, det;
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros(self.type(), {});
+    det = at::zeros({}, self.type());
   } else {
     det = diag_U.prod().mul_(det_P);
   }
@@ -77,29 +67,58 @@ Tensor logdet(const Tensor& self) {
 }
 
 std::tuple<Tensor, Tensor> slogdet(const Tensor& self) {
-  if (!at::isFloatingType(self.type().scalarType()) ||
-      self.dim() != 2 || self.size(0) != self.size(1)) {
-    std::ostringstream ss;
-    ss << "slogdet(" << self.type() << "{" << self.sizes() << "}): expected a "
-       << "2D square tensor of floating types";
-    throw std::runtime_error(ss.str());
-  }
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) &&
+           self.dim() == 2 && self.size(0) == self.size(1),
+           "slogdet(", self.type(), "{", self.sizes(), "}): expected a 2D square tensor "
+           "of floating types");
   double det_P;
   Tensor diag_U, det;
   int info;
   std::tie(det_P, diag_U, info) = _lu_det_P_diag_U_info(self);
   if (info > 0) {
-    det = at::zeros(self.type(), {});
+    det = at::zeros({}, self.type());
   } else {
     det = diag_U.prod().mul_(det_P);
   }
   return std::make_tuple(det.sign(), diag_U.abs_().log_().sum());
 }
 
-static void check_1d(const Tensor& t, const char* arg, const char* fn) {
-  if (t.dim() != 1) {
-   AT_ERROR(fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
+Tensor inverse(const Tensor& self) {
+  Tensor result = self.type().tensor();
+  return at::native::inverse_out(result, self);
+}
+
+Tensor& inverse_out(Tensor &result, const Tensor &self) {
+  AT_CHECK(self.type().backend() == kCPU || self.type().backend() == kCUDA,
+           "tensor should have CPU or CUDA backend");
+  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
+  AT_CHECK(self.size(0) == self.size(1), "tensor should be square");
+  AT_CHECK(at::isFloatingType(self.type().scalarType()), "tensor should be of floating-point type");
+  if (self.size(0) == 0) {
+    return result.resize_({0, 0});
+  } else {
+    return at::_getri_out(result, self);
   }
+}
+
+Tensor pinverse(const Tensor& self, double rcond) {
+  AT_CHECK(at::isFloatingType(self.type().scalarType()) && self.dim() == 2,
+           "pinverse(", self.type(), "{", self.sizes(), "}): expected a 2D tensor "
+           "of floating types");
+  AT_CHECK(self.dim() == 2, "tensor should be 2 dimensional");
+  if (self.numel() == 0) {
+    // Match NumPy
+    return self.type().tensor({self.size(1), self.size(0)});
+  }
+  Tensor U, S, V;
+  std::tie(U, S, V) = self.svd();
+  double max_val = S[0].toCDouble();
+  Tensor S_pseudoinv = at::where(S > rcond * max_val, S.reciprocal(), at::zeros({}, self.options()));
+  return V.mm(S_pseudoinv.diag().mm(U.t()));
+}
+
+static void check_1d(const Tensor& t, const char* arg, const char* fn) {
+ AT_CHECK(t.dim() == 1, fn, ": Expected 1-D argument ", arg, ", but got ", t.dim(), "-D");
 }
 
 Tensor ger(const Tensor& self, const Tensor& vec2) {
@@ -116,14 +135,14 @@ Tensor& ger_out(Tensor& result, const Tensor& self, const Tensor& vec2) {
 
 Tensor mm(const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm(at::zeros(mat2.type(), {}), self, mat2, 0, 1);
+    return mat2.type().addmm(at::zeros({}, mat2.type()), self, mat2, 0, 1);
   }
   return self.type()._mm(self, mat2);
 }
 
 Tensor& mm_out(Tensor& result, const Tensor& self, const Tensor& mat2) {
   if (self.is_sparse()) {
-    return mat2.type().addmm_out(result, at::zeros(mat2.type(), {}), self, mat2, 0, 1);
+    return mat2.type().addmm_out(result, at::zeros({}, mat2.type()), self, mat2, 0, 1);
   }
   return self.type()._mm_out(result, self, mat2);
 }

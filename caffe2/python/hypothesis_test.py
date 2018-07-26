@@ -13,7 +13,7 @@ import unittest
 
 from caffe2.python import core, workspace, tt_core, dyndep
 import caffe2.python.hypothesis_test_util as hu
-from caffe2.proto.caffe2_pb2 import TensorProto
+from caffe2.proto import caffe2_pb2
 
 dyndep.InitOpsLibrary('@/caffe2/caffe2/fb/optimizers:sgd_simd_ops')
 
@@ -583,6 +583,74 @@ class TestOperators(hu.HypothesisTestCase):
         self.assertReferenceChecks(
             gc, op, [var, nz, grad],
             partial(self._dense_ftrl, alpha, beta, lambda1, lambda2))
+
+    # Reference
+    @staticmethod
+    def _dense_gftrl(alpha, beta, lambda1, lambda2, w, nz, g):
+        if isinstance(alpha, np.ndarray):
+            alpha = np.asscalar(alpha)
+
+        old_shape = g.shape
+
+        n = np.take(nz, 0, axis=-1)
+        z = np.take(nz, 1, axis=-1)
+
+        output_dim = g.shape[0]
+
+        w = w.reshape(output_dim, -1)
+        g = g.reshape(output_dim, -1)
+
+        n = n.reshape(output_dim, -1)
+        z = z.reshape(output_dim, -1)
+
+        input_dim = g.shape[1]
+
+        g2 = g * g
+        sigma = (np.sqrt(n + g2) - np.sqrt(n)) / alpha
+        z += g - sigma * w
+        n += g2
+
+        z_norms = np.linalg.norm(z, 2, axis=0)
+
+        z_norms = z_norms + 1e-6
+        w = z * ((lambda1 * np.sqrt(output_dim)) / z_norms - 1) / \
+                    ((beta + np.sqrt(n)) / alpha + lambda2)
+        for i in range(input_dim):
+            if z_norms[i] <= lambda1 * np.sqrt(output_dim):
+                w[:, i] = 0
+
+        w = w.reshape(old_shape)
+        n = n.reshape(old_shape)
+        z = z.reshape(old_shape)
+        return (w, np.stack([n, z], axis=-1))
+
+    @given(inputs=hu.tensors(n=4),
+           in_place=st.booleans(),
+           alpha=st.floats(min_value=0.01, max_value=0.1),
+           beta=st.floats(min_value=0.1, max_value=0.9),
+           lambda1=st.floats(min_value=0.001, max_value=0.1),
+           lambda2=st.floats(min_value=0.001, max_value=0.1),
+           engine=st.sampled_from([None]),
+           **hu.gcs_cpu_only)
+    def test_gftrl_sgd(self, inputs, in_place, alpha, beta, lambda1, lambda2,
+                      engine, gc, dc):
+        var, n, z, grad = inputs
+        n = np.abs(n)
+        nz = np.stack([n, z], axis=-1)
+        op = core.CreateOperator(
+            "GFtrl",
+            ["var", "nz", "grad"],
+            ["var" if in_place else "var_o",
+             "nz" if in_place else "nz_o"],
+            alpha=alpha, beta=beta, lambda1=lambda1, lambda2=lambda2,
+            engine=engine,
+            device_option=gc)
+        self.assertDeviceChecks(
+            dc, op, [var, nz, grad], [0])
+
+        self.assertReferenceChecks(
+            gc, op, [var, nz, grad],
+            partial(self._dense_gftrl, alpha, beta, lambda1, lambda2))
 
     @given(inputs=hu.tensors(n=4),
            alpha=st.floats(min_value=0.01, max_value=0.1),
@@ -1739,7 +1807,7 @@ class TestOperators(hu.HypothesisTestCase):
 
         to = _NUMPY_TYPE_TO_ENUM[dst]
         if use_name:
-            to = TensorProto.DataType.Name(to).lower()
+            to = caffe2_pb2.TensorProto.DataType.Name(to).lower()
         op = core.CreateOperator('Cast', ["X"], ["Y"], to=to)
         self.assertDeviceChecks(dc, op, [a], [0])
         out, = self.assertReferenceChecks(gc, op, [a], ref)
@@ -2179,11 +2247,11 @@ class TestOperators(hu.HypothesisTestCase):
         **hu.gcs)
     def test_sparse_to_dense(self, inp, gc, dc):
         first_dim, X, I = inp
-        if X.dtype != np.dtype('float32') and gc.device_type == 1:
+        if X.dtype != np.dtype('float32') and gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP} :
             # Cuda only support 32 bit float
             print("Bailout {}".format(X.dtype))
             return
-        if gc.device_type == 1:
+        if gc.device_type in {caffe2_pb2.CUDA, caffe2_pb2.HIP}:
             # Cuda version only support int32
             I = I.astype(np.int32)
 

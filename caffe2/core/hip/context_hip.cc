@@ -247,18 +247,29 @@ struct Caffe2HipInitializerHelper
 };
 } // namespace
 
+/**
+ * A utility function to rectify the gpu id. If the context specifies the
+ * gpu id to be -1, it means that we will just use the current gpu id when
+ * the function is being called.
+ */
+static inline int RectifyGPUID(const int gpu_id) {
+  return gpu_id == -1 ? CaffeHipGetDevice() : gpu_id;
+}
+
 HIPContext::HIPContext(const int gpu_id)
-    : gpu_id_(gpu_id == -1 ? GetDefaultGPUID() : gpu_id), random_seed_(RandomNumberSeed())
-{
-    static Caffe2HipInitializerHelper g_hip_initializer_;
+    : gpu_id_(RectifyGPUID(gpu_id)), random_seed_(RandomNumberSeed()) {
+  static Caffe2HipInitializerHelper g_hip_initializer_;
 }
 
 HIPContext::HIPContext(const DeviceOption& option)
-    : gpu_id_(option.has_hip_gpu_id() ? option.hip_gpu_id() : GetDefaultGPUID()),
-      random_seed_(option.has_random_seed() ? option.random_seed() : RandomNumberSeed())
-{
-    static Caffe2HipInitializerHelper g_hip_initializer_;
-    DCHECK_EQ(option.device_type(), HIP);
+    : gpu_id_(
+          option.has_hip_gpu_id() ? RectifyGPUID(option.hip_gpu_id())
+                                  : CaffeHipGetDevice()),
+      random_seed_(
+          option.has_random_seed() ? option.random_seed()
+                                   : RandomNumberSeed()) {
+  static Caffe2HipInitializerHelper g_hip_initializer_;
+  DCHECK_EQ(option.device_type(), HIP);
 }
 
 // shared mutex to lock out alloc / free during NCCL launches

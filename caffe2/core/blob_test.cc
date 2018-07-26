@@ -30,10 +30,17 @@ class BlobTestFoo {
   int32_t val;
 };
 class BlobTestBar {};
+class BlobTestNonDefaultConstructible {
+ public:
+  BlobTestNonDefaultConstructible() = delete;
+  BlobTestNonDefaultConstructible(int x) : val(x) {}
+  int32_t val;
+};
 }
 
 CAFFE_KNOWN_TYPE(BlobTestFoo);
 CAFFE_KNOWN_TYPE(BlobTestBar);
+CAFFE_KNOWN_TYPE(BlobTestNonDefaultConstructible);
 
 class BlobTestFooSerializer : public BlobSerializerBase {
  public:
@@ -85,22 +92,6 @@ TEST(BlobTest, Blob) {
   EXPECT_FALSE(blob.IsType<int>());
 }
 
-TEST(BlobTest, BlobNewObjectFlag) {
-  Blob blob;
-
-  bool is_new_object = true;
-
-  blob.GetMutable<int>(&is_new_object);
-  EXPECT_TRUE(is_new_object);
-  blob.GetMutable<int>(&is_new_object);
-  EXPECT_FALSE(is_new_object);
-
-  blob.GetMutable<BlobTestFoo>(&is_new_object);
-  EXPECT_TRUE(is_new_object);
-  blob.GetMutable<BlobTestFoo>(&is_new_object);
-  EXPECT_FALSE(is_new_object);
-}
-
 TEST(BlobTest, BlobUninitialized) {
   Blob blob;
   ASSERT_THROW(blob.Get<int>(), EnforceNotMet);
@@ -135,6 +126,22 @@ TEST(BlobTest, BlobMove) {
   EXPECT_EQ(&blob2.Get<BlobTestFoo>(), fooPtr);
   Blob blob3{std::move(blob2)};
   EXPECT_EQ(&blob3.Get<BlobTestFoo>(), fooPtr);
+}
+
+TEST(BlobTest, BlobNonConstructible) {
+  Blob blob;
+  ASSERT_THROW(blob.Get<BlobTestNonDefaultConstructible>(), EnforceNotMet);
+  // won't work because it's not default constructible
+  // blob.GetMutable<BlobTestNonDefaultConstructible>();
+  EXPECT_FALSE(
+      blob.GetMutableOrNull<BlobTestNonDefaultConstructible>() != nullptr);
+  EXPECT_TRUE(blob.Reset(new BlobTestNonDefaultConstructible(42)) != nullptr);
+  ASSERT_NO_THROW(blob.Get<BlobTestNonDefaultConstructible>());
+  ASSERT_TRUE(
+      blob.GetMutableOrNull<BlobTestNonDefaultConstructible>() != nullptr);
+  EXPECT_EQ(blob.Get<BlobTestNonDefaultConstructible>().val, 42);
+  blob.GetMutableOrNull<BlobTestNonDefaultConstructible>()->val = 37;
+  EXPECT_EQ(blob.Get<BlobTestNonDefaultConstructible>().val, 37);
 }
 
 TEST(BlobTest, BlobShareExternalPointer) {
@@ -201,6 +208,21 @@ TEST(TensorNonTypedTest, TensorChangeType) {
   EXPECT_TRUE(doubleptr != nullptr);
   EXPECT_TRUE(tensor.data<double>() != nullptr);
   EXPECT_TRUE(tensor.meta().Match<double>());
+}
+
+TEST(TensorNonTypedTest, NonDefaultConstructible) {
+  vector<int> dims(3);
+  dims[0] = 2;
+  dims[1] = 3;
+  dims[2] = 5;
+  TensorCPU tensor(dims);
+
+  // this doesn't compile - good!
+  // auto* ptr = tensor.mutable_data<BlobTestNonDefaultConstructible>();
+  EXPECT_THROW(
+      tensor.raw_mutable_data(
+          TypeMeta::Make<BlobTestNonDefaultConstructible>()),
+      EnforceNotMet);
 }
 
 template <typename T> class TensorCPUTest : public ::testing::Test {};
@@ -499,7 +521,7 @@ TEST(TensorTest, TensorNonFundamentalType) {
   }
 }
 
-TEST(TensorTest, TensorNonFundamentalTypeCopy) {
+TEST(TensorTest, TensorNonFundamentalTypeClone) {
   TensorCPU tensor(vector<int>{2, 3, 4});
   std::string* ptr = tensor.mutable_data<std::string>();
   EXPECT_TRUE(ptr != nullptr);
@@ -507,8 +529,17 @@ TEST(TensorTest, TensorNonFundamentalTypeCopy) {
     EXPECT_TRUE(ptr[i] == "");
     ptr[i] = "filled";
   }
-  TensorCPU dst_tensor(tensor);
+  TensorCPU dst_tensor = tensor.Clone();
   const std::string* dst_ptr = dst_tensor.data<std::string>();
+  for (int i = 0; i < dst_tensor.size(); ++i) {
+    EXPECT_TRUE(dst_ptr[i] == "filled");
+  }
+  // Change the original tensor
+  for (int i = 0; i < tensor.size(); ++i) {
+    EXPECT_TRUE(ptr[i] == "filled");
+    ptr[i] = "changed";
+  }
+  // Confirm that the cloned tensor is not affect
   for (int i = 0; i < dst_tensor.size(); ++i) {
     EXPECT_TRUE(dst_ptr[i] == "filled");
   }
@@ -1036,6 +1067,48 @@ TEST(BlobTest, CastingMessage) {
     EXPECT_NE(msg.find("BlobTestFoo"), std::string::npos) << msg;
     EXPECT_NE(msg.find("BlobTestBar"), std::string::npos) << msg;
   }
+}
+
+TEST(TensorConstruction, UnitializedCopyTest) {
+  CPUContext context;
+  TensorCPU x;
+  TensorCPU y(x, &context);
+  TensorCPU z = x.Clone();
+  // should be uninitialized
+  EXPECT_EQ(x.size(), -1);
+  EXPECT_EQ(y.size(), -1);
+  LOG(INFO) << "z.size()" << z.size();
+  EXPECT_EQ(z.size(), -1);
+}
+
+TEST(TensorConstruction, CopyConstructorTest) {
+  CPUContext context;
+
+  TensorCPU x;
+  x.Resize(5);
+  x.mutable_data<float>()[0] = 1;
+  TensorCPU y = x.Clone();
+  TensorCPU z(x, &context);
+  TensorCPU w;
+
+  EXPECT_EQ(*x.data<float>(), 1);
+  EXPECT_EQ(*y.data<float>(), 1);
+  EXPECT_EQ(*z.data<float>(), 1);
+  x.mutable_data<float>()[0] = 5;
+  EXPECT_EQ(*x.data<float>(), 5);
+  EXPECT_EQ(*y.data<float>(), 1);
+  EXPECT_EQ(*z.data<float>(), 1);
+}
+
+TEST(TensorConstruction, MoveConstructorTest) {
+  CPUContext context;
+
+  TensorCPU x;
+  x.Resize(5);
+  x.mutable_data<float>()[0] = 1;
+  TensorCPU y = std::move(x);
+
+  EXPECT_EQ(*y.data<float>(), 1);
 }
 
 } // namespace

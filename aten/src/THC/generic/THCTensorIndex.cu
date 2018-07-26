@@ -19,14 +19,14 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
   ptrdiff_t dstSliceSize = 1;
   for (int d = 0; d < dstDims; d++) {
     if (d != dim) {
-      dstSliceSize *= dst->size[d];
+      dstSliceSize *= dst->size(d);
     }
   }
 
   if (src == nullptr) return dstSliceSize;
 
   THArgCheck(dim < srcDims, 3, "Indexing dim is out of bounds");
-  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size[dim], 4,
+  THArgCheck(THCudaLongTensor_nElement(state, index) == src->size(dim), 4,
              "length of src.size[dim] is not equal to length of indices");
 
   ptrdiff_t srcSliceSize = 1;
@@ -36,8 +36,8 @@ static ptrdiff_t THCTensor_(getSliceSize)(THCState *state, THCTensor *dst,
 
   for (int d = 0; d < srcDims; d++) {
     if (d != dim) {
-      srcSliceSize *= src->size[d];
-      if (!mismatch && dst->size[d] != src->size[d]) mismatch = true;
+      srcSliceSize *= src->size(d);
+      if (!mismatch && dst->size(d) != src->size(d)) mismatch = true;
     }
   }
 
@@ -112,8 +112,12 @@ void THCTensor_(indexCopy)(THCState *state, THCTensor *dst, int dim, THCudaLongT
   ptrdiff_t sliceSize = THCTensor_(getSliceSize)(state, dst, dim, indices, src);
   ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
   int64_t dstCopyDimSize = THCTensor_(size)(state, dst, dim);
-
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
+
+  if (sliceSize == 0) {
+    return;
+  }
+
   cudaStream_t stream = THCState_getCurrentStream(state);
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
@@ -221,15 +225,11 @@ void THCTensor_(take)(THCState *state, THCTensor *dst, THCTensor *src, THCudaLon
   THArgCheck(THCTensor_(nDimension)(state, src) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCTensor_(nDimension)(state, dst) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
   THArgCheck(THCudaLongTensor_nDimension(state, index) <= MAX_CUTORCH_DIMS, 2, CUTORCH_DIM_WARNING);
-  THArgCheck(!(THCTensor_(nDimension)(state, src) == 0 && THCudaLongTensor_nDimension(state, index) != 0), 2,
+  THArgCheck(!(THCTensor_(numel)(state, src) == 0 && THCudaLongTensor_numel(state, index) != 0), 2,
              "tried to take from an empty tensor");
 
-  THCTensor_(resizeNd)(state, dst, index->nDimension, index->size, NULL);
-
-  // dispatchTakePut only handles non-empty tensors;
-  if (index->nDimension > 0) {
-    dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
-  }
+  THCTensor_(resizeNd)(state, dst, index->dim(), THTensor_getSizePtr(index), NULL);
+  dispatchTakePut<real, TensorTakeOp>(state, src, dst, index);
 }
 
 static void THCTensor_(sort_indices)(THCState *state, THCudaLongTensor *index, THCTensor *src) {
@@ -301,8 +301,11 @@ void THCTensor_(indexAdd)(THCState *state, THCTensor *dst, int dim, THCudaLongTe
   ptrdiff_t sliceSize = THCTensor_(getSliceSize)(state, dst, dim, indices, src);
   ptrdiff_t srcTotalSize = THCTensor_(nElement)(state, src);
   int64_t dstAddDimSize = THCTensor_(size)(state, dst, dim);
-
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
+
+  if (sliceSize == 0) {
+    return;
+  }
   cudaStream_t stream = THCState_getCurrentStream(state);
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
@@ -420,8 +423,11 @@ void THCTensor_(indexFill)(THCState *state, THCTensor *dst, int dim, THCudaLongT
     THCTensor_(getSliceSize)(state, dst, dim, indices, nullptr);
   ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
   int64_t dstFillDimSize = THCTensor_(size)(state, dst, dim);
-
   ptrdiff_t numIndices = THCudaLongTensor_nElement(state, indices);
+
+  if (sliceSize == 0) {
+    return;
+  }
   cudaStream_t stream = THCState_getCurrentStream(state);
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
@@ -531,6 +537,7 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
 
   THLongStorage *newSize;
 
+#ifndef USE_TH_SIZE_ZERO_DIM
   if (numIndices == 0) {
     newSize = THCTensor_(newSizeOf)(state, src);
     THLongStorage_set(newSize, 0, numIndices);
@@ -538,11 +545,17 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
     THLongStorage_free(newSize);
     return;
   }
+#endif
 
   newSize = THCTensor_(newSizeOf)(state, src);
   THLongStorage_set(newSize, dim, numIndices);
   THCTensor_(resize)(state, dst, newSize, NULL);
   THLongStorage_free(newSize);
+
+  ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
+  if (dstTotalSize == 0) {
+    return;
+  }
 
   int indContig = THCudaLongTensor_isContiguous(state, indices);
 
@@ -551,7 +564,6 @@ void THCTensor_(indexSelect)(THCState *state, THCTensor *dst, THCTensor *src, in
   // total size of the tensor ignoring dimension `dim`;
   // -the number of indices we are choosing, which is the total size
   // of the tensor `indices`.
-  ptrdiff_t dstTotalSize = THCTensor_(nElement)(state, dst);
   int64_t srcSelectDimSize = THCTensor_(size)(state, src, dim);
   ptrdiff_t sliceSize = dstTotalSize / numIndices;
 

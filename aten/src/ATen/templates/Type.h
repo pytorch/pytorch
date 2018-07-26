@@ -11,9 +11,12 @@
 #include "ATen/ScalarType.h"
 #include "ATen/SparseTensorRef.h"
 #include "ATen/Tensor.h"
+#include "ATen/Deprecated.h"
+#include "ATen/Layout.h"
+#include "THNN/Reduction.h"
 
 #include <array>
-#include <cstdint>
+#include <cstddef>
 #include <functional>
 #include <limits>
 #include <memory>
@@ -32,20 +35,6 @@ struct Allocator;
 struct Generator;
 struct Storage;
 
-// Note [Empty versus 0-dim tensors]
-// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-// Unlike Torch, ATen treats zero-dimension tensors as having ONE
-// element (that is to say, a zero-dimensional tensor is a scalar!)
-// This is in contrast to Torch, where a zero-dimension tensor has
-// zero elements.
-//
-// Because we are backed by Torch tensors, we need to be able to
-// represent this state (of numel==0).  These tensors are represented
-// by one-dimensional tensors with size[0] == 0 and stride[0] == 1
-// (the stride is arbitrary but matches the NumPy equivalent).
-constexpr std::array<int64_t, 1> kEmptySizes { {0} };
-constexpr std::array<int64_t, 1> kEmptyStrides { {1} };
-
 static inline void noop_deleter(void*) {}
 
 enum class TypeID {
@@ -54,22 +43,23 @@ enum class TypeID {
   NumOptions
 };
 
-
 struct AT_API Type {
-  explicit Type(Context * context, bool is_variable_or_undefined)
-  : context(context), is_variable_or_undefined_(is_variable_or_undefined) {}
+  explicit Type(Context* context, bool is_variable, bool is_undefined)
+      : context(context), is_variable_(is_variable), is_undefined_(is_undefined) {}
   virtual ~Type() {}
   virtual ScalarType scalarType() const = 0;
   virtual Backend backend() const = 0;
+  Layout layout() const noexcept { return layout_from_backend(backend()); }
   virtual bool is_cuda() const = 0;
   virtual bool is_sparse() const = 0;
   virtual bool is_distributed() const = 0;
-  bool is_variable_or_undefined() const noexcept { return is_variable_or_undefined_; }
+  bool is_variable() const noexcept { return is_variable_; }
+  bool is_undefined() const noexcept { return is_undefined_; }
   static void registerCPU(Context * context);
   virtual std::unique_ptr<Storage> storage() const = 0;
   virtual std::unique_ptr<Storage> storage(size_t size) const = 0;
   virtual std::unique_ptr<Storage> storageFromBlob(void * data, int64_t size, const std::function<void(void*)> & deleter=noop_deleter) const = 0;
-  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, std::unique_ptr<Allocator> allocator) const = 0;
+  virtual std::unique_ptr<Storage> storageWithAllocator(int64_t size, Allocator* allocator) const = 0;
   virtual std::unique_ptr<Generator> generator() const = 0;
   virtual Tensor unsafeTensorFromTH(void * th_pointer, bool retain) const = 0;
   virtual std::unique_ptr<Storage> unsafeStorageFromTH(void * th_pointer, bool retain) const = 0;
@@ -77,6 +67,12 @@ struct AT_API Type {
   virtual size_t elementSizeInBytes() const = 0;
   virtual Type & toBackend(Backend b) const;
   virtual Type & toScalarType(ScalarType s) const;
+  Type & toSparse() const {
+    return this->toBackend(at::toSparse(this->backend()));
+  }
+  Type & toDense() const {
+    return this->toBackend(at::toDense(this->backend()));
+  }
   Context& get_context() const { return *context; }
 
   // contingious IDs for all types in the system
@@ -90,8 +86,8 @@ struct AT_API Type {
 
   Tensor tensorFromBlob(void * data, IntList sizes, const std::function<void(void*)> & deleter=noop_deleter) const;
   Tensor tensorFromBlob(void * data, IntList sizes, IntList strides, const std::function<void(void*)> & deleter=noop_deleter) const;
-  Tensor tensorWithAllocator(IntList sizes, std::unique_ptr<Allocator> allocator) const;
-  Tensor tensorWithAllocator(IntList sizes, IntList strides, std::unique_ptr<Allocator> allocator) const;
+  Tensor tensorWithAllocator(IntList sizes, Allocator* allocator) const;
+  Tensor tensorWithAllocator(IntList sizes, IntList strides, Allocator* allocator) const;
   Tensor scalarTensor(Scalar s) const;
 
   bool operator==(const Type& other) const;
@@ -102,11 +98,25 @@ struct AT_API Type {
   ${type_method_declarations}
 protected:
   Context* context;
-  bool is_variable_or_undefined_ = false;
+  bool is_variable_;
+  bool is_undefined_;
+
 };
 
-inline bool Tensor::is_variable_or_undefined() const noexcept {
-  return type().is_variable_or_undefined();
+inline bool Tensor::is_variable() const noexcept {
+  return type().is_variable();
+}
+
+inline ScalarType Tensor::dtype() const noexcept {
+  return type().scalarType();
+}
+
+inline Layout Tensor::layout() const noexcept {
+  return type().layout();
+}
+
+inline Device Tensor::device() const {
+  return Device(type().backend(), type().is_cuda() ? get_device() : -1);
 }
 
 } // namespace at

@@ -3,8 +3,10 @@
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/functions/basic_ops.h"
 #include "torch/csrc/autograd/grad_mode.h"
+#include "torch/csrc/autograd/anomaly_mode.h"
 #include "torch/csrc/autograd/variable.h"
-#include "torch/csrc/utils/auto_gpu.h"
+
+#include <ATen/DeviceGuard.h>
 
 #include <atomic>
 #include <condition_variable>
@@ -22,7 +24,7 @@
 #include <queue>
 #include <TH/TH.h>
 
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
 #include <cuda.h>
 #include <THC/THC.h>
 #endif
@@ -203,7 +205,7 @@ Engine::~Engine() = default;
 
 auto Engine::thread_init(int device) -> void {
   THInferNumThreads();
-  AutoGPU guard(device);
+  at::DeviceGuard guard(device);
   worker_device = device;
   thread_main(nullptr);
 }
@@ -269,6 +271,9 @@ auto Engine::thread_main(GraphTask *graph_task) -> void {
 auto Engine::thread_on_exception(FunctionTask& task, std::exception& e) -> void {
   std::lock_guard<std::mutex> lock(task.base->mutex);
   if (!task.base->has_error.load()) {
+    if (AnomalyMode::is_enabled()) {
+      task.fn->metadata()->print_stack();
+    }
     task.base->exception = std::current_exception();
     task.base->has_error = true;
   }
@@ -340,14 +345,28 @@ static variable_list call_function(FunctionTask& task) {
   if(!task.base->keep_graph) {
     fn.will_release_variables();
   }
-  auto outputs = fn(inputs);
+
+  const auto has_post_hooks = !fn.post_hooks().empty();
+  variable_list outputs;
+
+  if(has_post_hooks){
+    auto inputs_copy = inputs;
+    outputs = fn(std::move(inputs_copy));
+  }else{
+    outputs = fn(std::move(inputs));
+  }
+
   validate_outputs(fn.next_edges(), outputs, [&](const std::string& msg) {
     std::ostringstream ss;
     ss << "Function "  << fn.name() << " returned an " << msg;
     return ss.str();
   });
   checkpoint_valid = prev_checkpoint_valid_state;
-  return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+
+  if(has_post_hooks){
+    return call_post_hooks(fn, std::move(outputs), std::move(inputs));
+  }
+  return outputs;
 }
 
 auto Engine::evaluate_function(FunctionTask& task) -> void {
@@ -373,6 +392,20 @@ auto Engine::evaluate_function(FunctionTask& task) -> void {
 
   int num_outputs = outputs.size();
   if (num_outputs == 0) return; // Don't even acquire the mutex
+
+  if (AnomalyMode::is_enabled()) {
+    AutoGradMode grad_mode(false);
+    for (int i = 0; i < num_outputs; ++i) {
+      auto& output = outputs[i];
+      at::DeviceGuard guard(output);
+      if (output.defined() && output.ne(output).any().toCByte()) {
+        std::stringstream ss;
+        ss << "Function '" << fn.name() << "' returned nan values in its " << i << "th output.";
+        throw std::runtime_error(ss.str());
+      }
+    }
+  }
+
   std::lock_guard<std::mutex> lock(task.base->mutex);
   for (int i = 0; i < num_outputs; ++i) {
     auto& output = outputs[i];
@@ -557,7 +590,7 @@ auto Engine::ready_queue(int device) -> ReadyQueue& {
 
 auto Engine::start_threads() -> void {
   int num_devices = 0;
-#ifdef WITH_CUDA
+#ifdef USE_CUDA
   // check for case of compiled with CUDA but no available devices
   if (cudaGetDeviceCount(&num_devices) != cudaSuccess) {
     cudaGetLastError();

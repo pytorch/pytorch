@@ -107,7 +107,14 @@ def expand(o):
 
 
 # filter the list of declarations removing things we cannot support
-def supports(o):
+def supports(o, factory_methods):
+    # Ignore all families (!) of functions that have TensorOptions (i.e. tensor factory methods).
+    if o['name'] in factory_methods:
+        if factory_methods[o['name']] == 0:
+            print("Skipping {} because it is a factory method".format(o['name']))
+        factory_methods[o['name']] += 1
+        return False
+
     # skip all in-place operators for now since aten cannot Resize
     # caffe2 memory inside an operator
     if o['inplace']:
@@ -183,9 +190,18 @@ def get_num_inputs(o):
     return str(args)
 
 
+def find_factory_methods(decls):
+    factory_methods = {}
+    for o in decls:
+        if any(arg['dynamic_type'] == 'TensorOptions' for arg in o['arguments']):
+            factory_methods[o['name']] = 0
+    return factory_methods
+
+
 if __name__ == '__main__':
     decls = yaml.load(read(os.path.join(args.yaml_dir, 'Declarations.yaml')), Loader=Loader)
-    filtered = [expanded for o in decls for expanded in expand(o) if supports(expanded)]
+    factory_methods = find_factory_methods(decls)
+    filtered = [expanded for o in decls for expanded in expand(o) if supports(expanded, factory_methods)]
     top_env = {
         'mappings': [],
         'implementations': [],

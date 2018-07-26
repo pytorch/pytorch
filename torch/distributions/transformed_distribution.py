@@ -30,8 +30,11 @@ class TransformedDistribution(Distribution):
 
     For more examples, please look at the implementations of
     :class:`~torch.distributions.gumbel.Gumbel`,
+    :class:`~torch.distributions.half_cauchy.HalfCauchy`,
+    :class:`~torch.distributions.half_normal.HalfNormal`,
     :class:`~torch.distributions.log_normal.LogNormal`,
     :class:`~torch.distributions.pareto.Pareto`,
+    :class:`~torch.distributions.weibull.Weibull`,
     :class:`~torch.distributions.relaxed_bernoulli.RelaxedBernoulli` and
     :class:`~torch.distributions.relaxed_categorical.RelaxedOneHotCategorical`
     """

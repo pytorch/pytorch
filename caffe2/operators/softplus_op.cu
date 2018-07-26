@@ -26,7 +26,7 @@ bool SoftplusOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0);
   DCHECK_GT(X.size(), 0);
   Y->ResizeLike(X);
-  SoftplusKernel<<<
+  SoftplusKernel<float><<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,
@@ -43,7 +43,7 @@ bool SoftplusGradientOp<float, CUDAContext>::RunOnDevice() {
   DCHECK_GT(Y.size(), 0);
   DCHECK_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
-  SoftplusGradientKernel<<<
+  SoftplusGradientKernel<float><<<
       CAFFE_GET_BLOCKS(Y.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,

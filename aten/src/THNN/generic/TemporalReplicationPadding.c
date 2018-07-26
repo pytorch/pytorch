@@ -48,19 +48,19 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
   real *input_data;
   real *output_data;
 
-  THNN_ARGCHECK(input->nDimension == 2 || input->nDimension == 3, 2, input,
-		"2D or 3D (batch mode) tensor expected for input, but got: %s");
+  THNN_ARGCHECK(!input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
+		"non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimslices++;
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iwidth = input->size(dimw);
   owidth  = iwidth + pad_l + pad_r;
 
   THArgCheck(owidth >= 1 , 2,
@@ -73,7 +73,7 @@ void THNN_(TemporalReplicationPadding_updateOutput)(THNNState *state,
   input = THTensor_(newContiguous)(input);
 
   /* resize output */
-  if (input->nDimension == 2)
+  if (input->dim() == 2)
   {
     THTensor_(resize2d)(output, nslices, owidth);
 
@@ -157,16 +157,16 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
   long iwidth;
   long owidth;
 
-  if (input->nDimension == 3)
+  if (input->dim() == 3)
   {
-    nbatch = input->size[0];
+    nbatch = input->size(0);
     dimw++;
     dimslices++;
   }
 
   /* sizes */
-  nslices = input->size[dimslices];
-  iwidth = input->size[dimw];
+  nslices = input->size(dimslices);
+  iwidth = input->size(dimw);
   owidth  = iwidth + pad_l + pad_r;
 
   THArgCheck(owidth == THTensor_(size)(gradOutput, dimw), 3,
@@ -181,7 +181,7 @@ void THNN_(TemporalReplicationPadding_updateGradInput)(THNNState *state,
   THTensor_(zero)(gradInput);
 
   /* backprop */
-  if (input->nDimension == 2) {
+  if (input->dim() == 2) {
     THNN_(TemporalReplicationPadding_updateGradInput_frame)(
       THTensor_(data)(gradInput),
       THTensor_(data)(gradOutput),

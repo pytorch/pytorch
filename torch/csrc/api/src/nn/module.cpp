@@ -1,8 +1,11 @@
 #include <torch/nn/module.h>
 
+#include <torch/nn/cursor.h>
+
 #include <torch/csrc/autograd/generated/VariableType.h>
 
 #include <ATen/Error.h>
+#include <ATen/optional.h>
 
 #include <algorithm>
 #include <map>
@@ -32,53 +35,45 @@ const std::string& Module::name() const noexcept {
   return *name_;
 }
 
-std::shared_ptr<Module> Module::clone() const {
+std::shared_ptr<Module> Module::clone(at::optional<Device> device) const {
   AT_ERROR(
       "clone() has not been implemented for ",
       name(),
-      ". Use the copy constructor if you don't require polymorphic cloning. "
-      "Otherwise, subclass torch::nn::CloneableModule<",
+      ". Subclass torch::nn::Cloneable<",
       name(),
       "> instead of torch::nn::Module to inherit the ability to clone.");
 }
 
-std::map<std::string, Variable> Module::parameters() const {
-  std::map<std::string, Variable> ret;
-  for (const auto& child : children_) {
-    for (auto& p : child.value->parameters()) {
-      ret[child.key + "." + p.first] = p.second;
-    }
-  }
-  for (const auto& parameter : parameters_) {
-    ret[parameter.key] = parameter.value;
-  }
-  return ret;
+ModuleCursor Module::modules() {
+  return ModuleCursor(*this);
 }
 
-Variable& Module::param(std::string const& name) {
-  Module* container = this;
-  auto begin = 0;
-  while (true) {
-    auto dot_pos = name.find('.', begin);
-    if (dot_pos == std::string::npos) {
-      break;
-    }
+ConstModuleCursor Module::modules() const {
+  return ConstModuleCursor(*this);
+}
 
-    const auto child_name = name.substr(begin, dot_pos - begin);
-    if (auto* child = container->children_.find(child_name)) {
-      container = child->get();
-    } else {
-      AT_ERROR("No such child: ", child_name);
-    }
+ModuleCursor Module::children() {
+  return ModuleCursor(*this, /*maximum_depth=*/1);
+}
 
-    begin = dot_pos + 1; // Skip the dot
-  }
+ConstModuleCursor Module::children() const {
+  return ConstModuleCursor(*this, /*maximum_depth=*/1);
+}
 
-  const auto parameter_name = name.substr(begin);
-  if (auto* parameter = container->parameters_.find(parameter_name)) {
-    return *parameter;
-  }
-  AT_ERROR("No such param: ", parameter_name);
+ParameterCursor Module::parameters() {
+  return ParameterCursor(*this);
+}
+
+ConstParameterCursor Module::parameters() const {
+  return ConstParameterCursor(*this);
+}
+
+BufferCursor Module::buffers() {
+  return BufferCursor(*this);
+}
+
+ConstBufferCursor Module::buffers() const {
+  return ConstBufferCursor(*this);
 }
 
 void Module::train() {
@@ -95,47 +90,16 @@ void Module::eval() {
   is_training_ = false;
 }
 
-void Module::cuda() {
-  to(at::kCUDA);
+void Module::to(torch::Device device, torch::Dtype dtype, bool non_blocking) {
+  to_impl(device, dtype, non_blocking);
 }
 
-void Module::cpu() {
-  to(at::kCPU);
+void Module::to(torch::Dtype dtype, bool non_blocking) {
+  to_impl(dtype, non_blocking);
 }
 
-void Module::to(at::Type& type) {
-  for (auto& child : children_) {
-    child.value->to(type);
-  }
-  for (auto& parameter : parameters_) {
-    at::detail::set_data(*parameter, parameter->data().toType(type));
-    AT_ASSERT(parameter->data().type() == type);
-    AT_ASSERT(&parameter->type() == autograd::VariableType::getType(type));
-  }
-}
-
-void Module::to(at::ScalarType scalar_type) {
-  for (auto& child : children_) {
-    child.value->to(scalar_type);
-  }
-  for (auto& parameter : parameters_) {
-    auto& new_type = parameter->data().type().toScalarType(scalar_type);
-    at::detail::set_data(*parameter, parameter->data().toType(new_type));
-    AT_ASSERT(parameter->data().type().scalarType() == scalar_type);
-    AT_ASSERT(parameter->type().scalarType() == scalar_type);
-  }
-}
-
-void Module::to(at::Backend backend) {
-  for (auto& child : children_) {
-    child.value->to(backend);
-  }
-  for (auto& parameter : parameters_) {
-    auto& new_type = parameter->data().type().toBackend(backend);
-    at::detail::set_data(*parameter, parameter->data().toType(new_type));
-    AT_ASSERT(parameter->data().type().backend() == backend);
-    AT_ASSERT(parameter->type().backend() == backend);
-  }
+void Module::to(torch::Device device, bool non_blocking) {
+  to_impl(device, non_blocking);
 }
 
 bool Module::is_training() const noexcept {
@@ -147,24 +111,26 @@ void Module::zero_grad() {
     child.value->zero_grad();
   }
   for (auto& parameter : parameters_) {
-    parameter->grad().zero_();
+    auto& grad = parameter->grad();
+    if (grad.defined()) {
+      grad = grad.detach();
+      grad.zero_();
+    }
   }
 }
 
-autograd::Variable& Module::register_parameter(
+Tensor& Module::register_parameter(
     std::string name,
-    at::Tensor tensor) {
-  auto variable = autograd::make_variable(tensor, /*requires_grad=*/true);
-  return parameters_.insert(std::move(name), std::move(variable));
+    Tensor tensor,
+    bool requires_grad) {
+  tensor.set_requires_grad(requires_grad);
+  return parameters_.insert(std::move(name), std::move(tensor));
 }
 
-autograd::Variable& Module::register_buffer(
-    std::string name,
-    at::Tensor tensor) {
-  auto variable = autograd::make_variable(tensor, /*requires_grad=*/false);
-  return parameters_.insert(std::move(name), std::move(variable));
+Tensor& Module::register_buffer(std::string name, Tensor tensor) {
+  return buffers_.insert(std::move(name), std::move(tensor));
 }
 
-void Module::clone_(Module& other) {}
+void Module::clone_(Module& other, at::optional<Device> device) {}
 } // namespace nn
 } // namespace torch

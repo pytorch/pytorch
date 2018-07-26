@@ -33,6 +33,7 @@ Creation Ops
     range of distributions.
 
 .. autofunction:: tensor
+.. autofunction:: sparse_coo_tensor
 .. autofunction:: as_tensor
 .. autofunction:: from_numpy
 .. autofunction:: zeros
@@ -56,6 +57,7 @@ Indexing, Slicing, Joining, Mutating Ops
 .. autofunction:: gather
 .. autofunction:: index_select
 .. autofunction:: masked_select
+.. autofunction:: narrow
 .. autofunction:: nonzero
 .. autofunction:: reshape
 .. autofunction:: split
@@ -168,6 +170,7 @@ Pointwise Ops
 .. autofunction:: cosh
 .. autofunction:: div
 .. autofunction:: erf
+.. autofunction:: erfc
 .. autofunction:: erfinv
 .. autofunction:: exp
 .. autofunction:: expm1
@@ -180,6 +183,7 @@ Pointwise Ops
 .. autofunction:: log1p
 .. autofunction:: log2
 .. autofunction:: mul
+.. autofunction:: mvlgamma
 .. autofunction:: neg
 .. autofunction:: pow
 .. autofunction:: reciprocal
@@ -203,6 +207,7 @@ Reduction Ops
 .. autofunction:: cumprod
 .. autofunction:: cumsum
 .. autofunction:: dist
+.. autofunction:: logsumexp
 .. autofunction:: mean
 .. autofunction:: median
 .. autofunction:: mode
@@ -220,6 +225,8 @@ Comparison Ops
 .. autofunction:: equal
 .. autofunction:: ge
 .. autofunction:: gt
+.. autofunction:: isfinite
+.. autofunction:: isinf
 .. autofunction:: isnan
 .. autofunction:: kthvalue
 .. autofunction:: le
@@ -246,12 +253,15 @@ Spectral Ops
 
 Other Operations
 ~~~~~~~~~~~~~~~~~~~~~~
+.. autofunction:: bincount
 .. autofunction:: cross
 .. autofunction:: diag
 .. autofunction:: diagflat
 .. autofunction:: diagonal
 .. autofunction:: einsum
+.. autofunction:: flip
 .. autofunction:: histc
+.. autofunction:: meshgrid
 .. autofunction:: renorm
 .. autofunction:: trace
 .. autofunction:: tril
@@ -286,6 +296,7 @@ BLAS and LAPACK Operations
 .. autofunction:: mv
 .. autofunction:: orgqr
 .. autofunction:: ormqr
+.. autofunction:: pinverse
 .. autofunction:: potrf
 .. autofunction:: potri
 .. autofunction:: potrs

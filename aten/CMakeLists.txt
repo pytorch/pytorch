@@ -4,6 +4,7 @@ if (CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
   endif()
 else()
   cmake_minimum_required(VERSION 3.0 FATAL_ERROR)
+  project(ATen CXX C)
   include(CMakeDependentOption)
   option(USE_CUDA "Use CUDA" ON)
   option(USE_ROCM "Use ROCm" OFF)
@@ -14,26 +15,9 @@ else()
       "USE_CUDA" OFF)
   option(ATEN_NO_TEST "Do not build ATen test binaries" OFF)
 
-  # Legacy options, which we will eventually remove
-  cmake_dependent_option(
-      NO_CUDA "Legacy no CUDA" OFF
-      "USE_CUDA" ON)
-  cmake_dependent_option(
-      WITH_CUDNN "Legacy cuDNN" ON
-      "USE_CUDNN" OFF)
-  cmake_dependent_option(
-      NO_MKLDNN "Legacy no MKLDNN" OFF
-      "USE_MKLDNN" ON)
-
   # Flag for shared dependencies
   set(BUILD_ATEN ON)
 endif()
-if (NOT USE_CUDA)
-  set(NO_CUDA ON)
-endif()
-
-# Create the project in all cases
-project(ATen CXX C)
 
 # Find modules
 list(APPEND CMAKE_MODULE_PATH
@@ -44,9 +28,6 @@ list(APPEND CMAKE_MODULE_PATH
 list(APPEND CMAKE_LIBRARY_PATH /usr/lib/x86_64-linux-gnu/)
 
 cmake_policy(SET CMP0012 NEW)
-
-# Polyfill for upstream FindCUDA
-include(CMakeInitializeConfigs)
 
 #############################################
 
@@ -90,7 +71,7 @@ if (NOT CAFFE2_CMAKE_BUILDING_WITH_MAIN_REPO)
     ${Caffe2_PUBLIC_CUDA_DEPENDENCY_LIBS})
 endif()
 
-if(NOT NO_CUDA)
+if(USE_CUDA)
   list(APPEND ATen_CUDA_INCLUDE ${CUDA_INCLUDE_DIRS})
 endif()
 
@@ -99,21 +80,21 @@ add_subdirectory(src/TH)
 set(TH_CPU_INCLUDE
   # dense
   ${CMAKE_CURRENT_SOURCE_DIR}/src/TH
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
   ${CMAKE_CURRENT_BINARY_DIR}/src/TH
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THC
-  # sparse
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THS
-  ${CMAKE_CURRENT_SOURCE_DIR}/src/THCS
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THS
-  ${CMAKE_CURRENT_BINARY_DIR}/src/THCS
-
   ${CMAKE_CURRENT_SOURCE_DIR}/src
   ${CMAKE_CURRENT_BINARY_DIR}/src
   ${CMAKE_BINARY_DIR}/aten/src)
 list(APPEND ATen_CPU_INCLUDE ${TH_CPU_INCLUDE})
+
+if(USE_CUDA OR USE_ROCM)
+  set(TH_CUDA_INCLUDE
+    # dense
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/THC
+    ${CMAKE_CURRENT_BINARY_DIR}/src/THC)
+  list(APPEND ATen_CUDA_INCLUDE ${TH_CUDA_INCLUDE})
+endif()
+
 add_subdirectory(src/THNN)
-add_subdirectory(src/THS)
 
 # Find the HIP package, set the HIP paths, load the HIP CMake.
 IF(USE_ROCM)
@@ -134,15 +115,13 @@ if(USE_ROCM)
   SET(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
-  add_subdirectory(src/THCS)
   message("ROCm is enabled.")
-elseif(NOT NO_CUDA)
+elseif(USE_CUDA)
   SET(AT_CUDA_ENABLED 1)
   add_subdirectory(src/THC)
   add_subdirectory(src/THCUNN)
-  add_subdirectory(src/THCS)
 else()
-  message("disabling CUDA because NO_CUDA is set")
+  message("disabling CUDA because USE_CUDA is set false")
   SET(AT_CUDA_ENABLED 0)
 endif()
 
