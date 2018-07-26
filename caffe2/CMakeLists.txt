@@ -260,18 +260,18 @@ endif()
 
 # ---[ Caffe2 HIP sources.
 if(USE_ROCM)
-  # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
   IF(BUILD_ATEN)
+     # Call again since Caffe2_HIP_INCLUDES is extended with ATen include dirs.
      HIP_INCLUDE_DIRECTORIES(${Caffe2_HIP_INCLUDES})
+
+     # Necessary since some of ATen's C++ files contain HIP includes.
+     SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_HCC__=1")
   ENDIF()
 
   # Essentially, treat all files as hip compilable source code.
-  set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
-
-  # Necessary since some of ATen's C++ files contain HIP includes.
-  if(BUILD_ATEN)
-    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_HCC__=1")
-  endif()
+  IF(BUILD_CAFFE2)
+    set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
+  ENDIF()
 
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
 
