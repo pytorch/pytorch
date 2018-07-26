@@ -1,6 +1,14 @@
 version: 2
 jobs:
   linux_trusty_py3_6_gcc7_build:
+    docker:
+      - image: 308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/linux-trusty-py3.6-gcc7:226
+        user: jenkins
+        aws_auth:
+          aws_access_key_id: AKIAIUHRTFRLXI6HBUCQ
+          aws_secret_access_key: $CIRCLECI_AWS_SECRET_KEY
+    resource_class: large
+    steps:
     - run:
         name: Hello World
         command: |
