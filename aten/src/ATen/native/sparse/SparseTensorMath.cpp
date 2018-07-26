@@ -641,7 +641,7 @@ SparseTensor& hspmm_out_sparse_cpu(SparseTensor& r, const SparseTensor& sparse_,
 #ifndef USE_TH_SIZE_ZERO_DIM
   r.sparse_raw_resize_legacy_({m, n}, 1, 1);
 #else
-  _get_sparse_impl(r)->resize_(1, 1, {m, n});
+  _get_sparse_impl(r)->raw_resize_(1, 1, {m, n});
 #endif
 
   SparseTensor sparse = sparse_.coalesce();
@@ -735,7 +735,7 @@ SparseTensor& _sspaddmm_out_cpu(
 #ifndef USE_TH_SIZE_ZERO_DIM
   r.sparse_raw_resize_legacy_({dim_i, dim_k}, 2, 0);
 #else
-  _get_sparse_impl(r)->resize_(2, 0, {dim_i, dim_k});
+  _get_sparse_impl(r)->raw_resize_(2, 0, {dim_i, dim_k});
 #endif
 
   AT_CHECK(dense.size(0) == dim_j,

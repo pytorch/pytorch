@@ -81,20 +81,24 @@ public:
   std::vector<int64_t>& _sizes_mut() { return size_; }
 #endif
 
-#ifndef USE_TH_SIZE_ZERO_DIM
   // WARNING: This function does NOT preserve invariants of sparseDims/denseDims with
   // respect to indices and values
   void raw_resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
+#ifndef USE_TH_SIZE_ZERO_DIM
     // UGHHHHH.  Legacy special case
     if (size.size() == 0) {
       size_ = {0};
     } else {
       size_ = size.vec();
     }
+#else
+    size_ = size;
+#endif
     sparseDims_ = sparseDims;
     denseDims_ = denseDims;
   }
-#else
+
+#ifdef USE_TH_SIZE_ZERO_DIM
   // NOTE: This function preserves invariants of sparseDims/denseDims with respect to
   // indices and values
   void resize_(int64_t sparseDims, int64_t denseDims, ArrayRef<int64_t> size) {
