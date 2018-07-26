@@ -19,4 +19,10 @@ Storage::~Storage() {
   }
 }
 
+// Type& Storage::type() {
+//   if (storage_impl_->data_ptr.device().is_cuda())
+//     return globalContext().getType(Backend::CUDA, storage_impl_->scalar_type);
+//   return globalContext().getType(Backend::CPU, storage_impl_->scalar_type);
+// }
+
 } // namespace at

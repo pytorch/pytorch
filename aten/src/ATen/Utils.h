@@ -35,10 +35,10 @@ static inline T* checked_cast_storage(Base* expr, const char * name, int pos, Ba
   // if (typeid(*expr) != typeid(T))
   //   AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
   //            " for argument #", pos, " '", name, "'");
-  if (typeid(*expr) != typeid(T)) {
-    AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
-             " for argument #", pos, " '", name, "'");
-  }
+//  if (typeid(*expr) != typeid(T)) {
+//    AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
+//             " for argument #", pos, " '", name, "'");
+//  }
   return static_cast<T*>(expr);
 }
 
