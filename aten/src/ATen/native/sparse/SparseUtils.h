@@ -46,6 +46,8 @@ inline bool _check_device(ArrayRef<Tensor> ts) {
 inline void _raw_resize_sparse_legacy(const SparseTensor& self, int64_t sparseDims, int64_t denseDims, IntList size) {
 #ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(self)->raw_resize_(sparseDims, denseDims, size);
+#else
+  AT_ERROR("NYI: _raw_resize_sparse_legacy is not implemented");
 #endif
 }
 
