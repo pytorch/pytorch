@@ -3577,7 +3577,7 @@ class TestNN(NNTestCase):
         with self.assertRaisesRegex(ValueError, 'Expected.*batch_size'):
             F.nll_loss(x, t)
 
-    @unittest.skipIf(not (TEST_CUDNN  and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
+    @unittest.skipIf(not (TEST_CUDNN and TEST_CUDNN_VERSION >= 7000), "needs cudnn >= 7.0")
     def test_CTCLoss_cudnn(self):
         target_lengths = [30, 25, 20]
         input_lengths = [50, 50, 50]
