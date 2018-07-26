@@ -132,6 +132,6 @@ echo "Running Python tests.."
   "${EXTRA_TESTS[@]}"
 
 if [[ -n "$INTEGRATED" ]]; then
-  pip install --user pytest-xdist torchvision
-  "$ROOT_DIR/scripts/onnx/test.sh" -p
+  pip install --user torchvision
+  "$ROOT_DIR/scripts/onnx/test.sh"
 fi
