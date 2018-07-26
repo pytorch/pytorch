@@ -2,46 +2,51 @@
 
 set -ex
 
+pip install --user --no-cache-dir hypothesis==3.59.0
+
+
 # The INSTALL_PREFIX here must match up with test.sh
 INSTALL_PREFIX="/usr/local/caffe2"
 LOCAL_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 ROOT_DIR=$(cd "$LOCAL_DIR"/../.. && pwd)
 CMAKE_ARGS=()
+SCCACHE="$(which sccache)"
 
+if [ "$(which gcc)" != "/root/sccache/gcc" ]; then
+  # Setup SCCACHE
+  ###############################################################################
+  # Setup sccache if SCCACHE_BUCKET is set
+  if [ -n "${SCCACHE_BUCKET}" ]; then
+    mkdir -p ./sccache
 
-# Setup SCCACHE
-###############################################################################
-# Setup sccache if SCCACHE_BUCKET is set
-if [ -n "${SCCACHE_BUCKET}" ]; then
-  mkdir -p ./sccache
+    SCCACHE="$(which sccache)"
+    if [ -z "${SCCACHE}" ]; then
+      echo "Unable to find sccache..."
+      exit 1
+    fi
 
-  SCCACHE="$(which sccache)"
-  if [ -z "${SCCACHE}" ]; then
-    echo "Unable to find sccache..."
-    exit 1
+    # Setup wrapper scripts
+    for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
+      (
+        echo "#!/bin/sh"
+        echo "exec $SCCACHE $(which $compiler) \"\$@\""
+      ) > "./sccache/$compiler"
+      chmod +x "./sccache/$compiler"
+    done
+
+    if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
+      (
+        echo "#!/bin/sh"
+        echo "exec $SCCACHE $(which nvcc) \"\$@\""
+      ) > "./sccache/nvcc"
+      chmod +x "./sccache/nvcc"
+    fi
+
+    export CACHE_WRAPPER_DIR="$PWD/sccache"
+
+    # CMake must find these wrapper scripts
+    export PATH="$CACHE_WRAPPER_DIR:$PATH"
   fi
-
-  # Setup wrapper scripts
-  for compiler in cc c++ gcc g++ x86_64-linux-gnu-gcc; do
-    (
-      echo "#!/bin/sh"
-      echo "exec $SCCACHE $(which $compiler) \"\$@\""
-    ) > "./sccache/$compiler"
-    chmod +x "./sccache/$compiler"
-  done
-
-  if [[ "${BUILD_ENVIRONMENT}" == *-cuda* ]]; then
-    (
-      echo "#!/bin/sh"
-      echo "exec $SCCACHE $(which nvcc) \"\$@\""
-    ) > "./sccache/nvcc"
-    chmod +x "./sccache/nvcc"
-  fi
-
-  export CACHE_WRAPPER_DIR="$PWD/sccache"
-
-  # CMake must find these wrapper scripts
-  export PATH="$CACHE_WRAPPER_DIR:$PATH"
 fi
 
 # Setup ccache if configured to use it (and not sccache)

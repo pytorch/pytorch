@@ -2742,6 +2742,35 @@ void CopyMatrix<CUDAContext>(
       context->cuda_stream());
 }
 
+#define CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(T) \
+  template <>                                  \
+  void CopyMatrix<T, CUDAContext>(             \
+      const int M,                             \
+      const int N,                             \
+      const T* A,                              \
+      const int lda,                           \
+      T* B,                                    \
+      const int ldb,                           \
+      CUDAContext* context) {                  \
+    if (M == 0 || N == 0) {                    \
+      return;                                  \
+    }                                          \
+    cudaMemcpy2DAsync(                         \
+        B,                                     \
+        sizeof(T) * ldb,                       \
+        A,                                     \
+        sizeof(T) * lda,                       \
+        sizeof(T) * N,                         \
+        M,                                     \
+        cudaMemcpyDeviceToDevice,              \
+        context->cuda_stream());               \
+  }
+CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(float)
+CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(double)
+CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(int)
+CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX(TIndex)
+#undef CAFFE2_SPECIALIZED_CUDA_COPY_MATRIX
+
 template <>
 void CopyVector<float, CUDAContext>(
     const int N,
