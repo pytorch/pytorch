@@ -40,10 +40,10 @@ bool fuseConvBNHelper(repr::NNModule* nn, caffe2::Workspace* ws) {
       continue;
     }
 
-#define EXPOSE_TENSOR_DATA(name, index, inputs)                              \
-  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                    \
-  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");           \
-  auto name##Tensor = ws->GetBlob(name->getName())->GetMutable<TensorCPU>(); \
+#define EXPOSE_TENSOR_DATA(name, index, inputs)                            \
+  auto name = repr::nn::get<repr::Tensor>(inputs[index]);                  \
+  assert(ws->HasBlob(name->getName()) && "Blob not in workspace");         \
+  auto name##Tensor = ws->GetBlob(name->getName())->GetMutableTensor(CPU); \
   auto name##Data = name##Tensor->mutable_data<float>();
 
     EXPOSE_TENSOR_DATA(filter, 1, convInputs);

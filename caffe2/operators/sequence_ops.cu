@@ -126,8 +126,8 @@ template <bool Inclusive = true>
 void lengths_prefix_sum(
     const int32_t* lengths,
     int32_t num_items,
-    Tensor<CUDAContext>* prefix_buffer,
-    Tensor<CUDAContext>* prefix_sum,
+    Tensor* prefix_buffer,
+    Tensor* prefix_sum,
     CUDAContext* context) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -137,7 +137,7 @@ void lengths_prefix_sum(
         NULL,
         temp_storage_bytes,
         lengths,
-        prefix_sum->mutable_data<int32_t>(),
+        prefix_sum->template mutable_data<int32_t>(),
         num_items,
         context->cuda_stream());
   } else {
@@ -145,7 +145,7 @@ void lengths_prefix_sum(
         NULL,
         temp_storage_bytes,
         lengths,
-        prefix_sum->mutable_data<int32_t>(),
+        prefix_sum->template mutable_data<int32_t>(),
         num_items,
         context->cuda_stream());
   }
@@ -154,14 +154,14 @@ void lengths_prefix_sum(
   auto buffer_size = (temp_storage_bytes + sizeof(int32_t)) / sizeof(int32_t);
   prefix_buffer->Resize(buffer_size);
   void* d_temp_storage =
-      static_cast<void*>(prefix_buffer->mutable_data<int32_t>());
+      static_cast<void*>(prefix_buffer->template mutable_data<int32_t>());
 
   if (Inclusive) {
     cub::DeviceScan::InclusiveSum(
         d_temp_storage,
         temp_storage_bytes,
         lengths,
-        prefix_sum->mutable_data<int32_t>(),
+        prefix_sum->template mutable_data<int32_t>(),
         num_items,
         context->cuda_stream());
   } else {
@@ -169,7 +169,7 @@ void lengths_prefix_sum(
         d_temp_storage,
         temp_storage_bytes,
         lengths,
-        prefix_sum->mutable_data<int32_t>(),
+        prefix_sum->template mutable_data<int32_t>(),
         num_items,
         context->cuda_stream());
   }
@@ -204,7 +204,7 @@ bool AddPaddingOp<CUDAContext>::MakePadding(
   if (OutputSize() > 1) {
     auto* lengths_out = Output(1);
     lengths_out->Resize(lengths_size);
-    lengths_out_ptr = lengths_out->mutable_data<int32_t>();
+    lengths_out_ptr = lengths_out->template mutable_data<int32_t>();
   }
 
   if (lengths_size == 0) {
@@ -274,7 +274,7 @@ bool RemovePaddingOp<CUDAContext>::DoRunWithType() {
   if (OutputSize() > 1) {
     auto* lengths_out = Output(1);
     lengths_out->Resize(lengths_size);
-    lengths_out_ptr = lengths_out->mutable_data<int32_t>();
+    lengths_out_ptr = lengths_out->template mutable_data<int32_t>();
   }
 
   if (lengths_size == 0) {
