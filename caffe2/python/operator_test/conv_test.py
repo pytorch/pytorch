@@ -224,8 +224,8 @@ class TestConvolution(hu.HypothesisTestCase):
             self.assertGradientChecks(gc, op, inputs, i, [0])
 
     def _nd_convolution_nchw(self, n, input_channels, output_channels,
-                            batch_size, stride, size, kernel, dilation, pad,
-                            use_bias, gc, dc):
+                             batch_size, stride, size, kernel, dilation, pad,
+                             use_bias, gc, dc):
         dkernel = dilation * (kernel - 1) + 1
         for op_type in ["Conv", "Conv" + str(n) + "D"]:
             op = core.CreateOperator(
@@ -422,7 +422,7 @@ class TestConvolution(hu.HypothesisTestCase):
     @given(num_workers=st.integers(1, 4),
            net_type=st.sampled_from(
                ["simple", "dag"] +
-               (["async_dag"] if workspace.has_gpu_support else [])),
+               (["async_dag"] if workspace.has_gpu_support or workspace.has_hip_support else [])),
            do=st.sampled_from(hu.device_options),
            engine=st.sampled_from(["CUDNN", ""]))
     def test_convolution_sync(self, net_type, num_workers, do, engine):
@@ -545,6 +545,55 @@ class TestConvolution(hu.HypothesisTestCase):
                         f(**kwargs)
                         self.assertEqual(model.Proto().op[-1].engine,
                                          expected_engine)
+
+    @given(op_type=st.sampled_from(["Conv", "Conv2D"]), N=st.integers(1, 4),
+           G=st.integers(1, 4), DX=st.integers(1, 4), DY=st.integers(1, 4),
+           H=st.integers(1, 4), W=st.integers(1, 4), use_bias=st.booleans(),
+           **hu.gcs)
+    def test_1x1_conv(self, op_type, N, G, DX, DY, H, W, use_bias, gc, dc):
+        op = core.CreateOperator(
+            op_type,
+            ["X", "filter", "bias"] if use_bias else ["X", "filter"],
+            ["Y"],
+            stride_h=1,
+            stride_w=1,
+            pad_t=0,
+            pad_l=0,
+            pad_b=0,
+            pad_r=0,
+            kernel=1,
+            order="NCHW",
+            group=G,
+        )
+        C = G * DX
+        M = G * DY
+        X = np.random.randn(N, C, H, W).astype(np.float32)
+        filter = np.random.randn(M, DX, 1, 1).astype(np.float32)
+        bias = np.random.randn(M).astype(np.float32)
+        inputs = [X, filter, bias] if use_bias else [X, filter]
+
+        def conv_1x1_ref(X, filter, bias=None):
+            X = X.reshape(N, G, DX, -1)
+            filter = filter.reshape(G, DY, DX)
+            Y = np.zeros(shape=(N, G, DY, H * W), dtype=np.float32)
+            for i in range(N):
+                for j in range(G):
+                    Y[i, j, :, :] = np.dot(filter[j, :, :], X[i, j, :, :])
+            Y = Y.reshape(N, M, H, W)
+            if bias is not None:
+                bias = bias.reshape(1, M, 1, 1)
+                Y = np.add(Y, bias)
+            return [Y]
+
+        self.assertReferenceChecks(
+            device_option=gc,
+            op=op,
+            inputs=inputs,
+            reference=conv_1x1_ref,
+        )
+        self.assertDeviceChecks(dc, op, inputs, [0])
+        for i in range(len(inputs)):
+            self.assertGradientChecks(gc, op, inputs, i, [0])
 
 
 if __name__ == "__main__":

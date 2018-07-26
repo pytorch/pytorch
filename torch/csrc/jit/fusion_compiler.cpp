@@ -1,13 +1,16 @@
 #ifndef _WIN32
 #include "torch/csrc/jit/fusion_compiler.h"
+
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/variable_tensor_functions.h"
+#include <torch/csrc/jit/assertions.h>
 
 #include "ATen/ATen.h"
+
 #ifdef USE_CUDA
 #include "ATen/cuda/CUDAContext.h"
 #include "THC/THC.h"
@@ -16,6 +19,7 @@
 #include <cuda.h>
 #include <cuda_runtime.h>
 #endif
+
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -717,7 +721,7 @@ private:
 
 static void* checkDL(void * x) {
   if(!x) {
-    barf("error in dlopen or dlsym: %s", dlerror());
+    AT_ERROR("error in dlopen or dlsym: ", dlerror());
   }
   return x;
 }
@@ -733,10 +737,7 @@ struct DynamicLibrary {
   }
   ~DynamicLibrary() {
     if(!handle) return;
-    int r = dlclose(handle);
-    if(r) {
-      barf("error in dlclose: %s", dlerror());
-    }
+    dlclose(handle);
   }
 private:
   void * handle = nullptr;
@@ -750,10 +751,15 @@ static const std::string cpp_template = "/tmp/pytorch_fuserXXXXXX.cpp";
 // actually supports it or not, so we heuristically use the host
 // compiler to predict if the runtime compiler supports the option we
 // want.  This probably won't work if you're cross-compiling.
+// NB: -march=native is disabled because it has caused problems where
+// compiler and assembler do not agree on what native instruction they
+// understand for AVX512. When we need better CPU performance this
+// optimization can be re-enabled by tracking down the platforms where
+// this error occurs and only selectively disabling it.
 static const std::string compile_string =
   "\"${cxx}\" -O3 -g "
 #ifndef __PPC64__
-  "-march=native "
+//  "-march=native "
 #endif
   "-std=c++11 -fPIC ${fopenmp} -shared \"${cpp_file}\" -o \"${so_file}\" -lm";
 

@@ -483,44 +483,47 @@ Tensor host_softmax(const Tensor & input_, const int64_t dim_){
   AT_CHECK(dim >=0 && dim < input.dim(), "dim must be non-negative and less than input dimensions");
   int64_t outer_size = 1;
   int64_t dim_size = input.size(dim);
-  int64_t inner_size = 1;
-  cudaStream_t stream = at::cuda::getCurrentCUDAStream();
-  for (int64_t i = 0; i < dim; ++i)
-    outer_size *= input.size(i);
-  for (int64_t i = dim + 1; i < input.dim(); ++i)
-    inner_size *= input.size(i);
-  // This kernel spawns a block per each element in the batch.
-  // XXX: it assumes that inner_size == 1
-  if (inner_size == 1) {
-    const int ILP = 2;
-    dim3 grid(outer_size);
-    dim3 block = SoftMax_getBlockSize(ILP, dim_size);
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
-    using accscalar_t = acc_type<scalar_t, true>;
-    cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, Epilogue>
-      <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
-        output.data<scalar_t>(), input.data<scalar_t>(), dim_size
-    );
-    });
-  // This kernel runs in a 2D grid, where each application along y dimension has a fixed
-  // outer_size, and runs in parallel over inner_size. Dimension x is parallel over outer_size.
-  // Reductions over dim are done in a single-threaded manner.
-  } else {
-    uint32_t smem_size;
-    dim3 grid, block;
-    AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
-    using accscalar_t = acc_type<scalar_t, true>;
-    SpatialSoftMax_getLaunchSizes<accscalar_t>(
-        &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, Epilogue>,
-        outer_size, dim_size, inner_size,
-        grid, block, smem_size);
-    cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, Epilogue>
-      <<<grid, block, smem_size, stream>>>(
-        output.data<scalar_t>(), input.data<scalar_t>(), outer_size, dim_size, inner_size
-    );
-    });
+
+  if (input.numel() > 0) {
+    int64_t inner_size = 1;
+    cudaStream_t stream = at::cuda::getCurrentCUDAStream();
+    for (int64_t i = 0; i < dim; ++i)
+      outer_size *= input.size(i);
+    for (int64_t i = dim + 1; i < input.dim(); ++i)
+      inner_size *= input.size(i);
+    // This kernel spawns a block per each element in the batch.
+    // XXX: it assumes that inner_size == 1
+    if (inner_size == 1) {
+      const int ILP = 2;
+      dim3 grid(outer_size);
+      dim3 block = SoftMax_getBlockSize(ILP, dim_size);
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
+      using accscalar_t = acc_type<scalar_t, true>;
+      cunn_SoftMaxForward<ILP, scalar_t, accscalar_t, Epilogue>
+        <<<grid, block, block.x * sizeof(accscalar_t), stream>>>(
+          output.data<scalar_t>(), input.data<scalar_t>(), dim_size
+      );
+      });
+    // This kernel runs in a 2D grid, where each application along y dimension has a fixed
+    // outer_size, and runs in parallel over inner_size. Dimension x is parallel over outer_size.
+    // Reductions over dim are done in a single-threaded manner.
+    } else {
+      uint32_t smem_size;
+      dim3 grid, block;
+      AT_DISPATCH_FLOATING_TYPES_AND_HALF(input.type(), "host_softmax", [&] {
+      using accscalar_t = acc_type<scalar_t, true>;
+      SpatialSoftMax_getLaunchSizes<accscalar_t>(
+          &cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, Epilogue>,
+          outer_size, dim_size, inner_size,
+          grid, block, smem_size);
+      cunn_SpatialSoftMaxForward<scalar_t, accscalar_t, Epilogue>
+        <<<grid, block, smem_size, stream>>>(
+          output.data<scalar_t>(), input.data<scalar_t>(), outer_size, dim_size, inner_size
+      );
+      });
+    }
+    THCudaCheck(cudaGetLastError());
   }
-  THCudaCheck(cudaGetLastError());
   return output;
 }
 

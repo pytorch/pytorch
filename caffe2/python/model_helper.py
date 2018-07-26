@@ -30,6 +30,8 @@ _known_working_ops = [
     "Add",
     "Adagrad",
     "SparseAdagrad",
+    "Adadelta",
+    "SparseAdadelta",
     "AveragedLoss",
     "Cast",
     "Checkpoint",

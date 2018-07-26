@@ -137,7 +137,7 @@ if (jit::tracer::isTracing()) {
   trace_info = jit::tracer::preRecordTrace( jit::aten::${trace_name}, ${trace_inputs} );
   if (!jit::tracer::ArgumentStash::empty()) {
     ${record_positional_attributes}
-    TORCH_ASSERT(jit::tracer::ArgumentStash::empty());
+    AT_ASSERT(jit::tracer::ArgumentStash::empty());
   } else {
     ${record_attributes}
   }

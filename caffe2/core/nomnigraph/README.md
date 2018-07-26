@@ -102,7 +102,8 @@ bool b = repr::nn::is<repr::Tensor>(n); // Checks the type stored on the node.  
 
 repr::Conv* c = repr::nn::get<repr::Conv>(n); // Returns a pointer to the NeuralNetOperator or NeuralNetData in the node
 
-auto pairs = dataIterator(nn); // A useful paradigm for iterating through nodes in no particular order.
+auto pairs = dataIterator(nn); // A useful paradigm for iterating through nodes and corresponding data in no particular order.
+auto nodeRefs = nodeIterator(nn); // Iterate through nodes in no particular order.
 // See https://github.com/pytorch/pytorch/blob/master/caffe2/opt/mobile.cc#L106-L109
 
 

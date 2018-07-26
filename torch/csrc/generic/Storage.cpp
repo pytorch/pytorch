@@ -6,7 +6,7 @@ PyObject *THPStorageClass = NULL;
 
 PyObject * THPStorage_(New)(THWStorage *ptr)
 {
-  TORCH_ASSERT(ptr);
+  AT_ASSERT(ptr);
   PyTypeObject *type = (PyTypeObject *)THPStorageClass;
   PyObject *obj = type->tp_alloc(type, 0);
   if (obj) {

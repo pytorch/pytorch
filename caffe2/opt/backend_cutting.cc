@@ -269,7 +269,8 @@ void ReplaceSubgraph(
     auto op_node = g->createNode();
     for (const auto& input : op.input()) {
       if (!tensor_map.count(input)) {
-        tensor_map[input] = g->createNode(caffe2::make_unique<Tensor>(input));
+        tensor_map[input] =
+            g->createNode(caffe2::make_unique<nom::repr::Tensor>(input));
       }
 
       auto tensor_node = tensor_map[input];
@@ -278,7 +279,8 @@ void ReplaceSubgraph(
 
     for (const auto& output : op.output()) {
       if (!tensor_map.count(output)) {
-        tensor_map[output] = g->createNode(caffe2::make_unique<Tensor>(output));
+        tensor_map[output] =
+            g->createNode(caffe2::make_unique<nom::repr::Tensor>(output));
       }
       auto tensor_node = tensor_map[output];
       g->createEdge(op_node, tensor_node);

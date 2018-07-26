@@ -51,9 +51,9 @@ Tensor& s_addmm_out_sparse_dense_cuda(Tensor& r_, const Tensor& t, const SparseT
   AT_CHECK(_check_device({sparse_, r_, t, dense}));
 
   // TODO: This error message seems awfully opaque
-  AT_CHECK(sparse_._sparseDims() == 2, "addmm: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+  AT_CHECK(sparse_._sparseDims() == 2, "addmm: 2D tensor expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0, "addmm: scalar values expected, got ", sparse_._denseDims(), "D values");
-  AT_CHECK(dense.dim() == 2, "addmm: matrices expected, got ", dense.dim(), "D tensor");
+  AT_CHECK(dense.dim() == 2, "addmm: 2D tensor expected, got ", dense.dim(), "D tensor");
 
   // mxk * kxn = mxn
   int64_t m = sparse_.size(0);
@@ -183,11 +183,11 @@ SparseTensor& hspmm_out_sparse_cuda(SparseTensor& r_, const SparseTensor& sparse
   AT_CHECK(_check_device({r_, sparse_, dense}));
 
   AT_CHECK(sparse_._sparseDims() == 2,
-      "hspmm: Argument #2: matrices expected, got ", sparse_._sparseDims(), "D tensor");
+      "hspmm: Argument #2: 2D tensor expected, got ", sparse_._sparseDims(), "D tensor");
   AT_CHECK(sparse_._denseDims() == 0,
       "hspmm: Argument #2: scalar values expected, got ", sparse_._denseDims(), "D values");
   AT_CHECK(dense.dim() == 2,
-      "hspmm: Argument #3: matrices expected, got ", dense.dim(), "D tensor");
+      "hspmm: Argument #3: 2D tensor expected, got ", dense.dim(), "D tensor");
 
   int64_t m = sparse_.size(0);
   int64_t k = sparse_.size(1);

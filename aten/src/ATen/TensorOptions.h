@@ -9,6 +9,7 @@
 #include <ATen/Type.h>
 
 #include <cstddef>
+#include <iosfwd>
 #include <utility>
 
 namespace at {
@@ -277,3 +278,7 @@ inline Tensor Tensor::to(Device device, bool non_blocking) const {
   return detail::to(*this, options().device(device), non_blocking);
 }
 } // namespace at
+
+std::ostream& operator<<(
+    std::ostream& stream,
+    const at::TensorOptions& options);

@@ -8,6 +8,9 @@
 #include <torch/csrc/utils/memory.h>
 #include <torch/csrc/utils/variadic.h>
 
+#include <ATen/Device.h>
+#include <ATen/optional.h>
+
 #include <memory>
 #include <type_traits>
 #include <typeinfo>
@@ -54,7 +57,7 @@ class AnyModule {
 
   /// Creates a deep copy of an `AnyModule` if it contains a module, else an
   /// empty `AnyModule` if it is empty.
-  AnyModule clone() const;
+  AnyModule clone(at::optional<Device> device = at::nullopt) const;
 
   /// Assigns a module to the `AnyModule` (to circumvent the explicit
   /// constructor).
@@ -246,7 +249,8 @@ struct AnyModule::Placeholder : public AnyModule::Value::Placeholder {
   virtual std::unique_ptr<Placeholder> copy() const = 0;
 
   /// Returns a `Placeholder` with a deep copy of this `AnyModule`.
-  virtual std::unique_ptr<Placeholder> clone() const = 0;
+  virtual std::unique_ptr<Placeholder> clone(
+      at::optional<Device> device) const = 0;
 };
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~ AnyModule::Holder ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -308,9 +312,10 @@ struct AnyModule::Holder : public AnyModule::Placeholder {
     return torch::make_unique<Holder>(*this);
   }
 
-  std::unique_ptr<Placeholder> clone() const override {
+  std::unique_ptr<Placeholder> clone(
+      at::optional<Device> device) const override {
     return torch::make_unique<Holder>(
-        std::static_pointer_cast<ModuleType>(module->clone()));
+        std::static_pointer_cast<ModuleType>(module->clone(device)));
   }
 
   /// The actual concrete module instance.
@@ -344,9 +349,9 @@ inline AnyModule& AnyModule::operator=(const AnyModule& other) {
   return *this;
 }
 
-inline AnyModule AnyModule::clone() const {
+inline AnyModule AnyModule::clone(at::optional<Device> device) const {
   AnyModule clone;
-  clone.content_ = content_ ? content_->clone() : nullptr;
+  clone.content_ = content_ ? content_->clone(device) : nullptr;
   return clone;
 }
 
