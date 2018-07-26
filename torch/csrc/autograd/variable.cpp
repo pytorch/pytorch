@@ -65,10 +65,6 @@ std::unique_ptr<at::Storage> Variable::Impl::storage() {
   return data_.storage();
 }
 
-Scalar Variable::Impl::localScalar() {
-  return data_.pImpl->localScalar();
-}
-
 std::shared_ptr<Function> Variable::Impl::get_grad_accumulator() {
   if (grad_fn_) {
     throw std::logic_error(
