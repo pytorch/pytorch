@@ -6,6 +6,7 @@
 
 #include "ATen/Tensor.h"
 #include "ATen/Context.h"
+#include "ATen/TensorMethods.h"
 
 namespace at {
 Tensor Scalar::toTensor() const {
@@ -18,4 +19,12 @@ Tensor Scalar::toTensor() const {
     return CPU(kLong).scalarTensor(*this);
   }
 }
+
+Scalar Scalar::local() const {
+  if (Tag::HAS_t != tag) {
+    return *this;
+  }
+  return Tensor(t)._local_scalar();
+}
+
 }
