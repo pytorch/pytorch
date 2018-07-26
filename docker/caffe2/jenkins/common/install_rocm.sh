@@ -60,8 +60,15 @@ install_hip_thrust() {
 
 install_hcrng() {
     mkdir -p /opt/rocm/debians
-    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb 
+    curl https://s3.amazonaws.com/ossci-linux/hcrng-master-a8c6a0b-Linux.deb -o /opt/rocm/debians/hcrng.deb
     dpkg -i /opt/rocm/debians/hcrng.deb
+}
+
+install_rocRAND() {
+    # Install a newer version more compatible with PyTorch.
+    mkdir -p /opt/rocm/debians
+    curl https://s3.amazonaws.com/ossci-linux/rocrand-1.8.0-Linux.deb -o /opt/rocm/debians/rocRAND.deb
+    dpkg -i /opt/rocm/debians/rocRAND.deb
 }
 
 install_hcsparse() {
@@ -90,3 +97,4 @@ fi
 install_hip_thrust
 install_hcrng
 install_hcsparse
+install_rocRAND
