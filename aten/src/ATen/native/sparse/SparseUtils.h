@@ -42,11 +42,12 @@ inline bool _check_device(ArrayRef<Tensor> ts) {
   return true;
 }
 
-#ifndef USE_TH_SIZE_ZERO_DIM
+// TODO: remove this function when is USE_TH_SIZE_ZERO_DIM enabled by default
 inline void _raw_resize_sparse_legacy(const SparseTensor& self, int64_t sparseDims, int64_t denseDims, IntList size) {
+#ifndef USE_TH_SIZE_ZERO_DIM
   _get_sparse_impl(self)->raw_resize_(sparseDims, denseDims, size);
-}
 #endif
+}
 
 #ifndef USE_TH_SIZE_ZERO_DIM
 // Takes indices and values and directly puts them into the sparse tensor, no
