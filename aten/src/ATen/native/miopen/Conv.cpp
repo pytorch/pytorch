@@ -94,9 +94,6 @@ std::tuple<at::Tensor,at::Tensor,at::Tensor> miopen_convolution_transpose_backwa
 
 namespace at { namespace native {
 
-// TODO: Go through all the checking code again and make sure
-// we haven't missed anything.
-
 // ---------------------------------------------------------------------
 //
 // Math
@@ -169,7 +166,6 @@ std::vector<int64_t> conv_weight_size(
   return weight_size;
 }
 
-// TODO: Move this into the standard library, with a better name?
 Tensor narrowGroup(const Tensor& t, int dim, int group_idx, int64_t groups) {
   auto group_size = t.size(dim) / groups;
   return t.narrow(dim, group_idx * group_size, group_size);
@@ -235,8 +231,6 @@ static void convolution_shape_check(
   // Weight
   checkSameDim(c, input, weight);
 
-  // TODO: check that output->size() matches output_sizes
-  // TODO: check that weight matches output->sizes()
   checkSameDim(c, input, output);
 }
 
@@ -260,11 +254,6 @@ struct ConvolutionParams
 // contenst as char* when hashing
 static_assert(std::is_pod<ConvolutionParams>::value, "ConvolutionParams not POD");
 
-// NB: This can't be a constructor, because then ConvolutionParams
-// would not be a POD anymore.
-// TODO: Use TensorGeometry here instead of the entire Tensor, which we
-// don't actually need.  (OTOH: We can always pass in
-// grad_input/grad_output, so this is not very pressing)
 void setConvolutionParams(
     ConvolutionParams* params,
     const at::Tensor& input, const at::Tensor& weight,
@@ -287,8 +276,6 @@ void setConvolutionParams(
     params->stride[i] = stride[i];
     params->dilation[i] = dilation[i];
   }
-  // In principle, we shouldn't parametrize by groups for legacy
-  // CuDNN, but it doesn't seem worth the effort to actually do this.
   params->groups = groups;
   params->deterministic = deterministic;
 }
@@ -334,7 +321,6 @@ struct ParamsEqual {
   }
 };
 
-// TODO: Use something less heavy duty than a big honking mutex
 template <typename T>
 struct BenchmarkCache {
   std::mutex mutex;
@@ -360,8 +346,6 @@ BenchmarkCache<miopenConvFwdAlgorithm_t> fwd_algos;
 BenchmarkCache<miopenConvBwdDataAlgorithm_t> bwd_data_algos;
 BenchmarkCache<miopenConvBwdWeightsAlgorithm_t> bwd_filter_algos;
 
-// TODO: Stop manually allocating CUDA memory; allocate an ATen byte
-// tensor instead.
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
     CUDA_CHECK(THCudaMalloc(globalContext().lazyInitCUDA(), &data, size));
@@ -423,35 +407,6 @@ size_t getWorkspaceSize(
     return sz;
 }
 
-//FIXME: delete this
-#if 0
-template<typename algo_t>
-size_t getMaxWorkspaceSize(
-    const ConvolutionArgs& args,
-    const algo_t *algo, int n_algo)
-{
-    THCState *state = globalContext().lazyInitCUDA();
-
-    size_t max_ws_size = 0;
-    size_t max_block_size = 0;
-    size_t total_gpu_mem = 0;
-    size_t free_gpu_mem = 0;
-
-    //THCudaCheck(THCudaMemGetInfoCached(state, &free_gpu_mem, &total_gpu_mem, &max_block_size));
-
-    for (int i = 0; i < n_algo; i++) {
-        miopenStatus_t err;
-        size_t sz;
-        err = getWorkspaceSize(args, algo[i], &sz);
-        //if (MIOPEN_STATUS_SUCCESS != err || sz == 0
-        //    || sz < max_ws_size || sz > max_block_size) continue;
-        if (MIOPEN_STATUS_SUCCESS != err || sz == 0 || sz < max_ws_size) continue;
-        max_ws_size = sz;
-    }
-    return max_ws_size;
-}
-#endif
-
 template<typename perf_t>
 perf_t getBestAlgorithm(perf_t *perfResults, bool deterministic, int n_algo) {
   return perfResults[0];
@@ -484,39 +439,6 @@ struct algorithm_search<miopenConvFwdAlgorithm_t> {
         false));
     return perf_results;
   }
-
-// FIXME - remove these two
-#if 0
-  static void getAlgorithm(
-    const ConvolutionArgs& args,
-    algo_t* algo)
-  {
-    miopenConvolutionFwdPreference_t pref = MIOPEN_CONVOLUTION_FWD_PREFER_FASTEST;
-    MIOPEN_CHECK(miopenGetConvolutionForwardAlgorithm(
-        args.handle,
-        args.idesc.desc(),
-        args.wdesc.desc(),
-        args.cdesc.desc(),
-        args.odesc.desc(),
-        pref,
-        0,
-        algo));
-  }
-
-  static void getWorkspaceSize(
-    const ConvolutionArgs& args,
-    algo_t algo, size_t* workspaceSize)
-  {
-    MIOPEN_CHECK(miopenGetConvolutionForwardWorkspaceSize(
-        args.handle,
-        args.idesc.desc(),
-        args.wdesc.desc(),
-        args.cdesc.desc(),
-        args.odesc.desc(),
-        algo,
-        workspaceSize));
-  }
-#endif
 };
 
 template<>
@@ -546,35 +468,6 @@ struct algorithm_search<miopenConvBwdDataAlgorithm_t> {
         false));
     return perf_results;
   }
-
-// FIXME - remove these two
-#if 0
-  static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardDataAlgorithm(
-        args.handle,
-        args.wdesc.desc(),
-        args.odesc.desc(),
-        args.cdesc.desc(),
-        args.idesc.desc(),
-        MIOPEN_CONVOLUTION_BWD_DATA_PREFER_FASTEST,
-        0,
-        algo));
-  }
-
-  static void getWorkspaceSize(
-    const ConvolutionArgs& args,
-    miopenConvBwdDataAlgorithm_t algo, size_t* workspaceSize)
-  {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardDataWorkspaceSize(
-        args.handle,
-        args.wdesc.desc(),
-        args.odesc.desc(),
-        args.cdesc.desc(),
-        args.idesc.desc(),
-        algo,
-        workspaceSize));
-  }
-#endif
 };
 
 template<>
@@ -604,34 +497,6 @@ struct algorithm_search<miopenConvBwdWeightsAlgorithm_t> {
         false));
     return perf_results;
   }
-
-// FIXME - remove these two
-#if 0
-  static void getAlgorithm(const ConvolutionArgs& args, algo_t* algo) {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardFilterAlgorithm(
-        args.handle,
-        args.idesc.desc(),
-        args.odesc.desc(),
-        args.cdesc.desc(),
-        args.wdesc.desc(),
-        MIOPEN_CONVOLUTION_BWD_FILTER_PREFER_FASTEST,
-        0,
-        algo)
-    );
-  }
-
-  static void getWorkspaceSize(const ConvolutionArgs& args, algo_t algo, size_t* workspaceSize)
-  {
-    MIOPEN_CHECK(miopenGetConvolutionBackwardFilterWorkspaceSize(
-        args.handle,
-        args.idesc.desc(),
-        args.odesc.desc(),
-        args.cdesc.desc(),
-        args.wdesc.desc(),
-        algo,
-        workspaceSize));
-  }
-#endif
 };
 
 template<typename algo_t>
@@ -701,8 +566,6 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
   checkAllSameGPU(c, {output, bias});
   checkSize(c, bias, { output->size(output_channels_dim) });
 
-  // See Note [CuDNN broadcast padding].  Handle the left padding
-  // ourselves, but use TensorDescriptor's padding argument to do the rest.
   TensorDescriptor bdesc, odesc;
   bdesc.set(bias->expand({1, bias->size(0)}), output->dim());
   odesc.set(*output);
@@ -725,18 +588,16 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 //      convolution and transposed convolution.  Does NOT take bias.
 //
 //    - raw_miopen_convolution_forward_out (Tensor)
-//      Low level function which invokes CuDNN, and takes an output
+//      Low level function which invokes MIOpen, and takes an output
 //      tensor which is directly written to (thus _out).
 //
 // Where does argument checking happen?  Here's the division of
 // responsibility:
 //  - Things that happen in at::Tensor
 //    - TensorArg allocation
-//    - setCuDNNStreamToCurrent
+//    - setMIOpenStreamToCurrent 
 //  - Things that happen in TensorArg
 //    - Check arguments (type, GPU, shape)
-//
-// TODO: Consider renaming zero-indexed arguments to "self"
 
 
 
@@ -746,8 +607,7 @@ void miopen_convolution_add_bias_(CheckedFrom c, const TensorArg& output, const 
 //
 // ---------------------------------------------------------------------
 
-// The raw API directly invokes CuDNN and does not emulate support
-// for group convolution on old versions of CuDNN.
+// The raw API directly invokes MIOpen.
 //
 // There are a few reasons this should never be directly exposed
 // via ATen:
@@ -772,11 +632,6 @@ void raw_miopen_convolution_forward_out(
   args.odesc.set(output);
   args.cdesc.set(dataType, input.dim() - 2, args.params.padding, args.params.stride, args.params.dilation, args.params.groups);
 
-  // TODO: when we do legacy group convolution support, we'll repeatedly
-  // reinitialize the workspace for each convolution we do.  This is
-  // wasteful; we'd rather reuse the workspace.  OTOH, legacy group
-  // convolution support is already pretty slow, so this might not
-  // matter.  (This applies to raw_miopen_convolution_backward_input as well.)
   miopenConvFwdAlgorithm_t fwdAlg;
   Workspace workspace = chooseAlgorithm(args, benchmark, &fwdAlg);
 
@@ -826,7 +681,6 @@ Tensor miopen_convolution(
   TensorArg input  { input_t,  "input",  1 },
             weight { weight_t, "weight", 2 },
             bias   { bias_t,   "bias",   3 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   CheckedFrom c = "miopen_convolution";
   auto output_t = miopen_convolution_forward(
@@ -837,8 +691,6 @@ Tensor miopen_convolution(
   return output_t;
 }
 
-// NB: output_padding not needed here, as there is no ambiguity to
-// resolve
 Tensor miopen_convolution_transpose_backward_input(
     const Tensor& grad_output_t, const Tensor& weight_t,
     IntList padding, IntList stride, IntList dilation,
@@ -846,7 +698,6 @@ Tensor miopen_convolution_transpose_backward_input(
 {
   TensorArg grad_output { grad_output_t,  "grad_output", 1 },
             weight      { weight_t, "weight", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return miopen_convolution_forward(
     "miopen_convolution_transpose_backward_input",
@@ -965,7 +816,6 @@ Tensor miopen_convolution_backward_input(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             weight{ weight_t, "weight", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return miopen_convolution_backward_input(
       "miopen_convolution_backward_input",
@@ -1079,7 +929,6 @@ Tensor miopen_convolution_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return miopen_convolution_backward_weight(
       "miopen_convolution_backward_weight",
@@ -1096,7 +945,6 @@ Tensor miopen_convolution_transpose_backward_weight(
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 },
             input{ input_t, "input", 2 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
   return miopen_convolution_backward_weight(
       "miopen_convolution_backward_weight",
@@ -1114,7 +962,6 @@ Tensor miopen_convolution_backward_bias(
     const Tensor& grad_output_t)
 {
   TensorArg grad_output{ grad_output_t, "grad_output", 1 };
-  //setCuDNNStreamToCurrent();
   setMIOpenStreamToCurrent();
 
   auto grad_bias_t = grad_output->type().tensor(
@@ -1122,8 +969,6 @@ Tensor miopen_convolution_backward_bias(
 
   TensorArg grad_bias{ grad_bias_t, "result", 0 };
 
-  // See Note [CuDNN broadcast padding].  Handle the left padding
-  // ourselves, but use TensorDescriptor's pad argument to do the rest.
   TensorDescriptor bdesc{grad_bias->expand({1, grad_bias->size(0)}),
                          static_cast<size_t>(grad_output->dim())};
   TensorDescriptor odesc{*grad_output};

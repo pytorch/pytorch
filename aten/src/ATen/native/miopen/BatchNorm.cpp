@@ -73,7 +73,6 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
     checkAllSameType(c, {input, weight});
   }
   checkAllSameType(c, {weight, bias, running_mean, running_var});
-  // TODO: is weight required to be contiguous?
   checkAllContiguous(c, {input, weight, bias, running_mean, running_var});
   checkDimRange(c, input, 2, 6 /* exclusive */);
   auto num_features = input->size(1);
@@ -138,9 +137,6 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm(
   return std::tuple<Tensor, Tensor, Tensor>{output_t, save_mean, save_var};
 }
 
-// NB: CuDNN only implements the backward algorithm for batchnorm
-// in training mode (evaluation mode batchnorm has a different algorithm),
-// which is why this doesn't accept a 'training' parameter.
 std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
     const Tensor& input_t, const Tensor& grad_output_t, const Tensor& weight_t,
     // Unused: but we require them to be passed so that double backwards
@@ -166,7 +162,6 @@ std::tuple<Tensor, Tensor, Tensor> miopen_batch_norm_backward(
   }
   checkAllSameType(c, {input, grad_output});
   checkAllSameType(c, {weight, save_mean, save_var});
-  // TODO: is weight required to be contiguous?
   checkAllContiguous(c, {input, grad_output, save_mean, save_var});
   checkDimRange(c, input, 2, 6 /* exclusive */);
   checkSameSize(c, input, grad_output);

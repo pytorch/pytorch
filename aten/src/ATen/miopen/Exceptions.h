@@ -31,13 +31,13 @@ inline void MIOPEN_CHECK(miopenStatus_t status)
   }
 }
 
-inline void CUDA_CHECK(hipError_t error)
+inline void HIP_CHECK(hipError_t error)
 {
   if (error != hipSuccess) {
     std::string msg("HIP error: ");
-    //msg += hipErrorString(error);
+    msg += hipErrorString(error);
     throw std::runtime_error(msg);
   }
 }
 
-}}  // namespace at::miopen
+}} // namespace at::native
