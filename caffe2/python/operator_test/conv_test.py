@@ -41,11 +41,11 @@ def _cudnn_supports(
 def _cudnn_convolution_algo_count(direction):
     try:
         if direction == "fwd":
-            return st.integers(0, C.cudnn_convolution_fwd_algo_count() - 1)
+            return st.integers(0, C.cudnn_convolution_fwd_algo_count - 1)
         elif direction == "dgrad":
-            return st.integers(0, C.cudnn_convolution_bwd_data_algo_count() - 1)
+            return st.integers(0, C.cudnn_convolution_bwd_data_algo_count - 1)
         elif direction == "wgrad":
-            return st.integers(0, C.cudnn_convolution_bwd_filter_algo_count() - 1)
+            return st.integers(0, C.cudnn_convolution_bwd_filter_algo_count - 1)
         else:
             assert False
     except Exception:
@@ -70,9 +70,6 @@ class TestConvolution(hu.HypothesisTestCase):
            engine=st.sampled_from(["", "EIGEN"]),
            shared_buffer=st.booleans(),
            use_bias=st.booleans(),
-           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
-           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
-           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_convolution_separate_stride_pad_gradients(self, op_type,
                                                        stride_h, stride_w,
@@ -83,8 +80,6 @@ class TestConvolution(hu.HypothesisTestCase):
                                                        batch_size, order,
                                                        engine, shared_buffer,
                                                        use_bias,
-                                                       force_algo_fwd, force_algo_dgrad,
-                                                       force_algo_wgrad,
                                                        gc, dc):
         op = core.CreateOperator(
             op_type,
@@ -100,9 +95,6 @@ class TestConvolution(hu.HypothesisTestCase):
             order=order,
             engine=engine,
             shared_buffer=int(shared_buffer),
-            force_algo_fwd=force_algo_fwd,
-            force_algo_dgrad=force_algo_dgrad,
-            force_algo_wgrad=force_algo_wgrad,
         )
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -141,9 +133,6 @@ class TestConvolution(hu.HypothesisTestCase):
            batch_size=st.integers(1, 3),
            engine=st.sampled_from(["", "EIGEN"]),
            use_bias=st.booleans(),
-           force_algo_fwd=_cudnn_convolution_algo_count("fwd"),
-           force_algo_dgrad=_cudnn_convolution_algo_count("dgrad"),
-           force_algo_wgrad=_cudnn_convolution_algo_count("wgrad"),
            **hu.gcs)
     def test_convolution_separate_stride_pad_layout(self, op_type,
                                                     stride_h, stride_w,
@@ -152,8 +141,6 @@ class TestConvolution(hu.HypothesisTestCase):
                                                     input_channels,
                                                     output_channels, batch_size,
                                                     engine, use_bias,
-                                                    force_algo_fwd, force_algo_dgrad,
-                                                    force_algo_wgrad,
                                                     gc, dc):
         X = np.random.rand(
             batch_size, size, size, input_channels).astype(np.float32) - 0.5
@@ -177,9 +164,6 @@ class TestConvolution(hu.HypothesisTestCase):
                 order=order,
                 engine=engine,
                 device_option=gc,
-                force_algo_fwd=force_algo_fwd,
-                force_algo_dgrad=force_algo_dgrad,
-                force_algo_wgrad=force_algo_wgrad,
             )
             if order == "NCHW":
                 X_f = X.transpose((0, 3, 1, 2))
@@ -263,8 +247,8 @@ class TestConvolution(hu.HypothesisTestCase):
             self.assertDeviceChecks(dc, op, inputs, [0])
         except RuntimeError as e:
             es = str(e)
-            if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
-               or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+            if "status == CUDNN_STATUS_SUCCESS" not in es \
+               or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
                 raise e
 
         for i in range(len(inputs)):
@@ -272,8 +256,8 @@ class TestConvolution(hu.HypothesisTestCase):
                 self.assertGradientChecks(gc, op, inputs, i, [0])
             except RuntimeError as e:
                 es = str(e)
-                if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
-                   or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+                if "status == CUDNN_STATUS_SUCCESS" not in es \
+                   or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
                     raise e
 
     def _nd_convolution_nchw(self, n, input_channels, output_channels,
@@ -423,8 +407,8 @@ class TestConvolution(hu.HypothesisTestCase):
             self.assertDeviceChecks(dc, op, inputs, [0])
         except RuntimeError as e:
             es = str(e)
-            if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
-               or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+            if "status == CUDNN_STATUS_SUCCESS" not in es \
+               or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
                 raise e
 
         for i in range(len(inputs)):
@@ -432,8 +416,8 @@ class TestConvolution(hu.HypothesisTestCase):
                 self.assertGradientChecks(gc, op, inputs, i, [0])
             except RuntimeError as e:
                 es = str(e)
-                if es.find("status == CUDNN_STATUS_SUCCESS") < 0 \
-                   or es.find("CUDNN_STATUS_NOT_SUPPORTED") < 0:
+                if "status == CUDNN_STATUS_SUCCESS" not in es \
+                   or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
                     raise e
 
     @given(op_type=st.sampled_from(["Conv", "Conv2D"]),
