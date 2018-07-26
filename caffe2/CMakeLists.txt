@@ -268,15 +268,9 @@ if(USE_ROCM)
   # Essentially, treat all files as hip compilable source code.
   set_source_files_properties(${Caffe2_HIP_SRCS} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
-  # Strip out all *.h files from the source list added from ATen files.
+  # Necessary since some of ATen's C++ files contain HIP includes.
   if(BUILD_ATEN)
-    foreach(hip_source ${Caffe2_HIP_SRCS})
-      get_filename_component(extension ${hip_source} EXT)
-      if (${extension} MATCHES "\\.h$")
-        # Set to 0 to disable device compilation of regular header files.
-        set_source_files_properties(${hip_source} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 0)
-      endif()
-    endforeach()
+    SET(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D__HIP_PLATFORM_HCC__=1")
   endif()
 
   hip_add_library(caffe2_hip ${Caffe2_HIP_SRCS})
