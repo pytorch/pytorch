@@ -72,7 +72,9 @@ namespace detail {
     }
 
     // Populates low and high priority range
-    AT_CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&LOW_PRIORITY, &HIGH_PRIORITY));
+    #ifndef __HIP_PLATFORM_HCC__
+      AT_CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&LOW_PRIORITY, &HIGH_PRIORITY));
+    #endif 
   }
 
   // Creates the low and high priority stream pools for the specified device
