@@ -43,7 +43,7 @@ Tensor hardshrink_cpu(const Tensor & self, Scalar lambd) {
       [&](
         scalar_t& self_val,
         scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? convert<scalar_t, int>(0) : self_val;
+          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : self_val;
     });
   });
   return out_tensor;
@@ -61,7 +61,7 @@ Tensor hardshrink_backward_cpu(const Tensor & grad, const Tensor & self, Scalar 
         scalar_t& self_val,
         scalar_t& grad_val,
         scalar_t& out_tensor_val) {
-          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? convert<scalar_t, int>(0) : grad_val;
+          out_tensor_val = (self_val >= -lambd_val && self_val <= lambd_val) ? scalar_t(0) : grad_val;
     });
   });
   return out_tensor;
