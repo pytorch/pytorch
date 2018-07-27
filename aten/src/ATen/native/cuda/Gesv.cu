@@ -168,12 +168,16 @@ AT_ERROR("gesv: MAGMA library not found in "
 #else
   int64_t bx = self.size(0);
   int64_t by = (self.dim() == 1) ? 1 : self.size(1);
+  int64_t ax = A.size(0);
+  int64_t ay = A.size(1);
   int info;
   int* ipiv;
 
   // init to column major format
-  lu = A.t().clone();
-  sol = self.view({bx, by}).t().clone();
+  lu.resize_({ay, ax});
+  lu.copy_(A.t());
+  sol.resize_({by, bx});
+  sol.copy_(self.view({bx, by}).t());
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
       auto A_ptr = lu.data<scalar_t>();
@@ -183,8 +187,8 @@ AT_ERROR("gesv: MAGMA library not found in "
       magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
 
-  sol = sol.t();
-  lu = lu.t();
+  sol.t_();
+  lu.t_();
 
   checkErrors({info});
   return std::tuple<Tensor&,Tensor&>(sol, lu);
