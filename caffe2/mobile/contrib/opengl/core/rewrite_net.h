@@ -1,7 +1,7 @@
 
 #pragma once
 #include "GLPredictor.h"
-#include "caffe2/core/predictor.h"
+#include "caffe2/predictor/predictor.h"
 
 namespace caffe2 {
 bool tryConvertToOpenGL(const NetDef& initNet,

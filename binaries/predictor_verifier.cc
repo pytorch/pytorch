@@ -16,7 +16,7 @@
 
 #include "caffe2/core/flags.h"
 #include "caffe2/core/init.h"
-#include "caffe2/core/predictor.h"
+#include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/proto_utils.h"
 
 CAFFE2_DEFINE_string(init_net, "", "The given path to the init protobuffer.");
