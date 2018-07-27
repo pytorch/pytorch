@@ -13,8 +13,7 @@ jobs:
         name: Build
         command: |
           export SCCACHE_BUCKET=ossci-compiler-cache
-          pwd
-          ls
+          find /
           .jenkins/pytorch/build.sh
 workflows:
   version: 2
