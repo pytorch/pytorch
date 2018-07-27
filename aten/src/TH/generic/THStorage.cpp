@@ -61,7 +61,7 @@ THStorage* THStorage_(newWithMapping)(const char *filename, ptrdiff_t size, int 
       THMapAllocator::makeDataPtr(
           filename, flags, size * at::elementSize(scalar_type), &actual_size),
       /* allocator */ nullptr,
-      true);
+      false);
 
   if (size <= 0) {
     storage->size = actual_size / at::elementSize(scalar_type);

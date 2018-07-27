@@ -20,7 +20,7 @@ ${Storage}::${Storage}()
 #else
       getTHDefaultAllocator(),
 #endif
-      true)) {}
+      /* resizable */ true)) {}
 
 ${Storage}::${Storage}(size_t size)
   : Storage(new StorageImpl(
@@ -31,14 +31,14 @@ ${Storage}::${Storage}(size_t size)
 #else
       getTHDefaultAllocator(),
 #endif
-      true)) {}
+      /* resizable */ true)) {}
 
 ${Storage}::${Storage}(size_t size, Allocator* allocator)
   : Storage(new StorageImpl(
       ScalarType::${ScalarName}, 
       size,
       allocator,
-      true)) {}
+      /* resizable */ false)) {}
 
 // TODO: Take in Device as an input to the std::function constructor
 
@@ -65,5 +65,5 @@ ${Storage}::${Storage}(
 #endif
        ),
      /* allocator */ nullptr,
-      true)) {}
+     /* resizable */ false)) {}
 }
