@@ -100,16 +100,6 @@ def _if_scalar_type_as(g, self, tensor):
     fix up the scalar.
     """
     if isinstance(self, torch._C.Value):
-        if tensor.type().kind() == 'DynamicType':
-            # TODO: we can't convert change self's type if tensor has DynamicType
-            # We may need to insert type_as operations here.
-            return self
-        if (self.node().kind() == 'onnx::Constant' and
-                self.type().scalarType() != tensor.type().scalarType()):
-            # self may be a constant tensor of a different type
-            ty = tensor.type().scalarType().lower()
-            value = getattr(self.node().t('value'), ty)()
-            return g.op('Constant', value_t=value)
         return self
     elif tensor.type().kind() == "TensorType":
         ty = tensor.type().scalarType().lower()
