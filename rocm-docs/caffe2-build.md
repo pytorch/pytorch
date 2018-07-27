@@ -21,11 +21,11 @@ This docker image has all the dependencies for caffe2 pre-installed.
 ### Pull the latest caffe2 source:
 * Using https 
 ```
-git clone --recurse-submodules https://github.com/pytorch/pytorch.git
+git clone --recurse-submodules https://github.com/ROCmSoftwarePlatform/pytorch.git
 ```
 * Using ssh
 ```
-git clone --recurse-submodules git@github.com:pytorch/pytorch.git
+git clone --recurse-submodules git@github.com:ROCmSoftwarePlatform/pytorch.git
 ```
 Navigate to repo directory
 ```
