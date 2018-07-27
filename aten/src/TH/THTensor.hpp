@@ -152,6 +152,9 @@ inline void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset
 
 // NB: Steals ownership of storage
 inline void THTensor_stealAndSetStoragePtr(THTensor* tensor, THStorage* storage) {
+  // Caffe2 might have tensors whose storages are null, but we
+  // don't allow it in PyTorch.
+  AT_ASSERT(storage);
   tensor->storage_ = storage;
 }
 
