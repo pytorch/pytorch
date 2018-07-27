@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/Col2Im.cu"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(Col2Im_shapeCheck)(
                          THCState *state,
                          THCTensor *input,
@@ -31,8 +33,8 @@ static inline void THNN_(Col2Im_shapeCheck)(
   }
 
   int64_t inputLength  = input->size(batch_dim + 2);
-  int64_t nBlocksH = 1 + (outputHeight + 2 * padH - dH * (kH - 1) - 1) / sH;
-  int64_t nBlocksW = 1 + ( outputWidth + 2 * padW - dW * (kW - 1) - 1) / sW;
+  int64_t nBlocksH = div_rtn<int64_t>(outputHeight + 2 * padH - dH * (kH - 1) - 1, sH) + 1;
+  int64_t nBlocksW = div_rtn<int64_t>(outputWidth + 2 * padW - dW * (kW - 1) - 1, sW) + 1;
 
   if (inputLength != (nBlocksH * nBlocksW)) {
     THError("Given output_size=(%d, %d), kernel_size=(%d, %d), "
