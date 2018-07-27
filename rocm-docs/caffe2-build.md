@@ -49,7 +49,11 @@ Navigate to pytorch directory `cd /pytorch` inside the container.
 
 	Before running the tests, make sure that the required environment variables are set:
 	``` 
-	export LD_LIBRARY_PATH=/pytorch/build_caffe2/lib:$LD_LIBRARY_PATH
+	export LD_LIBRARY_PATH=/usr/local/caffe2/lib:$LD_LIBRARY_PATH
+	export PYTHONPATH=/usr/local/caffe2/lib/python2.7/dist-packages:$PYTHONPATH
 	```
 
 	Run the binaries under `/pytorch/build_caffe2/bin`
+
+### Run benchmarks
+
