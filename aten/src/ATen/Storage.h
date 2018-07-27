@@ -4,7 +4,7 @@
 
 namespace at {
 
-struct Storage {
+struct AT_API Storage {
 public:
   Storage() = delete;
   Storage(StorageImpl* storage_impl) : storage_impl_(storage_impl) {}
