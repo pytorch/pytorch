@@ -518,10 +518,10 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     dim3 block(threads_target, threads_batch);
     dim3 grid((2*max_target_length+1 + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
 
-    ctc_loss_backward_log_beta_gpu_kernel<scalar_t><<<grid, block, 0, stream>>>
+    ctc_loss_backward_log_beta_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
       (log_beta.data<scalar_t>(),
        log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<int64_t>(), target_lengths_t.data<int64_t>(), max_target_length,
+       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
        log_beta.stride(0), log_beta.stride(1), log_beta.stride(2),
        tg_batch_offsets.data<int64_t>(), tg_target_stride,
@@ -559,12 +559,12 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     int threads_batch = std::min(max_threads / threads_target, (int) batch_size);
     dim3 block(threads_target, threads_batch);
     dim3 grid((max_target_length + threads_target-1)/threads_target, (batch_size+threads_batch-1)/threads_batch);
-    ctc_loss_backward_collect_nonblank_gpu_kernel<scalar_t><<<grid, block, 0, stream>>>
+    ctc_loss_backward_collect_nonblank_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
       (grad.data<scalar_t>(),
        grad_out.data<scalar_t>(), grad_out.stride(0),
        log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
        log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<int64_t>(), target_lengths_t.data<int64_t>(), max_target_length,
+       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
        neg_log_likelihood.data<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
@@ -582,12 +582,12 @@ Tensor ctc_loss_backward_gpu_template(const Tensor& grad_out, const Tensor& log_
     dim3 block(threads_input, threads_batch);
     dim3 grid((log_probs.size(0) + threads_input-1)/threads_input, (batch_size+threads_batch-1)/threads_batch);
 
-    ctc_loss_backward_collect_gpu_kernel<scalar_t><<<grid, block, 0, stream>>>
+    ctc_loss_backward_collect_gpu_kernel<scalar_t, target_t><<<grid, block, 0, stream>>>
       (grad.data<scalar_t>(),
        grad_out.data<scalar_t>(), grad_out.stride(0),
        log_alpha.data<scalar_t>(), log_beta.data<scalar_t>(),
        log_probs.data<scalar_t>(), input_lengths_t.data<int64_t>(), log_probs.size(0),
-       targets.data<int64_t>(), target_lengths_t.data<int64_t>(), max_target_length,
+       targets.data<target_t>(), target_lengths_t.data<int64_t>(), max_target_length,
        neg_log_likelihood.data<scalar_t>(),
        grad.stride(0), grad.stride(1), grad.stride(2),
        log_probs.stride(0), log_probs.stride(1), log_probs.stride(2),
