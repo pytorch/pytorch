@@ -214,7 +214,7 @@ void THNN_(SpatialUpSamplingBicubic_updateGradInput)(
           }
         }
 
-        in += input_height * input_height;
+        in += input_width * input_height;
         out += output_width * output_height;
       }
     }

@@ -7,7 +7,6 @@
 #include "THCDeviceUtils.cuh"
 #include "THCHalf.h"
 #include "THCHalfAutoNumerics.cuh"
-#include "THCAtomics.cuh"
 
 template<typename Dtype, typename Acctype>
 __global__ void bicubic_interp2d_kernel(

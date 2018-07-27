@@ -1,6 +1,9 @@
 #ifndef THCUNN_UPSAMPLING_H
 #define THCUNN_UPSAMPLING_H
 
+#include "THCDeviceTensor.cuh"
+#include "THCAtomics.cuh"
+
 #undef MIN
 #define MIN(a,b) ( ((a)<(b)) ? (a) : (b) )
 #undef MAX
@@ -91,8 +94,7 @@ template<typename Acctype>
 __device__ __forceinline__
 static void get_cubic_upsampling_coefficients(
   Acctype coeffs[4],
-  Acctype t,
-  int size
+  Acctype t
 ) {
   Acctype A = -0.75;
 
@@ -113,11 +115,10 @@ static Acctype cubic_interp1d(
   Dtype x1,
   Dtype x2,
   Dtype x3,
-  Acctype t,
-  int size
+  Acctype t
 ) {
   Acctype coeffs[4];
-  get_cubic_upsampling_coefficients<Acctype>(coeffs, t, size);
+  get_cubic_upsampling_coefficients<Acctype>(coeffs, t);
 
   return x0 * coeffs[0]
     + x1 * coeffs[1]

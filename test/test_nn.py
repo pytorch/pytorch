@@ -5162,7 +5162,6 @@ class TestNN(NNTestCase):
                 input = torch.randn(1, 1, 2, 2, requires_grad=True)
                 gradcheck(lambda x: F.interpolate(x, out_size, **kwargs), [input])
 
-
     def test_upsamplingBilinear2d_spatial_invariance(self):
         m = nn.Upsample(scale_factor=3, mode='bilinear', align_corners=False)
         in_t_9 = torch.zeros(1, 1, 9, 9)
