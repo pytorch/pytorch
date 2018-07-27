@@ -55,7 +55,7 @@ endif()
 include(CMakeDependentOption)
 option(BUILD_TORCH "Build Torch" OFF)
 option(BUILD_CAFFE2 "Build Caffe2" ON)
-option(BUILD_ATEN "Build ATen" OFF)
+option(BUILD_ATEN "Build ATen" ON)
 option(BUILD_BINARY "Build C++ binaries" ON)
 option(BUILD_DOCS "Build Caffe2 documentation" OFF)
 option(BUILD_CUSTOM_PROTOBUF "Build and use Caffe2's own protobuf under third_party" ON)
@@ -75,7 +75,6 @@ cmake_dependent_option(
     "BUILD_TEST" OFF)
 option(USE_ACL "Use ARM Compute Library" OFF)
 option(USE_ASAN "Use Address Sanitizer" OFF)
-option(USE_ATEN "Use ATen" OFF)
 option(USE_CUDA "Use CUDA" ON)
 option(USE_ROCM "Use ROCm" OFF)
 option(CAFFE2_STATIC_LINK_CUDA "Statically link CUDA libraries" OFF)
@@ -145,8 +144,8 @@ option(USE_DISTRIBUTED_MW "Use THD (distributed) master worker" OFF)
 # Used when building Caffe2 through setup.py
 option(BUILDING_WITH_TORCH_LIBS "Tell cmake if Caffe2 is being built alongside torch libs" OFF)
 
-if (USE_ATEN)
-    set(BUILD_ATEN ${USE_ATEN})
+if (ANDROID)
+  set(BUILD_ATEN OFF)
 endif()
 
 # ---[ CMake scripts + modules
