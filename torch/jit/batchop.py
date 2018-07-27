@@ -162,7 +162,7 @@ def batch_zeros_like(data, mask, dims):
 
 
 @torch.jit.script
-def batch_index_select(data, mask, dims, index_data, index_mask, index_dims, dim_):
+def batch_index_select(data, mask, dims, dim_, index_data, index_mask, index_dims):
     dim = int(dim_)
     # if dim == 0:
     #     raise ValueError("Cannot index_select along 0 dim in BatchTensor")
@@ -249,7 +249,8 @@ def batch_gt_scalar(data1, data2):
 
 
 @torch.jit.script
-def batch_gt_one_scalar(data, mask, dims, other):
+def batch_gt_one_scalar(data, mask, dims, other_):
+    other = float(other_)
     return torch.gt(data, other), mask, dims
 
 

@@ -1,7 +1,7 @@
 #include "caffe2/core/context.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/predictor.h"
 #include "caffe2/core/tensor.h"
+#include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/math.h"
 
 #include <gtest/gtest.h>

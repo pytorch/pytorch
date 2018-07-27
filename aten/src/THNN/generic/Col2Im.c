@@ -124,7 +124,7 @@ static inline void THNN_(Col2Im_shapeCheck)(
   THArgCheck(dW > 0 && dH > 0, 8,
              "dilation should be greater than zero, but got dH: %d dW: %d", dH, dW);
 
-  int64_t ndim = THTensor_(nDimension)(input);
+  int64_t ndim = THTensor_(nDimensionLegacyNoScalars)(input);
   THNN_ARGCHECK(!input->is_empty() && (ndim == 2 || ndim == 3), 2, input,
                 "Expected non-empty 2D or 3D input tensor, but got input of shape %s");
 

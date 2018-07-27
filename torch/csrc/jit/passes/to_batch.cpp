@@ -34,30 +34,6 @@ void ToBatch::visitAten(Node* n, Block* block, Block* res_block){
     }
   }
 
-  // assume in batched operators, all attr inputs are in the end
-  for(Symbol attr : n->attributeNames()){
-    // std::cout << toString(n->kindOf(attr)) << std::endl;
-    auto attr_node = res_graph->create(prim::Constant);
-    at::Tensor t;
-    switch (n->kindOf(attr)) {
-      case AttributeKind::f:
-        t = at::tensor(n->f(attr), at::kFloat);
-        break;
-      case AttributeKind::i:
-        t = at::tensor(n->i(attr), at::kInt);
-        break;
-      case AttributeKind::t:
-        t = n->t(attr);
-        break;
-      default:
-        throw std::runtime_error("NYI: Attribute kind except for f, i, t is not supported yet");
-    }
-    attr_node->t_(attr::value, t);
-    attr_node->output()->inferTypeFrom(t);
-    res_block->appendNode(attr_node);
-    new_inputs.push_back(attr_node->output());
-  }
-
   // transform scalar to tensor before pass to batch operator script
   for(size_t i = 0; i < new_inputs.size(); i++){
     auto input = new_inputs[i];

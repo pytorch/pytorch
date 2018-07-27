@@ -1120,8 +1120,8 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
 {
   int64_t batch;
 
-  THArgCheck(THTensor_(nDimension)(batch1) == 3, 1, "expected 3D tensor");
-  THArgCheck(THTensor_(nDimension)(batch2) == 3, 2, "expected 3D tensor");
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor");
+  THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor");
   THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
              THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));

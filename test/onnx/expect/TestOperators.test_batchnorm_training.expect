@@ -11,8 +11,8 @@ graph {
     output: "6"
     output: "7"
     output: "8"
-    output: "batch_norm_dead_output-9"
-    output: "batch_norm_dead_output-10"
+    output: "batch_norm_dead_output-13"
+    output: "batch_norm_dead_output-14"
     op_type: "BatchNormalization"
     attribute {
       name: "epsilon"
