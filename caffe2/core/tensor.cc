@@ -15,8 +15,6 @@ CAFFE2_DEFINE_int64(
     "tensor sizes is bigger than this then tensor will be reset.");
 
 namespace caffe2 {
-// declaring it here instead of context.cc because tensor.h includes context.h
-CAFFE_KNOWN_TYPE(Tensor<CPUContext>);
 
 TensorPrinter::TensorPrinter(
     const std::string& tensor_name,

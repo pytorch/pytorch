@@ -12,7 +12,6 @@
 #include "caffe2/core/db.h"
 #include "caffe2/core/numa.h"
 #include "caffe2/core/operator.h"
-#include "caffe2/core/predictor.h"
 #include "caffe2/core/stats.h"
 #include "caffe2/core/transform.h"
 #include "caffe2/mkl/mkl_utils.h"
@@ -28,6 +27,7 @@
 #include "caffe2/opt/optimize_ideep.h"
 #include "caffe2/opt/passes.h"
 #include "caffe2/opt/sink.h"
+#include "caffe2/predictor/predictor.h"
 #include "caffe2/utils/cpuid.h"
 #include "caffe2/utils/string_utils.h"
 
@@ -793,13 +793,21 @@ void addObjectMethods(py::module& m) {
           "convert_node",
           [](caffe2::onnx::Caffe2Backend& instance,
              const py::bytes& node_str,
+             const std::vector<py::bytes>& value_infos_bytes,
              int opset_version) -> std::vector<std::vector<py::bytes>> {
             // Note that we return two lists of serialized ops. The first set is
             // init_ops and the second set is ops for pred net. When converting
             // RNN related op, it is possible that we will create ops in the
             // init_net. Hence the return structure here
+            caffe2::onnx::ValueInfoMap value_infos{};
+            for (const auto& vi_bytes : value_infos_bytes) {
+              ::ONNX_NAMESPACE::ValueInfoProto vi{};
+              vi.ParseFromString(vi_bytes);
+              auto name = vi.name();
+              value_infos.emplace(std::move(name), std::move(vi));
+            }
             auto c2ops = instance.ConvertNode(
-                node_str.cast<std::string>(), opset_version);
+                node_str.cast<std::string>(), {value_infos, opset_version});
             std::vector<std::vector<py::bytes>> vals;
             vals.emplace_back();
             auto& init_vals = vals.back();
@@ -816,12 +824,15 @@ void addObjectMethods(py::module& m) {
               normal_vals.emplace_back(py::bytes(out));
             }
             return vals;
-          })
+          },
+          py::arg("node_str"),
+          py::arg("value_infos_bytes") = std::vector<py::bytes>{},
+          py::arg("opset_version") = kKnownOpsetVersion)
       .def(
-        "_build_tensor_filling_op",
-        [](caffe2::onnx::Caffe2Backend& instance,
-           const py::bytes& tensor_proto_str,
-           const std::string& name="") -> py::bytes {
+          "_build_tensor_filling_op",
+          [](caffe2::onnx::Caffe2Backend& instance,
+             const py::bytes& tensor_proto_str,
+             const std::string& name = "") -> py::bytes {
             caffe2::OperatorDef op;
             ::ONNX_NAMESPACE::TensorProto tp;
             ParseProtoFromLargeString(tensor_proto_str, &tp);
@@ -829,7 +840,7 @@ void addObjectMethods(py::module& m) {
             std::string out;
             op.SerializeToString(&out);
             return py::bytes(out);
-        });
+          });
 
   py::class_<Predictor>(m, "Predictor")
       .def(
@@ -1353,6 +1364,33 @@ void addGlobalMethods(py::module& m) {
         }
 
         auto blob_info = InferBlobShapesAndTypesFromMap(blob_dimensions, nets_ptr);
+
+        std::string protob;
+        CAFFE_ENFORCE(blob_info.SerializeToString(&protob));
+        return py::bytes(protob);
+      });
+  m.def(
+      "infer_shapes_and_types_from_map",
+      [](const std::vector<py::bytes>& net_protos,
+         const std::map<std::string, std::vector<TIndex>> blob_dimensions,
+         const std::map<std::string, int> int_blob_types) {
+        // Parse protobuffers to NetDefs
+        std::vector<std::unique_ptr<caffe2::NetDef>> nets;
+        std::vector<caffe2::NetDef*> nets_ptr;
+        for (auto proto : net_protos) {
+          std::unique_ptr<NetDef> def(new NetDef());
+          CAFFE_ENFORCE(def->ParseFromString(proto));
+          nets_ptr.push_back(def.get());
+          nets.push_back(std::move(def));
+        }
+        std::map<std::string, TensorProto_DataType> blob_types;
+        for (auto blob_type : int_blob_types) {
+          blob_types[blob_type.first] =
+              static_cast<TensorProto_DataType>(blob_type.second);
+        }
+
+        auto blob_info = InferBlobShapesAndTypesFromMap(
+            blob_dimensions, blob_types, nets_ptr);
 
         std::string protob;
         CAFFE_ENFORCE(blob_info.SerializeToString(&protob));

@@ -31,27 +31,40 @@ static inline T* checked_cast_storage(Base* expr, const char * name, int pos) {
 }
 
 template <typename T, typename Base>
-inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull) {
+inline T* checked_cast_tensor(Base* expr, const char * name, int pos, bool allowNull, Backend backend, ScalarType scalar_type) {
   if(allowNull && expr == UndefinedTensor::singleton()) {
     return nullptr;
   }
-  if (typeid(*expr) != typeid(T))
-    AT_ERROR("Expected object of type ", T::typeString(), " but found type ", expr->type().toString(),
+  if (expr->type().backend() != backend) {
+    AT_ERROR("Expected object of backend ", backend, " but got backend ", expr->type().backend(),
              " for argument #", pos, " '", name, "'");
+  }
+  if (expr->type().scalarType() != scalar_type) {
+    AT_ERROR("Expected object of scalar type ", scalar_type, " but got scalar type ", expr->type().scalarType(),
+             " for argument #", pos, " '", name, "'");
+  }
+  // This is going away soon; delete this when we remove the subtypes of
+  // TensorImpl (so that we can eliminate the T template parameter)
+  if (typeid(*expr) != typeid(T)) {
+    AT_ERROR("Expected object of RTTI type ", typeid(T).name(), " but found type ", typeid(*expr).name(),
+             " for argument #", pos, " '", name, "'");
+  }
   return static_cast<T*>(expr);
 }
 
 // Converts a TensorList (i.e. ArrayRef<Tensor> to the underlying TH* Tensor Pointer)
 template <typename T, typename TBase, typename TH>
-static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos) {
+static inline std::vector<TH*> tensor_list_checked_cast(ArrayRef<TBase> tensors, const char * name, int pos, Backend backend, ScalarType scalar_type) {
   std::vector<TH*> casted(tensors.size());
   for (unsigned int i = 0; i < tensors.size(); ++i) {
     auto *expr = tensors[i].pImpl;
+    // TODO: Use the backend, scalar_type arguments to replace this
+    // dynamic cast for the test
     auto result = dynamic_cast<T*>(expr);
     if (result) {
       casted[i] = result->tensor;
     } else {
-      AT_ERROR("Expected a Tensor of type ", T::typeString(), " but found a type ", expr->type().toString(),
+      AT_ERROR("Expected a Tensor of RTTI type ", typeid(T).name(), " but found a type ", typeid(*expr).name(),
                " for sequence element ", i, " in sequence argument at position #", pos, " '", name, "'");
 
     }

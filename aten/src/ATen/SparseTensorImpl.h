@@ -57,11 +57,10 @@ public:
   Tensor indices() const { return indices_; }
   Tensor values() const { return values_; }
 
-  const char * toString() const override;
   IntList sizes() const override;
   IntList strides() const override;
   int64_t dim() const override;
-  Scalar localScalar() override;
+  TensorImpl* maybe_zero_dim(bool condition_when_zero_dim) override;
   void * unsafeGetTH(bool retain) override;
   std::unique_ptr<Storage> storage() override;
 

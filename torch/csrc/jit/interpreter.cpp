@@ -2,17 +2,17 @@
 
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/autograd/generated/variable_factories.h"
 #include "torch/csrc/autograd/profiler.h"
 #include "torch/csrc/autograd/variable.h"
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fusion_compiler.h"
-#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/jit/graph_executor.h"
 #include "torch/csrc/jit/ir.h"
-
 #include "torch/csrc/jit/ivalue.h"
 #include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/variable_tensor_functions.h"
-#include "torch/csrc/autograd/generated/variable_factories.h"
 
 #include <exception>
 #include <iostream>
@@ -147,6 +147,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
       auto nv = store->addOutput();
       auto old_node = graph.inputs()[input_pos];
+      nv->setType(old_node->type());
       stage_input_types[i].push_back(old_node->type());
       old_node->replaceAllUsesWith(nv);
       input_pos++;
@@ -336,12 +337,9 @@ struct PreprocessGraph {
 struct ContainerTensor : public at::TensorImpl {
 public:
   ContainerTensor()
-  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined))) {}
+  : TensorImpl(&(at::globalContext().getType(at::Backend::Undefined,at::ScalarType::Undefined)), nullptr) {}
 
   virtual ~ContainerTensor() {}
-  virtual const char * toString() const override {
-    throw std::runtime_error("toString() on ContainerTensor");
-  }
   virtual at::IntList sizes() const override {
     throw std::runtime_error("sizes() on ContainerTensor");
   }
@@ -350,9 +348,6 @@ public:
   }
   virtual int64_t dim() const override {
     throw std::runtime_error("dim() on ContainerTensor");
-  }
-  virtual at::Scalar localScalar() override {
-    throw std::runtime_error("localScalar() on ContainerTensor");
   }
   virtual void * unsafeGetTH(bool retain) override {
     throw std::runtime_error("unsafeGetTH() on ContainerTensor");
@@ -623,16 +618,9 @@ struct CodeImpl {
 
     auto executor = std::make_shared<GraphExecutor>(node->g(attr::Subgraph));
     graph_executors.emplace_back(executor.get());
-    auto num_inputs = node->inputs().size();
     return [=](Stack& stack) mutable {
       autograd::profiler::RecordFunction record("GraphExecutor");
-      auto inputs = last(stack, num_inputs);
-      variable_tensor_list tinputs(
-          fmap(inputs, [](const IValue& v) { return v.toTensor(); }));
-      drop(stack, num_inputs);
-      //TODO: has graph executor work from a stack as well
-      variable_tensor_list toutputs = executor->run(variable_tensor_list(std::move(tinputs)));
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+      executor->run(stack);
       return 0;
     };
   }

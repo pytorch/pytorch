@@ -1,6 +1,7 @@
 #pragma once
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/constants.h"
 
 namespace torch { namespace jit {
 
@@ -56,90 +57,51 @@ struct SymbolicVariable {
     return create(aten::mul, {*this, rhs})[0].typeLike(*this);
   }
   SymbolicVariable operator*(at::Scalar rhs) const {
-    if(isConstInt(rhs, 1))
+    if (isConstInt(rhs, 1))
       return *this;
-    Node * n;
-    auto r = create(aten::mul, {*this}, 1, &n)[0];
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return (*this) * insertConstant(rhs);
   }
   SymbolicVariable operator>(at::Scalar rhs) const {
-    Node * n;
-    auto r = create(aten::gt, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::gt, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator<(at::Scalar rhs) const {
-    Node * n;
-    auto r = create(aten::lt, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::lt, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator>=(at::Scalar rhs) const {
-    Node * n;
-    auto r = create(aten::ge, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::ge, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator<=(at::Scalar rhs) const {
-    Node * n;
-    auto r = create(aten::le, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::le, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator==(at::Scalar rhs) const {
-    Node * n;
-    auto r = create(aten::eq, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::eq, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator!=(at::Scalar rhs) const {
-    Node * n;
-    auto r = create(aten::ne, {*this}, 1, &n)[0].typeLikeWithScalarType(*this, at::kByte);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::ne, {*this, insertConstant(rhs)})[0].typeLikeWithScalarType(*this, at::kByte);
   }
   SymbolicVariable operator+(const SymbolicVariable rhs) const {
-    Node * n;
-    auto r = create(aten::add, {*this, rhs}, 1, &n)[0].typeLike(*this);
-    n->t_(attr::alpha, at::Scalar(1).toTensor());
-    return r;
+    return create(aten::add, {*this, rhs, insertConstant(1)})[0].typeLike(*this);
   }
   SymbolicVariable operator+(at::Scalar rhs) const {
-    Node * n;
-    auto r = create(aten::add, {*this}, 1, &n)[0].typeLike(*this);
-    n->t_(attr::alpha, at::Scalar(1).toTensor());
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return (*this) + insertConstant(rhs);
   }
   SymbolicVariable operator-() const {
     return create(aten::neg, {*this})[0].typeLike(*this);
   }
   SymbolicVariable operator-(const SymbolicVariable rhs) const {
-    Node *n;
-    auto r = create(aten::sub, {*this, rhs}, 1, &n)[0].typeLike(*this);
-    n->t_(attr::alpha, at::Scalar(1).toTensor());
-    return r;
+    return create(aten::sub, {*this, rhs, insertConstant(1)})[0].typeLike(*this);
   }
   SymbolicVariable operator/(at::Scalar rhs) const {
-    Node *n;
-    auto r = create(aten::div, {*this}, 1, &n)[0].typeLike(*this);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::div, {*this, insertConstant(rhs)})[0].typeLike(*this);
   }
   SymbolicVariable operator%(at::Scalar rhs) const {
-    Node *n;
-    auto r = create(aten::remainder, {*this}, 1, &n)[0].typeLike(*this);
-    n->t_(attr::other, rhs.toTensor());
-    return r;
+    return create(aten::remainder, {*this, insertConstant(rhs)})[0].typeLike(*this);
   }
   SymbolicVariable mm(const SymbolicVariable rhs) const {
-    auto r = create(t("mm"), {*this, rhs})[0];
-    return r;
+    return create(t("mm"), {*this, rhs})[0];
   }
   SymbolicVariable t() const {
-    auto r = create(t("t"), {*this})[0];
-    return r;
+    return create(t("t"), {*this})[0];
   }
   SymbolicVariable sigmoid() const {
     return create(aten::sigmoid, {*this})[0].typeLike(*this);
@@ -147,88 +109,73 @@ struct SymbolicVariable {
   SymbolicVariable tanh() const {
     return create(aten::tanh, {*this})[0].typeLike(*this);
   }
-  std::vector<SymbolicVariable> chunk(int32_t chunks, uint32_t dim) const {
-    Node * n;
-    auto r = create(t("chunk"), { *this }, chunks, &n);
-    n->i_(a("chunks"), chunks)
-     ->i_(a("dim"), dim);
-    return r;
+  std::vector<SymbolicVariable> chunk(int64_t chunks, int dim) const {
+    return create(t("chunk"), { *this , insertConstant(chunks), insertConstant(dim) }, chunks);
   }
   SymbolicVariable type_as(const SymbolicVariable rhs) const {
     return create(aten::type_as, {*this, rhs})[0].typeLikeWithRhsScalarType(*this, rhs);
   }
   SymbolicVariable narrow(int dim, int64_t start, int64_t length) const {
-    Node * n;
-    auto r = create(t("narrow"), { *this }, 1, &n)[0];
-    n->i_(a("dim"), dim)
-     ->i_(a("start"), start)
-     ->i_(a("length"), length);
-    return r;
+    return create(t("narrow"), { *this, insertConstant(dim), insertConstant(start), insertConstant(length) }, 1)[0];
   }
   static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, Value* dim) {
-    Node* n;
     std::vector<SymbolicVariable> all_inputs = inputs;
     all_inputs.push_back(dim);
-    auto r = create(aten::cat, all_inputs, 1, &n)[0];
-    return r;
+    return create(aten::cat, all_inputs)[0];
   }
-  static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int32_t dim) {
-    Node* n;
-    auto r = create(aten::cat, inputs, 1, &n)[0];
-    n->i_(attr::dim, dim);
-    return r;
+  static SymbolicVariable cat(ArrayRef<SymbolicVariable> inputs, int dim) {
+    JIT_ASSERT(inputs.size() > 0);
+    return SymbolicVariable::cat(inputs, inputs[0].insertConstant(dim));
   }
-  static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, int32_t dim) {
-    Node* n;
-    auto r = create(aten::stack, inputs, 1, &n)[0];
-    n->i_(attr::dim, dim);
-    return r;
+  static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, Value* dim) {
+    std::vector<SymbolicVariable> all_inputs = inputs;
+    all_inputs.push_back(dim);
+    return create(aten::stack, all_inputs)[0];
+  }
+  static SymbolicVariable stack(ArrayRef<SymbolicVariable> inputs, int dim) {
+    JIT_ASSERT(inputs.size() > 0);
+    return SymbolicVariable::stack(inputs, inputs[0].insertConstant(dim));
   }
   SymbolicVariable sum() const {
-    auto r = create(t("sum"), {*this})[0];
-    return r;
+    return create(t("sum"), {*this})[0];
   }
   SymbolicVariable sum(int dim, bool keepdim) const {
-    Node * n;
-    auto r = create(t("sum"), {*this}, 1, &n)[0];
-    n->is_(a("dim"), {dim})
-     ->i_(a("keepdim"), keepdim);
-    return r;
+    return create(t("sum"), {*this, insertConstant(at::IntList{dim}), insertConstant(keepdim)})[0];
   }
   SymbolicVariable squeeze(Value* dim) const {
-    Node * n;
-    auto r = create(t("squeeze"), {*this, dim}, 1, &n)[0];
-    return r;
+    return create(t("squeeze"), {*this, dim})[0];
   }
   SymbolicVariable squeeze(int dim) const {
-    Node * n;
-    auto r = create(t("squeeze"), {*this}, 1, &n)[0];
-    n->i_(a("dim"), dim);
-    return r;
+    return squeeze(insertConstant(dim));
+  }
+  SymbolicVariable unsqueeze(Value* dim) const {
+    return create(t("unsqueeze"), {*this, dim})[0];
   }
   SymbolicVariable unsqueeze(int dim) const {
-    Node * n;
-    auto r = create(t("unsqueeze"), {*this}, 1, &n)[0];
-    n->i_(a("dim"), dim);
-    return r;
+    return unsqueeze(insertConstant(dim));
+  }
+  SymbolicVariable view(Value* sizes) const {
+    return create(aten::view, {*this, sizes})[0];
   }
   SymbolicVariable view(std::vector<std::int64_t> sizes) const {
-    Node *n;
-    auto r =  create(aten::view, {*this}, 1, &n)[0];
-    n->is_(a("size"), std::move(sizes));
-    return r;
+    return view(insertConstant(sizes));
+  }
+  SymbolicVariable reshape(Value* sizes) const {
+    return create(aten::reshape, {*this, sizes})[0];
+  }
+  SymbolicVariable reshape(std::vector<std::int64_t> sizes) const {
+    return reshape(insertConstant(sizes));
   }
   SymbolicVariable addmm(SymbolicVariable mat1, SymbolicVariable mat2) const {
-    Node *n;
-    auto r = create(aten::addmm, {*this, mat1, mat2}, 1, &n)[0];
-    n->t_(a("alpha"), at::CPU(at::kFloat).scalarTensor(1.0));
-    n->t_(a("beta"), at::CPU(at::kFloat).scalarTensor(1.0));
-    return r;
+    return create(aten::addmm, {*this, mat1, mat2, insertConstant(1.0), insertConstant(1.0)})[0];
   }
   Value * value() const {
     return v;
   }
 private:
+  Value * insertConstant(IValue value) const {
+    return jit::insertConstant(*v->owningGraph(), value);
+  }
   SymbolicVariable typeLike(SymbolicVariable other) {
     if (auto other_type = other.v->type()->cast<TensorType>())
       v->setType(other_type->contiguous());

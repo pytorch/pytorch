@@ -255,7 +255,7 @@ class BatchMatMulOp final : public Operator<Context> {
 
       // TODO(T23893772): doing this in a loop is likely going to be slow on GPU
       for (size_t p = 0; p < num_outer_batches; ++p) {
-        math::GemmBatched<T, Context, Engine>(
+        math::GemmStridedBatched<T, Context, Engine>(
             trans_a_ ? CblasTrans : CblasNoTrans,
             trans_b_ ? CblasTrans : CblasNoTrans,
             num_sub_batches,
@@ -264,11 +264,13 @@ class BatchMatMulOp final : public Operator<Context> {
             K,
             1.0f,
             data_A + p * A_stride,
+            M * K,
             data_B + p * B_stride,
+            K * N,
             0.0f,
             Y_data + p * Y_stride,
-            &context_,
-            use_scratch_ ? scratch_.get() : nullptr);
+            M * N,
+            &context_);
       }
     }
     return true;

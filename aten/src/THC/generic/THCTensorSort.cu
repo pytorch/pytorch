@@ -21,7 +21,6 @@ THC_API void THCTensor_(sortKeyValueInplace)(THCState* state,
   ptrdiff_t inElements = THCTensor_(nElement)(state, key);
 
   if (inElements == 0) {
-    // Zero-dim tensor; do nothing
     return;
   }
 
