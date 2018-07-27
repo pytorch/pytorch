@@ -47,6 +47,7 @@ void magmaGetriBatched<double>(
         n, dA_array, ldda, dipiv_array, dinvA_array,
         lddia, info_array, batchCount, queue);
 }
+#endif
 
 #define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
