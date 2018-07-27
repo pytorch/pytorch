@@ -81,16 +81,12 @@
 - name: acos(Tensor self)
   self: grad * -((-self * self + 1).rsqrt())
 
+- name: add(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: maybe_multiply(grad, alpha)
+
 - name: add(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
-
-- name: s_native_add(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: maybe_multiply(grad, alpha)
-
-- name: th_add(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: maybe_multiply(grad, alpha)
 
 - name: addbmm(Tensor self, Tensor batch1, Tensor batch2, *, Scalar beta, Scalar alpha)
   self: maybe_multiply(grad, beta)
@@ -219,12 +215,12 @@
   self: norm_backward(grad, self - other, p, result)
   other: -norm_backward(grad, self - other, p, result)
 
-- name: div(Tensor self, Scalar other)
-  self: grad / other
-
 - name: div(Tensor self, Tensor other)
   self: grad / other
   other: -grad * self / (other * other)
+
+- name: div(Tensor self, Scalar other)
+  self: grad / other
 
 - name: dot(Tensor self, Tensor tensor)
   self: grad * tensor
@@ -256,7 +252,7 @@
   self: grad * (result + 1)
 
 - name: expand(Tensor self, IntList size, *, bool implicit)
-  self: reduce_to(grad, self.sizes())
+  self: at::sum_to(grad, self.sizes())
 
 - name: exponential_(Tensor self, double lambd, Generator generator)
   self: zeros_like(grad)
@@ -462,16 +458,12 @@
 - name: mode(Tensor self, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
 
+- name: mul(Tensor self, Tensor other)
+  self: grad * other
+  other: grad * self
+
 - name: mul(Tensor self, Scalar other)
   self: grad * other
-
-- name: s_native_mul(Tensor self, Tensor other)
-  self: grad * other
-  other: grad * self
-
-- name: th_mul(Tensor self, Tensor other)
-  self: grad * other
-  other: grad * self
 
 - name: mv(Tensor self, Tensor vec)
   self: grad.ger(vec)
@@ -659,16 +651,12 @@
 - name: std(Tensor self, int64_t dim, bool unbiased, bool keepdim)
   self: var_backward(grad / (result * 2), self, dim, unbiased, keepdim)
 
+- name: sub(Tensor self, Tensor other, *, Scalar alpha)
+  self: grad
+  other: -grad * alpha
+
 - name: sub(Tensor self, Scalar other, *, Scalar alpha)
   self: grad
-
-- name: s_native_sub(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: -grad * alpha
-
-- name: th_sub(Tensor self, Tensor other, *, Scalar alpha)
-  self: grad
-  other: -grad * alpha
 
 - name: _sum(Tensor self)
   self: grad.expand(self.sizes())

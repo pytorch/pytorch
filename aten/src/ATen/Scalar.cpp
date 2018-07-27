@@ -5,10 +5,13 @@
 #include <TH/TH.h>
 
 #include "ATen/Tensor.h"
+#include "ATen/TensorMethods.h"
+#include "ATen/TensorOperators.h"
 #include "ATen/Context.h"
 #include "ATen/TensorMethods.h"
 
 namespace at {
+
 Tensor Scalar::toTensor() const {
   if (Tag::HAS_t == tag) {
     return Tensor(t);
@@ -27,4 +30,14 @@ Scalar Scalar::local() const {
   return Tensor(t)._local_scalar();
 }
 
+Scalar Scalar::operator-() const {
+ if (isFloatingPoint()) {
+   return Scalar(-v.d);
+ } else if (isIntegral()) {
+   return Scalar(-v.i);
+ } else {
+   return Scalar(-Tensor(t));
+ }
 }
+
+}  // namespace at

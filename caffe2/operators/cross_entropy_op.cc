@@ -56,7 +56,7 @@ bool LabelCrossEntropyOp<float, CPUContext>::RunOnDevice() {
   Y->Resize(N);
   const auto* Xdata = X.data<float>();
   const auto* labelData = label.data<int>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   CAFFE_ENFORCE(
       (ConstEigenVectorArrayMap<int>(labelData, N) < D).all() &&
           (ConstEigenVectorArrayMap<int>(labelData, N) >= 0).all(),
@@ -85,7 +85,7 @@ bool SigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
     std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
     out->Resize(dims);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -123,7 +123,7 @@ bool SigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::RunOnDevice() {
 
   auto* out = Output(0);
   out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -167,7 +167,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsOp<float, CPUContext>::RunOnDevice() {
     std::vector<TIndex> dims(logits.dims().begin(), logits.dims().end() - 1);
     out->Resize(dims);
   }
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -201,7 +201,7 @@ bool WeightedSigmoidCrossEntropyWithLogitsGradientOp<float, CPUContext>::
 
   auto* out = Output(0);
   out->ResizeLike(logits);
-  auto* out_ptr = out->mutable_data<float>();
+  auto* out_ptr = out->template mutable_data<float>();
 
   auto* logits_ptr = logits.data<float>();
   auto* targets_ptr = targets.data<float>();
@@ -241,12 +241,12 @@ bool LabelCrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dY.ndim(), 1);
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
-  math::Set<float, CPUContext>(dX->size(), 0.f, dX->mutable_data<float>(),
-                               &context_);
+  math::Set<float, CPUContext>(
+      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const int* labelData = label.data<int>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   for (int i = 0; i < N; ++i) {
     dXdata[i * D + labelData[i]] =
         - dYdata[i] / std::max(Xdata[i * D + labelData[i]], kLOG_THRESHOLD());
@@ -263,7 +263,7 @@ bool MakeTwoClassOp<float, CPUContext>::RunOnDevice() {
   TIndex N = X.size();
   Y->Resize(shape);
   const auto* Xdata = X.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   for (TIndex i = 0; i < N; ++i) {
     DCHECK_GE(Xdata[i], 0.0);
     DCHECK_LE(Xdata[i], 1.0);
@@ -283,7 +283,7 @@ bool MakeTwoClassGradientOp<float, CPUContext>::RunOnDevice() {
   shape.pop_back();
   dX->Resize(shape);
   const float* dYdata = dY.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   TIndex N = dX->size();
   // use eigen?
   for (TIndex i = 0; i < N; ++i) {
@@ -311,7 +311,7 @@ bool CrossEntropyOp<float, CPUContext>::RunOnDevice() {
   Y->Resize(vector<TIndex>{N});
   const float* Xdata = X.data<float>();
   const float* labelData = label.data<float>();
-  auto* Ydata = Y->mutable_data<float>();
+  auto* Ydata = Y->template mutable_data<float>();
   CAFFE_ENFORCE(
       (ConstEigenArrayMap<float>(labelData, D, N) <= 1.0f).all() &&
           (ConstEigenArrayMap<float>(labelData, D, N) >= 0.0f).all(),
@@ -350,11 +350,11 @@ bool CrossEntropyGradientOp<float, CPUContext>::RunOnDevice() {
   CAFFE_ENFORCE_EQ(dY.dim32(0), N);
   dX->ResizeLike(X);
   math::Set<float, CPUContext>(
-    dX->size(), 0.f, dX->mutable_data<float>(), &context_);
+      dX->size(), 0.f, dX->template mutable_data<float>(), &context_);
   const float* Xdata = X.data<float>();
   const float* dYdata = dY.data<float>();
   const float* labelData = label.data<float>();
-  float* dXdata = dX->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
   EigenArrayMap<float>(dXdata, D, N) =
       (ConstEigenArrayMap<float>(labelData, D, N) /
        ConstEigenArrayMap<float>(Xdata, D, N).cwiseMax(kLOG_THRESHOLD()))
