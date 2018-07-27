@@ -29,7 +29,6 @@ using autograd::Variable;
 using autograd::variable_list;
 using at::Scalar;
 using at::Tensor;
-using at::TensorList;
 using at::TensorOptions;
 using at::DeviceGuard;
 
