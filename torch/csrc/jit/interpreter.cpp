@@ -617,16 +617,9 @@ struct CodeImpl {
 
     auto executor = std::make_shared<GraphExecutor>(node->g(attr::Subgraph));
     graph_executors.emplace_back(executor.get());
-    auto num_inputs = node->inputs().size();
     return [=](Stack& stack) mutable {
       autograd::profiler::RecordFunction record("GraphExecutor");
-      auto inputs = last(stack, num_inputs);
-      variable_tensor_list tinputs(
-          fmap(inputs, [](const IValue& v) { return v.toTensor(); }));
-      drop(stack, num_inputs);
-      //TODO: has graph executor work from a stack as well
-      variable_tensor_list toutputs = executor->run(variable_tensor_list(std::move(tinputs)));
-      stack.insert(stack.end(), toutputs.begin(), toutputs.end());
+      executor->run(stack);
       return 0;
     };
   }

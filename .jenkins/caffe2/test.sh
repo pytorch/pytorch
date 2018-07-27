@@ -100,6 +100,8 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Unknown reasons, need to debug
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/arg_ops_test.py")
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/piecewise_linear_transform_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
+  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/unique_ops_test.py")
 
   # Need to go through roi ops to replace max(...) with fmaxf(...)
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/roi_align_rotated_op_test.py")
@@ -107,12 +109,6 @@ if [[ $BUILD_ENVIRONMENT == *-rocm* ]]; then
   # Our cuda top_k op has some asm code, the hipified version doesn't
   # compile yet, so we don't have top_k operator for now
   rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/top_k_test.py")
-
-  # These are fixed in rocm 1.8.2, re-enable them once our CI docker images are upgraded
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/recurrent_net_executor_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/softmax_ops_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/conv_test.py")
-  rocm_ignore_test+=("--ignore $CAFFE2_PYPATH/python/operator_test/group_conv_test.py")
 fi
 
 # Python tests
