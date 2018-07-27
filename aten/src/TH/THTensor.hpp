@@ -28,7 +28,7 @@ struct THTensor
 
     std::atomic<int> refcount_;
 
-    // Note: storage->size may be greater than the recorded size
+    // Note: storage->size() may be greater than the recorded size
     // of a tensor
     THStorage *storage_;
     ptrdiff_t storage_offset_;

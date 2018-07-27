@@ -82,18 +82,18 @@ THTensor *THTensor_(newWithTensor)(THTensor *tensor)
 THTensor *THTensor_(newWithStorage)(THStorage *storage, ptrdiff_t storageOffset, THLongStorage *size, THLongStorage *stride)
 {
   if(size && stride) {
-    THArgCheck(size->size == stride->size, 4, "inconsistent size");
+    THArgCheck(size->size() == stride->size(), 4, "inconsistent size");
   }
   AT_CHECK(size, "size must not be null");
 
   THTensor *self = new THTensor(THStorage_(new)());
 #ifdef DEBUG
-  THAssert(size->size <= INT_MAX);
+  THAssert(size->size() <= INT_MAX);
 #endif
   THTensor_(setStorageNd)(self,
                           storage,
                           storageOffset,
-                          size->size,
+                          size->size(),
                           THLongStorage_data(size),
                           (stride ? THLongStorage_data(stride) : NULL));
 
@@ -227,7 +227,7 @@ THTensor *THTensor_(newView)(THTensor *tensor, THLongStorage *size)
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
   auto stride = THTensor_compute_stride(tensor->sizes(),
                                         tensor->strides(),
-                                        at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
+                                        at::IntList(inferred_size->data<int64_t>(), inferred_size->size()));
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
     "across two contiguous subspaces). Call .contiguous() before .view().");
@@ -245,12 +245,12 @@ void THTensor_(resize)(THTensor *self, THLongStorage *size, THLongStorage *strid
 {
   THArgCheck(size != NULL, 2, "invalid size");
   if(stride)
-    THArgCheck(stride->size == size->size, 3, "invalid stride");
+    THArgCheck(stride->size() == size->size(), 3, "invalid stride");
 
 #ifdef DEBUG
-  THAssert(size->size <= INT_MAX);
+  THAssert(size->size() <= INT_MAX);
 #endif
-  THTensor_(resizeNd)(self, size->size, THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
+  THTensor_(resizeNd)(self, size->size(), THLongStorage_data(size), (stride ? THLongStorage_data(stride) : NULL));
 }
 
 void THTensor_(resizeAs)(THTensor *self, THTensor *src)
@@ -303,7 +303,7 @@ void THTensor_(set)(THTensor *self, THTensor *src)
 void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_)
 {
   if(size_ && stride_)
-    THArgCheck(size_->size == stride_->size, 5, "inconsistent size/stride sizes");
+    THArgCheck(size_->size() == stride_->size(), 5, "inconsistent size/stride sizes");
 
   AT_CHECK(size_, "size must not be null");
 #ifdef DEBUG
@@ -312,7 +312,7 @@ void THTensor_(setStorage)(THTensor *self, THStorage *storage_, ptrdiff_t storag
   THTensor_(setStorageNd)(self,
                           storage_,
                           storageOffset_,
-                          size_->size,
+                          size_->size(),
                           THLongStorage_data(size_),
                           (stride_ ? THLongStorage_data(stride_) : NULL));
 }
@@ -596,6 +596,20 @@ int THTensor_(isContiguous)(const THTensor *self)
   return 1;
 }
 
+int THTensor_(isSize)(const THTensor *self, const THLongStorage *dims)
+{
+  int d;
+  if (THTensor_nDimensionLegacyAll(self) != dims->size())
+    return 0;
+
+  for(d = 0; d < THTensor_nDimensionLegacyAll(self); ++d)
+  {
+    if(self->size(d) != THLongStorage_data(dims)[d])
+      return 0;
+  }
+  return 1;
+}
+
 int THTensor_(isSameSizeAs)(const THTensor *self, const THTensor* src)
 {
   int d;
@@ -747,7 +761,7 @@ void THTensor_(resizeNd)(THTensor *self, int nDimension, int64_t *size, int64_t 
     if(!THTensor_getStoragePtr(self)) {
       THTensor_stealAndSetStoragePtr(self, THStorage_(new)());
     }
-    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size) {
+    if(totalSize+self->storage_offset() > THTensor_getStoragePtr(self)->size()) {
       THStorage_(resize)(THTensor_getStoragePtr(self), totalSize+self->storage_offset());
     }
   }

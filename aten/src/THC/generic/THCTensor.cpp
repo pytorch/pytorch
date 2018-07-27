@@ -89,7 +89,7 @@ THCTensor *THCTensor_(newWithTensor)(THCState *state, THCTensor *tensor)
 THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrdiff_t storageOffset, THLongStorage *size, THLongStorage *stride)
 {
   if(size && stride)
-    THArgCheck(size->size == stride->size, 4, "inconsistent size");
+    THArgCheck(size->size() == stride->size(), 4, "inconsistent size");
 
   AT_CHECK(size, "size must not be null");
   THCTensor *self = new THCTensor(THCStorage_(new)(state));
@@ -97,7 +97,7 @@ THCTensor *THCTensor_(newWithStorage)(THCState *state, THCStorage *storage, ptrd
                            self,
                            storage,
                            storageOffset,
-                           size->size,
+                           size->size(),
                            THLongStorage_data(size),
                            (stride ? THLongStorage_data(stride) : NULL));
 
@@ -230,7 +230,7 @@ THCTensor *THCTensor_(newView)(THCState *state, THCTensor *tensor, THLongStorage
   THLongStorage *inferred_size = THLongStorage_newInferSize(size, numel);
   auto stride = THTensor_compute_stride(tensor->sizes(),
                                         tensor->strides(),
-                                        at::IntList(inferred_size->data<int64_t>(), inferred_size->size));
+                                        at::IntList(inferred_size->data<int64_t>(), inferred_size->size()));
   THArgCheck(stride.has_value(), 2, "view size is "
     "not compatible with input tensor's size and stride (at least one dimension spans "
     "across two contiguous subspaces). Call .contiguous() before .view().");
@@ -309,14 +309,14 @@ void THCTensor_(set)(THCState *state, THCTensor *self, THCTensor *src)
 void THCTensor_(setStorage)(THCState *state, THCTensor *self, THCStorage *storage_, ptrdiff_t storageOffset_, THLongStorage *size_, THLongStorage *stride_)
 {
   if(size_ && stride_)
-    THArgCheck(size_->size == stride_->size, 5, "inconsistent size/stride sizes");
+    THArgCheck(size_->size() == stride_->size(), 5, "inconsistent size/stride sizes");
 
   AT_CHECK(size_, "size must not be null");
   THCTensor_(setStorageNd)(state,
                            self,
                            storage_,
                            storageOffset_,
-                           size_->size,
+                           size_->size(),
                            THLongStorage_data(size_),
                            (stride_ ? THLongStorage_data(stride_) : NULL));
 }
@@ -521,6 +521,20 @@ void THCTensor_(unsqueeze1d)(THCState *state, THCTensor *self, THCTensor *src, i
 int THCTensor_(isContiguous)(THCState *state, const THCTensor *self)
 {
   return THCTensor_isContiguous(state, self);
+}
+
+int THCTensor_(isSize)(THCState *state, const THCTensor *self, const THLongStorage *dims)
+{
+  int d;
+  if (self->dim() != dims->size())
+    return 0;
+
+  for (d = 0; d < self->dim(); ++d)
+  {
+    if (self->size(d) != THLongStorage_data(dims)[d])
+      return 0;
+  }
+  return 1;
 }
 
 int THCTensor_(isSetTo)(THCState *state, const THCTensor *self, const THCTensor *src)
