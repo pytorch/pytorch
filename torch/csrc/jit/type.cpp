@@ -63,7 +63,7 @@ TypePtr FloatType::get() {
   return value;
 }
 TypePtr NoneType::get() {
-  static auto value = std::make_shared<NoneType>();
+  static auto value = NoneType::create();
   return value;
 }
 TypePtr ListType::ofTensors() {

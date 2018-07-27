@@ -382,22 +382,29 @@ private:
   : Type(TypeKind::IntType) {}
 };
 
+struct NoneType;
+using NoneTypePtr = std::shared_ptr<NoneType>;
 // This node represents a Python int number value
 struct NoneType : public Type {
-  NoneType()
-  : Type(TypeKind::NoneType) {}
+  template<typename ... T>
+  static NoneTypePtr create( T&& ... all ) {
+    return NoneTypePtr(new NoneType( std::forward<T>(all)... ));
+  }
   virtual bool operator==(const Type& rhs) const override {
     return rhs.kind() == kind();
   }
   virtual std::string str() const override {
     return "None";
   }
-  virtual bool isSubtypeOf(const Type& rhs) const override {
-    return *this == rhs;
+  virtual bool isSubtypeOf(const TypePtr rhs) const override {
+    return *this == *rhs;
   }
   static const TypeKind Kind = TypeKind::NoneType;
   // global singleton
   static TypePtr get();
+private:
+  NoneType()
+  : Type(TypeKind::NoneType) {}
 };
 
 
