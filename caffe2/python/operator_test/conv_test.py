@@ -248,7 +248,9 @@ class TestConvolution(hu.HypothesisTestCase):
         except RuntimeError as e:
             es = str(e)
             if "status == CUDNN_STATUS_SUCCESS" not in es \
-               or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
+               or "CUDNN_STATUS_NOT_SUPPORTED" not in es \
+               or force_algo_fwd == 0: # CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM should
+                                       # always have implementation
                 raise e
 
         for i in range(len(inputs)):
@@ -408,7 +410,9 @@ class TestConvolution(hu.HypothesisTestCase):
         except RuntimeError as e:
             es = str(e)
             if "status == CUDNN_STATUS_SUCCESS" not in es \
-               or "CUDNN_STATUS_NOT_SUPPORTED" not in es:
+               or "CUDNN_STATUS_NOT_SUPPORTED" not in es \
+               or force_algo_fwd == 0: # CUDNN_CONVOLUTION_FWD_ALGO_IMPLICIT_GEMM should
+                                       # always have implementation
                 raise e
 
         for i in range(len(inputs)):
