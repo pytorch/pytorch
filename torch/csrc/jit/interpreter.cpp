@@ -147,6 +147,7 @@ static std::vector<std::vector<TypePtr>> flattenStages(Graph & graph) {
     while(input_pos < graph.inputs().size() && graph.inputs()[input_pos]->stage() == i) {
       auto nv = store->addOutput();
       auto old_node = graph.inputs()[input_pos];
+      nv->setType(old_node->type());
       stage_input_types[i].push_back(old_node->type());
       old_node->replaceAllUsesWith(nv);
       input_pos++;

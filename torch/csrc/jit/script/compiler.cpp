@@ -386,72 +386,6 @@ at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, 
   return std::vector<int64_t>(*N, *r);
 }
 
-// try to turn constant inputs into attributes
-void liftConstantAttributes(const FunctionSchema& schema, Node* node) {
-  // we shouldn't start with attributes, just inputs
-  JIT_ASSERT(!node->hasAttributes());
-  std::vector<Value*> new_inputs;
-  Attributes<Node> attributes;
-  for(size_t i = 0, n = 0; i < schema.arguments.size(); ++i) {
-    const auto& arg = schema.arguments[i];
-    // this was a builtin with a vararg list lowered,
-    if(*arg.type == *ListType::ofTensors()) {
-      // we need to skip all the vararg nodes, and continue parsing the
-      // possible attribute nodes
-      size_t vararg_list_size = node->inputs().size() - (schema.arguments.size() - 1);
-      while(n < i + vararg_list_size) {
-        new_inputs.push_back(node->input(n++));
-      }
-      continue;
-    }
-    auto input = node->input(n++);
-    switch(arg.type->kind()) {
-      case TypeKind::IntType:{
-        auto r = constant_as<int64_t>(input);
-        if(!r)
-          return;
-        attributes.i_(Symbol::attr(arg.name), *r);
-      } break;
-      case TypeKind::FloatType: {
-        auto r = constant_as<double>(input);
-        if(!r)
-          return;
-        attributes.f_(Symbol::attr(arg.name), *r);
-      } break;
-      case TypeKind::NumberType: {
-        auto r = constant_as<at::Scalar>(input);
-        if(!r)
-          return;
-        attributes.t_(Symbol::attr(arg.name), r->toTensor());
-      } break;
-      case TypeKind::ListType: {
-        auto elem = arg.type->expect<ListType>()->getElementType();
-        if(elem->kind() == TypeKind::IntType) {
-          auto r = getIntListAttribute(arg.N, input);
-          if(!r)
-            return;
-          attributes.is_(Symbol::attr(arg.name), *r);
-        } else {
-          // only IntLists can become attributes, other
-          // types are not attribute-able
-          new_inputs.push_back(input);
-        }
-      } break;
-      default:
-        new_inputs.push_back(input);
-    }
-  }
-  // nothing changed no need to modify the node
-  if(!attributes.hasAttributes())
-    return;
-
-  node->removeAllInputs();
-  for(Value* input : new_inputs) {
-    node->addInput(input);
-  }
-  node->copyAttributes(attributes);
-}
-
 at::ArrayRef<Value*> createTupleUnpack(Value* v) {
   // small peephole optimization to ensure IntList attributes can still turn
   // into constants e.g. in x.expand([3, 4])
@@ -516,10 +450,8 @@ at::optional<std::vector<Value*>> tryMatchSchema(
         return at::nullopt;
       }
       positional_inputs[i] = NamedValue(
-          loc,
-          i,
-          insertConstant(graph, *default_value, loc)
-              ->setType(schema.arguments[i].type));
+          loc, i,
+          insertConstant(graph, *default_value, loc));
     }
 
     // check input types
@@ -579,10 +511,6 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
     return nullptr;
   // we successfully matched this schema, construct the node
 
-  // note: we always construct purely positional nodes here
-  // the pass liftConstantAttributes replaces the node with with one that
-  // uses attributes if all the attributes ended up as constants
-
   NodeKind kind(Symbol::aten(name));
   auto n = graph->insertNode(graph->create(kind, *flat_inputs, 0))
                 ->setSourceLocation(std::make_shared<SourceRange>(loc));
@@ -602,9 +530,6 @@ static std::shared_ptr<SugaredValue> tryEmitBuiltin(
       n->addOutput()->setType(ret.type);
     }
   }
-
-  if(op->hasAttributedVersion())
-    liftConstantAttributes(op->schema, n);
 
   // assert that we did indeed create an op that has implementation
   // otherwise schema and dispatch are not in sync
