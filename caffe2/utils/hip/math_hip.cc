@@ -3,6 +3,7 @@
 
 #include "caffe2/utils/math.h"
 
+#include <cstring>
 #include <limits>
 #include <numeric>
 #include <vector>
@@ -14,6 +15,8 @@
 
 #include "caffe2/core/hip/context_hip.h"
 #include "caffe2/utils/conversions.h"
+#include "caffe2/utils/fixed_divisor.h"
+#include "caffe2/utils/math_utils.h"
 
 #if THRUST_VERSION >= 100800
 #define THRUST_SUPPORTS_PER_THREAD
@@ -25,25 +28,6 @@ namespace caffe2 {
 namespace math {
 
 namespace {
-
-inline __host__ __device__ bool Not(const bool x) {
-  return !x;
-}
-
-template <typename T>
-inline __host__ __device__ T Negate(const T& x) {
-  return -x;
-}
-
-template <typename T>
-inline __host__ __device__ T Square(const T& x) {
-  return x * x;
-}
-
-template <typename T>
-inline __host__ __device__ T Sign(const T& x) {
-  return x > 0 ? T(1) : (x < 0 ? T(-1) : T(0));
-}
 
 #define DELEGATE_SIMPLE_HOST_DEVICE_BINARY_FUNCTOR(Func, expr)        \
   template <typename T>                                               \
@@ -80,14 +64,13 @@ __global__ void SimpleBinaryOpHIPKernel(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
-__global__ void RowwiseBinaryOpHIPKenel(
-    const int rows,
+__global__ void RowwiseBinaryOpHIPKernel(
+    const int size,
     const int cols,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
-  const int size = rows * cols;
   HIP_1D_KERNEL_LOOP(C_index, size) {
     const int j = C_index % cols;
     const int A_index = broadcast_1st ? j : C_index;
@@ -97,14 +80,13 @@ __global__ void RowwiseBinaryOpHIPKenel(
 }
 
 template <typename TIn, typename TOut, class BinaryOperator, bool broadcast_1st>
-__global__ void ColwiseBinaryOpHIPKenel(
-    const int rows,
+__global__ void ColwiseBinaryOpHIPKernel(
+    const int size,
     const int cols,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
     TOut* C) {
-  const int size = rows * cols;
   HIP_1D_KERNEL_LOOP(C_index, size) {
     const int i = C_index / cols;
     const int A_index = broadcast_1st ? i : C_index;
@@ -118,7 +100,7 @@ __global__ void BroadcastBinaryOpHIPKernel(
     const int size,
     const SimpleArray<int, D> A_strides,
     const SimpleArray<int, D> B_strides,
-    const SimpleArray<int, D> C_dims,
+    const SimpleArray<FixedDivisor<int>, D> C_dims,
     const BinaryOperator op,
     const TIn* A,
     const TIn* B,
@@ -129,10 +111,10 @@ __global__ void BroadcastBinaryOpHIPKernel(
     int C_index_val = C_index;
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
-      const int d = C_index_val % C_dims.data[i];
-      A_index += A_strides.data[i] == 0 ? 0 : d * A_strides.data[i];
-      B_index += B_strides.data[i] == 0 ? 0 : d * B_strides.data[i];
-      C_index_val /= C_dims.data[i];
+      int d;
+      C_dims.data[i].DivMod(C_index_val, &C_index_val, &d);
+      A_index += d * A_strides.data[i];
+      B_index += d * B_strides.data[i];
     }
     C[C_index] = op(A[A_index], B[B_index]);
   }
@@ -140,9 +122,8 @@ __global__ void BroadcastBinaryOpHIPKernel(
 
 template <typename TIn, typename TOut, class BinaryOperator>
 void BinaryOpWith2DBroadcasting(
-    const int ndim,
-    const int* dims,
-    const int pivot,
+    const int rows,
+    const int cols,
     const bool rowwise_broadcast,
     const bool broadcast_1st,
     const BinaryOperator& op,
@@ -150,20 +131,19 @@ void BinaryOpWith2DBroadcasting(
     const TIn* B,
     TOut* C,
     HIPContext* context) {
-  const int rows =
-      std::accumulate(dims, dims + pivot, 1, std::multiplies<int>());
-  const int cols =
-      std::accumulate(dims + pivot, dims + ndim, 1, std::multiplies<int>());
+  if (rows == 0 || cols == 0) {
+    return;
+  }
   const int size = rows * cols;
   if (rowwise_broadcast) {
     if (broadcast_1st) {
       hipLaunchKernelGGL(
-          (RowwiseBinaryOpHIPKenel<TIn, TOut, BinaryOperator, true>),
+          (RowwiseBinaryOpHIPKernel<TIn, TOut, BinaryOperator, true>),
           dim3(CAFFE_GET_BLOCKS(size)),
           dim3(CAFFE_HIP_NUM_THREADS),
           0,
           context->hip_stream(),
-          rows,
+          size,
           cols,
           op,
           A,
@@ -171,12 +151,12 @@ void BinaryOpWith2DBroadcasting(
           C);
     } else {
       hipLaunchKernelGGL(
-          (RowwiseBinaryOpHIPKenel<TIn, TOut, BinaryOperator, false>),
+          (RowwiseBinaryOpHIPKernel<TIn, TOut, BinaryOperator, false>),
           dim3(CAFFE_GET_BLOCKS(size)),
           dim3(CAFFE_HIP_NUM_THREADS),
           0,
           context->hip_stream(),
-          rows,
+          size,
           cols,
           op,
           A,
@@ -186,12 +166,12 @@ void BinaryOpWith2DBroadcasting(
   } else {
     if (broadcast_1st) {
       hipLaunchKernelGGL(
-          (ColwiseBinaryOpHIPKenel<TIn, TOut, BinaryOperator, true>),
+          (ColwiseBinaryOpHIPKernel<TIn, TOut, BinaryOperator, true>),
           dim3(CAFFE_GET_BLOCKS(size)),
           dim3(CAFFE_HIP_NUM_THREADS),
           0,
           context->hip_stream(),
-          rows,
+          size,
           cols,
           op,
           A,
@@ -199,12 +179,12 @@ void BinaryOpWith2DBroadcasting(
           C);
     } else {
       hipLaunchKernelGGL(
-          (ColwiseBinaryOpHIPKenel<TIn, TOut, BinaryOperator, false>),
+          (ColwiseBinaryOpHIPKernel<TIn, TOut, BinaryOperator, false>),
           dim3(CAFFE_GET_BLOCKS(size)),
           dim3(CAFFE_HIP_NUM_THREADS),
           0,
           context->hip_stream(),
-          rows,
+          size,
           cols,
           op,
           A,
@@ -226,16 +206,19 @@ void BroadcastBinaryOpImpl(
     HIPContext* context) {
   SimpleArray<int, D> A_strides_array;
   SimpleArray<int, D> B_strides_array;
-  SimpleArray<int, D> C_dims_array;
+  SimpleArray<FixedDivisor<int>, D> C_dims_array;
   int A_stride = 1;
   int B_stride = 1;
   for (int i = D - 1; i >= 0; --i) {
+    if (C_dims[i] == 0) {
+      return;
+    }
     A_strides_array.data[i] = A_dims[i] == 1 ? 0 : A_stride;
     B_strides_array.data[i] = B_dims[i] == 1 ? 0 : B_stride;
     A_stride *= A_dims[i];
     B_stride *= B_dims[i];
+    C_dims_array.data[i] = FixedDivisor<int>(C_dims[i]);
   }
-  std::copy(C_dims, C_dims + D, C_dims_array.data);
   const int size =
       std::accumulate(C_dims, C_dims + D, 1, std::multiplies<int>());
   hipLaunchKernelGGL(
@@ -293,44 +276,29 @@ void BroadcastBinaryOp(
         C);
     return;
   }
-  int pivot;
+  int rows;
+  int cols;
   bool broadcast_1st;
   if (utils::IsRowwiseBroadcastBinaryOp(
           ndim,
           A_dims_array.data(),
           B_dims_array.data(),
-          &pivot,
+          &rows,
+          &cols,
           &broadcast_1st)) {
     BinaryOpWith2DBroadcasting<TIn, TOut, BinaryOperator>(
-        ndim,
-        C_dims_array.data(),
-        pivot,
-        true,
-        broadcast_1st,
-        op,
-        A,
-        B,
-        C,
-        context);
+        rows, cols, true, broadcast_1st, op, A, B, C, context);
     return;
   }
   if (utils::IsColwiseBroadcastBinaryOp(
           ndim,
           A_dims_array.data(),
           B_dims_array.data(),
-          &pivot,
+          &rows,
+          &cols,
           &broadcast_1st)) {
     BinaryOpWith2DBroadcasting<TIn, TOut, BinaryOperator>(
-        ndim,
-        C_dims_array.data(),
-        pivot,
-        false,
-        broadcast_1st,
-        op,
-        A,
-        B,
-        C,
-        context);
+        rows, cols, false, broadcast_1st, op, A, B, C, context);
     return;
   }
   DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_3(
@@ -348,6 +316,7 @@ void BroadcastBinaryOp(
       C,
       context);
 }
+
 } // namespace
 
 #define DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(T, Func, op)            \
@@ -378,22 +347,49 @@ DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Sin, sinf)
 DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Asin, asinf)
 DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Tan, tanf)
 DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Atan, atanf)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Sinh, sinhf)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Cosh, coshf)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Tanh, tanhf)
 DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Abs, fabsf)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Sqr, utils::Square<float>)
 DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Sqrt, sqrtf)
 DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Rsqrt, rsqrtf)
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Sqr, Square<float>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Cbrt, cbrtf)
 
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(bool, Not, Not)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Cube, utils::Cube<float>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(double, Cube, utils::Cube<double>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
+    std::int32_t,
+    Cube,
+    utils::Cube<std::int32_t>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
+    std::int64_t,
+    Cube,
+    utils::Cube<std::int64_t>)
 
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Neg, Negate<float>)
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(double, Neg, Negate<double>)
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(std::int32_t, Neg, Negate<std::int32_t>)
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(std::int64_t, Neg, Negate<std::int64_t>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(bool, Not, utils::Not)
 
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Sign, Sign<float>)
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(double, Sign, Sign<double>)
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(std::int32_t, Sign, Sign<std::int32_t>)
-DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(std::int64_t, Sign, Sign<std::int64_t>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Neg, utils::Negate<float>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(double, Neg, utils::Negate<double>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
+    std::int32_t,
+    Neg,
+    utils::Negate<std::int32_t>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
+    std::int64_t,
+    Neg,
+    utils::Negate<std::int64_t>)
+
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Sign, utils::Sign<float>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(double, Sign, utils::Sign<double>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
+    std::int32_t,
+    Sign,
+    utils::Sign<std::int32_t>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
+    std::int64_t,
+    Sign,
+    utils::Sign<std::int64_t>)
 
 #undef DELEGATE_SIMPLE_HIP_UNARY_FUNCTION
 
@@ -421,8 +417,6 @@ DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(std::int64_t, Sign, Sign<std::int64_t>)
 
 DELEGATE_SINCOS_HIP_FUNCTION(float, sincosf)
 DELEGATE_SINCOS_HIP_FUNCTION(double, sincos)
-
-#undef DELEGATE_SINCOS_HIP_FUNCTION
 
 #define DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(TIn, TOut, Func, Op)               \
   template <>                                                                  \
@@ -499,14 +493,17 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       const TIn* B,                                                    \
       TOut* C,                                                         \
       HIPContext* context) {                                           \
+    if (rows == 0 || cols == 0) {                                      \
+      return;                                                          \
+    }                                                                  \
     const int size = rows * cols;                                      \
     hipLaunchKernelGGL(                                                \
-        (RowwiseBinaryOpHIPKenel<TIn, TOut, Op<TIn>, true>),           \
+        RowwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, true>,            \
         CAFFE_GET_BLOCKS(size),                                        \
         CAFFE_HIP_NUM_THREADS,                                         \
         0,                                                             \
         context->hip_stream(),                                         \
-        rows,                                                          \
+        size,                                                          \
         cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
@@ -521,14 +518,17 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       const TIn* B,                                                    \
       TOut* C,                                                         \
       HIPContext* context) {                                           \
+    if (rows == 0 || cols == 0) {                                      \
+      return;                                                          \
+    }                                                                  \
     const int size = rows * cols;                                      \
     hipLaunchKernelGGL(                                                \
-        (RowwiseBinaryOpHIPKenel<TIn, TOut, Op<TIn>, false>),          \
+        RowwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, false>,           \
         CAFFE_GET_BLOCKS(size),                                        \
         CAFFE_HIP_NUM_THREADS,                                         \
         0,                                                             \
         context->hip_stream(),                                         \
-        rows,                                                          \
+        size,                                                          \
         cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
@@ -543,14 +543,17 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       const TIn* B,                                                    \
       TOut* C,                                                         \
       HIPContext* context) {                                           \
+    if (rows == 0 || cols == 0) {                                      \
+      return;                                                          \
+    }                                                                  \
     const int size = rows * cols;                                      \
     hipLaunchKernelGGL(                                                \
-        (ColwiseBinaryOpHIPKenel<TIn, TOut, Op<TIn>, true>),           \
+        ColwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, true>,            \
         CAFFE_GET_BLOCKS(size),                                        \
         CAFFE_HIP_NUM_THREADS,                                         \
         0,                                                             \
         context->hip_stream(),                                         \
-        rows,                                                          \
+        size,                                                          \
         cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
@@ -565,14 +568,17 @@ DELEGATE_SIMPLE_HIP_BINARY_FUNCTION(float, float, ElemwiseMax, thrust::maximum);
       const TIn* B,                                                    \
       TOut* C,                                                         \
       HIPContext* context) {                                           \
+    if (rows == 0 || cols == 0) {                                      \
+      return;                                                          \
+    }                                                                  \
     const int size = rows * cols;                                      \
     hipLaunchKernelGGL(                                                \
-        (ColwiseBinaryOpHIPKenel<TIn, TOut, Op<TIn>, false>),          \
+        ColwiseBinaryOpHIPKernel<TIn, TOut, Op<TIn>, false>,           \
         CAFFE_GET_BLOCKS(size),                                        \
         CAFFE_HIP_NUM_THREADS,                                         \
         0,                                                             \
         context->hip_stream(),                                         \
-        rows,                                                          \
+        size,                                                          \
         cols,                                                          \
         Op<TIn>(),                                                     \
         A,                                                             \
@@ -871,24 +877,56 @@ void GemmBatched<float, HIPContext>(
     const int N,
     const int K,
     const float alpha,
+    const float** A,
+    const float** B,
+    const float beta,
+    float** C,
+    HIPContext* context,
+    TensorProto::DataType math_type) {
+  // rocblas doesn't support SgemmBatched yet.
+  for (int i = 0; i < batch_size; ++i) {
+    Gemm<float, HIPContext>(
+        TransA,
+        TransB,
+        M,
+        N,
+        K,
+        alpha,
+        A[i],
+        B[i],
+        beta,
+        C[i],
+        context,
+        math_type);
+  }
+}
+
+template <>
+void GemmStridedBatched<float, HIPContext>(
+    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE TransB,
+    const int batch_size,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
     const float* A,
+    const int A_stride,
     const float* B,
+    const int B_stride,
     const float beta,
     float* C,
+    const int C_stride,
     HIPContext* context,
-    Tensor<HIPContext>* scratch,
     TensorProto::DataType math_type) {
-  const int a_stride = M * K;
-  const int b_stride = K * N;
-  const int c_stride = M * N;
   // Note that cublas follows fortran order, so the order is different from
   // the cblas convention.
   const int lda = (TransA == CblasNoTrans) ? K : M;
   const int ldb = (TransB == CblasNoTrans) ? N : K;
-  rocblas_operation cuTransA = (TransA == CblasNoTrans)
+  const rocblas_operation cuTransA = (TransA == CblasNoTrans)
       ? rocblas_operation_none
       : rocblas_operation_transpose;
-  rocblas_operation cuTransB = (TransB == CblasNoTrans)
+  const rocblas_operation cuTransB = (TransB == CblasNoTrans)
       ? rocblas_operation_none
       : rocblas_operation_transpose;
   ROCBLAS_ENFORCE(rocblas_sgemm_strided_batched(
@@ -901,35 +939,19 @@ void GemmBatched<float, HIPContext>(
       &alpha,
       B,
       ldb,
-      b_stride,
+      B_stride,
       A,
       lda,
-      a_stride,
+      A_stride,
       &beta,
       C,
       N,
-      c_stride,
+      C_stride,
       batch_size));
 }
 
-namespace {
-
-__global__ void FloatToHalfKernel(const int N, const float* X, half* Y) {
-  HIP_1D_KERNEL_LOOP(i, N) {
-    Y[i] = __float2half(X[i]);
-  }
-}
-
-__global__ void HalfToFloatKernel(const int N, const half* X, float* Y) {
-  HIP_1D_KERNEL_LOOP(i, N) {
-    Y[i] = __half2float(X[i]);
-  }
-}
-
-}; // namespace
-
 template <>
-void GemmBatched<float16, HIPContext>(
+void GemmStridedBatched<float16, HIPContext>(
     const CBLAS_TRANSPOSE TransA,
     const CBLAS_TRANSPOSE TransB,
     const int batch_size,
@@ -938,135 +960,67 @@ void GemmBatched<float16, HIPContext>(
     const int K,
     const float alpha,
     const float16* A,
+    const int A_stride,
     const float16* B,
+    const int B_stride,
     const float beta,
     float16* C,
+    const int C_stride,
     HIPContext* context,
-    Tensor<HIPContext>* scratch,
     TensorProto::DataType math_type) {
-  const int a_stride = M * K;
-  const int b_stride = K * N;
-  const int c_stride = M * N;
-
-  // 3 options:
-  // 1) scratch != null = cast to fp32, SgemmStridedBatched, cast result to fp16
-  // 2) math_type == FLOAT, scratch == nullptr = looped SgemmEx
-  // 3) math_type == FLOAT16, scratch == nullptr = batched Hgemm
-
-  if (scratch != nullptr) {
-    const int A_size = a_stride * batch_size;
-    const int B_size = b_stride * batch_size;
-    // cast, cublasSgemmStridedBatched, cast
-    size_t in_elems = A_size + B_size;
-    size_t out_elems = c_stride * batch_size;
-
-    scratch->Resize(in_elems + out_elems);
-    float* scratch_ptr = scratch->mutable_data<float>();
-
-    float* A_fp32 = scratch_ptr;
-    float* B_fp32 = scratch_ptr + A_size;
-    float* C_fp32 = scratch_ptr + A_size + B_size;
-
-    // cast A, B into fp32
-    hipLaunchKernelGGL(
-        (HalfToFloatKernel),
-        dim3(CAFFE_GET_BLOCKS(A_size)),
-        dim3(CAFFE_HIP_NUM_THREADS),
-        0,
-        context->hip_stream(),
-        A_size,
-        (half*)A,
-        A_fp32);
-    hipLaunchKernelGGL(
-        (HalfToFloatKernel),
-        dim3(CAFFE_GET_BLOCKS(B_size)),
-        dim3(CAFFE_HIP_NUM_THREADS),
-        0,
-        context->hip_stream(),
-        B_size,
-        (half*)B,
-        B_fp32);
-
-    // run fp32 batched Gemm
-    GemmBatched<float, HIPContext>(
-        TransA,
-        TransB,
-        batch_size,
-        M,
-        N,
-        K,
-        alpha,
-        A_fp32,
-        B_fp32,
-        beta,
-        C_fp32,
-        context);
-
-    // cast result back to fp16
-    hipLaunchKernelGGL(
-        (FloatToHalfKernel),
-        dim3(CAFFE_GET_BLOCKS(batch_size * M * N)),
-        dim3(CAFFE_HIP_NUM_THREADS),
-        0,
-        context->hip_stream(),
-        batch_size * M * N,
-        C_fp32,
-        (half*)C);
-  } else {
 #if ROCBLAS_FP16 // rocblas does not support fp16 yet
-    if (math_type == TensorProto_DataType_FLOAT) {
-      // loop over matrices in the batch
-      for (int i = 0; i < batch_size; ++i) {
-        math::Gemm<float16, HIPContext>(
-            TransA,
-            TransB,
-            M,
-            N,
-            K,
-            alpha,
-            A + a_stride * i,
-            B + b_stride * i,
-            beta,
-            C + c_stride * i,
-            context);
-      }
-    } else if (math_type == TensorProto_DataType_FLOAT16) {
-      // Note that cublas follows fortran order, so the order is different from
-      // the cblas convention.
-      const int lda = (TransA == CblasNoTrans) ? K : M;
-      const int ldb = (TransB == CblasNoTrans) ? N : K;
-      rocblas_operation cuTransA = (TransA == CblasNoTrans)
-          ? rocblas_operation_none
-          : rocblas_operation_transpose;
-      rocblas_operation cuTransB = (TransB == CblasNoTrans)
-          ? rocblas_operation_none
-          : rocblas_operation_transpose;
-
-      // convert alpha, beta from float -> __half
-      auto alpha_fp16 = convert::floatToHalf(alpha);
-      auto beta_fp16 = convert::floatToHalf(beta);
-      ROCBLAS_ENFORCE(cublasHgemmStridedBatched(
-          context->rocblas_handle(),
-          cuTransB,
-          cuTransA,
-          N,
+  if (math_type == TensorProto_DataType_FLOAT) {
+    // loop over matrices in the batch
+    for (int i = 0; i < batch_size; ++i) {
+      math::Gemm<float16, HIPContext>(
+          TransA,
+          TransB,
           M,
-          K,
-          &alpha_fp16,
-          (const __half*)B,
-          ldb,
-          b_stride,
-          (const __half*)A,
-          lda,
-          a_stride,
-          &beta_fp16,
-          (__half*)C,
           N,
-          c_stride,
-          batch_size));
+          K,
+          alpha,
+          A + a_stride * i,
+          B + b_stride * i,
+          beta,
+          C + c_stride * i,
+          context);
     }
-#endif
+  } else if (math_type == TensorProto_DataType_FLOAT16) {
+    // Note that cublas follows fortran order, so the order is different from
+    // the cblas convention.
+    const int lda = (TransA == CblasNoTrans) ? K : M;
+    const int ldb = (TransB == CblasNoTrans) ? N : K;
+    const rocblas_operation cuTransA = (TransA == CblasNoTrans)
+        ? rocblas_operation_none
+        : rocblas_operation_transpose;
+    const rocblas_operation cuTransB = (TransB == CblasNoTrans)
+        ? rocblas_operation_none
+        : rocblas_operation_transpose;
+
+    // convert alpha, beta from float -> __half
+    auto alpha_fp16 = convert::floatToHalf(alpha);
+    auto beta_fp16 = convert::floatToHalf(beta);
+    ROCBLAS_ENFORCE(cublasHgemmStridedBatched(
+        context->rocblas_handle(),
+        cuTransB,
+        cuTransA,
+        N,
+        M,
+        K,
+        &alpha_fp16,
+        (const __half*)B,
+        ldb,
+        B_stride,
+        (const __half*)A,
+        lda,
+        A_stride,
+        &beta_fp16,
+        (__half*)C,
+        N,
+        C_stride,
+        batch_size));
   }
+#endif
 }
 
 template <>
@@ -1171,7 +1125,7 @@ __global__ void AddStripedBatchKernel(
       const int batch,                              \
       HIPContext* context) {                        \
     hipLaunchKernelGGL(                             \
-        (AddStripedBatchKernel<T>),                 \
+        AddStripedBatchKernel<T>,                   \
         CAFFE_GET_BLOCKS(N),                        \
         CAFFE_HIP_NUM_THREADS,                      \
         0,                                          \
@@ -1255,6 +1209,7 @@ void Gemv<float16, HIPContext>(
   }
 #endif
 }
+
 namespace {
 template <typename T>
 __global__ void SetKernel(const int N, const T alpha, T* Y) {
@@ -2709,7 +2664,7 @@ __global__ void ColwiseReduceKernel(
   void RowwiseMax<T, HIPContext>(                                        \
       const int N, const int D, const T* x, T* y, HIPContext* context) { \
     hipLaunchKernelGGL(                                                  \
-        (RowwiseReduceKernel),                                           \
+        RowwiseReduceKernel,                                             \
         std::min(N, CAFFE_MAXIMUM_NUM_BLOCKS),                           \
         CAFFE_HIP_NUM_THREADS,                                           \
         0,                                                               \
@@ -2729,7 +2684,7 @@ CAFFE2_SPECIALIZED_HIP_ROWWISE_MAX(float)
   void ColwiseMax<T, HIPContext>(                                        \
       const int N, const int D, const T* x, T* y, HIPContext* context) { \
     hipLaunchKernelGGL(                                                  \
-        (ColwiseReduceKernel),                                           \
+        ColwiseReduceKernel,                                             \
         std::min(D, CAFFE_MAXIMUM_NUM_BLOCKS),                           \
         CAFFE_HIP_NUM_THREADS,                                           \
         0,                                                               \
@@ -2779,7 +2734,7 @@ __global__ void ReduceTensorHIPKernel(
     const int outer_size,
     const int inner_size,
     SimpleArray<int, D> X_strides,
-    SimpleArray<int, D> Y_dims,
+    SimpleArray<FixedDivisor<int>, D> Y_dims,
     const Reducer reducer,
     const T init,
     const T* X,
@@ -2792,10 +2747,15 @@ __global__ void ReduceTensorHIPKernel(
       int Y_index = i * inner_size + j;
 #pragma unroll
       for (int d = D - 1; d >= 0; --d) {
-        X_index += (Y_index % Y_dims.data[d]) * X_strides.data[d];
-        Y_index /= Y_dims.data[d];
+        int r;
+        Y_dims.data[d].DivMod(Y_index, &Y_index, &r);
+        X_index += r * X_strides.data[d];
       }
+#if __HIP_ARCH__ >= 350
       val = reducer(val, __ldg(X + X_index));
+#else
+      val = reducer(val, X[X_index]);
+#endif
     }
     val = BlockReduce<T>(temp_storage).Reduce(val, reducer);
     if (threadIdx.x == 0) {
@@ -2817,10 +2777,10 @@ void ReduceTensorHIPImpl(
     T* Y,
     HIPContext* context) {
   SimpleArray<int, D> X_strides;
-  SimpleArray<int, D> Y_dims;
+  SimpleArray<FixedDivisor<int>, D> Y_dims;
   utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = dims[axes[i]];
+    Y_dims.data[i] = FixedDivisor<int>(dims[axes[i]]);
   }
   hipLaunchKernelGGL(
       (ReduceTensorHIPKernel<T, Reducer, D>),
@@ -2850,6 +2810,9 @@ void ReduceTensorHIP(
     T* Y,
     HIPContext* context) {
   CAFFE_ENFORCE_LE(num_axes, num_dims);
+  if (X == Y) {
+    return;
+  }
   std::vector<int> transpose_axes(num_dims);
   utils::ComputeTransposeAxesForReduceOp(
       num_dims, num_axes, axes, transpose_axes.data());
@@ -2862,35 +2825,39 @@ void ReduceTensorHIP(
   for (int i = pivot; i < num_dims; ++i) {
     inner_size *= dims[transpose_axes[i]];
   }
-  if (transpose_axes[pivot] == pivot) {
-    hipLaunchKernelGGL(
-        (RowwiseReduceKernel<T>),
-        dim3(std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS)),
-        dim3(CAFFE_HIP_NUM_THREADS),
-        0,
-        context->hip_stream(),
+  if (outer_size > 0 && inner_size > 0) {
+    if (transpose_axes[pivot] == pivot) {
+      hipLaunchKernelGGL(
+          (RowwiseReduceKernel<T>),
+          dim3(std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS)),
+          dim3(CAFFE_HIP_NUM_THREADS),
+          0,
+          context->hip_stream(),
+          outer_size,
+          inner_size,
+          reducer,
+          init,
+          X,
+          Y);
+      return;
+    }
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
+        num_dims,
+        ReduceTensorHIPImpl,
+        T,
+        Reducer,
         outer_size,
         inner_size,
+        dims,
+        transpose_axes.data(),
         reducer,
         init,
         X,
-        Y);
-    return;
+        Y,
+        context);
+  } else if (outer_size > 0) {
+    math::Set<T, HIPContext>(outer_size, init, Y, context);
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_2(
-      num_dims,
-      ReduceTensorHIPImpl,
-      T,
-      Reducer,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      reducer,
-      init,
-      X,
-      Y,
-      context);
 }
 
 template <typename T>
@@ -3117,7 +3084,7 @@ __global__ void MomentsHIPKernel(
     const int outer_size,
     const int inner_size,
     SimpleArray<int, D> X_strides,
-    SimpleArray<int, D> Y_dims,
+    SimpleArray<FixedDivisor<int>, D> Y_dims,
     const T* X,
     T* mean,
     T* variance) {
@@ -3130,9 +3097,10 @@ __global__ void MomentsHIPKernel(
       int X_index = 0;
       int Y_index = i * inner_size + j;
 #pragma unroll
-      for (int i = D - 1; i >= 0; --i) {
-        X_index += (Y_index % Y_dims.data[i]) * X_strides.data[i];
-        Y_index /= Y_dims.data[i];
+      for (int d = D - 1; d >= 0; --d) {
+        int r;
+        Y_dims.data[d].DivMod(Y_index, &Y_index, &r);
+        X_index += r * X_strides.data[d];
       }
       m_val += __ldg(X + X_index);
       v_val += __ldg(X + X_index) * __ldg(X + X_index);
@@ -3158,10 +3126,10 @@ void MomentsHIPImpl(
     T* variance,
     HIPContext* context) {
   SimpleArray<int, D> X_strides;
-  SimpleArray<int, D> Y_dims;
+  SimpleArray<FixedDivisor<int>, D> Y_dims;
   utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = dims[axes[i]];
+    Y_dims.data[i] = FixedDivisor<int>(dims[axes[i]]);
   }
   hipLaunchKernelGGL(
       (MomentsHIPKernel<T, D>),
@@ -3201,32 +3169,34 @@ void MomentsHIP(
   for (int i = pivot; i < num_dims; ++i) {
     inner_size *= dims[transpose_axes[i]];
   }
-  if (transpose_axes[pivot] == pivot) {
-    hipLaunchKernelGGL(
-        (RowwiseMomentsHIPKernel<T>),
-        dim3(std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS)),
-        dim3(CAFFE_HIP_NUM_THREADS),
-        0,
-        context->hip_stream(),
+  if (outer_size > 0 && inner_size > 0) {
+    if (transpose_axes[pivot] == pivot) {
+      hipLaunchKernelGGL(
+          (RowwiseMomentsHIPKernel<T>),
+          dim3(std::min(outer_size, CAFFE_MAXIMUM_NUM_BLOCKS)),
+          dim3(CAFFE_HIP_NUM_THREADS),
+          0,
+          context->hip_stream(),
+          outer_size,
+          inner_size,
+          X,
+          mean,
+          variance);
+      return;
+    }
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
+        num_dims,
+        MomentsHIPImpl,
+        T,
         outer_size,
         inner_size,
+        dims,
+        transpose_axes.data(),
         X,
         mean,
-        variance);
-    return;
+        variance,
+        context);
   }
-  DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(
-      num_dims,
-      MomentsHIPImpl,
-      T,
-      outer_size,
-      inner_size,
-      dims,
-      transpose_axes.data(),
-      X,
-      mean,
-      variance,
-      context);
 }
 
 } // namespace
@@ -3253,7 +3223,7 @@ template <typename T, int D>
 __global__ void TransposeHIPKernel(
     const int size,
     const SimpleArray<int, D> X_strides,
-    const SimpleArray<int, D> Y_dims,
+    const SimpleArray<FixedDivisor<int>, D> Y_dims,
     const T* X,
     T* Y) {
   HIP_1D_KERNEL_LOOP(Y_index, size) {
@@ -3261,8 +3231,9 @@ __global__ void TransposeHIPKernel(
     int Y_index_val = Y_index;
 #pragma unroll
     for (int i = D - 1; i >= 0; --i) {
-      X_index += (Y_index_val % Y_dims.data[i]) * X_strides.data[i];
-      Y_index_val /= Y_dims.data[i];
+      int d;
+      Y_dims.data[i].DivMod(Y_index_val, &Y_index_val, &d);
+      X_index += d * X_strides.data[i];
     }
     Y[Y_index] = __ldg(X + X_index);
   }
@@ -3276,11 +3247,11 @@ void TransposeHIPImpl(
     T* Y,
     HIPContext* context) {
   SimpleArray<int, D> X_strides;
-  SimpleArray<int, D> Y_dims;
+  SimpleArray<FixedDivisor<int>, D> Y_dims;
   utils::ComputeTransposedStrides(D, dims, axes, X_strides.data);
   int size = 1;
   for (int i = 0; i < D; ++i) {
-    Y_dims.data[i] = dims[axes[i]];
+    Y_dims.data[i] = FixedDivisor<int>(dims[axes[i]]);
     size *= dims[i];
   }
   hipLaunchKernelGGL(
@@ -3298,17 +3269,23 @@ void TransposeHIPImpl(
 
 } // namespace
 
-#define CAFFE2_SPECIALIZED_HIP_TRANSPOSE(T)                    \
-  template <>                                                  \
-  void Transpose<T, HIPContext>(                               \
-      const int ndim,                                          \
-      const int* dims,                                         \
-      const int* axes,                                         \
-      const T* X,                                              \
-      T* Y,                                                    \
-      HIPContext* context) {                                   \
-    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(                    \
-        ndim, TransposeHIPImpl, T, dims, axes, X, Y, context); \
+#define CAFFE2_SPECIALIZED_HIP_TRANSPOSE(T)                              \
+  template <>                                                            \
+  void Transpose<T, HIPContext>(                                         \
+      const int ndim,                                                    \
+      const int* dims,                                                   \
+      const int* axes,                                                   \
+      const T* X,                                                        \
+      T* Y,                                                              \
+      HIPContext* context) {                                             \
+    if (utils::IsIdentityPermutation(ndim, axes)) {                      \
+      const int size =                                                   \
+          std::accumulate(dims, dims + ndim, 1, std::multiplies<int>()); \
+      context->template Copy<T, HIPContext, HIPContext>(size, X, Y);     \
+      return;                                                            \
+    }                                                                    \
+    DISPATCH_FUNCTION_BY_VALUE_WITH_TYPE_1(                              \
+        ndim, TransposeHIPImpl, T, dims, axes, X, Y, context);           \
   }
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(float)
 CAFFE2_SPECIALIZED_HIP_TRANSPOSE(double)

@@ -256,7 +256,12 @@ bool UnpackSegmentsOp<CUDAContext>::DoRunWithType2() {
 
   CAFFE_ENFORCE_GE(data.ndim(), 1, "DATA should be at least 1-D");
   CAFFE_ENFORCE_EQ(lengths.ndim(), 1, "LENGTH should be 1-D");
-
+  if (max_length_ != -1) {
+    CAFFE_ENFORCE_EQ(
+        max_length_,
+        data.dim(1),
+        "max_length should be equal to the packed segments");
+  }
   // Compute prefix sum over the lengths
   array_prefix_sum_exclusive<T>(
       lengths_ptr, num_seq, dev_buffer_, dev_lengths_prefix_sum_, context_);

@@ -1,7 +1,11 @@
 #pragma once
+
 #include <torch/csrc/jit/ir.h>
 #include "torch/csrc/utils/disallow_copy.h"
+#include <torch/csrc/jit/assertions.h>
+
 #include "ATen/ATen.h"
+
 #include <string>
 #include <algorithm>
 #include <unordered_map>
@@ -25,7 +29,7 @@ struct TensorDesc {
   : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
   TensorDesc(const at::Tensor& t)
     : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
-  TensorDesc(TensorType *type)
+  TensorDesc(TensorTypePtr type)
     : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression

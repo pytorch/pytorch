@@ -33,7 +33,7 @@ bool SeluOp<float, CUDAContext>::RunOnDevice() {
   auto* Y = Output(0);
   CAFFE_ENFORCE_GT(X.size(), 0);
   Y->ResizeLike(X);
-  SeluKernel<<<
+  SeluKernel<float><<<
       CAFFE_GET_BLOCKS(X.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,
@@ -50,7 +50,7 @@ bool SeluGradientOp<float, CUDAContext>::RunOnDevice() {
   CAFFE_ENFORCE_GT(Y.size(), 0);
   CAFFE_ENFORCE_EQ(dY.size(), Y.size());
   dX->ResizeLike(Y);
-  SeluGradientKernel<<<
+  SeluGradientKernel<float><<<
       CAFFE_GET_BLOCKS(Y.size()),
       CAFFE_CUDA_NUM_THREADS,
       0,

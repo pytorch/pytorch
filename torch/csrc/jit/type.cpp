@@ -1,5 +1,7 @@
 #include "torch/csrc/jit/type.h"
 
+#include "torch/csrc/jit/assertions.h"
+
 #include <iostream>
 
 namespace torch { namespace jit {
@@ -37,35 +39,35 @@ std::ostream& operator<<(std::ostream & out, const Type & t) {
     auto prim = t.cast<ListType>()->getElementType();
     out << *prim << "[]";
   } else {
-    barf("unknown type kind");
+    AT_ERROR("unknown type kind");
   }
   return out;
 }
 
 TypePtr DynamicType::get() {
-  static auto value = std::make_shared<DynamicType>();
+  static auto value = DynamicType::create();
   return value;
 }
 TypePtr NumberType::get() {
-  static auto value = std::make_shared<NumberType>();
+  static auto value = NumberType::create();
   return value;
 }
 TypePtr IntType::get() {
-  static auto value = std::make_shared<IntType>();
+  static auto value = IntType::create();
   return value;
 }
 TypePtr FloatType::get() {
-  static auto value = std::make_shared<FloatType>();
+  static auto value = FloatType::create();
   return value;
 }
 
 
 TypePtr ListType::ofTensors() {
-  static auto value = std::make_shared<ListType>(DynamicType::get());
+  static auto value = ListType::create(DynamicType::get());
   return value;
 }
 TypePtr ListType::ofInts() {
-  static auto value = std::make_shared<ListType>(IntType::get());
+  static auto value = ListType::create(IntType::get());
   return value;
 }
 

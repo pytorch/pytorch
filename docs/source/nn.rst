@@ -34,10 +34,22 @@ Containers
 .. autoclass:: ModuleList
     :members:
 
+:hidden:`ModuleDict`
+~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ModuleDict
+    :members:
+
 :hidden:`ParameterList`
 ~~~~~~~~~~~~~~~~~~~~~~~
 
 .. autoclass:: ParameterList
+    :members:
+
+:hidden:`ParameterDict`
+~~~~~~~~~~~~~~~~~~~~~~~
+
+.. autoclass:: ParameterDict
     :members:
 
 Convolution layers
@@ -1100,6 +1112,11 @@ Linear functions
 ~~~~~~~~~~~~~~~~
 
 .. autofunction:: linear
+
+:hidden:`bilinear`
+~~~~~~~~~~~~~~~~
+
+.. autofunction:: bilinear
 
 Dropout functions
 -----------------

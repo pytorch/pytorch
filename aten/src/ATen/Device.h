@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <iosfwd>
 #include <string>
+#include <functional>
 
 namespace at {
 /// Represents a a compute device on which a tensor is located. A device is
@@ -110,5 +111,18 @@ struct Device {
 };
 } // namespace at
 
-std::ostream& operator<<(std::ostream& stream, at::Device::Type type);
-std::ostream& operator<<(std::ostream& stream, const at::Device& device);
+AT_API std::ostream& operator<<(std::ostream& stream, at::Device::Type type);
+AT_API std::ostream& operator<<(std::ostream& stream, const at::Device& device);
+
+namespace std {
+  template<> struct hash<at::Device>
+  {
+    size_t operator()(const at::Device& device) const noexcept {
+      size_t hash_val = static_cast<size_t>(device.index() + 1);
+      if (device.is_cuda()) {
+        hash_val += 2;
+      }
+      return hash_val;
+    }
+  };
+} // namespace std

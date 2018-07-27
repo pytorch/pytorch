@@ -7,8 +7,8 @@
 #include <ATen/ATen.h>
 #include "ATen/Utils.h"
 
-#include "torch/csrc/jit/interned_strings.h"
-#include "torch/csrc/assertions.h"
+#include <torch/csrc/jit/assertions.h>
+#include <torch/csrc/jit/interned_strings.h>
 
 namespace torch { namespace jit {
 
@@ -40,10 +40,10 @@ struct ScalarAttributeValue : public AttributeValue {
   ValueType & value() {
     return value_;
   }
-  virtual Ptr clone() const override {
+  Ptr clone() const override {
     return Ptr(new ScalarAttributeValue(name, value_));
   }
-  virtual AttributeKind kind() const override { return Kind; }
+  AttributeKind kind() const override { return Kind; }
 private:
   ValueType value_;
 };
@@ -57,8 +57,8 @@ struct VectorAttributeValue : public AttributeValue {
   ValueType & value() {
     return value_;
   }
-  virtual AttributeKind kind() const override { return Kind; }
-  virtual std::unique_ptr<AttributeValue> clone() const override {
+  AttributeKind kind() const override { return Kind; }
+  std::unique_ptr<AttributeValue> clone() const override {
     auto copy = value_;
     return Ptr(new VectorAttributeValue(name, std::move(copy)));
   }
@@ -88,7 +88,7 @@ struct AttributeError : public std::exception {
     }
     msg = ss.str();
   }
-  virtual const char* what() const noexcept override  {
+  const char* what() const noexcept override  {
     return msg.c_str();
   }
 private:

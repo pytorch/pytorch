@@ -1,4 +1,4 @@
-#include "caffe2/operators/max_pool_with_index.h"
+#include "caffe2/operators/max_pool_with_index_gpu.h"
 #include "caffe2/utils/conversions.h"
 
 namespace caffe2 {

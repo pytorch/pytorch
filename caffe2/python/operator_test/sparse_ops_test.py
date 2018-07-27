@@ -41,7 +41,7 @@ class TestScatterOps(hu.HypothesisTestCase):
         d = rand_array(first_dim, *extra_dims)
         ind = np.random.randint(0, first_dim, index_dim).astype(ind_type)
         # ScatterWeightedSumOp only supports w0=1.0 in CUDAContext
-        if(gc == hu.gpu_do):
+        if(gc == hu.gpu_do or gc == hu.hip_do):
             w0 = np.array(1.0).astype(np.float32)
         else:
             w0 = rand_array()

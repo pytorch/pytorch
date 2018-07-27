@@ -6,6 +6,7 @@
 #include "torch/csrc/jit/python_arg_flatten.h"
 #include "torch/csrc/jit/export.h"
 #include "torch/csrc/jit/argument_spec.h"
+#include "torch/csrc/jit/passes/remove_expands.h"
 #include "torch/csrc/jit/passes/graph_fuser.h"
 #include "torch/csrc/jit/passes/onnx.h"
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
@@ -25,6 +26,7 @@
 #include "torch/csrc/jit/script/python_tree_views.h"
 #include "torch/csrc/jit/batched/BatchTensor.h"
 #include "torch/csrc/jit/pybind_utils.h"
+#include "torch/csrc/jit/function_schema.h"
 
 namespace torch  { namespace jit {
 
@@ -55,19 +57,21 @@ void initJITBindings(PyObject *module) {
    .def("_jit_pass_onnx", ToONNX)
    .def("_jit_pass_onnx_peephole", PeepholeOptimizeONNX)
    .def("_jit_pass_fuse", FuseGraph)
-   .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g){
+   .def("_jit_pass_dce", [](std::shared_ptr<Graph>& g) {
      return EliminateDeadCode(g); // overload resolution
    })
-   .def("_jit_pass_cse", EliminateCommonSubexpression)
+   .def("_jit_pass_cse", [](std::shared_ptr<Graph>& g) {
+     return EliminateCommonSubexpression(g); // overload resolution
+   })
    .def("_jit_pass_peephole", PeepholeOptimize)
    .def("_jit_pass_canonicalize", [](const std::shared_ptr<Graph>& g) {
      return Canonicalize(g);
    })
    .def("_jit_pass_lint", LintGraph)
    .def("_jit_pass_shape_analysis", [](Graph& graph, py::tuple inputs, bool with_grad) {
-     auto tensor_inputs = createVariableTensorList(inputs);
-     PropagateInputShapes(graph, ArgumentSpec(with_grad, tensor_inputs));
+     PropagateInputShapes(graph, ArgumentSpec(with_grad, createStack(inputs)));
    })
+   .def("_jit_pass_remove_expands", RemoveExpands)
    .def("_jit_pass_erase_number_types", EraseNumberTypes)
    .def("_jit_pass_loop_unrolling", UnrollLoops)
    .def("_jit_run_cpp_tests", [] {
@@ -177,28 +181,15 @@ void initJITBindings(PyObject *module) {
         return ge.graph();
       })
       .def("graph_for", [](GraphExecutor& ge, py::args args) {
-        return ge.graphFor(createVariableTensorList(args));
+        return ge.graphFor(createStack(args));
       })
       .def("get_debug_state", [](GraphExecutor& ge) {
         return ge.getDebugState();
       })
       .def("__call__", [](GraphExecutor& ge, py::args args) -> py::object {
-        auto inputs = createVariableTensorList(args);
-        auto outputs = ge.run(std::move(inputs));
-        // if we don't tell pybind these are variables it chokes on the
-        // conversion.
-        // TODO: fix conversions to be sane and make sure this works.
-        if (outputs.size() == 0) {
-          return py::none();
-        } else if (outputs.size() == 1) {
-          return py::cast(autograd::as_variable_ref(outputs[0]));
-        } else {
-          py::tuple tuple(outputs.size());
-          for(size_t i = 0; i < outputs.size(); i++) {
-            tuple[i] = py::cast(autograd::as_variable_ref(outputs[i]));
-          }
-          return tuple;
-        }
+        auto stack = createStack(args);
+        ge.run(stack);
+        return wrapStack(std::move(stack));
       });
 
   initPythonIRBindings(module);

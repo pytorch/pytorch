@@ -4,7 +4,7 @@
 
 /* a la lua? dim, storageoffset, ...  et les methodes ? */
 
-#define TH_TENSOR_REFCOUNTED 1
+#define THCTensor THTensor
 
 // Struct definition moved to THTensor.hpp
 typedef struct THTensor THTensor;
@@ -32,9 +32,6 @@ TH_API int64_t THTensor_(stride)(const THTensor *self, int dim);
 TH_API THLongStorage *THTensor_(newSizeOf)(THTensor *self);
 TH_API THLongStorage *THTensor_(newStrideOf)(THTensor *self);
 TH_API real *THTensor_(data)(const THTensor *self);
-
-TH_API void THTensor_(setFlag)(THTensor *self, const char flag);
-TH_API void THTensor_(clearFlag)(THTensor *self, const char flag);
 
 
 /**** creation methods ****/
@@ -106,6 +103,7 @@ TH_API void THTensor_(setStorage4d)(THTensor *self, THStorage *storage_, ptrdiff
 TH_API void THTensor_(narrow)(THTensor *self, THTensor *src, int dimension_, int64_t firstIndex_, int64_t size_);
 TH_API void THTensor_(select)(THTensor *self, THTensor *src, int dimension_, int64_t sliceIndex_);
 TH_API void THTensor_(transpose)(THTensor *self, THTensor *src, int dimension1_, int dimension2_);
+TH_API int THTensor_(isTransposed)(const THTensor *self);
 TH_API void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension_, int64_t size_, int64_t step_);
 
 TH_API void THTensor_(squeeze)(THTensor *self, THTensor *src);

@@ -3,6 +3,7 @@
 // Engine implements backpropagation from output variables and their gradients
 // to "root" variables (variables created by the user with requires_grad=True).
 
+#include "torch/csrc/WindowsTorchApiMacro.h"
 #include "torch/csrc/autograd/function.h"
 #include "torch/csrc/autograd/input_buffer.h"
 #include "torch/csrc/autograd/anomaly_mode.h"
@@ -24,7 +25,7 @@ struct GraphTask;
 namespace torch { namespace autograd {
 // A single instance of this struct should be created through the whole process lifetime.
 // The worker thread creation logic and Engine's destructor rely on this.
-struct Engine {
+struct TORCH_API Engine {
   /// Returns a reference to a static `Engine` instance.
   static Engine& get_default_engine();
 
@@ -67,6 +68,6 @@ protected:
 
 // allow python_engine to override the default engine when it loads
 typedef Engine& (*EngineStub)(void);
-void set_default_engine_stub(EngineStub stub);
+TORCH_API void set_default_engine_stub(EngineStub stub);
 
 }} // namespace torch::autograd

@@ -3,58 +3,58 @@
 - name: binary_cross_entropy(Tensor self, Tensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
   cname: BCECriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
 
 - name: kl_div(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: DistKLDivCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
 
 - name: l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: AbsCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
 
 - name: mse_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: MSECriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
 
 - name: multi_margin_loss(Tensor self, LongTensor target, Scalar p=1, Scalar margin=1, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean)
   cname: MultiMarginCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
 
 - name: multilabel_margin_loss(Tensor self, LongTensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: MultiLabelMarginCriterion
   buffers: [is_target]
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
-    is_target: target_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
+    is_target: target_->dim() == 0
 
 - name: nll_loss(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
   cname: ClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
 - name: nll_loss2d(Tensor self, LongTensor target, Tensor weight={}, int64_t reduction=Reduction::ElementwiseMean, int64_t ignore_index=-100)
   cname: SpatialClassNLLCriterion
   buffers: [total_weight]
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
     total_weight: 'true'
 
 - name: smooth_l1_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: SmoothL1Criterion
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
 
 - name: soft_margin_loss(Tensor self, Tensor target, int64_t reduction=Reduction::ElementwiseMean)
   cname: SoftMarginCriterion
   scalar_check:
-    output: reduction != Reduction::None || self_->isScalar()
+    output: reduction != Reduction::None || self_->dim() == 0
 
 # Activation functions
 
@@ -62,8 +62,8 @@
   cname: ELU
   has_inplace: True
   scalar_check:
-    output: self_->isScalar()
-    grad_input: output_->isScalar()
+    output: self_->dim() == 0
+    grad_input: output_->dim() == 0
 
 - name: glu(Tensor self, int64_t dim=-1)
   cname: GatedLinear
@@ -76,25 +76,25 @@
   cname: HardTanh
   has_inplace: True
   scalar_check:
-    output: self_->isScalar()
+    output: self_->dim() == 0
 
 - name: leaky_relu(Tensor self, Scalar negative_slope=0.01)
   cname: LeakyReLU
   has_inplace: True
   scalar_check:
-    output: self_->isScalar()
+    output: self_->dim() == 0
 
 - name: log_sigmoid(Tensor self)
   cname: LogSigmoid
   buffers: [buffer]
   scalar_check:
-    output: self_->isScalar()
-    buffer: self_->isScalar()
+    output: self_->dim() == 0
+    buffer: self_->dim() == 0
 
 - name: prelu(Tensor self, Tensor weight)
   cname: PReLU
   scalar_check:
-    output: self_->isScalar()
+    output: self_->dim() == 0
 
 # NOTE: we treat noise as an input (it's really a buffer) because the codegen
 # can't handle in-place functions that have buffers
@@ -102,23 +102,23 @@
   cname: RReLU
   has_inplace: True
   scalar_check:
-    output: self_->isScalar()
+    output: self_->dim() == 0
 
 - name: softplus(Tensor self, Scalar beta=1, Scalar threshold=20)
   cname: SoftPlus
   scalar_check:
-    output: self_->isScalar()
+    output: self_->dim() == 0
 
 - name: softshrink(Tensor self, Scalar lambd=0.5)
   cname: SoftShrink
   scalar_check:
-    output: self_->isScalar()
+    output: self_->dim() == 0
 
 - name: threshold(Tensor self, Scalar threshold, Scalar value)
   cname: Threshold
   has_inplace: True
   scalar_check:
-    output: self_->isScalar()
+    output: self_->dim() == 0
 
 # Pooling
 
@@ -224,14 +224,14 @@
 - name: _sigmoid(Tensor self)
   cname: Sigmoid
   scalar_check:
-    output: self_->isScalar()
-    grad_input: output_->isScalar()
+    output: self_->dim() == 0
+    grad_input: output_->dim() == 0
 
 - name: _tanh(Tensor self)
   cname: Tanh
   scalar_check:
-    output: self_->isScalar()
-    grad_input: output_->isScalar()
+    output: self_->dim() == 0
+    grad_input: output_->dim() == 0
 
 # Batch normalization
 

@@ -140,7 +140,7 @@ static PyObject * THPVariable_size(PyObject* self, PyObject* args, PyObject* kwa
   ParsedArgs<3> parsed_args;
   auto r = parser.parse(args, kwargs, parsed_args);
   if (r.idx == 0) {
-    if (jit::tracer::isTracing(self_)) {
+    if (jit::tracer::isTracing()) {
       return wrap(jit::tracer::getSizeOf(self_, r.toInt64(0)));
     } else {
       return wrap(self_.size(r.toInt64(0)));

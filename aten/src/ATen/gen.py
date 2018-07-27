@@ -273,7 +273,7 @@ def generate_storage_type_and_tensor(backend, density, scalar_type, declarations
         env['THStorage'] = 'THCuda{}Storage'.format(sname)
         env['THTensor'] = 'THCuda{}Tensor'.format(sname)
         env['THIndexTensor'] = 'THCudaLongTensor'
-        env['state'] = ['context->getTHCState()']
+        env['state'] = ['globalContext().getTHCState()']
         env['isCUDA'] = 'true'
         env['storage_device'] = 'return storage->device;'
         env['Generator'] = 'CUDAGenerator'

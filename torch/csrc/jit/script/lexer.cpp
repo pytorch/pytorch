@@ -1,4 +1,7 @@
 #include "torch/csrc/jit/script/lexer.h"
+
+#include <ATen/Error.h>
+
 #include <string>
 #include <unordered_map>
 #include <mutex>

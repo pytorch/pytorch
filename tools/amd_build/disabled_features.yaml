@@ -2,13 +2,6 @@
   "disable_unsupported_hip_calls":
     [
       {
-        "path": "aten/src/THC/generic/THCTensorSort.cu",
-        "functions": {
-            "thrust::copy": ";",
-            "thrust::stable_sort_by_key": ";"
-        }
-      },
-      {
         "path": "aten/src/THC/THCBlas.cu",
         "functions": {
           "cublasSgemmEx": "HIPBLAS_STATUS_INTERNAL_ERROR",
@@ -21,18 +14,6 @@
         },
         "constants": {
             "HIPBLAS_DATA_HALF": "0"
-        }
-      },
-      {
-        "path": "aten/src/THCUNN/SoftMaxCommon.cuh",
-        "functions": {
-          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
-        }
-      },
-      {
-        "path": "aten/src/ATen/native/cuda/SoftMax.cu",
-        "functions": {
-          "cudaOccupancyMaxActiveBlocksPerMultiprocessor": "16"
         }
       },
       {
@@ -136,13 +117,28 @@
         "s_constants": {
             "RoiPooling2d_backward_kernel<<<": "RoiPooling2d_backward_kernel<float><<<"
         }
+      },
+      {
+        "path": "aten/src/ATen/CUDAStream.cpp",
+        "s_constants": {
+            # FIXME: ROCm currently does not support multi-GPU setup; and getNumGPUs runs into a seg fault
+            # ROCm Pytorch issue: https://github.com/ROCmSoftwarePlatform/pytorch/issues/31
+            "getCUDAHooks().getNumGPUs()": "1",
+        }
+      },
+      {
+        "path": "aten/src/ATen/Context.h",
+        "s_constants": {
+            # FIXME: ROCm currently does not support multi-GPU setup; and getNumGPUs runs into a seg fault
+            # ROCm Pytorch issue: https://github.com/ROCmSoftwarePlatform/pytorch/issues/31
+            "detail::getCUDAHooks().getNumGPUs()": "1",
+        }
       }
     ],
   "disabled_modules": [
     "aten/src/ATen/native/cuda/CuFFTUtils.h",
     "aten/src/ATen/native/cuda/CuFFTPlanCache.h",
     "aten/src/ATen/native/cuda/SpectralOps.cu",
-    "aten/src/THCUNN/RReLU.cu",
     "aten/src/ATen/native/cuda/Distributions.cu"
   ],
   "disabled_functions": [
@@ -184,13 +180,6 @@
       "functions": [
         "THNN_(SparseLinear_updateOutput)",
         "THNN_(SparseLinear_accGradParameters)"
-      ]
-    },
-    {
-      "path": "aten/src/THCUNN/generic/RReLU.cu",
-      "functions": [
-        "THNN_(RReLU_updateOutput)",
-        "THNN_(RReLU_updateGradInput)"
       ]
     },
     {

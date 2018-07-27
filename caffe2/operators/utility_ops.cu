@@ -1,20 +1,94 @@
-#include <math.h>
-#include <cfloat>
-// TODO(jamesreed): I would use <cmath> here but std::isnan
-// and std::isinf are declared constexpr there and the nvidia
-// compiler throws an error because of it
+#include "caffe2/core/context_gpu.h"
+#include "caffe2/operators/flatten_op.h"
+#include "caffe2/operators/minmax_ops.h"
+#include "caffe2/operators/utility_ops.h"
+#include "caffe2/utils/math.h"
 
 #include <thrust/device_vector.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>
 #include <thrust/system/cuda/execution_policy.h>
 #include <thrust/unique.h>
-#include "caffe2/core/context_gpu.h"
-#include "flatten_op.h"
-#include "minmax_ops.h"
-#include "utility_ops.h"
 
 namespace caffe2 {
+
+template <>
+bool WeightedSumOp<CUDAContext>::RunOnDevice() {
+  if (Input(0).IsType<float>()) {
+    return DoRunWithType<float>();
+  } else if (Input(0).IsType<float16>()) {
+    return DoRunWithType<float16>();
+  } else {
+    CAFFE_THROW("Unsupported inputs");
+  }
+  return false;
+}
+
+template <>
+bool SumOp<CUDAContext>::RunOnDevice() {
+  if (Input(0).IsType<float>()) {
+    return DoRunWithType<float, float>();
+  } else if (Input(0).IsType<float16>()) {
+    return DoRunWithType<float16, float16>();
+  } else {
+    CAFFE_THROW("Unsupported inputs");
+  }
+  return false;
+}
+
+template <>
+class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
+    : public Operator<CUDAContext> {
+ public:
+  CopyOnDeviceLikeOp(const OperatorDef& operator_def, Workspace* ws)
+      : Operator<CUDAContext>(operator_def, ws) {}
+  USE_OPERATOR_FUNCTIONS(CUDAContext);
+
+  bool RunOnDevice() override {
+    auto& input = Input(0);
+    auto* output = OperatorBase::Output<Tensor<CUDAContext>>(0);
+    CUDAContext context(GetGPUIDForPointer(Input(1).raw_data()));
+    output->ResizeLike(input);
+    context.template CopyItems<CUDAContext, CUDAContext>(
+        input.meta(),
+        input.size(),
+        input.raw_data(),
+        output->raw_mutable_data(input.meta()));
+    return true;
+  }
+};
+
+REGISTER_CUDA_OPERATOR(Print, PrintOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Flatten, FlattenOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(FlattenToVec, FlattenToVecOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Alias, AliasOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(ResizeLike, ResizeLikeOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(Sum, SumOp<CUDAContext>);
+REGISTER_CUDA_OPERATOR(WeightedSum, WeightedSumOp<CUDAContext>);
+
+// From CPU, copy it to whatever the current context
+REGISTER_CUDA_OPERATOR(
+    CopyFromCPUInput,
+    CopyOp<CUDAContext, CUDAContext, CPUContext>);
+
+// CopyGPUToCPU and CopyCPUToGPU should both be carried out in a cuda context,
+// since gpu code will be involved.
+REGISTER_CUDA_OPERATOR(
+    CopyGPUToCPU,
+    CopyOp<CUDAContext, CPUContext, CUDAContext>);
+REGISTER_CUDA_OPERATOR(
+    CopyCPUToGPU,
+    CopyOp<CUDAContext, CUDAContext, CPUContext>);
+// If we only specify Copy, we assume that it is a gpu to gpu copy - maybe
+// involving different GPUs.
+REGISTER_CUDA_OPERATOR(Copy, CopyOp<CUDAContext, CUDAContext, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(
+    CopyOnDeviceLike,
+    CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>);
+
+REGISTER_CUDA_OPERATOR(UnsafeCoalesce, UnsafeCoalesceOp<CUDAContext>);
+
 CAFFE_KNOWN_TYPE(const float*);
 
 REGISTER_CUDA_OPERATOR(EnsureDense, EnsureDenseOp<CUDAContext>);
@@ -89,7 +163,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
         std::cerr << "NaN idxs:" << std::endl;
         auto* cpu_X_data = cpu_X.data<float>();
         for (size_t i = 0; i < cpu_X.size(); ++i) {
-          if (isnan(cpu_X_data[i]) || isinf(cpu_X_data[i])) {
+          if (std::isnan(cpu_X_data[i]) || std::isinf(cpu_X_data[i])) {
             std::cerr << i << " ";
           }
         }
@@ -112,7 +186,7 @@ REGISTER_CUDA_OPERATOR(NanCheck, NanCheckOp<CUDAContext>);
 __global__ void
 ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    maxout[i] = max(X[i], Y[i]);
+    maxout[i] = fmaxf(X[i], Y[i]);
   }
 }
 
@@ -143,7 +217,7 @@ REGISTER_CUDA_OPERATOR(MaxGradient, MaxGradientOp<float, CUDAContext>);
 __global__ void
 ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
   CUDA_1D_KERNEL_LOOP(i, N) {
-    minout[i] = min(X[i], Y[i]);
+    minout[i] = fminf(X[i], Y[i]);
   }
 }
 
@@ -324,7 +398,7 @@ bool ScatterWeightedSumOp<float, CUDAContext>::DoRunWithType() {
   TIndex K = indices.size();
   TIndex block_size = M / N;
 
-  T* data = output->template mutable_data<T>();
+  float* data = output->template mutable_data<float>();
 
   // In order to have all device pointers of x_i (and weight_i similarly)
   // consecutively in device memory, copy pointers to a host vector and then

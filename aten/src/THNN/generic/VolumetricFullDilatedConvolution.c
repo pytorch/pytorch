@@ -112,7 +112,7 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
                   "non-empty 5D (nOutputPlane x nInputPlane x kT x kH x kW) tensor "
                   "expected for weight, but got: %s");
     if (bias != NULL) {
-      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size[1]);
+      THNN_CHECK_DIM_SIZE(bias, 1, 0, weight->size(1));
     }
   } else if (!weight_nullable) {
     THError("weight tensor is expected to be non-nullable");
@@ -132,13 +132,13 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
   }
 
   if (weight != NULL) {
-    const int64_t nInputPlane = weight->size[0];
+    const int64_t nInputPlane = weight->size(0);
     THNN_CHECK_DIM_SIZE(input, ndim, dimf, nInputPlane);
   }
 
-  const int64_t inputWidth   = input->size[dimw];
-  const int64_t inputHeight  = input->size[dimh];
-  const int64_t inputDepth   = input->size[dimd];
+  const int64_t inputWidth   = input->size(dimw);
+  const int64_t inputHeight  = input->size(dimh);
+  const int64_t inputDepth   = input->size(dimd);
   const int64_t outputDepth  = (inputDepth - 1) * dT - 2*pT + (dilationT * (kT - 1) + 1) + aT;
   const int64_t outputHeight = (inputHeight - 1) * dH - 2*pH + (dilationH * (kH - 1) + 1) + aH;
   const int64_t outputWidth  = (inputWidth - 1) * dW - 2*pW + (dilationW * (kW - 1) + 1) + aW;
@@ -151,10 +151,10 @@ static inline void THNN_(VolumetricFullDilatedConvolution_shapeCheck)(
 
   if (gradOutput != NULL) {
     if (weight != NULL) {
-      const int64_t nOutputPlane = weight->size[1];
+      const int64_t nOutputPlane = weight->size(1);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     } else if (bias != NULL) {
-      const int64_t nOutputPlane = bias->size[0];
+      const int64_t nOutputPlane = bias->size(0);
       THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimf, nOutputPlane);
     }
     THNN_CHECK_DIM_SIZE(gradOutput, ndim, dimd, outputDepth);
@@ -184,8 +184,8 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
         input, NULL, weight, bias, kT, kW, kH,
         dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, 0);
 
-  const int nInputPlane  = (int)weight->size[0];
-  const int nOutputPlane = (int)weight->size[1];
+  const int nInputPlane  = (int)weight->size(0);
+  const int nOutputPlane = (int)weight->size(1);
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
@@ -195,18 +195,18 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   {
     // Force batch
     is_batch = 0;
-    THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
+    THTensor_(resize5d)(input, 1, input->size(0), input->size(1), input->size(2), input->size(3));
   }
 
-  const int64_t inputWidth   = input->size[4];
-  const int64_t inputHeight  = input->size[3];
-  const int64_t inputDepth   = input->size[2];
+  const int64_t inputWidth   = input->size(4);
+  const int64_t inputHeight  = input->size(3);
+  const int64_t inputDepth   = input->size(2);
   const int64_t outputDepth  = (inputDepth - 1) * dT - 2*pT + (dilationT * (kT - 1) + 1) + aT;
   const int64_t outputHeight = (inputHeight - 1) * dH - 2*pH + (dilationH * (kH - 1) + 1) + aH;
   const int64_t outputWidth  = (inputWidth - 1) * dW - 2*pW + (dilationW * (kW - 1) + 1) + aW;
 
   // Batch size + input planes
-  const int64_t batchSize = input->size[0];
+  const int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize5d)(output, batchSize, nOutputPlane, outputDepth, outputHeight, outputWidth);
@@ -218,7 +218,7 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
   // Define a buffer of ones, for bias accumulation
   // Note: this buffer can be shared with other modules, it only ever gets increased,
   // and always contains ones.
-  if (ones->dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth)
+  if (ones->dim() != 3 || ones->size(0)*ones->size(1)*ones->size(2) < outputDepth*outputHeight*outputWidth)
   {
     // Resize plane and fill with ones...
     THTensor_(resize3d)(ones, outputDepth, outputHeight, outputWidth);
@@ -239,9 +239,9 @@ void THNN_(VolumetricFullDilatedConvolution_updateOutput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    const int64_t m = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
-    const int64_t n = columns->size[1];
-    const int64_t k = weight->size[0];
+    const int64_t m = weight->size(1) * weight->size(2) * weight->size(3) * weight->size(4);
+    const int64_t n = columns->size(1);
+    const int64_t k = weight->size(0);
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THBlas_(gemm)(
@@ -324,8 +324,8 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
         input, gradOutput, weight, NULL, kT, kW, kH,
         dT, dW, dH, pT, pW, pH, dilationT, dilationW, dilationH, aT, aW, aH, 0);
 
-  const int64_t nInputPlane  = weight->size[0];
-  const int64_t nOutputPlane = weight->size[1];
+  const int64_t nInputPlane  = weight->size(0);
+  const int64_t nOutputPlane = weight->size(1);
 
   input = THTensor_(newContiguous)(input);
   weight = THTensor_(newContiguous)(weight);
@@ -336,19 +336,19 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
   {
     // Force batch
     is_batch = 0;
-    THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
-    THTensor_(resize5d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
+    THTensor_(resize5d)(input, 1, input->size(0), input->size(1), input->size(2), input->size(3));
+    THTensor_(resize5d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2), gradOutput->size(3));
   }
 
-  const int64_t inputWidth   = input->size[4];
-  const int64_t inputHeight  = input->size[3];
-  const int64_t inputDepth   = input->size[2];
+  const int64_t inputWidth   = input->size(4);
+  const int64_t inputHeight  = input->size(3);
+  const int64_t inputDepth   = input->size(2);
   const int64_t outputDepth  = (inputDepth - 1) * dT - 2*pT + (dilationT * (kT - 1) + 1) + aT;
   const int64_t outputHeight = (inputHeight - 1) * dH - 2*pH + (dilationH * (kH - 1) + 1) + aH;
   const int64_t outputWidth  = (inputWidth - 1) * dW - 2*pW + (dilationW * (kW - 1) + 1) + aW;
 
   // Batch size + input planes
-  const int64_t batchSize = input->size[0];
+  const int64_t batchSize = input->size(0);
 
   // Resize output
   THTensor_(resize5d)(gradInput, batchSize, nInputPlane, inputDepth, inputHeight, inputWidth);
@@ -383,9 +383,9 @@ void THNN_(VolumetricFullDilatedConvolution_updateGradInput)(
 
     // M,N,K are dims of matrix A and B
     // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-    const int64_t m = weight->size[0];
-    const int64_t n = gradColumns->size[1];
-    const int64_t k = weight->size[1] * weight->size[2] * weight->size[3] * weight->size[4];
+    const int64_t m = weight->size(0);
+    const int64_t n = gradColumns->size(1);
+    const int64_t k = weight->size(1) * weight->size(2) * weight->size(3) * weight->size(4);
 
     // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
     THBlas_(gemm)(
@@ -464,22 +464,22 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   {
     // Force batch
     is_batch = 0;
-    THTensor_(resize5d)(input, 1, input->size[0], input->size[1], input->size[2], input->size[3]);
-    THTensor_(resize5d)(gradOutput, 1, gradOutput->size[0], gradOutput->size[1], gradOutput->size[2], gradOutput->size[3]);
+    THTensor_(resize5d)(input, 1, input->size(0), input->size(1), input->size(2), input->size(3));
+    THTensor_(resize5d)(gradOutput, 1, gradOutput->size(0), gradOutput->size(1), gradOutput->size(2), gradOutput->size(3));
   }
 
-  const int64_t inputWidth   = input->size[4];
-  const int64_t inputHeight  = input->size[3];
-  const int64_t inputDepth   = input->size[2];
+  const int64_t inputWidth   = input->size(4);
+  const int64_t inputHeight  = input->size(3);
+  const int64_t inputDepth   = input->size(2);
   const int64_t outputDepth  = (inputDepth - 1) * dT - 2*pT + (dilationT * (kT - 1) + 1) + aT;
   const int64_t outputHeight = (inputHeight - 1) * dH - 2*pH + (dilationH * (kH - 1) + 1) + aH;
   const int64_t outputWidth  = (inputWidth - 1) * dW - 2*pW + (dilationW * (kW - 1) + 1) + aW;
 
   // Batch size + input planes
-  const int64_t batchSize = input->size[0];
+  const int64_t batchSize = input->size(0);
 
   // Define a buffer of ones, for bias accumulation
-  if (ones->dim() != 3 || ones->size[0]*ones->size[1]*ones->size[2] < outputDepth*outputHeight*outputWidth)
+  if (ones->dim() != 3 || ones->size(0)*ones->size(1)*ones->size(2) < outputDepth*outputHeight*outputWidth)
   {
     // Resize plane and fill with ones...
     THTensor_(resize3d)(ones, outputDepth, outputHeight, outputWidth);
@@ -519,9 +519,9 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
 
       // M,N,K are dims of matrix A and B
       // (see http://docs.nvidia.com/cuda/cublas/#cublas-lt-t-gt-gemm)
-      const int64_t n = columns->size[0];   // nOutputPlane * kt * kh * kw
-      const int64_t m = input_n->size[0];   // nInputPlane
-      const int64_t k = columns->size[1];   // inputHeight * inputWidth
+      const int64_t n = columns->size(0);   // nOutputPlane * kt * kh * kw
+      const int64_t m = input_n->size(0);   // nInputPlane
+      const int64_t k = columns->size(1);   // inputHeight * inputWidth
 
       // Do GEMM (note: this is a bit confusing because gemm assumes column-major matrices)
       THBlas_(gemm)(
@@ -563,7 +563,7 @@ void THNN_(VolumetricFullDilatedConvolution_accGradParameters)(
   if (is_batch == 0)
   {
     THTensor_(resize4d)(gradOutput, nOutputPlane, outputDepth, outputHeight, outputWidth);
-    THTensor_(resize4d)(input, input->size[1], inputDepth, inputHeight, inputWidth);
+    THTensor_(resize4d)(input, input->size(1), inputDepth, inputHeight, inputWidth);
   }
 
   THTensor_(free)(input);

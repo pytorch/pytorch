@@ -1,124 +1,66 @@
-#pragma once
-#include "caffe2/utils/math.h"
-#include "caffe2/operators/conv_pool_op_base.h"
+#ifndef CAFFE2_OPERATORS_CHANNEL_SHUFFLE_OP_H_
+#define CAFFE2_OPERATORS_CHANNEL_SHUFFLE_OP_H_
+
+#include "caffe2/core/context.h"
+#include "caffe2/core/logging.h"
+#include "caffe2/core/operator.h"
 
 namespace caffe2 {
 
-template <typename Context>
-class ChannelShuffleOp final : public ConvPoolOpBase<Context> {
+template <typename T, class Context>
+class ChannelShuffleOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(Context);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
   ChannelShuffleOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
-
-  bool RunOnDeviceWithOrderNCHW() override {
-    const auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
-    const auto C = X.dim32(1);
-    const auto G = this->group_;
-    CAFFE_ENFORCE(C % G == 0, "");
-    const auto K = C / G;
-    const auto S = X.dim32(2) * X.dim32(3);
-    for (auto n = 0; n < X.dim32(0); ++n) {
-      for (auto g = 0; g < G; ++g) {
-        // Scatter the group g block (of size KxS) to output channels
-        // g + 0 * G, g + 1 * G, g + 2 * G, g + G * (K - 1) etc.
-        math::CopyMatrix<Context>(
-            X.itemsize(),
-            K,
-            S,
-            X.template data<float>() + g * K * S + n * C * S,
-            S,
-            Y->template mutable_data<float>() + g * S + n * C * S,
-            G * S,
-            &context_,
-            X.meta().copy());
-      }
-    }
-    return true;
+      : Operator<Context>(operator_def, ws),
+        order_(StringToStorageOrder(
+            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))),
+        OP_SINGLE_ARG(int, "group", group_, 1) {
+    CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
 
-  bool RunOnDeviceWithOrderNHWC() override {
-    const auto& X = Input(0);
-    auto* Y = Output(0);
-    Y->ResizeLike(X);
-    const auto C = X.dim32(3);
-    const auto G = this->group_;
-    CAFFE_ENFORCE(C % G == 0, "");
-    const auto K = C / G;
-    std::array<int, 2> dims = {G, K};
-    std::array<int, 2> axes = {1, 0};
-    for (auto i = 0; i < X.size(); i += C) {
-      // Transpose each C = GxK matrix
-      math::Transpose(
-          2,
-          dims.data(),
-          axes.data(),
-          X.template data<float>() + i,
-          Y->template mutable_data<float>() + i,
-          &context_);
-    }
-    return true;
+  bool RunOnDevice() override {
+    return order_ == StorageOrder::NCHW ? RunOnDeviceWithOrderNCHW()
+                                        : RunOnDeviceWithOrderNHWC();
   }
+
+  bool RunOnDeviceWithOrderNCHW();
+
+  bool RunOnDeviceWithOrderNHWC();
+
+ private:
+  const StorageOrder order_;
+  const int group_;
 };
 
-template <typename Context>
-class ChannelShuffleGradientOp final : public ConvPoolOpBase<Context> {
+template <typename T, class Context>
+class ChannelShuffleGradientOp final : public Operator<Context> {
  public:
-  USE_OPERATOR_FUNCTIONS(Context);
+  USE_OPERATOR_CONTEXT_FUNCTIONS;
+
   ChannelShuffleGradientOp(const OperatorDef& operator_def, Workspace* ws)
-      : ConvPoolOpBase<Context>(operator_def, ws) {}
-
-  bool RunOnDeviceWithOrderNCHW() override {
-    const auto& dY = Input(0);
-    auto* dX = Output(0);
-    dX->ResizeLike(dY);
-    const auto C = dY.dim32(1);
-    const auto G = this->group_;
-    CAFFE_ENFORCE(C % G == 0, "");
-    const auto K = C / G;
-    const auto S = dY.dim32(2) * dY.dim32(3);
-    for (auto n = 0; n < dY.dim32(0); ++n) {
-      for (auto g = 0; g < G; ++g) {
-        // Gather the group g block (of size KxS) from output channels
-        // g + 0 * G, g + 1 * G, g + 2 * G, g + G * (K - 1) etc.
-        math::CopyMatrix<Context>(
-            dY.itemsize(),
-            K,
-            S,
-            dY.template data<float>() + g * S + n * C * S,
-            G * S,
-            dX->template mutable_data<float>() + g * K * S + n * C * S,
-            S,
-            &context_,
-            dY.meta().copy());
-      }
-    }
-    return true;
+      : Operator<Context>(operator_def, ws),
+        order_(StringToStorageOrder(
+            OperatorBase::GetSingleArgument<std::string>("order", "NCHW"))),
+        OP_SINGLE_ARG(int, "group", group_, 1) {
+    CAFFE_ENFORCE_NE(order_, StorageOrder::UNKNOWN);
   }
 
-  bool RunOnDeviceWithOrderNHWC() override {
-    const auto& dY = Input(0);
-    auto* dX = Output(0);
-    dX->ResizeLike(dY);
-    const auto C = dY.dim32(3);
-    const auto G = this->group_;
-    CAFFE_ENFORCE(C % G == 0, "");
-    const auto K = C / G;
-    std::array<int, 2> dims = {K, G};
-    std::array<int, 2> axes = {1, 0};
-    for (auto i = 0; i < dY.size(); i += C) {
-      // Transpose each C = KxG matrix
-      math::Transpose(
-          2,
-          dims.data(),
-          axes.data(),
-          dY.template data<float>() + i,
-          dX->template mutable_data<float>() + i,
-          &context_);
-    }
-    return true;
+  bool RunOnDevice() override {
+    return order_ == StorageOrder::NCHW ? RunOnDeviceWithOrderNCHW()
+                                        : RunOnDeviceWithOrderNHWC();
   }
+
+  bool RunOnDeviceWithOrderNCHW();
+
+  bool RunOnDeviceWithOrderNHWC();
+
+ private:
+  const StorageOrder order_;
+  const int group_;
 };
+
 } // namespace caffe2
+
+#endif // CAFFE2_OPERATORS_CHANNEL_SHUFFLE_OP_H_

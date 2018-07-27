@@ -342,7 +342,7 @@
   self: at::zeros(self.sizes(), grad.type()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
-  self: -at::mm(output.t(), at::mm(grad, output.t()))
+  self: -at::mm(result.t(), at::mm(grad, result.t()))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
@@ -477,6 +477,9 @@
   self: grad.ger(vec)
   vec: self.t().mv(grad)
 
+- name: mvlgamma(Tensor self, int64_t p)
+  self: mvlgamma_backward(grad, self, p)
+
 - name: ne_(Tensor self, Scalar other)
   self: zeros_like(self)
 
@@ -579,7 +582,7 @@
   self: repeat_backward(grad, self.dim(), repeats)
 
 # DO NOT define a backward for reshape!
-# reshape is special in that it sometimes returns a view, and somtimes not.
+# reshape is special in that it sometimes returns a view, and sometimes not.
 # Defining a backward will make codegen spit out the forward call as
 #     as_variable(baseType->reshape(self)),
 # making it impossible (hard) to detect when it is actually a view.
@@ -677,13 +680,16 @@
   self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: not_implemented("symeig")
+  self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
 
 - name: t(Tensor self)
   self: grad.t()
 
 - name: flip(Tensor self, IntList dims)
   self: grad.flip(dims)
+
+- name: rot90(Tensor self, int64_t k, IntList dims)
+  self: grad.rot90(-k, dims)
 
 - name: take(Tensor self, Tensor index)
   self: zeros_like(self).put_(index, grad, true)
@@ -1209,8 +1215,8 @@
   input, hx, cx, weight: "_cudnn_rnn_backward(input, weight, weight_stride0, result4, hx, cx, result0, grads[0], grads[1], grads[2], mode, hidden_size, num_layers, batch_first, dropout, train, bidirectional, batch_sizes, dropout_state, retain_variables ? result3.clone() : result3, grad_input_mask)"
 
 # mkldnn
-- name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation)
-  self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, grad_input_mask)
+- name: mkldnn_convolution(Tensor self, Tensor weight, Tensor bias, IntList padding, IntList stride, IntList dilation, int64_t groups)
+  self, weight, bias: mkldnn_convolution_backward(self, grad, weight, padding, stride, dilation, groups, grad_input_mask)
 
 # fft
 - name: _fft_with_size(Tensor self, int64_t signal_ndim, bool complex_input, bool complex_output, bool inverse, IntList checked_signal_sizes, bool normalized, bool onesided, IntList output_sizes)

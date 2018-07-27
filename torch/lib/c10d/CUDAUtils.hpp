@@ -12,9 +12,9 @@ namespace c10d {
 // RAII wrapper for CUDA events.
 class CUDAEvent {
  public:
-  CUDAEvent(cudaEvent_t event) : event_(event) {}
+  CUDAEvent(cudaEvent_t event, int device) : device_(device), event_(event) {}
 
-  CUDAEvent() : CUDAEvent(nullptr) {}
+  CUDAEvent() : CUDAEvent(nullptr, 0) {}
 
   ~CUDAEvent();
 
@@ -27,11 +27,13 @@ class CUDAEvent {
   // Must be move constructable.
   CUDAEvent(CUDAEvent&& other) {
     std::swap(event_, other.event_);
+    std::swap(device_, other.device_);
   }
 
   // Must be move assignable.
   CUDAEvent& operator=(CUDAEvent&& other) {
     std::swap(event_, other.event_);
+    std::swap(device_, other.device_);
     return *this;
   }
 
@@ -39,7 +41,12 @@ class CUDAEvent {
     return event_;
   }
 
+  int getDevice() const {
+    return device_;
+  }
+
  protected:
+  int device_;
   cudaEvent_t event_;
 };
 
