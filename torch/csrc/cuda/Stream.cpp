@@ -3,6 +3,9 @@
 #include "THP.h"
 #include "Module.h"
 
+#include "THC/THCStream.h"
+#include "ATen/cuda/CUDAStream.h"
+
 #include <structmember.h>
 #include <cuda_runtime_api.h>
 
@@ -15,7 +18,6 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   int current_device;
   THCudaCheck(cudaGetDevice(&current_device));
 
-  int flags = cudaStreamNonBlocking;
   int priority = 0;
   unsigned long long cdata = 0;
 
@@ -32,11 +34,9 @@ static PyObject * THCPStream_pynew(PyTypeObject *type, PyObject *args, PyObject 
   THCStream* stream;
   if (cdata) {
     stream = (THCStream*) cdata;
-    if (stream) {
-      THCStream_retain(stream);
-    }
   } else {
-    stream = THCStream_newWithPriority(flags, priority);
+    const bool isHighPriority = priority < 0 ? true : false;
+    stream = at::cuda::detail::CUDAStream_createStream(isHighPriority);
   }
 
   THCPStream* self = (THCPStream *)ptr.get();
