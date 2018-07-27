@@ -161,8 +161,6 @@ struct GraphFuser {
     if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor", /*const=*/attr::alpha)) {
       std::vector<Value*> inputs {node->namedInput(attr::self), node->namedInput(attr::other)};
       return areTensorsOfSameShape(inputs) && haveSupportedType(inputs);
-    } else if (node->matches("aten::add(Tensor self, Scalar other, *, Scalar alpha) -> Tensor", /*const=*/{attr::other, attr::alpha})) {
-      return hasSupportedType(node->namedInput(attr::self));
     } else if (node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
                node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
                node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
