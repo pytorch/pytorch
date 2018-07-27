@@ -96,13 +96,18 @@ void fuseBroadcast(Block *b) {
     JIT_ASSERT(!n->hasAttribute(attr::axis));
 
     auto input_index = n->inputs().size() - 1;
-    auto* expanded_rhs = n->input(input_index)->node();
+    auto* rhs_expand = n->input(input_index)->node();
 
-    // The expanded_rhs input isn't actually an expand, so no fusion available
-    if (expanded_rhs->kind() != aten::expand) continue;
-    if (expanded_rhs->inputs().size() != 1) continue;
+    // The rhs_expand input isn't actually an expand, so no fusion available
+    // XXX: we can't use the ->matches(...) mechanism in here, because input nodes
+    //      have been
+    if (rhs_expand->kind() != aten::expand ||
+        rhs_expand->input(1)->node()->kind() != onnx::Constant ||
+        rhs_expand->input(2)->node()->kind() != onnx::Constant) {
+      continue;
+    }
 
-    auto* unexpanded_rhs = expanded_rhs->input();
+    auto* unexpanded_rhs = rhs_expand->input(0);
 
     // We need to know what the type pre-expand is.  We should basically
     // always have this information (because expands are only ever traced,
@@ -113,7 +118,7 @@ void fuseBroadcast(Block *b) {
     // Not all broadcasts are supported by ONNX broadcast.
     at::optional<size_t> axis = fusibleExpandTo(
         unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-        expanded_rhs->output()->type()->expect<TensorType>()->sizes()); // to
+        rhs_expand->output()->type()->expect<TensorType>()->sizes()); // to
     if (axis == at::nullopt)
       continue;
 
@@ -128,8 +133,8 @@ void fuseBroadcast(Block *b) {
         n->i_(attr::axis, axis.value());
       }
     }
-    if (!expanded_rhs->hasUses()) {
-      expanded_rhs->destroy();
+    if (!rhs_expand->hasUses()) {
+      rhs_expand->destroy();
     }
   }
 }
