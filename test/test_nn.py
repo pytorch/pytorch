@@ -712,6 +712,16 @@ class TestNN(NNTestCase):
             self.assertFalse(output2.requires_grad)
             self.assertRaises(RuntimeError, lambda: output2.backward(torch.ones(1, 5, 10, 10)))
 
+    def test_invalid_conv2d(self):
+        module = torch.nn.Conv2d(1, 1, kernel_size=3, dilation=2, stride=2)
+        input = torch.empty(1, 1, 4, 4)
+        self.assertRaises(RuntimeError, lambda: module(input))
+
+    def test_invalid_conv3d(self):
+        module = torch.nn.Conv3d(1, 1, kernel_size=3, dilation=2, stride=2)
+        input = torch.empty(1, 1, 4, 4, 4)
+        self.assertRaises(RuntimeError, lambda: module(input))
+
     def _test_dropout(self, cls, input):
         p = 0.2
         input.fill_(1 - p)
