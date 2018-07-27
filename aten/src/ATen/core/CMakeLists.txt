@@ -10,4 +10,4 @@ set(ATen_CORE_SRCS ${ATen_CORE_SRCS} PARENT_SCOPE)
 # This is a little dodgy, because it means ALL ATen headers are made
 # visible.  Fortunately, you should just get a lot of undefined symbol
 # errors if you go outside core
-set(ATen_CORE_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../..)
+set(ATen_CORE_INCLUDE ${CMAKE_CURRENT_SOURCE_DIR}/../.. PARENT_SCOPE)
