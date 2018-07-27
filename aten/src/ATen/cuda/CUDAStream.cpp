@@ -82,7 +82,7 @@ namespace detail {
   static void initDeviceStreamState(const int64_t device) {
     // Switches to the requested device so streams are properly associated
     // with it.
-    at::DeviceGuard device_guard{device};
+    at::DeviceGuard device_guard{(int)device};
 
     low_priority_streams[device].resize(STREAMS_PER_POOL);
     high_priority_streams[device].resize(STREAMS_PER_POOL);
