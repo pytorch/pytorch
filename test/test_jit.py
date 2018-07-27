@@ -880,6 +880,7 @@ class TestJit(JitTestCase):
     def test_alexnet(self):
         x = torch.ones(1, 3, 224, 224)
         trace, _ = torch.jit.get_trace_graph(torchvision.models.AlexNet(), x)
+        self.run_pass('cse', trace)
         self.assertExpectedGraph(trace)
 
     # Inplace copies don't work with tracer yet.
@@ -1144,20 +1145,20 @@ class TestBatched(TestCase):
 
     def test_batch_elementwise_binary(self):
         @torch.jit.batch(batch_size=4)
-        def add(a, b):
-            return a + b
+        def mul(a, b):
+            return a * b
 
         xs, batch = self.rand_batch(4, (True, 3), (False, 2))
         xs2, batch2 = xs, batch
-        res_batch = add(batch, batch2)
-        res = [torch.add(xs[j], xs2[j]) for j in range(4)]
+        res_batch = mul(batch, batch2)
+        res = [torch.mul(xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
         # test broadcast
         xs, batch = self.rand_batch(4, (False, 3), (False, 2))
         b = torch.rand(3, 2)
-        res_batch = add(batch, b)
-        res = [torch.add(xs[j], b) for j in range(4)]
+        res_batch = mul(batch, b)
+        res = [torch.mul(xs[j], b) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
     def test_batch_mm(self):
@@ -1220,6 +1221,7 @@ class TestBatched(TestCase):
         res = [torch.where(xs_cond[j], xs[j], xs2[j]) for j in range(4)]
         self.assertEqual(res, res_batch.examples())
 
+    @unittest.skip("Need support for scalar arguments")
     def test_lstm_cell(self):
         def LSTMCell(x, h, c, w_xi, w_xf, w_xo, w_xc, w_hi, w_hf, w_ho, w_hc, b_i, b_f, b_o, b_c):
             i_t = torch.matmul(x, w_xi) + torch.matmul(h, w_hi) + b_i

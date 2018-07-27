@@ -124,9 +124,11 @@ void broadcastBinary(Node *node, std::vector<TensorTypePtr>& types, size_t idx1,
     if (input_type->sizes() == expected_size)
       return;
     auto graph = node->owningGraph();
-    Node *expand = graph->create(aten::expand, {node->inputs().at(input_idx)})
-                        ->is_(attr::size, expected_size)
-                        ->i_(attr::implicit, 0)
+    WithInsertPoint point_guard { node };
+    Node *expand = graph->create(aten::expand,
+                                 {node->inputs().at(input_idx),
+                                  insertConstant(*graph, expected_size),
+                                  insertConstant(*graph, 0)})
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());
@@ -280,6 +282,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       node->matches("aten::min(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::max(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+      node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
@@ -451,7 +454,8 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
   }
 }
 
-}
+} // anonymous namespace
+
 void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   JIT_ASSERT(graph.inputs().size() == spec.size());
   for(size_t i = 0; i < spec.size(); ++i) {
@@ -460,6 +464,31 @@ void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
     graph.inputs()[i]->setType(argspec);
   }
   PropagateShapeOnBlock(graph.block());
+}
+
+namespace {
+
+void EraseShapeInformation(at::ArrayRef<Value*> vals) {
+  for (Value * v : vals) {
+    v->setType(unshapedType(v->type()));
+  }
+}
+
+void EraseShapeInformation(Block * b) {
+  EraseShapeInformation(b->inputs());
+  EraseShapeInformation(b->outputs());
+  for (Node * n : b->nodes()) {
+    EraseShapeInformation(n->outputs());
+    for (Block *sb : n->blocks()) {
+      EraseShapeInformation(sb);
+    }
+  }
+}
+
+} // anonymous namespace
+
+void EraseShapeInformation(Graph & graph) {
+  EraseShapeInformation(graph.block());
 }
 
 }}
