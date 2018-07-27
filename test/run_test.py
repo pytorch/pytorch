@@ -13,6 +13,7 @@ import tempfile
 
 import torch
 from torch.utils import cpp_extension
+from common import TEST_WITH_ROCM
 
 TESTS = [
     'autograd',
@@ -36,6 +37,18 @@ TESTS = [
 
 WINDOWS_BLACKLIST = [
     'distributed',
+]
+
+ROCM_BLACKLIST = [
+    'cpp_extensions',
+    'cuda',
+    'distributed',
+    'distributions',
+    'legacy_nn',
+    'multiprocessing',
+    'nccl',
+    'nn',
+    'sparse',
 ]
 
 DISTRIBUTED_TESTS_CONFIG = {
@@ -302,6 +315,9 @@ def get_selected_tests(options):
             WINDOWS_BLACKLIST.append('cpp_extensions')
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
+
+    else if TEST_WITH_ROCM:
+        selected_tests = exclude_tests(ROCM_BLACKLIST, selected_tests, 'on ROCm')
 
     return selected_tests
 
