@@ -172,6 +172,9 @@ class SegmentOneHotOp : public Operator<CPUContext> {
   SegmentOneHotOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator(operator_def, ws) {}
 
+  // TODO: enable input filler
+  DISABLE_INPUT_FILLERS(CPUContext)
+
   bool RunOnDevice() override {
     auto& lengths = Input(0);
     auto& indices = Input(1);
