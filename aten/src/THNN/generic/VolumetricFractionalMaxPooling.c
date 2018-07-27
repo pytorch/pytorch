@@ -119,7 +119,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
 		"non-empty 4D or 5D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 5) {
-    numBatch = THTensor_(size)(input, 0);
+    numBatch = THTensor_(sizeLegacyNoScalars)(input, 0);
     planeDim++;
     heightDim++;
     widthDim++;
@@ -127,10 +127,10 @@ void THNN_(VolumetricFractionalMaxPooling_updateOutput)(
   }
 
   /* sizes */
-  int64_t numPlanes = THTensor_(size)(input, planeDim);
-  int64_t inputH = THTensor_(size)(input, heightDim);
-  int64_t inputW = THTensor_(size)(input, widthDim);
-  int64_t inputT = THTensor_(size)(input, timeDim);
+  int64_t numPlanes = THTensor_(sizeLegacyNoScalars)(input, planeDim);
+  int64_t inputH = THTensor_(sizeLegacyNoScalars)(input, heightDim);
+  int64_t inputW = THTensor_(sizeLegacyNoScalars)(input, widthDim);
+  int64_t inputT = THTensor_(sizeLegacyNoScalars)(input, timeDim);
 
   THArgCheck(outputH + poolSizeH - 1 < inputH, 9,
              "poolSizeH (%d) too large relative to input height (%d)",
@@ -226,7 +226,7 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
 
   int64_t numInputDims = THTensor_(nDimensionLegacyNoScalars)(input);
   if (numInputDims == 5) {
-    numBatch = THTensor_(size)(input, 0);
+    numBatch = THTensor_(sizeLegacyNoScalars)(input, 0);
     planeDim = 1;
     heightDim++;
     widthDim++;
@@ -234,16 +234,16 @@ void THNN_(VolumetricFractionalMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  int64_t numPlanes = THTensor_(size)(input, planeDim);
-  int64_t inputH = THTensor_(size)(input, heightDim);
-  int64_t inputW = THTensor_(size)(input, widthDim);
-  int64_t inputT = THTensor_(size)(input, timeDim);
+  int64_t numPlanes = THTensor_(sizeLegacyNoScalars)(input, planeDim);
+  int64_t inputH = THTensor_(sizeLegacyNoScalars)(input, heightDim);
+  int64_t inputW = THTensor_(sizeLegacyNoScalars)(input, widthDim);
+  int64_t inputT = THTensor_(sizeLegacyNoScalars)(input, timeDim);
 
-  THArgCheck(outputT == THTensor_(size)(gradOutput, timeDim), 3,
+  THArgCheck(outputT == THTensor_(sizeLegacyNoScalars)(gradOutput, timeDim), 3,
              "gradOutput time unexpected");
-  THArgCheck(outputW == THTensor_(size)(gradOutput, widthDim), 3,
+  THArgCheck(outputW == THTensor_(sizeLegacyNoScalars)(gradOutput, widthDim), 3,
              "gradOutput width unexpected");
-  THArgCheck(outputH == THTensor_(size)(gradOutput, heightDim), 3,
+  THArgCheck(outputH == THTensor_(sizeLegacyNoScalars)(gradOutput, heightDim), 3,
              "gradOutput height unexpected");
 
   /* get contiguous gradOutput */

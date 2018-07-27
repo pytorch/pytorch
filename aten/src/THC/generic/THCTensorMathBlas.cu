@@ -53,13 +53,13 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
     THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
        mat->dim(), vec->dim());
 
-  if( mat->size(1) != vec->size(0) )
+  if( THTensor_sizeLegacyNoScalars(mat, 1) != THTensor_sizeLegacyNoScalars(vec, 0) )
     THError("size mismatch");
 
   if(t->dim() != 1)
     THError("size mismatch");
 
-  if(t->size(0) != mat->size(0))
+  if(THTensor_sizeLegacyNoScalars(t, 0) != THTensor_sizeLegacyNoScalars(mat, 0))
     THError("size mismatch");
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
@@ -69,32 +69,32 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
     THCTensor_(copy)(state, r_, t);
   }
 
-  if(mat->stride(0) == 1)
+  if(THTensor_strideLegacyNoScalars(mat, 0) == 1)
   {
 #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sgemv(state, 'n', mat->size(0), mat->size(1),
-                    alpha, THCTensor_(data)(state, mat), mat->stride(1),
-                    THCTensor_(data)(state, vec), vec->stride(0),
-                    beta, THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Sgemv(state, 'n', THTensor_sizeLegacyNoScalars(mat, 0), THTensor_sizeLegacyNoScalars(mat, 1),
+                    alpha, THCTensor_(data)(state, mat), THTensor_strideLegacyNoScalars(mat, 1),
+                    THCTensor_(data)(state, vec), THTensor_strideLegacyNoScalars(vec, 0),
+                    beta, THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dgemv(state, 'n', mat->size(0), mat->size(1),
-                    alpha, THCTensor_(data)(state, mat), mat->stride(1),
-                    THCTensor_(data)(state, vec), vec->stride(0),
-                    beta, THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Dgemv(state, 'n', THTensor_sizeLegacyNoScalars(mat, 0), THTensor_sizeLegacyNoScalars(mat, 1),
+                    alpha, THCTensor_(data)(state, mat), THTensor_strideLegacyNoScalars(mat, 1),
+                    THCTensor_(data)(state, vec), THTensor_strideLegacyNoScalars(vec, 0),
+                    beta, THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #endif
   }
-  else if(mat->stride(1) == 1)
+  else if(THTensor_strideLegacyNoScalars(mat, 1) == 1)
   {
 #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sgemv(state, 't',  mat->size(1), mat->size(0),
-                    alpha, THCTensor_(data)(state, mat), mat->stride(0),
-                    THCTensor_(data)(state, vec), vec->stride(0),
-                    beta, THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Sgemv(state, 't',  THTensor_sizeLegacyNoScalars(mat, 1), THTensor_sizeLegacyNoScalars(mat, 0),
+                    alpha, THCTensor_(data)(state, mat), THTensor_strideLegacyNoScalars(mat, 0),
+                    THCTensor_(data)(state, vec), THTensor_strideLegacyNoScalars(vec, 0),
+                    beta, THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dgemv(state, 't',  mat->size(1), mat->size(0),
-                     alpha, THCTensor_(data)(state, mat), mat->stride(0),
-                     THCTensor_(data)(state, vec), vec->stride(0),
-                     beta, THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Dgemv(state, 't',  THTensor_sizeLegacyNoScalars(mat, 1), THTensor_sizeLegacyNoScalars(mat, 0),
+                     alpha, THCTensor_(data)(state, mat), THTensor_strideLegacyNoScalars(mat, 0),
+                     THCTensor_(data)(state, vec), THTensor_strideLegacyNoScalars(vec, 0),
+                     beta, THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #endif
   }
   else
@@ -102,15 +102,15 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
     THCTensor *cmat = THCTensor_(newContiguous)(state, mat);
 
 #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sgemv(state, 't',  mat->size(1), mat->size(0),
-                    alpha, THCTensor_(data)(state, cmat), cmat->stride(0),
-                    THCTensor_(data)(state, vec), vec->stride(0),
-                    beta, THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Sgemv(state, 't',  THTensor_sizeLegacyNoScalars(mat, 1), THTensor_sizeLegacyNoScalars(mat, 0),
+                    alpha, THCTensor_(data)(state, cmat), THTensor_strideLegacyNoScalars(cmat, 0),
+                    THCTensor_(data)(state, vec), THTensor_strideLegacyNoScalars(vec, 0),
+                    beta, THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dgemv(state, 't',  mat->size(1), mat->size(0),
-                    alpha, THCTensor_(data)(state, cmat), cmat->stride(0),
-                    THCTensor_(data)(state, vec), vec->stride(0),
-                    beta, THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Dgemv(state, 't',  THTensor_sizeLegacyNoScalars(mat, 1), THTensor_sizeLegacyNoScalars(mat, 0),
+                    alpha, THCTensor_(data)(state, cmat), THTensor_strideLegacyNoScalars(cmat, 0),
+                    THCTensor_(data)(state, vec), THTensor_strideLegacyNoScalars(vec, 0),
+                    beta, THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #endif
 
     THCTensor_(free)(state, cmat);
@@ -118,7 +118,7 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 
   // In cublasSgemv, cublasDgemv (x,0).mv(0) does not
   // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
-  if (vec->size(0) == 0 && mat->size(0) != 0) {
+  if (THTensor_sizeLegacyNoScalars(vec, 0) == 0 && THTensor_sizeLegacyNoScalars(mat, 0) != 0) {
     if(THCNumerics<real>::eq(beta, ScalarConvert<int, real>::to(0))) {
       THCTensor_(zero)(state, r_);
     } else if(THCNumerics<real>::ne(beta, ScalarConvert<int, real>::to(1))) {
@@ -129,15 +129,15 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 #elif defined(THC_REAL_IS_HALF)
     // Currently no Hgemv/SgemvEx in Cublas
     THCTensor *vecAsMatrix = THCTensor_(newWithTensor)(state, vec);
-    THCTensor_(resize2d)(state, vecAsMatrix, vecAsMatrix->size(0), 1);
+    THCTensor_(resize2d)(state, vecAsMatrix, THTensor_sizeLegacyNoScalars(vecAsMatrix, 0), 1);
 
     THCTensor *tAsMatrix = THCTensor_(newWithTensor)(state, t);
-    THCTensor_(resize2d)(state, tAsMatrix, tAsMatrix->size(0), 1);
+    THCTensor_(resize2d)(state, tAsMatrix, THTensor_sizeLegacyNoScalars(tAsMatrix, 0), 1);
 
     THCTensor_(addmm)(state, r_, beta, tAsMatrix, alpha, mat, vecAsMatrix);
 
     // r_ will have answer as matrix, need to return a vector
-    THCTensor_(resize1d)(state, r_, r_->size(0));
+    THCTensor_(resize1d)(state, r_, THTensor_sizeLegacyNoScalars(r_, 0));
     THCTensor_(free)(state, vecAsMatrix);
     THCTensor_(free)(state, tAsMatrix);
 #endif
@@ -160,7 +160,7 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
     THError("size mismatch");
   }
 
-  if ( (t->size(0) != vec1->size(0)) || (t->size(1) != vec2->size(0)) ) {
+  if ( (THTensor_sizeLegacyNoScalars(t, 0) != THTensor_sizeLegacyNoScalars(vec1, 0)) || (THTensor_sizeLegacyNoScalars(t, 1) != THTensor_sizeLegacyNoScalars(vec2, 0)) ) {
     THError("size mismatch");
   }
 
@@ -176,32 +176,32 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
     THCTensor_(mul)(state, r_, r_, beta);
   }
 
-  if(r_->stride(0) == 1)
+  if(THTensor_strideLegacyNoScalars(r_, 0) == 1)
   {
 #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sger(state, vec1->size(0), vec2->size(0),
-                   alpha, THCTensor_(data)(state, vec1), vec1->stride(0),
-                   THCTensor_(data)(state, vec2), vec2->stride(0),
-                   THCTensor_(data)(state, r_), r_->stride(1));
+    THCudaBlas_Sger(state, THTensor_sizeLegacyNoScalars(vec1, 0), THTensor_sizeLegacyNoScalars(vec2, 0),
+                   alpha, THCTensor_(data)(state, vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                   THCTensor_(data)(state, vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                   THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 1));
 #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dger(state, vec1->size(0), vec2->size(0),
-                   alpha, THCTensor_(data)(state, vec1), vec1->stride(0),
-                   THCTensor_(data)(state, vec2), vec2->stride(0),
-                   THCTensor_(data)(state, r_), r_->stride(1));
+    THCudaBlas_Dger(state, THTensor_sizeLegacyNoScalars(vec1, 0), THTensor_sizeLegacyNoScalars(vec2, 0),
+                   alpha, THCTensor_(data)(state, vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                   THCTensor_(data)(state, vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                   THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 1));
 #endif
   }
-  else if(r_->stride(1) == 1)
+  else if(THTensor_strideLegacyNoScalars(r_, 1) == 1)
   {
 #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sger(state, vec2->size(0), vec1->size(0),
-                   alpha, THCTensor_(data)(state, vec2), vec2->stride(0),
-                   THCTensor_(data)(state, vec1), vec1->stride(0),
-                   THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Sger(state, THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_sizeLegacyNoScalars(vec1, 0),
+                   alpha, THCTensor_(data)(state, vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                   THCTensor_(data)(state, vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                   THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dger(state, vec2->size(0), vec1->size(0),
-                   alpha, THCTensor_(data)(state, vec2), vec2->stride(0),
-                   THCTensor_(data)(state, vec1), vec1->stride(0),
-                   THCTensor_(data)(state, r_), r_->stride(0));
+    THCudaBlas_Dger(state, THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_sizeLegacyNoScalars(vec1, 0),
+                   alpha, THCTensor_(data)(state, vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                   THCTensor_(data)(state, vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                   THCTensor_(data)(state, r_), THTensor_strideLegacyNoScalars(r_, 0));
 #endif
   }
   else
@@ -209,15 +209,15 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
     THCTensor *cr = THCTensor_(newClone)(state, r_);
 
 #ifdef THC_REAL_IS_FLOAT
-    THCudaBlas_Sger(state, vec2->size(0), vec1->size(0),
-                   alpha, THCTensor_(data)(state, vec2), vec2->stride(0),
-                   THCTensor_(data)(state, vec1), vec1->stride(0),
-                   THCTensor_(data)(state, cr), cr->stride(0));
+    THCudaBlas_Sger(state, THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_sizeLegacyNoScalars(vec1, 0),
+                   alpha, THCTensor_(data)(state, vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                   THCTensor_(data)(state, vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                   THCTensor_(data)(state, cr), THTensor_strideLegacyNoScalars(cr, 0));
 #elif defined(THC_REAL_IS_DOUBLE)
-    THCudaBlas_Dger(state, vec2->size(0), vec1->size(0),
-                   alpha, THCTensor_(data)(state, vec2), vec2->stride(0),
-                   THCTensor_(data)(state, vec1), vec1->stride(0),
-                   THCTensor_(data)(state, cr), cr->stride(0));
+    THCudaBlas_Dger(state, THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_sizeLegacyNoScalars(vec1, 0),
+                   alpha, THCTensor_(data)(state, vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                   THCTensor_(data)(state, vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                   THCTensor_(data)(state, cr), THTensor_strideLegacyNoScalars(cr, 0));
 #endif
 
     THCTensor_(freeCopyTo)(state, cr, r_);
@@ -225,11 +225,11 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
 #elif defined(THC_REAL_IS_HALF)
   // currently no Hger/SgerEx in Cublas.
   THCTensor *vec2T = THCTensor_(newWithTensor)(state, vec2);
-  THCTensor_(resize2d)(state, vec2T, vec2T->size(0), 1);
+  THCTensor_(resize2d)(state, vec2T, THTensor_sizeLegacyNoScalars(vec2T, 0), 1);
   THCTensor_(transpose)(state, vec2T, NULL, 0, 1);
 
   THCTensor *vec1M = THCTensor_(newWithTensor)(state, vec1);
-  THCTensor_(resize2d)(state, vec1M, vec1M->size(0), 1);
+  THCTensor_(resize2d)(state, vec1M, THTensor_sizeLegacyNoScalars(vec1M, 0), 1);
 
   THCTensor_(addmm)(state, r_, beta, t, alpha, vec1M, vec2T);
   THCTensor_(free)(state, vec2T);
@@ -255,13 +255,13 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   if(t->dim() != 2)
     THError("2D tensor expected, got %dD tensor for t", t->dim());
 
-  if(m1->size(1) != m2->size(0)) {
+  if(THTensor_sizeLegacyNoScalars(m1, 1) != THTensor_sizeLegacyNoScalars(m2, 0)) {
     THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
     THCDescBuff bm2 = THCTensor_(sizeDesc)(state, m2);
     THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
   }
 
-  if( (t->size(0) != m1->size(0)) || (t->size(1) != m2->size(1)) ) {
+  if( (THTensor_sizeLegacyNoScalars(t, 0) != THTensor_sizeLegacyNoScalars(m1, 0)) || (THTensor_sizeLegacyNoScalars(t, 1) != THTensor_sizeLegacyNoScalars(m2, 1)) ) {
     THCDescBuff bt  = THCTensor_(sizeDesc)(state, t);
     THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);
     THCDescBuff bm2 = THCTensor_(sizeDesc)(state, m2);
@@ -277,14 +277,14 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   }
 
   /* r_ */
-  if(r_->stride(0) == 1 &&
-     r_->stride(1) != 0)
+  if(THTensor_strideLegacyNoScalars(r_, 0) == 1 &&
+     THTensor_strideLegacyNoScalars(r_, 1) != 0)
   {
     transpose_r = 'n';
     r__ = r_;
   }
-  else if(r_->stride(1) == 1 &&
-          r_->stride(0) != 0)
+  else if(THTensor_strideLegacyNoScalars(r_, 1) == 1 &&
+          THTensor_strideLegacyNoScalars(r_, 0) != 0)
   {
     THCTensor *swap = m2;
     m2 = m1;
@@ -303,14 +303,14 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   }
 
   /* m1 */
-  if(m1->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
-     m1->stride((transpose_r == 'n' ? 1 : 0)) != 0)
+  if(THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 0 : 1)) == 1 &&
+     THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 1 : 0)) != 0)
   {
     transpose_m1 = 'n';
     m1_ = m1;
   }
-  else if(m1->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
-          m1->stride((transpose_r == 'n' ? 0 : 1)) != 0)
+  else if(THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 1 : 0)) == 1 &&
+          THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 0 : 1)) != 0)
   {
     transpose_m1 = 't';
     m1_ = m1;
@@ -322,14 +322,14 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   }
 
   /* m2 */
-  if(m2->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
-     m2->stride((transpose_r == 'n' ? 1 : 0)) != 0)
+  if(THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 0 : 1)) == 1 &&
+     THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 1 : 0)) != 0)
   {
     transpose_m2 = 'n';
     m2_ = m2;
   }
-  else if(m2->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
-          m2->stride((transpose_r == 'n' ? 0 : 1)) != 0)
+  else if(THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 1 : 0)) == 1 &&
+          THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 0 : 1)) != 0)
   {
     transpose_m2 = 't';
     m2_ = m2;
@@ -344,47 +344,47 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   THCudaBlas_Hgemm(state,
                    transpose_m1,
                    transpose_m2,
-                   r__->size((transpose_r == 'n' ? 0 : 1)),
-                   r__->size((transpose_r == 'n' ? 1 : 0)),
-                   m1_->size((transpose_r == 'n' ? 1 : 0)),
+                   THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 0 : 1)),
+                   THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0)),
+                   THTensor_sizeLegacyNoScalars(m1_, (transpose_r == 'n' ? 1 : 0)),
                    alpha,
                    THCTensor_(data)(state, m1_),
-                   (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
+                   (transpose_m1 == 'n' ? THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 0 : 1))),
                    THCTensor_(data)(state, m2_),
-                   (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
+                   (transpose_m2 == 'n' ? THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 0 : 1))),
                    beta,
                    THCTensor_(data)(state, r__),
-                   r__->stride((transpose_r == 'n' ? 1 : 0)));
+                   THTensor_strideLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0)));
 #elif defined(THC_REAL_IS_FLOAT)
   THCudaBlas_Sgemm(state,
                    transpose_m1,
                    transpose_m2,
-                   r__->size((transpose_r == 'n' ? 0 : 1)),
-                   r__->size((transpose_r == 'n' ? 1 : 0)),
-                   m1_->size((transpose_r == 'n' ? 1 : 0)),
+                   THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 0 : 1)),
+                   THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0)),
+                   THTensor_sizeLegacyNoScalars(m1_, (transpose_r == 'n' ? 1 : 0)),
                    alpha,
                    THCTensor_(data)(state, m1_),
-                   (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
+                   (transpose_m1 == 'n' ? THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 0 : 1))),
                    THCTensor_(data)(state, m2_),
-                   (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
+                   (transpose_m2 == 'n' ? THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 0 : 1))),
                    beta,
                    THCTensor_(data)(state, r__),
-                   r__->stride((transpose_r == 'n' ? 1 : 0)));
+                   THTensor_strideLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0)));
 #elif defined(THC_REAL_IS_DOUBLE)
   THCudaBlas_Dgemm(state,
                    transpose_m1,
                    transpose_m2,
-                   r__->size((transpose_r == 'n' ? 0 : 1)),
-                   r__->size((transpose_r == 'n' ? 1 : 0)),
-                   m1_->size((transpose_r == 'n' ? 1 : 0)),
+                   THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 0 : 1)),
+                   THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0)),
+                   THTensor_sizeLegacyNoScalars(m1_, (transpose_r == 'n' ? 1 : 0)),
                    alpha,
                    THCTensor_(data)(state, m1_),
-                   (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1))),
+                   (transpose_m1 == 'n' ? THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 0 : 1))),
                    THCTensor_(data)(state, m2_),
-                   (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1))),
+                   (transpose_m2 == 'n' ? THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 0 : 1))),
                    beta,
                    THCTensor_(data)(state, r__),
-                   r__->stride((transpose_r == 'n' ? 1 : 0)));
+                   THTensor_strideLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0)));
 #endif
 
   /* free intermediate variables */
@@ -413,19 +413,19 @@ THCTensor_(addbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch1) == 3, 6, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch2) == 3, 7, "expected 3D tensor");
 
-  int64_t batchnum = THCTensor_(size)(state, batch1, 0);
-  int64_t m1d1 = THCTensor_(size)(state, batch1, 1);
-  int64_t innerdim = THCTensor_(size)(state, batch1, 2);
-  int64_t m2d2 = THCTensor_(size)(state, batch2, 2);
+  int64_t batchnum = THCTensor_(sizeLegacyNoScalars)(state, batch1, 0);
+  int64_t m1d1 = THCTensor_(sizeLegacyNoScalars)(state, batch1, 1);
+  int64_t innerdim = THCTensor_(sizeLegacyNoScalars)(state, batch1, 2);
+  int64_t m2d2 = THCTensor_(sizeLegacyNoScalars)(state, batch2, 2);
 
-  THArgCheck(batchnum == THCTensor_(size)(state, batch2, 0), 7,
+  THArgCheck(batchnum == THCTensor_(sizeLegacyNoScalars)(state, batch2, 0), 7,
       "equal number of batches expected");
   // M is t, as listed in the docs under addbmm
-  THArgCheck(m1d1 == THCTensor_(size)(state, t, 0), 6,
+  THArgCheck(m1d1 == THCTensor_(sizeLegacyNoScalars)(state, t, 0), 6,
       "first dimension must match first dimension of M");
-  THArgCheck(m2d2 == THCTensor_(size)(state, t, 1), 7,
+  THArgCheck(m2d2 == THCTensor_(sizeLegacyNoScalars)(state, t, 1), 7,
       "second dimension must match second dimension of M");
-  THArgCheck(innerdim == THCTensor_(size)(state, batch2, 1), 6,
+  THArgCheck(innerdim == THCTensor_(sizeLegacyNoScalars)(state, batch2, 1), 6,
       "second dimension must match first dimension of batch2");
 
   if (t != result) {
@@ -477,15 +477,15 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, t) == 3, 4, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch1) == 3, 6, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, batch2) == 3, 7, "expected 3D tensor");
-  THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch1, 0), 6,
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, t, 0) == THCTensor_(sizeLegacyNoScalars)(state, batch1, 0), 6,
              "equal number of batches expected");
-  THArgCheck(THCTensor_(size)(state, t, 0) == THCTensor_(size)(state, batch2, 0), 7,
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, t, 0) == THCTensor_(sizeLegacyNoScalars)(state, batch2, 0), 7,
              "equal number of batches expected");
-  THArgCheck(THCTensor_(size)(state, t, 1) == THCTensor_(size)(state, batch1, 1), 6,
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, t, 1) == THCTensor_(sizeLegacyNoScalars)(state, batch1, 1), 6,
              "wrong matrix size");
-  THArgCheck(THCTensor_(size)(state, t, 2) == THCTensor_(size)(state, batch2, 2), 7,
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, t, 2) == THCTensor_(sizeLegacyNoScalars)(state, batch2, 2), 7,
              "wrong matrix size");
-  THArgCheck(THCTensor_(size)(state, batch1, 2) == THCTensor_(size)(state, batch2, 1), 6,
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, batch1, 2) == THCTensor_(sizeLegacyNoScalars)(state, batch2, 1), 6,
              "wrong matrix size");
 
   if (t != result) {
@@ -499,13 +499,13 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   char transpose_batch1, transpose_batch2;
   int64_t lda, ldb, ldc;
   THCTensor *result_, *batch1_, *batch2_;
-  if (result->stride(1) == 1)
+  if (THTensor_strideLegacyNoScalars(result, 1) == 1)
   {
     transpose_result = false;
     result_ = result;
-    ldc = result_->stride(2);
+    ldc = THTensor_strideLegacyNoScalars(result_, 2);
   }
-  else if (result->stride(2) == 1)
+  else if (THTensor_strideLegacyNoScalars(result, 2) == 1)
   {
     transpose_result = true;
 
@@ -514,7 +514,7 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     batch1 = swap;
 
     result_ = result;
-    ldc = result_->stride(1);
+    ldc = THTensor_strideLegacyNoScalars(result_, 1);
   }
   else
   {
@@ -525,22 +525,22 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     THCTensor_(free)(state, transp_r_);
     THCTensor_(transpose)(state, result_, NULL, 1, 2);
 
-    ldc = result_->stride(2);
+    ldc = THTensor_strideLegacyNoScalars(result_, 2);
   }
 
-  if (batch1->stride(transpose_result ? 2 : 1) == 1 &&
-   batch1->stride(transpose_result ? 1 : 2) != 0)
+  if (THTensor_strideLegacyNoScalars(batch1, transpose_result ? 2 : 1) == 1 &&
+   THTensor_strideLegacyNoScalars(batch1, transpose_result ? 1 : 2) != 0)
   {
     transpose_batch1 = 'n';
     batch1_ = batch1;
-    lda = batch1_->stride(transpose_result ? 1 : 2);
+    lda = THTensor_strideLegacyNoScalars(batch1_, transpose_result ? 1 : 2);
   }
-  else if (batch1->stride(transpose_result ? 1 : 2) == 1 &&
-   batch1->stride(transpose_result ? 2 : 1) != 0)
+  else if (THTensor_strideLegacyNoScalars(batch1, transpose_result ? 1 : 2) == 1 &&
+   THTensor_strideLegacyNoScalars(batch1, transpose_result ? 2 : 1) != 0)
   {
     transpose_batch1 = 't';
     batch1_ = batch1;
-    lda = batch1_->stride(transpose_result ? 2 : 1);
+    lda = THTensor_strideLegacyNoScalars(batch1_, transpose_result ? 2 : 1);
   }
   else
   {
@@ -551,22 +551,22 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     } else {
       batch1_ = THCTensor_(newContiguous)(state, batch1);
     }
-    lda = batch1_->stride(1);
+    lda = THTensor_strideLegacyNoScalars(batch1_, 1);
   }
 
-  if (batch2->stride(transpose_result ? 2 : 1) == 1 &&
-   batch2->stride(transpose_result ? 1 : 2) != 0)
+  if (THTensor_strideLegacyNoScalars(batch2, transpose_result ? 2 : 1) == 1 &&
+   THTensor_strideLegacyNoScalars(batch2, transpose_result ? 1 : 2) != 0)
   {
     transpose_batch2 = 'n';
     batch2_ = batch2;
-    ldb = batch2_->stride(transpose_result ? 1 : 2);
+    ldb = THTensor_strideLegacyNoScalars(batch2_, transpose_result ? 1 : 2);
   }
-  else if (batch2->stride(transpose_result ? 1 : 2) == 1 &&
-   batch2->stride(transpose_result ? 2 : 1) != 0)
+  else if (THTensor_strideLegacyNoScalars(batch2, transpose_result ? 1 : 2) == 1 &&
+   THTensor_strideLegacyNoScalars(batch2, transpose_result ? 2 : 1) != 0)
   {
     transpose_batch2 = 't';
     batch2_ = batch2;
-    ldb = batch2_->stride(transpose_result ? 2 : 1);
+    ldb = THTensor_strideLegacyNoScalars(batch2_, transpose_result ? 2 : 1);
   }
   else
   {
@@ -577,9 +577,9 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
     } else {
       batch2_ = THCTensor_(newContiguous)(state, batch2);
     }
-    ldb = batch2_->stride(1);
+    ldb = THTensor_strideLegacyNoScalars(batch2_, 1);
   }
-  int64_t num_batches = result_->size(0);
+  int64_t num_batches = THTensor_sizeLegacyNoScalars(result_, 0);
 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   // Compute pointers to matrices in each batch.
@@ -597,16 +597,16 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
   createBatchGemmBuffer3<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     d_matrices1, d_matrices2, (const real**)d_result_matrices, THCTensor_(data)(state, batch1_),
     THCTensor_(data)(state, batch2_), THCTensor_(data)(state, result_),
-    batch1_->stride(0), batch2_->stride(0), result_->stride(0), num_batches);
+    THTensor_strideLegacyNoScalars(batch1_, 0), THTensor_strideLegacyNoScalars(batch2_, 0), THTensor_strideLegacyNoScalars(result_, 0), num_batches);
 
 #ifdef THC_REAL_IS_FLOAT
   THCudaBlas_SgemmBatched(
       state,
       transpose_batch1,
       transpose_batch2,
-      result_->size(transpose_result ? 2 : 1),
-      result_->size(transpose_result ? 1 : 2),
-      batch1_->size(transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 2 : 1),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(batch1_, transpose_result ? 1 : 2),
       alpha,
       d_matrices1, lda,
       d_matrices2, ldb,
@@ -618,9 +618,9 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
       state,
       transpose_batch1,
       transpose_batch2,
-      result_->size(transpose_result ? 2 : 1),
-      result_->size(transpose_result ? 1 : 2),
-      batch1_->size(transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 2 : 1),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(batch1_, transpose_result ? 1 : 2),
       alpha,
       d_matrices1, lda,
       d_matrices2, ldb,
@@ -639,28 +639,28 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
       state,
       transpose_batch1,
       transpose_batch2,
-      result_->size(transpose_result ? 2 : 1),
-      result_->size(transpose_result ? 1 : 2),
-      batch1_->size(transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 2 : 1),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(batch1_, transpose_result ? 1 : 2),
       alpha,
-      THCTensor_(data)(state, batch1_), lda, batch1_->stride(0),
-      THCTensor_(data)(state, batch2_), ldb, batch2_->stride(0),
+      THCTensor_(data)(state, batch1_), lda, THTensor_strideLegacyNoScalars(batch1_, 0),
+      THCTensor_(data)(state, batch2_), ldb, THTensor_strideLegacyNoScalars(batch2_, 0),
       beta,
-      THCTensor_(data)(state, result_), ldc, result_->stride(0),
+      THCTensor_(data)(state, result_), ldc, THTensor_strideLegacyNoScalars(result_, 0),
       num_batches);
 #elif defined(THC_REAL_IS_DOUBLE)
   THCudaBlas_DgemmStridedBatched(
       state,
       transpose_batch1,
       transpose_batch2,
-      result_->size(transpose_result ? 2 : 1),
-      result_->size(transpose_result ? 1 : 2),
-      batch1_->size(transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 2 : 1),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(batch1_, transpose_result ? 1 : 2),
       alpha,
-      THCTensor_(data)(state, batch1_), lda, batch1_->stride(0),
-      THCTensor_(data)(state, batch2_), ldb, batch2_->stride(0),
+      THCTensor_(data)(state, batch1_), lda, THTensor_strideLegacyNoScalars(batch1_, 0),
+      THCTensor_(data)(state, batch2_), ldb, THTensor_strideLegacyNoScalars(batch2_, 0),
       beta,
-      THCTensor_(data)(state, result_), ldc, result_->stride(0),
+      THCTensor_(data)(state, result_), ldc, THTensor_strideLegacyNoScalars(result_, 0),
       num_batches);
 #endif //THC_REAL
 #endif //CUDA_VERSION
@@ -674,14 +674,14 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
         state,
         transpose_batch1,
         transpose_batch2,
-        result_->size(transpose_result ? 2 : 1),
-        result_->size(transpose_result ? 1 : 2),
-        batch1_->size(transpose_result ? 1 : 2),
+        THTensor_sizeLegacyNoScalars(result_, transpose_result ? 2 : 1),
+        THTensor_sizeLegacyNoScalars(result_, transpose_result ? 1 : 2),
+        THTensor_sizeLegacyNoScalars(batch1_, transpose_result ? 1 : 2),
         alpha,
-        THCTensor_(data)(state, batch1_) + i * batch1_->stride(0), lda,
-        THCTensor_(data)(state, batch2_) + i * batch2_->stride(0), ldb,
+        THCTensor_(data)(state, batch1_) + i * THTensor_strideLegacyNoScalars(batch1_, 0), lda,
+        THCTensor_(data)(state, batch2_) + i * THTensor_strideLegacyNoScalars(batch2_, 0), ldb,
         beta,
-        THCTensor_(data)(state, result_) + i * result_->stride(0), ldc);
+        THCTensor_(data)(state, result_) + i * THTensor_strideLegacyNoScalars(result_, 0), ldc);
   }
 #else
   cudaDeviceProp* prop = THCState_getCurrentDeviceProperties(state);
@@ -691,14 +691,14 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
       state,
       transpose_batch1,
       transpose_batch2,
-      result_->size(transpose_result ? 2 : 1),
-      result_->size(transpose_result ? 1 : 2),
-      batch1_->size(transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 2 : 1),
+      THTensor_sizeLegacyNoScalars(result_, transpose_result ? 1 : 2),
+      THTensor_sizeLegacyNoScalars(batch1_, transpose_result ? 1 : 2),
       alpha,
-      THCTensor_(data)(state, batch1_), lda, batch1_->stride(0),
-      THCTensor_(data)(state, batch2_), ldb, batch2_->stride(0),
+      THCTensor_(data)(state, batch1_), lda, THTensor_strideLegacyNoScalars(batch1_, 0),
+      THCTensor_(data)(state, batch2_), ldb, THTensor_strideLegacyNoScalars(batch2_, 0),
       beta,
-      THCTensor_(data)(state, result_), ldc, result_->stride(0),
+      THCTensor_(data)(state, result_), ldc, THTensor_strideLegacyNoScalars(result_, 0),
       num_batches);
    } else {
       for (int64_t i = 0; i < num_batches; ++i) {
@@ -706,14 +706,14 @@ THCTensor_(baddbmm)(THCState *state, THCTensor *result, real beta, THCTensor *t,
         state,
         transpose_batch1,
         transpose_batch2,
-        result_->size(transpose_result ? 2 : 1),
-        result_->size(transpose_result ? 1 : 2),
-        batch1_->size(transpose_result ? 1 : 2),
+        THTensor_sizeLegacyNoScalars(result_, transpose_result ? 2 : 1),
+        THTensor_sizeLegacyNoScalars(result_, transpose_result ? 1 : 2),
+        THTensor_sizeLegacyNoScalars(batch1_, transpose_result ? 1 : 2),
         alpha,
-        THCTensor_(data)(state, batch1_) + i * batch1_->stride(0), lda,
-        THCTensor_(data)(state, batch2_) + i * batch2_->stride(0), ldb,
+        THCTensor_(data)(state, batch1_) + i * THTensor_strideLegacyNoScalars(batch1_, 0), lda,
+        THCTensor_(data)(state, batch2_) + i * THTensor_strideLegacyNoScalars(batch2_, 0), ldb,
         beta,
-        THCTensor_(data)(state, result_) + i * result_->stride(0), ldc);
+        THCTensor_(data)(state, result_) + i * THTensor_strideLegacyNoScalars(result_, 0), ldc);
       }
    }
 
@@ -741,25 +741,25 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE)
   THAssert(THCTensor_(checkGPU)(state, 2, ra_, a));
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, a) == 3, 3, "expected 3D tensor");
-  THArgCheck(THCTensor_(size)(state, a, 1) ==
-             THCTensor_(size)(state, a, 2), 3, "matrices must be square");
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, a, 1) ==
+             THCTensor_(sizeLegacyNoScalars)(state, a, 2), 3, "matrices must be square");
 
   if (ra_ != a) {
     THCTensor_(resizeAs)(state, ra_, a);
-    if (ra_->stride(2) == 1) {
+    if (THTensor_strideLegacyNoScalars(ra_, 2) == 1) {
       THCTensor_(transpose)(state, ra_, NULL, 1, 2);
     }
     THCTensor_(copy)(state, ra_, a);
   }
 
 
-  int n = a->size(1);
+  int n = THTensor_sizeLegacyNoScalars(a, 1);
   int lda;
   THCTensor *ra__;
 
-  if (ra_->stride(1) == 1) {
+  if (THTensor_strideLegacyNoScalars(ra_, 1) == 1) {
     // column ordered, what BLAS wants
-    lda = ra_->stride(2);
+    lda = THTensor_strideLegacyNoScalars(ra_, 2);
     ra__ = ra_;
   } else {
     // not column ordered, need to make it such (requires copy)
@@ -767,10 +767,10 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
     ra__ = THCTensor_(newClone)(state, transp_r_);
     THCTensor_(free)(state, transp_r_);
     THCTensor_(transpose)(state, ra__, NULL, 1, 2);
-    lda = ra__->stride(2);
+    lda = THTensor_strideLegacyNoScalars(ra__, 2);
   }
 
-  int64_t num_batches = ra__->size(0);
+  int64_t num_batches = THTensor_sizeLegacyNoScalars(ra__, 0);
 
   if (!pivot) {
     THCudaIntTensor *t = THCudaIntTensor_new(state);
@@ -804,7 +804,7 @@ THC_API void THCTensor_(btrifact)(THCState *state, THCTensor *ra_, THCudaIntTens
     const int64_t grid = (num_batches + block - 1) / block;
     createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
       (const real**)d_result, THCTensor_(data)(state, ra__),
-      ra__->stride(0), num_batches);
+      THTensor_strideLegacyNoScalars(ra__, 0), num_batches);
   }
 
   int *pivots_gpu = NULL;
@@ -851,12 +851,12 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
   THArgCheck(THCTensor_(nDimensionLegacyAll)(state, atf) == 3, 3, "expected 3D tensor");
   THArgCheck(THCTensor_(nDimensionLegacyAll)(state, b) == 3 ||
              THCTensor_(nDimensionLegacyAll)(state, b) == 2, 4, "expected 2D or 3D tensor");
-  THArgCheck(THCTensor_(size)(state, atf, 0) ==
-             THCTensor_(size)(state, b, 0), 3, "number of batches must be equal");
-  THArgCheck(THCTensor_(size)(state, atf, 1) ==
-             THCTensor_(size)(state, atf, 2), 3, "A matrices must be square");
-  THArgCheck(THCTensor_(size)(state, atf, 1) ==
-             THCTensor_(size)(state, b, 1), 3, "dimensions of A and b must be equal");
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, atf, 0) ==
+             THCTensor_(sizeLegacyNoScalars)(state, b, 0), 3, "number of batches must be equal");
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, atf, 1) ==
+             THCTensor_(sizeLegacyNoScalars)(state, atf, 2), 3, "A matrices must be square");
+  THArgCheck(THCTensor_(sizeLegacyNoScalars)(state, atf, 1) ==
+             THCTensor_(sizeLegacyNoScalars)(state, b, 1), 3, "dimensions of A and b must be equal");
 
   if (rb_ != b) {
     THCTensor_(resizeAs)(state, rb_, b);
@@ -864,16 +864,16 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
   }
 
 
-  int n = atf->size(1);
-  int nrhs = THTensor_nDimensionLegacyAll(rb_) > 2 ? rb_->size(2) : 1;
+  int n = THTensor_sizeLegacyNoScalars(atf, 1);
+  int nrhs = THTensor_nDimensionLegacyAll(rb_) > 2 ? THTensor_sizeLegacyNoScalars(rb_, 2) : 1;
   THCTensor *atf_;
   THCTensor *rb__;
   int lda, ldb;
 
   // correct ordering of A_tf
-  if (atf->stride(1) == 1) {
+  if (THTensor_strideLegacyNoScalars(atf, 1) == 1) {
     // column ordered, what BLAS wants
-    lda = atf->stride(2);
+    lda = THTensor_strideLegacyNoScalars(atf, 2);
     atf_ = atf;
   } else {
     // not column ordered, need to make it such (requires copy)
@@ -884,16 +884,16 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
     atf_ = THCTensor_(newClone)(state, transp_r_);
     THCTensor_(free)(state, transp_r_);
     THCTensor_(transpose)(state, atf_, NULL, 1, 2);
-    lda = atf_->stride(2);
+    lda = THTensor_strideLegacyNoScalars(atf_, 2);
   }
 
   // correct ordering of B
-  if (rb_->stride(1) == 1) {
+  if (THTensor_strideLegacyNoScalars(rb_, 1) == 1) {
     // column ordered
-    if (THTensor_nDimensionLegacyAll(rb_) == 2 || rb_->size(2) == 1) {
+    if (THTensor_nDimensionLegacyAll(rb_) == 2 || THTensor_sizeLegacyNoScalars(rb_, 2) == 1) {
       ldb = n;
     } else {
-      ldb = rb_->stride(2);
+      ldb = THTensor_strideLegacyNoScalars(rb_, 2);
     }
     rb__ = rb_;
   } else {
@@ -903,14 +903,14 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
       rb__ = THCTensor_(newClone)(state, transp_r_);
       THCTensor_(free)(state, transp_r_);
       THCTensor_(transpose)(state, rb__, NULL, 1, 2);
-      ldb = rb__->stride(2);
+      ldb = THTensor_strideLegacyNoScalars(rb__, 2);
     } else {
       rb__ = THCTensor_(newClone)(state, rb_);
       ldb = n;
     }
   }
 
-  int64_t num_batches = rb_->size(0);
+  int64_t num_batches = THTensor_sizeLegacyNoScalars(rb_, 0);
   size_t matrices_size = num_batches * sizeof(real*);
 
   // Copy pointers to device.
@@ -921,10 +921,10 @@ THC_API void THCTensor_(btrisolve)(THCState *state, THCTensor *rb_, THCTensor *b
   const int64_t grid = (num_batches + block - 1) / block;
   createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     (const real**)d_result, THCTensor_(data)(state, rb__),
-    rb__->stride(0), num_batches);
+    THTensor_strideLegacyNoScalars(rb__, 0), num_batches);
   createBatchGemmBuffer<<<grid, block, 0, THCState_getCurrentStream(state)>>>(
     d_atf, THCTensor_(data)(state, atf_),
-    atf_->stride(0), num_batches);
+    THTensor_strideLegacyNoScalars(atf_, 0), num_batches);
 
   if (!THCudaIntTensor_isContiguous(state, pivots)) {
       THError("Error: pivots is not contiguous.");

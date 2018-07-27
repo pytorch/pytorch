@@ -34,9 +34,9 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
     int outputWidth,
     bool align_corners){
 
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputWidth = THTensor_(size)(input, 2);
+  int nbatch = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int channels = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int inputWidth = THTensor_(sizeLegacyNoScalars)(input, 2);
 
   THNN_(TemporalUpSamplingLinear_shapeCheck)
     (input, NULL,
@@ -45,8 +45,8 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
 
   input = THTensor_(newContiguous)(input);
   THTensor_(resize3d)(output,
-		      THTensor_(size)(input, 0),
-		      THTensor_(size)(input, 1),
+		      THTensor_(sizeLegacyNoScalars)(input, 0),
+		      THTensor_(sizeLegacyNoScalars)(input, 1),
 		      outputWidth);
   THTensor_(zero)(output);
   real *idata = THTensor_(data)(input);

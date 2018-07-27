@@ -24,8 +24,8 @@ THD_API THDDescBuff THDTensor_(sizeDesc)(const THDTensor *tensor);
 THD_API THDStorage* THDTensor_(storage)(const THDTensor *self);
 THD_API ptrdiff_t THDTensor_(storageOffset)(const THDTensor *self);
 THD_API int THDTensor_(nDimensionLegacyNoScalars)(const THDTensor *self);
-THD_API int64_t THDTensor_(size)(const THDTensor *self, int dim);
-THD_API int64_t THDTensor_(stride)(const THDTensor *self, int dim);
+THD_API int64_t THDTensor_(sizeLegacyNoScalars)(const THDTensor *self, int dim);
+THD_API int64_t THDTensor_(strideLegacyNoScalars)(const THDTensor *self, int dim);
 THD_API THLongStorage *THDTensor_(newSizeOf)(THDTensor *self);
 THD_API THLongStorage *THDTensor_(newStrideOf)(THDTensor *self);
 

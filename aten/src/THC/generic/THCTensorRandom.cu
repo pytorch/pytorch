@@ -110,8 +110,8 @@ THC_API void THCTensor_(cauchy)(THCState* state, THCTensor *self_, double median
 void THCTensor_(renormRows)(struct THCState* state,
                              THCTensor* t) {
   THAssert(THCTensor_(nDimensionLegacyAll)(state, t) == 2);
-  int64_t rows = THCTensor_(size)(state, t, 0);
-  int64_t cols = THCTensor_(size)(state, t, 1);
+  int64_t rows = THCTensor_(sizeLegacyNoScalars)(state, t, 0);
+  int64_t cols = THCTensor_(sizeLegacyNoScalars)(state, t, 1);
 
   cudaDeviceProp* props = THCState_getCurrentDeviceProperties(state);
   THAssert(props != NULL);
@@ -143,10 +143,10 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
 
   // Categories are in the innermost dimension
   int64_t numDist =
-    inputSize == 1 ? 1 : THCTensor_(size)(state, prob_dist, 0);
+    inputSize == 1 ? 1 : THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0);
   int64_t numCategoriesLong =
-    inputSize == 1 ? THCTensor_(size)(state, prob_dist, 0) :
-    THCTensor_(size)(state, prob_dist, 1);
+    inputSize == 1 ? THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 0) :
+    THCTensor_(sizeLegacyNoScalars)(state, prob_dist, 1);
 
   // Since the index tensor is float, numCategories cannot exceed max
   // float integer precision
@@ -203,8 +203,8 @@ THC_API void THCTensor_(multinomial)(struct THCState *state,
       numCategories,
       THCTensor_(data)(state, sampled),
       THCTensor_(data)(state, prob_dist),
-      THCTensor_(stride)(state, prob_dist, 0),
-      THCTensor_(stride)(state, prob_dist, 1)
+      THCTensor_(strideLegacyNoScalars)(state, prob_dist, 0),
+      THCTensor_(strideLegacyNoScalars)(state, prob_dist, 1)
       );
     THCTensor_(free)(state, sampled);
   } else {

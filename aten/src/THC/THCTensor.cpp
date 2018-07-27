@@ -17,14 +17,13 @@ int THCTensor_nDimensionLegacyAll(THCState *state, const THCTensor *self) {
   return THTensor_nDimensionLegacyAll(self);
 }
 
-int64_t THCTensor_size(THCState *state, const THCTensor *self, int dim) {
-  THArgCheck((dim >= 0) && (dim < self->dim()), 2, "out of range");
-  return self->size(dim);
+int64_t THCTensor_sizeLegacyNoScalars(THCState *state, const THCTensor *self, int dim) {
+  return THTensor_sizeLegacyNoScalars(self, dim);
 }
 
-int64_t THCTensor_stride(THCState *state, const THCTensor *self, int dim) {
+int64_t THCTensor_strideLegacyNoScalars(THCState *state, const THCTensor *self, int dim) {
   THArgCheck((dim >= 0) && (dim < self->dim()), 2, "out of range");
-  return self->stride(dim);
+  return THTensor_strideLegacyNoScalars(self, dim);
 }
 THLongStorage *THCTensor_newSizeOf(THCState *state, THCTensor *self) {
   THLongStorage *size = THLongStorage_newWithSize(self->dim());
@@ -73,7 +72,7 @@ void THCTensor_resizeAs(THCState *state, THCTensor *self, THCTensor *src) {
     isSame = 1;
     for(d = 0; d < self->dim(); d++)
     {
-      if(self->size(d) != src->size(d))
+      if(THTensor_sizeLegacyNoScalars(self, d) != THTensor_sizeLegacyNoScalars(src, d))
       {
         isSame = 0;
         break;
@@ -108,12 +107,12 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
       AT_CHECK(size[d] > 0, "sizes must be non-negative");
     }
 #endif
-    if((self->dim() > d) && (size[d] != self->size(d))) {
+    if((self->dim() > d) && (size[d] != THTensor_sizeLegacyNoScalars(self, d))) {
       hascorrectsize = false;
     }
 
     // NB: this used to test that stride[d] was >= 0
-    if((self->dim() > d) && stride && (stride[d] != self->stride(d))) {
+    if((self->dim() > d) && stride && (stride[d] != THTensor_strideLegacyNoScalars(self, d))) {
       hascorrectsize = false;
     }
   }
@@ -142,10 +141,10 @@ void THCTensor_resizeNd(THCState *state, THCTensor *self, int nDimension, int64_
         THTensor_setStrideAtDim(self, d, 1);
       } else {
         // Keep stride monotonically increasing to match NumPy.
-        THTensor_setStrideAtDim(self, d, std::max<int64_t>(self->size(d+1),1)*self->stride(d+1));
+        THTensor_setStrideAtDim(self, d, std::max<int64_t>(THTensor_sizeLegacyNoScalars(self, d+1),1)*THTensor_strideLegacyNoScalars(self, d+1));
       }
     }
-    totalSize += (self->size(d)-1)*self->stride(d);
+    totalSize += (THTensor_sizeLegacyNoScalars(self, d)-1)*THTensor_strideLegacyNoScalars(self, d);
   }
 
   if(totalSize+self->storage_offset() > 0)
@@ -212,15 +211,15 @@ void THCTensor_squeeze1d(THCState *state, THCTensor *self, THCTensor *src, int d
   THCTensor_set(state, self, src);
 
 #ifdef TH_SCALAR
-  if(src->size(dimension) == 1)
+  if(THTensor_sizeLegacyNoScalars(src, dimension) == 1)
 #else
-  if(src->size(dimension) == 1 && src->dim() > 1)
+  if(THTensor_sizeLegacyNoScalars(src, dimension) == 1 && src->dim() > 1)
 #endif
   {
     for(d = dimension; d < self->dim()-1; d++)
     {
-      THTensor_setSizeAtDim(self, d, self->size(d+1));
-      THTensor_setStrideAtDim(self, d, self->stride(d+1));
+      THTensor_setSizeAtDim(self, d, THTensor_sizeLegacyNoScalars(self, d+1));
+      THTensor_setStrideAtDim(self, d, THTensor_strideLegacyNoScalars(self, d+1));
     }
     THTensor_resizeDim(self, self->dim() - 1);
   }
@@ -242,11 +241,11 @@ void THCTensor_unsqueeze1d(THCState *state, THCTensor *self, THCTensor *src, int
 
   THTensor_resizeDim(self, self->dim() + 1);
   for (d = self->dim()-1; d > dimension; d--) {
-    THTensor_setSizeAtDim(self, d, self->size(d-1));
-    THTensor_setStrideAtDim(self, d, self->stride(d-1));
+    THTensor_setSizeAtDim(self, d, THTensor_sizeLegacyNoScalars(self, d-1));
+    THTensor_setStrideAtDim(self, d, THTensor_strideLegacyNoScalars(self, d-1));
   }
   if (dimension+1 < self->dim()) {
-    THTensor_setStrideAtDim(self, dimension, self->size(dimension+1) * self->stride(dimension+1));
+    THTensor_setStrideAtDim(self, dimension, THTensor_sizeLegacyNoScalars(self, dimension+1) * THTensor_strideLegacyNoScalars(self, dimension+1));
   } else {
     THTensor_setStrideAtDim(self, dimension, 1);
   }
@@ -259,10 +258,10 @@ bool THCTensor_isContiguous(THCState *state, const THCTensor *self) {
   int d;
   for(d = self->dim()-1; d >= 0; d--)
   {
-    if(self->size(d) != 1)
+    if(THTensor_sizeLegacyNoScalars(self, d) != 1)
     {
-      if(self->stride(d) == z)
-        z *= self->size(d);
+      if(THTensor_strideLegacyNoScalars(self, d) == z)
+        z *= THTensor_sizeLegacyNoScalars(self, d);
       else
         return false;
     }
@@ -288,7 +287,7 @@ ptrdiff_t THCTensor_nElement(THCState *state, const THCTensor *self) {
     ptrdiff_t nElement = 1;
     int d;
     for(d = 0; d < THTensor_nDimensionLegacyAll(self); d++)
-      nElement *= self->size(d);
+      nElement *= THTensor_sizeLegacyNoScalars(self, d);
     return nElement;
   }
 }
@@ -328,11 +327,11 @@ bool THCTensor_canUse32BitIndexMath(THCState* state, const THCTensor* t, ptrdiff
 
   for (int i = THCTensor_nDimensionLegacyAll(state, t) - 1; i >= 0; --i) {
     ptrdiff_t curDimIndex =
-      linearId % THCTensor_size(state, t, i);
+      linearId % THCTensor_sizeLegacyNoScalars(state, t, i);
     ptrdiff_t curDimOffset = curDimIndex *
-      THCTensor_stride(state, t, i);
+      THCTensor_strideLegacyNoScalars(state, t, i);
     offset += curDimOffset;
-    linearId /= THCTensor_size(state, t, i);
+    linearId /= THCTensor_sizeLegacyNoScalars(state, t, i);
   }
 
   if (offset >= max_elem) {
@@ -405,12 +404,12 @@ bool THCTensor_maybeOverlappingIndices(THCState* state, const THCTensor* t) {
   int dims = THCTensor_nDimensionLegacyAll(state, t);
   int nonSize1Dims = 0;
   for (int i = 0; i < dims; ++i) {
-    int64_t size = THCTensor_size(state, t, i);
+    int64_t size = THCTensor_sizeLegacyNoScalars(state, t, i);
 
     if (size > 1) {
       info[nonSize1Dims].size = size;
       info[nonSize1Dims].stride =
-        THCTensor_stride(state, t, i);
+        THCTensor_strideLegacyNoScalars(state, t, i);
 
       if (info[nonSize1Dims].stride < 1) {
         return true;

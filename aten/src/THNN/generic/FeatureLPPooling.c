@@ -51,42 +51,42 @@ THNN_(FeatureLPPooling_upcastCPU)(THTensor* t, bool batchMode) {
   if (dim == 1) {
     THAssert(!batchMode);
     // [feature dim]
-    s.size[1] = THTensor_(size)(t, 0);
-    s.stride[1] = THTensor_(stride)(t, 0);
+    s.size[1] = THTensor_(sizeLegacyNoScalars)(t, 0);
+    s.stride[1] = THTensor_(strideLegacyNoScalars)(t, 0);
   } else if (dim == 2) {
     if (batchMode) {
       // [batch dim][feature dim]
       for (int i = 0; i < 2; ++i) {
-        s.size[i] = THTensor_(size)(t, i);
-        s.stride[i] = THTensor_(stride)(t, i);
+        s.size[i] = THTensor_(sizeLegacyNoScalars)(t, i);
+        s.stride[i] = THTensor_(strideLegacyNoScalars)(t, i);
       }
     } else {
       // [feature dim][opt dim 1]
-      s.size[1] = THTensor_(size)(t, 0);
-      s.stride[1] = THTensor_(stride)(t, 0);
-      s.size[2] = THTensor_(size)(t, 1);
-      s.stride[2] = THTensor_(stride)(t, 1);
+      s.size[1] = THTensor_(sizeLegacyNoScalars)(t, 0);
+      s.stride[1] = THTensor_(strideLegacyNoScalars)(t, 0);
+      s.size[2] = THTensor_(sizeLegacyNoScalars)(t, 1);
+      s.stride[2] = THTensor_(strideLegacyNoScalars)(t, 1);
     }
   } else if (dim == 3) {
     if (batchMode) {
       // [batch dim][feature dim][opt dim 1]
       for (int i = 0; i < 3; ++i) {
-        s.size[i] = THTensor_(size)(t, i);
-        s.stride[i] = THTensor_(stride)(t, i);
+        s.size[i] = THTensor_(sizeLegacyNoScalars)(t, i);
+        s.stride[i] = THTensor_(strideLegacyNoScalars)(t, i);
       }
     } else {
       // [feature dim][opt dim 1][opt dim 2]
       for (int i = 1; i < 4; ++i) {
-        s.size[i] = THTensor_(size)(t, i - 1);
-        s.stride[i] = THTensor_(stride)(t, i - 1);
+        s.size[i] = THTensor_(sizeLegacyNoScalars)(t, i - 1);
+        s.stride[i] = THTensor_(strideLegacyNoScalars)(t, i - 1);
       }
     }
   } else if (dim == 4) {
     // [batch dim][feature dim][opt dim 1][opt dim 2]
     THAssert(batchMode);
     for (int i = 0; i < 4; ++i) {
-      s.size[i] = THTensor_(size)(t, i);
-      s.stride[i] = THTensor_(stride)(t, i);
+      s.size[i] = THTensor_(sizeLegacyNoScalars)(t, i);
+      s.stride[i] = THTensor_(strideLegacyNoScalars)(t, i);
     }
   }
 
@@ -103,11 +103,11 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
   THAssert(inputDim >= 1 && inputDim <= 4);
 
   int64_t outSize =
-    flpOutputSize(THTensor_(size)(input, 0), width, stride);
+    flpOutputSize(THTensor_(sizeLegacyNoScalars)(input, 0), width, stride);
   if (batchMode) {
     THAssert(inputDim > 1);
     outSize =
-      flpOutputSize(THTensor_(size)(input, 1), width, stride);
+      flpOutputSize(THTensor_(sizeLegacyNoScalars)(input, 1), width, stride);
   } else {
     THAssert(inputDim < 4);
   }
@@ -117,29 +117,29 @@ THNN_(FeatureLPPooling_resizeForOutputCPU)(THTensor* toResize,
   } else if (inputDim == 2) {
     if (batchMode) {
       THTensor_(resize2d)(toResize,
-                          THTensor_(size)(input, 0),
+                          THTensor_(sizeLegacyNoScalars)(input, 0),
                           outSize);
     } else {
       THTensor_(resize2d)(toResize,
                           outSize,
-                          THTensor_(size)(input, 1));
+                          THTensor_(sizeLegacyNoScalars)(input, 1));
     }
   } else if (inputDim == 3) {
     if (batchMode) {
       THTensor_(resize3d)(toResize,
-                          THTensor_(size)(input, 0), outSize,
-                          THTensor_(size)(input, 2));
+                          THTensor_(sizeLegacyNoScalars)(input, 0), outSize,
+                          THTensor_(sizeLegacyNoScalars)(input, 2));
     } else {
       THTensor_(resize3d)(toResize,
-                          outSize, THTensor_(size)(input, 1),
-                          THTensor_(size)(input, 2));
+                          outSize, THTensor_(sizeLegacyNoScalars)(input, 1),
+                          THTensor_(sizeLegacyNoScalars)(input, 2));
     }
   } else if (inputDim == 4) {
     THTensor_(resize4d)(toResize,
-                        THTensor_(size)(input, 0),
+                        THTensor_(sizeLegacyNoScalars)(input, 0),
                         outSize,
-                        THTensor_(size)(input, 2),
-                        THTensor_(size)(input, 3));
+                        THTensor_(sizeLegacyNoScalars)(input, 2),
+                        THTensor_(sizeLegacyNoScalars)(input, 3));
   }
 }
 
@@ -152,25 +152,25 @@ THNN_(FeatureLPPooling_resizeCPU)(THTensor* toResize,
 
   if (inputDim == 1) {
     THTensor_(resize1d)(toResize,
-                        THTensor_(size)(src, 0));
+                        THTensor_(sizeLegacyNoScalars)(src, 0));
   } else if (inputDim == 2) {
     THTensor_(resize2d)(
       toResize,
-      THTensor_(size)(src, 0),
-      THTensor_(size)(src, 1));
+      THTensor_(sizeLegacyNoScalars)(src, 0),
+      THTensor_(sizeLegacyNoScalars)(src, 1));
   } else if (inputDim == 3) {
     THTensor_(resize3d)(
       toResize,
-      THTensor_(size)(src, 0),
-      THTensor_(size)(src, 1),
-      THTensor_(size)(src, 2));
+      THTensor_(sizeLegacyNoScalars)(src, 0),
+      THTensor_(sizeLegacyNoScalars)(src, 1),
+      THTensor_(sizeLegacyNoScalars)(src, 2));
   } else if (inputDim == 4) {
     THTensor_(resize4d)(
       toResize,
-      THTensor_(size)(src, 0),
-      THTensor_(size)(src, 1),
-      THTensor_(size)(src, 2),
-      THTensor_(size)(src, 3));
+      THTensor_(sizeLegacyNoScalars)(src, 0),
+      THTensor_(sizeLegacyNoScalars)(src, 1),
+      THTensor_(sizeLegacyNoScalars)(src, 2),
+      THTensor_(sizeLegacyNoScalars)(src, 3));
   }
 }
 

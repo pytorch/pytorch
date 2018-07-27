@@ -12,10 +12,10 @@ void THNN_(GatedLinear_updateOutput)(
 
   // size output to half of input
   dim = dim - TH_INDEX_BASE;
-  const int64_t nIn = THCTensor_(size)(state, input, dim);
+  const int64_t nIn = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
       dim + TH_INDEX_BASE, nIn);
-  const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
+  const int64_t inputSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim) / 2;
   THLongStorage *newSizes = THCTensor_(newSizeOf)(state, input);
   THLongStorage_set(newSizes, dim, inputSize);
   THCTensor_(resize)(state, output, newSizes, NULL);
@@ -41,16 +41,16 @@ void THNN_(GatedLinear_updateGradInput)(
 {
   THCUNN_assertSameGPU(state, 2, gradOutput, gradInput);
   dim = dim - TH_INDEX_BASE;
-  const int64_t nIn = THCTensor_(size)(state, input, dim);
+  const int64_t nIn = THCTensor_(sizeLegacyNoScalars)(state, input, dim);
   THArgCheck(nIn % 2 == 0, 2, "Halving dimension must be even. Dim %d is size %ld",
       dim + TH_INDEX_BASE, nIn);
 
   THCTensor_(resizeAs)(state, gradInput, input);
-  const int64_t inputSize = THCTensor_(size)(state, input, dim) / 2;
+  const int64_t inputSize = THCTensor_(sizeLegacyNoScalars)(state, input, dim) / 2;
   THCTensor *firstHalf = THCTensor_(newNarrow)(state, input, dim, 0, inputSize);
   THCTensor *gradInputfirstHalf = THCTensor_(newNarrow)(state, gradInput, dim, 0, inputSize);
-  const int64_t stride_i = THCTensor_(stride)(state, input, dim) * inputSize;
-  const int64_t stride_gI = THCTensor_(stride)(state, gradInput, dim) * inputSize;
+  const int64_t stride_i = THCTensor_(strideLegacyNoScalars)(state, input, dim) * inputSize;
+  const int64_t stride_gI = THCTensor_(strideLegacyNoScalars)(state, gradInput, dim) * inputSize;
   THC_pointwiseApply3<real, real, real>(state, gradInputfirstHalf, gradOutput, firstHalf, gatedLinearDerivative<real,accreal>(stride_i, stride_gI)); 
   THCTensor_(free)(state, firstHalf);
   THCTensor_(free)(state, gradInputfirstHalf);

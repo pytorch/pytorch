@@ -32,33 +32,33 @@ static inline void THNN_(VolumetricAveragePooling_shapeCheck)(
 
   if (!input->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4)
   {
-    THArgCheck(input->size(dimw) >= kW && input->size(dimh) >= kH
-               && input->size(dimt) >= kT, 2,
+    THArgCheck(THTensor_sizeLegacyNoScalars(input, dimw) >= kW && THTensor_sizeLegacyNoScalars(input, dimh) >= kH
+               && THTensor_sizeLegacyNoScalars(input, dimt) >= kT, 2,
                "input image (T: %d H: %d W: %d) smaller than "
                "kernel size (kT: %d kH: %d kW: %d)",
-               input->size(dimt), input->size(dimh), input->size(dimw),
+               THTensor_sizeLegacyNoScalars(input, dimt), THTensor_sizeLegacyNoScalars(input, dimh), THTensor_sizeLegacyNoScalars(input, dimw),
                kT, kH, kW);
 
     /* sizes */
-    inputSlices = THCTensor_(size)(state, input, 0);
-    inputTime   = THCTensor_(size)(state, input, 1);
-    inputHeight = THCTensor_(size)(state, input, 2);
-    inputWidth  = THCTensor_(size)(state, input, 3);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
   }
   else if (!input->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, input) == 5)
   {
-    THArgCheck(input->size(dimw) >= kW && input->size(dimh) >= kH
-               && input->size(dimt) >= kT, 2,
+    THArgCheck(THTensor_sizeLegacyNoScalars(input, dimw) >= kW && THTensor_sizeLegacyNoScalars(input, dimh) >= kH
+               && THTensor_sizeLegacyNoScalars(input, dimt) >= kT, 2,
                "input image (T: %d H: %d W: %d) smaller than "
                "kernel size (kT: %d kH: %d kW: %d)",
-               input->size(dimt), input->size(dimh), input->size(dimw),
+               THTensor_sizeLegacyNoScalars(input, dimt), THTensor_sizeLegacyNoScalars(input, dimh), THTensor_sizeLegacyNoScalars(input, dimw),
                kT, kH, kW);
 
     /* sizes */
-    inputSlices = THCTensor_(size)(state, input, 1);
-    inputTime   = THCTensor_(size)(state, input, 2);
-    inputHeight = THCTensor_(size)(state, input, 3);
-    inputWidth  = THCTensor_(size)(state, input, 4);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
   }
   else
   {
@@ -144,19 +144,19 @@ void THNN_(VolumetricAveragePooling_updateOutput)(
   {
     /* sizes */
     batchSize   = 1;
-    inputSlices = THCTensor_(size)(state, input, 0);
-    inputTime   = THCTensor_(size)(state, input, 1);
-    inputHeight = THCTensor_(size)(state, input, 2);
-    inputWidth  = THCTensor_(size)(state, input, 3);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
   }
   else /* 5D */
   {
     /* sizes */
-    batchSize   = THCTensor_(size)(state, input, 0);
-    inputSlices = THCTensor_(size)(state, input, 1);
-    inputTime   = THCTensor_(size)(state, input, 2);
-    inputHeight = THCTensor_(size)(state, input, 3);
-    inputWidth  = THCTensor_(size)(state, input, 4);
+    batchSize   = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputSlices = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputTime   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputHeight = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+    inputWidth  = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
   }
 
   int outputTime;
@@ -288,26 +288,26 @@ void THNN_(VolumetricAveragePooling_updateGradInput)(
   if (!fiveDimensionalInput) /* 4D */
   {
     batchSize = 1;
-    inputSlices  = THCTensor_(size)(state, input, 0);
-    inputTime    = THCTensor_(size)(state, input, 1);
-    inputHeight  = THCTensor_(size)(state, input, 2);
-    inputWidth   = THCTensor_(size)(state, input, 3);
+    inputSlices  = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputTime    = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputHeight  = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputWidth   = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
 
-    outputTime   = THCTensor_(size)(state, gradOutput, 1);
-    outputHeight = THCTensor_(size)(state, gradOutput, 2);
-    outputWidth  = THCTensor_(size)(state, gradOutput, 3);
+    outputTime   = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 1);
+    outputHeight = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 2);
+    outputWidth  = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 3);
   }
   else
   {
-    batchSize    = THCTensor_(size)(state, input, 0);
-    inputSlices  = THCTensor_(size)(state, input, 1);
-    inputTime    = THCTensor_(size)(state, input, 2);
-    inputHeight  = THCTensor_(size)(state, input, 3);
-    inputWidth   = THCTensor_(size)(state, input, 4);
+    batchSize    = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    inputSlices  = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+    inputTime    = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    inputHeight  = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+    inputWidth   = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
 
-    outputTime   = THCTensor_(size)(state, gradOutput, 2);
-    outputHeight = THCTensor_(size)(state, gradOutput, 3);
-    outputWidth  = THCTensor_(size)(state, gradOutput, 4);
+    outputTime   = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 2);
+    outputHeight = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 3);
+    outputWidth  = THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 4);
   }
 
   gradOutput = THCTensor_(newContiguous)(state, gradOutput);

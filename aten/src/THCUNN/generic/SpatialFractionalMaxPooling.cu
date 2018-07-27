@@ -21,16 +21,16 @@ void THNN_(SpatialFractionalMaxPooling_updateOutput)(
                   "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s");
 
   if (numInputDims == 4) {
-    numBatch = THCTensor_(size)(state, input, 0);
+    numBatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
     planeDim++;
     dimh++;
     dimw++;
   }
 
   /* sizes */
-  int64_t numPlanes = THCTensor_(size)(state, input, planeDim);
-  int64_t inputH = THCTensor_(size)(state, input, dimh);
-  int64_t inputW = THCTensor_(size)(state, input, dimw);
+  int64_t numPlanes = THCTensor_(sizeLegacyNoScalars)(state, input, planeDim);
+  int64_t inputH = THCTensor_(sizeLegacyNoScalars)(state, input, dimh);
+  int64_t inputW = THCTensor_(sizeLegacyNoScalars)(state, input, dimw);
 
   THArgCheck(outputH + poolSizeH - 1 <= inputH, 6,
              "poolSizeH (%d) too large relative to input height (%d)",
@@ -113,12 +113,12 @@ void THNN_(SpatialFractionalMaxPooling_updateGradInput)(
   }
 
   /* sizes */
-  int64_t inputH = THCTensor_(size)(state, input, dimh);
-  int64_t inputW = THCTensor_(size)(state, input, dimw);
+  int64_t inputH = THCTensor_(sizeLegacyNoScalars)(state, input, dimh);
+  int64_t inputW = THCTensor_(sizeLegacyNoScalars)(state, input, dimw);
 
-  THArgCheck(outputH == THCTensor_(size)(state, gradOutput, dimh), 3,
+  THArgCheck(outputH == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimh), 3,
                 "gradOutput height unexpected");
-  THArgCheck(outputW == THCTensor_(size)(state, gradOutput, dimw), 3,
+  THArgCheck(outputW == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw), 3,
                 "gradOutput width unexpected");
 
   /* resize */

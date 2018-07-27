@@ -40,7 +40,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   if (scaleGradByFreq)
   {
-    THIntegerTensor_(resize1d)(count, gradWeight->size(0));
+    THIntegerTensor_(resize1d)(count, THTensor_sizeLegacyNoScalars(gradWeight, 0));
     count_data = THIntegerTensor_(data)(count);
   }
 
@@ -55,7 +55,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   THIndex_t *input_data = THIndexTensor_(data)(input);
   ptrdiff_t numel = THIndexTensor_(nElement)(input);
-  int64_t numw = THTensor_(size)(gradWeight, 0);
+  int64_t numw = THTensor_(sizeLegacyNoScalars)(gradWeight, 0);
 
   // check that inputs are all within range
   for (i=0; i<numel; i++)
@@ -69,7 +69,7 @@ void THNN_(LookupTable_accGradParameters)(
 
   real *gw = THTensor_(data)(gradWeight);
   real *go = THTensor_(data)(gradOutput);
-  int64_t stride = THTensor_(stride)(gradWeight, 0);
+  int64_t stride = THTensor_(strideLegacyNoScalars)(gradWeight, 0);
 
   if (count_data)
     THNN_(LookupTable_resetCount)(count_data, input);
@@ -182,8 +182,8 @@ void THNN_(LookupTable_renorm)(
   THIndex_t *row_idx = THIndexTensor_(data)(idx);
   ptrdiff_t numel = THIndexTensor_(nElement)(idx);
 
-  int64_t numw = THTensor_(size)(weight, 0);
-  int64_t stride = THTensor_(stride)(weight, 0);
+  int64_t numw = THTensor_(sizeLegacyNoScalars)(weight, 0);
+  int64_t stride = THTensor_(strideLegacyNoScalars)(weight, 0);
   real *gw = THTensor_(data)(weight);
   for (i=0; i<numel; i++) {
     if (row_idx[i] < TH_INDEX_BASE || row_idx[i] >= numw + TH_INDEX_BASE) {

@@ -12,14 +12,14 @@ static inline void THNN_(VolumetricGridSamplerBilinear_shapeCheck)(
   THCUNN_argCheck(state, !grid->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, grid) == 5, 2, grid,
       "non-empty 5D grid tensor expected but got: %s");
 
-  int64_t nbatch   = THCTensor_(size)(state, input, 0);
-  int64_t channels = THCTensor_(size)(state, input, 1);
-  int64_t idepth   = THCTensor_(size)(state, input, 2);
-  int64_t iheight   = THCTensor_(size)(state, input, 3);
-  int64_t iwidth    = THCTensor_(size)(state, input, 4);
-  int64_t odepth   = THCTensor_(size)(state, grid, 1);
-  int64_t oheight   = THCTensor_(size)(state, grid, 2);
-  int64_t owidth    = THCTensor_(size)(state, grid, 3);
+  int64_t nbatch   = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t channels = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int64_t idepth   = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int64_t iheight   = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+  int64_t iwidth    = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
+  int64_t odepth   = THCTensor_(sizeLegacyNoScalars)(state, grid, 1);
+  int64_t oheight   = THCTensor_(sizeLegacyNoScalars)(state, grid, 2);
+  int64_t owidth    = THCTensor_(sizeLegacyNoScalars)(state, grid, 3);
 
   THCUNN_check_dim_size(state, grid, 5, 0, nbatch);
   THCUNN_check_dim_size(state, grid, 5, 4, 3);
@@ -42,14 +42,14 @@ THC_API void THNN_(VolumetricGridSamplerBilinear_updateOutput)(
 
   THCUNN_assertSameGPU(state, 3, input, grid, output);
   THNN_(VolumetricGridSamplerBilinear_shapeCheck)(state, input, grid, NULL);
-  int64_t N = THCTensor_(size)(state, input, 0);
-  int64_t C = THCTensor_(size)(state, input, 1);
-  int64_t ID = THCTensor_(size)(state, input, 2);
-  int64_t IH = THCTensor_(size)(state, input, 3);
-  int64_t IW = THCTensor_(size)(state, input, 4);
-  int64_t D = THCTensor_(size)(state,grid, 1);
-  int64_t H = THCTensor_(size)(state,grid, 2);
-  int64_t W = THCTensor_(size)(state, grid, 3);
+  int64_t N = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t C = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int64_t ID = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int64_t IH = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+  int64_t IW = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
+  int64_t D = THCTensor_(sizeLegacyNoScalars)(state,grid, 1);
+  int64_t H = THCTensor_(sizeLegacyNoScalars)(state,grid, 2);
+  int64_t W = THCTensor_(sizeLegacyNoScalars)(state, grid, 3);
 
   // resize output to the same shape as input
   THCTensor_(resize5d)(state, output, N, C, D, H, W);
@@ -74,14 +74,14 @@ THC_API void THNN_(VolumetricGridSamplerBilinear_updateGradInput)(
 
   THCUNN_assertSameGPU(state, 5, input, gradInput, grid, gradGrid, gradOutput);
   THNN_(VolumetricGridSamplerBilinear_shapeCheck)(state, input, grid, gradOutput);
-  int64_t N = THCTensor_(size)(state, input, 0);
-  int64_t C = THCTensor_(size)(state, input, 1);
-  int64_t ID = THCTensor_(size)(state, input, 2);
-  int64_t IH = THCTensor_(size)(state, input, 3);
-  int64_t IW = THCTensor_(size)(state, input, 4);
-  int64_t D = THCTensor_(size)(state,grid, 1);
-  int64_t H = THCTensor_(size)(state,grid, 2);
-  int64_t W = THCTensor_(size)(state, grid, 3);
+  int64_t N = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int64_t C = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int64_t ID = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+  int64_t IH = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
+  int64_t IW = THCTensor_(sizeLegacyNoScalars)(state, input, 4);
+  int64_t D = THCTensor_(sizeLegacyNoScalars)(state,grid, 1);
+  int64_t H = THCTensor_(sizeLegacyNoScalars)(state,grid, 2);
+  int64_t W = THCTensor_(sizeLegacyNoScalars)(state, grid, 3);
 
   THCTensor_(resize5d)(state, gradInput, N, C, ID, IH, IW);
   THCTensor_(resize5d)(state, gradGrid, N, D, H, W, 3);

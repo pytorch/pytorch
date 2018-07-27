@@ -14,16 +14,16 @@ void THNN_(SpatialClassNLLCriterion_shapeCheck)(
   AT_CHECK(!input->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, input) == 4, 2,
            "only batches of spatial inputs supported (non-empty 4D tensors), "      \
            "but got input of size: ", input->sizes());
-  if (THCTensor_(size)(state, input, 0) != THCIndexTensor_(size)(state, target, 0) ||
-      THCTensor_(size)(state, input, 2) != THCIndexTensor_(size)(state, target, 1) ||
-      THCTensor_(size)(state, input, 3) != THCIndexTensor_(size)(state, target, 2)) {
+  if (THCTensor_(sizeLegacyNoScalars)(state, input, 0) != THCIndexTensor_(sizeLegacyNoScalars)(state, target, 0) ||
+      THCTensor_(sizeLegacyNoScalars)(state, input, 2) != THCIndexTensor_(sizeLegacyNoScalars)(state, target, 1) ||
+      THCTensor_(sizeLegacyNoScalars)(state, input, 3) != THCIndexTensor_(sizeLegacyNoScalars)(state, target, 2)) {
     THCDescBuff input_size = THCTensor_(sizeDesc)(state, input);
     THCDescBuff target_size = THCIndexTensor_(sizeDesc)(state, target);
     THError("input and target batch or spatial sizes don't match: target %s, input %s",
             target_size.str, input_size.str);
   }
 
-  if (weights && THCTensor_(nElement)(state, weights) != THCTensor_(size)(state, input, 1)) {
+  if (weights && THCTensor_(nElement)(state, weights) != THCTensor_(sizeLegacyNoScalars)(state, input, 1)) {
     THError("weight tensor should be defined either for all or no classes");
   }
 }
@@ -35,9 +35,9 @@ static void THNN_(SpatialClassNLLCriterion_gradOutput_no_reduce_shapeCheck)(
 {
   AT_CHECK(!gradOutput->is_empty() && THCTensor_(nDimensionLegacyNoScalars)(state, gradOutput) == 3, 2,
            "Expected non-empty dimension 3 but got gradOutput of size: ", gradOutput->sizes());
-  if (THCTensor_(size)(state, gradOutput, 0) != THCIndexTensor_(size)(state, target, 0) ||
-      THCTensor_(size)(state, gradOutput, 1) != THCIndexTensor_(size)(state, target, 1) ||
-      THCTensor_(size)(state, gradOutput, 2) != THCIndexTensor_(size)(state, target, 2)) {
+  if (THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 0) != THCIndexTensor_(sizeLegacyNoScalars)(state, target, 0) ||
+      THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 1) != THCIndexTensor_(sizeLegacyNoScalars)(state, target, 1) ||
+      THCTensor_(sizeLegacyNoScalars)(state, gradOutput, 2) != THCIndexTensor_(sizeLegacyNoScalars)(state, target, 2)) {
     THCDescBuff gradOutput_size = THCTensor_(sizeDesc)(state, gradOutput);
     THCDescBuff target_size = THCIndexTensor_(sizeDesc)(state, target);
     THError("gradOutput sizes don't match target sizes: target %s, gradOutput %s",
@@ -66,9 +66,9 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
     THCUNN_assertSameGPU(state, 4, input, target, output, total_weight);
 
   if (reduction == Reduction::None) {
-    int64_t batch_size = THCTensor_(size)(state, input, 0);
-    int64_t H = THCTensor_(size)(state, input, 2);
-    int64_t W = THCTensor_(size)(state, input, 3);
+    int64_t batch_size = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    int64_t H = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    int64_t W = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
 
     THCTensor_(resize3d)(state, output, batch_size, H, W);
 
@@ -102,7 +102,7 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
   real *output_data = THCTensor_(data)(state, output);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
+  THCIndex_t batch_size = THCIndexTensor_(sizeLegacyNoScalars)(state, target, 0);
   THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
@@ -119,9 +119,9 @@ void THNN_(SpatialClassNLLCriterion_updateOutput)(
       target_data,
       weights_data,
       reduction == Reduction::ElementwiseMean,
-      THCTensor_(size)(state, input, 0),
-      THCTensor_(size)(state, input, 1),
-      THCTensor_(size)(state, input, 2) * THCTensor_(size)(state, input, 3),
+      THCTensor_(sizeLegacyNoScalars)(state, input, 0),
+      THCTensor_(sizeLegacyNoScalars)(state, input, 1),
+      THCTensor_(sizeLegacyNoScalars)(state, input, 2) * THCTensor_(sizeLegacyNoScalars)(state, input, 3),
       blocks_per_sample,
       ignore_index
   );
@@ -168,9 +168,9 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
         gradOutput,
         target);
 
-    int64_t batch_size = THCTensor_(size)(state, input, 0);
-    int64_t H = THCTensor_(size)(state, input, 2);
-    int64_t W = THCTensor_(size)(state, input, 3);
+    int64_t batch_size = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+    int64_t H = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
+    int64_t W = THCTensor_(sizeLegacyNoScalars)(state, input, 3);
 
     if (weights) {
       weights = THCTensor_(newContiguous)(state, weights);
@@ -202,7 +202,7 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
   THCIndex_t *target_data = THCIndexTensor_(data)(state, target);
   real *total_weight_data = THCTensor_(data)(state, total_weight);
 
-  THCIndex_t batch_size = THCIndexTensor_(size)(state, target, 0);
+  THCIndex_t batch_size = THCIndexTensor_(sizeLegacyNoScalars)(state, target, 0);
   THCIndex_t map_nelem = THCIndexTensor_(nElement)(state, target) / batch_size;
   int blocks_per_sample = GET_BLOCKS(map_nelem) / 128;
   blocks_per_sample = (blocks_per_sample == 0) ? 1 : blocks_per_sample;
@@ -216,9 +216,9 @@ void THNN_(SpatialClassNLLCriterion_updateGradInput)(
       weights_data,
       total_weight_data,
       reduction == Reduction::ElementwiseMean,
-      THCTensor_(size)(state, input, 0),
-      THCTensor_(size)(state, input, 1),
-      THCTensor_(size)(state, input, 2) *THCTensor_(size)(state, input, 3),
+      THCTensor_(sizeLegacyNoScalars)(state, input, 0),
+      THCTensor_(sizeLegacyNoScalars)(state, input, 1),
+      THCTensor_(sizeLegacyNoScalars)(state, input, 2) *THCTensor_(sizeLegacyNoScalars)(state, input, 3),
       blocks_per_sample,
       ignore_index
   );

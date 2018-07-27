@@ -25,13 +25,13 @@ static inline void THNN_(TemporalConvolution_shapeCheck)(
   THNN_ARGCHECK(!input->is_empty() && (input->dim() == 2 || input->dim() == 3), 2, input,
                   "non-empty 2D or 3D (batch mode) tensor expected for input, but got: %s");
   if (inputFrameSize != NULL) {
-    THArgCheck(input->size(dimF) == *inputFrameSize, 2,
+    THArgCheck(THTensor_sizeLegacyNoScalars(input, dimF) == *inputFrameSize, 2,
                "invalid input frame size. Got: %d, Expected: %d",
-               input->size(dimF), *inputFrameSize);
+               THTensor_sizeLegacyNoScalars(input, dimF), *inputFrameSize);
   }
-  THArgCheck(input->size(dimS) >= kW, 2,
+  THArgCheck(THTensor_sizeLegacyNoScalars(input, dimS) >= kW, 2,
              "input sequence smaller than kernel size. Got: %d, Expected: %d",
-             input->size(dimS), kW);
+             THTensor_sizeLegacyNoScalars(input, dimS), kW);
 }
 
 void THNN_(TemporalConvolution_updateOutput)(
@@ -64,7 +64,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   outputWindow = THTensor_(new)();
   inputWindow = THTensor_(new)();
 
-  nInputFrame = input->size(dimS);
+  nInputFrame = THTensor_sizeLegacyNoScalars(input, dimS);
   nOutputFrame = (nInputFrame - kW) / dW + 1;
 
   if (input->dim() == 2)
@@ -89,14 +89,14 @@ void THNN_(TemporalConvolution_updateOutput)(
       nOutputFrame -= nFrame;
 
       THTensor_(setStorage2d)(inputWindow, THTensor_getStoragePtr(input),
-                              input->storage_offset()+k*dW*input->size(1),
-                              nFrame, inputFrameStride*input->size(1),
-                              kW*input->size(1), 1);
+                              input->storage_offset()+k*dW*THTensor_sizeLegacyNoScalars(input, 1),
+                              nFrame, inputFrameStride*THTensor_sizeLegacyNoScalars(input, 1),
+                              kW*THTensor_sizeLegacyNoScalars(input, 1), 1);
 
       THTensor_(setStorage2d)(outputWindow, THTensor_getStoragePtr(output),
-                              output->storage_offset() + k*output->size(1),
-                              nFrame, outputFrameStride*output->size(1),
-                              output->size(1), 1);
+                              output->storage_offset() + k*THTensor_sizeLegacyNoScalars(output, 1),
+                              nFrame, outputFrameStride*THTensor_sizeLegacyNoScalars(output, 1),
+                              THTensor_sizeLegacyNoScalars(output, 1), 1);
 
       THTensor *tweight = THTensor_(new)();
       THTensor_(transpose)(tweight, weight, 0, 1);
@@ -108,7 +108,7 @@ void THNN_(TemporalConvolution_updateOutput)(
   {
     THTensor *outputSample = THTensor_(new)();
     THTensor *inputSample = THTensor_(new)();
-    int nBatchFrame = input->size(0);
+    int nBatchFrame = THTensor_sizeLegacyNoScalars(input, 0);
 
     THTensor_(resize3d)(output,
                         nBatchFrame,
@@ -137,14 +137,14 @@ void THNN_(TemporalConvolution_updateOutput)(
         nOutputSampleFrame -= nFrame;
 
         THTensor_(setStorage2d)(inputWindow, THTensor_getStoragePtr(inputSample),
-                                inputSample->storage_offset()+k*dW*inputSample->size(1),
-                                nFrame, inputFrameStride*inputSample->size(1),
-                                kW*inputSample->size(1), 1);
+                                inputSample->storage_offset()+k*dW*THTensor_sizeLegacyNoScalars(inputSample, 1),
+                                nFrame, inputFrameStride*THTensor_sizeLegacyNoScalars(inputSample, 1),
+                                kW*THTensor_sizeLegacyNoScalars(inputSample, 1), 1);
 
         THTensor_(setStorage2d)(outputWindow, THTensor_getStoragePtr(outputSample),
-                                outputSample->storage_offset() + k*outputSample->size(1),
-                                nFrame, outputFrameStride*outputSample->size(1),
-                                outputSample->size(1), 1);
+                                outputSample->storage_offset() + k*THTensor_sizeLegacyNoScalars(outputSample, 1),
+                                nFrame, outputFrameStride*THTensor_sizeLegacyNoScalars(outputSample, 1),
+                                THTensor_sizeLegacyNoScalars(outputSample, 1), 1);
 
         THTensor *tweight = THTensor_(new)();
         THTensor_(transpose)(tweight, weight, 0, 1);
@@ -188,8 +188,8 @@ void THNN_(TemporalConvolution_updateGradInput)(
   THArgCheck(THTensor_(isContiguous)(weight), 4, "weight must be contiguous");
   THNN_(TemporalConvolution_shapeCheck)(
         state, input, kW, dW, NULL);
-  nInputFrame = input->size(dimS);
-  nOutputFrame = gradOutput->size(dimS);
+  nInputFrame = THTensor_sizeLegacyNoScalars(input, dimS);
+  nOutputFrame = THTensor_sizeLegacyNoScalars(gradOutput, dimS);
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -211,14 +211,14 @@ void THNN_(TemporalConvolution_updateGradInput)(
       nOutputFrame -= nFrame;
 
       THTensor_(setStorage2d)(gradOutputWindow, THTensor_getStoragePtr(gradOutput),
-                              gradOutput->storage_offset() + k*gradOutput->size(1),
-                              nFrame, outputFrameStride*gradOutput->size(1),
-                              gradOutput->size(1), 1);
+                              gradOutput->storage_offset() + k*THTensor_sizeLegacyNoScalars(gradOutput, 1),
+                              nFrame, outputFrameStride*THTensor_sizeLegacyNoScalars(gradOutput, 1),
+                              THTensor_sizeLegacyNoScalars(gradOutput, 1), 1);
 
       THTensor_(setStorage2d)(gradInputWindow, THTensor_getStoragePtr(gradInput),
-                              gradInput->storage_offset()+k*dW*gradInput->size(1),
-                              nFrame, inputFrameStride*gradInput->size(1),
-                              kW*gradInput->size(1), 1);
+                              gradInput->storage_offset()+k*dW*THTensor_sizeLegacyNoScalars(gradInput, 1),
+                              nFrame, inputFrameStride*THTensor_sizeLegacyNoScalars(gradInput, 1),
+                              kW*THTensor_sizeLegacyNoScalars(gradInput, 1), 1);
 
       THTensor_(addmm)(gradInputWindow, 1, gradInputWindow, 1, gradOutputWindow, weight);
     }
@@ -227,7 +227,7 @@ void THNN_(TemporalConvolution_updateGradInput)(
   {
     THTensor *gradOutputSample = THTensor_(new)();
     THTensor *gradInputSample = THTensor_(new)();
-    int nBatchFrame = input->size(0);
+    int nBatchFrame = THTensor_sizeLegacyNoScalars(input, 0);
 
     for(i = 0; i < nBatchFrame; i++)
     {
@@ -244,14 +244,14 @@ void THNN_(TemporalConvolution_updateGradInput)(
         nOutputSampleFrame -= nFrame;
 
         THTensor_(setStorage2d)(gradOutputWindow, THTensor_getStoragePtr(gradOutputSample),
-                                gradOutputSample->storage_offset() + k*gradOutputSample->size(1),
-                                nFrame, outputFrameStride*gradOutputSample->size(1),
-                                gradOutputSample->size(1), 1);
+                                gradOutputSample->storage_offset() + k*THTensor_sizeLegacyNoScalars(gradOutputSample, 1),
+                                nFrame, outputFrameStride*THTensor_sizeLegacyNoScalars(gradOutputSample, 1),
+                                THTensor_sizeLegacyNoScalars(gradOutputSample, 1), 1);
 
         THTensor_(setStorage2d)(gradInputWindow, THTensor_getStoragePtr(gradInputSample),
-                                gradInputSample->storage_offset()+k*dW*gradInputSample->size(1),
-                                nFrame, inputFrameStride*gradInputSample->size(1),
-                                kW*gradInputSample->size(1), 1);
+                                gradInputSample->storage_offset()+k*dW*THTensor_sizeLegacyNoScalars(gradInputSample, 1),
+                                nFrame, inputFrameStride*THTensor_sizeLegacyNoScalars(gradInputSample, 1),
+                                kW*THTensor_sizeLegacyNoScalars(gradInputSample, 1), 1);
 
         THTensor_(addmm)(gradInputWindow, 1, gradInputWindow, 1, gradOutputWindow, weight);
       }
@@ -294,8 +294,8 @@ void THNN_(TemporalConvolution_accGradParameters)(
 
   THNN_(TemporalConvolution_shapeCheck)(
         state, input, kW, dW, NULL);
-  nInputFrame = input->size(dimS);
-  nOutputFrame = gradOutput->size(dimS);
+  nInputFrame = THTensor_sizeLegacyNoScalars(input, dimS);
+  nOutputFrame = THTensor_sizeLegacyNoScalars(gradOutput, dimS);
 
   input = THTensor_(newContiguous)(input);
   gradOutput = THTensor_(newContiguous)(gradOutput);
@@ -320,14 +320,14 @@ void THNN_(TemporalConvolution_accGradParameters)(
       nOutputFrame -= nFrame;
 
       THTensor_(setStorage2d)(inputWindow, THTensor_getStoragePtr(input),
-                              input->storage_offset()+k*dW*input->size(1),
-                              nFrame, inputFrameStride*input->size(1),
-                              kW*input->size(1), 1);
+                              input->storage_offset()+k*dW*THTensor_sizeLegacyNoScalars(input, 1),
+                              nFrame, inputFrameStride*THTensor_sizeLegacyNoScalars(input, 1),
+                              kW*THTensor_sizeLegacyNoScalars(input, 1), 1);
 
       THTensor_(setStorage2d)(gradOutputWindow, THTensor_getStoragePtr(gradOutput),
-                              gradOutput->storage_offset() + k*gradOutput->size(1),
-                              nFrame, outputFrameStride*gradOutput->size(1),
-                              gradOutput->size(1), 1);
+                              gradOutput->storage_offset() + k*THTensor_sizeLegacyNoScalars(gradOutput, 1),
+                              nFrame, outputFrameStride*THTensor_sizeLegacyNoScalars(gradOutput, 1),
+                              THTensor_sizeLegacyNoScalars(gradOutput, 1), 1);
 
       THTensor *tgradOutputWindow = THTensor_(new)();
       THTensor_(transpose)(tgradOutputWindow, gradOutputWindow, 0, 1);
@@ -339,7 +339,7 @@ void THNN_(TemporalConvolution_accGradParameters)(
   {
     THTensor *gradOutputSample = THTensor_(new)();
     THTensor *inputSample = THTensor_(new)();
-    int nBatchFrame = input->size(0);
+    int nBatchFrame = THTensor_sizeLegacyNoScalars(input, 0);
 
     for(i = 0; i < nBatchFrame; i++)
     {
@@ -363,14 +363,14 @@ void THNN_(TemporalConvolution_accGradParameters)(
         nOutputSampleFrame -= nFrame;
 
         THTensor_(setStorage2d)(inputWindow, THTensor_getStoragePtr(inputSample),
-                                inputSample->storage_offset()+k*dW*inputSample->size(1),
-                                nFrame, inputFrameStride*inputSample->size(1),
-                                kW*inputSample->size(1), 1);
+                                inputSample->storage_offset()+k*dW*THTensor_sizeLegacyNoScalars(inputSample, 1),
+                                nFrame, inputFrameStride*THTensor_sizeLegacyNoScalars(inputSample, 1),
+                                kW*THTensor_sizeLegacyNoScalars(inputSample, 1), 1);
 
         THTensor_(setStorage2d)(gradOutputWindow, THTensor_getStoragePtr(gradOutputSample),
-                                gradOutputSample->storage_offset() + k*gradOutputSample->size(1),
-                                nFrame, outputFrameStride*gradOutputSample->size(1),
-                                gradOutputSample->size(1), 1);
+                                gradOutputSample->storage_offset() + k*THTensor_sizeLegacyNoScalars(gradOutputSample, 1),
+                                nFrame, outputFrameStride*THTensor_sizeLegacyNoScalars(gradOutputSample, 1),
+                                THTensor_sizeLegacyNoScalars(gradOutputSample, 1), 1);
 
         THTensor *tgradOutputWindow = THTensor_(new)();
         THTensor_(transpose)(tgradOutputWindow, gradOutputWindow, 0, 1);

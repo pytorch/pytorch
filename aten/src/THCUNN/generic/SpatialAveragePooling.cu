@@ -32,9 +32,9 @@ static inline void THNN_(SpatialAveragePooling_shapeCheck)(
              "padW = %d, padH = %d, kW = %d, kH = %d",
              padW, padH, kW, kH);
 
-  int64_t nInputPlane = input->size(dimh-1);
-  int64_t nInputRows = input->size(dimh);
-  int64_t nInputCols = input->size(dimw);
+  int64_t nInputPlane = THTensor_sizeLegacyNoScalars(input, dimh-1);
+  int64_t nInputRows = THTensor_sizeLegacyNoScalars(input, dimh);
+  int64_t nInputCols = THTensor_sizeLegacyNoScalars(input, dimw);
   int64_t nOutputRows, nOutputCols;
   int64_t nOutputPlane = nInputPlane;
 
@@ -88,17 +88,17 @@ void THNN_(SpatialAveragePooling_updateOutput)(
   int64_t nOutputCols, nOutputRows;
 
   if (input->dim() == 3) {
-    nInputCols = input->size(2);
-    nInputRows = input->size(1);
-    nInputPlane = input->size(0);
+    nInputCols = THTensor_sizeLegacyNoScalars(input, 2);
+    nInputRows = THTensor_sizeLegacyNoScalars(input, 1);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 0);
     batchSize = 1;
   }
   else
   {
-    nInputCols = input->size(3);
-    nInputRows = input->size(2);
-    nInputPlane = input->size(1);
-    batchSize = input->size(0);
+    nInputCols = THTensor_sizeLegacyNoScalars(input, 3);
+    nInputRows = THTensor_sizeLegacyNoScalars(input, 2);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 1);
+    batchSize = THTensor_sizeLegacyNoScalars(input, 0);
   }
 
   if(ceil_mode) {
@@ -174,18 +174,18 @@ void THNN_(SpatialAveragePooling_updateGradInput)(
   int dimRow = 1;
 
   if (input->dim() == 3) {
-    nInputPlane = input->size(0);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 0);
     batchSize = 1;
   }
   else
   {
     dimCol = 3;
     dimRow = 2;
-    nInputPlane = input->size(1);
-    batchSize = input->size(0);
+    nInputPlane = THTensor_sizeLegacyNoScalars(input, 1);
+    batchSize = THTensor_sizeLegacyNoScalars(input, 0);
   }
-  nInputCols = input->size(dimCol);
-  nInputRows = input->size(dimRow);
+  nInputCols = THTensor_sizeLegacyNoScalars(input, dimCol);
+  nInputRows = THTensor_sizeLegacyNoScalars(input, dimRow);
 
   if(ceil_mode) {
     nOutputCols = ceil(float(nInputCols - kW + 2*padW) / float(dW)) + 1;

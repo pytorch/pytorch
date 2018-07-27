@@ -34,9 +34,9 @@ static inline void THNN_(SpatialDilatedMaxPooling_shapeCheck)(
 	     "padW = %d, padH = %d, kW = %d, kH = %d",
 	     padW, padH, kW, kH);
 
-  int64_t nInputPlane = input->size(dimh-1);
-  int64_t inputHeight = input->size(dimh);
-  int64_t inputWidth = input->size(dimw);
+  int64_t nInputPlane = THTensor_sizeLegacyNoScalars(input, dimh-1);
+  int64_t inputHeight = THTensor_sizeLegacyNoScalars(input, dimh);
+  int64_t inputWidth = THTensor_sizeLegacyNoScalars(input, dimw);
   int64_t outputHeight, outputWidth;
   int64_t nOutputPlane = nInputPlane;
 
@@ -184,15 +184,15 @@ void THNN_(SpatialDilatedMaxPooling_updateOutput)(
 
   if (input->dim() == 4)
   {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
   }
 
   /* sizes */
-  nInputPlane = input->size(dimh-1);
-  inputHeight = input->size(dimh);
-  inputWidth = input->size(dimw);
+  nInputPlane = THTensor_sizeLegacyNoScalars(input, dimh-1);
+  inputHeight = THTensor_sizeLegacyNoScalars(input, dimh);
+  inputWidth = THTensor_sizeLegacyNoScalars(input, dimw);
   if (ceil_mode)
   {
     outputHeight = (int64_t)(ceil((float)(inputHeight - (dilationH * (kH - 1) + 1) + 2*padH) / dH)) + 1;
@@ -349,17 +349,17 @@ void THNN_(SpatialDilatedMaxPooling_updateGradInput)(
   THTensor_(zero)(gradInput);
 
   if (input->dim() == 4) {
-    nbatch = input->size(0);
+    nbatch = THTensor_sizeLegacyNoScalars(input, 0);
     dimw++;
     dimh++;
   }
 
   /* sizes */
-  nInputPlane = input->size(dimh-1);
-  inputHeight = input->size(dimh);
-  inputWidth = input->size(dimw);
-  outputHeight = gradOutput->size(dimh);
-  outputWidth = gradOutput->size(dimw);
+  nInputPlane = THTensor_sizeLegacyNoScalars(input, dimh-1);
+  inputHeight = THTensor_sizeLegacyNoScalars(input, dimh);
+  inputWidth = THTensor_sizeLegacyNoScalars(input, dimw);
+  outputHeight = THTensor_sizeLegacyNoScalars(gradOutput, dimh);
+  outputWidth = THTensor_sizeLegacyNoScalars(gradOutput, dimw);
 
   /* get raw pointers */
   gradInput_data = THTensor_(data)(gradInput);

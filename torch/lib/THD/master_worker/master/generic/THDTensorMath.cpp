@@ -319,7 +319,7 @@ void THDTensor_(diag)(THDTensor *r_, THDTensor *t, int k) {
       1, "matrix or a vector expected");
 
   if (THDTensor_(nDimensionLegacyNoScalars)(t) == 1) {
-    int64_t t_size = THDTensor_(size)(t, 0);
+    int64_t t_size = THDTensor_(sizeLegacyNoScalars)(t, 0);
     int64_t sz = t_size + (k >= 0 ? k : -k);
 
     THDTensor_(resize2d)(r_, sz, sz);
@@ -327,9 +327,9 @@ void THDTensor_(diag)(THDTensor *r_, THDTensor *t, int k) {
   } else {
     int64_t sz;
     if (k >= 0)
-      sz = std::min(THDTensor_(size)(t, 0), THDTensor_(size)(t, 1)-k);
+      sz = std::min(THDTensor_(sizeLegacyNoScalars)(t, 0), THDTensor_(sizeLegacyNoScalars)(t, 1)-k);
     else
-      sz = std::min(THDTensor_(size)(t, 0)+k, THDTensor_(size)(t, 1));
+      sz = std::min(THDTensor_(sizeLegacyNoScalars)(t, 0)+k, THDTensor_(sizeLegacyNoScalars)(t, 1));
     THDTensor_(resize1d)(r_, sz);
   }
   masterCommandChannel->sendMessage(
@@ -412,7 +412,7 @@ void THDTensor_(topk)(THDTensor *rt_, THDLongTensor *ri_,
   int numDims = THDTensor_(nDimensionLegacyNoScalars)(t);
   THArgCheck(dim >= 0 && dim < numDims, 3, "dim not in range");
 
-  int64_t sliceSize = THDTensor_(size)(t, dim);
+  int64_t sliceSize = THDTensor_(sizeLegacyNoScalars)(t, dim);
   THArgCheck(k > 0 && k <= sliceSize, 2, "k not in range for dimension");
 
   THLongStorage *topKSize = THDTensor_(newSizeOf)(t);

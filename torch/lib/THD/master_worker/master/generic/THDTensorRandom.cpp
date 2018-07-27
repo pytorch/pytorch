@@ -90,11 +90,11 @@ void THDTensor_(multinomial)(THDLongTensor *self, THDGenerator *_generator,
                              int with_replacement) {
   int start_dim = THDTensor_(nDimensionLegacyNoScalars)(prob_dist);
   if (start_dim == 1) {
-    THDTensor_(resize2d)(prob_dist, 1, THDTensor_(size)(prob_dist, 0));
+    THDTensor_(resize2d)(prob_dist, 1, THDTensor_(sizeLegacyNoScalars)(prob_dist, 0));
   }
 
-  long n_dist = THDTensor_(size)(prob_dist, 0);
-  long n_categories = THDTensor_(size)(prob_dist, 1);
+  long n_dist = THDTensor_(sizeLegacyNoScalars)(prob_dist, 0);
+  long n_categories = THDTensor_(sizeLegacyNoScalars)(prob_dist, 1);
 
   THArgCheck(n_sample > 0, 2, "cannot sample n_sample < 0 samples");
 

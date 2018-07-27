@@ -21,11 +21,11 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
   int size[Dim];
   for (int i = 0; i < Dim || i < inDim; ++i) {
     if (i < Dim && i < inDim) {
-      size[i] = t->size(i);
+      size[i] = THTensor_sizeLegacyNoScalars(t, i);
     } else if (i < Dim) {
       size[i] = 1;
     } else {
-      size[Dim - 1] *= t->size(i);
+      size[Dim - 1] *= THTensor_sizeLegacyNoScalars(t, i);
     }
   }
   return THCDeviceTensor<real, Dim>(t->data<real>(), size);
@@ -39,7 +39,7 @@ void THNN_(BatchNormalization_updateOutput)(
 
   THCTensor_(resizeAs)(state, output_, input_);
   if (train) {
-    int64_t nInput = THCTensor_(size)(state, input_, 1);
+    int64_t nInput = THCTensor_(sizeLegacyNoScalars)(state, input_, 1);
     THCTensor_(resize1d)(state, saveMean_, nInput);
     THCTensor_(resize1d)(state, saveStd_, nInput);
   }

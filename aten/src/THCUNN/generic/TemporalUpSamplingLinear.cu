@@ -33,9 +33,9 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
            int outputWidth,
            bool align_corners)
 {
-  int nbatch = THCTensor_(size)(state, input, 0);
-  int channels = THCTensor_(size)(state, input, 1);
-  int inputWidth = THCTensor_(size)(state, input, 2);
+  int nbatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
+  int channels = THCTensor_(sizeLegacyNoScalars)(state, input, 1);
+  int inputWidth = THCTensor_(sizeLegacyNoScalars)(state, input, 2);
   THNN_(TemporalUpSamplingLinear_shapeCheck)
        (state, input, NULL,
         nbatch, channels,
@@ -43,8 +43,8 @@ void THNN_(TemporalUpSamplingLinear_updateOutput)(
 
   THCUNN_assertSameGPU(state, 2, input, output);
   THCTensor_(resize3d)(state, output,
-                       THCTensor_(size)(state, input, 0),
-                       THCTensor_(size)(state, input, 1),
+                       THCTensor_(sizeLegacyNoScalars)(state, input, 0),
+                       THCTensor_(sizeLegacyNoScalars)(state, input, 1),
                        outputWidth);
   THCTensor_(zero)(state, output);
   THCDeviceTensor<real, 3> idata = toDeviceTensor<real, 3>(state, input);

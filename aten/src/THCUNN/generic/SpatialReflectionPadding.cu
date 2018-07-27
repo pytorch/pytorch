@@ -20,15 +20,15 @@ void THNN_(SpatialReflectionPadding_updateOutput)(THCState *state,
                   "non-empty 3D or 4D (batch mode) tensor expected for input, but got: %s")
 
   if (numInputDims == 4) {
-    numBatch = THCTensor_(size)(state, input, 0);
+    numBatch = THCTensor_(sizeLegacyNoScalars)(state, input, 0);
     planeDim++;
     dimh++;
     dimw++;
   }
 
-  int numPlanes = THCTensor_(size)(state, input, planeDim);
-  int inputH = THCTensor_(size)(state, input, dimh);
-  int inputW = THCTensor_(size)(state, input, dimw);
+  int numPlanes = THCTensor_(sizeLegacyNoScalars)(state, input, planeDim);
+  int inputH = THCTensor_(sizeLegacyNoScalars)(state, input, dimh);
+  int inputW = THCTensor_(sizeLegacyNoScalars)(state, input, dimw);
 
   THArgCheck(padL < inputW && padR < inputW, 4,
              "Padding size should be less than the corresponding input dimension, "
@@ -97,17 +97,17 @@ void THNN_(SpatialReflectionPadding_updateGradInput)(
     dimh++;
     dimw++;
   }
-  int iheight = input->size(dimh);
-  int iwidth = input->size(dimw);
+  int iheight = THTensor_sizeLegacyNoScalars(input, dimh);
+  int iwidth = THTensor_sizeLegacyNoScalars(input, dimw);
   int oheight = iheight + padT + padB;
   int owidth  = iwidth + padL + padR;
 
-  THArgCheck(owidth == THCTensor_(size)(state, gradOutput, dimw), 3,
+  THArgCheck(owidth == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw), 3,
              "gradOutput width unexpected. Expected: %d, Got: %d",
-             owidth, THCTensor_(size)(state, gradOutput, dimw));
-  THArgCheck(oheight == THCTensor_(size)(state, gradOutput, dimh), 3,
+             owidth, THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimw));
+  THArgCheck(oheight == THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimh), 3,
              "gradOutput height unexpected. Expected: %d, Got: %d",
-             oheight, THCTensor_(size)(state, gradOutput, dimh));
+             oheight, THCTensor_(sizeLegacyNoScalars)(state, gradOutput, dimh));
 
   THCTensor_(resizeAs)(state, gradInput, input);
   THCTensor_(zero)(state, gradInput);

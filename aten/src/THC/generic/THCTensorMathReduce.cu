@@ -38,7 +38,7 @@ THC_API void
 THCTensor_(mean)(THCState *state, THCTensor *self, THCTensor *src, int dim, int keepdim)
 {
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 2, self, src));
-  const accreal size = scalar_cast<accreal>(THCTensor_(size)(state, src, dim));
+  const accreal size = scalar_cast<accreal>(THCTensor_(sizeLegacyNoScalars)(state, src, dim));
   if (!THC_reduceDim<real>(state, self, src,
                            thrust::identity<accreal>{},
                            ReduceAdd<accreal>{},
@@ -68,8 +68,8 @@ THCTensor_(renorm)(THCState *state, THCTensor* self, THCTensor* src, real value,
   THArgCheck(THCTensor_(nDimensionLegacyNoScalars)(state, src) > 1, 1, "need at least 2 dimensions");
 
   if (numel > 0) {
-    ptrdiff_t size = numel / data->size(0);
-    dim3 grid(data->size(0));
+    ptrdiff_t size = numel / THTensor_sizeLegacyNoScalars(data, 0);
+    dim3 grid(THTensor_sizeLegacyNoScalars(data, 0));
     dim3 threads(32);
 
     THCTensor_kernel_renorm<real, accreal>
@@ -407,7 +407,7 @@ THCTensor_(median)(THCState *state,
 
   int64_t t_size_dim, k;
 
-  t_size_dim = THCTensor_(size)(state, self, dimension);
+  t_size_dim = THCTensor_(sizeLegacyNoScalars)(state, self, dimension);
 
   k = (t_size_dim-1) >> 1;
 

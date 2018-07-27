@@ -6,39 +6,39 @@
 #include <omp.h>
 #endif
 
-#define ROW_PTR2(t, r) (THTensor_(data)(t) + (r) * (t)->stride(0))
-#define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * (t)->stride(1))
+#define ROW_PTR2(t, r) (THTensor_(data)(t) + (r) * THTensor_strideLegacyNoScalars(t, 0))
+#define COL_PTR2(t, c) (THTensor_(data)(t) + (c) * THTensor_strideLegacyNoScalars(t, 1))
 
 static bool THNN_(checkLegacyInput)(THTensor* t)
 {
-  return !t->is_empty() && t->dim() == 3 && t->size(2) == 2;
+  return !t->is_empty() && t->dim() == 3 && THTensor_sizeLegacyNoScalars(t, 2) == 2;
 }
 
 static bool THNN_(checkInput)(THTensor* t)
 {
-  return!t->is_empty() && t->dim() == 2 && t->size(1) == 3;
+  return!t->is_empty() && t->dim() == 2 && THTensor_sizeLegacyNoScalars(t, 1) == 3;
 }
 
 static bool THNN_(checkSize2D)(THTensor* t, int64_t size0, int64_t size1)
 {
-  return !t->is_empty() && t->dim() == 2 && t->size(0) == size0 && t->size(1) == size1;
+  return !t->is_empty() && t->dim() == 2 && THTensor_sizeLegacyNoScalars(t, 0) == size0 && THTensor_sizeLegacyNoScalars(t, 1) == size1;
 }
 
 static bool THNN_(checkSize1D)(THTensor* t, int64_t size0)
 {
-  return !t->is_empty() && t->dim() == 1 && t->size(0) == size0;
+  return !t->is_empty() && t->dim() == 1 && THTensor_sizeLegacyNoScalars(t, 0) == size0;
 }
 
 static void THNN_(set1d)(THTensor *t, int64_t x0, real value) {
-  THStorage_(set)(THTensor_getStoragePtr(t), t->storage_offset() + x0*t->stride(0), value);
+  THStorage_(set)(THTensor_getStoragePtr(t), t->storage_offset() + x0*THTensor_strideLegacyNoScalars(t, 0), value);
 }
 static real THNN_(get3d)(const THTensor *t, int64_t x0, int64_t x1, int64_t x2) {
   return THStorage_(get)(THTensor_getStoragePtr(t), t->storage_offset() +
-                         x0*t->stride(0) + x1*t->stride(1) + x2*t->stride(2));
+                         x0*THTensor_strideLegacyNoScalars(t, 0) + x1*THTensor_strideLegacyNoScalars(t, 1) + x2*THTensor_strideLegacyNoScalars(t, 2));
 }
 static real THNN_(get2d)(const THTensor *t, int64_t x0, int64_t x1) {
   return THStorage_(get)(THTensor_getStoragePtr(t), t->storage_offset() +
-                         x0*t->stride(0) + x1*t->stride(1));
+                         x0*THTensor_strideLegacyNoScalars(t, 0) + x1*THTensor_strideLegacyNoScalars(t, 1));
 }
 
 void THNN_(SparseLinear_updateOutput)(
@@ -49,15 +49,15 @@ void THNN_(SparseLinear_updateOutput)(
           THTensor *bias)
 {
   int64_t h, i, hp0, hp1;
-  int64_t outDim = THTensor_(size)(weight, 0);
-  int64_t inDim = THTensor_(size)(weight, 1);
-  int64_t batchSize = THTensor_(size)(output, 0);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(weight, 0);
+  int64_t inDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
+  int64_t batchSize = THTensor_(sizeLegacyNoScalars)(output, 0);
 
   THArgCheck(THNN_(checkInput)(input), 2, "input must be in coo format, nnz x 3");
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
   THArgCheck(THNN_(checkSize1D)(bias, outDim), 5, "bias size wrong");
 
-  int64_t nnz = THTensor_(size)(input, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(input, 0);
 
   THLongTensor * csr = THLongTensor_newWithSize1d(batchSize+1);
   THLongTensor_zero(csr);
@@ -92,8 +92,8 @@ void THNN_(SparseLinear_updateOutput)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
             val,
-            COL_PTR2(weight, offset), weight->stride(0),
-            ROW_PTR2(output, h), output->stride(1));
+            COL_PTR2(weight, offset), THTensor_strideLegacyNoScalars(weight, 0),
+            ROW_PTR2(output, h), THTensor_strideLegacyNoScalars(output, 1));
       } else {
         THError("index out of bound. updateOutput: %d not between 1 and %d",
             offset + 1, inDim);
@@ -119,8 +119,8 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
           THTensor *bias)
 {
   int64_t h, i;
-  int64_t outDim = THTensor_(size)(weight, 0);
-  int64_t inDim = THTensor_(size)(weight, 1);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(weight, 0);
+  int64_t inDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
 
   THArgCheck(THNN_(checkLegacyInput)(input), 2, "input size must be batchsize x nnz x 2");
   THArgCheck(THTensor_(isContiguous)(output), 3, "output must be contiguous");
@@ -128,8 +128,8 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
 
   weight = THTensor_(newContiguous)(weight);
 
-  int64_t batchSize = THTensor_(size)(input, 0);
-  int64_t nnz = THTensor_(size)(input, 1);
+  int64_t batchSize = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(input, 1);
   THTensor_(resize2d)(output, batchSize, outDim);
 
   // output = weight * input + bias
@@ -147,8 +147,8 @@ void THNN_(SparseLinear_legacyUpdateOutput)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
                       val,
-                      COL_PTR2(weight, offset), weight->stride(0),
-                      ROW_PTR2(output, h), output->stride(1));
+                      COL_PTR2(weight, offset), THTensor_strideLegacyNoScalars(weight, 0),
+                      ROW_PTR2(output, h), THTensor_strideLegacyNoScalars(output, 1));
       } else {
         THError("index out of bound. updateOutput: %d not between 1 and %d",
                 offset + 1, inDim);
@@ -179,8 +179,8 @@ void THNN_(SparseLinear_accGradParameters)(
   real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   int64_t h, i, col, hp0, hp1;
-  int64_t outDim = THTensor_(size)(weight, 0);
-  int64_t inDim = THTensor_(size)(weight, 1);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(weight, 0);
+  int64_t inDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
 
   THArgCheck(THNN_(checkInput)(input), 2,
              "input must be in coo format, nnz x 3");
@@ -191,7 +191,7 @@ void THNN_(SparseLinear_accGradParameters)(
   THArgCheck(THTensor_(isContiguous)(gradOutput), 1,
              "gradOutput must be contiguous");
 
-  int64_t nnz = THTensor_(size)(input, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(input, 0);
 
   THLongTensor* csc = THLongTensor_newWithSize1d(inDim+1);
   THLongTensor_zero(csc);
@@ -221,8 +221,8 @@ void THNN_(SparseLinear_accGradParameters)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
             val,
-            ROW_PTR2(gradOutput, h), gradOutput->stride(1),
-            COL_PTR2(gradWeight, offset), gradWeight->stride(0));
+            ROW_PTR2(gradOutput, h), THTensor_strideLegacyNoScalars(gradOutput, 1),
+            COL_PTR2(gradWeight, offset), THTensor_strideLegacyNoScalars(gradWeight, 0));
       } else {
         THError(
             "index out of bound. accGradParameters: %d not between 1 and %d",
@@ -259,8 +259,8 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
   real weightDecay = TH_CONVERT_ACCREAL_TO_REAL(weightDecay_);
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
   int64_t h, i;
-  int64_t outDim = THTensor_(size)(weight, 0);
-  int64_t inDim = THTensor_(size)(weight, 1);
+  int64_t outDim = THTensor_(sizeLegacyNoScalars)(weight, 0);
+  int64_t inDim = THTensor_(sizeLegacyNoScalars)(weight, 1);
 
   THArgCheck(THNN_(checkLegacyInput)(input), 2,
              "input size must be batchsize x nnz x 2");
@@ -271,8 +271,8 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
   THArgCheck(THTensor_(isContiguous)(gradOutput), 1,
              "gradOutput must be contiguous");
 
-  int64_t batchSize = THTensor_(size)(input, 0);
-  int64_t nnz = THTensor_(size)(input, 1);
+  int64_t batchSize = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(input, 1);
   THTensor_(resize2d)(gradOutput, batchSize, outDim);
 
   // gradWeight += gradOutput * input
@@ -289,8 +289,8 @@ void THNN_(SparseLinear_legacyAccGradParameters)(
       if (offset >= 0 && offset < inDim) {
         THBlas_(axpy)(outDim,
                       val,
-                      ROW_PTR2(gradOutput, h), gradOutput->stride(1),
-                      COL_PTR2(gradWeight, offset), gradWeight->stride(0));
+                      ROW_PTR2(gradOutput, h), THTensor_strideLegacyNoScalars(gradOutput, 1),
+                      COL_PTR2(gradWeight, offset), THTensor_strideLegacyNoScalars(gradWeight, 0));
       } else {
         THError(
           "index out of bound. accGradParameters: %d not between 1 and %d",
@@ -324,8 +324,8 @@ void THNN_(SparseLinear_updateParameters)(
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t i;
-  int64_t outDim = weight->size(0);
-  int64_t inDim = weight->size(1);
+  int64_t outDim = THTensor_sizeLegacyNoScalars(weight, 0);
+  int64_t inDim = THTensor_sizeLegacyNoScalars(weight, 1);
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -335,7 +335,7 @@ void THNN_(SparseLinear_updateParameters)(
              "input must be in coo format, nnz x 3");
 
 
-  int64_t nnz = THTensor_(size)(lastInput, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(lastInput, 0);
 
   // collect unique offsets of non-0 val in input
   THTensor* offsets = THTensor_(newWithSize1d)(nnz);
@@ -366,7 +366,7 @@ void THNN_(SparseLinear_updateParameters)(
 
   cnt = 1;
   real* uniqueOffsets_p = THTensor_(data)(uniqueOffsets);
-  for (i = 1; i < THTensor_(size)(uniqueOffsets, 0); i++) {
+  for (i = 1; i < THTensor_(sizeLegacyNoScalars)(uniqueOffsets, 0); i++) {
     if (uniqueOffsets_p[i] != uniqueOffsets_p[i - 1]) {
       uniqueOffsets_p[cnt++] = uniqueOffsets_p[i];
     }
@@ -380,8 +380,8 @@ void THNN_(SparseLinear_updateParameters)(
     int64_t offset = (int64_t)uniqueOffsets_p[i];
     THBlas_(axpy)(outDim,
                   -learningRate,
-                  COL_PTR2(gradWeight, offset), gradWeight->stride(0),
-                  COL_PTR2(weight, offset), weight->stride(0));
+                  COL_PTR2(gradWeight, offset), THTensor_strideLegacyNoScalars(gradWeight, 0),
+                  COL_PTR2(weight, offset), THTensor_strideLegacyNoScalars(weight, 0));
   }
 
   THTensor_(free)(uniqueOffsets);
@@ -398,8 +398,8 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
 {
   real learningRate = TH_CONVERT_ACCREAL_TO_REAL(learningRate_);
   int64_t h, i;
-  int64_t outDim = weight->size(0);
-  int64_t inDim = weight->size(1);
+  int64_t outDim = THTensor_sizeLegacyNoScalars(weight, 0);
+  int64_t inDim = THTensor_sizeLegacyNoScalars(weight, 1);
 
   THArgCheck(THNN_(checkSize2D)(gradWeight, outDim, inDim), 4,
              "gradWeight size wrong");
@@ -409,8 +409,8 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
              "input size must be batchsize x nnz x 2");
 
 
-  int64_t batchSize = THTensor_(size)(lastInput, 0);
-  int64_t nnz = THTensor_(size)(lastInput, 1);
+  int64_t batchSize = THTensor_(sizeLegacyNoScalars)(lastInput, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(lastInput, 1);
 
   // collect unique offsets of non-0 val in input
   THTensor* offsets = THTensor_(newWithSize1d)(batchSize * nnz);
@@ -442,7 +442,7 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
 
   cnt = 1;
   real* uniqueOffsets_p = THTensor_(data)(uniqueOffsets);
-  for (i = 1; i < THTensor_(size)(uniqueOffsets, 0); i++) {
+  for (i = 1; i < THTensor_(sizeLegacyNoScalars)(uniqueOffsets, 0); i++) {
     if (uniqueOffsets_p[i] != uniqueOffsets_p[i - 1]) {
       uniqueOffsets_p[cnt++] = uniqueOffsets_p[i];
     }
@@ -456,8 +456,8 @@ void THNN_(SparseLinear_legacyUpdateParameters)(
     int64_t offset = (int64_t)uniqueOffsets_p[i];
     THBlas_(axpy)(outDim,
                   -learningRate,
-                  COL_PTR2(gradWeight, offset), gradWeight->stride(0),
-                  COL_PTR2(weight, offset), weight->stride(0));
+                  COL_PTR2(gradWeight, offset), THTensor_strideLegacyNoScalars(gradWeight, 0),
+                  COL_PTR2(weight, offset), THTensor_strideLegacyNoScalars(weight, 0));
   }
 
   THTensor_(free)(uniqueOffsets);
@@ -471,8 +471,8 @@ void THNN_(SparseLinear_zeroGradParameters)(
 {
   int64_t i, j;
 
-  int64_t outDim = gradWeight->size(0);
-  int64_t inDim = gradWeight->size(1);
+  int64_t outDim = THTensor_sizeLegacyNoScalars(gradWeight, 0);
+  int64_t inDim = THTensor_sizeLegacyNoScalars(gradWeight, 1);
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkInput)(lastInput), 4,
@@ -480,7 +480,7 @@ void THNN_(SparseLinear_zeroGradParameters)(
 
   THTensor_(zero)(gradBias);
 
-  int64_t nnz = THTensor_(size)(lastInput, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(lastInput, 0);
 
 #pragma omp parallel for private(i, j) schedule(static) if (   \
   nnz * outDim > 10000)
@@ -492,10 +492,10 @@ void THNN_(SparseLinear_zeroGradParameters)(
     int64_t offset = (int64_t)(THNN_(get2d)(lastInput, i, 1)) - 1;
     if (offset >= 0 && offset < inDim) {
       real* pGradWeight = COL_PTR2(gradWeight, offset);
-      if (gradWeight->stride(0) == 1) {
+      if (THTensor_strideLegacyNoScalars(gradWeight, 0) == 1) {
         THVector_(fill)(pGradWeight, 0, outDim);
       } else {
-        int64_t stride = gradWeight->stride(0);
+        int64_t stride = THTensor_strideLegacyNoScalars(gradWeight, 0);
         for (j = 0; j < outDim; ++j) {
           pGradWeight[j * stride] = 0;
         }
@@ -517,8 +517,8 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
 {
   int64_t h, i, j;
 
-  int64_t outDim = gradWeight->size(0);
-  int64_t inDim = gradWeight->size(1);
+  int64_t outDim = THTensor_sizeLegacyNoScalars(gradWeight, 0);
+  int64_t inDim = THTensor_sizeLegacyNoScalars(gradWeight, 1);
 
   THArgCheck(THNN_(checkSize1D)(gradBias, outDim), 3, "gradBias size wrong");
   THArgCheck(THNN_(checkLegacyInput)(lastInput), 4,
@@ -526,8 +526,8 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
 
   THTensor_(zero)(gradBias);
 
-  int64_t batchSize = THTensor_(size)(lastInput, 0);
-  int64_t nnz = THTensor_(size)(lastInput, 1);
+  int64_t batchSize = THTensor_(sizeLegacyNoScalars)(lastInput, 0);
+  int64_t nnz = THTensor_(sizeLegacyNoScalars)(lastInput, 1);
 
 #pragma omp parallel for private(h, i, j) schedule(static) if (   \
   batchSize > 1 && batchSize * nnz * outDim > 10000)
@@ -540,10 +540,10 @@ void THNN_(SparseLinear_legacyZeroGradParameters)(
       int64_t offset = (int64_t)(THNN_(get3d)(lastInput, h, i, 0)) - 1;
       if (offset >= 0 && offset < inDim) {
         real* pGradWeight = COL_PTR2(gradWeight, offset);
-        if (gradWeight->stride(0) == 1) {
+        if (THTensor_strideLegacyNoScalars(gradWeight, 0) == 1) {
           THVector_(fill)(pGradWeight, 0, outDim);
         } else {
-          int64_t stride = gradWeight->stride(0);
+          int64_t stride = THTensor_strideLegacyNoScalars(gradWeight, 0);
           for (j = 0; j < outDim; ++j) {
             pGradWeight[j * stride] = 0;
           }

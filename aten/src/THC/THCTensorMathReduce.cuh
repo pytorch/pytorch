@@ -300,13 +300,13 @@ __host__ void THCTensor_varOuterDim(THCState *state, TensorTypeK *tgt, TensorTyp
   // Treat all outer dimensions (i.e. dim < dimension) as one.
   unsigned num_orows = 1;
   for (int64_t dim = 0; dim < dimension; dim++) {
-    num_orows *= THCTensor_size(state, src, dim);
+    num_orows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, dimension);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, dimension);
   // Treat all inner dimensions (i.e. dim > dimension) as one.
   unsigned num_irows = 1;
   for (unsigned dim = dimension + 1; dim < ndim; dim++) {
-    num_irows *= THCTensor_size(state, src, dim);
+    num_irows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
 
   dim3 threads(min(512, num_irows));
@@ -446,9 +446,9 @@ __host__ void THCTensor_varInnermostDim(THCState *state, TensorTypeK *tgt, Tenso
   // Treat all outer dimensions as a single dimension.
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
-    num_rows *= THCTensor_size(state, src, dim);
+    num_rows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, ndim - 1);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
 
   // From limited testing, 16x32 seemed a good compromise for handling both long and short dimensions.
   dim3 threads(16, 32);
@@ -518,12 +518,12 @@ THC_transformReduceOuterDimIndex(THCState *state,
   unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
   unsigned num_orows = 1;
   for (int64_t dim = 0; dim < rdim; dim++) {
-    num_orows *= THCTensor_size(state, src, dim);
+    num_orows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, rdim);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, rdim);
   unsigned num_irows = 1;
   for (unsigned dim = rdim + 1; dim < ndim; dim++) {
-    num_irows *= THCTensor_size(state, src, dim);
+    num_irows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
 
   dim3 threads(min(512, num_irows));
@@ -621,9 +621,9 @@ THC_transformReduceInnermostDimIndex(THCState *state,
   unsigned ndim = THCTensor_nDimensionLegacyAll(state, src);
   unsigned num_rows = 1;
   for (unsigned dim = 0; dim < ndim - 1; dim++) {
-    num_rows *= THCTensor_size(state, src, dim);
+    num_rows *= THCTensor_sizeLegacyNoScalars(state, src, dim);
   }
-  unsigned row_size = THCTensor_size(state, src, ndim - 1);
+  unsigned row_size = THCTensor_sizeLegacyNoScalars(state, src, ndim - 1);
 
   dim3 threads(16, 32);
   dim3 grid(min(1024, THCCeilDiv(num_rows, threads.y)));

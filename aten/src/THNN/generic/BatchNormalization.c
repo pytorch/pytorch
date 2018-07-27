@@ -10,7 +10,7 @@ void THNN_(BatchNormalization_updateOutput)(
   bool train, double momentum, double eps)
 {
   THTensor_(resizeAs)(output, input);
-  int64_t nInput = THTensor_(size)(input, 1);
+  int64_t nInput = THTensor_(sizeLegacyNoScalars)(input, 1);
   int64_t f;
   ptrdiff_t n = THTensor_(nElement)(input) / nInput;
 
@@ -81,7 +81,7 @@ void THNN_(BatchNormalization_backward)(
   bool train, double scale, double eps)
 {
   THNN_CHECK_SHAPE(input, gradOutput);
-  int64_t nInput = THTensor_(size)(input, 1);
+  int64_t nInput = THTensor_(sizeLegacyNoScalars)(input, 1);
   int64_t f;
   ptrdiff_t n = THTensor_(nElement)(input) / nInput;
 

@@ -30,16 +30,16 @@ void THNN_(TemporalUpSamplingNearest_updateOutput)(
     THTensor *output,
     int outputWidth)
 {
-  int nbatch = THTensor_(size)(input, 0);
-  int channels = THTensor_(size)(input, 1);
-  int inputWidth = THTensor_(size)(input, 2);
+  int nbatch = THTensor_(sizeLegacyNoScalars)(input, 0);
+  int channels = THTensor_(sizeLegacyNoScalars)(input, 1);
+  int inputWidth = THTensor_(sizeLegacyNoScalars)(input, 2);
   const float scale = (float) inputWidth / (float)outputWidth;
 
   THNN_(TemporalUpSamplingNearest_shapeCheck)(input, NULL, nbatch, channels, inputWidth, outputWidth);
 
     THTensor_(resize3d)(output,
-			THTensor_(size)(input, 0),
-      THTensor_(size)(input, 1),
+			THTensor_(sizeLegacyNoScalars)(input, 0),
+      THTensor_(sizeLegacyNoScalars)(input, 1),
       outputWidth);
     channels = channels * nbatch;
 

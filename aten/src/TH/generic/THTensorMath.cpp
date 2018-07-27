@@ -809,7 +809,7 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     THError("matrix and vector expected, got %dD, %dD",
       mat->dim(), vec->dim());
 
-  if( mat->size(1) != vec->size(0) ) {
+  if( THTensor_sizeLegacyNoScalars(mat, 1) != THTensor_sizeLegacyNoScalars(vec, 0) ) {
     THDescBuff bm = THTensor_(sizeDesc)(mat);
     THDescBuff bv = THTensor_(sizeDesc)(vec);
     THError("size mismatch, %s, %s", bm.str, bv.str);
@@ -818,7 +818,7 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   if(t->dim() != 1)
     THError("vector expected, got t: %dD", t->dim());
 
-  if(t->size(0) != mat->size(0)) {
+  if(THTensor_sizeLegacyNoScalars(t, 0) != THTensor_sizeLegacyNoScalars(mat, 0)) {
     THDescBuff bt = THTensor_(sizeDesc)(t);
     THDescBuff bm = THTensor_(sizeDesc)(mat);
     THError("size mismatch, t: %s, mat: %s", bt.str, bm.str);
@@ -833,35 +833,35 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   // n == 1 || lda >= max(1, m)
   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
 
-  if(mat->stride(0) == 1 && LDA_COND(mat->size(0), mat->size(1), mat->stride(1)))
+  if(THTensor_strideLegacyNoScalars(mat, 0) == 1 && LDA_COND(THTensor_sizeLegacyNoScalars(mat, 0), THTensor_sizeLegacyNoScalars(mat, 1), THTensor_strideLegacyNoScalars(mat, 1)))
   {
-    THBlas_(gemv)('n', mat->size(0), mat->size(1),
-                  alpha, THTensor_(data)(mat), mat->stride(1),
-                  THTensor_(data)(vec), vec->stride(0),
-                  beta, THTensor_(data)(r_), r_->stride(0));
+    THBlas_(gemv)('n', THTensor_sizeLegacyNoScalars(mat, 0), THTensor_sizeLegacyNoScalars(mat, 1),
+                  alpha, THTensor_(data)(mat), THTensor_strideLegacyNoScalars(mat, 1),
+                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, THTensor_(data)(r_), THTensor_strideLegacyNoScalars(r_, 0));
   }
-  else if(mat->stride(1) == 1 && LDA_COND(mat->size(1), mat->size(0), mat->stride(0)))
+  else if(THTensor_strideLegacyNoScalars(mat, 1) == 1 && LDA_COND(THTensor_sizeLegacyNoScalars(mat, 1), THTensor_sizeLegacyNoScalars(mat, 0), THTensor_strideLegacyNoScalars(mat, 0)))
   {
-    THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, THTensor_(data)(mat), mat->stride(0),
-                  THTensor_(data)(vec), vec->stride(0),
-                  beta, THTensor_(data)(r_), r_->stride(0));
+    THBlas_(gemv)('t',  THTensor_sizeLegacyNoScalars(mat, 1), THTensor_sizeLegacyNoScalars(mat, 0),
+                  alpha, THTensor_(data)(mat), THTensor_strideLegacyNoScalars(mat, 0),
+                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, THTensor_(data)(r_), THTensor_strideLegacyNoScalars(r_, 0));
   }
   else
   {
     THTensor *cmat = THTensor_(newContiguous)(mat);
 
-    THBlas_(gemv)('t',  mat->size(1), mat->size(0),
-                  alpha, THTensor_(data)(cmat), cmat->stride(0),
-                  THTensor_(data)(vec), vec->stride(0),
-                  beta, THTensor_(data)(r_), r_->stride(0));
+    THBlas_(gemv)('t',  THTensor_sizeLegacyNoScalars(mat, 1), THTensor_sizeLegacyNoScalars(mat, 0),
+                  alpha, THTensor_(data)(cmat), THTensor_strideLegacyNoScalars(cmat, 0),
+                  THTensor_(data)(vec), THTensor_strideLegacyNoScalars(vec, 0),
+                  beta, THTensor_(data)(r_), THTensor_strideLegacyNoScalars(r_, 0));
 
     THTensor_(free)(cmat);
   }
 
   // In gemv (x,0).mv(0) does not
   // handle beta, whereas gemm does for case where (x,0).mm(0,y).
-  if (vec->size(0) == 0 && mat->size(0) != 0) {
+  if (THTensor_sizeLegacyNoScalars(vec, 0) == 0 && THTensor_sizeLegacyNoScalars(mat, 0) != 0) {
     if (beta == 0) {
       THTensor_(zero)(r_);
     } else if (beta != 1) {
@@ -874,8 +874,8 @@ void THTensor_(addmv)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
 void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
 {
-  int64_t N1 = m1->size(0);
-  int64_t N2 = m2->size(0);
+  int64_t N1 = THTensor_sizeLegacyNoScalars(m1, 0);
+  int64_t N2 = THTensor_sizeLegacyNoScalars(m2, 0);
   int64_t dim;
   real *m1_p;
   real *m2_p;
@@ -890,8 +890,8 @@ void THTensor_(match)(THTensor *r_, THTensor *m1, THTensor *m2, real gain)
   THTensor_(resize2d)(m1, N1, THTensor_(nElement)(m1) / N1);
   THTensor_(resize2d)(m2, N2, THTensor_(nElement)(m2) / N2);
 
-  dim = m1->size(1);
-  THArgCheck(m1->size(1) == m2->size(1), 3, "m1 and m2 must have the same inner vector dim");
+  dim = THTensor_sizeLegacyNoScalars(m1, 1);
+  THArgCheck(THTensor_sizeLegacyNoScalars(m1, 1) == THTensor_sizeLegacyNoScalars(m2, 1), 3, "m1 and m2 must have the same inner vector dim");
 
   m1_p = THTensor_(data)(m1);
   m2_p = THTensor_(data)(m2);
@@ -924,7 +924,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   if( (m1->dim() != 2) || (m2->dim() != 2))
     THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
 
-  if(m1->size(1) != m2->size(0)) {
+  if(THTensor_sizeLegacyNoScalars(m1, 1) != THTensor_sizeLegacyNoScalars(m2, 0)) {
     THDescBuff bm1 = THTensor_(sizeDesc)(m1);
     THDescBuff bm2 = THTensor_(sizeDesc)(m2);
     THError("size mismatch, m1: %s, m2: %s", bm1.str, bm2.str);
@@ -933,7 +933,7 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   if( t->dim() != 2 )
     THError("matrix expected, got %dD tensor for t", t->dim());
 
-  if( (t->size(0) != m1->size(0)) || (t->size(1) != m2->size(1)) ) {
+  if( (THTensor_sizeLegacyNoScalars(t, 0) != THTensor_sizeLegacyNoScalars(m1, 0)) || (THTensor_sizeLegacyNoScalars(t, 1) != THTensor_sizeLegacyNoScalars(m2, 1)) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
     THDescBuff bm1 = THTensor_(sizeDesc)(m1);
     THDescBuff bm2 = THTensor_(sizeDesc)(m2);
@@ -952,14 +952,14 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
   #define LDC_COND(M, N, LDC) ((N) == 1 || (LDC) >= THMax(1, M))
 
   /* r_ */
-  if(r_->stride(0) == 1 &&
-     LDC_COND(r_->size(0), r_->size(1), r_->stride(1)))
+  if(THTensor_strideLegacyNoScalars(r_, 0) == 1 &&
+     LDC_COND(THTensor_sizeLegacyNoScalars(r_, 0), THTensor_sizeLegacyNoScalars(r_, 1), THTensor_strideLegacyNoScalars(r_, 1)))
   {
     transpose_r = 'n';
     r__ = r_;
   }
-  else if(r_->stride(1) == 1 &&
-          LDC_COND(r_->size(1), r_->size(0), r_->stride(0)))
+  else if(THTensor_strideLegacyNoScalars(r_, 1) == 1 &&
+          LDC_COND(THTensor_sizeLegacyNoScalars(r_, 1), THTensor_sizeLegacyNoScalars(r_, 0), THTensor_strideLegacyNoScalars(r_, 0)))
   {
     THTensor *swap = m2;
     m2 = m1;
@@ -979,21 +979,21 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
   #undef LDC_COND
 
-  int64_t m = r__->size((transpose_r == 'n' ? 0 : 1));
-  int64_t n = r__->size((transpose_r == 'n' ? 1 : 0));
-  int64_t k = m1->size((transpose_r == 'n' ? 1 : 0));
-  int64_t ldr__ = r__->stride((transpose_r == 'n' ? 1 : 0));
+  int64_t m = THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 0 : 1));
+  int64_t n = THTensor_sizeLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0));
+  int64_t k = THTensor_sizeLegacyNoScalars(m1, (transpose_r == 'n' ? 1 : 0));
+  int64_t ldr__ = THTensor_strideLegacyNoScalars(r__, (transpose_r == 'n' ? 1 : 0));
 
   /* m1 */
   /* Need ldm1_ >= max(1, (transpose_m1 == 'n' ? m : k)) */
-  if(m1->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
-     m1->stride((transpose_r == 'n' ? 1 : 0)) >= THMax(1, m))
+  if(THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 0 : 1)) == 1 &&
+     THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 1 : 0)) >= THMax(1, m))
   {
     transpose_m1 = 'n';
     m1_ = m1;
   }
-  else if(m1->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
-          m1->stride((transpose_r == 'n' ? 0 : 1)) >= THMax(1, k))
+  else if(THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 1 : 0)) == 1 &&
+          THTensor_strideLegacyNoScalars(m1, (transpose_r == 'n' ? 0 : 1)) >= THMax(1, k))
   {
     transpose_m1 = 't';
     m1_ = m1;
@@ -1007,14 +1007,14 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
 
   /* m2 */
   /* Need ldm2_ >= max(1, (transpose_m2 == 'n' ? k : n)) */
-  if(m2->stride((transpose_r == 'n' ? 0 : 1)) == 1 &&
-     m2->stride((transpose_r == 'n' ? 1 : 0)) >= THMax(1, k))
+  if(THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 0 : 1)) == 1 &&
+     THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 1 : 0)) >= THMax(1, k))
   {
     transpose_m2 = 'n';
     m2_ = m2;
   }
-  else if(m2->stride((transpose_r == 'n' ? 1 : 0)) == 1 &&
-          m2->stride((transpose_r == 'n' ? 0 : 1)) >= THMax(1, n))
+  else if(THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 1 : 0)) == 1 &&
+          THTensor_strideLegacyNoScalars(m2, (transpose_r == 'n' ? 0 : 1)) >= THMax(1, n))
   {
     transpose_m2 = 't';
     m2_ = m2;
@@ -1026,8 +1026,8 @@ void THTensor_(addmm)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor
     free_m2 = 1;
   }
 
-  int64_t ldm1_ = (transpose_m1 == 'n' ? m1_->stride((transpose_r == 'n' ? 1 : 0)) : m1_->stride((transpose_r == 'n' ? 0 : 1)));
-  int64_t ldm2_ = (transpose_m2 == 'n' ? m2_->stride((transpose_r == 'n' ? 1 : 0)) : m2_->stride((transpose_r == 'n' ? 0 : 1)));
+  int64_t ldm1_ = (transpose_m1 == 'n' ? THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m1_, (transpose_r == 'n' ? 0 : 1)));
+  int64_t ldm2_ = (transpose_m2 == 'n' ? THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 1 : 0)) : THTensor_strideLegacyNoScalars(m2_, (transpose_r == 'n' ? 0 : 1)));
 
 #pragma omp critical(blasgemm)
   /* do the operation */
@@ -1065,7 +1065,7 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   if(t->dim() != 2)
     THError("expected matrix, got %dD tensor for t", t->dim());
 
-  if( (t->size(0) != vec1->size(0)) || (t->size(1) != vec2->size(0)) ) {
+  if( (THTensor_sizeLegacyNoScalars(t, 0) != THTensor_sizeLegacyNoScalars(vec1, 0)) || (THTensor_sizeLegacyNoScalars(t, 1) != THTensor_sizeLegacyNoScalars(vec2, 0)) ) {
     THDescBuff bt  = THTensor_(sizeDesc)(t);
     THDescBuff bv1 = THTensor_(sizeDesc)(vec1);
     THDescBuff bv2 = THTensor_(sizeDesc)(vec2);
@@ -1087,28 +1087,28 @@ void THTensor_(addr)(THTensor *r_, real beta, THTensor *t, real alpha, THTensor 
   // n == 1 || lda >= max(1, m)
   #define LDA_COND(M, N, LDA) ((N) == 1 || (LDA) >= THMax(1, (M)))
 
-  if(r_->stride(0) == 1 && LDA_COND(vec1->size(0), vec2->size(0), r_->stride(1)))
+  if(THTensor_strideLegacyNoScalars(r_, 0) == 1 && LDA_COND(THTensor_sizeLegacyNoScalars(vec1, 0), THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_strideLegacyNoScalars(r_, 1)))
   {
-    THBlas_(ger)(vec1->size(0), vec2->size(0),
-                 alpha, THTensor_(data)(vec1), vec1->stride(0),
-                 THTensor_(data)(vec2), vec2->stride(0),
-                 THTensor_(data)(r_), r_->stride(1));
+    THBlas_(ger)(THTensor_sizeLegacyNoScalars(vec1, 0), THTensor_sizeLegacyNoScalars(vec2, 0),
+                 alpha, THTensor_(data)(vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                 THTensor_(data)(vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                 THTensor_(data)(r_), THTensor_strideLegacyNoScalars(r_, 1));
   }
-  else if(r_->stride(1) == 1 && LDA_COND(vec2->size(0), vec1->size(0), r_->stride(0)))
+  else if(THTensor_strideLegacyNoScalars(r_, 1) == 1 && LDA_COND(THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_sizeLegacyNoScalars(vec1, 0), THTensor_strideLegacyNoScalars(r_, 0)))
   {
-    THBlas_(ger)(vec2->size(0), vec1->size(0),
-                 alpha, THTensor_(data)(vec2), vec2->stride(0),
-                 THTensor_(data)(vec1), vec1->stride(0),
-                 THTensor_(data)(r_), r_->stride(0));
+    THBlas_(ger)(THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_sizeLegacyNoScalars(vec1, 0),
+                 alpha, THTensor_(data)(vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                 THTensor_(data)(vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                 THTensor_(data)(r_), THTensor_strideLegacyNoScalars(r_, 0));
   }
   else
   {
     THTensor *cr = THTensor_(newClone)(r_);
 
-    THBlas_(ger)(vec2->size(0), vec1->size(0),
-                 alpha, THTensor_(data)(vec2), vec2->stride(0),
-                 THTensor_(data)(vec1), vec1->stride(0),
-                 THTensor_(data)(cr), cr->stride(0));
+    THBlas_(ger)(THTensor_sizeLegacyNoScalars(vec2, 0), THTensor_sizeLegacyNoScalars(vec1, 0),
+                 alpha, THTensor_(data)(vec2), THTensor_strideLegacyNoScalars(vec2, 0),
+                 THTensor_(data)(vec1), THTensor_strideLegacyNoScalars(vec1, 0),
+                 THTensor_(data)(cr), THTensor_strideLegacyNoScalars(cr, 0));
 
     THTensor_(freeCopyTo)(cr, r_);
   }
@@ -1122,18 +1122,18 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
 
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch1) == 3, 1, "expected 3D tensor");
   THArgCheck(THTensor_(nDimensionLegacyNoScalars)(batch2) == 3, 2, "expected 3D tensor");
-  THArgCheck(THTensor_(size)(batch1, 0) == THTensor_(size)(batch2, 0), 2,
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(batch1, 0) == THTensor_(sizeLegacyNoScalars)(batch2, 0), 2,
              "equal number of batches expected, got %d, %d",
-             THTensor_(size)(batch1, 0), THTensor_(size)(batch2, 0));
-  THArgCheck(THTensor_(size)(batch1, 2) == THTensor_(size)(batch2, 1), 2,
+             THTensor_(sizeLegacyNoScalars)(batch1, 0), THTensor_(sizeLegacyNoScalars)(batch2, 0));
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(batch1, 2) == THTensor_(sizeLegacyNoScalars)(batch2, 1), 2,
              "wrong matrix size, batch1: %dx%d, batch2: %dx%d",
-             THTensor_(size)(batch1, 1), THTensor_(size)(batch1,2),
-             THTensor_(size)(batch2, 1), THTensor_(size)(batch2,2));
+             THTensor_(sizeLegacyNoScalars)(batch1, 1), THTensor_(sizeLegacyNoScalars)(batch1,2),
+             THTensor_(sizeLegacyNoScalars)(batch2, 1), THTensor_(sizeLegacyNoScalars)(batch2,2));
 
-  int64_t dim1 = THTensor_(size)(batch1, 1);
-  int64_t dim2 = THTensor_(size)(batch2, 2);
-  THArgCheck(THTensor_(size)(t, 0) == dim1, 1, "output tensor of incorrect size");
-  THArgCheck(THTensor_(size)(t, 1) == dim2, 1, "output tensor of incorrect size");
+  int64_t dim1 = THTensor_(sizeLegacyNoScalars)(batch1, 1);
+  int64_t dim2 = THTensor_(sizeLegacyNoScalars)(batch2, 2);
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(t, 0) == dim1, 1, "output tensor of incorrect size");
+  THArgCheck(THTensor_(sizeLegacyNoScalars)(t, 1) == dim2, 1, "output tensor of incorrect size");
 
   if (t != result) {
     THTensor_(resizeAs)(result, t);
@@ -1145,7 +1145,7 @@ void THTensor_(addbmm)(THTensor *result, real beta, THTensor *t, real alpha, THT
   THTensor *matrix1 = THTensor_(new)();
   THTensor *matrix2 = THTensor_(new)();
 
-  for (batch = 0; batch < THTensor_(size)(batch1, 0); ++batch) {
+  for (batch = 0; batch < THTensor_(sizeLegacyNoScalars)(batch1, 0); ++batch) {
     THTensor_(select)(matrix1, batch1, 0, batch);
     THTensor_(select)(matrix2, batch2, 0, batch);
 
