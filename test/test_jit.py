@@ -1864,21 +1864,26 @@ class TestScript(JitTestCase):
         self.assertEqual(test_script_for_in_range_if_ast(*inputs).shape[0], 20)
 
     def test_script_None(self):
-        @torch.jit.script
         def func(x):
             output = None
             output = x
             return output
 
-        self.assertEqual(func(torch.rand(1, 2)).shape[1], 2)
+        self.checkScript(func, [torch.arange(0, 2)], optimize=True)
 
-    def test_script_clamp_max(self):
-        @torch.jit.script
-        def test_script_clamp_max(x):
-            return torch.clamp(x, min=None, max=0.5)
+    def test_script_clamp_none(self):
+        # TODO: could not enable default/optional argument for None in JIT
+        # result from Aten native python_default_init for clamp, it is used
+        # in Aten but not in JIT, need to fix type/default arg system in ATen
+        def test_script_clamp_max_none(x):
+            return torch.clamp(x, min=None, max=2)
 
-        input = torch.tensor([[0.3, 0.4], [0.5, 0.51]])
-        self.assertEqual(test_script_clamp_max(input)[1][1], 0.5)
+        def test_script_clamp_min_none(x):
+            return torch.clamp(x, min=2, max=None)
+
+        input = [torch.arange(0, 3)]
+        self.checkScript(test_script_clamp_max_none, input, optimize=True)
+        self.checkScript(test_script_clamp_min_none, input, optimize=True)
 
     def test_script_bool_constant(self):
         script = '''
