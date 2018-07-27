@@ -615,6 +615,8 @@ DELEGATE_SIMPLE_UNARY_FUNCTION(float, Rsqrt, vsInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Rsqrt, vdInvSqrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(float, Cbrt, vsCbrt)
 DELEGATE_SIMPLE_UNARY_FUNCTION(double, Cbrt, vdCbrt)
+DELEGATE_SIMPLE_UNARY_FUNCTION(float, Inv, vsInv)
+DELEGATE_SIMPLE_UNARY_FUNCTION(double, Inv, vdInv)
 #undef DELEGATE_SIMPLE_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_FUNCTION(T, OriginalFunc)           \
@@ -734,6 +736,15 @@ DELEGATE_COSH_FUNCTION(float)
 DELEGATE_COSH_FUNCTION(double)
 #undef DELEGATE_COSH_FUNCTION
 
+#define DELEGATE_INV_FUNCTION(T)                                        \
+  template <>                                                           \
+  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
+    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse();\
+  }
+DELEGATE_INV_FUNCTION(float)
+DELEGATE_INV_FUNCTION(double)
+#undef DELEGATE_INV_FUNCTION
+
 #endif // CAFFE2_USE_MKL
 
 #define DELEGATE_NEG_FUNCTION(T)                                        \
@@ -768,15 +779,6 @@ DELEGATE_CUBE_FUNCTION(double)
 DELEGATE_CUBE_FUNCTION(std::int32_t)
 DELEGATE_CUBE_FUNCTION(std::int64_t)
 #undef DELEGATE_CUBE_FUNCTION
-
-#define DELEGATE_INV_FUNCTION(T)                                        \
-  template <>                                                           \
-  void Inv<T, CPUContext>(const int N, const T* x, T* y, CPUContext*) { \
-    EigenVectorMap<T>(y, N) = ConstEigenVectorArrayMap<T>(x, N).inverse();\
-  }
-DELEGATE_INV_FUNCTION(float)
-DELEGATE_INV_FUNCTION(double)
-#undef DELEGATE_INV_FUNCTION
 
 #define EIGEN_SIMPLE_BINARY_FUNCTION(T, Func, expr)             \
   template <>                                                   \

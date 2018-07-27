@@ -15,6 +15,18 @@ struct ReciprocalFunctor {
   }
 };
 
+template <class Context>
+struct ReciprocalGradientFunctor {
+  template <typename T>
+  bool Forward(
+      const std::vector<int>& Y_dims,
+      const std::vector<int>& dY_dims,
+      const T* Y,
+      const T* dY,
+      T* dX,
+      Context* context) const;
+};
+
 } // namespace caffe2
 
 #endif // CAFFE2_OPERATORS_RECIPROCAL_OP_H_

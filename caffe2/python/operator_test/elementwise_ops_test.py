@@ -608,14 +608,8 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self._test_bitwise_binary_op(
             "BitwiseXor", np.bitwise_xor, n, m, k, t, gc, dc)
 
-    @given(
-        X=hu.tensor(
-            elements=st.floats(0.1, 10, 0),
-            # allow empty tensor
-            ),
-        inplace=st.booleans(),
-        **hu.gcs
-    )
+    @given(X=hu.tensor(elements=st.floats(0.1, 10.0, 0.), dtype=np.float32),
+           inplace=st.booleans(), **hu.gcs)
     def test_reciprocal(self, X, inplace, gc, dc):
         def reciprocal_op(X):
             return [np.reciprocal(X)]
@@ -636,3 +630,7 @@ class TestElementwiseOps(hu.HypothesisTestCase):
         self.assertGradientChecks(
             gc, op, [X], 0, [0], stepsize=1e-2)
 
+
+if __name__ == "__main__":
+    import unittest
+    unittest.main()

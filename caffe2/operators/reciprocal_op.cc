@@ -67,30 +67,6 @@ Y:
 .Input(0, "X", "*(type: Tensor`<float>`)* Input data tensor.")
 .Output(0, "Y", "*(type: Tensor`<float>`)* Output tensor.");
 
-namespace {
-
-class GetReciprocalGradient : public GradientMakerBase {
-  using GradientMakerBase::GradientMakerBase;
-  std::vector<OperatorDef> GetGradientDefs() override {
-    Argument scale_arg;
-    scale_arg.set_name("scale");
-    scale_arg.set_f(0.5);
-    return std::vector<OperatorDef>{CreateOperatorDef(
-                                        "Scale",
-                                        "",
-                                        std::vector<std::string>{GO(0)},
-                                        std::vector<std::string>{GI(0)},
-                                        std::vector<Argument>{scale_arg}),
-                                    CreateOperatorDef(
-                                        "Div",
-                                        "",
-                                        std::vector<std::string>{GI(0), O(0)},
-                                        std::vector<std::string>{GI(0)})};
-  }
-};
-
-} // namespace
-
-REGISTER_GRADIENT(Reciprocal, GetReciprocalGradient);
+OPERATOR_SCHEMA(ReciprocalGradient).NumInputs(2).NumOutputs(1).AllowInplace({{1, 0}});
 
 } // namespace caffe2
