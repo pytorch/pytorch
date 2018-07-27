@@ -54,7 +54,7 @@ bool isDifferentiable(Node * n) {
     return true;
 
   if (n->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
-    return n->input(1)->type()->cast<TensorType>();
+    return static_cast<bool>(n->input(1)->type()->cast<TensorType>());
   }
   if (n->matches("aten::cat(Tensor[] tensors, int dim) -> Tensor")) {
     if (!n->is_constant(attr::dim)) return false;
@@ -64,7 +64,7 @@ bool isDifferentiable(Node * n) {
     return true;
   }
   if (n->matches("aten::squeeze(Tensor self) -> Tensor")) {
-    return n->input()->type()->cast<TensorType>();
+    return static_cast<bool>(n->input()->type()->cast<TensorType>());
   }
   if (n->matches("aten::squeeze(Tensor self, int dim) -> Tensor")) {
     return n->namedInput(attr::self)->type()->cast<TensorType>() && n->is_constant(attr::dim);
@@ -74,7 +74,7 @@ bool isDifferentiable(Node * n) {
   }
   if (n->matches("aten::view(Tensor self, int[] size) -> Tensor") ||
       n->matches("aten::reshape(Tensor self, int[] shape) -> Tensor")) {
-    return n->namedInput(attr::self)->type()->cast<TensorType>();
+    return static_cast<bool>(n->namedInput(attr::self)->type()->cast<TensorType>());
   }
 
   // linear blocks may appear as inputs to graph executors, but they are removed

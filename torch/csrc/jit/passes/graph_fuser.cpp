@@ -128,10 +128,10 @@ struct GraphFuser {
   }
 
   bool areTensorsOfSameShape(at::ArrayRef<Value*> values) {
-    TensorType* expected_type = values.at(0)->type()->cast<TensorType>();
+    auto expected_type = values.at(0)->type()->cast<TensorType>();
     if (!expected_type) return false;
     for (Value * val : values) {
-      TensorType* val_type = val->type()->cast<TensorType>();
+      auto val_type = val->type()->cast<TensorType>();
       if (!val_type) return false;
       if (expected_type->device() != val_type->device()) return false;
       if (expected_type->sizes() != val_type->sizes()) return false;
@@ -186,10 +186,10 @@ struct GraphFuser {
       inputs.pop_back(); // Get rid of the dim argument
     }
 
-    TensorType *expected = inputs.at(0)->type()->cast<TensorType>();
+    auto expected = inputs.at(0)->type()->cast<TensorType>();
     if (!expected) return false;
     return std::all_of(inputs.begin(), inputs.end(), [expected](Value *v) {
-        TensorType *actual = v->type()->cast<TensorType>();
+        auto actual = v->type()->cast<TensorType>();
         return actual && actual->sizes() == expected->sizes();
     });
   }
@@ -327,7 +327,7 @@ struct GraphFuser {
     Node * insert_after = nullptr;
     for (auto input : n->inputs()) {
       if (inputs_map.count(input) == 0) {
-        if (input->type()->isSubtypeOf(*DynamicType::get())) {
+        if (input->type()->isSubtypeOf(DynamicType::get())) {
           auto in_group = subgraph.addInput();
           in_group->setType(input->type());
           inputs_map[input] = in_group;
@@ -503,7 +503,7 @@ struct GraphFuser {
       chunked_op->output()->setType(chunk_sel->type()->cast<TensorType>()->contiguous());
       auto chunked_inputs_it = chunked_inputs.begin();
       for (size_t i = 0; i < original_inputs.size(); ++i) {
-        if (original_inputs[i]->type()->isSubtypeOf(*DynamicType::get())) {
+        if (original_inputs[i]->type()->isSubtypeOf(DynamicType::get())) {
           JIT_ASSERT(chunked_inputs_it != chunked_inputs.end());
           chunked_op->addInput(chunked_inputs_it->at(chunk_sel->offset()));
           ++chunked_inputs_it;
