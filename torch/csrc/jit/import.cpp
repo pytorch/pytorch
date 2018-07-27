@@ -264,7 +264,7 @@ TypePtr ModuleDecoder::buildType(const onnx_torch::TypeProto& type_proto) {
   } else if (kind == "IntType") {
     return IntType::get();
   } else {
-    JIT_ASSERT("unexpected string for type kind");
+    throw std::runtime_error("unexpected string for type kind");
   }
 }
 

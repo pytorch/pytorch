@@ -508,7 +508,7 @@ void ModuleEncoder::EncodeTypeInfo(
   } else if (kind == TypeKind::IntType) {
     type_proto->set_denotation("IntType");
   } else {
-    JIT_ASSERT("unexpected type kind");
+    throw std::runtime_error("unexpected type kind");
   }
 }
 
