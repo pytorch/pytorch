@@ -6394,6 +6394,11 @@ class TestTorch(TestCase):
         devices = ['cpu'] if not torch.cuda.is_available() else ['cpu', 'cuda']
         for device in devices:
 
+            # need to init cuda to check has_magma
+            empty = torch.randn((0, 0), device=device)
+            if device == 'cuda' and not torch.cuda.has_magma:
+                continue
+
             def fn(torchfn, *args):
                 return torchfn(*tuple(torch.randn(shape, device=device) if isinstance(shape, tuple) else shape
                                       for shape in args))
