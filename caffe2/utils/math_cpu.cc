@@ -11,7 +11,6 @@
 //     platforms, it allows one to quickly port Caffe2 to different platforms
 //     where BLAS may not be present.
 
-#include "caffe2/utils/eigen_utils.h"
 #include "caffe2/utils/math.h"
 
 #include <algorithm>
@@ -30,6 +29,7 @@
 
 #include "caffe2/core/context.h"
 #include "caffe2/utils/cpu_neon.h"
+#include "caffe2/utils/eigen_utils.h"
 
 #include "Eigen/Core"
 #include "Eigen/Dense"
@@ -75,8 +75,8 @@ namespace math {
 // CblasTrans, respectively, for each of A and B.
 template <>
 void Gemm<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -93,9 +93,9 @@ void Gemm<float, CPUContext>(
   } else {
     C_mat *= beta;
   }
-  switch (TransA) {
+  switch (trans_A) {
     case CblasNoTrans: {
-      switch (TransB) {
+      switch (trans_B) {
         case CblasNoTrans:
           C_mat.noalias() += alpha *
               (ConstEigenMatrixMap<float>(B, N, K) *
@@ -107,11 +107,11 @@ void Gemm<float, CPUContext>(
                ConstEigenMatrixMap<float>(A, K, M));
           return;
         default:
-          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
       }
     }
     case CblasTrans: {
-      switch (TransB) {
+      switch (trans_B) {
         case CblasNoTrans:
           C_mat.noalias() += alpha *
               (ConstEigenMatrixMap<float>(B, N, K) *
@@ -123,18 +123,18 @@ void Gemm<float, CPUContext>(
                ConstEigenMatrixMap<float>(A, M, K).transpose());
           return;
         default:
-          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
       }
     }
     default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
+      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_A";
   }
 }
 
 template <>
 void GemmEx<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -147,56 +147,65 @@ void GemmEx<float, CPUContext>(
     float* C,
     const int ldc,
     CPUContext*) {
-  using OuterStride = Eigen::OuterStride<Eigen::Dynamic>;
-  using StridedMap = Eigen::Map<Eigen::MatrixXf, 0, OuterStride>;
-  using ConstStridedMap = Eigen::Map<const Eigen::MatrixXf, 0, OuterStride>;
-  auto C_mat = StridedMap(C, N, M, OuterStride(ldc));
+  EigenOuterStridedMatrixMap<float> C_mat(C, N, M, EigenOuterStride(ldc));
   if (beta == 0) {
     C_mat.setZero();
   } else {
     C_mat *= beta;
   }
-  switch (TransA) {
+  switch (trans_A) {
     case CblasNoTrans: {
-      switch (TransB) {
+      switch (trans_B) {
         case CblasNoTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-               ConstStridedMap(A, K, M, OuterStride(lda)));
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, N, K, EigenOuterStride(ldb)) *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, K, M, EigenOuterStride(lda)));
           return;
         case CblasTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-               ConstStridedMap(A, K, M, OuterStride(lda)));
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, K, N, EigenOuterStride(ldb))
+                   .transpose() *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, K, M, EigenOuterStride(lda)));
           return;
         default:
-          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
       }
     }
     case CblasTrans: {
-      switch (TransB) {
+      switch (trans_B) {
         case CblasNoTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, N, K, OuterStride(ldb)) *
-               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, N, K, EigenOuterStride(ldb)) *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, M, K, EigenOuterStride(lda))
+                   .transpose());
           return;
         case CblasTrans:
           C_mat.noalias() += alpha *
-              (ConstStridedMap(B, K, N, OuterStride(ldb)).transpose() *
-               ConstStridedMap(A, M, K, OuterStride(lda)).transpose());
+              (ConstEigenOuterStridedMatrixMap<float>(
+                   B, K, N, EigenOuterStride(ldb))
+                   .transpose() *
+               ConstEigenOuterStridedMatrixMap<float>(
+                   A, M, K, EigenOuterStride(lda))
+                   .transpose());
           return;
         default:
-          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransB";
+          LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_B";
       }
     }
     default:
-      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for TransA";
+      LOG(FATAL) << "Unexpected CBLAS_TRANSPOSE for trans_A";
   }
 }
 
 template <>
 void Gemv<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
     const float alpha,
@@ -206,7 +215,7 @@ void Gemv<float, CPUContext>(
     float* y,
     CPUContext* context,
     TensorProto::DataType math_type) {
-  EigenVectorMap<float> y_vec(y, TransA == CblasNoTrans ? M : N);
+  EigenVectorMap<float> y_vec(y, trans_A == CblasNoTrans ? M : N);
   if (beta == 0) {
     // In Caffe2 we often do a lazy initialization, which may contain NaNs in
     // the float values. As a result, if beta is 0, we explicitly do a setzero.
@@ -214,7 +223,7 @@ void Gemv<float, CPUContext>(
   } else {
     y_vec *= beta;
   }
-  switch (TransA) {
+  switch (trans_A) {
     case CblasNoTrans: {
       y_vec.noalias() += alpha *
           (ConstEigenMatrixMap<float>(A, N, M).transpose() *
@@ -292,8 +301,8 @@ CAFFE2_SPECIALIZED_AXPBY(float)
 
 template <>
 void Gemm<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -304,12 +313,12 @@ void Gemm<float, CPUContext>(
     float* C,
     CPUContext* /*context*/,
     TensorProto::DataType /*math_type*/) {
-  int lda = (TransA == CblasNoTrans) ? K : M;
-  int ldb = (TransB == CblasNoTrans) ? N : K;
+  const int lda = (trans_A == CblasNoTrans) ? K : M;
+  const int ldb = (trans_B == CblasNoTrans) ? N : K;
   cblas_sgemm(
       CblasRowMajor,
-      TransA,
-      TransB,
+      trans_A,
+      trans_B,
       M,
       N,
       K,
@@ -325,8 +334,8 @@ void Gemm<float, CPUContext>(
 
 template <>
 void GemmEx<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -341,8 +350,8 @@ void GemmEx<float, CPUContext>(
     CPUContext* /*context*/) {
   cblas_sgemm(
       CblasRowMajor,
-      TransA,
-      TransB,
+      trans_A,
+      trans_B,
       M,
       N,
       K,
@@ -358,7 +367,7 @@ void GemmEx<float, CPUContext>(
 
 template <>
 void Gemv<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
     const float alpha,
@@ -368,7 +377,7 @@ void Gemv<float, CPUContext>(
     float* y,
     CPUContext* /*context*/,
     TensorProto::DataType /*math_type*/) {
-  cblas_sgemv(CblasRowMajor, TransA, M, N, alpha, A, N, x, 1, beta, y, 1);
+  cblas_sgemv(CblasRowMajor, trans_A, M, N, alpha, A, N, x, 1, beta, y, 1);
 }
 
 #define CAFFE2_SPECIALIZED_SCALE(T, prefix)                             \
@@ -447,69 +456,106 @@ CAFFE2_SPECIALIZED_AXPBY(float, s)
 
 template <>
 void GemmBatched<float, CPUContext>(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
     const int M,
     const int N,
     const int K,
     const float alpha,
-    const float* A,
-    const float* B,
+    const float** A,
+    const float** B,
     const float beta,
-    float* C,
+    float** C,
     CPUContext* context,
-    Tensor<CPUContext>*, /* scratch */
     TensorProto::DataType /* math_type */) {
-  const int a_stride = M * K;
-  const int b_stride = K * N;
-  const int c_stride = M * N;
-
 #ifdef CAFFE2_USE_MKL
   (void)context;
-
-  const int lda = (TransA == CblasNoTrans) ? K : M;
-  const int ldb = (TransB == CblasNoTrans) ? N : K;
-  std::vector<const float*> a_array(batch_size, nullptr);
-  std::vector<const float*> b_array(batch_size, nullptr);
-  std::vector<float*> c_array(batch_size, nullptr);
-  for (int i = 0; i < batch_size; ++i) {
-    a_array[i] = A + a_stride * i;
-    b_array[i] = B + b_stride * i;
-    c_array[i] = C + c_stride * i;
-  }
+  const int lda = (trans_A == CblasNoTrans) ? K : M;
+  const int ldb = (trans_B == CblasNoTrans) ? N : K;
+  const int ldc = N;
   cblas_sgemm_batch(
       CblasRowMajor,
-      &TransA,
-      &TransB,
+      &trans_A,
+      &trans_B,
       &M,
       &N,
       &K,
       &alpha,
-      a_array.data(),
+      A,
       &lda,
-      b_array.data(),
+      B,
       &ldb,
       &beta,
-      c_array.data(),
-      &N, // ldc_array
+      C,
+      &ldc,
       1,
       &batch_size);
 #else // CAFFE2_USE_MKL
   // loop over matrices in the batch
   for (int i = 0; i < batch_size; ++i) {
     math::Gemm<float, CPUContext>(
-        TransA,
-        TransB,
-        M,
-        N,
-        K,
-        alpha,
-        A + a_stride * i,
-        B + b_stride * i,
-        beta,
-        C + c_stride * i,
-        context);
+        trans_A, trans_B, M, N, K, alpha, A[i], B[i], beta, C[i], context);
+  }
+#endif // CAFFE2_USE_MKL
+}
+
+template <>
+void GemmStridedBatched<float, CPUContext>(
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
+    const int batch_size,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const float* A,
+    const int A_stride,
+    const float* B,
+    const int B_stride,
+    const float beta,
+    float* C,
+    const int C_stride,
+    CPUContext* context,
+    TensorProto::DataType /* math_type */) {
+#ifdef CAFFE2_USE_MKL
+  (void)context;
+  const int lda = (trans_A == CblasNoTrans) ? K : M;
+  const int ldb = (trans_B == CblasNoTrans) ? N : K;
+  const int ldc = N;
+  std::vector<const float*> A_array(batch_size);
+  std::vector<const float*> B_array(batch_size);
+  std::vector<float*> C_array(batch_size);
+  for (int i = 0; i < batch_size; ++i) {
+    A_array[i] = A + i * A_stride;
+    B_array[i] = B + i * B_stride;
+    C_array[i] = C + i * C_stride;
+  }
+  cblas_sgemm_batch(
+      CblasRowMajor,
+      &trans_A,
+      &trans_B,
+      &M,
+      &N,
+      &K,
+      &alpha,
+      A_array.data(),
+      &lda,
+      B_array.data(),
+      &ldb,
+      &beta,
+      C_array.data(),
+      &ldc,
+      1,
+      &batch_size);
+#else // CAFFE2_USE_MKL
+  // loop over matrices in the batch
+  for (int i = 0; i < batch_size; ++i) {
+    math::Gemm<float, CPUContext>(
+        trans_A, trans_B, M, N, K, alpha, A, B, beta, C, context);
+    A += A_stride;
+    B += B_stride;
+    C += C_stride;
   }
 #endif
 }
@@ -1395,29 +1441,6 @@ void ColwiseBinaryOp(
   }
 }
 
-template <typename TIn, typename TOut, class Operator1, class Operator2>
-void BinaryOpWith2DBroadcasting(
-    const int ndim,
-    const int* dims,
-    const int pivot,
-    const bool broadcast_1st,
-    const Operator1& op1,
-    const Operator2& op2,
-    const TIn* A,
-    const TIn* B,
-    TOut* C,
-    CPUContext* context) {
-  const int rows =
-      std::accumulate(dims, dims + pivot, 1, std::multiplies<int>());
-  const int cols =
-      std::accumulate(dims + pivot, dims + ndim, 1, std::multiplies<int>());
-  if (broadcast_1st) {
-    op1(rows, cols, A, B, C, context);
-  } else {
-    op2(rows, cols, A, B, C, context);
-  }
-}
-
 template <typename TIn, typename TOut, class BinaryOperator>
 void BroadcastBinaryOpImpl(
     const int ndim,
@@ -1585,87 +1608,101 @@ DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int32_t)
 DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION(std::int64_t)
 #undef DEFINE_2D_BROADCAST_1ST_DIV_FUNCTION
 
-#define DELEGATE_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op) \
-  template <>                                                   \
-  void Func<TIn, CPUContext>(                                   \
-      const int A_ndim,                                         \
-      const int* A_dims,                                        \
-      const int B_ndim,                                         \
-      const int* B_dims,                                        \
-      const TIn* A,                                             \
-      const TIn* B,                                             \
-      TOut* C,                                                  \
-      CPUContext* context) {                                    \
-    const int ndim = std::max(A_ndim, B_ndim);                  \
-    std::vector<int> A_dims_array(ndim);                        \
-    std::vector<int> B_dims_array(ndim);                        \
-    std::vector<int> C_dims_array(ndim);                        \
-    utils::ComputeBroadcastBinaryOpDims(                        \
-        A_ndim,                                                 \
-        A_dims,                                                 \
-        B_ndim,                                                 \
-        B_dims,                                                 \
-        A_dims_array.data(),                                    \
-        B_dims_array.data(),                                    \
-        C_dims_array.data());                                   \
-    if (A_dims_array == B_dims_array) {                         \
-      const int size = std::accumulate(                         \
-          C_dims_array.cbegin(),                                \
-          C_dims_array.cend(),                                  \
-          1,                                                    \
-          std::multiplies<int>());                              \
-      Func<TIn, CPUContext>(size, A, B, C, context);            \
-      return;                                                   \
-    }                                                           \
-    int pivot;                                                  \
-    bool broadcast_1st;                                         \
-    if (utils::IsRowwiseBroadcastBinaryOp(                      \
-            ndim,                                               \
-            A_dims_array.data(),                                \
-            B_dims_array.data(),                                \
-            &pivot,                                             \
-            &broadcast_1st)) {                                  \
-      BinaryOpWith2DBroadcasting(                               \
-          ndim,                                                 \
-          C_dims_array.data(),                                  \
-          pivot,                                                \
-          broadcast_1st,                                        \
-          Rowwise##Func<TIn, CPUContext, true>,                 \
-          Rowwise##Func<TIn, CPUContext, false>,                \
-          A,                                                    \
-          B,                                                    \
-          C,                                                    \
-          context);                                             \
-      return;                                                   \
-    }                                                           \
-    if (utils::IsColwiseBroadcastBinaryOp(                      \
-            ndim,                                               \
-            A_dims_array.data(),                                \
-            B_dims_array.data(),                                \
-            &pivot,                                             \
-            &broadcast_1st)) {                                  \
-      BinaryOpWith2DBroadcasting(                               \
-          ndim,                                                 \
-          C_dims_array.data(),                                  \
-          pivot,                                                \
-          broadcast_1st,                                        \
-          Colwise##Func<TIn, CPUContext, true>,                 \
-          Colwise##Func<TIn, CPUContext, false>,                \
-          A,                                                    \
-          B,                                                    \
-          C,                                                    \
-          context);                                             \
-      return;                                                   \
-    }                                                           \
-    BroadcastBinaryOpImpl(                                      \
-        ndim,                                                   \
-        A_dims_array.data(),                                    \
-        B_dims_array.data(),                                    \
-        C_dims_array.data(),                                    \
-        Op<TIn>(),                                              \
-        A,                                                      \
-        B,                                                      \
-        C);                                                     \
+#define DELEGATE_BROADCAST_BINARY_FUNCTION(TIn, TOut, Func, Op)              \
+  template <>                                                                \
+  void Func<TIn, CPUContext>(                                                \
+      const int A_ndim,                                                      \
+      const int* A_dims,                                                     \
+      const int B_ndim,                                                      \
+      const int* B_dims,                                                     \
+      const TIn* A,                                                          \
+      const TIn* B,                                                          \
+      TOut* C,                                                               \
+      CPUContext* context) {                                                 \
+    const int ndim = std::max(A_ndim, B_ndim);                               \
+    std::vector<int> A_dims_array(ndim);                                     \
+    std::vector<int> B_dims_array(ndim);                                     \
+    std::vector<int> C_dims_array(ndim);                                     \
+    utils::ComputeBroadcastBinaryOpDims(                                     \
+        A_ndim,                                                              \
+        A_dims,                                                              \
+        B_ndim,                                                              \
+        B_dims,                                                              \
+        A_dims_array.data(),                                                 \
+        B_dims_array.data(),                                                 \
+        C_dims_array.data());                                                \
+    if (A_dims_array == B_dims_array) {                                      \
+      const int size = std::accumulate(                                      \
+          C_dims_array.cbegin(),                                             \
+          C_dims_array.cend(),                                               \
+          1,                                                                 \
+          std::multiplies<int>());                                           \
+      Func<TIn, CPUContext>(size, A, B, C, context);                         \
+      return;                                                                \
+    }                                                                        \
+    int rows;                                                                \
+    int cols;                                                                \
+    bool broadcast_1st;                                                      \
+    if (utils::IsRowwiseBroadcastBinaryOp(                                   \
+            ndim,                                                            \
+            A_dims_array.data(),                                             \
+            B_dims_array.data(),                                             \
+            &rows,                                                           \
+            &cols,                                                           \
+            &broadcast_1st)) {                                               \
+      if (broadcast_1st) {                                                   \
+        Rowwise##Func<TIn, CPUContext, true>(rows, cols, A, B, C, context);  \
+      } else {                                                               \
+        Rowwise##Func<TIn, CPUContext, false>(rows, cols, A, B, C, context); \
+      }                                                                      \
+      return;                                                                \
+    }                                                                        \
+    if (utils::IsColwiseBroadcastBinaryOp(                                   \
+            ndim,                                                            \
+            A_dims_array.data(),                                             \
+            B_dims_array.data(),                                             \
+            &rows,                                                           \
+            &cols,                                                           \
+            &broadcast_1st)) {                                               \
+      if (broadcast_1st) {                                                   \
+        Colwise##Func<TIn, CPUContext, true>(rows, cols, A, B, C, context);  \
+      } else {                                                               \
+        Colwise##Func<TIn, CPUContext, false>(rows, cols, A, B, C, context); \
+      }                                                                      \
+      return;                                                                \
+    }                                                                        \
+    int pre;                                                                 \
+    int mid;                                                                 \
+    int nxt;                                                                 \
+    if (utils::IsMiddleBroadcastBinaryOp(                                    \
+            ndim,                                                            \
+            A_dims_array.data(),                                             \
+            B_dims_array.data(),                                             \
+            &pre,                                                            \
+            &mid,                                                            \
+            &nxt,                                                            \
+            &broadcast_1st)) {                                               \
+      const int stride = mid * nxt;                                          \
+      for (int i = 0; i < pre; ++i) {                                        \
+        if (broadcast_1st) {                                                 \
+          Colwise##Func<TIn, CPUContext, true>(                              \
+              mid, nxt, A, B + i * stride, C + i * stride, context);         \
+        } else {                                                             \
+          Colwise##Func<TIn, CPUContext, false>(                             \
+              mid, nxt, A + i * stride, B, C + i * stride, context);         \
+        }                                                                    \
+      }                                                                      \
+      return;                                                                \
+    }                                                                        \
+    BroadcastBinaryOpImpl(                                                   \
+        ndim,                                                                \
+        A_dims_array.data(),                                                 \
+        B_dims_array.data(),                                                 \
+        C_dims_array.data(),                                                 \
+        Op<TIn>(),                                                           \
+        A,                                                                   \
+        B,                                                                   \
+        C);                                                                  \
   }
 
 #define DEFINE_BROADCAST_COMPARE_FUNCTION(Func, Op)                \
@@ -2461,6 +2498,73 @@ void CopyMatrix<CPUContext>(
   }
 }
 
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_COPY_MATRIX_FUNCTION(T, Func)  \
+  template <>                                   \
+  void CopyMatrix<T, CPUContext>(               \
+      const int M,                              \
+      const int N,                              \
+      const T* A,                               \
+      const int lda,                            \
+      T* B,                                     \
+      const int ldb,                            \
+      CPUContext* /* context */) {              \
+    Func('R', 'N', M, N, T(1), A, lda, B, ldb); \
+  }
+DELEGATE_COPY_MATRIX_FUNCTION(float, mkl_somatcopy)
+DELEGATE_COPY_MATRIX_FUNCTION(double, mkl_domatcopy)
+#undef DELEGATE_COPY_MATRIX_FUNCTION
+
+#endif // CAFFE2_USE_MKL
+
+#define CAFFE2_SPECIALIZED_COPY_MATRIX(T)                                \
+  template <>                                                            \
+  void CopyMatrix<T, CPUContext>(                                        \
+      const int M,                                                       \
+      const int N,                                                       \
+      const T* A,                                                        \
+      const int lda,                                                     \
+      T* B,                                                              \
+      const int ldb,                                                     \
+      CPUContext* /* context */) {                                       \
+    if (M == 0 || N == 0) {                                              \
+      return;                                                            \
+    }                                                                    \
+    if (lda == N) {                                                      \
+      if (ldb == N) {                                                    \
+        std::memcpy(B, A, sizeof(T) * M * N);                            \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenMatrixMap<T>(A, N, M);                             \
+      }                                                                  \
+    } else {                                                             \
+      if (ldb == N) {                                                    \
+        EigenMatrixMap<T>(B, N, M) = ConstEigenOuterStridedMatrixMap<T>( \
+            A, N, M, EigenOuterStride(lda));                             \
+      } else {                                                           \
+        EigenOuterStridedMatrixMap<T>(B, N, M, EigenOuterStride(ldb)) =  \
+            ConstEigenOuterStridedMatrixMap<T>(                          \
+                A, N, M, EigenOuterStride(lda));                         \
+      }                                                                  \
+    }                                                                    \
+  }
+
+#ifndef CAFFE2_USE_MKL
+CAFFE2_SPECIALIZED_COPY_MATRIX(float)
+CAFFE2_SPECIALIZED_COPY_MATRIX(double)
+#endif // CAFFE2_USE_MKL
+
+CAFFE2_SPECIALIZED_COPY_MATRIX(int)
+CAFFE2_SPECIALIZED_COPY_MATRIX(TIndex)
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE2_SPECIALIZED_COPY_MATRIX(long)
+#endif
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint8_t)
+CAFFE2_SPECIALIZED_COPY_MATRIX(std::uint16_t)
+
+#undef CAFFE2_SPECIALIZXED_COPY_MATRIX
+
 #define CAFFE2_SPECIALIZED_COPYVECTOR(T)                            \
   template <>                                                       \
   void CopyVector<T, CPUContext>(                                   \
@@ -2476,7 +2580,7 @@ namespace {
 
 #ifdef CAFFE2_USE_HPTT
 
-bool TryTransposeWithHPTT(
+bool TransposeWithHPTT(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -2511,6 +2615,62 @@ bool TryTransposeWithHPTT(
 
 #endif // CAFFE2_USE_HPTT
 
+template <typename T>
+void Tranpose2D(const int rows, const int cols, const T* X, T* Y);
+
+#ifdef CAFFE2_USE_MKL
+
+#define DELEGATE_TRANSPOSE_2D_FUNCTION(T, Func)                          \
+  template <>                                                            \
+  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+    Func('R', 'T', rows, cols, T(1), X, cols, Y, rows);                  \
+  }
+DELEGATE_TRANSPOSE_2D_FUNCTION(float, mkl_somatcopy);
+DELEGATE_TRANSPOSE_2D_FUNCTION(double, mkl_domatcopy);
+#undef DELEGATE_TRANSPOSE_2D_FUNCTION
+
+#endif // CAFFE2_USE_MKL
+
+#define CAFFE2_SPECIALIZED_TRANSPOSE_2D(T)                               \
+  template <>                                                            \
+  void Tranpose2D<T>(const int rows, const int cols, const T* X, T* Y) { \
+    EigenMatrixMap<T>(Y, rows, cols) =                                   \
+        ConstEigenMatrixMap<T>(X, cols, rows).transpose();               \
+  }
+
+#ifndef CAFFE2_USE_MKL
+
+template <>
+void Tranpose2D<float>(
+    const int rows,
+    const int cols,
+    const float* X,
+    float* Y) {
+#ifdef CAFFE2_USE_HPTT
+  const std::array<int, 2> dims = {rows, cols};
+  const std::array<int, 2> axes = {1, 0};
+  if (TransposeWithHPTT(2, dims.data(), axes.data(), X, Y)) {
+    return;
+  }
+#endif // CAFFE2_USE_HPTT
+  EigenMatrixMap<float>(Y, rows, cols) =
+      ConstEigenMatrixMap<float>(X, cols, rows).transpose();
+}
+
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(double)
+
+#endif // CAFFE2_USE_MKL
+
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(int)
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(TIndex)
+#ifdef CAFFE2_UNIQUE_LONG_TYPEMETA
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(long)
+#endif
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(std::uint8_t)
+CAFFE2_SPECIALIZED_TRANSPOSE_2D(std::uint16_t)
+
+#undef CAFFE2_SPECIALIZED_TRANSPOSE_2D
+
 std::vector<int>
 ComputeXStrides(const int ndim, const int* dims, const int* axes) {
   std::vector<int> x_strides(ndim);
@@ -2527,7 +2687,7 @@ ComputeXStrides(const int ndim, const int* dims, const int* axes) {
 }
 
 template <typename T>
-void TransposeCPUImpl(
+void TransposeND(
     const int ndim,
     const int* dims,
     const int* axes,
@@ -2547,10 +2707,6 @@ void TransposeCPUImpl(
   const int itr_axes = ndim - num_shared_idx;
   const int num_blocks = std::accumulate(
       Y_dims.cbegin(), Y_dims.cbegin() + itr_axes, 1, std::multiplies<int>());
-  if (ndim < 2 || itr_axes == 0) {
-    std::memcpy(Y, X, num_blocks * block_size * sizeof(T));
-    return;
-  }
   const std::vector<int> X_strides = ComputeXStrides(itr_axes, dims, axes);
   std::vector<int> index(itr_axes, 0);
   for (int Y_index = 0; Y_index < num_blocks; ++Y_index) {
@@ -2568,23 +2724,52 @@ void TransposeCPUImpl(
   }
 }
 
-} // namespace
+template <typename T>
+void TransposeCPUImpl(
+    const int ndim,
+    const int* dims,
+    const int* axes,
+    const T* X,
+    T* Y) {
+  if (utils::IsIdentityPermutation(ndim, axes)) {
+    const int size =
+        std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());
+    std::memcpy(Y, X, size * sizeof(T));
+    return;
+  }
+  if (ndim == 2) {
+    Tranpose2D<T>(dims[0], dims[1], X, Y);
+  } else {
+    TransposeND<T>(ndim, dims, axes, X, Y);
+  }
+}
 
 template <>
-void Transpose<float, CPUContext>(
+void TransposeCPUImpl(
     const int ndim,
     const int* dims,
     const int* axes,
     const float* X,
-    float* Y,
-    CPUContext* /* context */) {
-#ifdef CAFFE2_USE_HPTT
-  if (TryTransposeWithHPTT(ndim, dims, axes, X, Y)) {
+    float* Y) {
+  if (utils::IsIdentityPermutation(ndim, axes)) {
+    const int size =
+        std::accumulate(dims, dims + ndim, 1, std::multiplies<int>());
+    std::memcpy(Y, X, size * sizeof(float));
     return;
   }
-#endif // CAFFE2_USE_HPTT
-  TransposeCPUImpl(ndim, dims, axes, X, Y);
+  if (ndim == 2) {
+    Tranpose2D<float>(dims[0], dims[1], X, Y);
+  } else {
+#ifdef CAFFE2_USE_HPTT
+    if (TransposeWithHPTT(ndim, dims, axes, X, Y)) {
+      return;
+    }
+#endif
+    TransposeND<float>(ndim, dims, axes, X, Y);
+  }
 }
+
+} // namespace
 
 #define CAFFE2_SPECIALIZED_TRANSPOSE(T)       \
   template <>                                 \
@@ -2597,6 +2782,7 @@ void Transpose<float, CPUContext>(
       CPUContext* /* context */) {            \
     TransposeCPUImpl(ndim, dims, axes, X, Y); \
   }
+CAFFE2_SPECIALIZED_TRANSPOSE(float)
 CAFFE2_SPECIALIZED_TRANSPOSE(double)
 CAFFE2_SPECIALIZED_TRANSPOSE(int)
 CAFFE2_SPECIALIZED_TRANSPOSE(TIndex)

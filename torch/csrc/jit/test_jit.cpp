@@ -9,6 +9,7 @@
 
 #endif
 
+#include "torch/csrc/jit/assertions.h"
 #include "torch/csrc/jit/fusion_compiler.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/ir.h"
@@ -26,8 +27,6 @@
 #include "torch/csrc/jit/passes/dead_code_elimination.h"
 #include "torch/csrc/jit/passes/lower_grad_of.h"
 #include "torch/csrc/variable_tensor_functions.h"
-
-#include "torch/csrc/assertions.h"
 
 #include "torch/csrc/autograd/variable.h"
 #include "torch/csrc/autograd/engine.h"
@@ -642,7 +641,7 @@ std::string toString(std::shared_ptr<Graph>& graph) {
 void testDifferentiate(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -669,7 +668,7 @@ void testDifferentiate(std::ostream & out) {
 void testDifferentiateWithRequiresGrad(std::ostream & out) {
   auto graph = std::make_shared<Graph>();
   at::ScalarType s = at::ScalarType::Float;
-  auto type = std::shared_ptr<TensorType>(new TensorType(s, -1, {2, 3, 4}, {12, 4, 1}));
+  auto type = TensorType::create(s, -1, {2, 3, 4}, {12, 4, 1});
 
   // Build up a fake graph
   auto a = SymbolicVariable::asNewInput(*graph, type);
@@ -715,7 +714,8 @@ bool isEqual(at::IntList lhs, at::IntList rhs) {
   return lhs.size() == rhs.size() && std::equal(lhs.begin(), lhs.end(), rhs.begin());
 }
 
-bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
+bool isEqual(const ArgumentInfo & ti, const autograd::Variable & v) {
+  REQUIRE(ti.isTensor());
   if(!ti.defined())
     return ti.defined() == v.defined();
   return
@@ -729,8 +729,8 @@ bool isEqual(const TensorInfo & ti, const autograd::Variable & v) {
 // work around the fact that variable_tensor_list doesn't duplicate all
 // of std::vector's constructors.
 // most constructors are never used in the implementation, just in our tests.
-variable_tensor_list createVarList(std::vector<at::Tensor> && list) {
-  return variable_tensor_list(std::move(list));
+Stack createStack(std::vector<at::Tensor> && list) {
+  return Stack(std::make_move_iterator(list.begin()), std::make_move_iterator(list.end()));
 }
 
 void argumentSpecTest() {
@@ -739,14 +739,14 @@ void argumentSpecTest() {
   auto & GF = at::CUDA(at::kFloat);
   auto & GD = at::CUDA(at::kDouble);
 
-  auto list =  createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+  auto list = createStack({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
 
   // make sure we have some non-standard strides
-  list[1].transpose_(0, 1);
+  list[1].toTensor().transpose_(0, 1);
 
   // same list but different backing values
-  auto list2 = createVarList({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
-  list2[1].transpose_(0, 1);
+  auto list2 = createStack({ var(CF, {1}, true), var(CD, {1, 2}, false) , var(GF, {}, true), var(GD, {4,5,6}, false), undef()});
+  list2[1].toTensor().transpose_(0, 1);
 
 
   ArgumentSpec a(true, list);
@@ -759,7 +759,7 @@ void argumentSpecTest() {
   REQUIRE(d.hashCode() == a.hashCode());
 
   for(size_t i = 0; i < list.size(); ++i) {
-    REQUIRE(isEqual(a.tensorInfo(i), list[i]));
+    REQUIRE(isEqual(a.at(i), list[i].toTensor()));
   }
   ArgumentSpec no_grad(/*with_grad=*/false, list);
   REQUIRE(no_grad != a);
@@ -771,7 +771,7 @@ void argumentSpecTest() {
   spec.insert(std::move(no_grad));
   REQUIRE(spec.count(ArgumentSpec(true,list)) == 1);
 
-  list2[1].transpose_(0,1);
+  list2[1].toTensor().transpose_(0,1);
   ArgumentSpec c(true, list2); // same as list, except for one stride
   REQUIRE(!(c == a));
   REQUIRE(spec.count(c) == 0);
@@ -794,7 +794,7 @@ void shapeAnalysisTest() {
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
   auto g = build_lstm();
-  ArgumentSpec spec(false, createVarList({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
+  ArgumentSpec spec(false, createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh) }));
   PropagateInputShapes(*g, spec);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
@@ -819,14 +819,15 @@ void testGraphExecutor() {
   auto w_ih  = t_def(at::randn({4 * hidden_size, input_size}, at::kCUDA));
   auto w_hh  = t_def(at::randn({4 * hidden_size, hidden_size}, at::kCUDA));
 
-  std::vector<at::Tensor> inputs = {v(input), v(hx), v(cx), v(w_ih), v(w_hh) };
   auto g = build_lstm();
   GraphExecutor executor(g);
-  auto outputs = executor.run(variable_tensor_list(std::move(inputs)));
+  auto stack = createStack({v(input), v(hx), v(cx), v(w_ih), v(w_hh)});
+  executor.run(stack);
+  REQUIRE(stack.size() == 2);
   at::Tensor r0, r1;
   std::tie(r0, r1) = lstm(input, hx, cx, w_ih, w_hh);
-  REQUIRE(almostEqual(Variable(outputs[0]).data(), r0));
-  REQUIRE(almostEqual(Variable(outputs[1]).data(), r1));
+  REQUIRE(almostEqual(Variable(stack[0].toTensor()).data(), r0));
+  REQUIRE(almostEqual(Variable(stack[1].toTensor()).data(), r1));
 }
 
 void testBlocks(std::ostream & out) {
@@ -953,7 +954,7 @@ void testProto() {
   proto.set_producer_name("foo");
 }
 
-std::string runJITCPPTests() {
+TORCH_API std::string runJITCPPTests() {
   std::stringstream out;
   testIValue();
   testControlFlow();

@@ -1,6 +1,7 @@
 #include "ATen/ATen.h"
 #include "ATen/NativeFunctions.h"
 #include "ATen/Error.h"
+#include "ATen/cuda/CUDAContext.h"
 
 #include <cfloat>
 #include <tuple>
@@ -134,7 +135,7 @@ std::tuple<Tensor, Tensor> RoiPooling2d_forward_cuda(
 
   dim3 block(512);
   dim3 grid((output.numel() + 512 - 1) / 512);
-  RoiPooling2d_forward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+  RoiPooling2d_forward_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
     output.numel(), input.data<float>(), rois.data<float>(), static_cast<float>(spatialScale), inputChannels,
     inputHeight, inputWidth, pooledHeight, pooledWidth, output.data<float>(), argmaxes.data<int>());
   AT_CHECK(cudaGetLastError() == cudaSuccess, "RoiPooling2d_forward_kernel failed with error code ", cudaGetLastError());
@@ -201,7 +202,7 @@ Tensor RoiPooling2d_backward_cuda(
 
   dim3 block(512);
   dim3 grid((gradInput.numel() + 512 - 1) / 512);
-  RoiPooling2d_backward_kernel<<<grid, block, 0, globalContext().getCurrentCUDAStream()>>>(
+  RoiPooling2d_backward_kernel<<<grid, block, 0, at::cuda::getCurrentCUDAStream()>>>(
     gradOutput.numel(), gradOutput.data<float>(), argmaxes.data<int>(), proposals,
     static_cast<float>(spatialScale), inputChannels, inputHeight, inputWidth,
     pooledHeight, pooledWidth, gradInput.data<float>(), rois.data<float>());

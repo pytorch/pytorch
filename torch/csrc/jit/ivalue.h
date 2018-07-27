@@ -1,6 +1,10 @@
 #pragma once
+
+#include "torch/csrc/jit/assertions.h"
+
 #include <ATen/ATen.h>
-#include "torch/csrc/assertions.h"
+
+#include <type_traits>
 
 namespace torch { namespace jit {
 
@@ -87,6 +91,10 @@ using DoubleList = ConstantList<double>;
 // The tag is currently 4 bytes to determine the type, and 1 byte
 // to mark whether that type is a subtype of at::Retainable and needs
 // retain/release calls.
+
+#define TORCH_FORALL_TAGS(_) \
+  _(None) _(Tensor) _(Double) _(Int) _(Tuple) _(IntList) _(DoubleList)
+
 struct IValue {
   IValue()
   : payload(0)
@@ -171,11 +179,15 @@ struct IValue {
   : tag(Tag::Int), retainable(false) {
     as_int = i;
   }
+
   // allow you to pass literals (3, 4) without ambiguity
   IValue(int32_t i)
   : IValue(static_cast<int64_t>(i)) {}
+  IValue(bool b)
+  : IValue(static_cast<int64_t>(b)) {}
 
   bool isInt() const { return Tag::Int == tag; }
+
   int64_t toInt() const {
     JIT_ASSERT(isInt());
     return as_int;
@@ -183,6 +195,9 @@ struct IValue {
 
   // IntList
   IValue(Shared<IntList> v);
+  IValue(std::vector<int64_t> v);
+  IValue(at::ArrayRef<int64_t> v)
+  : IValue(std::vector<int64_t>(v.begin(), v.end())) {}
   bool isIntList() const { return Tag::IntList == tag; }
   Shared<IntList> toIntList() && {
     JIT_ASSERT(isIntList());
@@ -193,8 +208,11 @@ struct IValue {
     return toRetainable<IntList>();
   }
 
+  std::vector<int64_t> copyToIntList() const;
+
   // DoubleList
   IValue(Shared<DoubleList> v);
+  IValue(std::vector<double> v);
   bool isDoubleList() const { return Tag::DoubleList == tag; }
   Shared<DoubleList> toDoubleList() && {
     JIT_ASSERT(isDoubleList());
@@ -208,6 +226,51 @@ struct IValue {
   bool isNone() {
     return Tag::None == tag;
   }
+
+  // Scalar, which gets encoded as either an Int or a Double
+  IValue(at::Scalar s)
+  : IValue() {
+    if(s.isFloatingPoint()) {
+      *this = s.toDouble();
+    } else {
+      *this = s.toLong();
+    }
+  }
+  bool isScalar() {
+    return isDouble() || isInt();
+  }
+  at::Scalar toScalar() const {
+    if(isDouble())
+      return toDouble();
+    else if(isInt())
+      return toInt();
+    else
+      throw std::runtime_error("IValue is not a Scalar");
+  }
+
+  // for debugging
+  std::string tagKind() {
+    switch(tag) {
+      #define DEFINE_CASE(x) case Tag::x: return #x;
+      TORCH_FORALL_TAGS(DEFINE_CASE)
+      #undef DEFINE_CASE
+    }
+    return "Invalid Tag";
+  }
+
+  // generic v.to<at::Tensor>() implementations
+  // that can be used in special functions like pop/push
+  // that use template meta-programming.
+  // prefer the directly named methods when you can,
+  // since they are simpler to understand
+
+  // Note: if you get linker errors saying one of these is missing,
+  // change it to ... && = delete; and you will see better error messages for why
+  // However, we cannot commit this because some compiler versions barf on it.
+  template<typename T>
+  T to() &&;
+  template<typename T>
+  T to() const &;
 
 private:
   template<typename T>
@@ -226,7 +289,9 @@ private:
     retainable = false;
   }
   enum class Tag : uint32_t {
-    None, Tensor, Double, Int, Tuple, IntList, DoubleList
+    #define DEFINE_TAG(x) x,
+    TORCH_FORALL_TAGS(DEFINE_TAG)
+    #undef DEFINE_TAG
   };
   union {
     at::TensorImpl* as_tensor_impl;
@@ -241,6 +306,29 @@ private:
   bool retainable;
 };
 
+#undef TORCH_FORALL_TAGS
+
+
+#define DEFINE_TO(type, method_name) \
+template<> \
+inline type IValue::to<type>() && { \
+  return std::move(*this).method_name(); \
+} \
+template<> \
+inline type IValue::to<type>() const & { \
+  return this->method_name(); \
+}
+DEFINE_TO(at::Tensor, toTensor)
+DEFINE_TO(Shared<Tuple>, toTuple)
+DEFINE_TO(double, toDouble)
+DEFINE_TO(int64_t, toInt)
+DEFINE_TO(Shared<DoubleList>, toDoubleList)
+DEFINE_TO(Shared<IntList>, toIntList)
+DEFINE_TO(at::Scalar, toScalar)
+DEFINE_TO(bool, toInt)
+DEFINE_TO(std::vector<int64_t>, copyToIntList)
+
+#undef DEFINE_TO
 
 // non-mutable list
 template<typename Elem>
@@ -257,6 +345,9 @@ struct ConstantList : at::Retainable {
   at::ArrayRef<Elem> elements() const {
     return elements_;
   }
+  operator at::ArrayRef<Elem>() const {
+    return elements();
+  }
 };
 
 inline IValue::IValue(Shared<Tuple> v)
@@ -268,11 +359,18 @@ inline IValue::IValue(Shared<IntList> v)
 : tag(Tag::IntList), retainable(true) {
   as_retainable = v.detach();
 }
+inline IValue::IValue(std::vector<int64_t> v)
+: IValue(IntList::create(std::move(v))) {}
 
 inline IValue::IValue(Shared<DoubleList> v)
 : tag(Tag::DoubleList), retainable(true) {
   as_retainable = v.detach();
 }
+inline IValue::IValue(std::vector<double> v)
+: IValue(DoubleList::create(std::move(v))) {}
 
+inline std::vector<int64_t> IValue::copyToIntList() const {
+  return std::vector<int64_t>(toIntList()->elements());
+}
 
 }}

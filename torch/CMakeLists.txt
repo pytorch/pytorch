@@ -107,13 +107,13 @@ add_custom_command(
   WORKING_DIRECTORY "${TORCH_SRC_DIR}/..")
 
 set(TORCH_SRCS
-  ${TORCH_SRC_DIR}/csrc/assertions.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/anomaly_mode.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/aten_variable_hooks.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/engine.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/function.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/accumulate_grad.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/basic_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/autograd/functions/comm.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/tensor.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/functions/utils.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/generated/Functions.cpp
@@ -123,18 +123,18 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/autograd/profiler.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/saved_variable.cpp
   ${TORCH_SRC_DIR}/csrc/autograd/variable.cpp
+  ${TORCH_SRC_DIR}/csrc/cuda/comm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/autodiff.cpp
   ${TORCH_SRC_DIR}/csrc/jit/export.cpp
   ${TORCH_SRC_DIR}/csrc/jit/fusion_compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/generated/register_aten_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/graph_executor.cpp
   ${TORCH_SRC_DIR}/csrc/jit/import.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interned_strings.cpp
   ${TORCH_SRC_DIR}/csrc/jit/interpreter.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/constants.cpp
   ${TORCH_SRC_DIR}/csrc/jit/ir.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/operator.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/batch_mm.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/canonicalize.cpp
@@ -153,17 +153,18 @@ set(TORCH_SRCS
   ${TORCH_SRC_DIR}/csrc/jit/passes/shape_analysis.cpp
   ${TORCH_SRC_DIR}/csrc/jit/passes/specialize_undef.cpp
   ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_prim_ops.cpp
+  ${TORCH_SRC_DIR}/csrc/jit/register_symbols.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/compiler.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/lexer.cpp
   ${TORCH_SRC_DIR}/csrc/jit/script/module.cpp
   ${TORCH_SRC_DIR}/csrc/jit/test_jit.cpp
   ${TORCH_SRC_DIR}/csrc/jit/tracer.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/tracer_state.cpp
   ${TORCH_SRC_DIR}/csrc/jit/type.cpp
-  ${TORCH_SRC_DIR}/csrc/jit/variable_flags.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.cpp
   ${TORCH_SRC_DIR}/csrc/onnx/onnx.npb.cpp
   ${TORCH_SRC_DIR}/csrc/torch.cpp
+  ${TORCH_SRC_DIR}/csrc/utils/tensor_flatten.cpp
   ${TORCH_SRC_DIR}/csrc/utils/variadic.cpp
   )
 
@@ -228,6 +229,14 @@ else()
     # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
     -Wno-missing-braces
     )
+
+  if(NOT APPLE)
+    target_compile_options(torch PRIVATE
+      # Considered to be flaky.  See the discussion at
+      # https://github.com/pytorch/pytorch/pull/9608
+      -Wno-maybe-uninitialized)
+  endif()
+
 endif()
 
 # see the source file for explanation
@@ -238,7 +247,7 @@ set_source_files_properties(
 
 if (MSVC)
 elseif ($ENV{WERROR})
-  target_compile_options(torch PRIVATE -Werror)
+  target_compile_options(torch PRIVATE -Werror -Wno-strict-overflow)
 endif()
 
 if (MSVC)
@@ -248,6 +257,15 @@ endif()
 target_link_libraries(torch
   caffe2_library
   protobuf-nanopb)
+
+find_package(OpenMP)
+if(OPENMP_FOUND)
+  if (VERBOSE)
+    message(STATUS "Compiling with OpenMP")
+  endif()
+  target_compile_options(torch INTERFACE -fopenmp)
+  target_link_libraries(torch -fopenmp)
+endif()
 
 if(USE_CUDA)
   if(MSVC)
@@ -365,31 +383,24 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
     ${TORCH_SRC_DIR}/csrc/api
     ${TORCH_SRC_DIR}/csrc/api/include)
 
-  if (NOT MSVC)
-    target_compile_options(torch PRIVATE -Wno-maybe-uninitialized)
-  endif()
-
-  if (APPLE)
-    target_compile_options(torch PRIVATE -Wno-unknown-warning-option)
-  endif()
-
   set(TORCH_API_TEST_DIR "${TORCH_SRC_DIR}/../test/cpp/api")
 
   add_executable(test_api
     ${TORCH_API_TEST_DIR}/any.cpp
-    ${TORCH_API_TEST_DIR}/modules.cpp
     ${TORCH_API_TEST_DIR}/cursor.cpp
     ${TORCH_API_TEST_DIR}/integration.cpp
     ${TORCH_API_TEST_DIR}/main.cpp
     ${TORCH_API_TEST_DIR}/misc.cpp
     ${TORCH_API_TEST_DIR}/module.cpp
+    ${TORCH_API_TEST_DIR}/modules.cpp
     ${TORCH_API_TEST_DIR}/optim.cpp
-    ${TORCH_API_TEST_DIR}/sequential.cpp
+    ${TORCH_API_TEST_DIR}/parallel.cpp
     ${TORCH_API_TEST_DIR}/rnn.cpp
+    ${TORCH_API_TEST_DIR}/sequential.cpp
     ${TORCH_API_TEST_DIR}/serialization.cpp
     ${TORCH_API_TEST_DIR}/static.cpp
-    ${TORCH_API_TEST_DIR}/tensor.cpp
     ${TORCH_API_TEST_DIR}/tensor_cuda.cpp
+    ${TORCH_API_TEST_DIR}/tensor.cpp
     # Temporary until ATen tests are built with Caffe2
     ${TORCH_API_TEST_DIR}/tensor_options.cpp
     ${TORCH_API_TEST_DIR}/tensor_options_cuda.cpp
@@ -402,18 +413,19 @@ if (BUILD_TORCH_TEST AND NOT NO_API AND NOT USE_ROCM)
 
   target_link_libraries(test_api torch ${TORCH_CUDA_LIBRARIES})
 
-  if (APPLE)
-    target_compile_options(test_api PRIVATE
-      -Wno-unknown-warning-option
-      -Wno-missing-braces
-      -Wno-maybe-uninitialized
-      -Wno-reorder
-      )
-  elseif (MSVC)
-  else()
-    target_compile_options(test_api PRIVATE
-      -Wno-unused-but-set-parameter
-      -Wno-reorder
-      )
+  if (NOT MSVC)
+    if (APPLE)
+      target_compile_options(test_api PRIVATE
+        # Clang has an unfixed bug leading to spurious missing braces
+        # warnings, see https://bugs.llvm.org/show_bug.cgi?id=21629
+        -Wno-missing-braces)
+    else()
+      target_compile_options(test_api PRIVATE
+        # Considered to be flaky.  See the discussion at
+        # https://github.com/pytorch/pytorch/pull/9608
+        -Wno-maybe-uninitialized
+        # gcc gives nonsensical warnings about variadic.h
+        -Wno-unused-but-set-parameter)
+    endif()
   endif()
 endif()

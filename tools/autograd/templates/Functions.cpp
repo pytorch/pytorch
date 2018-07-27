@@ -130,6 +130,12 @@ Tensor pow_backward_exponent(Tensor grad, const Tensor & self, const Tensor & ex
   return grad * self.pow(exponent) * self.log();
 }
 
+Tensor mvlgamma_backward(Tensor grad, const Tensor & self, int64_t p) {
+  Tensor args = at::arange(-p + 1, 1, -1, self.options()).div_(2.);
+  args = args.add(self.unsqueeze(-1));
+  return grad * args.digamma_().sum(-1).add_(p * (p - 1) * std::log(M_PI) / 4.);
+}
+
 Tensor reduce_to(const Tensor & grad, IntList sizes) {
   if (sizes.size() == 0) {
     return grad.sum();
@@ -360,7 +366,7 @@ Tensor cumprod_backward(const Tensor &grad, const Tensor &input, int64_t dim) {
     // At this point omitted_products is the same size
     // as input, except on the dimension dim where it's
     // dim_size - k
-    TORCH_ASSERT(omitted_products.size(dim) == dim_size - k);
+    AT_ASSERT(omitted_products.size(dim) == dim_size - k);
 
     grad_input.select(dim, k).copy_(
         at::sum(grad.slice(dim, k) * omitted_products,dim));
@@ -656,7 +662,7 @@ Tensor split_backward(const std::vector<torch::autograd::Variable> &grads,
 }
 
 Tensor max_pool_double_backward(const Tensor & grad, const Tensor & indices, int dim) {
-  TORCH_ASSERT(indices.dim() >= dim);
+  AT_ASSERT(indices.dim() >= dim);
   auto size = std::vector<int64_t>(indices.sizes().slice(0, indices.dim() - dim));
   size.push_back(-1);
   auto indices_view = indices.view(size);
@@ -768,7 +774,7 @@ Tensor smooth_l1_loss_double_backward_grad_output(const Tensor & grad, const Ten
 
 Tensor diag_backward(const Tensor & grad, IntList input_sizes, int64_t diagonal) {
   auto ndimension = input_sizes.size();
-  TORCH_ASSERT(ndimension == 1 || ndimension == 2);
+  AT_ASSERT(ndimension == 1 || ndimension == 2);
 
   if (ndimension == 1 || input_sizes[0] == input_sizes[1]) {
     return grad.diag(diagonal);
@@ -1536,6 +1542,43 @@ Tensor svd_backward(const std::vector<torch::autograd::Variable> &grads, const T
   }
 
   return u_term + sigma_term + v_term;
+}
+
+// http://eprints.maths.ox.ac.uk/1079/1/NA-08-01.pdf
+Tensor symeig_backward(const std::vector<torch::autograd::Variable> &grads, const Tensor& self,
+                    bool eigenvectors, bool upper, const Tensor& lambda, const Tensor& v) {
+    auto glambda = grads[0];
+    auto gv = grads[1];
+    
+    auto vt = v.t();
+    
+    if (!eigenvectors) {
+        throw std::runtime_error(std::string("cannot compute backward without "
+                                             "computing eigenvectors in forward pass"));
+    }
+    
+    Tensor result;
+    if (gv.defined()) {
+        Tensor F = lambda.unsqueeze(0).expand_as(self).clone();
+        F.sub_(at::unsqueeze(lambda, 1));
+        F.diagonal().fill_(INFINITY);
+        F.pow_(-1);
+        
+        F.mul_(vt.mm(gv));
+        result = v.mm(F.mm(vt));
+    } else {
+        result = at::zeros_like(self);
+    }
+    
+    if (glambda.defined()) {
+        result.add_((v * glambda).mm(vt));
+    }
+    if (upper) {
+        result = at::triu(result) + at::triu(result.t(), 1);
+    } else {
+        result = at::tril(result) + at::tril(result.t(), -1);
+    }
+    return result;
 }
 
 // Invertible case is derived from Jacobi's formula, and also can be found at:

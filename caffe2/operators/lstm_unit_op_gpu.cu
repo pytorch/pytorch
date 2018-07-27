@@ -2,7 +2,7 @@
 #include <cmath>
 #include <vector>
 #include "caffe2/core/context_gpu.h"
-#include "lstm_unit_op.h"
+#include "caffe2/operators/lstm_unit_op.h"
 
 namespace caffe2 {
 

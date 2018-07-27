@@ -1,5 +1,5 @@
 #include "caffe2/core/context_gpu.h"
-#include "integral_image_op.h"
+#include "caffe2/operators/integral_image_op.h"
 
 namespace caffe2 {
 

@@ -477,6 +477,9 @@
   self: grad.ger(vec)
   vec: self.t().mv(grad)
 
+- name: mvlgamma(Tensor self, int64_t p)
+  self: mvlgamma_backward(grad, self, p)
+
 - name: ne_(Tensor self, Scalar other)
   self: zeros_like(self)
 
@@ -677,13 +680,16 @@
   self: svd_backward(grads, self, some, res1, res2, res3)  # resX are defined in Declarations.cwrap
 
 - name: symeig(Tensor self, bool eigenvectors, bool upper)
-  self: not_implemented("symeig")
+  self: symeig_backward(grads, self, eigenvectors, upper, res1, res2)
 
 - name: t(Tensor self)
   self: grad.t()
 
 - name: flip(Tensor self, IntList dims)
   self: grad.flip(dims)
+
+- name: rot90(Tensor self, int64_t k, IntList dims)
+  self: grad.rot90(-k, dims)
 
 - name: take(Tensor self, Tensor index)
   self: zeros_like(self).put_(index, grad, true)

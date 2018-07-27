@@ -69,30 +69,3 @@ CopyFromOpenCL
 NCHW2NHWC
 NHWC2NCHW
 
-Int8Quantize
-Int8Dequantize
-Int8AveragePool : AveragePool
-Int8Conv : Conv
-Int8ConvTranspose : ConvTranspose
-Int8FC : FC
-Int8MaxPool : MaxPool
-Int8Relu : Relu
-Int8GivenTensorFill : GivenTensorFill
-Int8Concat : Concat
-Int8Softmax : Softmax
-Int8ChannelShuffle : ChannelShuffle
-Int8Sum : Sum
-Int8Add : Add
-Int8Reshape : Reshape
-Int8Flatten : Flatten
-Int8ConvRelu : ConvRelu
-Int8SumRelu : SumRelu
-Int8AveragePoolRelu : AveragePoolRelu
-Int8MaxPoolRelu : MaxPoolRelu
-
-BatchMatMul
-- TransA : bool : false
-- TransB : bool : true
-- Broadcast: bool : false
-BatchGather
-ConcatBatchMatMulBatchGatherOp

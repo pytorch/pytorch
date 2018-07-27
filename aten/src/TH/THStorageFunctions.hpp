@@ -33,14 +33,13 @@
 //    If it is not, you must report that the storage is dead.
 //
 
-ptrdiff_t THStorage_size(const THStorage *self);
+TH_API ptrdiff_t THStorage_size(const THStorage *self);
 
-void THStorage_setFlag(THStorage *storage, const char flag);
-void THStorage_clearFlag(THStorage *storage, const char flag);
-void THStorage_retain(THStorage *storage);
-void THStorage_resize(THStorage *storage, ptrdiff_t size);
-void THStorage_swap(THStorage *storage1, THStorage *storage2);
+TH_API void THStorage_setFlag(THStorage *storage, const char flag);
+TH_API void THStorage_clearFlag(THStorage *storage, const char flag);
+TH_API void THStorage_retain(THStorage *storage);
+TH_API void THStorage_resize(THStorage *storage, ptrdiff_t size);
+TH_API void THStorage_swap(THStorage *storage1, THStorage *storage2);
 
-void THStorage_weakRetain(THStorage *weak_storage);
-void THStorage_weakFree(THStorage *weak_storage);
-THStorage* THStorage_weakLock(THStorage *weak_storage);
+TH_API void THStorage_weakRetain(THStorage *weak_storage);
+TH_API THStorage* THStorage_weakLock(THStorage *weak_storage);

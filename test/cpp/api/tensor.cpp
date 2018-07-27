@@ -5,6 +5,8 @@
 #include <ATen/ATen.h>
 
 #include <cmath>
+#include <cstddef>
+#include <vector>
 
 template <typename T>
 bool exactly_equal(at::Tensor left, T right) {
@@ -178,4 +180,15 @@ TEST_CASE("Tensor/UsesOptionsThatAreSupplied") {
   REQUIRE(exactly_equal(tensor[0], 1));
   REQUIRE(exactly_equal(tensor[1], 2));
   REQUIRE(exactly_equal(tensor[2], 3));
+}
+
+TEST_CASE("FromBlob") {
+  std::vector<int32_t> v = {1, 2, 3};
+  auto tensor = torch::from_blob(
+      reinterpret_cast<void*>(v.data()), v.size(), torch::kInt32);
+  REQUIRE(tensor.is_variable());
+  REQUIRE(tensor.numel() == 3);
+  REQUIRE(tensor[0].toCInt() == 1);
+  REQUIRE(tensor[1].toCInt() == 2);
+  REQUIRE(tensor[2].toCInt() == 3);
 }

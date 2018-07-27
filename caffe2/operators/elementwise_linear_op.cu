@@ -1,6 +1,6 @@
 #include <assert.h>
 
-#include "elementwise_linear_op.h"
+#include "caffe2/operators/elementwise_linear_op.h"
 
 #include "caffe2/core/context_gpu.h"
 #include "caffe2/operators/operator_fallback_gpu.h"

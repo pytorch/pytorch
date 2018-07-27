@@ -145,7 +145,7 @@ void initPythonIRBindings(PyObject * module_) {
       return ss.str();
     })
     .def("propagate_shapes", [](Graph& g, std::vector<at::Tensor> inputs, bool with_grad) {
-      PropagateInputShapes(g, ArgumentSpec(with_grad, variable_tensor_list(std::move(inputs))));
+      PropagateInputShapes(g, ArgumentSpec(with_grad, fmap<IValue>(inputs)));
     })
     .def("export", [](const std::shared_ptr<Graph> g, const std::vector<at::Tensor>& initializers,
                       int64_t onnx_opset_version, bool defer_weight_export,
@@ -236,7 +236,6 @@ void initPythonIRBindings(PyObject * module_) {
     .def("return_node", [](Graph &g) {
       return g.block()->return_node();
     })
-    .GS(createConstant)
     .GS(createFusionGroup)
     .def("createClone",[](Graph & g, Node * n, py::object fn) {
       return g.createClone(n, [&](Value * e) {
@@ -282,7 +281,10 @@ void initPythonIRBindings(PyObject * module_) {
 
   #undef VS
 
-  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block");
+  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
+    .def("nodes",[](Block &b) {
+      return py::make_iterator(b.nodes().begin(), b.nodes().end());
+    });
 
   #define NS(name) \
     def(#name,&Node :: name)
@@ -433,7 +435,7 @@ void initPythonIRBindings(PyObject * module_) {
         case TypeKind::TupleType:
           return "TupleType";
         default:
-          torch::barf("unknown type kind");
+          AT_ERROR("unknown type kind");
           return "";
         }
     })
@@ -444,7 +446,7 @@ void initPythonIRBindings(PyObject * module_) {
       return t.expect<TensorType>()->strides();
     })
     .def("contiguous",[](Type& t) {
-      return t.expect<TensorType>()->contiguous();
+      return std::static_pointer_cast<Type>(t.expect<TensorType>()->contiguous());
     })
     .def("scalarType",[](Type& t) {
       return at::toString(t.expect<TensorType>()->scalarType());
@@ -452,9 +454,18 @@ void initPythonIRBindings(PyObject * module_) {
     ;
 
   py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
-    .def(py::init<>());
+    .def(py::init([](){ return DynamicType::create(); }));
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
-    .def(py::init<std::vector<TypePtr>>());
+    .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))
+    .def("elements", [](TupleType &self){
+      std::vector<TypePtr> types;
+      for (auto type : self.elements()) {
+        types.push_back(type);
+      }
+      return types;
+    });
+  py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
+    .def_static("ofInts", &ListType::ofInts);
 
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)
@@ -470,9 +481,6 @@ void initPythonIRBindings(PyObject * module_) {
           std::move(tensor), /*requires_grad=*/false));
     }
     return std::make_tuple(graph, variables);
-  });
-  m.def("_jit_is_tracing", [](const autograd::Variable& var) {
-    return tracer::isTracing(var);
   });
 }
 }}

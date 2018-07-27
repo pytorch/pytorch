@@ -1,6 +1,10 @@
 #include "ir.h"
 
+
+#include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -236,7 +240,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorType* type = v->type()->cast<TensorType>()) {
+    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -402,7 +406,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+          JIT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
       JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -517,7 +521,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value *) -> Value* {
-    barf("Graph::copy() encountered a use of a value not in scope. Run lint!");
+    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -564,6 +568,86 @@ Value* Value::setUniqueName(const std::string & name) {
   names[name] = this;
   unique_name_ = name;
   return this;
+}
+
+std::pair<size_t, const Argument*> findArgument(const FunctionSchema& the_schema, Symbol name) {
+  auto name_str = name.toUnqualString();
+  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
+    const Argument* arg = &the_schema.arguments[i];
+    if (arg->name == name_str) {
+      return std::make_pair(i, arg);
+    }
+  }
+  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
+}
+
+at::optional<IValue> Node::get(Symbol name) const {
+  // TODO (apaszke): remove. this is in here for now just so that we can ensure
+  // we always use this in places where the node has a valid schema already
+  // (will make next commits easier).
+  if (hasAttribute(name)) {
+    switch (kindOf(name)) {
+      case AttributeKind::i:
+        return IValue(i(name));
+      case AttributeKind::f:
+        return IValue(f(name));
+      case AttributeKind::t: {
+        // attributes are ambiguous, this might be a at::Scalar
+        // disambiguate via schema
+        at::Tensor ten = t(name);
+        const Argument* arg = findArgument(schema(), name).second;
+        if(arg->type->isSubtypeOf(NumberType::get())) {
+          return IValue(at::Scalar(ten));
+        }
+        return IValue(ten);
+      }
+      case AttributeKind::is:
+        return IValue(is(name));
+      default:
+        throw std::runtime_error("get() NYI");
+    }
+  }
+  return toIValue(namedInput(name));
+}
+
+Value* Node::namedInput(Symbol name) const {
+  if(hasAttribute(name)) {
+    // XXX - const cast because this really should not be modifying graph
+    // and once we remove attributes it no longer will
+    Value* v = insertConstant(const_cast<Graph&>(*owningGraph()), get(name).value());
+    // XXX - insert point can be anywhere since modifying the graph is unexpected,
+    // so this is completely unsafe and needs to be gone as soon as possible.
+    return v;
+  }
+  const auto & the_schema = schema();
+  int64_t tensor_list_pos = 0;
+  for (auto & arg : the_schema.arguments) {
+    if (*arg.type == *ListType::ofTensors())
+      break;
+    tensor_list_pos++;
+  }
+  int64_t arg_pos = findArgument(schema(), name).first;
+  // XXX: we don't have a single value we could give for a Tensor[],
+  // because we flatten lists into arguments
+  JIT_ASSERT(arg_pos != tensor_list_pos);
+  // NB: if there's no tensor list, then tensor_list_pos == arguments.size(), so this is always true
+  if (arg_pos < tensor_list_pos) {
+    return input(arg_pos);
+  } else {
+    return input(inputs().size() - (the_schema.arguments.size() - arg_pos));
+  }
+}
+
+bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
+  if (!sig(signature_literal).matches(this)) return false;
+  for (Symbol s : const_inputs) {
+    if (!is_constant(s)) return false;
+  }
+  return true;
+}
+
+void Node::findSchema() const {
+  schema_ = &getOperatorFor(this).schema;
 }
 
 PythonOp* defaultAllocPythonOp(Graph*g) {

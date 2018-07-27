@@ -21,11 +21,11 @@ static THCDeviceTensor<real, Dim> THNN_(devicetensor)(THCState *state, THCTensor
   int size[Dim];
   for (int i = 0; i < Dim || i < inDim; ++i) {
     if (i < Dim && i < inDim) {
-      size[i] = t->size[i];
+      size[i] = t->size(i);
     } else if (i < Dim) {
       size[i] = 1;
     } else {
-      size[Dim - 1] *= t->size[i];
+      size[Dim - 1] *= t->size(i);
     }
   }
   return THCDeviceTensor<real, Dim>(t->data<real>(), size);

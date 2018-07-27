@@ -3,11 +3,9 @@
 #include "torch/csrc/utils/python_stub.h"
 
 #include "torch/csrc/WindowsTorchApiMacro.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/autograd/edge.h"
 #include "torch/csrc/autograd/function_hook.h"
 #include "torch/csrc/autograd/variable_version.h"
-#include "torch/csrc/utils/auto_unique_ptr.h"
 
 #include <ATen/ATen.h>
 #include <ATen/Error.h>
@@ -20,19 +18,9 @@
 #include <utility>
 #include <vector>
 
-namespace torch {
-namespace autograd {
-struct Function;
-} // namespace autograd
-namespace jit { namespace tracer {
-// Has to be forward declared because tracer_state.h has a dependency on
-// variable.h.
-struct ValueTracingStateElem;
-using ValueTracingState = std::list<ValueTracingStateElem>;
-}} // namespace jit::tracer
-} // namespace torch
-
 namespace torch { namespace autograd {
+
+struct Function;
 
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 ///                                Variable
@@ -88,7 +76,7 @@ namespace torch { namespace autograd {
 /// free function instead. To create a view variable, use `make_variable_view`.
 ///~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-struct Variable : public at::Tensor {
+struct TORCH_API Variable : public at::Tensor {
   /// Default constructor.
   Variable() = default;
 
@@ -123,14 +111,14 @@ struct Variable : public at::Tensor {
   // "Downcasts" a `Tensor` into a `Variable`. Only call this on tensors you
   // know are Variables.
   /*implicit*/ Variable(at::Tensor const& rhs) : at::Tensor(rhs) {
-    TORCH_ASSERTM(
+    AT_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
 
-  /*implicit*/ Variable(at::Tensor&& rhs) noexcept
+  /*implicit*/ Variable(at::Tensor&& rhs)
       : at::Tensor(std::move(rhs)) {
-    TORCH_ASSERTM(
+    AT_CHECK(
         is_variable() || !defined(),
         "Tensor that was converted to Variable was not actually a Variable");
   }
@@ -228,15 +216,6 @@ struct Variable : public at::Tensor {
   const std::vector<std::shared_ptr<FunctionPreHook>>& hooks() const noexcept;
   void clear_hooks();
 
-  // JIT Tracing
-  //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-  void set_tracing_state(jit::tracer::ValueTracingState* new_tracing_state);
-  jit::tracer::ValueTracingState& tracing_state() const noexcept;
-
-  /// Returns true if the `Variable`'s tracing state is not null.
-  bool has_tracing_state() const noexcept;
-
   // View Variables
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -273,7 +252,7 @@ struct Variable : public at::Tensor {
   //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
   Variable(Variable::Impl* self, bool retain);
-  Impl* get() const noexcept;
+  Impl* get() const;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -288,11 +267,9 @@ struct Variable::Impl : public at::TensorImpl {
 
   ~Impl() override;
 
-  const char* toString() const override;
   at::IntList sizes() const override;
   at::IntList strides() const override;
   int64_t dim() const override;
-  at::Scalar localScalar() override;
   void* unsafeGetTH(bool retain) override;
   std::unique_ptr<at::Storage> storage() override;
   static const char* typeString();
@@ -379,9 +356,6 @@ struct Variable::Impl : public at::TensorImpl {
   // state are still thread-safe. Used by get_grad_fn and
   // get_grad_accumulator.
   std::mutex mutex_;
-
-  // For use in torch::jit::tracer
-  auto_unique_ptr<jit::tracer::ValueTracingState> tracing_state_;
 };
 
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -564,13 +538,6 @@ inline void Variable::clear_hooks() {
   get()->hooks_.clear();
 }
 
-// JIT Tracing
-//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-inline bool Variable::has_tracing_state() const noexcept {
-  return get()->tracing_state_ != nullptr;
-}
-
 // View Variables
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
@@ -607,8 +574,8 @@ inline PyObject* Variable::pyobj() const noexcept {
 inline Variable::Variable(Variable::Impl* self, bool retain)
     : at::Tensor(self, retain) {}
 
-inline Variable::Impl* Variable::get() const noexcept {
-  TORCH_ASSERTM(defined(), "Called Variable::get() on an undefined Variable");
+inline Variable::Impl* Variable::get() const {
+  AT_CHECK(defined(), "Called Variable::get() on an undefined Variable");
   return static_cast<Variable::Impl*>(pImpl);
 }
 }} // namespace torch::autograd

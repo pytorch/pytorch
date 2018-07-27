@@ -533,10 +533,11 @@ class Operator : public OperatorBase {
     return fillers;
   }
 
-#define DISABLE_INPUT_FILLERS(Context)                                  \
-  std::vector<TensorFiller<Context>> InputFillers(                      \
-      const std::vector<std::vector<TIndex>>& /* unused */) override {  \
-    throw UnsupportedOperatorFeature("Op does not have input fillers"); \
+#define DISABLE_INPUT_FILLERS(Context)                                 \
+  std::vector<TensorFiller<Context>> InputFillers(                     \
+      const std::vector<std::vector<TIndex>>& /* unused */) override { \
+    throw UnsupportedOperatorFeature(                                  \
+        OperatorBase::type() + " does not have input fillers");        \
   }
 
   void SparseLengthsFillerHelper(
@@ -554,7 +555,8 @@ class Operator : public OperatorBase {
       size_t segment_index,
       std::vector<TensorFiller<Context>>* fillers) {
     CAFFE_ENFORCE_EQ(shapes[segment_index].size(), 1);
-    // TODO: what would be a proper #segments
+    // TODO (mnaumov): distribution of value
+    (*fillers)[value_index].Min(0).Max(shapes[value_index].front() * 2);
     (*fillers)[segment_index].SparseSegments(shapes[value_index].front() - 1);
   }
 
@@ -966,6 +968,11 @@ TensorShapes InferBlobShapesAndTypesFromWorkspace(
 
 TensorShapes InferBlobShapesAndTypesFromMap(
     const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const vector<NetDef*>& nets);
+
+TensorShapes InferBlobShapesAndTypesFromMap(
+    const CaffeMap<std::string, std::vector<TIndex>>& blob_dimensions,
+    const CaffeMap<std::string, TensorProto_DataType>& blob_types,
     const vector<NetDef*>& nets);
 
 std::map<string, std::pair<DeviceOption, DeviceOption>> ValidateTensorDevices(

@@ -3,6 +3,7 @@ from torch import Tensor
 from torch.autograd import Variable, function
 from torch.nn import Module, ModuleList, ParameterList, Parameter, Sequential
 from torch.jit.frontend import get_jit_ast
+import torch.jit.annotations
 from torch._six import raise_from, with_metaclass
 from collections import defaultdict, OrderedDict, namedtuple
 import sys
@@ -24,21 +25,10 @@ _unflatten = torch._C._jit_unflatten
 _jit_script_compile = torch._C._jit_script_compile
 BatchTensor = torch._C._jit.BatchTensor
 
-# This global variable is set when we are tracing a *forwards* computation.
-# It is intended to be a cheap way to test if tracing has occurred, before
-# doing the slower path using `get_tracing_state` (below.)
-_tracing = False
-
-
-def get_tracing_state(args):
-    if not torch._C._is_tracing(args):
-        return None
-    return torch._C._get_tracing_state(args)
-
 
 @contextlib.contextmanager
-def scope(scope_name, *vars):
-    tracing_state = get_tracing_state(vars)
+def scope(scope_name):
+    tracing_state = torch._C._get_tracing_state()
     if tracing_state:
         tracing_state.push_scope(scope_name)
     try:
@@ -98,18 +88,19 @@ class LegacyTracedModule(Module):
         self.inner = inner
 
     def forward(self, *args):
-        global _tracing
         in_vars, in_desc = _flatten(args)
         # NOTE: use full state, because we need it for BatchNorm export
         # This differs from the compiler path, which doesn't support it at the moment.
         module_state = list(_unique_state_dict(self, keep_vars=True).values())
         trace, all_trace_inputs = torch._C._tracer_enter(in_vars + module_state)
-        _tracing = True
-        trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
-        out = self.inner(*trace_inputs)
-        out_vars, _ = _flatten(out)
-        _tracing = False
-        torch._C._tracer_exit(out_vars)
+        try:
+            trace_inputs = _unflatten(all_trace_inputs[:len(in_vars)], in_desc)
+            out = self.inner(*trace_inputs)
+            out_vars, _ = _flatten(out)
+            torch._C._tracer_exit(out_vars)
+        except Exception:
+            torch._C._tracer_abandon()
+            raise
         return trace, out
 
 
@@ -289,13 +280,7 @@ def trace(*args, **kwargs):
         if len(kwargs) != 0:
             raise TypeError("got unexpected keyword arguments: {}".format(", ".join(kwargs.keys())))
 
-        if isinstance(func, torch.nn.Module):
-            orig = func
-        else:
-            # traced functions become a method on an Empty module
-            orig = Module()
-
-        module = TopLevelTracedModule(orig, **executor_options)
+        module = TopLevelTracedModule(func, **executor_options)
         module._create_method_from_trace('forward', func, args)
         return module
 
@@ -354,22 +339,33 @@ class CompilationUnit(object):
         return self.module._get_method(attr)
 
 
-def _script_graph(fn, _frames_up=0):
-    rcb = createResolutionCallback(_frames_up + 1)
+def _fn_to_typed_def(fn, method=False):
+    schema = annotations.get_signature(fn)
     ast = get_jit_ast(fn)
-    return _jit_script_compile(ast, rcb)
+    if schema:
+        typed_def = torch._C._pack_typed_def(ast, schema[0], schema[1], method)
+    else:
+        typed_def = torch._C.TypedDef(ast)
+    return typed_def
 
 
 def script(fn, optimize=True, _frames_up=0):
-    graph = _script_graph(fn, _frames_up=_frames_up + 1)
+    rcb = createResolutionCallback(_frames_up + 1)
+    typed_def = _fn_to_typed_def(fn)
+    graph = _jit_script_compile(typed_def, rcb)
     mod = ScriptModule()
     mod._create_method_from_graph('forward', graph)
+    # TODO: refactor everything so we're not 1) creating a ScriptModule
+    # 2) Throwing everything away except for the graph 3) Creating a new
+    # ScriptModule and dumping that graph in 4) Re-populating the schema
+    # because it was lost doing the previous
+    mod.__getattr__('forward').set_arg_and_return_types(typed_def, False)
     # Forward docstrings
     mod.__doc__ = fn.__doc__
     return mod
 
 
-ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'ast', 'original_method'))
+ScriptMethodStub = namedtuple('ScriptMethodStub', ('resolution_callback', 'typed_def', 'original_method'))
 
 
 def script_method(fn):
@@ -385,7 +381,8 @@ def script_method(fn):
     #
     # createResolutionCallback internally adds 1 to get us to the scope of this
     # function (the calling function). Adding 2 gets us to the proper surrounding scope.
-    return ScriptMethodStub(createResolutionCallback(frames_up=2), get_jit_ast(fn), fn)
+    typed_def = _fn_to_typed_def(fn, method=True)
+    return ScriptMethodStub(createResolutionCallback(frames_up=2), typed_def, fn)
 
 
 def batch(batch_size=1, optimize=True, _frames_up=0):
@@ -589,9 +586,9 @@ class ScriptMeta(type(torch._C.ScriptModule)):
             if cls is type(self):
                 torch._C.ScriptModule.__init__(self)
             original_init(self, *args, **kwargs)
-            asts = [m.ast for m in methods]
+            typed_defs = [m.typed_def for m in methods]
             rcbs = [m.resolution_callback for m in methods]
-            self._create_methods(asts, rcbs)
+            self._create_methods(typed_defs, rcbs)
 
         cls.__init__ = init_then_register
         return super(ScriptMeta, cls).__init__(name, bases, attrs)
@@ -683,9 +680,16 @@ class TracedModule(ScriptModule):
     __frozen = False
 
     def __init__(self, orig, id_set=None, optimize=True):
+        # XXX: orig can be a nn.Module or a function!
         super(TracedModule, self).__init__(optimize=optimize)
         if id_set is None:
             id_set = set()
+
+        if not isinstance(orig, torch.nn.Module):
+            self._name = orig.__name__
+            orig = torch.nn.Module()
+        else:
+            self._name = 'TracedModule[' + type(orig).__name__ + ']'
 
         def check_unique(param):
             if param in id_set:
@@ -702,7 +706,6 @@ class TracedModule(ScriptModule):
             if buf is not None:
                 self._buffers[name] = buf
                 check_unique(buf)
-        self._orig_class = type(orig)
 
         if orig._backward_hooks or orig._forward_hooks or orig._forward_pre_hooks:
             raise ValueError("Modules that have hooks assigned can't be compiled")
@@ -719,7 +722,7 @@ class TracedModule(ScriptModule):
         self.__frozen = True
 
     def _get_name(self):
-        return 'TracedModule[' + self._orig_class.__name__ + ']'
+        return self._name
 
     def __setattr__(self, attr, value):
         if not self.__frozen or hasattr(self, attr):

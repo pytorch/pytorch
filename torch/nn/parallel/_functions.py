@@ -76,19 +76,17 @@ class Scatter(Function):
 
     @staticmethod
     def forward(ctx, target_gpus, chunk_sizes, dim, input):
-        ctx.target_gpus = target_gpus
-        ctx.chunk_sizes = chunk_sizes
         ctx.dim = dim
         ctx.input_device = input.get_device() if input.is_cuda else -1
         streams = None
         if ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
-            streams = [_get_stream(device) for device in ctx.target_gpus]
-        outputs = comm.scatter(input, ctx.target_gpus, ctx.chunk_sizes, ctx.dim, streams)
+            streams = [_get_stream(device) for device in target_gpus]
+        outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):
-                with torch.cuda.device(ctx.target_gpus[i]):
+                with torch.cuda.device(target_gpus[i]):
                     main_stream = torch.cuda.current_stream()
                     main_stream.wait_stream(streams[i])
                     output.record_stream(main_stream)

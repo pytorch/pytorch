@@ -223,16 +223,19 @@ class Graph {
   /// \p data An rvalue of the data being held in the node.
   /// \return A reference to the node created.
   NodeRef createNode(T&& data) {
-    Nodes.emplace_back(Node<T, U...>(std::move(data)));
-    DEBUG_PRINT("Creating node (%p)\n", &Nodes.back());
-    return &Nodes.back();
+    return createNodeInternal(Node<T, U...>(std::move(data)));
+  }
+
+  NodeRef createNode() {
+    return createNodeInternal(Node<T, U...>());
   }
 
   void importNode(NodeRef node, Graph<T, U...>& otherGraph) {
-    std::list<Node<T, U...>>& otherNodes = otherGraph.Nodes;
     for (auto it = Nodes.begin(); it != Nodes.end(); ++it) {
       if (&(*it) == node) {
+        std::list<Node<T, U...>>& otherNodes = otherGraph.Nodes;
         otherNodes.splice(otherNodes.end(), Nodes, it, ++it);
+        otherGraph.NodeRefs.insert(node);
         break;
       }
     }
@@ -272,12 +275,6 @@ class Graph {
     n1->setInEdges(n2InEdges);
     n2->setOutEdges(n1OutEdges);
     n2->setInEdges(n1InEdges);
-  }
-
-  NodeRef createNode() {
-    Nodes.emplace_back(Node<T, U...>());
-    DEBUG_PRINT("Creating node (%p)\n", &Nodes.back());
-    return &Nodes.back();
   }
 
   /// \brief Replace a node in the graph with a generic
@@ -353,10 +350,15 @@ class Graph {
     }
     for (auto i = Nodes.begin(); i != Nodes.end(); ++i) {
       if (&*i == n) {
+        NodeRefs.erase(n);
         Nodes.erase(i);
         break;
       }
     }
+  }
+
+  bool hasNode(NodeRef ref) const {
+    return NodeRefs.find(ref) != NodeRefs.end();
   }
 
   /// \brief Deletes a edge from the graph.
@@ -404,9 +406,18 @@ class Graph {
     }
   }
 
- protected:
+ private:
   std::list<Node<T, U...>> Nodes;
   std::list<Edge<T, U...>> Edges;
+  std::unordered_set<NodeRef> NodeRefs;
+
+  NodeRef createNodeInternal(Node<T, U...>&& node) {
+    Nodes.emplace_back(std::move(node));
+    NodeRef nodeRef = &Nodes.back();
+    DEBUG_PRINT("Creating node (%p)\n", nodeRef);
+    NodeRefs.insert(nodeRef);
+    return nodeRef;
+  }
 };
 
 } // namespace nom
