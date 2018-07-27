@@ -351,9 +351,7 @@ Value* createNumber(Graph& g, const SourceRange& loc, const at::Tensor& val) {
 }
 
 Value* createStringLiteral(Graph& g, const SourceRange& loc, const std::string& str) {
-  auto n = g.createString(str);
-  n->setSourceLocation(std::make_shared<SourceRange>(loc));
-  return g.insertNode(n)->output();
+  return insertConstant(g, str, loc);
 }
 
 Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs) {

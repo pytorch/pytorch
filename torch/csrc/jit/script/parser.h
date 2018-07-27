@@ -193,7 +193,7 @@ struct Parser {
     auto ret_str = str.substr(quote_len, str.size() - quote_len * 2);
     size_t pos = ret_str.find('\\');
     while(pos != std::string::npos) {
-      //invariant: backslash cannot be the last character
+      //invariant: pos has to escape a character because it is a valid string
       char c = ret_str[pos + 1];
       switch (ret_str[pos + 1]) {
         case '\\':
@@ -219,8 +219,7 @@ struct Parser {
         default:
           throw ErrorReport(range) << " octal and hex escaped sequences are not supported";
       }
-      ret_str.erase(pos, 2);
-      ret_str.insert(pos, 1, c);
+      ret_str.replace(pos, /* num to erase */ 2, /* num copies */ 1, c);
       pos = ret_str.find('\\', pos + 1);
     }
     return ret_str;

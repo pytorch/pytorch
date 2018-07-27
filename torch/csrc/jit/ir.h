@@ -985,12 +985,6 @@ public:
   Node * createUndefined() {
     return create(prim::Undefined);
   }
-  Node * createString(const std::string& str) {
-    auto n = create(prim::StringLiteral);
-    n->s_(attr::string, std::move(str));
-    n->output()->setType(StringType::get());
-    return n;
-  }
   Node * createFusionGroup(int device) {
     auto n = create(prim::FusionGroup, 0);
     n->g_(attr::Subgraph,std::make_shared<Graph>(scope_root_));

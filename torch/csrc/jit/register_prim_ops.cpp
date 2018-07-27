@@ -107,15 +107,6 @@ RegisterOperators reg({
             return 0;
           };
         }),
-    Operator(
-        prim::StringLiteral,
-        [](Node* node) {
-          std::string s = node->s(attr::string);
-          return [s](Stack& stack) {
-            stack.push_back(IValue(s));
-            return 0;
-          };
-        }),
     // Load x, y
     // loads values from registers onto the stack, the actual callback does
     // nothing since the stack manipulation is already encoded in inst.inputs

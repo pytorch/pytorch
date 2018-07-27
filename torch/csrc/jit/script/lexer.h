@@ -216,7 +216,10 @@ struct SharedParserData {
       }
       end++;
     }
+    //set length equal to the complete string including quotations
     *len = end - start + quote_len;
+    //if end finished without going past the last character of the string than
+    //there is a match
     return end < str.size();
   }
 

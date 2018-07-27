@@ -1,3 +1,2 @@
 1
-[ Variable[CPULongType]{} ] abcd a    bcd 1
-[ Variable[CPULongType]{} ]
+[ Variable[CPULongType]{} ] abcd 2 1.5

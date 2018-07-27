@@ -1443,7 +1443,8 @@ class TestScript(JitTestCase):
     def test_string_cu(self):
         cu = torch.jit.CompilationUnit('''
             def foo(a):
-                print(a, """a\\n\tb\\n""", 2)
+                print(a, """a\\n\tb\\n""", 2, "a\
+a")
                 return a
         ''')
         self.assertExpected(str(cu.foo.graph))
@@ -1755,13 +1756,10 @@ class TestScript(JitTestCase):
 
     def test_string_print(self):
         def func(a):
-            print(a, "a" 'b' '''c''' """d""", "a\
-            b" "c"  # ignored
-                    "d", a)
+            print(a, "a" 'b' '''c''' """d""", 2, 1.5)
             return a
         inputs = self._make_scalar_vars([1], torch.int64)
-        func(inputs)
-        # self.checkScript(func, inputs, capture_output=True)
+        self.checkScript(func, inputs, capture_output=True)
 
     def test_while(self):
         def func(a, b, max):
