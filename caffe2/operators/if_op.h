@@ -32,7 +32,7 @@ class IfOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     CAFFE_ENFORCE(
-        this->template InputIsType<Tensor>(0, Context::GetDeviceType()),
+        this->template InputIsType<Tensor<Context>>(0),
         "Invalid condition in If operator: tensor expected");
 
     const auto& condition = Input(0);

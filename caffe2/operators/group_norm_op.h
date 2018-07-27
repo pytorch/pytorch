@@ -152,8 +152,8 @@ class GroupNormGradientOp final : public Operator<Context> {
   const int group_;
   const StorageOrder order_;
 
-  Tensor ds_{Context::GetDeviceType()};
-  Tensor db_{Context::GetDeviceType()};
+  Tensor<Context> ds_;
+  Tensor<Context> db_;
 
   // Input: dY, X, gamma, beta, mu, inv_sig
   // Output: dX, dgamma, dbeta

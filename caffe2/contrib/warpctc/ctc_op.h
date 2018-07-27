@@ -47,26 +47,26 @@ class CTCOp final : public Operator<Context> {
     const auto& inputs = Input(INPUTS);
     const auto minibatchSize = inputs.dim(1);
     const auto alphabetSize = inputs.dim(2);
-    const auto& labels = OperatorBase::template Input<Tensor>(LABELS, CPU);
+    const auto& labels = OperatorBase::template Input<TensorCPU>(LABELS);
     const auto& labelLengths =
-        OperatorBase::template Input<Tensor>(LABEL_LENGTHS, CPU);
+        OperatorBase::template Input<TensorCPU>(LABEL_LENGTHS);
     const auto& inputLengths =
-        OperatorBase::template Input<Tensor>(INPUT_LENGTHS, CPU);
+        OperatorBase::template Input<TensorCPU>(INPUT_LENGTHS);
 
     // outputs
-    Tensor* gradients = nullptr;
+    Tensor<Context>* gradients = nullptr;
     TensorCPU* costs;
-    Tensor* workspace;
+    Tensor<Context>* workspace;
     if (!is_test_) {
       // [grads, costs, workspace] to maintain backward compatibility
       gradients = Output(0);
       gradients->ResizeLike(inputs);
-      costs = OperatorBase::template Output<Tensor>(1, CPU);
+      costs = OperatorBase::template Output<TensorCPU>(1);
       costs->ResizeLike(labelLengths);
       workspace = Output(2);
     } else {
       // [costs, workspace]
-      costs = OperatorBase::template Output<Tensor>(0, CPU);
+      costs = OperatorBase::template Output<TensorCPU>(0);
       costs->ResizeLike(labelLengths);
       workspace = Output(1);
     }

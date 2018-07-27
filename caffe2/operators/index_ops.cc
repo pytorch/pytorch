@@ -93,7 +93,8 @@ struct Index: IndexBase {
     return true;
   }
 
-  bool Store(Tensor* out) {
+  template<typename Ctx>
+  bool Store(Tensor<Ctx>* out) {
     std::lock_guard<std::mutex> lock(dictMutex_);
     out->Resize(nextId_ - 1);
     auto outData = out->template mutable_data<T>();
@@ -150,10 +151,7 @@ class IndexGetOp: public Operator<CPUContext> {
     const auto& keys = Input(1);
     auto* values = Output(0);
     values->ResizeLike(keys);
-    dict->Get(
-        keys.data<T>(),
-        values->template mutable_data<TIndexValue>(),
-        keys.size());
+    dict->Get(keys.data<T>(), values->mutable_data<TIndexValue>(), keys.size());
     return true;
   }
 };
@@ -228,7 +226,7 @@ class IndexSizeOp : public Operator<CPUContext> {
     auto& base = OperatorBase::Input<std::unique_ptr<IndexBase>>(0);
     auto* out = Output(0);
     out->Resize(std::vector<TIndex>{});
-    *out->template mutable_data<TIndexValue>() = base->Size();
+    *out->mutable_data<TIndexValue>() = base->Size();
     return true;
   }
 };
@@ -353,7 +351,7 @@ class IndexSerializer : public BlobSerializerBase {
       SerializationAcceptor acceptor) override {
     auto& base = blob.template Get<std::unique_ptr<IndexBase>>();
     Blob tensor_blob;
-    auto* tensor_out = tensor_blob.GetMutableTensor(CPU);
+    auto* tensor_out = tensor_blob.template GetMutable<Tensor<CPUContext>>();
 
     if (base->Type().Match<std::string>()) {
       doStore<std::string>(base, tensor_out);
@@ -369,7 +367,7 @@ class IndexSerializer : public BlobSerializerBase {
         tensor_out->size() <= std::numeric_limits<int32_t>::max(),
         "Index too large to be serialized.");
     BlobProto blob_proto;
-    TensorSerializer ser;
+    TensorSerializer<CPUContext> ser;
     ser.Serialize(
         *tensor_out, name, blob_proto.mutable_tensor(), 0, tensor_out->size());
     blob_proto.set_name(name);
@@ -384,7 +382,9 @@ class IndexSerializer : public BlobSerializerBase {
 
  private:
   template <typename T>
-  void doStore(const std::unique_ptr<IndexBase>& base, Tensor* tensor_out) {
+  void doStore(
+      const std::unique_ptr<IndexBase>& base,
+      Tensor<CPUContext>* tensor_out) {
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base.get());
     CAFFE_ENFORCE(dict, "Wrong dictionary type.");
     dict->Store(tensor_out);
@@ -394,7 +394,7 @@ class IndexSerializer : public BlobSerializerBase {
 class IndexDeserializer : public BlobDeserializerBase {
  public:
   void Deserialize(const BlobProto& proto, Blob* blob) override {
-    TensorDeserializer deser;
+    TensorDeserializer<CPUContext> deser;
     Blob tensor_blob;
     deser.Deserialize(proto, &tensor_blob);
 
@@ -403,7 +403,7 @@ class IndexDeserializer : public BlobDeserializerBase {
     bool isFrozen{false};
     is >> maxElements >> isFrozen;
 
-    auto& tensor_in = tensor_blob.template Get<Tensor>();
+    auto& tensor_in = tensor_blob.template Get<Tensor<CPUContext>>();
     auto* base = blob->template GetMutable<std::unique_ptr<IndexBase>>();
 
     if (tensor_in.IsType<std::string>()) {
@@ -426,7 +426,7 @@ class IndexDeserializer : public BlobDeserializerBase {
   void doLoad(
       std::unique_ptr<IndexBase>* base,
       int64_t maxElements,
-      const Tensor& tensor_in) {
+      const Tensor<CPUContext>& tensor_in) {
     base->reset(new Index<T>(maxElements));
     auto* dict = dynamic_cast_if_rtti<Index<T>*>(base->get());
     dict->Load(tensor_in.data<T>(), tensor_in.size());

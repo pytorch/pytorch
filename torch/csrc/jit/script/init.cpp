@@ -86,7 +86,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
                              << "of arguments: expected " << arguments.size() << ", but got "
                              << inputs.size();
     for (size_t i = 0; i < arguments.size(); ++i) {
-      if (!inputs[i]->type()->isSubtypeOf(*arguments[i]))
+      if (!inputs[i]->type()->isSubtypeOf(arguments[i]))
         throw ErrorReport(loc) << "type mismatch at argument " << i << ": expected "
                                << arguments[i]->str() << ", but got " << inputs[i]->type()->str();
     }
@@ -135,7 +135,7 @@ struct VISIBILITY_HIDDEN PythonValue : public SugaredValue {
     // equivalent, but the PythonOp impl ends with an optional tuple unpack, so we need
     // to do it.
     for (auto & ret_type_elem : returns) {
-      if (!ret_type_elem->isSubtypeOf(*DynamicType::get())) {
+      if (!ret_type_elem->isSubtypeOf(DynamicType::get())) {
         throw ErrorReport(loc) << "Python functions can currently only return Tensors";
       }
     }
@@ -371,9 +371,9 @@ static void gatherParametersAndBuffers(std::vector<at::Tensor*> & values, const 
 }
 
 py::object runMethodFromPython(Method& m, py::args args) {
-  auto inputs = createVariableTensorList(args);
-  auto outputs = m.run(std::move(inputs));
-  return unpackVariableTensorList(std::move(outputs));
+  auto stack = createStack(args);
+  m.run(stack);
+  return wrapStack(std::move(stack));
 }
 
 void initJitScriptBindings(PyObject* module) {
@@ -502,7 +502,7 @@ void initJitScriptBindings(PyObject* module) {
       })
       .def("graph_for", [](Module& self, py::args args) {
         if (self.find_method("forward")) {
-          return self.get_method("forward").graph_for(createVariableTensorList(args));
+          return self.get_method("forward").graph_for(createStack(args));
         }
         throw std::runtime_error("Attempted to call graph_for on a Module without a compiled forward()");
       })
@@ -530,7 +530,7 @@ void initJitScriptBindings(PyObject* module) {
     .def("propagate_and_assign_input_and_output_shapes", &Method::propagate_and_assign_input_and_output_shapes)
     .def("params", &Method::params)
     .def("graph_for", [](Method& self, py::args args) {
-      return self.graph_for(createVariableTensorList(args));
+      return self.graph_for(createStack(args));
     })
     .def("set_arg_and_return_types", [](Method &self, TypedDef &typed_def, bool method) {
       std::vector<Argument> arg_type_args, return_type_args;

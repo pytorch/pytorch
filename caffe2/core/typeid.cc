@@ -69,7 +69,8 @@ CaffeTypeId CaffeTypeId::createTypeId() {
   return CaffeTypeId(new_value);
 }
 
-CAFFE_DEFINE_KNOWN_TYPE(Tensor);
+CAFFE_DEFINE_KNOWN_TYPE(Tensor<CPUContext>);
+CAFFE_DEFINE_KNOWN_TYPE(Tensor<CUDAContext>);
 CAFFE_DEFINE_KNOWN_TYPE(float);
 CAFFE_DEFINE_KNOWN_TYPE(int);
 CAFFE_DEFINE_KNOWN_TYPE(std::string);

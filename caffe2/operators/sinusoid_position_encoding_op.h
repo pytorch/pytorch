@@ -28,7 +28,7 @@ class SinusoidPositionEncodingOp : public Operator<Context> {
 
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-        this, OperatorBase::Input<Tensor>(0, CPU));
+        this, OperatorBase::Input<TensorCPU>(0));
   }
 
   template <typename Index>

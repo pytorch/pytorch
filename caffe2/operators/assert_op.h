@@ -41,7 +41,7 @@ class AssertOp final : public Operator<Context> {
   }
 
  private:
-  Tensor cmp_tensor_{CPU};
+  TensorCPU cmp_tensor_;
   std::string error_msg_;
 };
 

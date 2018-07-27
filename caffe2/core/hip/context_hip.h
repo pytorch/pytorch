@@ -120,46 +120,37 @@ class ThreadLocalHIPObjects {
   vector<miopenHandle_t> miopen_handles_[CAFFE2_COMPILE_TIME_MAX_HIP_GPUS];
 };
 
-BaseStaticContext* GetHIPStaticContext();
-
-class HIPContext final : public BaseContext {
+class HIPContext final {
  public:
   // The default HIP context constructor.
   explicit HIPContext(const int gpu_id = -1);
   explicit HIPContext(const DeviceOption& option);
 
-  ~HIPContext() override {
+  ~HIPContext() {
     if (hiprand_generator_) {
       HIPRAND_CHECK(hiprandDestroyGenerator(hiprand_generator_));
     }
     FinishDeviceComputation();
   }
 
-  BaseStaticContext* GetStaticContext() const override {
-    return GetHIPStaticContext();
-  }
-
-  static BaseStaticContext* StaticContext() {
-    return GetHIPStaticContext();
-  }
-
-  inline void SwitchToDevice(int stream_id) override {
+  inline void SwitchToDevice(int stream_id) {
     set_stream_id(stream_id);
     CaffeHipSetDevice(gpu_id_);
   }
+  inline void SwitchToDevice() {
+    SwitchToDevice(0);
+  }
 
-  using BaseContext::SwitchToDevice;
-
-  inline void WaitEvent(const Event& ev) override {
+  inline void WaitEvent(const Event& ev) {
     ev.Wait(HIP, this);
   }
 
-  inline void Record(Event* ev, const char* err_msg = nullptr) const override {
+  inline void Record(Event* ev, const char* err_msg = nullptr) const {
     CAFFE_ENFORCE(ev, "Event must not be null.");
     ev->Record(HIP, this, err_msg);
   }
 
-  void FinishDeviceComputation() override {
+  void FinishDeviceComputation() {
     hipStreamSynchronize(hip_objects_.GetStream(gpu_id_, stream_id_));
     hipError_t error = hipGetLastError();
     if (error != hipSuccess) {
@@ -204,9 +195,7 @@ class HIPContext final : public BaseContext {
     return hiprand_generator_;
   }
 
-  static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return StaticContext()->New(nbytes);
-  }
+  static std::pair<void*, MemoryDeleter> New(size_t nbytes);
 
   // Get a mutex to lock out hipMalloc / hipFree calls when
   // NCCL kernels are being launched. Should remove threat of
@@ -228,21 +217,6 @@ class HIPContext final : public BaseContext {
         nbytes,
         hipMemcpyDefault,
         hip_objects_.GetStream(gpu_id_, stream_id_)));
-  }
-
-  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst)
-      override {
-    CopyBytes<HIPContext, HIPContext>(nbytes, src, dst);
-  }
-
-  void CopyBytesToCPU(size_t nbytes, const void* src, void* dst)
-      override {
-    CopyBytes<HIPContext, CPUContext>(nbytes, src, dst);
-  }
-
-  void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst)
-      override {
-    CopyBytes<CPUContext, HIPContext>(nbytes, src, dst);
   }
 
   template <typename T, class SrcContext, class DstContext>
@@ -270,14 +244,6 @@ class HIPContext final : public BaseContext {
   static bool IsStreamFree(const DeviceOption& option, int stream_id) {
     auto stream = HIPContext::hip_stream(option.hip_gpu_id(), stream_id);
     return hipStreamQuery(stream) == hipSuccess;
-  }
-
-  DeviceType GetDevicetype() const override {
-    return HIP;
-  }
-
-  static constexpr DeviceType GetDeviceType() {
-    return HIP;
   }
 
  protected:
@@ -373,38 +339,8 @@ struct PinnedCPUAllocator final : CPUAllocator {
   DefaultCPUAllocator baseAllocator_;
 };
 
-class HIPStaticContext final : public BaseStaticContext {
- public:
-  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override;
-
-  std::unique_ptr<BaseContext> CreateContext() override {
-    return caffe2::make_unique<HIPContext>();
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(
-      const DeviceOption& option) override {
-    return caffe2::make_unique<HIPContext>(option);
-  }
-
-  std::unique_ptr<BaseContext> CreateContext(int gpu_id = -1) {
-    return caffe2::make_unique<HIPContext>(gpu_id);
-  }
-
-  DeviceType GetDeviceType() override {
-    return HIP;
-  }
-
-
-  void ExtractDeviceOption(DeviceOption* device, const void* data) override {
-    device->set_device_type(GetDeviceType());
-    device->set_hip_gpu_id(GetGPUIDForPointer(data));
-  }
-
- protected:
-  static void Delete(void* data);
-};
-
-typedef Tensor TensorHIP;
+// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
+typedef Tensor<HIPContext> TensorHIP;
 
 } // namespace caffe2
 

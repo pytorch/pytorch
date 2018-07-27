@@ -23,7 +23,7 @@ void THNN_(Linear_updateOutput)(
           THTensor *bias,
           THTensor *addBuffer)
 {
-  int64_t dim = THTensor_(_nDimension)(input);
+  int64_t dim = THTensor_(nDimensionLegacyAll)(input);
   if (dim == 1) {
     THTensor_(resize1d)(output,THTensor_(size)(weight,0));
     if (bias) {
@@ -66,7 +66,7 @@ void THNN_(Linear_updateGradInput)(
       THTensor_(zero)(gradInput);
     }
 
-    int64_t dim = THTensor_(_nDimension)(input);
+    int64_t dim = THTensor_(nDimensionLegacyAll)(input);
     if (dim == 1) {
       THTensor *tweight = THTensor_(new)();
       THTensor_(transpose)(tweight,weight,0,1);
@@ -92,7 +92,7 @@ void THNN_(Linear_accGradParameters)(
           accreal scale_)
 {
   real scale = TH_CONVERT_ACCREAL_TO_REAL(scale_);
-  int64_t dim = THTensor_(_nDimension)(input);
+  int64_t dim = THTensor_(nDimensionLegacyAll)(input);
   if (dim == 1) {
     THTensor_(addr)(gradWeight,1,gradWeight,scale,gradOutput,input);
     if (bias) {

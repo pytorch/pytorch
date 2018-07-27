@@ -38,11 +38,7 @@ bool SeluOp<float, CUDAContext>::RunOnDevice() {
       CAFFE_CUDA_NUM_THREADS,
       0,
       context_.cuda_stream()>>>(
-      X.size(),
-      X.data<float>(),
-      Y->template mutable_data<float>(),
-      alpha_,
-      lambda_);
+      X.size(), X.data<float>(), Y->mutable_data<float>(), alpha_, lambda_);
   return true;
 }
 
@@ -62,7 +58,7 @@ bool SeluGradientOp<float, CUDAContext>::RunOnDevice() {
       Y.size(),
       Y.data<float>(),
       dY.data<float>(),
-      dX->template mutable_data<float>(),
+      dX->mutable_data<float>(),
       alpha_,
       lambda_);
   return true;

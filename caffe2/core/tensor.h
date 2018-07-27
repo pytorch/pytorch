@@ -89,10 +89,13 @@ inline int canonical_axis_index_(int axis_index, int ndims) {
  * the allocation and de-allocation of such memory. We make a simplified
  * assumption that the memory is always contiguous.
  */
+template <class Context>
 class Tensor {
  public:
-  Tensor() = delete;
-  explicit Tensor(DeviceType type) : device_type_(type) {}
+  /**
+   * Initializes an empty tensor.
+   */
+  Tensor() {}
 
   /**
    * @brief Creates a tensor of the given dimension.
@@ -100,86 +103,67 @@ class Tensor {
    * Note that the actual data allocation is not going to be carried out until
    * the first time mutable_data() is called.
    */
-  explicit Tensor(const vector<TIndex>& dims, DeviceType type)
-      : device_type_(type) {
-    Resize(dims);
-  }
-  explicit Tensor(const vector<int>& dims, DeviceType type)
-      : device_type_(type) {
-    Resize(dims);
-  }
+  explicit Tensor(const vector<TIndex>& dims) { Resize(dims); }
+  explicit Tensor(const vector<int>& dims) { Resize(dims); }
 
-  /* Now we require that context_for_copy has the same device type as src since template
-   * is removed
+  /**
+   * @brief Creates a tensor from a source tensor, copying over the content.
+   *
+   * Note that the source tensor can be from a different device context. The
+   * second argument provides a device context object (either Context or
+   * SrcContext) that will be responsible for copying the underlying data.
+   * If you do not wish to pass in a Context object, an equivalent constructor
+   * function exists that will create an implicit context object for copy, but
+   * be noted that this will cause a potential performance hit.
    */
-  Tensor(const Tensor& src, BaseContext* context_for_copy, DeviceType type) : device_type_(type) {
-    CopyFrom(src, context_for_copy);
+  template <class SrcContext, class ContextForCopy>
+  Tensor(const Tensor<SrcContext>& src, ContextForCopy* context) {
+    CopyFrom(src, context);
   }
 
   /**
-   * @brief: Create a Tensor of DeviceType `type` and initialize it with
-   * src Tensor
+   * @brief Creates a tensor from a source tensor, copying over the content.
+   *
+   * Note that this may have a potential performance hit, since a temporary
+   * context object will be created for the memory copy. Prefer explicitly
+   * providing a context for copy if you can.
+   *
+   * Since it's a potentially expensive operation - making copy constructor
+   * explicit here. If SrcContext != Context it's actually a typecast
+   * constructor and it should be definitely explicit.
    */
-  Tensor(const Tensor& src, DeviceType type) : device_type_(type) {
+  template <class SrcContext>
+  explicit Tensor(const Tensor<SrcContext>& src) {
     CopyFrom(src);
   }
 
   /**
    * @brief Creates a tensor, and fills its contents with the given values.
-   * The type of tensor will be decided by the context parameter
    */
   template <typename T>
-  Tensor(
-      const vector<TIndex>& dims,
-      const vector<T>& values,
-      BaseContext* context)
+  Tensor(const vector<TIndex>& dims, const vector<T>& values, Context* context)
       : meta_(TypeMeta::Make<T>()) {
     Resize(dims);
     CAFFE_ENFORCE_EQ_WITH_CALLER(values.size(), size_);
-    device_type_ = context->GetDevicetype();
-    context->CopyItemsFromCPU(meta_, size_, values.data(), mutable_data<T>());
+    context->template Copy<T, CPUContext, Context>(size_, values.data(), mutable_data<T>());
   }
 
   /**
    * @brief Creates a scalar tensor, and fills its content with the given value.
-   * The type of tensor will be decided by the context parameter
    */
-  template <
-      typename T,
-      typename = typename std::enable_if<std::is_scalar<T>::value>::type>
-  Tensor(const T& value, BaseContext* context) : meta_(TypeMeta::Make<T>()) {
+  template <typename T,
+            typename = typename std::enable_if<std::is_scalar<T>::value>::type>
+  Tensor(const T& value, Context* context) {
     Resize(vector<TIndex>{});
-    device_type_ = context->GetDevicetype();
-    context->CopyItemsFromCPU(meta_, size_, &value, mutable_data<T>());
+    context->template Copy<T, CPUContext, Context>(size_, &value, mutable_data<T>());
   }
 
-  /*
-   * Since we removed template from tensor, we now store a static
-   * context pointer in tensor, which indicates the type of the tensor.
-   */
-  BaseStaticContext* GetStaticContext() const {
-    return GET_STATIC_CONTEXT(device_type_);
-  }
-
-  /* @brief
-   * Create a context that has the same device_type
-   * as the tensor.
-   * Note that this doesn't support passing in argument
-   * TODO(jerryzh): move this to a global registry
-   * that can create context for us
-   */
-  std::unique_ptr<BaseContext> CreateContext() const {
-    return GetStaticContext()->CreateContext();
-  }
-
-  DeviceType GetDeviceType() const {
-    return device_type_;
-  }
   /**
    * @brief Copies the data from a source tensor, with a contex provided to
    * carry out the underlying memcpy operation.
    */
-  void CopyFrom(const Tensor& src, BaseContext* context = nullptr) {
+  template <class SrcContext, class ContextForCopy>
+  void CopyFrom(const Tensor<SrcContext>& src, ContextForCopy* context) {
     if ((void*)&src == (void*)this) {
       return;
     }
@@ -196,37 +180,25 @@ class Tensor {
     Resize(src.dims());
     if (size() > 0) {
       if (meta_.copy()) {
-        CAFFE_ENFORCE(
-            GetDeviceType() == CPU,
-            "In CopyFrom source and dest tensors must both be CPU for meta copy");
-        CAFFE_ENFORCE(
-            src.GetDeviceType() == CPU,
-            "In CopyFrom source and dest tensors must both be CPU for meta copy");
         meta_.copy()(src.raw_data(), raw_mutable_data(), size());
       } else {
-        // We'll need to use a non-CPU context to perform the copy if
-        // one of the context is not CPU since only non-CPU context
-        // knows how to copy between CPU and that context
-        if (src.GetDeviceType() != CPU || GetDeviceType() == CPU) {
-          if (!context) {
-            src.CreateContext().get()->CopyBytesToDevice(
-                nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
-          } else {
-            CAFFE_ENFORCE(
-                context->GetDevicetype() == src.GetDeviceType(),
-                "Type for provided context does not match the type of source");
-            context->CopyBytesToDevice(
-                nbytes(), src.raw_data(), raw_mutable_data(), GetDeviceType());
-          }
-        } else {
-          // In case source context is CPU, and target context is non-CPU
-          // We'll have to create a Context from target and perform the
-          // copy using that context
-          CreateContext().get()->CopyBytesFromCPU(
-              nbytes(), src.raw_data(), raw_mutable_data());
-        }
+        context->template CopyBytes<SrcContext, Context>(
+            nbytes(), src.raw_data(), raw_mutable_data());
       }
     }
+  }
+
+  /**
+   * @brief Copies the data from a source tensor.
+   *
+   * Note that this may have a potential performance hit, since a temporary
+   * context object will be created for the memory copy. Prefer explicitly
+   * providing a context for copy if you can.
+   */
+  template <class SrcContext>
+  inline void CopyFrom(const Tensor<SrcContext>& src) {
+    SrcContext tmp_context;
+    CopyFrom(src, &tmp_context);
   }
 
   virtual ~Tensor() noexcept {}
@@ -240,7 +212,8 @@ class Tensor {
    * growthPct. This ensures that Extend runs on an amortized O(1) time
    * complexity.
    */
-  void Extend(TIndex num, float growthPct, BaseContext* context) {
+  template <class ContextForCopy>
+  void Extend(TIndex num, float growthPct, ContextForCopy* context) {
     CAFFE_ENFORCE_GE_WITH_CALLER(dims_.size(), 1);
     auto newDims = dims_;
     newDims[0] += num;
@@ -266,8 +239,8 @@ class Tensor {
     size_ = newSize;
   }
 
-  template <class T>
-  void Reserve(const std::vector<T>& newCapacity, BaseContext* context) {
+  template <class T, class ContextForCopy>
+  void Reserve(const std::vector<T>& newCapacity, ContextForCopy* context) {
     auto newSize = std::accumulate(
         newCapacity.begin(),
         newCapacity.end(),
@@ -281,7 +254,8 @@ class Tensor {
     auto oldDims = dims_;
     Resize(newCapacity);
     auto* newData = raw_mutable_data(meta_);
-    context->CopyItemsSameDevice(meta_, oldSize, oldData.get(), newData);
+    context->template CopyItems<ContextForCopy, ContextForCopy>(
+        meta_, oldSize, oldData.get(), newData);
     dims_ = oldDims;
     size_ = oldSize;
     reserved_ = true;
@@ -346,7 +320,8 @@ class Tensor {
    * Resize the tensor like the source tensor. Note that this is just a
    * sugar wrapper that essentially calls Resize(src_tensor.dims()).
    */
-  inline void ResizeLike(const Tensor& src_tensor) {
+  template <class OtherContext>
+  inline void ResizeLike(const Tensor<OtherContext>& src_tensor) {
     // Note: need casting for different context types.
     if (static_cast<void*>(this) != static_cast<const void*>(&src_tensor)) {
       Resize(src_tensor.dims());
@@ -409,7 +384,7 @@ class Tensor {
     return ss.str();
   }
 
-  void swap(Tensor& other) noexcept {
+  void swap(Tensor<Context>& other) {
     std::swap(dims_, other.dims_);
     std::swap(size_, other.size_);
     std::swap(meta_, other.meta_);
@@ -417,7 +392,6 @@ class Tensor {
     std::swap(shares_data_, other.shares_data_);
     std::swap(capacity_, other.capacity_);
     std::swap(reserved_, other.reserved_);
-    std::swap(device_type_, other.device_type_);
   }
 
   /**
@@ -568,8 +542,7 @@ class Tensor {
         // destruction procedure.
         auto size = size_;
         auto dtor = meta_.dtor();
-        auto ptr_and_deleter =
-            GetStaticContext()->New(size_ * meta_.itemsize());
+        auto ptr_and_deleter = Context::New(size_ * meta_.itemsize());
         auto deleter = ptr_and_deleter.second;
         data_.reset(
             ptr_and_deleter.first, [size, dtor, deleter](void* ptr) -> void {
@@ -579,8 +552,7 @@ class Tensor {
         meta_.ctor()(data_.get(), size_);
       } else {
         // For fundamental type, new and delete is easier.
-        auto ptr_and_deleter =
-            GetStaticContext()->New(size_ * meta_.itemsize());
+        auto ptr_and_deleter = Context::New(size_ * meta_.itemsize());
         data_.reset(ptr_and_deleter.first, ptr_and_deleter.second);
       }
       capacity_ = size_ * meta_.itemsize();
@@ -718,28 +690,20 @@ class Tensor {
     return dims_[i];
   }
 
-  // We don't allow change to the type of
-  // tensor after initialization
   Tensor Clone() const {
-    Tensor x(GetDeviceType());
+    Tensor x;
     x.CopyFrom(*this);
     return x;
   }
 
-  Tensor(Tensor&& src) noexcept {
+  Tensor(Tensor<Context>&& src) noexcept {
     swap(src);
   }
-
-  Tensor& operator=(Tensor&&) = default;
 
   /**
    * @brief Delete the copy constructor and use Clone explicitly
    */
-  Tensor(const Tensor& src) = delete;
-
-  void ExtractDeviceOption(DeviceOption* device) const {
-    GetStaticContext()->ExtractDeviceOption(device, raw_data());
-  }
+  Tensor(const Tensor<Context>& src) = delete;
 
  protected:
   vector<TIndex> dims_;
@@ -749,7 +713,6 @@ class Tensor {
   bool shares_data_ = false;
   size_t capacity_ = 0;
   bool reserved_ = false;
-  DeviceType device_type_ = CPU;
   // In case of chunk load we store how much data was already loaded
 
  private:
@@ -822,7 +785,8 @@ class Tensor {
   Tensor& operator=(const Tensor& src) = delete;
 };
 
-using TensorCPU = Tensor;
+// For simplicity, we will typedef Tensor<CPUContext> to TensorCPU.
+typedef Tensor<CPUContext> TensorCPU;
 
 constexpr int k_limit_default_ = 1000;
 
@@ -830,6 +794,12 @@ constexpr int k_limit_default_ = 1000;
 typedef TypeMeta (*TypeCall)(const void*);
 TypeCall GetTypeCallFunction(CaffeTypeId id);
 void RegisterTypeCallFunction(CaffeTypeId id, TypeCall c);
+
+template <class Context>
+TypeMeta GetTensorType(const void* c) {
+  const Tensor<Context>* tc = static_cast<const Tensor<Context>*>(c);
+  return tc->meta();
+}
 
 // Shape call registry
 typedef vector<TIndex> (*TensorInfoCall)(
@@ -840,8 +810,19 @@ typedef vector<TIndex> (*TensorInfoCall)(
 TensorInfoCall GetTensorInfoFunction(CaffeTypeId id);
 void RegisterTensorInfoFunction(CaffeTypeId id, TensorInfoCall c);
 
-// resize helper function
-void TensorVectorResize(std::vector<Tensor>& tensors, int size, DeviceType type);
+template <class Context>
+vector<TIndex> GetTensorInfo(
+    const void* c,
+    bool* shares_data,
+    size_t* capacity,
+    DeviceOption* device) {
+  const Tensor<Context>* tc = static_cast<const Tensor<Context>*>(c);
+  *shares_data = tc->shares_data();
+  *capacity = tc->capacity_nbytes();
+  device->set_device_type(CPU);
+  device->set_cuda_gpu_id(0);
+  return tc->dims();
+}
 
 class TensorPrinter {
  public:
@@ -852,11 +833,13 @@ class TensorPrinter {
   ~TensorPrinter();
 
   template <class T>
-  void Print(const Tensor& tensor);
+  void Print(const Tensor<CPUContext>& tensor);
 
-  void PrintMeta(const Tensor& tensor);
+  template <class Context>
+  void PrintMeta(const Tensor<Context>& tensor);
 
-  string MetaStr(const Tensor& tensor);
+  template <class Context>
+  string MetaStr(const Tensor<Context>& tensor);
 
  private:
   bool to_file_;
@@ -866,7 +849,7 @@ class TensorPrinter {
 };
 
 template <class T>
-void TensorPrinter::Print(const Tensor& tensor) {
+void TensorPrinter::Print(const Tensor<CPUContext>& tensor) {
   std::stringstream values_stream;
   // One most likely doesn't want to print int64-number of items for visual
   // inspection, so we cast down to int here.
@@ -884,6 +867,27 @@ void TensorPrinter::Print(const Tensor& tensor) {
     // Log to console.
     LOG(INFO) << MetaStr(tensor) << values_stream.str();
   }
+}
+
+template <class Context>
+void TensorPrinter::PrintMeta(const Tensor<Context>& tensor) {
+  if (to_file_) {
+    (*log_file_) << MetaStr(tensor) << std::endl;
+  } else {
+    LOG(INFO) << MetaStr(tensor);
+  }
+}
+
+template <class Context>
+std::string TensorPrinter::MetaStr(const Tensor<Context>& tensor) {
+  std::stringstream meta_stream;
+  meta_stream << "Tensor " << tensor_name_ << " of type "
+              << tensor.meta().name() << ". Dims: (";
+  for (const auto dim : tensor.dims()) {
+    meta_stream << dim << ",";
+  }
+  meta_stream << "): ";
+  return meta_stream.str();
 }
 
 }  // namespace caffe2

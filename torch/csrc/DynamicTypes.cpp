@@ -140,8 +140,7 @@ PyObject* createPyObject(const at::Storage& storage)
 
 bool isStorage(PyObject* obj)
 {
-  auto it = py_storage_type_to_attype.find(Py_TYPE(obj));
-  return it != py_storage_type_to_attype.end();
+  return py_storage_type_to_attype.count(Py_TYPE(obj));
 }
 std::unique_ptr<at::Storage> createStorage(PyObject* obj)
 {

@@ -19,9 +19,9 @@ class SoftmaxOp final : public Operator<Context> {
 
  protected:
   int axis_;
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor rowmax_{Context::GetDeviceType()};
-  Tensor sum_multiplier_{Context::GetDeviceType()};
+  Tensor<Context> scale_;
+  Tensor<Context> rowmax_;
+  Tensor<Context> sum_multiplier_;
 };
 
 template <typename T, class Context>
@@ -35,8 +35,8 @@ class SoftmaxGradientOp final : public Operator<Context> {
 
  protected:
   int axis_;
-  Tensor scale_{Context::GetDeviceType()};
-  Tensor sum_multiplier_{Context::GetDeviceType()};
+  Tensor<Context> scale_;
+  Tensor<Context> sum_multiplier_;
 };
 
 } // namespace caffe2

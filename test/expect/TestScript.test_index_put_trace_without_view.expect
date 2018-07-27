@@ -1,7 +1,8 @@
 graph(%0 : Double(100)
       %1 : Long(4)
       %2 : Double(4)) {
-  %3 : Long(4) = aten::_cast_Long[non_blocking=0](%1)
-  %10 : Double(100) = aten::index_put(%0, %3, %2)
-  return (%10);
+  %3 : int = prim::Constant[value=0]()
+  %4 : Long(4) = aten::_cast_Long(%1, %3)
+  %16 : Double(100) = aten::index_put(%0, %4, %2)
+  return (%16);
 }
