@@ -1,4 +1,4 @@
-#include "caffe2/core/predictor.h"
+#include "caffe2/predictor/predictor.h"
 #ifdef CAFFE2_OPTIMIZER
 #include "caffe2/opt/optimizer.h"
 #endif
