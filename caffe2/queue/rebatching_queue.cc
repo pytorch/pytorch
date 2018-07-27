@@ -50,12 +50,12 @@ void concat(
         continue;
       }
 
-      context.CopyItems<CPUContext, CPUContext>(
+      context.CopyItemsToCPU(
           input.meta(),
           input.size(),
           input.raw_data() /* src */,
           destinations[j] /* dst */
-          );
+      );
 
       destinations[j] =
           (char*)destinations[j] + input.size() * input.itemsize();
@@ -84,8 +84,8 @@ std::vector<std::vector<TensorCPU>> split(
     CAFFE_ENFORCE_EQ(input.dims().at(0), outputSize);
 
     for (int i = 0; i < outputSize; ++i) {
-      outputs[i].push_back(TensorCPU(outputDims));
-      context.CopyItems<CPUContext, CPUContext>(
+      outputs[i].push_back(Tensor(outputDims, CPU));
+      context.CopyItemsToCPU(
           input.meta(),
           innerSize,
           (char*)input.raw_data() + i * innerSize * itemSize /* src */,

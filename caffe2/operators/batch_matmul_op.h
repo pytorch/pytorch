@@ -20,7 +20,7 @@ class BatchMatMulOp final : public Operator<Context> {
         broadcast_(OperatorBase::GetSingleArgument<int>("broadcast", 0)),
         use_scratch_(OperatorBase::GetSingleArgument<int>("use_scratch", 0)) {
     if (use_scratch_) {
-      scratch_ = std::make_shared<Tensor<Context>>();
+      scratch_ = std::make_shared<Tensor>(Context::GetDeviceType());
     }
   }
 
@@ -282,7 +282,7 @@ class BatchMatMulOp final : public Operator<Context> {
   bool broadcast_;
 
   bool use_scratch_;
-  std::shared_ptr<Tensor<Context>> scratch_;
+  std::shared_ptr<Tensor> scratch_;
 };
 
 } // namespace caffe2

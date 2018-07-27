@@ -46,7 +46,7 @@ class CopyOnDeviceLikeOp<CUDAContext, CUDAContext, CUDAContext>
 
   bool RunOnDevice() override {
     auto& input = Input(0);
-    auto* output = OperatorBase::Output<Tensor<CUDAContext>>(0);
+    auto* output = OperatorBase::Output<Tensor>(0, CUDA);
     CUDAContext context(GetGPUIDForPointer(Input(1).raw_data()));
     output->ResizeLike(input);
     context.template CopyItems<CUDAContext, CUDAContext>(
@@ -143,7 +143,7 @@ bool NanCheckOp<CUDAContext>::RunOnDevice() {
               << std::endl;
 
     for (int j = 0; j < InputSize(); j++) {
-      TensorCPU cpu_X;
+      Tensor cpu_X(CPU);
       cpu_X.ResizeLike(Input(j));
       // Hack to cause allocaiton happen here, so it won't happen
       // when we do CopyFrom. We need the mutex then because host->gpu
@@ -192,7 +192,7 @@ ElwiseMaxKernel(const float* X, const float* Y, float* maxout, const int N) {
 
 template <>
 bool MaxOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->mutable_data<float>();
+  float* output_data = Output(0)->template mutable_data<float>();
   const int N = Input(0).size();
 
   // Run pairwise-maxes
@@ -223,7 +223,7 @@ ElwiseMinKernel(const float* X, const float* Y, float* minout, const int N) {
 
 template <>
 bool MinOp<float, CUDAContext>::Compute() {
-  float* output_data = Output(0)->mutable_data<float>();
+  float* output_data = Output(0)->template mutable_data<float>();
   const int N = Input(0).size();
 
   // Run pairwise-mines
@@ -274,7 +274,7 @@ bool SelectGradientOpBase<float, CUDAContext>::RunOnDevice() {
         output.data<float>(),
         input.data<float>(),
         grad_output.data<float>(),
-        grad_input->mutable_data<float>());
+        grad_input->template mutable_data<float>());
   }
   return true;
 }
@@ -299,7 +299,7 @@ __global__ void GatherKernel(
 template <>
 bool GatherOp<CUDAContext>::RunOnDevice() {
   return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(
-      this, OperatorBase::Input<TensorCUDA>(INDICES));
+      this, OperatorBase::Input<Tensor>(INDICES, CUDA));
 }
 
 template <>
@@ -501,13 +501,14 @@ template <typename T>
 bool RangeOp<CUDAContext>::DoRunOnDevice(
     const T& start,
     const T& step,
-    Tensor<CUDAContext>* output) {
+    Tensor* output) {
   int N = output->size();
   RangeKernel<<<
       CAFFE_GET_BLOCKS(N),
       CAFFE_CUDA_NUM_THREADS,
       0,
-      context_.cuda_stream()>>>(N, output->mutable_data<T>(), start, step);
+      context_.cuda_stream()>>>(
+      N, output->template mutable_data<T>(), start, step);
   return true;
 }
 

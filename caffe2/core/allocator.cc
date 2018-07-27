@@ -26,7 +26,7 @@ void SetCPUAllocator(CPUAllocator* alloc) {
   g_cpu_allocator.reset(alloc);
 }
 
-MemoryAllocationReporter CPUContext::reporter_;
+MemoryAllocationReporter CPUStaticContext::reporter_;
 
 void MemoryAllocationReporter::New(void* ptr, size_t nbytes) {
   std::lock_guard<std::mutex> guard(mutex_);

@@ -15,12 +15,12 @@ bool LpNormOp<float, CPUContext>::RunOnDevice() {
   const float size = average_ ? (float)X.size() : 1.0f;
   CAFFE_ENFORCE_GT(size, 0);
   if (p_ == 1) {
-    *(norm->mutable_data<float>()) =
+    *(norm->template mutable_data<float>()) =
         (ConstEigenVectorMap<float>(X_data, X.size()).array()).abs().sum() /
         size;
     // L1(x) = sum(|x|), L1_average(x) = sum(\x\) / x.size()
   } else if (p_ == 2) {
-    *(norm->mutable_data<float>()) =
+    *(norm->template mutable_data<float>()) =
         (ConstEigenVectorMap<float>(X_data, X.size()).array()).square().sum() /
         size;
     // L2(x) = (sum(|x|^2)), L2_average(x) = sum(|x|^2) / x.size()
@@ -43,15 +43,17 @@ bool LpNormGradientOp<float, CPUContext>::RunOnDevice() {
     for (int i = 0; i < X.size(); ++i) {
       float temp = (X.data<float>())[i];
       if (temp < -kEps) {
-        dX->mutable_data<float>()[i] = -(dnorm.data<float>())[0] / size;
+        dX->template mutable_data<float>()[i] =
+            -(dnorm.data<float>())[0] / size;
       } else if (temp > kEps) {
-        dX->mutable_data<float>()[i] = (dnorm.data<float>())[0] / size;
+        dX->template mutable_data<float>()[i] = (dnorm.data<float>())[0] / size;
       } else {
-        dX->mutable_data<float>()[i] = 0;
+        dX->template mutable_data<float>()[i] = 0;
       }
     }
   } else if (p_ == 2) {
-    EigenVectorMap<float>(dX->mutable_data<float>(), X.size()).array() =
+    EigenVectorMap<float>(dX->template mutable_data<float>(), X.size())
+        .array() =
         ConstEigenVectorMap<float>(X.data<float>(), X.size()).array() * 2.0f *
         ((dnorm.data<float>())[0] / size);
   }

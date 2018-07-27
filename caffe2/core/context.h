@@ -7,6 +7,7 @@
 #include <unordered_map>
 
 #include "caffe2/core/allocator.h"
+#include "caffe2/core/context_base.h"
 #include "caffe2/core/event.h"
 #include "caffe2/core/logging.h"
 #include "caffe2/core/typeid.h"
@@ -15,6 +16,8 @@
 CAFFE2_DECLARE_bool(caffe2_report_cpu_memory_usage);
 
 namespace caffe2 {
+
+BaseStaticContext* GetCPUStaticContext();
 
 /**
  * A function to generate a random number seed that is unique in a best-effort
@@ -26,44 +29,15 @@ uint32_t RandomNumberSeed();
  * The CPU Context, representing the bare minimum of what a Context class in
  * Caffe2 should implement.
  *
+ * // TODO modify docs
  * See operator.h, especially Operator<Context>, for how Context are used in
  * actual operator implementations that are associated with specific devices.
  * In general, the Context class is passed in as a template argument, and
  * the operator can use the functions defined in the context to execute whatever
  * computation it has.
  *
- * A Context defines all the necessities to run an operator on a specific
- * device. Specific Context classes have the freedom to choose what functions it
- * implements, but there are a few functions that you should consider
- * implementing if you want to write your own context class:
- * - void SwitchToDevice(): any necessary code to switch to the device before
- *     running anything.
- * - void WaitEvent(const Event& ev): make the current context to wait on
- *     an event. For example, for cuda, this is the equivalent of
- *     cudaStreamWaitEvent. For CPU context, it essentially synchronizes the
- *     event.
- * - void Record(Event* ev): record the async activities on the current context
- *     to the event. For example, for cuda, this is the equivalent of
- *     cudaEventRecord on the current stream. For CPU context, it is always
- *     synchronous.
- * - void FinishDeviceComputation(): any wrapping-up work after all the
- *     computation of the operator is done. If there are errors during the
- *     execution, throw exception. For example, in a CUDAContext, this function
- *     carries out a stream synchronization and spots potential errors for
- *     the cuda kernel calls.
- * - static std::pair<void*, MemoryDeleter> New(size_t nbytes): allocates
-       memory and returns a deleter.
- * - template <class SrcContext, class DstContext> void CopyBytes(...): does
- *     cross context memory copy.
- * - template <typename T, class SrcContext, class DstContext> void Copy(...):
- *     usually a simple wrapper around the above CopyBytes function.
- *
- * We intentionally did not create a base class for the various possible Context
- * classes there might be, since they are intended to be specified during
- * compile time using templates rather than via polymorphism. You should also
- * not have classes derived from existing context classes.
  */
-class CPUContext final {
+class CPUContext final : public BaseContext {
  public:
   typedef std::mt19937 rand_gen_type;
   CPUContext() : random_seed_(RandomNumberSeed()) {}
@@ -74,23 +48,30 @@ class CPUContext final {
     CAFFE_ENFORCE_EQ(option.device_type(), CPU);
   }
 
-  ~CPUContext() noexcept {}
+  ~CPUContext() noexcept override {}
 
-  inline void SwitchToDevice(int /*stream_id*/) {}
-  inline void SwitchToDevice() {
-    SwitchToDevice(0);
+  BaseStaticContext* GetStaticContext() const override {
+    return GetCPUStaticContext();
   }
 
-  inline void WaitEvent(const Event& ev) {
+  static BaseStaticContext* StaticContext() {
+    return GetCPUStaticContext();
+  }
+
+  inline void SwitchToDevice(int /*stream_id*/) override {}
+
+  using BaseContext::SwitchToDevice;
+
+  inline void WaitEvent(const Event& ev) override {
     ev.Wait(CPU, this);
   }
 
-  inline void Record(Event* ev, const char* err_msg = nullptr) const {
+  inline void Record(Event* ev, const char* err_msg = nullptr) const override {
     CAFFE_ENFORCE(ev, "Event must not be null.");
     ev->Record(CPU, this, err_msg);
   }
 
-  inline void FinishDeviceComputation() {}
+  inline void FinishDeviceComputation() override {}
 
   inline rand_gen_type& RandGenerator() {
     if (!random_generator_.get()) {
@@ -99,16 +80,32 @@ class CPUContext final {
     return *random_generator_.get();
   }
 
-  static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    auto data_and_deleter = GetCPUAllocator()->New(nbytes);
-    if (FLAGS_caffe2_report_cpu_memory_usage) {
-      reporter_.New(data_and_deleter.first, nbytes);
-      data_and_deleter.second = ReportAndDelete;
-    }
-    return data_and_deleter;
+  inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
+    return StaticContext()->New(nbytes);
   }
 
-  // Two copy functions that deals with cross-device copies.
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
+    if (nbytes == 0) {
+      return;
+    }
+    CAFFE_ENFORCE(src);
+    CAFFE_ENFORCE(dst);
+    memcpy(dst, src, nbytes);
+  }
+
+  void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  void CopyBytesToCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  bool SupportsNonFundamentalTypes() const override {
+    // CPU non fumdamental type copy OK
+    return true;
+  }
+
   template <class SrcContext, class DstContext>
   inline void CopyBytes(size_t nbytes, const void* src, void* dst);
 
@@ -147,14 +144,65 @@ class CPUContext final {
 
   // CPU streams are not implemented and are silently ignored by CPU ops,
   // return true to signal executor to schedule a CPU op
-  static bool IsStreamFree(const DeviceOption& /* unused */, int /* unused */) {
+  static bool IsStreamFree(
+      const DeviceOption& /* option */,
+      int /* stream_id */) {
     return true;
+  }
+
+  DeviceType GetDevicetype() const override {
+    return CPU;
+  }
+
+  static constexpr DeviceType GetDeviceType() {
+    return CPU;
   }
 
  protected:
   // TODO(jiayq): instead of hard-coding a generator, make it more flexible.
   int random_seed_{1701};
   std::unique_ptr<rand_gen_type> random_generator_;
+};
+
+template <>
+inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
+    size_t nbytes,
+    const void* src,
+    void* dst) {
+  if (nbytes == 0) {
+    return;
+  }
+  CAFFE_ENFORCE(src);
+  CAFFE_ENFORCE(dst);
+  memcpy(dst, src, nbytes);
+}
+
+// TODO(jerryzh): merge CPUStaticContext with Allocator
+class CPUStaticContext : public BaseStaticContext {
+ public:
+  std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
+    auto data_and_deleter = GetCPUAllocator()->New(nbytes);
+    if (FLAGS_caffe2_report_cpu_memory_usage) {
+      reporter_.New(data_and_deleter.first, nbytes);
+      data_and_deleter.second = ReportAndDelete;
+    }
+    return data_and_deleter;
+  }
+
+  std::unique_ptr<BaseContext> CreateContext() override {
+    return caffe2::make_unique<CPUContext>();
+  }
+
+  std::unique_ptr<BaseContext> CreateContext(
+      const DeviceOption& option) override {
+    return caffe2::make_unique<CPUContext>(option);
+  }
+
+  DeviceType GetDeviceType() override {
+    return CPU;
+  }
+
+ protected:
   CAFFE2_API static MemoryAllocationReporter reporter_;
 
  private:
@@ -163,17 +211,6 @@ class CPUContext final {
     GetCPUAllocator()->GetDeleter()(ptr);
   }
 };
-
-template<>
-inline void CPUContext::CopyBytes<CPUContext, CPUContext>(
-    size_t nbytes, const void* src, void* dst) {
-  if (nbytes == 0) {
-    return;
-  }
-  CAFFE_ENFORCE(src);
-  CAFFE_ENFORCE(dst);
-  memcpy(dst, src, nbytes);
-}
 
 }  // namespace caffe2
 
