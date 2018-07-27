@@ -28,6 +28,7 @@ void magmaGetriBatched(
   AT_ERROR("getri only takes float or double Tensors");
 }
 
+template<class scalar_t>
 void magmaGetrfBatched(
     magma_int_t m, magma_int_t n, scalar_t** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
