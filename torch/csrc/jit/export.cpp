@@ -615,7 +615,7 @@ void ModuleEncoder::EncodeTensor(
     tensor_proto->add_int64_data(d);
   }
 
-  auto storage_ptr = tensor.storage()->data();
+  auto storage_ptr = tensor.storage()->pImpl()->data();
   auto dedup_it = storage_dedup_map_.find(storage_ptr);
   if (dedup_it != storage_dedup_map_.end()) {
     tensor_proto->set_doc_string(dedup_it->second);
@@ -629,7 +629,17 @@ void ModuleEncoder::EncodeTensor(
     tensor_proto->set_doc_string(name);
     JIT_ASSERT(raw_data_export_map_.count(name) == 0);
     storage_dedup_map_[storage_ptr] = name;
-    raw_data_export_map_[name] = tensor;
+
+    // NB: This new tensor is created to support cuda tensors.
+    // Storages can be mutated when converting tensors from cuda to cpu,
+    // and we need a cpu tensor to copy data from.
+    auto t = tensor.type().tensor(
+        *tensor.storage(),
+        /* storageOffset = */ 0,
+        /* size = */ { tensor.numel() },
+        /* strides = */ { 1 })
+    .toBackend(at::kCPU);
+    raw_data_export_map_[name] = t;
   }
 }
 
