@@ -43,6 +43,10 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
   export KMTHINLTO=1
 
+  # Need the libc++1 and libc++abi1 libraries to allow torch._C to load at runtime
+  sudo apt-get install libc++1
+  sudo apt-get install libc++abi1
+
   sudo chown -R jenkins:jenkins /usr/local
   rm -rf "$(dirname "${BASH_SOURCE[0]}")/../../../pytorch_amd/" || true
   python "$(dirname "${BASH_SOURCE[0]}")/../../tools/amd_build/build_pytorch_amd.py"
