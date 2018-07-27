@@ -26,17 +26,10 @@ void ProfileOperatorObserver::Dump() const {
   LOG(INFO) << "--------- Starting operator " << subject_->debug_def().type()
             << " op#" << getId() << " ---------";
   for (int i = 0; i < subject_->InputSize(); ++i) {
-    if (subject_->InputIsType<TensorCPU>(i)) {
-      const auto& tensor = subject_->Input<TensorCPU>(i);
-      const auto& name = subject_->debug_def().input(i);
-      TensorPrinter printer(name);
-      LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
-    } else if (subject_->InputIsType<TensorCUDA>(i)) {
-      const auto& tensor = subject_->Input<TensorCUDA>(i);
-      const auto& name = subject_->debug_def().input(i);
-      TensorPrinter printer(name);
-      LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
-    }
+    const auto& tensor = subject_->Input<Tensor>(i);
+    const auto& name = subject_->debug_def().input(i);
+    TensorPrinter printer(name);
+    LOG(INFO) << "Input " << i << ": " << printer.MetaStr(tensor);
   }
 
   int a = 0;
@@ -46,13 +39,13 @@ void ProfileOperatorObserver::Dump() const {
   }
 
   for (int o = 0; o < subject_->OutputSize(); ++o) {
-    if (subject_->OutputIsType<TensorCPU>(o)) {
-      auto* tensor = subject_->Output<TensorCPU>(o);
+    if (subject_->OutputIsType<Tensor>(o, CPU)) {
+      auto* tensor = subject_->Output<Tensor>(o, CPU);
       const auto& name = subject_->debug_def().output(o);
       TensorPrinter printer(name);
       LOG(INFO) << "Output " << o << ": " << printer.MetaStr(*tensor);
-    } else if (subject_->OutputIsType<TensorCUDA>(o)) {
-      auto* tensor = subject_->Output<TensorCUDA>(o);
+    } else if (subject_->OutputIsType<Tensor>(o, CUDA)) {
+      auto* tensor = subject_->Output<Tensor>(o, CUDA);
       const auto& name = subject_->debug_def().output(o);
       TensorPrinter printer(name);
       LOG(INFO) << "Output " << o << ": " << printer.MetaStr(*tensor);

@@ -175,11 +175,11 @@ NetDef OnnxifiTransformer::SubnetToOnnxifiOp(
 
       // Feed into workspace as CPU Tensors
       auto* blob = ws->CreateBlob(t.name());
-      auto* cpu_tensor = blob->GetMutable<TensorCPU>();
+      auto* cpu_tensor = blob->GetMutableTensor(CPU);
       std::vector<TIndex> dims;
       std::copy(t.dims().begin(), t.dims().end(), dims.begin());
       cpu_tensor->Resize(dims);
-      context.template CopyBytes<CPUContext, CPUContext>(
+      context.CopyBytesSameDevice(
           cpu_tensor->size() * sizeof(float),
           static_cast<const void*>(t.raw_data().data()),
           cpu_tensor->raw_mutable_data(TypeMeta::Make<float>()));

@@ -44,9 +44,9 @@ class SigmoidCrossEntropyLossOp final : public Operator<Context> {
  protected:
   float scale_;
   int normalize_;
-  Tensor<Context> losses_;
-  Tensor<Context> counts_;
-  Tensor<Context> normalizer_;
+  Tensor losses_{Context::GetDeviceType()};
+  Tensor counts_{Context::GetDeviceType()};
+  Tensor normalizer_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -69,8 +69,8 @@ class SigmoidCrossEntropyLossGradientOp final : public Operator<Context> {
  protected:
   float scale_;
   int normalize_;
-  Tensor<Context> counts_;
-  Tensor<Context> normalizer_;
+  Tensor counts_{Context::GetDeviceType()};
+  Tensor normalizer_{Context::GetDeviceType()};
 };
 
 } // namespace caffe2

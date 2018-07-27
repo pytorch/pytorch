@@ -81,8 +81,8 @@ class SplitByLengthsOp final : public Operator<Context> {
 
  protected:
   int axis_;
-  Tensor<Context> inclusive_scan_buffer_;
-  Tensor<Context> inclusive_scan_length_buffer_;
+  Tensor inclusive_scan_buffer_{Context::GetDeviceType()};
+  Tensor inclusive_scan_length_buffer_{Context::GetDeviceType()};
   // Input: X, optionally split
   // The split tensor is stored in CPU.
 };
@@ -134,7 +134,7 @@ bool SplitOp<Context>::RunOnDevice() {
         0,
         "If you set split with an input blob, do not pass in "
         "split in the argument.");
-    auto& split_tensor = OperatorBase::Input<TensorCPU>(1);
+    auto& split_tensor = OperatorBase::Input<Tensor>(1, CPU);
     CAFFE_ENFORCE_EQ(split_tensor.size(), OutputSize());
     axis_data = split_tensor.template data<int>();
   } else if (split_.size() == 0) {
@@ -199,7 +199,7 @@ bool SplitOp<Context>::RunOnDevice() {
 template <class Context>
 bool SplitByLengthsOp<Context>::RunOnDevice() {
   auto& input = Input(0);
-  auto& length = OperatorBase::Input<TensorCPU>(1);
+  auto& length = OperatorBase::Input<Tensor>(1, CPU);
   auto length_length = length.size();
   CAFFE_ENFORCE_EQ(
       length_length % OutputSize(),
@@ -244,7 +244,7 @@ bool SplitByLengthsOp<Context>::RunOnDevice() {
 template <class Context>
 bool ConcatOp<Context>::RunOnDevice() {
   auto* output = Output(0);
-  TensorCPU* split = OperatorBase::Output<TensorCPU>(1);
+  Tensor* split = OperatorBase::Output<Tensor>(1, CPU);
   split->Resize(vector<TIndex>(1, InputSize()));
   int* axis_data = split->template mutable_data<int>();
   auto& input_zero = Input(0);

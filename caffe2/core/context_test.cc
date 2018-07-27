@@ -26,7 +26,7 @@ TEST(CPUContextTest, TestAllocDealloc) {
   }
   DeviceOption option;
   CPUContext context(option);
-  context.Copy<float, CPUContext, CPUContext>(10, data, dst_data);
+  context.CopyToCPU<float>(10, data, dst_data);
   for (int i = 0; i < 10; ++i) {
     EXPECT_FLOAT_EQ(dst_data[i], i);
   }

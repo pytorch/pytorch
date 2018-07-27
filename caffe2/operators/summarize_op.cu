@@ -96,12 +96,12 @@ bool SummarizeOp<float, CUDAContext>::RunOnDevice() {
                  << standard_deviation << std::endl;
   }
   if (OutputSize()) {
-    auto* Y = OperatorBase::Output<TensorCUDA>(0);
+    auto* Y = Output(0);
     Y->Resize(4);
     float output_buffer[NUM_STATS] = {result.min, result.max, result.mean,
                                standard_deviation};
-    context_.Copy<float, CPUContext, CUDAContext>(
-        NUM_STATS, output_buffer, Y->mutable_data<float>());
+    context_.CopyFromCPU<float>(
+        NUM_STATS, output_buffer, Y->template mutable_data<float>());
   }
   return true;
 }
