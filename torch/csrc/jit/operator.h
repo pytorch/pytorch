@@ -38,6 +38,7 @@ struct TORCH_API Operator {
   // as attributes or inputs. This function returns the right Operation function,
   // given a node encoded for one variant.
   // Behavior is undefined if matches(n) == false
+  // TODO (apaszke) : remove
   Operation selectVariant(Node* n) const {
     if(n->hasAttributes()) {
       JIT_ASSERT(op_const_attributes != nullptr);
@@ -76,5 +77,14 @@ struct TORCH_API RegisterOperators {
     }
   }
 };
+
+struct OperatorSet {
+  OperatorSet(std::initializer_list<const char *> sig_literals);
+  // XXX: Returns a nullptr if no Operator in the set matches n
+  Operator* find(Node *n);
+private:
+  std::unordered_map<Symbol, std::vector<std::shared_ptr<Operator>>> ops;
+};
+
 
 }}
