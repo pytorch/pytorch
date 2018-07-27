@@ -279,7 +279,7 @@ static PyObject * THPStorage_(newSharedCuda)(PyObject *_unused, PyObject *args)
       LIBRARY_STATE
       THCIpcDeleter::makeDataPtr(devPtr, device),
       storage_size, /* allocator */ nullptr));
-  base->flag = TH_STORAGE_REFCOUNTED;  // NB: Not resizable
+  base->resizable = false;
 
   return THPStorage_(New)(base.release());
   END_HANDLE_TH_ERRORS
