@@ -711,7 +711,7 @@
 
 - func: gesv(Tensor self, Tensor A) -> (Tensor, Tensor)
 
-- func: gesv_out(Tensor result0, Tensor result1, Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: gesv_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor, Tensor)
   variants: function
 
 # gesv handles broadcasting of arbitrary batch dims while _gesv_helper does not.
@@ -722,7 +722,7 @@
 
 - func: _gesv_single(Tensor self, Tensor A) -> (Tensor, Tensor)
 
-- func: _gesv_single_out(Tensor result0, Tensor result1, Tensor self, Tensor A) -> (Tensor, Tensor)
+- func: _gesv_single_out(Tensor solution, Tensor lu, Tensor self, Tensor A) -> (Tensor, Tensor)
   variants: function
   dispatch:
     CPU: _gesv_single_out_cpu

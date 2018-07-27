@@ -19,14 +19,13 @@ static inline void checkInputs(const Tensor& self, const Tensor& A, bool batched
       AT_ERROR("A should have 2 dimensions, but has %d",
           A.dim());
     } else if (self.dim() != 1 && self.dim() != 2) {
-      AT_ERROR("B should have 1 or 2 dimensions, but has %d",
-          self.dim());
+      AT_ERROR("B should have 1 or 2 dimensions, but has %d", self.dim());
     } else if (A.size(0) != A.size(1)) {
       AT_ERROR("A must be a square matrix, but is %lld by %lld",
           (long long)A.size(0), (long long)A.size(1));
     } else if (A.size(0) != self.size(0)) {
-      AT_ERROR("A,B size incompatible - A has %ld "
-          "rows, B has %ld cols", A.size(0), self.size(0));
+      AT_ERROR("A,B size incompatible - A has %lld "
+          "rows, B has %lld cols", (long long)A.size(0), (long long)self.size(0));
     }
   }
 }

@@ -160,7 +160,7 @@ std::tuple<Tensor,Tensor> _gesv_helper_cuda(const Tensor& self, const Tensor& A)
   return std::tuple<Tensor,Tensor>(b_working_copy, A_working_copy);
 }
 
-std::tuple<Tensor&,Tensor&> _gesv_single_out_cuda(Tensor& result0, Tensor& result1,
+std::tuple<Tensor&,Tensor&> _gesv_single_out_cuda(Tensor& sol, Tensor& lu,
     const Tensor& self, const Tensor& A) {
 #ifndef USE_MAGMA
 AT_ERROR("gesv: MAGMA library not found in "
@@ -171,22 +171,23 @@ AT_ERROR("gesv: MAGMA library not found in "
   int info;
   int* ipiv;
 
-  result1 = A.t().clone();
-  result0 = self.view({bx, by}).t().clone();
+  // init to column major format
+  lu = A.t().clone();
+  sol = self.view({bx, by}).t().clone();
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-      auto A_ptr = result1.data<scalar_t>();
-      auto b_ptr = result0.data<scalar_t>();
-      ALLOCATE_ARRAY(ipiv, int, bx, result0);
+      auto A_ptr = lu.data<scalar_t>();
+      auto b_ptr = sol.data<scalar_t>();
+      ALLOCATE_ARRAY(ipiv, int, bx, sol);
 
       magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
 
-  result0 = result0.t();
-  result1 = result1.t();
+  sol = sol.t();
+  lu = lu.t();
 
   checkErrors({info});
-  return std::tuple<Tensor&,Tensor&>(result0, result1);
+  return std::tuple<Tensor&,Tensor&>(sol, lu);
 #endif
 }
 }}  // namespace at::native

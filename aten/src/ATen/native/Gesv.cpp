@@ -73,7 +73,7 @@ static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 }
 
 std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
-    Tensor& result0, Tensor& result1,
+    Tensor& sol, Tensor& lu,
     const Tensor& self, const Tensor& A) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv: LAPACK library not found in compilation");
@@ -82,22 +82,23 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   int64_t by = (self.dim() == 1) ? 1 : self.size(1);
   int info = 0;
 
-  result1 = A.t().clone();
-  result0 = self.view({bx, by}).t().clone();
+  // init to column major format
+  lu = A.t().clone();
+  sol = self.view({bx, by}).t().clone();
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
-    auto A_ptr = result1.data<scalar_t>();
-    auto b_ptr = result0.data<scalar_t>();
-    auto ipiv = at::empty({bx}, result0.options().dtype(kInt));
+    auto A_ptr = lu.data<scalar_t>();
+    auto b_ptr = sol.data<scalar_t>();
+    auto ipiv = at::empty({bx}, sol.options().dtype(kInt));
 
     lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
   });
 
-  result0 = result0.t();
-  result1 = result1.t();
+  sol = sol.t();
+  lu = lu.t();
 
   checkErrors({info});
-  return std::tuple<Tensor&, Tensor&>(result0, result1);
+  return std::tuple<Tensor&, Tensor&>(sol, lu);
 }
 
 std::tuple<Tensor,Tensor> _gesv_helper_cpu(const Tensor& self, const Tensor& A) {
@@ -146,14 +147,14 @@ std::tuple<Tensor,Tensor> gesv(const Tensor& self, const Tensor& A) {
 }
 
 std::tuple<Tensor&,Tensor&> gesv_out(
-    Tensor& result0, Tensor& result1, const Tensor& self, const Tensor& A) {
+    Tensor& sol, Tensor& lu, const Tensor& self, const Tensor& A) {
   if (self.dim() > 2 || A.dim() > 2) {
     AT_ERROR("torch.gesv() with the `out` keyword does not support batching. "
                   "b.dim() (%lld) and A.dim() (%lld) must both be 2.",
                   (long long)self.dim(), (long long)A.dim());
   }
 
-  return self.type()._gesv_single_out(result0, result1, self, A);
+  return self.type()._gesv_single_out(sol, lu, self, A);
 }
 
 }}  // namespace at::native

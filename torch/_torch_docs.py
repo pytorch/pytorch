@@ -1818,14 +1818,15 @@ A, in order as a tuple `X, LU`.
 
 `LU` contains `L` and `U` factors for LU factorization of `A`.
 
-`torch.gesv(B, A)` can take in 2D inputs `B, A` or inputs that are
-batches of 2D matrices. If the inputs are batches, then returns
-batched outputs `X, LU`.
+`torch.gesv(B, A)` can take in inputs `B, A` such that `A` is 2D
+and B is 1D or 2D. Alternatively, `B, A` can be batches of 2D matrices.
+If the inputs are batches, then returns batched outputs `X, LU`.
 
 .. note::
 
     The `out` keyword only supports 2D matrix inputs, that is,
-    `B, A` must be 2D matrices.
+    `B, A` must be 2D matrices. The `out` keyword does not support
+    batched solving.
 
 .. note::
 
