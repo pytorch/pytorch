@@ -38,7 +38,6 @@ if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
   # The HIP Utility scripts require these environment variables to be set in order to run without error.
   export LANG=C.UTF-8
   export LC_ALL=C.UTF-8
-  export PYTORCH_BUILT_WITH_ROCM=1
 
   # This environment variable enabled HCC Optimizations that speed up the linking stage.
   # https://github.com/RadeonOpenCompute/hcc#hcc-with-thinlto-linking
