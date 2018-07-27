@@ -316,7 +316,7 @@ def get_selected_tests(options):
 
         selected_tests = exclude_tests(WINDOWS_BLACKLIST, selected_tests, 'on Windows')
 
-    else if TEST_WITH_ROCM:
+    elif TEST_WITH_ROCM:
         selected_tests = exclude_tests(ROCM_BLACKLIST, selected_tests, 'on ROCm')
 
     return selected_tests
