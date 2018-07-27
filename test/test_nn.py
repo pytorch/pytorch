@@ -384,6 +384,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
         super(NewCriterionTest, self).__init__(*args, **kwargs)
         self.check_gradgrad = kwargs.get('check_gradgrad', True)
         self.check_half = kwargs.get('check_half', True)
+        self.convert_target = kwargs.get('convert_target', True)
 
     def _do_extra_tests(self, test_case, module, input, target):
         if not self.check_gradgrad:
@@ -431,7 +432,7 @@ class NewCriterionTest(InputVariableMixin, CriterionTest):
             if dtype is not None:
                 cpu_input = convert_dtype(cpu_input, dtype, True)
                 # NLLLoss requires target to be LongTensor
-                if not isinstance(cpu_target, torch.LongTensor):
+                if not isinstance(cpu_target, torch.LongTensor) and self.convert_target:
                     cpu_target = convert_dtype(cpu_target, dtype)
                 cpu_module.type(dtype)
                 gpu_module.type(dtype)
@@ -6228,16 +6229,17 @@ new_criterion_tests = [
     ),
     dict(
         module_name='CTCLoss',
-        desc='1d_int_target',
+        desc='2d_int_target',
         constructor_args=(0,),  # blank=0
         extra_args=([50, 50, 50], [30, 25, 20]),  # input_lengths, target_lengths
         input_fn=lambda: torch.randn(50, 3, 15).log_softmax(2),
-        target_fn=lambda: torch.randint(1, 15, (30 + 25 + 20,), dtype=torch.int),
+        target_fn=lambda: torch.randint(1, 15, (3, 30), dtype=torch.int),
         reference_fn=lambda i, t, il, tl, m:
             ctcloss_reference(i, t, il, tl, blank=0, reduction=get_reduction(m)),
         check_sum_reduction=True,
         check_gradgrad=False,
         check_half=False,
+        convert_target=False,
     ),
 ]
 
