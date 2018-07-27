@@ -1121,6 +1121,26 @@ class TestTorch(TestCase):
             res2[i, 3] = res2[i, 3] + 2
         self.assertEqual(res1, res2)
 
+        # inter-type
+        m1 = torch.randn(10, 10)
+        self.assertEqual(m1 + 3, m1 + torch.tensor(3))
+        self.assertEqual(3 + m1, torch.tensor(3) + m1)
+        one = torch.tensor(1, dtype=torch.uint8)
+        self.assertEqual(torch.add(one, 1), 2)
+        self.assertEqual(torch.add(one, 1).dtype, torch.uint8)
+
+        # contiguous + non-contiguous
+        m1 = torch.randn(10, 10)
+        m2 = torch.randn(10, 10).t()
+        res = m1 + m2
+        self.assertTrue(res.is_contiguous())
+        self.assertEqual(res, m1 + m2.contiguous())
+
+        # 1d + empty
+        m1 = torch.tensor([1.0], dtype=torch.float)
+        m2 = torch.tensor([], dtype=torch.float)
+        self.assertEqual(m1 + m2, [])
+
         # [res] torch.add([res,] tensor1, value, tensor2)
 
     def test_csub(self):

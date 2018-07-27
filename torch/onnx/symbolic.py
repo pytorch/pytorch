@@ -91,7 +91,7 @@ def _scalar(x):
     return x.item()
 
 
-def _if_scalar_type_as(self, tensor):
+def _if_scalar_type_as(g, self, tensor):
     """
     Convert self into the same type of tensor, as necessary.
 
@@ -106,14 +106,6 @@ def _if_scalar_type_as(self, tensor):
         return getattr(self, ty)()
     else:
         return self
-
-
-def _broadcast_if_scalar(x):
-    """Return kwargs enabling broadcasting if 'x' is a scalar."""
-    if isinstance(x, torch._C.Value):
-        return {}
-    else:
-        return {"broadcast_i": 1}
 
 
 def _is_value(x):
@@ -145,7 +137,7 @@ def _unimplemented(op, msg):
 # increasing this number.  This includes symbolic definitions NOT in this
 # file, so grep for "OpName" (with quotes)
 
-_onnx_opset_version = 6
+_onnx_opset_version = 7
 
 
 # ---------------------------------------------------------------------
@@ -166,10 +158,6 @@ _onnx_opset_version = 6
 #     will do implicit conversions on scalars; however, ONNX will not, so
 #     we must do the conversion ourselves.  This is what _if_scalar_type_as
 #     does.
-#
-#   - Most of the time, the arguments to self/other are pre-expanded according
-#     to broadcasting.  However, a scalar will NOT be broadcasted, so we have
-#     to enable broadcasting ONNX side.
 #
 #   - Dispatch to these functions takes advantage an outrageous coincidence
 #     between the tensor and scalar name.  When we add two tensors together,
@@ -196,32 +184,35 @@ def add(g, self, other, alpha):
         return _unimplemented("add", "alpha != 1")
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
-    return g.op("Add", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    return g.op("Add", self, _if_scalar_type_as(g, other, self))
 
 
 @parse_args('v', 'v', 't')
 def sub(g, self, other, alpha):
     if _scalar(alpha) != 1:
         return _unimplemented("sub", "alpha != 1")
-    # See Note [Pointwise by scalar]
+    # See Note [Pointwise by scalar]. Note that self or other may be scalars.
     other = _maybe_get_scalar(other)
-    return g.op("Sub", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    self = _maybe_get_scalar(self)
+    self = _if_scalar_type_as(g, self, other)
+    other = _if_scalar_type_as(g, other, self)
+    return g.op("Sub", self, other)
 
 
 def mul(g, self, other):
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
-    return g.op("Mul", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    return g.op("Mul", self, _if_scalar_type_as(g, other, self))
 
 
 def div(g, self, other):
     # See Note [Pointwise by scalar]
     other = _maybe_get_scalar(other)
-    return g.op("Div", self, _if_scalar_type_as(other, self), **_broadcast_if_scalar(other))
+    return g.op("Div", self, _if_scalar_type_as(g, other, self))
 
 
 def reciprocal(g, self):
-    return g.op("Div", _if_scalar_type_as(torch.ones(1), self), self, broadcast_i=1)
+    return g.op("Div", _if_scalar_type_as(g, torch.ones(1), self), self)
 
 
 # This syntax is Python 2 portable
@@ -236,7 +227,7 @@ def mm(g, self, other):
     # since beta = 0
     ty = self.type().scalarType().lower()
     C = g.constant(0, [1], ty)
-    return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0, broadcast_i=True)
+    return g.op("Gemm", self, other, C, beta_f=0.0, alpha_f=1.0)
 
 
 def bmm(g, self, other):
@@ -582,12 +573,12 @@ def upsample_bilinear2d(g, input, output_size, align_corners):
 
 def gt(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Greater", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+    return g.op("Greater", input, _if_scalar_type_as(g, other, input))
 
 
 def lt(g, input, other):
     other = _maybe_get_scalar(other)
-    return g.op("Less", input, _if_scalar_type_as(other, input), **_broadcast_if_scalar(other))
+    return g.op("Less", input, _if_scalar_type_as(g, other, input))
 
 
 def ge(g, input, other):
@@ -632,7 +623,7 @@ def _convolution(g, input, weight, bias, stride, padding, dilation,
     n = g.op("ConvTranspose" if transposed else "Conv", *args, **kwargs)
 
     if bias.node().kind() != "prim::Undefined" and len(bias.type().sizes()) != 1:
-        return g.op("Add", n, bias, broadcast_i=1, axis_i=1)
+        return g.op("Add", n, bias)
     else:
         return n
 
@@ -645,7 +636,6 @@ def batch_norm(g, input, weight, bias, running_mean, running_var, training, mome
         input = g.op("Unsqueeze", input, axes_i=[2])
 
     out = g.op("BatchNormalization", input, weight, bias, running_mean, running_var,
-               is_test_i=not training,
                epsilon_f=eps,
                momentum_f=1 - momentum,
                outputs=1 if not training else 5)
@@ -713,7 +703,7 @@ def abs(g, self):
 
 def pow(g, self, exponent):
     exponent = _maybe_get_scalar(exponent)
-    return g.op("Pow", self, _if_scalar_type_as(exponent, self), **_broadcast_if_scalar(exponent))
+    return g.op("Pow", self, _if_scalar_type_as(g, exponent, self))
 
 
 @parse_args('v', 'f', 'f')
