@@ -149,8 +149,9 @@ struct Environment {
   std::shared_ptr<Environment> next;
 
   SugaredValuePtr findInThisFrame(const std::string& name) {
-    if (value_table.count(name)) {
-      return value_table.at(name);
+    auto it = value_table.find(name);
+    if (it != value_table.end()) {
+      return it->second;
     }
     return nullptr;
   }
