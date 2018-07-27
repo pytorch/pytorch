@@ -173,6 +173,7 @@ sampleMultinomialOnce(int64_t* dest,
 
   AccT accZero = ScalarConvert<int, AccT>::to(0);
   T zero = ScalarConvert<int, T>::to(0);
+  T one = ScalarConvert<int, T>::to(1);
 
   for (int64_t curDist = blockIdx.x;
        curDist < distributions; curDist += gridDim.x) {
@@ -203,7 +204,7 @@ sampleMultinomialOnce(int64_t* dest,
     __syncthreads();
 
     sum = asmem[0];
-    T sample = smem[0];
+    T sample = THCNumerics<T>::sub(one, smem[0]);
     __syncthreads();
 
     if (THCNumerics<AccT>::eq(sum,  accZero) || THCNumerics<T>::eq(sample, zero)) {
