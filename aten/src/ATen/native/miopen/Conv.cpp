@@ -348,7 +348,7 @@ BenchmarkCache<miopenConvBwdWeightsAlgorithm_t> bwd_filter_algos;
 
 struct Workspace {
   Workspace(size_t size) : size(size), data(NULL) {
-    CUDA_CHECK(THCudaMalloc(globalContext().lazyInitCUDA(), &data, size));
+    data = THCudaMalloc(globalContext().lazyInitCUDA(), size);
   }
   Workspace(const Workspace&) = delete;
   Workspace(Workspace&&) = default;
@@ -523,8 +523,7 @@ void findAlgorithm(const ConvolutionArgs& args, bool benchmark, algo_t* algo) {
 
   cache.insert(args.params, *algo);
 
-  THCDeviceAllocator* allocator = THCCachingAllocator_get();
-  CUDA_CHECK(allocator->emptyCache(allocator->state));
+  THCCachingAllocator_emptyCache();
 }
 
 template<typename algo_t>

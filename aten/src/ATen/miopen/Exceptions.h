@@ -35,7 +35,7 @@ inline void HIP_CHECK(hipError_t error)
 {
   if (error != hipSuccess) {
     std::string msg("HIP error: ");
-    msg += hipErrorString(error);
+    msg += hipGetErrorString(error);
     throw std::runtime_error(msg);
   }
 }
