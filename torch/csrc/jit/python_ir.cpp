@@ -451,9 +451,9 @@ void initPythonIRBindings(PyObject * module_) {
     ;
 
   py::class_<DynamicType, Type, std::shared_ptr<DynamicType>>(m, "DynamicType")
-    .def(py::init<>());
+    .def(py::init([](){ return DynamicType::create(); }));
   py::class_<TupleType, Type, std::shared_ptr<TupleType>>(m, "TupleType")
-    .def(py::init<std::vector<TypePtr>>())
+    .def(py::init([](std::vector<TypePtr> a){ return TupleType::create(a); }))
     .def("elements", [](TupleType &self){
       std::vector<TypePtr> types;
       for (auto type : self.elements()) {

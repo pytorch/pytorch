@@ -93,9 +93,9 @@ struct CastValue : public SugaredValue {
         throw ErrorReport(loc) << "expected a single argument for cast";
       auto values = toValues(inputs);
       Value* input = values.at(0);
-      if(!input->type()->isSubtypeOf(*type)) {
+      if(!input->type()->isSubtypeOf(type)) {
         if(*type == *DynamicType::get()) {
-          if(!input->type()->isSubtypeOf(*NumberType::get())) {
+          if(!input->type()->isSubtypeOf(NumberType::get())) {
             throw ErrorReport(loc) << "expected a number";
           }
           input = numToTensor(loc, input);
@@ -244,7 +244,7 @@ struct Environment {
         throw ErrorReport(loc) << "Cannot re-assign '" << name << "' because it has type " << value->kind() <<
 	" and " << name << " is not a first-class value.  Only reassignments to first-class values are allowed";
       }
-      if(!as_simple_value->type()->isSubtypeOf(*unshapedType(simple_parent->type()))) {
+      if(!as_simple_value->type()->isSubtypeOf(unshapedType(simple_parent->type()))) {
         throw ErrorReport(loc) << "variable '" << name << "' previously has type " << simple_parent->type()->str()
         << " but is now being assigned to a value of type " << as_simple_value->type()->str();
       }
@@ -368,7 +368,7 @@ Value* createStack(Graph& g, const SourceRange& loc, at::ArrayRef<Value*> inputs
 }
 
 static bool isTensorSubtype(Value* v) {
-  return v->type()->isSubtypeOf(*DynamicType::get());
+  return v->type()->isSubtypeOf(DynamicType::get());
 }
 
 at::optional<std::vector<int64_t>> getIntListAttribute(at::optional<int32_t> N, Value* input) {
@@ -538,12 +538,12 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       // Allow tuples that only contain integers to turn into lists of integers
       if(*ListType::ofInts() == *arg.type &&
          v.value->type()->kind() == TypeKind::TupleType &&
-         v.value->type()->isSubtypeOf(*ListType::ofInts())) {
+         v.value->type()->isSubtypeOf(ListType::ofInts())) {
         auto unpacked = createTupleUnpack(v.value);
         v.value = graph.insertNode(graph.createList(IntType::get(), unpacked))->output();
       }
 
-      if(!v.value->type()->isSubtypeOf(*arg.type)) {
+      if(!v.value->type()->isSubtypeOf(arg.type)) {
         err() << "expected a value of type " << arg.type->str() << " for argument '" << arg.name << "' but found "
               << v.value->type()->str() << "\n"
               << v.loc;
@@ -551,7 +551,7 @@ at::optional<std::vector<Value*>> tryMatchSchema(
       }
 
       // we only support tensor lists for builtins, where they must be flattened
-      if(arg.type->isSubtypeOf(*ListType::ofTensors())) {
+      if(arg.type->isSubtypeOf(ListType::ofTensors())) {
         auto outputs = createTupleUnpack(v.value);
         flat_inputs.insert(flat_inputs.end(), outputs.begin(), outputs.end());
       } else {
@@ -663,7 +663,7 @@ static Value* ensureTensor(const SourceRange& range, Value* v) {
 }
 
 static Value* ensureInt(const SourceRange& range, Value* v) {
-  if(!v->type()->isSubtypeOf(*IntType::get())) {
+  if(!v->type()->isSubtypeOf(IntType::get())) {
     throw ErrorReport(range) << "expected a int but found a "
                              << v->type()->str();
   }
@@ -778,7 +778,7 @@ struct to_ir {
       auto range = return_stmt.range();
       size_t return_type_idx = 0;
       for (auto& r : results) {
-        if(r->type()->isSubtypeOf(*NumberType::get())) {
+        if(r->type()->isSubtypeOf(NumberType::get())) {
           graph->registerOutput(numToTensor(range, r));
         } else {
           ensureTensor(range, r);
@@ -787,7 +787,7 @@ struct to_ir {
         TypePtr type = DynamicType::get();
         if (typed_def.schema) {
           type = typed_def.schema->returns.at(return_type_idx).type;
-          if (!r->type()->isSubtypeOf(*type)) {
+          if (!r->type()->isSubtypeOf(type)) {
             throw ErrorReport(return_stmt.range()) << "Return value at position "
               << return_type_idx << " was annotated as having type " << type->str()
               << " but is actually of type " << r->type()->str();
@@ -914,10 +914,10 @@ private:
 
   Value* emitCond(Expr cond) {
     Value* v = emitExpr(cond, identity);
-    if(v->type()->isSubtypeOf(*DynamicType::get())) {
+    if(v->type()->isSubtypeOf(DynamicType::get())) {
       v = tensorToNum(cond.range(), v, IntType::get());
     }
-    if(!v->type()->isSubtypeOf(*IntType::get())) {
+    if(!v->type()->isSubtypeOf(IntType::get())) {
       throw ErrorReport(cond) << "expected a tensor or integer expression for condition but found " << v->type()->str();
     }
     return v;
