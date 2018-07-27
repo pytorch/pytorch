@@ -56,6 +56,7 @@ else()
   # This codepath should only be exercised by the Android build.
   add_subdirectory(../aten/src/ATen/core ATen_core)
   list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
+  list(APPEND Caffe2_CPU_INCLUDE ${ATen_CORE_INCLUDE})
   # TODO: We should probably install the headers, but I don't know
   # how to do that.
 endif()
