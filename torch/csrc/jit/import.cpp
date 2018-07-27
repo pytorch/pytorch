@@ -20,13 +20,17 @@ namespace {
 
 class DecoderBase {
  protected:
-  std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto);
+  virtual std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto);
 
   void buildBlock(const onnx_torch::GraphProto& graph_proto, Block* block,
                    std::unordered_map<std::string, Value*>& value_map);
 
   void buildBlocks(const std::vector<onnx_torch::GraphProto>& graphs_, Node* node,
                    std::unordered_map<std::string, Value*>& value_map);
+
+  virtual void buildValue(Value* value, const onnx_torch::ValueInfoProto& valueinfo_proto) {};
+
+  virtual void buildIntermediateValue(Value* value, const std::string& name) {};
 
   at::ScalarType onnxTypeToATenType(onnx_torch::TensorProto_DataType tensor_proto);
 
@@ -91,7 +95,9 @@ void DecoderBase::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* b
                 std::unordered_map<std::string, Value*>& value_map) {
 
   for (auto & input : graph_proto.input()) {
-    value_map[input.name()] = block->addInput();
+    auto value = block->addInput();
+    value_map[input.name()] = value;
+    buildValue(value, input);
   }
 
   for (auto & node_ : graph_proto.node()) {
@@ -156,6 +162,7 @@ void DecoderBase::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* b
 
     for (int i=0; i<node_.output().size(); i++) {
       value_map[node_.output(i)] = node->outputs()[i];
+      buildIntermediateValue(node->outputs()[i], node_.output(i));
     }
 
     block->appendNode(node);
@@ -163,6 +170,7 @@ void DecoderBase::buildBlock(const onnx_torch::GraphProto& graph_proto, Block* b
 
   for (auto & output : graph_proto.output()) {
     Value* v = value_map.at(output.name());
+    buildValue(v, output);
     block->registerOutput(v);
   }
 }
@@ -195,7 +203,15 @@ class ModuleDecoder : DecoderBase {
       const std::unordered_map<std::string, std::string>& storage_map);
 
  private:
-  at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto);
+  virtual std::shared_ptr<Graph> buildGraph(const onnx_torch::GraphProto& graph_proto) override;
+
+  virtual at::Tensor buildTensor(const onnx_torch::TensorProto& tensor_proto) override;
+
+  TypePtr buildType(const onnx_torch::TypeProto& type_proto);
+
+  virtual void buildValue(Value* value, const onnx_torch::ValueInfoProto& valueinfo_proto) override;
+
+  virtual void buildIntermediateValue(Value* value, const std::string& name) override;
 
   at::Tensor buildParameter(const onnx_torch::TensorProto& tensor_proto);
 
@@ -209,7 +225,58 @@ class ModuleDecoder : DecoderBase {
 
   const std::unordered_map<std::string, std::string> *storage_export_map_;
   std::unordered_map<std::string, std::shared_ptr<at::Tensor>> storage_map_;
+  std::unordered_map<std::string, const onnx_torch::TypeProto*> value_type_map_;
 };
+
+std::shared_ptr<Graph> ModuleDecoder::buildGraph(const onnx_torch::GraphProto& graph_proto) {
+  for (auto &subtype : graph_proto.value_info()) {
+    value_type_map_[subtype.name()] = &subtype.type();
+  }
+  return DecoderBase::buildGraph(graph_proto);
+}
+
+TypePtr ModuleDecoder::buildType(const onnx_torch::TypeProto& type_proto) {
+  auto tensortype_proto = type_proto.tensor_type();
+  auto shape_proto = tensortype_proto.shape();
+  auto kind = type_proto.denotation();
+  if (kind == "DynamicType") {
+    return DynamicType::get();
+  } else if (kind == "TensorType") {
+    // TODO: Don't use DynamicType here
+    return DynamicType::get();
+  } else if (kind == "TupleType") {
+    std::vector<TypePtr> elems;
+    for (auto &subkind : shape_proto.dim()) {
+      auto it = value_type_map_.find(subkind.dim_param());
+      JIT_ASSERT(it != value_type_map_.end());
+      elems.push_back(buildType(*it->second));
+    }
+    return TupleType::create(elems);
+  } else if (kind == "ListType") {
+    auto subkind = shape_proto.dim(0);
+    auto it = value_type_map_.find(subkind.dim_param());
+    JIT_ASSERT(it != value_type_map_.end());
+    return ListType::create(buildType(*it->second));
+  } else if (kind == "NumberType") {
+    return NumberType::get();
+  } else if (kind == "FloatType") {
+    return FloatType::get();
+  } else if (kind == "IntType") {
+    return IntType::get();
+  } else {
+    JIT_ASSERT("unexpected string for type kind");
+  }
+}
+
+void ModuleDecoder::buildValue(Value* value, const onnx_torch::ValueInfoProto& valueinfo_proto) {
+  value->setType(buildType(valueinfo_proto.type()));
+}
+
+void ModuleDecoder::buildIntermediateValue(Value* value, const std::string& name) {
+  auto it = value_type_map_.find(name);
+  JIT_ASSERT(it != value_type_map_.end());
+  value->setType(buildType(*it->second));
+}
 
 at::Tensor ModuleDecoder::buildParameter(const onnx_torch::TensorProto& tensor_proto) {
   std::vector<int64_t> strides;
@@ -269,12 +336,10 @@ std::pair<std::shared_ptr<script::Module>, std::string> ModuleDecoder::parseFull
 
   std::shared_ptr<script::Module> curr = root_module;
   for (size_t i = 0; i < vec.size() - 1; i++) {
-    if (curr->find_module(vec[i]) != nullptr) {
-      curr = curr->get_module(vec[i]);
-    } else {
+    if (curr->find_module(vec[i]) == nullptr) {
       curr->register_module(vec[i], std::make_shared<script::Module>());
-      curr = curr->get_module(vec[i]);
     }
+    curr = curr->get_module(vec[i]);
   }
   return std::make_pair(curr, vec.back());
 }
@@ -311,9 +376,7 @@ std::shared_ptr<script::Module> ModuleDecoder::decode(
       member_inputs.push_back(param_map[param_name]);
     }
 
-    auto graph = std::make_shared<Graph>();
-    std::unordered_map<std::string, Value*> value_map;
-    buildBlock(node_proto.attribute(0).g(), graph->block(), value_map);
+    auto graph = buildGraph(node_proto.attribute(0).g());
     parent_module->create_method(name, graph, member_inputs);
   }
 

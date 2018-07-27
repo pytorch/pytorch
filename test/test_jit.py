@@ -3612,9 +3612,12 @@ def func(t):
                 self.param = torch.nn.Parameter(torch.rand(2, 2, dtype=torch.float))
                 self.param2 = torch.nn.Parameter(self.param.view(2, 2))
 
+            def foo(self):
+                return torch.ones([2, 2])
+
             @torch.jit.script_method
             def forward(self, input):
-                return input + self.param + self.param2
+                return input + torch.ones([2, 2]) + self.param + self.param2
 
         m_orig = M()
         m_import = torch.jit.ScriptModule()
@@ -3624,7 +3627,7 @@ def func(t):
         for m in [m_orig, m_import]:
             input = torch.ones([2, 2], dtype=torch.float)
             o = m(input)
-            self.assertEqual(o, input + m.param + m.param2)
+            self.assertEqual(o, input + torch.ones([2, 2], dtype=torch.float) + m.param + m.param2)
 
         # test file export
         import io

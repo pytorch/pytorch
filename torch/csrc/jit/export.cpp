@@ -86,8 +86,15 @@ class EncoderBase {
                    const std::vector<at::Tensor> &initializers = {});
 
   virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                    const at::Tensor &tensor,
-                    const at::optional<std::string> external_ref = {});
+                            const at::Tensor &tensor,
+                            const at::optional<std::string> external_ref = {});
+
+  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
+                                           const Value* n) {};
+
+  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
+                               onnx::ValueInfoProto* v,
+                               const Value* n);
 
   void AddAttribute(onnx::NodeProto *node_proto, const jit::Node *node, const jit::Symbol name);
 
@@ -120,25 +127,6 @@ onnx::TensorProto_DataType ATenTypeToOnnxType(at::ScalarType at_type) {
   }
 }
 
-void EncodeTypeProtoTensorType(onnx::TypeProto_Tensor* tensor_type, const Value* n) {
-  onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
-  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
-    const std::vector<std::int64_t>& sizes = node_type->sizes();
-    for (size_t i = 0; i < sizes.size(); i++) {
-      shape->add_dim();
-      shape->mutable_dim(i)->set_dim_value(sizes[i]);
-    }
-    tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
-  }
-}
-
-void EncodeValueInfo(onnx::ValueInfoProto* v, const Value* n) {
-  v->set_name(n->uniqueName());
-  onnx::TypeProto* t = v->mutable_type();
-  onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
-  EncodeTypeProtoTensorType(tensor_type, n);
-}
-
 EncoderBase::EncoderBase(
     onnx::ModelProto *model_proto,
     int64_t onnx_opset_version,
@@ -153,6 +141,25 @@ EncoderBase::EncoderBase(
   auto* imp = model_proto->add_opset_import();
   // This is the version of ONNX operator set we are targeting
   imp->set_version(onnx_opset_version);
+}
+
+void EncoderBase::EncodeValueInfo(
+    onnx::GraphProto *graph_proto,
+    onnx::ValueInfoProto* v,
+    const Value* n) {
+  v->set_name(n->uniqueName());
+  onnx::TypeProto* t = v->mutable_type();
+  onnx::TypeProto_Tensor* tensor_type = t->mutable_tensor_type();
+
+  onnx::TensorShapeProto* shape = tensor_type->mutable_shape();
+  if (TensorTypePtr node_type = n->type()->cast<TensorType>()) {
+    const std::vector<std::int64_t>& sizes = node_type->sizes();
+    for (size_t i = 0; i < sizes.size(); i++) {
+      shape->add_dim();
+      shape->mutable_dim(i)->set_dim_value(sizes[i]);
+    }
+    tensor_type->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+  }
 }
 
 void EncoderBase::EncodeGraph(
@@ -175,11 +182,11 @@ void EncoderBase::EncodeBlock(
 
   for (auto input : block->inputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_input();
-    EncodeValueInfo(v, input);
+    EncodeValueInfo(graph_proto, v, input);
   }
   for (auto output : block->outputs()) {
     onnx::ValueInfoProto* v = graph_proto->add_output();
-    EncodeValueInfo(v, output);
+    EncodeValueInfo(graph_proto, v, output);
   }
   for (auto node : block->nodes()) {
     bool is_raw_export = operator_export_type_ == onnx_torch::OperatorExportTypes::RAW;
@@ -204,6 +211,7 @@ void EncoderBase::EncodeBlock(
     }
     for(auto output : node->outputs()) {
       p_n->add_output(output->uniqueName());
+      EncodeIntermediateValueInfo(graph_proto, output);
     }
     if (is_raw_export) {
       JIT_ASSERT(!node->kind().is_onnx());
@@ -403,8 +411,20 @@ class ModuleEncoder: public EncoderBase {
                     const std::string prefix);
 
   virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
-                    const at::Tensor &tensor,
-                    const at::optional<std::string> external_ref) override;
+                            const at::Tensor &tensor,
+                            const at::optional<std::string> external_ref) override;
+
+  virtual void EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto,
+                                           const Value* n) override;
+
+  virtual void EncodeValueInfo(onnx::GraphProto *graph_proto,
+                               onnx::ValueInfoProto* v,
+                               const Value* n) override;
+
+  void EncodeTypeInfo(onnx::GraphProto *graph_proto,
+                      onnx::ValueInfoProto* v,
+                      const TypePtr& type,
+                      const std::string& name);
 
   // Used to deduplicate tensor storages
   std::unordered_map<const void*, std::string> storage_dedup_map_;
@@ -414,6 +434,9 @@ class ModuleEncoder: public EncoderBase {
 
   // Used to create sequential tensor storage names
   size_t storage_counter_ = 0;
+
+  // Used to create sequential dummy names for node types
+  size_t type_counter_ = 0;
 };
 
 ModuleEncoder::ModuleEncoder(
@@ -425,6 +448,75 @@ ModuleEncoder::ModuleEncoder(
                  /*defer_weight_export*/ true) {
   model_proto->set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto->mutable_graph(), module);
+}
+
+void ModuleEncoder::EncodeIntermediateValueInfo(onnx::GraphProto *graph_proto, const Value *n) {
+  auto v = graph_proto->add_value_info();
+  EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
+}
+
+void ModuleEncoder::EncodeTypeInfo(
+    onnx::GraphProto *graph_proto,
+    onnx::ValueInfoProto* v,
+    const TypePtr& type,
+    const std::string& name) {
+  v->set_name(name);
+  onnx::TypeProto* type_proto = v->mutable_type();
+  onnx::TypeProto_Tensor* tensortype_proto = type_proto->mutable_tensor_type();
+  onnx::TensorShapeProto* shape_proto = tensortype_proto->mutable_shape();
+
+  auto kind = type->kind();
+  if (kind == TypeKind::DynamicType) {
+    type_proto->set_denotation("DynamicType");
+  } else if (kind == TypeKind::TensorType) {
+    type_proto->set_denotation("TensorType");
+    TensorTypePtr node_type = type->cast<TensorType>();
+    const std::vector<std::int64_t>& sizes = node_type->sizes();
+    for (size_t i = 0; i < sizes.size(); i++) {
+      shape_proto->add_dim();
+      shape_proto->mutable_dim(i)->set_dim_value(sizes[i]);
+    }
+    const std::vector<std::int64_t>& strides = node_type->strides();
+    for (size_t i = 0; i < strides.size(); i++) {
+      shape_proto->add_dim();
+      shape_proto->mutable_dim(i)->set_dim_value(strides[i]);
+    }
+    tensortype_proto->set_elem_type(ATenTypeToOnnxType(node_type->scalarType()));
+  } else if (kind == TypeKind::TupleType) {
+    type_proto->set_denotation("TupleType");
+    TupleTypePtr node_type = type->cast<TupleType>();
+    auto elements = node_type->elements();
+    for (size_t i = 0; i < elements.size(); i++) {
+      std::string name = "#" + std::to_string(type_counter_++);
+      shape_proto->add_dim();
+      shape_proto->mutable_dim(i)->set_dim_param(name);
+      onnx::ValueInfoProto* subtype_proto = graph_proto->add_value_info();
+      EncodeTypeInfo(graph_proto, subtype_proto, elements[i], name);
+    }
+  } else if (kind == TypeKind::ListType) {
+    type_proto->set_denotation("ListType");
+    ListTypePtr node_type = type->cast<ListType>();
+    std::string name = "#" + std::to_string(type_counter_++);
+    shape_proto->add_dim();
+    shape_proto->mutable_dim(0)->set_dim_param(name);
+    onnx::ValueInfoProto* subtype_proto = graph_proto->add_value_info();
+    EncodeTypeInfo(graph_proto, subtype_proto, node_type->getElementType(), name);
+  } else if (kind == TypeKind::NumberType) {
+    type_proto->set_denotation("NumberType");
+  } else if (kind == TypeKind::FloatType) {
+    type_proto->set_denotation("FloatType");
+  } else if (kind == TypeKind::IntType) {
+    type_proto->set_denotation("IntType");
+  } else {
+    JIT_ASSERT("unexpected type kind");
+  }
+}
+
+void ModuleEncoder::EncodeValueInfo(
+    onnx::GraphProto *graph_proto,
+    onnx::ValueInfoProto* v,
+    const Value* n) {
+  EncodeTypeInfo(graph_proto, v, n->type(), n->uniqueName());
 }
 
 void ModuleEncoder::EncodeModule(
