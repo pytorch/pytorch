@@ -658,8 +658,16 @@ bool ImageInputOp<Context>::GetImageAndLabelAndInfoFromDBValue(
         for (int j = 0; j < additional_output_proto.int64_data_size(); ++j) {
           additional_output[j] = additional_output_proto.int64_data(j);
         }
-      }
-      else {
+      } else if (additional_output_proto.data_type() == TensorProto::UINT8) {
+        uint8_t* additional_output =
+            prefetched_additional_outputs_[i].template mutable_data<uint8_t>() +
+            item_id * additional_output_proto.int32_data_size();
+
+        for (int j = 0; j < additional_output_proto.int32_data_size(); ++j) {
+          additional_output[j] =
+              static_cast<uint8_t>(additional_output_proto.int32_data(j));
+        }
+      } else {
         LOG(FATAL) << "Unsupported output type.";
       }
     }
@@ -1148,6 +1156,9 @@ bool ImageInputOp<Context>::Prefetch() {
           } else if (
               additional_output_proto.data_type() == TensorProto::INT64) {
             prefetched_additional_outputs_[i].template mutable_data<int64_t>();
+          } else if (
+              additional_output_proto.data_type() == TensorProto::UINT8) {
+            prefetched_additional_outputs_[i].template mutable_data<uint8_t>();
           } else {
             LOG(FATAL) << "Unsupported output type.";
           }
