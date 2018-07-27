@@ -199,7 +199,9 @@ class ModuleDecoder : DecoderBase {
 
   at::Tensor buildParameter(const onnx_torch::TensorProto& tensor_proto);
 
-  at::Tensor* getStorageTensor(at::ScalarType type, std::string name);
+  at::Tensor buildTensorCommon(const onnx_torch::TensorProto& tensor_proto,
+                               const int64_t storage_offset,
+                               const std::vector<int64_t>& strides);
 
   std::pair<std::shared_ptr<script::Module>, std::string> parseFullName(
       std::shared_ptr<script::Module> root_module,
@@ -210,38 +212,47 @@ class ModuleDecoder : DecoderBase {
 };
 
 at::Tensor ModuleDecoder::buildParameter(const onnx_torch::TensorProto& tensor_proto) {
-  auto storage = getStorageTensor(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
-  std::vector<int64_t> dims, strides;
-  std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
+  std::vector<int64_t> strides;
   std::move(tensor_proto.int32_data().begin() + 3, tensor_proto.int32_data().end(), std::back_inserter(strides));
-  auto tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      *storage->storage(), tensor_proto.int64_data(2), dims, strides);
-  autograd::Variable var = autograd::make_variable(tensor, tensor_proto.int64_data(0));
+  auto tensor = buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(2), strides);
+  autograd::Variable var = autograd::make_variable(tensor, /* requires_grad = */ tensor_proto.int64_data(1));
   return var;
 }
 
 at::Tensor ModuleDecoder::buildTensor(const onnx_torch::TensorProto& tensor_proto) {
-  auto storage = getStorageTensor(onnxTypeToATenType(tensor_proto.data_type()), tensor_proto.doc_string());
-  std::vector<int64_t> dims, strides;
-  std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
+  std::vector<int64_t> strides;
   std::move(tensor_proto.int32_data().begin() + 1, tensor_proto.int32_data().end(), std::back_inserter(strides));
-  auto tensor = at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
-      *storage->storage().get(), tensor_proto.int64_data(0), dims, strides);
-  return tensor;
+  return buildTensorCommon(tensor_proto, /* storage_offset = */ tensor_proto.int64_data(0), strides);
 }
 
-at::Tensor* ModuleDecoder::getStorageTensor(at::ScalarType type, std::string name) {
-  auto storage_it = storage_map_.find(name);
+at::Tensor ModuleDecoder::buildTensorCommon(
+    const onnx_torch::TensorProto& tensor_proto,
+    const int64_t storage_offset,
+    const std::vector<int64_t>& strides) {
+  // NB: storage_offset and strides are passed in separately because
+  // because they are encoded differently for parameters and tensors
+  auto storage_name = tensor_proto.doc_string();
+  auto type = onnxTypeToATenType(tensor_proto.data_type());
+  std::vector<int64_t> dims;
+  std::move(tensor_proto.dims().begin(), tensor_proto.dims().end(), std::back_inserter(dims));
+
+  // Find or create the storage
+  at::Tensor *storage_tensor;
+  auto storage_it = storage_map_.find(storage_name);
   if (storage_it == storage_map_.end()) {
     auto storage = std::make_shared<at::Tensor>(at::CPU(type).tensor());
-    auto string_it = storage_export_map_->find(name);
+    auto string_it = storage_export_map_->find(storage_name);
     JIT_ASSERT(string_it != storage_export_map_->end());
     storage->resize_({ string_it->second.size() });
     std::memcpy(storage->storage()->data(), string_it->second.data(), string_it->second.size());
-    storage_map_.insert(std::make_pair(name, storage));
-    return storage.get();
+    storage_map_.insert(std::make_pair(storage_name, storage));
+    storage_tensor = storage.get();
+  } else {
+    storage_tensor = storage_it->second.get();
   }
-  return storage_it->second.get();
+
+  return at::CPU(onnxTypeToATenType(tensor_proto.data_type())).tensor(
+      *storage_tensor->storage().get(), storage_offset, dims, strides);
 }
 
 // Given a full name of a parameter or method,
@@ -286,7 +297,7 @@ std::shared_ptr<script::Module> ModuleDecoder::decode(
     std::tie(parent_module, name) = parseFullName(root_module, tensor_proto.name());
 
     auto param = buildParameter(tensor_proto);
-    parent_module->register_parameter(name, param, tensor_proto.int64_data(1));
+    parent_module->register_parameter(name, param, /* is_buffer = */ tensor_proto.int64_data(1));
     param_map[tensor_proto.name()] = parent_module->parameter_slot(name);
   }
 

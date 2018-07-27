@@ -148,7 +148,7 @@ EncoderBase::EncoderBase(
       defer_weight_export_(defer_weight_export),
       operator_export_type_(operator_export_type) {
   model_proto->set_producer_name("pytorch");
-  model_proto->set_ir_version(3);
+  model_proto->set_ir_version(onnx::IR_VERSION);
   model_proto->set_producer_version("0.4");
   auto* imp = model_proto->add_opset_import();
   // This is the version of ONNX operator set we are targeting
@@ -319,6 +319,8 @@ void EncoderBase::AddAttribute(onnx::NodeProto *node_proto, const jit::Node *nod
         EncodeGraph(g, v);
       }
       break;
+    default:
+      throw std::runtime_error("unexpected attribute kind");
   }
 }
 
@@ -400,9 +402,9 @@ class ModuleEncoder: public EncoderBase {
                     const std::unique_ptr<script::Method> &method,
                     const std::string prefix);
 
-  void EncodeTensor(onnx::TensorProto *tensor_proto,
+  virtual void EncodeTensor(onnx::TensorProto *tensor_proto,
                     const at::Tensor &tensor,
-                    const at::optional<std::string> external_ref);
+                    const at::optional<std::string> external_ref) override;
 
   // Used to deduplicate tensor storages
   std::unordered_map<const void*, std::string> storage_dedup_map_;
@@ -421,6 +423,7 @@ ModuleEncoder::ModuleEncoder(
     onnx_torch::OperatorExportTypes operator_export_type)
     : EncoderBase(model_proto, onnx_opset_version, operator_export_type,
                  /*defer_weight_export*/ true) {
+  model_proto->set_doc_string("THIS PROTO IS NOT STANDARD ONNX");
   EncodeModule(model_proto->mutable_graph(), module);
 }
 
@@ -451,34 +454,17 @@ void ModuleEncoder::EncodeParameter(
     const script::NamedParameter &parameter,
     const std::string prefix) {
   auto tensor = parameter.slot();
-
   // Name will be prefixed by submodule. e.g. submodule_foo.parameter_bar
-  tensor_proto->set_name(prefix + parameter.name);
-  parameter_map_[tensor] = tensor_proto->name();
+  auto name = prefix + parameter.name;
 
-  for (auto &d : tensor->sizes()) {
-    tensor_proto->add_dims(d);
-  }
-  tensor_proto->set_data_type(ATenTypeToOnnxType(tensor->type().scalarType()));
+  tensor_proto->set_name(name);
+  parameter_map_[tensor] = name;
 
-  // The int64_data field stores requires_grad, is_buffer, offset, and strides
-  tensor_proto->add_int64_data(tensor->requires_grad());
+  // Parameters have these fields, but tensors do not
   tensor_proto->add_int64_data(parameter.is_buffer);
-  tensor_proto->add_int64_data(tensor->storage_offset());
-  for (auto &d : tensor->strides()) {
-    tensor_proto->add_int64_data(d);
-  }
+  tensor_proto->add_int64_data(tensor->requires_grad());
 
-  auto storage_ptr = tensor->data_ptr();
-  auto dedup_it = storage_dedup_map_.find(storage_ptr);
-  if (dedup_it != storage_dedup_map_.end()) {
-    tensor_proto->set_doc_string(dedup_it->second);
-  } else {
-    tensor_proto->set_doc_string(tensor_proto->name());
-    JIT_ASSERT(raw_data_export_map_.count(tensor_proto->name()) == 0);
-    storage_dedup_map_[storage_ptr] = tensor_proto->name();
-    raw_data_export_map_[tensor_proto->name()] = *tensor;
-  }
+  EncodeTensor(tensor_proto, *tensor, name);
 }
 
 void ModuleEncoder::EncodeMethods(
@@ -513,12 +499,12 @@ void ModuleEncoder::EncodeMethod(
   attr_proto->set_type(onnx::AttributeProto_AttributeType_GRAPH);
 
   for (auto node : method->graph()->nodes()) {
-    IR_IF(node, PythonOp)
-      auto py_node = static_cast<torch::jit::PythonOp*>(value);
+    if (node->kind() == prim::PythonOp) {
+      auto py_node = static_cast<torch::jit::PythonOp*>(node);
       throw std::runtime_error(
           "Couldn't export Python operator " + py_node->name() +
           "\n\nDefined at:\n" + getNodeStackTraceString(node));
-    IR_END()
+    }
   }
   EncodeBlock(attr_proto->mutable_g(), method->graph()->block(), {});
 }
@@ -526,29 +512,32 @@ void ModuleEncoder::EncodeMethod(
 void ModuleEncoder::EncodeTensor(
     onnx::TensorProto *tensor_proto,
     const at::Tensor &tensor,
-    const at::optional<std::string> external_ref) {
-  for(auto d : tensor.sizes()) {
+    const at::optional<std::string> external_ref = {}) {
+  for (auto &d : tensor.sizes()) {
     tensor_proto->add_dims(d);
   }
   tensor_proto->set_data_type(ATenTypeToOnnxType(tensor.type().scalarType()));
-  auto t = tensor.contiguous().toBackend(at::kCPU);
 
-  // The int64_data field stores offset, and strides
   tensor_proto->add_int64_data(tensor.storage_offset());
   for (auto &d : tensor.strides()) {
     tensor_proto->add_int64_data(d);
   }
 
-  auto storage_ptr = tensor.data_ptr();
+  auto storage_ptr = tensor.storage()->data();
   auto dedup_it = storage_dedup_map_.find(storage_ptr);
   if (dedup_it != storage_dedup_map_.end()) {
     tensor_proto->set_doc_string(dedup_it->second);
   } else {
-    std::string storage_name = "$" + std::to_string(storage_counter_++);
-    tensor_proto->set_doc_string(storage_name);
-    JIT_ASSERT(raw_data_export_map_.count(storage_name) == 0);
-    storage_dedup_map_[storage_ptr] = storage_name;
-    raw_data_export_map_[storage_name] = tensor;
+    std::string name;
+    if (external_ref) {
+      name = external_ref.value();
+    } else {
+      name = "$" + std::to_string(storage_counter_++);
+    }
+    tensor_proto->set_doc_string(name);
+    JIT_ASSERT(raw_data_export_map_.count(name) == 0);
+    storage_dedup_map_[storage_ptr] = name;
+    raw_data_export_map_[name] = tensor;
   }
 }
 

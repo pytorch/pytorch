@@ -3633,7 +3633,7 @@ def func(t):
         f.seek(0)
         import zipfile
         with zipfile.ZipFile(f, 'r', compression=zipfile.ZIP_STORED) as z:
-            self.assertExpected(str([file.filename for file in z.infolist()]))
+            self.assertExpected(str(sorted([file.filename for file in z.infolist()])))
 
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
