@@ -18,11 +18,6 @@ graph {
       f: 1
       type: FLOAT
     }
-    attribute {
-      name: "broadcast"
-      i: 1
-      type: INT
-    }
   }
   node {
     input: "0"
@@ -105,5 +100,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }
