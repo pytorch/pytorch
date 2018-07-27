@@ -41,7 +41,7 @@ void GenerateStylizedImage(std::vector<float>& originalImage,
   caffe2::Predictor p(init_net, predict_net);
 
   std::vector<int> dims({1, 3, height, width});
-  caffe2::TensorCPU input;
+  caffe2::Tensor input(caffe2::CPU);
   input.Resize(dims);
   input.ShareExternalPointer(originalImage.data());
   caffe2::Predictor::TensorVector input_vec{&input};

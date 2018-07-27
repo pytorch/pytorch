@@ -1,13 +1,12 @@
 #pragma once
 
 #include "caffe2/core/dispatch/DispatchKey.h"
-#include "caffe2/utils/Metaprogramming.h"
+#include "caffe2/proto/caffe2.pb.h"
 #include "caffe2/utils/Array.h"
+#include "caffe2/utils/Metaprogramming.h"
 
 namespace caffe2 {
-template<class Context> class Tensor;
-class CPUContext;
-class CUDAContext;
+class Tensor;
 }  // namespace caffe2
 
 namespace c10 {
@@ -18,26 +17,29 @@ namespace details {
  * If Arg is a Tensor or reference to a Tensor, provide the member constant value equal to true.  Otherwise
  * return false.
  */
-template<class Arg> using is_tensor_arg = guts::is_instantiation_of<caffe2::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
+template <class Arg>
+using is_tensor_arg = std::
+    is_same<caffe2::Tensor, guts::remove_cv_t<guts::remove_reference_t<Arg>>>;
+
+inline DeviceTypeId to_device_type_id(caffe2::DeviceType device_type) {
+  switch (device_type) {
+    case caffe2::CPU:
+      return DeviceTypeId::CPU;
+    case caffe2::CUDA:
+      return DeviceTypeId::CUDA;
+    default:
+      return DeviceTypeId::UNDEFINED;
+  }
+}
 
 // TODO get rid of tensor_to_dispatch_key once c2::Tensor is de-templatized. This then fits into a template lambda instead of a functor.
-template<class TensorType, class Enable = void> struct tensor_to_dispatch_key_ final {};
-template<class TensorType>
-struct tensor_to_dispatch_key_<TensorType, guts::enable_if_t<std::is_same<TensorType, caffe2::Tensor<caffe2::CPUContext>>::value>> final {
-    static TensorParameterDispatchKey call(const TensorType& tensor) {
-      return TensorParameterDispatchKey{DeviceTypeId::CPU, LayoutId(0), tensor.meta().id()};
-    }
-};
-template<class TensorType>
-struct tensor_to_dispatch_key_<TensorType, guts::enable_if_t<std::is_same<TensorType, caffe2::Tensor<caffe2::CUDAContext>>::value>> final {
-    static TensorParameterDispatchKey call(const TensorType& tensor) {
-      return TensorParameterDispatchKey{DeviceTypeId::CUDA, LayoutId(0), tensor.meta().id()};
-    }
-};
 struct tensor_to_dispatch_key final {
     template<class TensorType>
     TensorParameterDispatchKey operator()(const TensorType& tensor) const {
-      return tensor_to_dispatch_key_<TensorType, void>::call(tensor);
+      return TensorParameterDispatchKey{
+          to_device_type_id(tensor.GetDeviceType()),
+          LayoutId(0),
+          tensor.meta().id()};
     }
 };
 
