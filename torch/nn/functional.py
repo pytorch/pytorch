@@ -1827,8 +1827,24 @@ def multilabel_soft_margin_loss(input, target, weight=None, size_average=None,
     """
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
-    input = torch.sigmoid(input)
-    return binary_cross_entropy(input, target, weight, None, None, reduction)
+
+    loss = - (target * logsigmoid(input) + (1 - target) * logsigmoid(-input))
+
+    if weight is not None:
+        loss = loss * weight
+
+    if reduction != 'none':
+        if reduction == 'sum':
+            return loss.sum()
+        else:  # elementwise_mean
+            return loss.mean()
+    else:
+        if size_average and reduce:
+            return loss.mean()
+        elif reduce:
+            return loss.sum()
+        else:
+            return loss
 
 
 def cosine_embedding_loss(input1, input2, target, margin=0, size_average=None,
