@@ -1,7 +1,6 @@
 #pragma once
 
 #include "torch/csrc/onnx/onnx.npb.h"
-#include "torch/csrc/assertions.h"
 #include "torch/csrc/WindowsTorchApiMacro.h"
 
 #include <pb_encode.h>

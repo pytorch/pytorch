@@ -81,7 +81,9 @@ def batch_matmul(data1, mask1, dims1, data2, mask2, dims2):
 
 
 @torch.jit.script
-def batch_select(data, mask, dims, dim, index):
+def batch_select(data, mask, dims, dim_, index_):
+    dim = int(dim_)
+    index = int(index_)
     # if dim == 0:
     #     raise ValueError("Cannot select 0 dim in BatchTensor")
     data = data.select(dim, index)

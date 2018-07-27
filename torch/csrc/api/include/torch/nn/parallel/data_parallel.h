@@ -36,14 +36,8 @@ std::vector<std::shared_ptr<ModuleType>> replicate(
   std::vector<std::shared_ptr<ModuleType>> replicas;
   replicas.reserve(devices.size());
   for (const auto& device : devices) {
-    // Here we rely on the property tensors are never (or should never be)
-    // allocated on any particular device, but always the default device, e.g.
-    // in `torch::ones({3, 4})`, the device is unspecified and pulled from the
-    // current thread local default options. As such, we can here modify these
-    // thread local default options and thereby cause all tensors in the cloned
-    // module to be constructed directly on the device we want.
-    OptionsGuard guard(device);
-    replicas.push_back(std::static_pointer_cast<ModuleType>(module->clone()));
+    replicas.push_back(
+        std::static_pointer_cast<ModuleType>(module->clone(device)));
   }
   return replicas;
 }

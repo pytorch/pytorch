@@ -1,8 +1,10 @@
 #include "torch/csrc/jit/passes/shape_analysis.h"
 
 #include "torch/csrc/jit/ir.h"
+#include "torch/csrc/jit/constants.h"
 #include "torch/csrc/jit/argument_spec.h"
 #include "torch/csrc/jit/operator.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <ATen/DeviceGuard.h>
 #include <ATen/ExpandUtils.h>
@@ -21,9 +23,9 @@ struct propagation_error : std::exception {};
 
 namespace {
 
-void setDynamicType(Node * node) {
+void setUnshapedType(Node * node) {
   for(auto o : node->outputs()) {
-    o->setType(DynamicType::get());
+    o->setType(unshapedType(o->type()));
   }
 }
 
@@ -34,47 +36,66 @@ int64_t wrapDim(int64_t dim, at::IntList sizes) {
   return dim;
 }
 
-at::Tensor representativeTensor(const TensorType * type) {
-  auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
-  at::DeviceGuard device_guard(type->device());
-  auto & attype = at::getType(backend, type->scalarType());
-  return attype.tensor(type->sizes(), type->strides()).zero_();
+IValue representativeValue(Value* v) {
+  TypePtr type_ = v->type();
+  // if the value is actually constant, just use it!
+  if(auto iv = toIValue(v)) {
+    return *iv;
+  }
+  if (TensorTypePtr type = type_->cast<TensorType>()) {
+    auto backend = type->device() == -1 ? at::kCPU : at::kCUDA;
+    at::DeviceGuard device_guard(type->device());
+    auto& attype = at::getType(backend, type->scalarType());
+    return attype.tensor(type->sizes(), type->strides()).zero_();
+  } else if (type_->isSubtypeOf(FloatType::get())) {
+    return 0.f;
+  }
+  // we should not get here because isValidArgumentForRunning should have
+  // prevented it
+  std::stringstream ss;
+  ss << "unable to create representative value for: " << type_->str()
+     << ". File a bug report.";
+  throw std::runtime_error(ss.str());
 }
 
 void PropagateShapeOnBlock(Block * block, bool insert_expands=true);
 
-at::optional<std::vector<TensorType*>> gatherTensorTypes(Node *node) {
-  std::vector<TensorType*> tensor_types;
-  tensor_types.reserve(node->inputs().size());
-  // TODO (apaszke): Remove once we stop using attributes
-  // XXX: we also make the exception for cat, because we need shape prop to work for it
-  // (we have tests). We'll have to remove the special case once we stop flattening lists into inputs.
-  if (node->hasAttributes() || node->kind() == aten::cat) {
-    std::vector<Value*> inputs = node->inputs();
-    if (node->kind() == aten::cat && inputs.back()->type()->isSubtypeOf(*IntType::get())) {
-      inputs.pop_back();
+// for each node in the schema with type Tensor, extract the TensorType
+// returns at::nullopt if any Tensor in the schema does not have a known shape
+// ignores non-tensor in the list of inputs
+at::optional<std::vector<TensorTypePtr>> gatherTensorTypes(Node *node) {
+  std::vector<TensorTypePtr> tensor_types;
+
+  auto & schema = node->schema();
+  auto & args = schema.arguments;
+  // can't handle varargs primitives because we don't know what should be a Tensor
+  if (schema.is_vararg) {
+    return at::nullopt;
+  }
+  size_t input_i = 0;
+  for (auto& arg : args) {
+    size_t consume_n; // how many tensors do we check for in the input list
+    if (arg.type->isSubtypeOf(ListType::ofTensors())) {
+      // we have a list of tensor, there is only ever one list
+      // so we calculte how many elements must be in it by how much bigger
+      // or smaller the input list is compared to the arguments in the schema
+      consume_n = node->inputs().size() + 1 - args.size();
+    } else if (arg.type->isSubtypeOf(DynamicType::get())) {
+      // a single Tensor for this argument
+      consume_n = 1;
+    } else {
+      // this argument is not a tensor, skip it
+      consume_n = 0;
     }
-    for (Value *v : inputs) {
-      TensorType* type = v->type()->cast<TensorType>();
-      if(!type) return at::nullopt;
-      tensor_types.push_back(type);
-    }
-  } else {
-    auto & schema = node->schema();
-    auto & args = schema.arguments;
-    // XXX: This gets triggered for nodes that have Tensor[] as arguments.
-    // Those are currently very annoying to handle, because the lists are simply
-    // inlined into the node inputs, so we bail out from shape propagation for now.
-    if (schema.is_vararg || args.size() != node->inputs().size()) {
-      return at::nullopt;
-    }
-    for (size_t i = 0; i < node->inputs().size(); ++i) {
-      if (!args[i].type->isSubtypeOf(*DynamicType::get())) continue;
-      TensorType *type = node->input(i)->type()->cast<TensorType>();
-      if (!type) return at::nullopt;
+    for(size_t j = 0; j < consume_n; j++) {
+      // bail out if a tensor does not have a size
+      TensorTypePtr type = node->input(input_i++)->type()->cast<TensorType>();
+      if (!type)
+        return at::nullopt;
       tensor_types.push_back(type);
     }
   }
+
   return tensor_types;
 }
 
@@ -96,16 +117,18 @@ bool mergeTypes(ArrayRef<Value*> lhs, ArrayRef<Value*> rhs, ArrayRef<Value*> out
 
 void PropagateShapeOnNode(Node * node, bool insert_expands=true);
 
-void broadcastBinary(Node *node, std::vector<TensorType*>& types, size_t idx1, size_t idx2) {
+void broadcastBinary(Node *node, std::vector<TensorTypePtr>& types, size_t idx1, size_t idx2) {
   auto expected_size = at::infer_size(types[idx1]->sizes(), types[idx2]->sizes());
   auto broadcast = [&](size_t input_idx) {
-    TensorType* input_type = types.at(input_idx);
+    TensorTypePtr input_type = types.at(input_idx);
     if (input_type->sizes() == expected_size)
       return;
     auto graph = node->owningGraph();
-    Node *expand = graph->create(aten::expand, {node->inputs().at(input_idx)})
-                        ->is_(attr::size, expected_size)
-                        ->i_(attr::implicit, 0)
+    WithInsertPoint point_guard { node };
+    Node *expand = graph->create(aten::expand,
+                                 {node->inputs().at(input_idx),
+                                  insertConstant(*graph, expected_size),
+                                  insertConstant(*graph, 0)})
                         ->insertBefore(node);
     PropagateShapeOnNode(expand);
     node->replaceInput(input_idx, expand->output());
@@ -116,36 +139,12 @@ void broadcastBinary(Node *node, std::vector<TensorType*>& types, size_t idx1, s
   types[1] = node->inputs().at(idx2)->type()->expect<TensorType>();
 }
 
-void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>& types) {
+void PropagateShapeOnNodeByRunningIt(Node* node) {
   auto op = getOperation(node);
   Stack stack;
 
-  size_t types_i = 0;
-  // TODO (apaszke): remove once we stop using attributes
-  if (node->hasAttributes()) {
-    for (auto & type : types) {
-      stack.push_back(representativeTensor(type));
-    }
-  // TODO (apaszke): remove once aten::cat is saner (see first XXX in gatherTensorTypes)
-  } else if (node->kind() == aten::cat) {
-    for (auto & type : types) {
-      stack.push_back(representativeTensor(type));
-    }
-    stack.push_back(node->get(attr::dim).value());
-  } else {
-    JIT_ASSERT(node->schema().arguments.size() == node->inputs().size());
-    for (const auto & arg : node->schema().arguments) {
-      if (arg.type->isSubtypeOf(*DynamicType::get())) {
-        stack.emplace_back(representativeTensor(types[types_i++]));
-      } else {
-        auto maybe_val = node->get(Symbol::attr(arg.name));
-        if (!maybe_val) {
-          setDynamicType(node);
-          return;
-        }
-        stack.push_back(std::move(*maybe_val));
-      }
-    }
+  for (auto input : node->inputs()) {
+    stack.push_back(representativeValue(input));
   }
 
   // XXX: we're not catching any exceptions from the op for now. This
@@ -156,8 +155,53 @@ void PropagateShapeOnNodeByRunningIt(Node* node, const std::vector<TensorType*>&
 
   JIT_ASSERT(stack.size() == node->outputs().size());
   for (size_t i = 0; i < stack.size(); ++i) {
-    node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
+    // some ops may have mixed tensor/primitive outputs
+    // for primitives, we don't need to change the type because it is already
+    // its most constrained form.
+    if(stack[i].isTensor())
+      node->outputs()[i]->inferTypeFrom(stack[i].toTensor());
   }
+}
+
+// is it ok to try to run the op
+// If an input is a constant, then we assume that the input is valid
+// and we can try to run it.
+// Otherwise:
+// Integral typed _inputs_ are often an indicator that we're indexing into
+// a tensor, so we should special-case these ops in the shape propagation.
+// Additionally, passing in a zero representative tensor into an integer
+// division op causes divide-by-zero errors
+// _Outputs_ must be tensors or primtives
+// We will call inferTypeFrom on the tensors, and ignore the primitives.
+// However, we allow primitive returns because we want to support mixed
+// primitive/tensor outputs.
+
+bool isValidArgumentForRunning(Value* v) {
+  // allow constants
+  if(toIValue(v))
+    return true;
+  if(TensorTypePtr tt = v->type()->cast<TensorType>()) {
+    return !at::isIntegralType(tt->scalarType());
+  }
+  return v->type()->isSubtypeOf(FloatType::get());
+}
+bool isValidReturnForRunning(Value* v) {
+  return v->type()->isSubtypeOf(DynamicType::get()) ||
+      v->type()->isSubtypeOf(NumberType::get());
+}
+
+bool canPropagateShapeByRunningIt(Node* node) {
+  bool valid_args = std::all_of(
+      node->inputs().begin(), node->inputs().end(), isValidArgumentForRunning);
+  if (!valid_args)
+    return false;
+
+  bool valid_returns = std::all_of(
+      node->outputs().begin(), node->outputs().end(), isValidReturnForRunning);
+  if (!valid_returns)
+    return false;
+
+  return true;
 }
 
 void PropagateShapeOnNode(Node * node, bool insert_expands) {
@@ -198,28 +242,31 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       }
       return;
     }
+    case prim::TensorToNum:
     case prim::NumToTensor:
-    case prim::TensorToNum: {
-      node->output()->setType(node->inputs()[0]->type());
-      return;
-    }
+      return; // correct num type is already set
     case prim::Constant: {
-      node->output()->inferTypeFrom(node->t(attr::value));
+      if(node->output()->type()->isSubtypeOf(DynamicType::get())) {
+        node->output()->inferTypeFrom(node->t(attr::value));
+      }
       return;
     }
     case prim::PythonOp:
     case prim::Print:
     case prim::Undefined: {
-      setDynamicType(node);
+      setUnshapedType(node);
       return;
     }
     default:
       break; // fall-through
   }
 
+  bool can_propagate_by_running = canPropagateShapeByRunningIt(node);
   auto maybe_tensor_types = gatherTensorTypes(node);
   if (!maybe_tensor_types) {
-    return setDynamicType(node);
+    if(can_propagate_by_running)
+      return PropagateShapeOnNodeByRunningIt(node);
+    return setUnshapedType(node);
   }
   auto & tensor_types = *maybe_tensor_types;
 
@@ -235,6 +282,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       node->matches("aten::min(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::max(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::lt(Tensor self, Tensor other) -> Tensor") ||
+      node->matches("aten::le(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::gt(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::ge(Tensor self, Tensor other) -> Tensor") ||
       node->matches("aten::eq(Tensor self, Tensor other) -> Tensor") ||
@@ -251,7 +299,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     auto lhs_type = tensor_types.at(0);
     auto rhs_type = tensor_types.at(1);
     SHAPE_ASSERT(lhs_type->sizes().size() == 2 && rhs_type->sizes().size() == 2);
-    node->output()->setType(std::make_shared<TensorType>(
+    node->output()->setType(TensorType::create(
       lhs_type->scalarType(), lhs_type->device(),
       at::IntList{lhs_type->sizes().at(0), rhs_type->sizes().at(1)}));
     return;
@@ -344,7 +392,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     return;
   } else if (node->matches("aten::type_as(Tensor self, Tensor other) -> Tensor")) {
     if (tensor_types.at(0)->scalarType() == tensor_types.at(1)->scalarType()) {
-      node->output()->setType(node->input(attr::self)->type());
+      node->output()->setType(node->namedInput(attr::self)->type());
     } else {
       // This will be a copy, so the result will be contiguous
       node->output()->setType(tensor_types.at(1)->withSizes(tensor_types.at(0)->sizes()));
@@ -374,26 +422,19 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
     std::vector<int64_t> dim_vec = {(int64_t)tensor_types.at(0)->sizes().size()};
     at::IntList dims(dim_vec);
     node->output()->setType(
-        std::make_shared<TensorType>(at::kLong, -1, dims));
+        TensorType::create(at::kLong, -1, dims));
     return;
   } else if (node->kind() == onnx::Reshape) {
-    setDynamicType(node);
+    setUnshapedType(node);
     return;
   }
 
   // If we haven't managed to handle the op so far, we fall back to inferring the
   // shapes by doing an example run of the op (if we can).
-  // Integral typed inputs are often an indicator that we're indexing into
-  // a tensor, so we should special-case these ops in the shape propagation.
-  // Additionally, passing in a zero representative tensor into an integer
-  // division op causes divide-by-zero errors
-  bool shape_inferenceable = !std::any_of(tensor_types.begin(), tensor_types.end(), [](TensorType* t){
-    return at::isIntegralType(t->scalarType());
-  });
-  if (shape_inferenceable) {
-    PropagateShapeOnNodeByRunningIt(node, tensor_types);
+  if (can_propagate_by_running) {
+    PropagateShapeOnNodeByRunningIt(node);
   } else {
-    setDynamicType(node);
+    setUnshapedType(node);
   }
 }
 
@@ -402,7 +443,7 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
     try {
       PropagateShapeOnNode(node, insert_expands);
     } catch(propagation_error& e) {
-      setDynamicType(node);
+      setUnshapedType(node);
     } catch(std::exception & e) {
       if(auto sl = node->getSourceLocation()) {
         sl->wrapAndRethrowException(e, "operation failed shape propagation");
@@ -413,13 +454,41 @@ void PropagateShapeOnBlock(Block * block, bool insert_expands) {
   }
 }
 
-}
+} // anonymous namespace
+
 void PropagateInputShapes(Graph & graph, const ArgumentSpec & spec) {
   JIT_ASSERT(graph.inputs().size() == spec.size());
   for(size_t i = 0; i < spec.size(); ++i) {
-    graph.inputs()[i]->setType(spec.tensorInfo(i));
+    auto argspec = spec.at(i);
+    if (!argspec.isTensor()) continue;
+    graph.inputs()[i]->setType(argspec);
   }
   PropagateShapeOnBlock(graph.block());
+}
+
+namespace {
+
+void EraseShapeInformation(at::ArrayRef<Value*> vals) {
+  for (Value * v : vals) {
+    v->setType(unshapedType(v->type()));
+  }
+}
+
+void EraseShapeInformation(Block * b) {
+  EraseShapeInformation(b->inputs());
+  EraseShapeInformation(b->outputs());
+  for (Node * n : b->nodes()) {
+    EraseShapeInformation(n->outputs());
+    for (Block *sb : n->blocks()) {
+      EraseShapeInformation(sb);
+    }
+  }
+}
+
+} // anonymous namespace
+
+void EraseShapeInformation(Graph & graph) {
+  EraseShapeInformation(graph.block());
 }
 
 }}

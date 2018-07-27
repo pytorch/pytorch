@@ -310,8 +310,8 @@ void Transpose(
 // limitation that the data has to be contiguous in memory.
 template <typename T, class Context, class Engine = DefaultEngine>
 void Gemm(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -327,8 +327,8 @@ void Gemm(
 // In most cases you probably want to use the function above, though.
 template <typename T, class Context, class Engine = DefaultEngine>
 void GemmEx(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int M,
     const int N,
     const int K,
@@ -345,19 +345,37 @@ void GemmEx(
 // GemmBatched provides a simple abstraction into library routines
 template <typename T, class Context, class Engine = DefaultEngine>
 void GemmBatched(
-    const CBLAS_TRANSPOSE TransA,
-    const CBLAS_TRANSPOSE TransB,
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
+    const int batch_size,
+    const int M,
+    const int N,
+    const int K,
+    const float alpha,
+    const T** A,
+    const T** B,
+    const float beta,
+    T** C,
+    Context* context,
+    TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
+
+template <typename T, class Context, class Engine = DefaultEngine>
+void GemmStridedBatched(
+    const CBLAS_TRANSPOSE trans_A,
+    const CBLAS_TRANSPOSE trans_B,
     const int batch_size,
     const int M,
     const int N,
     const int K,
     const float alpha,
     const T* A,
+    const int A_stride,
     const T* B,
+    const int B_stride,
     const float beta,
     T* C,
+    const int C_stride,
     Context* context,
-    Tensor<Context>* scratch = nullptr,
     TensorProto::DataType math_type = TensorProto_DataType_FLOAT);
 
 // Gemv always takes in a M*N matrix A, and depending on whether we set TransA
@@ -366,7 +384,7 @@ void GemmBatched(
 // CblasTrans:   x is an M dim vector and y is an N dim vector.
 template <typename T, class Context, class Engine = DefaultEngine>
 void Gemv(
-    const CBLAS_TRANSPOSE TransA,
+    const CBLAS_TRANSPOSE trans_A,
     const int M,
     const int N,
     const float alpha,
@@ -562,6 +580,16 @@ void CopyMatrix(
     const int ldb,
     Context* context,
     TypeMeta::TypedCopy copy = nullptr);
+
+template <typename T, class Context>
+void CopyMatrix(
+    const int M,
+    const int N,
+    const T* A,
+    const int lda,
+    T* B,
+    const int ldb,
+    Context* context);
 
 template <typename T, class Context>
 void CopyVector(const int N, const T* A, T* B, Context* context);

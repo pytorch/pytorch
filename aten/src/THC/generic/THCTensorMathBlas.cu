@@ -50,7 +50,8 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, mat, vec));
   if( (mat->dim() != 2) || (vec->dim() != 1) )
-    THError("matrix and vector expected");
+    THError("2D tensor and 1D tensor expected, got %dD, %dD tensors",
+       mat->dim(), vec->dim());
 
   if( mat->size(1) != vec->size(0) )
     THError("size mismatch");
@@ -115,7 +116,7 @@ THCTensor_(addmv)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
     THCTensor_(free)(state, cmat);
   }
 
-  // cublasSgemv, cublasDgemv have a bug where (x,0).mv(0) does not
+  // In cublasSgemv, cublasDgemv (x,0).mv(0) does not
   // handle beta, whereas cublasSgemm, cublasDgemm do for case where (x,0).mm(0,y).
   if (vec->size(0) == 0 && mat->size(0) != 0) {
     if(THCNumerics<real>::eq(beta, ScalarConvert<int, real>::to(0))) {
@@ -151,7 +152,8 @@ THCTensor_(addr)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real a
 #if defined(THC_REAL_IS_FLOAT) || defined(THC_REAL_IS_DOUBLE) || defined(THC_REAL_IS_HALF)
   THCAssertSameGPU(THCTensor_(checkGPU)(state, 4, r_, t, vec1, vec2));
   if ( (vec1->dim() != 1) || (vec2->dim() != 1) ) {
-    THError("vector and vector expected");
+    THError("1D tensors expected, got %dD, %dD tensors",
+       vec1->dim(), vec2->dim());
   }
 
   if (t->dim() != 2) {
@@ -248,10 +250,10 @@ THCTensor_(addmm)(THCState *state, THCTensor *r_, real beta, THCTensor *t, real 
   THCTensor *r__, *m1_, *m2_;
 
   if( (m1->dim() != 2) || (m2->dim() != 2) )
-    THError("matrices expected, got %dD, %dD tensors", m1->dim(), m2->dim());
+    THError("2D tensors expected, got %dD, %dD tensors", m1->dim(), m2->dim());
 
   if(t->dim() != 2)
-    THError("matrix expected, got %dD tensor for t", t->dim());
+    THError("2D tensor expected, got %dD tensor for t", t->dim());
 
   if(m1->size(1) != m2->size(0)) {
     THCDescBuff bm1 = THCTensor_(sizeDesc)(state, m1);

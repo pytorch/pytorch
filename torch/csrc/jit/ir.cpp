@@ -1,8 +1,10 @@
 #include "ir.h"
 
-#include "torch/csrc/jit/tensor_conversions.h"
+
 #include "torch/csrc/jit/operator.h"
 #include "torch/csrc/autograd/function.h"
+#include "torch/csrc/jit/constants.h"
+#include "torch/csrc/jit/assertions.h"
 
 #include <iostream>
 #include <unordered_map>
@@ -238,7 +240,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorType* type = v->type()->cast<TensorType>()) {
+    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -404,7 +406,7 @@ void Graph::lint() const {
     void check_node(const Node* n) {
       for (auto input : n->inputs_) {
         if (!scope->contains(input)) {
-          JIT_ASSERTM(0, "%%%d not in scope", input->unique());
+          JIT_ASSERTM(0, input->unique(), " not in scope");
         }
       }
       JIT_ASSERT(anticipated_uses[n] == static_cast<int64_t>(n->inputs_.size()));
@@ -519,7 +521,7 @@ void Block::cloneFrom(Block * src, std::function<Value*(Value*)> outer_map) {
 std::shared_ptr<Graph> Graph::copy() {
   auto new_g = std::make_shared<Graph>();
   auto env = [](Value *) -> Value* {
-    barf("Graph::copy() encountered a use of a value not in scope. Run lint!");
+    AT_ERROR("Graph::copy() encountered a use of a value not in scope. Run lint!");
   };
   new_g->block()->cloneFrom(this->block(), env);
   return new_g;
@@ -568,161 +570,72 @@ Value* Value::setUniqueName(const std::string & name) {
   return this;
 }
 
-template<typename T>
-Value* Graph::insertConstant(T value) {
-  Node *n = create(prim::Constant);
-  insertNode(n);
-  auto t_value = as_tensor(value);
-  n->t_(attr::value, t_value.clone());
-  n->output()->inferTypeFrom(t_value);
-  return n->output();
+std::pair<size_t, const Argument*> findArgument(const FunctionSchema& the_schema, Symbol name) {
+  auto name_str = name.toUnqualString();
+  for (size_t i = 0; i < the_schema.arguments.size(); ++i) {
+    const Argument* arg = &the_schema.arguments[i];
+    if (arg->name == name_str) {
+      return std::make_pair(i, arg);
+    }
+  }
+  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
-// This is necessary, because integral literals are of type int by default,
-// and will dispatch to this function.
-template<>
-Value * Graph::insertConstant(int value) {
-  return insertConstant(static_cast<int64_t>(value));
-}
-
-template Value* Graph::insertConstant(int64_t value);
-template Value* Graph::insertConstant(double value);
-template Value* Graph::insertConstant(at::Tensor value);
-template Value* Graph::insertConstant(at::IntList value);
-template Value* Graph::insertConstant(at::Scalar value);
-
-namespace {
-
-// Of course any sane person would define this thing as a templated function, but
-// it so happens that clang 3.8 has a pretty annoying bug which makes it complain that
-// specializations are redefinitions of themselves, and so here we are.
-template<typename T>
-struct getattr {};
-
-template<>
-struct getattr<int64_t> {
-  int64_t operator()(Node *n, Symbol name) {
-    return n->i(name);
-  }
-};
-
-template<>
-struct getattr<double> {
-  double operator()(Node *n, Symbol name) {
-    return n->f(name);
-  }
-};
-
-template<>
-struct getattr<at::Tensor> {
-  at::Tensor operator()(Node *n, Symbol name) {
-    return n->t(name);
-  }
-};
-
-template<>
-struct getattr<std::vector<int64_t>> {
-  std::vector<int64_t> operator()(Node *n, Symbol name) {
-    return n->is(name);
-  }
-};
-
-} // anonymous namespace
-
-template<typename T>
-at::optional<T> Node::get(Symbol name) {
+at::optional<IValue> Node::get(Symbol name) const {
   // TODO (apaszke): remove. this is in here for now just so that we can ensure
   // we always use this in places where the node has a valid schema already
   // (will make next commits easier).
-  if (!schema_) findSchema();
-  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
-  if (hasAttributes()) {
-    // If it has an attribute, then it is a constant. If it's missing, it means we're
-    // doing an invalid lookup and it should throw anyway.
-    return getattr<T>()(this, name);
-  }
-  auto inp = findInput(name);
-  const Argument & arg = inp.second;
-  if (!inp.first) {
-    return tensor_as<T>(arg.default_value.value());
-  }
-  Node *producer = inp.first->node();
-  if (producer->kind() != prim::Constant) return at::nullopt;
-  auto value = producer->t(attr::value);
-  return tensor_as<T>(std::move(value));
-}
-
-template at::optional<int64_t> Node::get(Symbol name);
-template at::optional<double> Node::get(Symbol name);
-template at::optional<at::Tensor> Node::get(Symbol name);
-template at::optional<std::vector<int64_t>> Node::get(Symbol name);
-
-at::optional<IValue> Node::get(Symbol name) {
-  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
   if (hasAttribute(name)) {
     switch (kindOf(name)) {
       case AttributeKind::i:
-        return IValue{as_tensor(i(name))};
-      case AttributeKind::t:
-        return IValue{as_tensor(t(name))};
+        return IValue(i(name));
+      case AttributeKind::f:
+        return IValue(f(name));
+      case AttributeKind::t: {
+        // attributes are ambiguous, this might be a at::Scalar
+        // disambiguate via schema
+        at::Tensor ten = t(name);
+        const Argument* arg = findArgument(schema(), name).second;
+        if(arg->type->isSubtypeOf(NumberType::get())) {
+          return IValue(at::Scalar(ten));
+        }
+        return IValue(ten);
+      }
       case AttributeKind::is:
-        return IValue{as_tensor(is(name))};
+        return IValue(is(name));
       default:
         throw std::runtime_error("get() NYI");
     }
   }
-  auto inp = findInput(name);
-  const Argument & arg = inp.second;
-  if (!inp.first) {
-    return IValue{arg.default_value.value()};
-  }
-  Node * producer = inp.first->node();
-  if (producer->kind() != prim::Constant) return at::nullopt;
-  auto value = producer->t(attr::value);
-  return IValue{std::move(value)};
+  return toIValue(namedInput(name));
 }
 
-Value* Node::input(Symbol name) {
-  // TODO (apaszke): remove once tracer and compiler stop emitting attributes
-  if (hasAttribute(name)) {
-    switch (kindOf(name)) {
-      case AttributeKind::i:
-        return owningGraph()->insertConstant(i(name));
-      case AttributeKind::is:
-        return owningGraph()->insertConstant(is(name));
-      case AttributeKind::t:
-        return owningGraph()->insertConstant(t(name));
-      default:
-        throw std::runtime_error("getValue() NYI");
-    }
+Value* Node::namedInput(Symbol name) const {
+  if(hasAttribute(name)) {
+    // XXX - const cast because this really should not be modifying graph
+    // and once we remove attributes it no longer will
+    Value* v = insertConstant(const_cast<Graph&>(*owningGraph()), get(name).value());
+    // XXX - insert point can be anywhere since modifying the graph is unexpected,
+    // so this is completely unsafe and needs to be gone as soon as possible.
+    return v;
   }
-  auto inp = findInput(name);
-  if (inp.first) return inp.first;
-  return owningGraph()->insertConstant(inp.second.default_value.value());
-}
-
-// XXX: the first coordinate can be a nullptr, which means that you should use
-// the default value for this arg, because it's optional and missing
-std::pair<Value*, const Argument&> Node::findInput(Symbol name) {
-  if (!schema_) {
-    findSchema();
+  const auto & the_schema = schema();
+  int64_t tensor_list_pos = 0;
+  for (auto & arg : the_schema.arguments) {
+    if (*arg.type == *ListType::ofTensors())
+      break;
+    tensor_list_pos++;
   }
-  auto name_str = name.toUnqualString();
-  size_t input_i = 0;
-  for (size_t i = 0; i < schema_->arguments.size(); ++i) {
-    const auto & arg = schema_->arguments[i];
-    if (hasAttributeS(arg.name)) continue;
-    if (arg.name == name_str) {
-      if (input_i < inputs().size()) {
-        return std::pair<Value*, const Argument&>(input(input_i), arg);
-      } else {
-        JIT_ASSERT(arg.default_value);
-        return std::pair<Value*, const Argument&>(nullptr, arg);
-      }
-    }
-    input_i++;
+  int64_t arg_pos = findArgument(schema(), name).first;
+  // XXX: we don't have a single value we could give for a Tensor[],
+  // because we flatten lists into arguments
+  JIT_ASSERT(arg_pos != tensor_list_pos);
+  // NB: if there's no tensor list, then tensor_list_pos == arguments.size(), so this is always true
+  if (arg_pos < tensor_list_pos) {
+    return input(arg_pos);
+  } else {
+    return input(inputs().size() - (the_schema.arguments.size() - arg_pos));
   }
-  throw std::runtime_error(std::string("Couldn't find an argument called ") + name.toQualString());
 }
 
 bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inputs) {
@@ -733,7 +646,7 @@ bool Node::matches(const char *signature_literal, at::ArrayRef<Symbol> const_inp
   return true;
 }
 
-void Node::findSchema() {
+void Node::findSchema() const {
   schema_ = &getOperatorFor(this).schema;
 }
 

@@ -3,8 +3,8 @@
 
 #include <string>
 #include "caffe2/core/net.h"
-#include "caffe2/core/predictor.h"
 #include "caffe2/mobile/contrib/ios/ios_caffe_defines.h"
+#include "caffe2/predictor/predictor.h"
 
 struct Tensor {
   std::vector<int64_t> dims;
