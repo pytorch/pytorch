@@ -177,7 +177,7 @@ AT_ERROR("gesv: MAGMA library not found in "
   lu.resize_({ay, ax});
   lu.copy_(A.t());
   sol.resize_({by, bx});
-  sol.copy_(self.view({bx, by}).t());
+  sol.copy_(self.view({by, bx}).contiguous());
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
       auto A_ptr = lu.data<scalar_t>();
