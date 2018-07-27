@@ -388,8 +388,10 @@ private:
     auto graph_ = graph->copy();
     runRequiredPasses(graph_);
     if(optimize) {
-      if(!symbolically_differentiable)
+      if(!symbolically_differentiable) {
+        EraseShapeInformation(*graph_);
         CreateAutodiffSubgraphs(*graph_);
+      }
       runOptimization(graph_, /*graphMustSupportVariables=*/true);
     }
     autograd_fallback_graph = graph_;

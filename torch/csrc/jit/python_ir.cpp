@@ -281,7 +281,10 @@ void initPythonIRBindings(PyObject * module_) {
 
   #undef VS
 
-  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block");
+  py::class_<Block, std::unique_ptr<Block, py::nodelete>>(m, "Block")
+    .def("nodes",[](Block &b) {
+      return py::make_iterator(b.nodes().begin(), b.nodes().end());
+    });
 
   #define NS(name) \
     def(#name,&Node :: name)
@@ -461,6 +464,8 @@ void initPythonIRBindings(PyObject * module_) {
       }
       return types;
     });
+  py::class_<ListType, Type, std::shared_ptr<ListType>>(m, "ListType")
+    .def_static("ofInts", &ListType::ofInts);
 
   py::class_<Use>(m,"Use")
   .def_readonly("user",&Use::user)

@@ -19,6 +19,51 @@ namespace torch { namespace jit { namespace tracer {
 ////////////////////////////////////////////////////////////////////////////////
 namespace detail {
 
+template<typename T>
+void genericAddInput(Node *n, T value) {
+  n->addInput(insertConstant(*n->owningGraph(), value));
+}
+
+void badArgType() {
+  throw std::runtime_error("Found an unsupported argument type in the JIT tracer. File a bug report.");
+}
+
+
+void addInputs(Node *n, const char * name, int64_t value)            { genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, bool value)               { genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, double value)             { genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Scalar& value)  { genericAddInput(n, value); }
+void addInputs(Node *n, const char * name, const at::Tensor& value)  { n->addInput(getValueTrace(value)); }
+void addInputs(Node *n, const char * name, const std::string& value)         { badArgType(); }
+void addInputs(Node *n, const char * name, const at::SparseTensorRef& value) { badArgType(); }
+
+void addInputs(Node *n, const char * name, at::TensorList value) {
+  for (auto & t : value) {
+    n->addInput(getValueTrace(t));
+  }
+}
+
+void addInputs(Node *n, const char * name, at::IntList value) {
+  using ArgumentStash = jit::tracer::ArgumentStash;
+  std::vector<Value*> info = ArgumentStash::hasIntList(name) ?
+    ArgumentStash::popIntList(name) :
+    ArgumentStash::IntListTrace(value.size());
+
+  auto& g = getTracingState()->graph;
+  for (size_t i = 0; i < info.size(); ++i) {
+    if (info[i] != nullptr) continue;
+    info[i] = insertConstant(*g, value[i]);
+  }
+  for (jit::Value* v : info) {
+    if (*v->type() != *jit::IntType::get()) {
+      throw std::runtime_error(
+        "Type mismatch in setposattr for IntList. Check that your program "
+        "is valid without tracing, and please file a bug report if it is.");
+    }
+  }
+  n->addInput(g->insertNode(g->createList(jit::IntType::get(), info))->output());
+}
+
 thread_local std::shared_ptr<TracingState> tracing_state;
 
 } // namespace detail
@@ -35,13 +80,6 @@ TracingState::TracingState()
     : graph(new Graph()) {}
 
 TracingState::~TracingState() = default;
-
-PreTraceInfo preRecordTrace(Symbol op,
-                            at::ArrayRef<Variable> inputs) {
-  return makePreTraceInfo(inputs, [&op](const std::shared_ptr<TracingState>& state, Graph& graph) {
-    return graph.create(op, 0 /* initial outputs */);
-  });
-}
 
 void postRecordTrace(const PreTraceInfo& info,
                      at::ArrayRef<Variable> outputs) {

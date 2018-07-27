@@ -210,8 +210,8 @@ struct SchemaParser {
   Lexer L;
   bool kwarg_only;
 };
-}
 
+} // namespace script
 
 namespace {
 
@@ -271,7 +271,7 @@ struct OperatorRegistry  {
     operators_by_sig[canonicalSchemaString(op.schema)] = op_ptr;
   }
 
-  Operator& lookupByLiteral(const char * name) {
+  const std::shared_ptr<Operator>& lookupByLiteral(const char * name) {
     auto it = operators_by_sig_literal.find(name);
     if (it == operators_by_sig_literal.end()) {
       auto op_ptr_it = operators_by_sig.find(name);
@@ -286,7 +286,7 @@ struct OperatorRegistry  {
       JIT_ASSERTM(op_ptr_it != operators_by_sig.end(), "Couldn't find an operator for %s", name);
       it = operators_by_sig_literal.emplace_hint(it, name, op_ptr_it->second);
     }
-    return *it->second;
+    return it->second;
   }
 
   const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
@@ -315,7 +315,7 @@ const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
 }
 
 Operator& sig(const char *signature) {
-  return getRegistry().lookupByLiteral(signature);
+  return *getRegistry().lookupByLiteral(signature);
 }
 
 FunctionSchema parseSchema(const std::string& schema) {
@@ -429,6 +429,28 @@ const Operator& getOperatorFor(const Node* node) {
     er << "  " << candidate->schema << "\n";
   }
   throw er;
+}
+
+
+OperatorSet::OperatorSet(std::initializer_list<const char *> sig_literals) {
+  auto & registry = getRegistry();
+  for (const char * sig : sig_literals) {
+    auto op = registry.lookupByLiteral(sig);
+    ops[Symbol::fromQualString(op->schema.name)].push_back(op);
+  }
+}
+
+Operator* OperatorSet::find(Node *n) {
+  auto it = ops.find(n->kind());
+  if (it == ops.end()) {
+    return nullptr;
+  }
+  for (auto & op : it->second) {
+    if (op->matches(n)) {
+      return op.get();
+    }
+  }
+  return nullptr;
 }
 
 }}
