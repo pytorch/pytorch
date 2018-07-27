@@ -119,14 +119,14 @@ struct Method {
     for (size_t i=0; i < retval->inputs().size(); ++i) {
       auto scalar_type = inputs[i].type().scalarType();
       auto sizes = inputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->inputs()[i]->setType(type);
     }
     JIT_ASSERT(retval->outputs().size() == outputs.size());
     for (size_t i=0; i < retval->outputs().size(); ++i) {
       auto scalar_type = outputs[i].type().scalarType();
       auto sizes = outputs[i].sizes();
-      auto type = std::make_shared<torch::jit::TensorType>(scalar_type, -1, sizes);
+      auto type = torch::jit::TensorType::create(scalar_type, -1, sizes);
       retval->outputs()[i]->setType(type);
     }
     return retval;

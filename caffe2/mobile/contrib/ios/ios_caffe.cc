@@ -1,8 +1,8 @@
 
 #include "ios_caffe.h"
-#include "caffe2/core/predictor.h"
 #include "caffe2/core/tensor.h"
 #include "caffe2/mobile/contrib/ios/ios_caffe_predictor.h"
+#include "caffe2/predictor/predictor.h"
 
 Caffe2IOSPredictor* MakeCaffe2Predictor(const std::string& init_net_str,
                                         const std::string& predict_net_str,

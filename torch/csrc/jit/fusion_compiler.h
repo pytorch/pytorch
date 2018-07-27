@@ -29,7 +29,7 @@ struct TensorDesc {
   : TensorDesc(type, TensorDesc::findContiguous(sizes, strides)) {}
   TensorDesc(const at::Tensor& t)
     : TensorDesc(t.type().scalarType(), t.sizes(), t.strides()) {}
-  TensorDesc(TensorType *type)
+  TensorDesc(TensorTypePtr type)
     : TensorDesc(type->scalarType(), type->sizes(), type->strides()) {}
 
   // number of dimensions after contiguity compression

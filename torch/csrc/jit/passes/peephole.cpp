@@ -30,7 +30,7 @@ void PeepholeOptimize(Block * block) {
       if (auto input_type = node->namedInput(attr::self)->type()->cast<TensorType>()) {
         auto expanded_sizes = node->get<std::vector<int64_t>>(attr::size);
         if (expanded_sizes == input_type->sizes()) {
-          node->output()->replaceAllUsesWith(node->input());
+          node->output()->replaceAllUsesWith(node->namedInput(attr::self));
         }
       }
     } else if (node->matches("aten::t(Tensor self) -> Tensor")) {
