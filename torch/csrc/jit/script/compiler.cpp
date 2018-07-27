@@ -685,12 +685,16 @@ struct to_ir {
       auto range = return_stmt.range();
       size_t return_type_idx = 0;
       for (auto& r : results) {
-        if(r->type()->isSubtypeOf(NumberType::get())) {
-          graph->registerOutput(numToTensor(range, r));
-        } else {
-          ensureTensor(range, r);
-          graph->registerOutput(r);
+        // TODO: support tuples and lists as returns
+        auto return_kind = r->type()->kind();
+        if (return_kind != TypeKind::TensorType &&
+            return_kind != TypeKind::DynamicType &&
+            return_kind != TypeKind::IntType &&
+            return_kind != TypeKind::FloatType) {
+          throw ErrorReport(return_stmt.range()) << "The only supported return types "
+            << "are tensors, ints and floats";
         }
+        graph->registerOutput(r);
         TypePtr type = DynamicType::get();
         if (typed_def.schema) {
           type = typed_def.schema->returns.at(return_type_idx).type;
