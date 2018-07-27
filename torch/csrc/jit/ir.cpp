@@ -240,7 +240,7 @@ static void checkSameDevice(const Node* node) {
   bool has_device = false;
   int device;
   auto checkValue = [&](const Value* v) {
-    if(TensorType* type = v->type()->cast<TensorType>()) {
+    if(TensorTypePtr type = v->type()->cast<TensorType>()) {
       if(!has_device) {
         has_device = true;
         device = type->device();
@@ -596,7 +596,7 @@ at::optional<IValue> Node::get(Symbol name) const {
         // disambiguate via schema
         at::Tensor ten = t(name);
         const Argument* arg = findArgument(schema(), name).second;
-        if(arg->type->isSubtypeOf(*NumberType::get())) {
+        if(arg->type->isSubtypeOf(NumberType::get())) {
           return IValue(at::Scalar(ten));
         }
         return IValue(ten);
