@@ -7611,11 +7611,13 @@ class TestTorch(TestCase):
     @unittest.skipIf(not TEST_NUMPY, "Numpy not found")
     def test_multiplication_numpy_scalar(self):
         for np_dtype in [np.float32, np.float64, np.int32, np.int64]:
-            np_sc = np_dtype(2.0)
-            t = torch.ones(2, requires_grad=True)
-            r1 = t * np_sc
-            self.assertIsInstance(r1, torch.Tensor)
-            self.assertTrue(r1.requires_grad)
+            for t_dtype in [torch.float, torch.double]:
+                np_sc = np_dtype(2.0)
+                t = torch.ones(2, requires_grad=True, dtype=t_dtype)
+                r1 = t * np_sc
+                self.assertIsInstance(r1, torch.Tensor)
+                self.assertTrue(r1.dtype == t_dtype)
+                self.assertTrue(r1.requires_grad)
 
     def test_error_msg_type_translation(self):
         with self.assertRaisesRegex(
