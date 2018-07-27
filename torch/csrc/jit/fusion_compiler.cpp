@@ -4,6 +4,7 @@
 #include "torch/csrc/jit/ir.h"
 #include "torch/csrc/jit/code_template.h"
 #include "torch/csrc/jit/resource_guard.h"
+#include "torch/csrc/jit/constants.h"
 
 #include "torch/csrc/utils/disallow_copy.h"
 #include "torch/csrc/variable_tensor_functions.h"
@@ -196,15 +197,14 @@ static std::string valueName(Value * n) {
   return "n" + std::to_string(n->unique());
 }
 
-static std::string scalarValue(const at::Tensor & t) {
-  auto s =  at::Scalar(t);
-  if (s.isIntegral()){
-    return std::to_string(s.toLong());
-  } else {
-     std::ostringstream out;
-     out << std::scientific << s.toDouble() << "f";
-     return out.str();
-  }
+static std::string scalarValue(int64_t v) {
+  return std::to_string(v);
+}
+
+static std::string scalarValue(double v) {
+  std::ostringstream out;
+  out << std::scientific << v << "f";
+  return out.str();
 }
 
 static const char * scalarTypeName(at::ScalarType type) {
@@ -280,42 +280,31 @@ std::string encodeRHS(Node * n) {
     {aten::remainder, "remainderf(${0}, ${1})"},
     {aten::pow, "powf(${0}, ${1})"},
 
-    //alpha
-    {aten::add, "${0} + ${alpha}*${1}"},
-    {aten::sub, "(${0} - ${alpha}*${1})"},
-
-    // special
-    {aten::lerp, "${0} + ${weight}*(${1} - ${0})"},
-    {aten::clamp, "min(max(${0},${min}),${max})"},
+    // binary with alpha
+    {aten::add, "${0} + ${2}*${1}"},
+    {aten::sub, "(${0} - ${2}*${1})"},
 
     // simple derivatives
     {aten::_sigmoid_backward, "${0} * ${1} * (1.f - ${1})"},
     {aten::_tanh_backward,    "${0} * (1.f - ${1} * ${1})"},
   };
 
+  if (n->kind() == prim::Constant) {
+    auto val = toIValue(n->output()).value();
+    if (val.isDouble()) {
+      return scalarValue(val.toDouble());
+    } else {
+      JIT_ASSERT(val.isInt());
+      return scalarValue(val.toInt());
+    }
+  }
 
   TemplateEnv env;
   size_t i = 0;
   for(auto in : n->inputs()) {
     env.s(std::to_string(i++), valueName(in));
   }
-  // TODO (apaszke): remove once we get rid of attributes
-  // ops like div have a / b or a / 2 with the constant having the attribute other
-  // so we add other as an input if it is present
-  // 'pow' is the same but uses exponent as the attribute, so we handle that here as well
-  if(n->hasAttribute(attr::other) || n->hasAttribute(attr::exponent)) {
-    env.s(std::to_string(i), scalarValue(n->t(attr::other)));
-  }
-  // we also add any other scalar tensors to the env for special ops
-  for(auto a : n->attributeNames()) {
-    if(n->kindOf(a) == AttributeKind::t) {
-      auto v = n->t(a);
-      if(v.dim() == 0) {
-        JIT_ASSERT(a.is_attr());
-        env.s(a.toUnqualString(), scalarValue(v));
-      }
-    }
-  }
+
   const auto & str = simple_map_ops.at(n->kind());
   return format(str, env);
 }
@@ -362,9 +351,12 @@ std::vector<ConcatDesc> emitCompilationUnit(std::ostream & out,
         flat_output_nodes.push_back(o);
       } else {
         auto cat = o->node();
-        size_t nInputs = cat->inputs().size();
+        auto tensor_inputs = cat->inputs();
+        // We need to drop the dim arg
+        tensor_inputs = tensor_inputs.slice(0, tensor_inputs.size() - 1);
+        size_t nInputs = tensor_inputs.size();
         concat_desc.emplace_back(desc, nInputs, cat->get<int64_t>(attr::dim).value());
-        for(auto c : cat->inputs()) {
+        for(auto c : tensor_inputs) {
           emitFormal(c, *concat_desc.back().subtensorDesc);
           flat_output_nodes.push_back(c);
         }

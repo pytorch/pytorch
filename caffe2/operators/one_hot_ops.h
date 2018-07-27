@@ -13,6 +13,9 @@ class OneHotOp final : public Operator<Context> {
  public:
   USE_OPERATOR_CONTEXT_FUNCTIONS;
 
+  // TODO: enable input filler
+  DISABLE_INPUT_FILLERS(Context)
+
   OneHotOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
 
@@ -58,6 +61,8 @@ class BatchOneHotOp final : public Operator<Context> {
   BatchOneHotOp(const OperatorDef& operator_def, Workspace* ws)
       : Operator<Context>(operator_def, ws) {}
 
+  USE_VALUE_KEY_LENGTH_INPUT_FILLERS(Context, X, VALS, LENS)
+
   bool RunOnDevice() override {
     return DispatchHelper<TensorTypes<int32_t, int64_t>>::call(this, Input(X));
   }
@@ -82,6 +87,9 @@ class BatchBucketOneHotOp final : public Operator<Context> {
       : Operator<Context>(operator_def, ws) {}
 
   bool RunOnDevice() override;
+
+  // TODO: enable input filler
+  DISABLE_INPUT_FILLERS(Context)
 
  protected:
   INPUT_TAGS(X, LENS, BOUNDARIES);
