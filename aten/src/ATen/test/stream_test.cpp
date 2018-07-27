@@ -210,3 +210,19 @@ TEST_CASE("Streampool Round Robin") {
 
   REQUIRE(hasDuplicates);
 }
+
+// Note: to be expanded once CUDAEvent PR is accepted
+TEST_CASE("Multi-GPU") {
+  if (at::cuda::getNumGPUs() < 2) return;
+
+  at::cuda::CUDAStream s0 = at::cuda::createCUDAStream(true, 0);
+  at::cuda::CUDAStream s1 = at::cuda::createCUDAStream(false, 1);
+
+  at::cuda::setCurrentCUDAStream(s0);
+  at::cuda::setCurrentCUDAStream(s1);
+
+  REQUIRE(s0 == at::cuda::getCurrentCUDAStream());
+
+  at::DeviceGuard device_guard{1};
+  REQUIRE(s1 == at::cuda::getCurrentCUDAStream());
+}

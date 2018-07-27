@@ -1,6 +1,7 @@
 #include "ATen/cuda/CUDAStream.h"
 #include "ATen/cuda/CUDAContext.h"
 #include "ATen/cuda/Exceptions.h"
+#include "ATen/DeviceGuard.h"
 #include "ATen/Error.h"
 
 #include <mutex>
@@ -79,6 +80,10 @@ namespace detail {
 
   // Creates the low and high priority stream pools for the specified device
   static void initDeviceStreamState(const int64_t device) {
+    // Switches to the requested device so streams are properly associated
+    // with it.
+    at::DeviceGuard device_guard{device};
+
     low_priority_streams[device].resize(STREAMS_PER_POOL);
     high_priority_streams[device].resize(STREAMS_PER_POOL);
     
@@ -162,6 +167,8 @@ namespace detail {
     initCUDAStreamsOnce();
     if (device == -1) device = current_device();
     check_gpu(device);
+    
+    // Initializes the stream pools (once)
     std::call_once(device_flags[device], initDeviceStreamState, device);
 
     if (isHighPriority) {
