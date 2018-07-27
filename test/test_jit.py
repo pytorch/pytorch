@@ -627,7 +627,7 @@ class TestJit(JitTestCase):
         y = torch.tensor([0.7], dtype=torch.float, device=device)
 
         def doit(x, y):
-            return torch.sigmoid(torch.tanh(x * (x + y) + 1))
+            return torch.sigmoid(torch.tanh(x * (x + y) + x))
 
         ge = self.checkTrace(doit, (x, y))
         self.assertExpectedGraph(ge.graph_for(x, y))

@@ -279,6 +279,10 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
   if (node->matches("aten::add(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
       node->matches("aten::sub(Tensor self, Tensor other, *, Scalar alpha) -> Tensor") ||
       node->matches("aten::mul(Tensor self, Tensor other) -> Tensor")) {
+    // These nodes and "div" handle tensors of different shapes internally,
+    // so there's no need to insert explicit expand nodes. Note that "div" is
+    // handled by the fallthrough because it's not always safe to run it due
+    // to integer divide-by-zero.
     PropagateShapeOnNodeByRunningIt(node);
     return;
   } else if (insert_expands && (
