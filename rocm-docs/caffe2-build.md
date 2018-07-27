@@ -57,3 +57,33 @@ Navigate to pytorch directory `cd /pytorch` inside the container.
 
 ### Run benchmarks
 
+Navigate to build directory, `cd /pytorch/build_caffe2` to run benchmarks.
+
+Caffe2 benchmarking script supports the following networks.
+1. MLP
+2. AlexNet
+3. OverFeat
+4. VGGA
+5. Inception
+6. Inception_v2
+7. Resnet50 
+
+*Special case:* Inception_v2 and Resnet50 will need their corresponding protobuf files to run the benchmarks. Protobufs can be downloaded from caffe2 model zoo using the below command. Substitute model_name with `inception_v2` or `resnet50`
+
+```
+python caffe2/python/models/download.py <model_name>
+```
+This will download the protobufs to current working directory.
+
+* To run benchmarks for networks MLP, AlexNet, OverFeat, VGGA, Inception, run the command replacing `<name_of_the_netwrok>` with one of the networks. 
+
+```
+python caffe2/python/convnet_benchmarks.py --batch_size 64 --model <name_of_the_network> --engine MIOPEN --layer_wise_benchmark True --net_type simple
+
+```
+To run Inception_v2 or Resnet50, please add additional argument `--model_path` to the above command which should point to the model directories downloaded above.
+
+```
+python caffe2/python/convnet_benchmarks.py --batch_size 64 --model <name_of_the_network> --engine MIOPEN --layer_wise_benchmark True --net_type simple --model_path <path_to_model_protobufs>
+
+```
