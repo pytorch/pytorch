@@ -391,6 +391,9 @@ DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(
     Sign,
     utils::Sign<std::int64_t>)
 
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(float, Inv, utils::Inv<float>)
+DELEGATE_SIMPLE_HIP_UNARY_FUNCTION(double, Inv, utils::Inv<double>)
+
 #undef DELEGATE_SIMPLE_HIP_UNARY_FUNCTION
 
 #define DELEGATE_SINCOS_HIP_FUNCTION(T, fn)                         \
