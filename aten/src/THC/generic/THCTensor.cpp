@@ -468,7 +468,7 @@ void THCTensor_(unfold)(THCState *state, THCTensor *self, THCTensor *src, int di
     }
   }
 
-  THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
+  self->as_strided_(newSize, newStride);
 }
 
 /* we have to handle the case where the result is a number */

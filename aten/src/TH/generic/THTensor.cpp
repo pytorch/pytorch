@@ -474,7 +474,7 @@ void THTensor_(unfold)(THTensor *self, THTensor *src, int dimension, int64_t siz
     }
   }
 
-  THTensor_setSizesAndStrides(self, std::move(newSize), std::move(newStride));
+  self->as_strided_(newSize, newStride);
 }
 
 /* we have to handle the case where the result is a number */

@@ -91,11 +91,24 @@ public:
       return strides_[d];
     }
 
-    inline at::IntList sizes() {
+    // WARNING: This function does not check if the requested
+    // sizes/strides are in bounds for the storage is allocated;
+    // this is the responsibility of the caller
+    void as_strided_(at::IntList sizes, at::IntList strides) {
+      AT_ASSERT(sizes.size() == strides.size());
+      sizes_ = sizes.vec();
+      strides_ = strides.vec();
+      for (auto s : sizes_) {
+        numel_ *= s;
+        if (numel_ == 0) break;
+      }
+    }
+
+    inline at::IntList sizes() const {
       return sizes_;
     }
 
-    inline at::IntList strides() {
+    inline at::IntList strides() const {
       return strides_;
     }
 
@@ -110,7 +123,6 @@ public:
     }
 
     friend void THTensor_resizeDim(THTensor* tensor, int64_t ndim);
-    friend void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride);
     friend void THTensor_setSizeAtDim(THTensor* tensor, int dim, int64_t new_size);
     friend void THTensor_setStrideAtDim(THTensor* tensor, int dim, int64_t new_stride);
     friend void THTensor_setStorageOffset(THTensor* tensor, ptrdiff_t storage_offset);
@@ -148,16 +160,6 @@ inline void THTensor_resizeDim(THTensor* tensor, int64_t ndim) {
   tensor->numel_ = 1;
   for (int64_t i = 0; i < ndim; i++) {
     tensor->numel_ *= tensor->sizes_[i];
-    if (tensor->numel_ == 0) break;
-  }
-}
-
-inline void THTensor_setSizesAndStrides(THTensor* tensor, std::vector<int64_t>&& new_size, std::vector<int64_t>&& new_stride) {
-  tensor->sizes_ = std::move(new_size);
-  tensor->strides_ = std::move(new_stride);
-  tensor->numel_ = 1;
-  for (auto s : tensor->sizes_) {
-    tensor->numel_ *= s;
     if (tensor->numel_ == 0) break;
   }
 }
