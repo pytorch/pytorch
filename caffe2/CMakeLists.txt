@@ -54,7 +54,7 @@ if(BUILD_ATEN)
 else()
   # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
   # This codepath should only be exercised by the Android build.
-  add_subdirectory(../aten/src/ATen/core)
+  add_subdirectory(../aten/src/ATen/core ATen_core)
   list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
   # TODO: We should probably install the headers, but I don't know
   # how to do that.
