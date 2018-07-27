@@ -45,7 +45,7 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
     Output(SAVED_MEAN)->Resize(C);
     Output(SAVED_INV_VAR)->Resize(C);
     EigenVectorArrayMap<float> mean(
-        Output(SAVED_MEAN)->mutable_data<float>(), C);
+        Output(SAVED_MEAN)->template mutable_data<float>(), C);
     EigenVectorArrayMap<float> var(
         Output(SAVED_INV_VAR)->mutable_data<float>(), C);
     if (N > 0) {
@@ -131,7 +131,7 @@ bool SpatialBNOp<CPUContext>::RunOnDevice() {
     inv_std = (var_arr + epsilon_).sqrt().inverse();
   } else {
     EigenVectorArrayMap<float> saved_inv_std(
-        Output(SAVED_INV_VAR)->mutable_data<float>(), C);
+        Output(SAVED_INV_VAR)->template mutable_data<float>(), C);
     saved_inv_std = (saved_inv_std + epsilon_).inverse().sqrt();
     inv_std = saved_inv_std;
   }

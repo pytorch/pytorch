@@ -14,33 +14,33 @@ REGISTER_CPU_OPERATOR(
 OPERATOR_SCHEMA(SpatialSoftmaxWithLoss)
     .NumInputs(2, 3)
     .NumOutputs(2)
-    .TensorInferenceFunction(
-        [](const OperatorDef& def, const vector<TensorShape>& in) {
-          ArgumentHelper helper(def);
-          vector<TensorShape> out(2);
+    .TensorInferenceFunction([](const OperatorDef& def,
+                                const vector<TensorShape>& in) {
+      ArgumentHelper helper(def);
+      vector<TensorShape> out(2);
 
-          auto logits = in[0]; // Tensor with Shape [batch_size, num_classes]
-          auto labels = in[1]; // Tensor with shape [batch_size, ]
-          auto batch_size = logits.dims().Get(0);
-          auto num_classes = logits.dims().Get(1);
+      auto logits = in[0]; // Tensor with Shape [batch_size, num_classes]
+      auto labels = in[1]; // Tensor with shape [batch_size, ]
+      auto batch_size = logits.dims().Get(0);
+      auto num_classes = logits.dims().Get(1);
 
-          CAFFE_ENFORCE_EQ(logits.dims_size(), 4);
-          CAFFE_ENFORCE_EQ(labels.dims_size(), 3);
-          out[0].set_data_type(logits.data_type());
-          out[0].add_dims(batch_size);
-          out[0].add_dims(num_classes);
-          out[0].add_dims(in[0].dims(2));
-          out[0].add_dims(in[0].dims(3));
-          // Output 2 is scalar shape, so no dims added
-          return out;
-        })
+      CAFFE_ENFORCE_EQ(logits.dims_size(), 4);
+      CAFFE_ENFORCE_EQ(labels.dims_size(), 3);
+      out[0].set_data_type(logits.data_type());
+      out[0].add_dims(batch_size);
+      out[0].add_dims(num_classes);
+      out[0].add_dims(in[0].dims(2));
+      out[0].add_dims(in[0].dims(3));
+      // Output 2 is scalar shape, so no dims added
+      return out;
+    })
     .SetDoc(R"DOC(
 Combined Spatial Softmax and Cross-Entropy loss operator.
 Similar to SoftmaxWithLoss, this operator computes the spatial softmax
 normalized values for each layer in the batch of the given input, after which
 cross-entropy loss is computed. This operator is numerically more stable than
 separate Softmax and CrossEntropy ops. The inputs are a 2-D tensor
-(Tensor<float>) of size (batch_size x input_feature_dimensions) and tensor of
+(Tensor) of size (batch_size x input_feature_dimensions) and tensor of
 labels (ground truth).
 Output is tensor with the probability for each label in a pixel for each example
 (N x D x W x H) and averaged loss (scalar).
@@ -78,7 +78,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
         D, 1.f, sum_multiplier_.mutable_data<float>(), &context_);
   }
 
-  float* Pdata = P->mutable_data<float>();
+  float* Pdata = P->template mutable_data<float>();
   const float* weights = (InputSize() > 2 ? Input(2).data<float>() : nullptr);
   CAFFE_ENFORCE_EQ(X.ndim(), 4);
   CAFFE_ENFORCE_EQ(T.ndim(), 3);
@@ -120,7 +120,7 @@ bool SpatialSoftmaxWithLossOp<float, CPUContext>::RunOnDevice() {
 
   // Compute the avg cross-entropy loss
   avg_loss->Resize(vector<TIndex>());
-  float* avg_loss_data = avg_loss->mutable_data<float>();
+  float* avg_loss_data = avg_loss->template mutable_data<float>();
   const int* label_data = T.data<int>();
 
   float sum_label_xent = 0.0f;
@@ -175,13 +175,13 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
   int W = X.dim32(3);
 
   const float* Pdata = P.data<float>();
-  float* dX_data = dX->mutable_data<float>();
+  float* dX_data = dX->template mutable_data<float>();
   const int* label_data = T.data<int>();
 
   // Copy softmax probabilities into dX. All but the neuron
   // corresponding to the correct label has gradient equaling e(x_j)
   // which is the probability under softmax.
-  context_.Copy<float, CPUContext, CPUContext>(P.size(), Pdata, dX_data);
+  context_.CopyFromCPU<float>(P.size(), Pdata, dX_data);
 
   float total_weight = 0.0f;
   for (int y = 0; y < H; ++y) {
@@ -228,7 +228,7 @@ bool SpatialSoftmaxWithLossGradientOp<float, CPUContext>::RunOnDevice() {
       dX->size(),
       d_avg_loss.data<float>(),
       dX->data<float>(),
-      dX->mutable_data<float>(),
+      dX->template mutable_data<float>(),
       &context_);
   return true;
 }

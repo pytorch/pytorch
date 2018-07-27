@@ -20,7 +20,6 @@ REGISTER_HIP_OPERATOR(
 REGISTER_HIP_OPERATOR(PythonDLPack, PythonOp<HIPContext, true>);
 REGISTER_HIP_OPERATOR(PythonDLPackGradient, PythonGradientOp<HIPContext, true>);
 
-REGISTER_BLOB_FETCHER((TypeMeta::Id<TensorHIP>()), TensorFetcher<HIPContext>);
 REGISTER_BLOB_FEEDER(HIP, TensorFeeder<HIPContext>);
 
 namespace py = pybind11;

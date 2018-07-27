@@ -43,7 +43,7 @@ class SumElementsOp : public Operator<Context> {
 
  private:
   bool average_;
-  Tensor<Context> scratch_;
+  Tensor scratch_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -66,7 +66,7 @@ class SumElementsIntOp : public Operator<Context> {
   }
 
  private:
-  Tensor<Context> scratch_;
+  Tensor scratch_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context>
@@ -124,7 +124,7 @@ class SumSqrElementsOp : public Operator<Context> {
   }
 
  private:
-  Tensor<Context> scratch_;
+  Tensor scratch_{Context::GetDeviceType()};
 };
 
 template <typename T, class Context, bool ROWWISE>

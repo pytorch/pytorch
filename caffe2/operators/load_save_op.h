@@ -536,7 +536,7 @@ class CheckpointOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     int64_t iter =
-        OperatorBase::Input<TensorCPU>(0).template data<int64_t>()[0];
+        OperatorBase::Input<Tensor>(0, CPU).template data<int64_t>()[0];
     if (iter % every_ == 0) {
       GetMutableArgument("db", true, &save_op_def_)
           ->set_s(FormatString(db_pattern_, iter));

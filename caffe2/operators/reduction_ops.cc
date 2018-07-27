@@ -296,9 +296,7 @@ bool SumElementsGradientOp<T, Context>::RunOnDevice()
 #endif
 {
   auto& X = Input(0);
-  // Copy Input(1) from Context to CPUContext
-  CPUContext context;
-  TensorCPU sum_grad(Input(1), &context);
+  Tensor sum_grad(Input(1), CPU);
   auto* dX = Output(0);
   dX->ResizeLike(X);
   DCHECK_EQ(sum_grad.size(), 1);
