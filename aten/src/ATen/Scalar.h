@@ -38,12 +38,7 @@ public:
 #undef DEFINE_IMPLICIT_CTOR
 
   // return a new scalar that is guarenteed to be not backed by a tensor.
-  Scalar local() const {
-    if (Tag::HAS_t != tag) {
-      return *this;
-    }
-    return t.pImpl->localScalar();
-  }
+  Scalar local() const;
 
 #define DEFINE_ACCESSOR(type,name,member) \
   type to##name () const { \

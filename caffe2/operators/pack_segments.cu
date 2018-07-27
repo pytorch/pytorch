@@ -53,9 +53,9 @@ template <typename T>
 int64_t int_array_sum(
     const T* dev_array,
     int64_t num_items,
-    Tensor<CUDAContext>& dev_buffer,
-    Tensor<CUDAContext>& dev_sum,
-    Tensor<CPUContext>& host_sum,
+    Tensor& dev_buffer,
+    Tensor& dev_sum,
+    Tensor& host_sum,
     CUDAContext& context) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -82,7 +82,7 @@ int64_t int_array_sum(
       context.cuda_stream());
 
   // Copy to host
-  host_sum.CopyFrom<CUDAContext>(dev_sum);
+  host_sum.CopyFrom(dev_sum);
   context.FinishDeviceComputation();
   return *host_sum.data<int64_t>();
 }
@@ -91,9 +91,9 @@ template <typename T>
 T array_max(
     const T* dev_array,
     int64_t num_items,
-    Tensor<CUDAContext>& dev_max_buffer,
-    Tensor<CUDAContext>& dev_max,
-    Tensor<CPUContext>& host_max,
+    Tensor& dev_max_buffer,
+    Tensor& dev_max,
+    Tensor& host_max,
     CUDAContext& context) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;
@@ -120,7 +120,7 @@ T array_max(
       context.cuda_stream());
 
   // Copy to host
-  host_max.CopyFrom<CUDAContext>(dev_max);
+  host_max.CopyFrom(dev_max);
   context.FinishDeviceComputation();
   return *host_max.data<T>();
 }
@@ -129,8 +129,8 @@ template <typename T>
 void array_prefix_sum_exclusive(
     const T* dev_array,
     const int32_t num_items,
-    Tensor<CUDAContext>& prefix_buffer,
-    Tensor<CUDAContext>& prefix_sum,
+    Tensor& prefix_buffer,
+    Tensor& prefix_sum,
     CUDAContext& context) {
   // Retrieve buffer size
   size_t temp_storage_bytes = 0;

@@ -40,7 +40,7 @@ class PrependDimOp : public Operator<Context> {
 
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           input.meta(),
           input.size(),
           input.raw_data(),
@@ -75,7 +75,7 @@ class MergeDimOp : public Operator<Context> {
 
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           input.meta(),
           input.size(),
           input.raw_data(),

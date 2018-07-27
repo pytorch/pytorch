@@ -84,7 +84,7 @@ FROM_IVALUE = {
     'Scalar': '{}.toScalar()',
     'ScalarType': 'static_cast<at::ScalarType>({}.toInt())',
     'Tensor': '{}.toTensor()',
-    'bool': '{}.toInt()',
+    'bool': 'bool({}.toInt())',
     'double': '{}.toDouble()',
     'int64_t': '{}.toInt()',
     'std::array<bool,2>': 'as_bool_array<2>({}.toIntList()->elements())',
@@ -419,7 +419,9 @@ def signature(decl):
                 .replace('false', 'False') \
                 .replace('nullptr', 'None') \
                 .replace('Reduction::ElementwiseMean', 'ElementwiseMean') \
-                .replace('{}', 'None' if is_tensor_arg(arg) else '[]')
+                .replace('{}', 'None' if is_tensor_arg(arg) else '[]') \
+                .replace('{', '[') \
+                .replace('}', ']')
 
             default = default_map.get(default, default)
             decl = '{}={}'.format(decl, default)

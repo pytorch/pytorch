@@ -96,13 +96,18 @@ void fuseBroadcast(Block *b) {
     JIT_ASSERT(!n->hasAttribute(attr::axis));
 
     auto input_index = n->inputs().size() - 1;
-    auto* expanded_rhs = n->input(input_index)->node();
+    auto* rhs_expand = n->input(input_index)->node();
 
-    // The expanded_rhs input isn't actually an expand, so no fusion available
-    if (expanded_rhs->kind() != aten::expand) continue;
-    if (expanded_rhs->inputs().size() != 1) continue;
+    // The rhs_expand input isn't actually an expand, so no fusion available
+    // XXX: we can't use the ->matches(...) mechanism in here, because input nodes
+    //      have been
+    if (rhs_expand->kind() != aten::expand ||
+        rhs_expand->input(1)->node()->kind() != onnx::Constant ||
+        rhs_expand->input(2)->node()->kind() != onnx::Constant) {
+      continue;
+    }
 
-    auto* unexpanded_rhs = expanded_rhs->input();
+    auto* unexpanded_rhs = rhs_expand->input(0);
 
     // We need to know what the type pre-expand is.  We should basically
     // always have this information (because expands are only ever traced,
@@ -113,7 +118,7 @@ void fuseBroadcast(Block *b) {
     // Not all broadcasts are supported by ONNX broadcast.
     at::optional<size_t> axis = fusibleExpandTo(
         unexpanded_rhs->type()->expect<TensorType>()->sizes(), // from
-        expanded_rhs->output()->type()->expect<TensorType>()->sizes()); // to
+        rhs_expand->output()->type()->expect<TensorType>()->sizes()); // to
     if (axis == at::nullopt)
       continue;
 
@@ -128,8 +133,8 @@ void fuseBroadcast(Block *b) {
         n->i_(attr::axis, axis.value());
       }
     }
-    if (!expanded_rhs->hasUses()) {
-      expanded_rhs->destroy();
+    if (!rhs_expand->hasUses()) {
+      rhs_expand->destroy();
     }
   }
 }
@@ -217,7 +222,7 @@ void pushPackingPastRnn(Block *b) {
     if (n->kind() != prim::PackPadded) {
       continue;
     }
-    if (n->outputs()[0]->uses().size() != 1) {
+    if (n->outputs().at(0)->uses().size() != 1) {
       // For now, only handle the case where there is one consumer.
       continue;
     }
@@ -229,11 +234,20 @@ void pushPackingPastRnn(Block *b) {
     if(rnn->owningBlock() != n->owningBlock())
       continue;
 
+    // Packing only has an effect on a network when its outputs are actually used,
+    // so we can remove it here.
+    if (rnn->outputs().at(0)->uses().empty() && n->outputs().at(1)->uses().size() == 1) {
+      n->outputs().at(0)->replaceAllUsesWith(n->inputs().at(0));
+      n->outputs().at(1)->replaceFirstUseWith(n->inputs().at(1));
+      it.destroyCurrent();
+      continue;
+    }
+
     // The rnn is followed by a transpose and a reshape (if
     // bidirectional), or by a squeeze (if unidirectional).
-    Node * next = rnn->outputs()[0]->uses()[0].user;
+    Node * next = rnn->outputs().at(0)->uses().at(0).user;
     if (next->kind() == onnx::Transpose) {
-      next = next->outputs()[0]->uses()[0].user;
+      next = next->outputs().at(0)->uses().at(0).user;
       if (next->kind() != onnx::Reshape) {
         continue;
       }
@@ -242,38 +256,38 @@ void pushPackingPastRnn(Block *b) {
     }
 
     // remove PackPadded from in front of the RNN
-    n->outputs()[0]->replaceAllUsesWith(n->inputs()[0]);
+    n->outputs().at(0)->replaceAllUsesWith(n->inputs().at(0));
 
     // note there can be multiple uses of the length blob. If we are
     // translating a multi-level RNN it will be an input to each level.
-    n->outputs()[1]->replaceFirstUseWith(n->inputs()[1]);
+    n->outputs().at(1)->replaceFirstUseWith(n->inputs().at(1));
 
     // and insert new PackPadded after the RNN
     Node * newPackPadded = b->owningGraph()->create(prim::PackPadded, 2);
     newPackPadded->insertAfter(next);
 
     // make things consume from the new PackPadded
-    next->outputs()[0]->replaceAllUsesWith(newPackPadded->outputs()[0]);
-    n->outputs()[1]->replaceAllUsesWith(newPackPadded->outputs()[1]);
+    next->outputs().at(0)->replaceAllUsesWith(newPackPadded->outputs().at(0));
+    n->outputs().at(1)->replaceAllUsesWith(newPackPadded->outputs().at(1));
 
     // setup the new PackPadded's inputs
-    newPackPadded->addInput(next->outputs()[0]);
-    newPackPadded->addInput(n->inputs()[1]);
+    newPackPadded->addInput(next->outputs().at(0));
+    newPackPadded->addInput(n->inputs().at(1));
 
     // See https://github.com/pytorch/pytorch/issues/9043 for a full
     // description.  Since PackPadded is for now treated in an
     // unhygenic way, Pytorch ends up propagating an incorrect type.
     // Until a long-term cleanup comes around, we can fix this by
     // resetting the size to the correct value.
-    TensorType* oldType = rnn->inputs()[0]->type()->cast<TensorType>();
+    TensorTypePtr oldType = rnn->inputs().at(0)->type()->cast<TensorType>();
     if (oldType) {
       std::vector<int64_t> new_sizes;
-      new_sizes.push_back(oldType->sizes()[0]);
-      new_sizes.push_back(oldType->sizes()[1]);
+      new_sizes.push_back(oldType->sizes().at(0));
+      new_sizes.push_back(oldType->sizes().at(1));
       new_sizes.push_back(rnn->i(attr::hidden_size));
-      TensorTypePtr newType = std::make_shared<TensorType>(
+      TensorTypePtr newType = TensorType::create(
           oldType->scalarType(), oldType->device(), new_sizes);
-      next->outputs()[0]->setType(newType);
+      next->outputs().at(0)->setType(newType);
     }
 
     it.destroyCurrent();

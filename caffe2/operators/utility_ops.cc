@@ -1276,7 +1276,7 @@ template <typename T>
 bool RangeOp<CPUContext>::DoRunOnDevice(
     const T& start,
     const T& step,
-    Tensor<CPUContext>* output) {
+    Tensor* output) {
   auto* output_data = output->template mutable_data<T>();
   for (int i = 0; i < output->size(); ++i) {
     output_data[i] = i * step + start;

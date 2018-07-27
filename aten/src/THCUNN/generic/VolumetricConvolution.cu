@@ -2,6 +2,8 @@
 #define THC_GENERIC_FILE "generic/VolumetricConvolution.cu"
 #else
 
+#include <ATen/div_rtn.h>
+
 static inline void THNN_(VolumetricConvolution_shapeCheck)
                         (THCState *state,
                          THCTensor *input,
@@ -83,9 +85,9 @@ static inline void THNN_(VolumetricConvolution_shapeCheck)
       exactInputDepth,exactInputHeight,exactInputWidth,kT,kH,kW);
   }
 
-  int64_t outputWidth  = (exactInputDepth - kH) / dH + 1;
-  int64_t outputHeight = (exactInputHeight - kT) / dT + 1;
-  int64_t outputDepth  = (exactInputWidth - kW) / dW + 1;
+  int64_t outputWidth  = div_rtn<int64_t>(exactInputDepth - kH, dH) + 1;
+  int64_t outputHeight = div_rtn<int64_t>(exactInputHeight - kT, dT) + 1;
+  int64_t outputDepth  = div_rtn<int64_t>(exactInputWidth - kW, dW) + 1;
 
   if (outputWidth < 1 || outputHeight < 1 || outputDepth < 1)
   {

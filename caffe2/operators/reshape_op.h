@@ -35,9 +35,7 @@ class ReshapeOp : public Operator<Context> {
 
  protected:
   template <typename T>
-  void DoRunWithTypeImpl(
-      const Tensor<Context>& input,
-      Tensor<Context>* output) {
+  void DoRunWithTypeImpl(const Tensor& input, Tensor* output) {
     vector<int64_t> actual_new_shape = new_shape_;
     if (InputSize() == 2) {
       CAFFE_ENFORCE(
@@ -52,8 +50,7 @@ class ReshapeOp : public Operator<Context> {
 
       // Bit awkward, but needed so works on both CPU and CUDA contexts
       std::vector<T> tmpv(shape.size());
-      context_.template CopyBytes<Context, CPUContext>(
-          shape.size() * sizeof(T), shape_data, &tmpv[0]);
+      context_.CopyBytesToCPU(shape.size() * sizeof(T), shape_data, &tmpv[0]);
       actual_new_shape.assign(tmpv.begin(), tmpv.begin() + shape.size());
     }
 
@@ -124,7 +121,7 @@ class ReshapeOp : public Operator<Context> {
     output->Resize(actual_new_shape);
     if (output != &input) {
       // If we are not doing in-place computation, a copy is needed.
-      context_.template CopyItems<Context, Context>(
+      context_.CopyItemsSameDevice(
           input.meta(),
           input.size(),
           input.raw_data(),

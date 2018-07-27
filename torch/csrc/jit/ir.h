@@ -181,7 +181,7 @@ private:
 public:
   Value* setType(const TypePtr type);
   void inferTypeFrom(const at::Tensor& output) {
-    setType(std::make_shared<TensorType>(output));
+    setType(TensorType::create(output));
   }
   const TypePtr & type() const {
     JIT_ASSERT(type_ != nullptr);
@@ -995,13 +995,13 @@ public:
   }
   Node* createTuple(at::ArrayRef<Value*> values) {
     auto types = fmap(values, [](Value* v) { return v->type(); });
-    auto tt = std::make_shared<TupleType>(std::move(types));
+    auto tt = TupleType::create(std::move(types));
     auto n = create(prim::TupleConstruct, values);
     n->output()->setType(tt);
     return n;
   }
   Node* createTupleUnpack(Value * v) {
-    TupleType* tt = v->type()->expect<TupleType>();
+    TupleTypePtr tt = v->type()->expect<TupleType>();
     auto n = create(prim::TupleUnpack, {v}, 0);
     for(auto & element : tt->elements()) {
       n->addOutput()->setType(element);
@@ -1011,9 +1011,9 @@ public:
   Node* createList(const TypePtr& elem_type, at::ArrayRef<Value*> values) {
     auto n = create(prim::ListConstruct, values);
     for(const auto & v : values) {
-      JIT_ASSERT(v->type()->isSubtypeOf(*elem_type));
+      JIT_ASSERT(v->type()->isSubtypeOf(elem_type));
     }
-    n->output()->setType(std::make_shared<ListType>(elem_type));
+    n->output()->setType(ListType::create(elem_type));
     return n;
   }
   Node* createNumToTensor(Value* value) {
