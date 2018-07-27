@@ -46,7 +46,7 @@
     TENSOR##_data = THTensor_getStoragePtr(TENSOR)->data<TYPE>()+TENSOR->storage_offset(); \
     TENSOR##_size = 1; \
     TENSOR##_stride = 1; \
-    for(TENSOR##_i = TENSOR->_dim()-1; TENSOR##_i >= 0; TENSOR##_i--) { \
+    for(TENSOR##_i = THTensor_nDimensionLegacyAll(TENSOR)-1; TENSOR##_i >= 0; TENSOR##_i--) { \
       if(TENSOR->size(TENSOR##_i) != 1) { \
         if(TENSOR->stride(TENSOR##_i) == TENSOR##_size && TENSOR##_i != DIM) \
           TENSOR##_size *= TENSOR->size(TENSOR##_i); \
@@ -59,7 +59,7 @@
     if (!TENSOR##_contiguous) { \
       /* Find the dimension of contiguous sections */ \
       TENSOR##_dim = 1; \
-      for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; TENSOR##_i--) \
+      for(TENSOR##_i = THTensor_nDimensionLegacyAll(TENSOR)-2; TENSOR##_i >= 0; TENSOR##_i--) \
       { \
         if(TENSOR->stride(TENSOR##_i) != TENSOR->stride(TENSOR##_i+1) * TENSOR->size(TENSOR##_i+1) || TENSOR##_i == DIM || TENSOR##_i+1 == DIM) \
           TENSOR##_dim++; \
@@ -69,19 +69,19 @@
       TENSOR##_sizes = TENSOR##_counter + TENSOR##_dim; \
       TENSOR##_strides = TENSOR##_counter + 2*TENSOR##_dim; \
       TH_TENSOR_dim_index = TENSOR##_dim-1; \
-      TENSOR##_dimOffset = (DIM == TENSOR->_dim()-1) ? &TENSOR##_i : &TENSOR##_counter[DIM]; \
-      TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR->_dim()-1); \
-      TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride(TENSOR->_dim()-1); \
+      TENSOR##_dimOffset = (DIM == THTensor_nDimensionLegacyAll(TENSOR)-1) ? &TENSOR##_i : &TENSOR##_counter[DIM]; \
+      TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(THTensor_nDimensionLegacyAll(TENSOR)-1); \
+      TENSOR##_strides[TH_TENSOR_dim_index] = TENSOR->stride(THTensor_nDimensionLegacyAll(TENSOR)-1); \
       /* TENSOR##_counter tracks where we are in the storage. The offset into the */ \
       /* storage is given by storage_offset + (i * j), where i is the stride */ \
       /* vector and j is tensor_counter vector. This sets the starting position for the loop. */ \
       for(TENSOR##_i = TENSOR##_dim-1; TENSOR##_i >= 0; --TENSOR##_i) { \
         TENSOR##_counter[TENSOR##_i] = 0; \
       } \
-      for(TENSOR##_i = TENSOR->_dim()-2; TENSOR##_i >= 0; --TENSOR##_i) { \
+      for(TENSOR##_i = THTensor_nDimensionLegacyAll(TENSOR)-2; TENSOR##_i >= 0; --TENSOR##_i) { \
         if (TENSOR->stride(TENSOR##_i) == TENSOR->stride(TENSOR##_i+1) * TENSOR->size(TENSOR##_i+1) && TENSOR##_i != DIM && TENSOR##_i+1 != DIM) { \
           TENSOR##_sizes[TH_TENSOR_dim_index] = TENSOR->size(TENSOR##_i) * TENSOR##_sizes[TH_TENSOR_dim_index]; \
-          if (DIM != TENSOR->_dim()-1 && TENSOR##_i < DIM) \
+          if (DIM != THTensor_nDimensionLegacyAll(TENSOR)-1 && TENSOR##_i < DIM) \
             TENSOR##_dimOffset--; \
         } else { \
           --TH_TENSOR_dim_index; \
