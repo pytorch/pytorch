@@ -18,7 +18,15 @@ extern "C" void dgetri_(
     int *info);
 extern "C" void sgetri_(
     int *n, float *a, int *lda,
-    int *ipiv, double *work, int *lwork,
+    int *ipiv, float *work, int *lwork,
+    int *info);
+extern "C" void dgetrf_(
+    int *m, int *n, double *a,
+    int *lda, int *ipiv,
+    int *info);
+extern "C" void sgetrf_(
+    int *m, int *n, float *a,
+    int *lda, int *ipiv,
     int *info);
 #endif
 
@@ -27,32 +35,52 @@ namespace native {
 
 template<class scalar_t>
 void lapackGetri(
-    int n, scalar_t* a, int lda,
-    int *ipiv, double *work, int lwork,
+    int n, scalar_t *a, int lda,
+    int *ipiv, scalar_t *work, int lwork,
     int *info) {
   AT_ERROR("getri only takes float or double Tensors");
 }
 
-#ifdef USE_LAPACK
-template<> void lapackGetri<float>(
-    int n, float *a, int lda,
-    int *ipiv, double *work, int lwork,
-    int* info) {
-  sgetri_(&n, a, &lda, ipiv, work, &lwork, info);
+template<class scalar_t>
+void lapackGetrf(
+    int m, int n, scalar_t* a,
+    int lda, int *ipiv, int *info) {
+  AT_ERROR("getrf only takes float or double Tensors");
 }
 
+#ifdef USE_LAPACK
 template<> void lapackGetri<double>(
     int n, double *a, int lda,
     int *ipiv, double *work, int lwork,
-    int* info) {
+    int *info) {
   dgetri_(&n, a, &lda, ipiv, work, &lwork, info);
+}
+
+template<> void lapackGetri<float>(
+    int n, float *a, int lda,
+    int *ipiv, float *work, int lwork,
+    int *info) {
+  sgetri_(&n, a, &lda, ipiv, work, &lwork, info);
+}
+
+template<> void lapackGetrf<double>(
+    int m, int n, double *a,
+    int lda, int *ipiv, int *info) {
+  dgetrf_(&m, &n, a, &lda, ipiv, info);
+}
+
+template<> void lapackGetrf<float>(
+    int m, int n, float *a,
+    int lda, int *ipiv, int *info) {
+  sgetrf_(&m, &n, a, &lda, ipiv, info);
 }
 #endif
 
 template <typename scalar_t>
-static void applyGetri(Tensor& self, std::vector<int64_t> infos) {
+static void applyInverse(
+  Tensor& self, std::vector<int64_t> getrf_infos, std::vector<int64_t> getri_infos) {
 #ifndef USE_LAPACK
-  AT_ERROR("getri: LAPACK library not found in compilation");
+  AT_ERROR("inverse: LAPACK library not found in compilation");
 #endif
   auto self_data = self.data<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
@@ -61,15 +89,32 @@ static void applyGetri(Tensor& self, std::vector<int64_t> infos) {
   auto n = self.size(-2);
 
   auto ipiv = at::empty({n}, self.type().toScalarType(kInt));
-  auto work = at::empty({1}, self.type().toScalarType(kDouble));
-  int lwork = -1;  // compute the optimal work size
+  int lwork;
+  scalar_t wkopt;
+  Tensor work;
 
   for (int64_t i = 0; i < batch_size; i++) {
     int info;
     scalar_t* self_working_ptr = &self_data[i * self_matrix_stride];
+    lapackGetrf<scalar_t>(n, n, self_working_ptr, n, ipiv.data<int>(),
+                          &info);
+    getrf_infos[i] = info;
+    if (info != 0) {
+      return;
+    }
+
+    // Run twice, first to get the optimum work size
+    lwork = -1;
     lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv.data<int>(),
-                          work.data<double>(), lwork, &info);
-    infos[i] = info;
+                          &wkopt, lwork, &info);
+
+    lwork = static_cast<int>(wkopt);
+    work = at::empty({lwork}, self.type());
+
+    // now to compute the actual inverse
+    lapackGetri<scalar_t>(n, self_working_ptr, n, ipiv.data<int>(),
+                          work.data<scalar_t>(), lwork, &info);
+    getri_infos[i] = info;
     if (info != 0) {
       return;
     }
@@ -77,12 +122,14 @@ static void applyGetri(Tensor& self, std::vector<int64_t> infos) {
 }
 
 Tensor _inverse_helper_cpu(const Tensor& self) {
-  std::vector<int64_t> infos(batchCount(self), 0);
+  std::vector<int64_t> getrf_infos(batchCount(self), 0);
+  std::vector<int64_t> getri_infos(batchCount(self), 0);
   auto self_working_copy = cloneBatchedColumnMajor(self);
   AT_DISPATCH_FLOATING_TYPES(self.type(), "inverse", [&]{
-    applyGetri<scalar_t>(self_working_copy, infos);
+    applyInverse<scalar_t>(self_working_copy, getrf_infos, getri_infos);
   });
-  checkErrors(infos);
+  checkErrors(getrf_infos, "getrf");
+  checkErrors(getri_infos, "getri");
   return self_working_copy;
 }
 
@@ -94,7 +141,8 @@ Tensor inverse(const Tensor &self) {
 }
 
 Tensor& inverse_out(Tensor &result, const Tensor &self) {
-  return at::_getri_single_out(result, self);
+  result.copy_(native::inverse(self));
+  return result;
 }
 
 } // namespace native
