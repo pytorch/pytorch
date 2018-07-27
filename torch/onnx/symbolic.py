@@ -837,7 +837,7 @@ def zeros_like(g, input):
 
 def full_like(g, input, fill_value):
     # TODO: a more efficient implementation (ConstantFill?)
-    return add(g, zeros_like(g, input), fill_value, alpha=g.op("Constant", value_t=torch.tensor(1)))
+    return add(g, zeros_like(g, input), fill_value, g.op("Constant", value_t=torch.tensor(1)))
 
 
 @parse_args('v', 'i', 'i', 'i', 'i')
