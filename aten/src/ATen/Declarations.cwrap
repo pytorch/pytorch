@@ -3090,7 +3090,7 @@
       default: S
 ]]
 [[
-  name: _getri
+  name: _getri_single
   cname: getri
   types:
     - Float

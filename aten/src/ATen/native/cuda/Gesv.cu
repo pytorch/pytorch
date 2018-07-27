@@ -6,6 +6,7 @@
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 
 #include "ATen/native/LinearAlgebraUtils.h"
+#include "ATen/native/cuda/LinearAlgebraUtils.h"
 #include "ATen/native/Gesv.h"
 
 #include "THC.h" // for USE_MAGMA
@@ -45,27 +46,6 @@ void magmaGesvBatched<double>(
   magma_dgesv_batched(
       n, nrhs, dA_array, ldda, dipiv_array,
       dB_array, lddb, dinfo_array, batch_count, queue);
-}
-
-static magma_queue_t createMagmaQueue(const Tensor& tensor) {
-  auto& context = tensor.type().get_context();
-  magma_queue_t magma_queue;
-  magma_queue_create_from_cuda(
-      tensor.get_device(),
-      at::cuda::getCurrentCUDAStream(),
-      THCState_getCurrentBlasHandle(context.getTHCState()),
-      THCState_getCurrentSparseHandle(context.getTHCState()),
-      &magma_queue);
-  return magma_queue;
-}
-
-static inline magma_int_t magma_int_cast(int64_t value, const char* varname) {
-  auto result = static_cast<magma_int_t>(value);
-  if (static_cast<int64_t>(result) != value) {
-    AT_ERROR("magma: The value of %s (%lld) is too large to fit into a magma_int_t (%llu bytes)",
-             varname, (long long)value, sizeof(magma_int_t));
-  }
-  return result;
 }
 #endif
 

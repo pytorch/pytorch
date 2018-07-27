@@ -769,6 +769,11 @@
 - func: inverse_out(Tensor result, Tensor self) -> Tensor
   variants: function
 
+- func: _inverse_helper(Tensor self) -> Tensor
+  dispatch:
+    CPU: _inverse_helper_cpu
+    CUDA: _inverse_helper_cuda
+
 - func: isclose(Tensor self, Tensor other, double rtol=1e-5, double atol=1e-8, bool equal_nan=False) -> Tensor
 
 - func: is_cuda(Tensor self) -> bool
