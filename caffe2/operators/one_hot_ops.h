@@ -27,7 +27,7 @@ class OneHotOp final : public Operator<Context> {
         "indices input must be 1D tensor of data type TIndex");
 
     // Index size input must be in CPU context
-    auto& index_size_tensor = OperatorBase::Input<Tensor<CPUContext>>(1);
+    auto& index_size_tensor = OperatorBase::Input<Tensor>(1, CPU);
     CAFFE_ENFORCE_EQ(
         index_size_tensor.size(),
         1,
@@ -50,8 +50,8 @@ class OneHotOp final : public Operator<Context> {
   void DoOneHotOp(
       TIndex batch_size,
       TIndex index_size,
-      const Tensor<Context>& indices,
-      Tensor<Context>* output);
+      const Tensor& indices,
+      Tensor* output);
 };
 
 template <class Context>

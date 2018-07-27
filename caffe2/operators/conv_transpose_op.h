@@ -18,8 +18,8 @@ class ConvTransposeOp final : public ConvTransposeUnpoolBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
   // Input: X, W, b
   // Output: Y
   INPUT_TAGS(INPUT, FILTER, BIAS);
@@ -41,8 +41,8 @@ class ConvTransposeGradientOp final : public ConvTransposeUnpoolBase<Context> {
   bool RunOnDeviceWithOrderNHWC() override;
 
  private:
-  Tensor<Context> col_buffer_;
-  Tensor<Context> bias_multiplier_;
+  Tensor col_buffer_{Context::GetDeviceType()};
+  Tensor bias_multiplier_{Context::GetDeviceType()};
   const bool no_bias_;
   // input: X, W, dY
   // output: dW, optionally db and dX

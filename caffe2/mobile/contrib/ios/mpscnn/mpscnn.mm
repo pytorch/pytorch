@@ -256,9 +256,9 @@ void computeOutputHW(
     int W,
     int* OH,
     int* OW) {
-  Tensor<CPUContext> input, output;
+  Tensor input(CPU), output(CPU);
   input.Resize(1, 1, H, W);
-  op->SetOutputSize<CPUContext>(input, &output, 1);
+  op->SetOutputSize(input, &output, 1);
   CAFFE_ENFORCE_EQ(output.ndim(), 4);
   *OH = output.dim(2);
   *OW = output.dim(3);
@@ -495,7 +495,7 @@ class MPSCNNPackedInt8BGRANHWCToNCHWCStylizerPreprocessOp final
       caffe2::Timer rt;
       // Initialize random noise on first use.
       // Cache it to maintain temporal consistency.
-      auto* t = noiseBlob->template GetMutable<TensorCPU>();
+      auto* t = noiseBlob->GetMutableTensor(CPU);
       t->Resize(noiseSize);
       math::RandGaussian<float, CPUContext>(
           t->size(),

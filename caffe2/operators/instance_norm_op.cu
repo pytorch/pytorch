@@ -206,9 +206,9 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto input_data = input.data<float>();
   const auto scale_data = scale.data<float>();
   const auto bias_data = bias.data<float>();
-  auto output_data = output->mutable_data<float>();
-  auto mean_data = mean->mutable_data<float>();
-  auto inv_stdev_data = inv_stdev->mutable_data<float>();
+  auto output_data = output->template mutable_data<float>();
+  auto mean_data = mean->template mutable_data<float>();
+  auto inv_stdev_data = inv_stdev->template mutable_data<float>();
 
   const auto dim = H * W;
   const auto N_stride = C * H * W;
@@ -283,9 +283,9 @@ bool InstanceNormOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto input_data = input.data<float>();
   const auto scale_data = scale.data<float>();
   const auto bias_data = bias.data<float>();
-  auto output_data = output->mutable_data<float>();
-  auto mean_data = mean->mutable_data<float>();
-  auto inv_stdev_data = inv_stdev->mutable_data<float>();
+  auto output_data = output->template mutable_data<float>();
+  auto mean_data = mean->template mutable_data<float>();
+  auto inv_stdev_data = inv_stdev->template mutable_data<float>();
 
   const auto dim = H * W;
   const auto N_stride = C * H * W;
@@ -370,9 +370,9 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNHWC() {
   const auto bias_data = bias.data<float>();
   const auto output_grad_data = output_grad.data<float>();
 
-  auto input_grad_data = input_grad->mutable_data<float>();
-  auto scale_grad_data = scale_grad->mutable_data<float>();
-  auto bias_grad_data = bias_grad->mutable_data<float>();
+  auto input_grad_data = input_grad->template mutable_data<float>();
+  auto scale_grad_data = scale_grad->template mutable_data<float>();
+  auto bias_grad_data = bias_grad->template mutable_data<float>();
 
   const auto dim = H * W;
   const auto N_stride = C * H * W;
@@ -501,9 +501,9 @@ bool InstanceNormGradientOp<float, CUDAContext>::RunOnDeviceWithOrderNCHW() {
   const auto bias_data = bias.data<float>();
   const auto output_grad_data = output_grad.data<float>();
 
-  auto input_grad_data = input_grad->mutable_data<float>();
-  auto scale_grad_data = scale_grad->mutable_data<float>();
-  auto bias_grad_data = bias_grad->mutable_data<float>();
+  auto input_grad_data = input_grad->template mutable_data<float>();
+  auto scale_grad_data = scale_grad->template mutable_data<float>();
+  auto bias_grad_data = bias_grad->template mutable_data<float>();
 
   const auto dim = H * W;
   const auto N_stride = C * H * W;
