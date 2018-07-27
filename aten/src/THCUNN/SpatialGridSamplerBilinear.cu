@@ -158,7 +158,7 @@ __global__ void SpatialGridSamplerBilinear_updateGradInput_kernel(
     Dtype ne_val;
     Dtype sw_val;
     Dtype se_val;
-    
+
     int ix_nw_cl, iy_nw_cl, ix_ne_cl, iy_ne_cl, ix_sw_cl, iy_sw_cl, ix_se_cl, iy_se_cl;
 
     if (padding_mode==MODE_BORDER){

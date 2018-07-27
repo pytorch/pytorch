@@ -313,6 +313,9 @@
   self: gesv_backward_self(grad, self, A)
   A: gesv_backward_A(grad, self, A, result0)
 
+- name: grid_sampler_2d(Tensor input, Tensor grid, int64_t interpolation_mode, int64_t padding_mode)
+  input, grid: grid_sampler_2d_backward(grad, input, grid, interpolation_mode, padding_mode)
+
 - name: gt_(Tensor self, Scalar other)
   self: zeros_like(self)
 
