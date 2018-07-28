@@ -272,9 +272,10 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
       if (std::all_of(input_types.begin(), input_types.end(),
           [](const TensorTypePtr& tp) { return tp != nullptr; })) {
         std::vector<int64_t> sizes = input_types[0]->sizes();
-        int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
+        const int64_t dim = wrapDim(node->get<int64_t>(attr::dim).value(), sizes);
+        const int64_t ndim = sizes.size();
 
-        if (dim < 0 || dim >= sizes.size())
+        if (dim < 0 || dim >= ndim)
           goto cat_fail;
 
         sizes[dim] = 0;
@@ -282,7 +283,7 @@ void PropagateShapeOnNode(Node * node, bool insert_expands) {
           auto & tp_sizes = tp->sizes();
           if (sizes.size() != tp_sizes.size())
             goto cat_fail;
-          for (size_t i = 0; i < sizes.size(); ++i) {
+          for (size_t i = 0; i < ndim; ++i) {
             if (sizes[i] != tp_sizes[i] && i != dim) {
               goto cat_fail;
             }
