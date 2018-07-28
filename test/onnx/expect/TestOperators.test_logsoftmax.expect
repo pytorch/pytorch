@@ -8,7 +8,7 @@ graph {
     op_type: "LogSoftmax"
     attribute {
       name: "axis"
-      i: 2
+      i: 3
       type: INT
     }
   }
