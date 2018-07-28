@@ -6,7 +6,7 @@
 #include "ATen/cuda/CUDAApplyUtils.cuh"
 
 #include "ATen/native/LinearAlgebraUtils.h"
-#include "ATen/native/cuda/LinearAlgebraUtils.h"
+#include "ATen/native/cuda/MiscUtils.h"
 #include "ATen/native/Getri.h"
 
 #include "THC.h" // for USE_MAGMA
