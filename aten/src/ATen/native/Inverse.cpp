@@ -5,7 +5,7 @@
 #include "ATen/NativeFunctions.h"
 
 #include "ATen/native/LinearAlgebraUtils.h"
-#include "Getri.h"
+#include "Inverse.h"
 
 #include "TH.h" // for USE_LAPACK
 
