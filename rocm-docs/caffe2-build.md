@@ -4,14 +4,31 @@
 This instruction provides a starting point to build caffe2 on AMD GPUs (Caffe2 ROCm port) from source.
 *Note*: it is recommended to start with a clean Ubuntu 16.04 system
 
+## Install docker
+
+ If your machine doesn't have docker installed, follow the steps [here](https://docs.docker.com/install/linux/docker-ce/ubuntu/#install-docker-ce) to install docker.
+
 ## Install ROCm
 
 Install ROCm stack following steps at [link](https://github.com/RadeonOpenCompute/ROCm/blob/master/README.md) if your machine doesn't have ROCm already.
 
-## Build caffe2 inside docker
+Once the machine is ready with ROCm stack, there are two ways to use caffe2 
+* Run the docker container with caffe2 installed in it.
 
- If your machine doesn't have docker installed, follow the steps [here](https://docs.docker.com/install/linux/docker-ce/ubuntu/#install-docker-ce) to install docker.
+* Build caffe2 from source inside a docker with all the dependencies.
 
+## Lauch docker container with caffe2 pre-installed
+```
+docker run -it --network=host --device=/dev/kfd --device=/dev/dri --group-add video rocm/caffe2:rocm1.8.2
+```
+Once the container is launched, set the environment variables
+```
+export LD_LIBRARY_PATH=/usr/local/caffe2/lib:$LD_LIBRARY_PATH
+export PYTHONPATH=/usr/local/caffe2/lib/python2.7/dist-packages:$PYTHONPATH
+```
+To run benchmarks, skip directly to benchmarks section of the document.
+
+## Build Caffe2 from source
 ### Pull the docker image
 ```
 docker pull rocm/caffe2:unbuilt-rocm1.8.2
@@ -55,7 +72,7 @@ Navigate to pytorch directory `cd /pytorch` inside the container.
 
 	Run the binaries under `/pytorch/build_caffe2/bin`
 
-### Run benchmarks
+## Run benchmarks
 
 Navigate to build directory, `cd /pytorch/build_caffe2` to run benchmarks.
 
