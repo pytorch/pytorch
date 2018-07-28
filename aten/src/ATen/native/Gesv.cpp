@@ -86,7 +86,7 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
 
   // init to column major format
   lu.resize_({ay, ax});
-  lu.copy_(A.t());
+  lu.copy_(A.t().contiguous());
   sol.resize_({by, bx});
   sol.copy_(self.view({bx, by}).t().contiguous());
 

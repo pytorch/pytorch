@@ -175,7 +175,7 @@ AT_ERROR("gesv: MAGMA library not found in "
 
   // init to column major format
   lu.resize_({ay, ax});
-  lu.copy_(A.t());
+  lu.copy_(A.t().contiguous());
   sol.resize_({by, bx});
   sol.copy_(self.view({bx, by}).t().contiguous());
 
