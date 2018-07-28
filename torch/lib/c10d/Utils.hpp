@@ -60,6 +60,29 @@ inline void assertSameSizeAndType(const std::vector<at::Tensor>& tensors) {
   }
 }
 
+inline at::Tensor newLikeFlat(std::vector<std::vector<at::Tensor>>& tensors) {
+  if (tensors.size() == 0 || tensors[0].size() == 0) {
+    throw std::runtime_error("Received an empty list");
+  }
+  auto& t = tensors[0][0];
+  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors[0].size()),
+                             static_cast<int64_t>(tensors.size())};
+  sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
+  return t.type().tensor(sizes);
+}
+
+inline at::Tensor newLikeFlat(std::vector<at::Tensor>& tensors) {
+  if (tensors.size() == 0) {
+    throw std::runtime_error("Received an empty list");
+  }
+  auto& t = tensors[0];
+  at::DeviceGuard gpuGuard(t.is_cuda() ? t.get_device() : -1);
+  std::vector<int64_t> sizes{static_cast<int64_t>(tensors.size())};
+  sizes.insert(sizes.end(), t.sizes().begin(), t.sizes().end());
+  return t.type().tensor(sizes);
+}
+
 inline std::vector<std::vector<int64_t>> getSizes(
     const std::vector<at::Tensor>& tensors) {
   std::vector<std::vector<int64_t>> sizes(tensors.size());

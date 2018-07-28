@@ -138,7 +138,7 @@ target_include_directories(c10d PRIVATE ${CMAKE_BINARY_DIR}/include)
 
 install(TARGETS c10d ARCHIVE DESTINATION lib)
 
-option(BUILD_EXAMPLES "Build examples" OFF)
+option(BUILD_EXAMPLES "Build examples" ON)
 if(BUILD_EXAMPLES)
   add_subdirectory(example)
 endif()
