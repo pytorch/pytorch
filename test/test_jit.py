@@ -3682,7 +3682,7 @@ def func(t):
             m_export, storage_map = m_orig.export()
             torch._C._jit_import_module(m_import, m_export, storage_map)
             self.assertEqual(m_orig.foo(), m_import.foo())
-            self.assertEqual(m_orig.foo().dtype, m_import.foo().dtype)
+            self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
     @unittest.skipIf(not RUN_CUDA, "testing cuda tensors require CUDA")
     def test_script_module_export_tensor_cuda(self):
@@ -3700,9 +3700,9 @@ def func(t):
         m_import = torch.jit.ScriptModule()
         m_export, storage_map = m_orig.export()
         torch._C._jit_import_module(m_import, m_export, storage_map)
-        self.assertNotEqual(m_orig.foo().device, m_import.foo().device)
+        self.assertTrue(m_import.foo().device == torch.device('cpu'))
         self.assertEqual(m_orig.foo(), m_import.foo())
-        self.assertEqual(m_orig.foo().dtype, m_import.foo().dtype)
+        self.assertTrue(m_orig.foo().dtype == m_import.foo().dtype)
 
     def test_script_module_export_shared_storage(self):
         class M(torch.jit.ScriptModule):
@@ -3710,7 +3710,7 @@ def func(t):
             def __init__(self):
                 super(M, self).__init__(False)
                 self.param1 = torch.nn.Parameter(torch.rand(5, 5))
-                self.param2 = torch.nn.Parameter(self.param1[1])
+                self.param2 = torch.nn.Parameter(self.param1[3])
                 self.param3 = torch.nn.Parameter(torch.rand(5, 5))
 
             @torch.jit.script_method
@@ -3722,8 +3722,8 @@ def func(t):
         m_export, storage_map = m_orig.export()
         torch._C._jit_import_module(m_import, m_export, storage_map)
         self.assertEqual(m_orig.foo(), m_import.foo())
-        self.assertEqual(m_import.param1.storage(), m_import.param2.storage())
-        self.assertNotEqual(m_import.param1.storage(), m_import.param3.storage())
+        self.assertTrue(m_import.param1.storage().data_ptr() == m_import.param2.storage().data_ptr())
+        self.assertTrue(m_import.param1.storage().data_ptr() != m_import.param3.storage().data_ptr())
 
     def test_onnx_export_script_module(self):
         class ModuleToExport(torch.jit.ScriptModule):
