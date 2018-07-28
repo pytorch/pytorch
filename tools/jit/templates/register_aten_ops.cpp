@@ -41,12 +41,6 @@ int deviceForInputs(Stack & stack, size_t N) {
   return t.type().is_cuda() ? (int) t.get_device() : -1;
 }
 
-std::vector<at::Tensor> toTensors(at::ArrayRef<IValue> ivalues) {
-  return fmap(ivalues, [](const IValue& v) {
-    return v.toTensor();
-  });
-}
-
 template<size_t N>
 std::array<bool, N> as_bool_array(const std::vector<int64_t>& vec) {
   std::array<bool, N> res;
