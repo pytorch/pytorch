@@ -4239,23 +4239,63 @@ class TestTorch(TestCase):
     def test_signal_window_functions(self):
         self._test_signal_window_functions(self)
 
-    @skipIfNoLapack
-    def test_inverse(self):
-        M = torch.randn(5, 5)
+    @staticmethod
+    def _test_inverse(self, cast):
+        # no batches: 2-D tensors
+        M = cast(torch.randn(5, 5))
         MI = torch.inverse(M)
-        E = torch.eye(5)
-        self.assertFalse(MI.is_contiguous(), 'MI is contiguous')
+        E = cast(torch.eye(5))
         self.assertEqual(E, torch.mm(M, MI), 1e-8, 'inverse value')
         self.assertEqual(E, torch.mm(MI, M), 1e-8, 'inverse value')
 
-        MII = torch.Tensor(5, 5)
+        MII = cast(torch.Tensor(5, 5))
         torch.inverse(M, out=MII)
-        self.assertFalse(MII.is_contiguous(), 'MII is contiguous')
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
         # second call, now that MII is transposed
         torch.inverse(M, out=MII)
-        self.assertFalse(MII.is_contiguous(), 'MII is contiguous')
         self.assertEqual(MII, MI, 0, 'inverse value in-place')
+
+        # one batch
+        M = cast(torch.randn(1, 5, 5))
+        MI = torch.inverse(M)
+        expected_inv = M.squeeze(0).inverse()
+        self.assertEqual(MI, expected_inv.unsqueeze(0))
+
+        # four batches
+        M = cast(torch.randn(4, 5, 5))
+        MI = torch.inverse(M)
+        expected_inv_list = []
+        for i in range(0, 4):
+            expected_inv_list.append(torch.inverse(M[i]))
+        expected_inv = torch.stack(expected_inv_list)
+        self.assertEqual(MI, expected_inv)
+
+        # correctness test
+        M = cast(torch.randn(3, 5, 5))
+        MI = torch.inverse(M)
+        self.assertEqual(torch.matmul(M, MI), E.expand_as(M))
+        self.assertEqual(torch.matmul(MI, M), E.expand_as(M))
+
+        # torch.inverse with out and batches
+        M = cast(torch.randn(3, 5, 5))
+        MI = cast(torch.randn(3, 5, 5))
+        torch.inverse(M, out=MI)
+        self.assertEqual(torch.inverse(M), MI)
+
+        # non-contiguous inputs
+        if not TEST_NUMPY:
+            return
+
+        from numpy.linalg import inv
+        M = cast(torch.randn(2, 3, 3)).permute(0, 2, 1)
+        assert not M.is_contiguous()
+        MI = torch.inverse(M)
+        expected_inv = torch.as_tensor(inv(M.cpu().numpy()))
+        self.assertEqual(MI, cast(expected_inv))
+
+    @skipIfNoLapack
+    def test_inverse(self):
+        self._test_inverse(self, lambda t: t)
 
     @staticmethod
     def _test_pinverse(self, conv_fn):

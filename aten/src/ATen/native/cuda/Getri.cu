@@ -79,7 +79,7 @@ void magmaGetrfBatched<float>(
 
 #define ALLOCATE_ARRAY(name, type, size, dummy_tensor) \
   auto storage_##name = pin_memory<type>(size, dummy_tensor); \
-  name = reinterpret_cast<type*>(storage_##name->data());
+  name = reinterpret_cast<type*>(storage_##name->pImpl()->data());
 
 template <typename scalar_t>
 static void applyInverse(
