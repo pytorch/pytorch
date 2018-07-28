@@ -710,7 +710,14 @@ def pow(g, self, exponent):
 
 @parse_args('v', 'f', 'f')
 def clamp(g, self, min, max):
-    return g.op("Clip", self, min_f=min, max_f=max)
+    # check min/max is NaN or not, and dispatch the call
+    # a != a means a == NaN
+    if min != min:
+        return clamp_max(g, self, max)
+    elif max != max:
+        return clamp_min(g, self, min)
+    else:
+        return g.op("Clip", self, min_f=min, max_f=max)
 
 
 @parse_args('v', 'f')

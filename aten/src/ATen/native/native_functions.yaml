@@ -266,17 +266,26 @@
 - func: chunk(Tensor self, int64_t chunks, int64_t dim=0) -> TensorList
 
 - func: clamp(Tensor self, Scalar min, Scalar max) -> Tensor
+  python_default_init:
+    min: NAN
+    max: NAN
 
 - func: clamp_(Tensor self, Scalar min, Scalar max) -> Tensor
   dispatch:
     CPU: _clamp__cpu
     CUDA: _clamp__cuda
+  python_default_init:
+    min: NAN
+    max: NAN
 
 - func: clamp_out(Tensor result, Tensor self, Scalar min, Scalar max) -> Tensor
   variants: function
   dispatch:
     CPU: _clamp_out_cpu
     CUDA: _clamp_out_cuda
+  python_default_init:
+    min: NAN
+    max: NAN
 
 - func: clamp_max(Tensor self, Scalar max) -> Tensor
 

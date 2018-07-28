@@ -357,7 +357,7 @@ class TestOperators(TestCase):
 
     def test_logsoftmax(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
-        self.assertONNX(nn.LogSoftmax(dim=2), x)
+        self.assertONNX(nn.LogSoftmax(dim=3), x)
 
     def test_pow(self):
         x = Variable(torch.randn(1, 2, 3, 4), requires_grad=True)
