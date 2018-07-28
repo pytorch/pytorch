@@ -239,20 +239,6 @@ struct Caffe2HipInitializerHelper
     }
 };
 
-struct TensorHIPStatGetter : BlobStatGetter {
-  size_t sizeBytes(const Blob& blob) const override {
-    const auto& tensor = blob.Get<TensorHIP>();
-    auto nbytes = tensor.nbytes();
-    if (nbytes > 0 && tensor.IsType<std::string>()) {
-      const auto* data = tensor.data<std::string>();
-      for (int i = 0; i < tensor.size(); ++i) {
-        nbytes += data[i].size();
-      }
-    }
-    return nbytes;
-  }
-};
-REGISTER_BLOB_STAT_GETTER(TensorHIP, TensorHIPStatGetter);
 } // namespace
 
 /**
