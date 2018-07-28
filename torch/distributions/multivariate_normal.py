@@ -47,15 +47,6 @@ def _batch_diag(bmat):
     return torch.diagonal(bmat, dim1=-2, dim2=-1)
 
 
-def _batch_inverse(bmat):
-    r"""
-    Returns the inverses of a batch of square matrices.
-    """
-    n = bmat.size(-1)
-    flat_bmat_inv = torch.stack([m.inverse() for m in bmat.reshape(-1, n, n)])
-    return flat_bmat_inv.reshape(bmat.shape)
-
-
 def _batch_trtrs_lower(bb, bA):
     """
     Applies `torch.trtrs` for batches of matrices. `bb` and `bA` should have
@@ -149,7 +140,7 @@ class MultivariateNormal(Distribution):
             if precision_matrix.dim() < 2:
                 raise ValueError("precision_matrix must be at least two-dimensional, "
                                  "with optional leading batch dimensions")
-            covariance_matrix = _batch_inverse(precision_matrix)
+            covariance_matrix = torch.inverse(precision_matrix)
             self._unbroadcasted_scale_tril = _batch_potrf_lower(covariance_matrix)
             batch_shape = _get_batch_shape(precision_matrix, loc)
             self.precision_matrix = precision_matrix.expand(batch_shape + event_shape + event_shape)
@@ -172,7 +163,7 @@ class MultivariateNormal(Distribution):
     @lazy_property
     def precision_matrix(self):
         # TODO: use `torch.potri` on `scale_tril` once a backwards pass is implemented.
-        scale_tril_inv = _batch_inverse(self._unbroadcasted_scale_tril)
+        scale_tril_inv = torch.inverse(self._unbroadcasted_scale_tril)
         return torch.matmul(scale_tril_inv.transpose(-1, -2), scale_tril_inv).expand(
             self._batch_shape + self._event_shape + self._event_shape)
 
