@@ -18,6 +18,7 @@ set(TEST_SOURCES
 
 add_library(dispatch OBJECT ${LIB_SOURCES})
 target_enable_style_warnings(dispatch)
+add_dependencies(dispatch Caffe2_PROTO)
 
 if(BUILD_TEST)
     add_executable(dispatch_test ${TEST_SOURCES} $<TARGET_OBJECTS:dispatch>)

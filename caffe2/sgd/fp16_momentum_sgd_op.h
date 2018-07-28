@@ -35,9 +35,10 @@ class FP16MomentumSGDUpdateOp final : public Operator<Context> {
         fp32_update_(OperatorBase::GetSingleArgument<int>("fp32_update", 0)) {}
 
   bool RunOnDevice() override {
+    auto device_type = Context::GetDeviceType();
     // Iter live on the CPU
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(GRAD));
-    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor<Context>>(MOMENTUM));
+    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(GRAD, device_type));
+    CAFFE_ENFORCE(OperatorBase::InputIsType<Tensor>(MOMENTUM, device_type));
     CAFFE_ENFORCE(Input(LR).size() == 1);
     CAFFE_ENFORCE(Input(GRAD).size() == Input(MOMENTUM).size());
     Output(OUTPUT_GRAD)->ResizeLike(Input(GRAD));
