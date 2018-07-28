@@ -19,6 +19,7 @@ _(namespaces, scope) \
 _(namespaces, namespaces) \
 _(prim, Assign) \
 _(prim, Constant) \
+_(prim, None) \
 _(prim, Drop) \
 _(prim, Eval) \
 _(prim, Expand) /* onnx */ \
