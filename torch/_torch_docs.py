@@ -1985,15 +1985,18 @@ add_docstr(torch.inverse,
            r"""
 inverse(input, out=None) -> Tensor
 
-Takes the inverse of the square matrix :attr:`input`.
+Takes the inverse of the square matrix :attr:`input`. :attr:`input` can be batches
+of 2D square tensors, in which case this function would return a tensor composed of
+individual inverses.
 
 .. note::
 
-    Irrespective of the original strides, the returned matrix will be
-    transposed, i.e. with strides `(1, m)` instead of `(m, 1)`
+    Irrespective of the original strides, the returned tensors will be
+    transposed, i.e. with strides like `input.contiguous().transpose(-2, -1).strides()`
 
 Args:
-    input (Tensor): the input 2-D square tensor
+    input (Tensor): the input tensor of size (*, n, n) where `*` is zero or more
+                    batch dimensions
     out (Tensor, optional): the optional output tensor
 
 Example::
@@ -2006,9 +2009,14 @@ Example::
             [ 0.0000,  1.0000,  0.0000,  0.0000],
             [ 0.0000,  0.0000,  1.0000,  0.0000],
             [ 0.0000, -0.0000, -0.0000,  1.0000]])
-    >>> torch.max(torch.abs(z - torch.eye(4))) # Max nonzero
-    tensor(1.00000e-07 *
-           1.1921)
+    >>> torch.max(torch.abs(z - torch.eye(4))) # Max non-zero
+    tensor(1.1921e-07)
+    >>> # Batched inverse example
+    >>> x = torch.randn(2, 3, 4, 4)
+    >>> y = torch.inverse(x)
+    >>> z = torch.matmul(x, y)
+    >>> torch.max(torch.abs(z - torch.eye(4).expand_as(x))) # Max non-zero
+    tensor(1.9073e-06)
 """)
 
 add_docstr(torch.kthvalue,

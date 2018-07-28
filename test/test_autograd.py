@@ -3015,6 +3015,7 @@ method_tests = [
     ('index_fill', (), (0, torch.tensor([0], dtype=torch.int64), 2), 'scalar_input_dim', [0]),
     ('index_fill', (), (0, torch.tensor(0, dtype=torch.int64), 2), 'scalar_both_dim', [0]),
     ('inverse', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
+    ('inverse', (2, 3, S, S), NO_ARGS, 'batched', NO_ARGS, [skipIfNoLapack]),
     ('det', (S, S), NO_ARGS, '', NO_ARGS, [skipIfNoLapack]),
     ('det', (1, 1), NO_ARGS, '1x1', NO_ARGS, [skipIfNoLapack]),
     ('det', lambda: random_symmetric_matrix(S), NO_ARGS, 'symmetric', NO_ARGS, [skipIfNoLapack]),

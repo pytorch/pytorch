@@ -71,7 +71,7 @@ void magmaGetrfBatched<float>(
     magma_int_t m, magma_int_t n, float** dA_array, magma_int_t ldda,
     magma_int_t** ipiv_array, magma_int_t* info_array, magma_int_t batchsize,
     magma_queue_t queue) {
-    magma_dgetrf_batched(
+    magma_sgetrf_batched(
     m, n, dA_array, ldda, ipiv_array,
     info_array, batchsize, queue);
 }
@@ -118,17 +118,17 @@ AT_ERROR("inverse: MAGMA library not found in "
     ipiv_array[i] = &ipiv_data[i * self_mat_stride];
   }
 
-  MagmaGetrfBatched<scalar_t>(
-    n, n, self_array, n, ipiv_array, info_array,
+  magmaGetrfBatched<scalar_t>(
+    n, n, self_array, n, ipiv_array, getrf_info_array,
     batch_size, createMagmaQueue(self));
 
   for (int64_t i = 0; i < batch_size; i++) {
     getrf_infos[i] = getrf_info_array[i];
   }
 
-  MagmaGetriBatched<scalar_t>(
+  magmaGetriBatched<scalar_t>(
     n, self_array, n, ipiv_array, self_inv_array,
-    n, info_array, batch_size, createMagmaQueue(self));
+    n, getri_info_array, batch_size, createMagmaQueue(self));
 
   for (int64_t i = 0; i < batch_size; i++) {
     getri_infos[i] = getri_info_array[i];

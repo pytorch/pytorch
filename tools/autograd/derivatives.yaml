@@ -342,7 +342,7 @@
   self: at::zeros(self.sizes(), grad.type()).index_add_(dim, index, grad)
 
 - name: inverse(Tensor self)
-  self: -at::mm(result.t(), at::mm(grad, result.t()))
+  self: -at::matmul(result.transpose(-2, -1), at::matmul(grad, result.transpose(-2, -1)))
 
 - name: kthvalue(Tensor self, int64_t k, int64_t dim, bool keepdim)
   self: index_select_backward(grad, dim, result1, self.sizes(), keepdim)
