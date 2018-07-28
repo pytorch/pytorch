@@ -84,7 +84,7 @@ void magmaGetrfBatched<float>(
 template <typename scalar_t>
 static void applyInverse(
     Tensor &self, Tensor &self_inv,
-    std::vector<int64_t>getrf_infos, std::vector<int64_t>getri_infos) {
+    std::vector<int64_t>& getrf_infos, std::vector<int64_t>& getri_infos) {
 #ifndef USE_MAGMA
 AT_ERROR("inverse: MAGMA library not found in "
     "compilation. Please rebuild with MAGMA.");

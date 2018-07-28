@@ -10,6 +10,7 @@
 #include "TH.h" // for USE_LAPACK
 
 #include <vector>
+#include <iostream>
 
 #ifdef USE_LAPACK
 extern "C" void dgetri_(
@@ -78,7 +79,7 @@ template<> void lapackGetrf<float>(
 
 template <typename scalar_t>
 static void applyInverse(
-  Tensor& self, std::vector<int64_t> getrf_infos, std::vector<int64_t> getri_infos) {
+  Tensor& self, std::vector<int64_t>& getrf_infos, std::vector<int64_t>& getri_infos) {
 #ifndef USE_LAPACK
   AT_ERROR("inverse: LAPACK library not found in compilation");
 #endif
@@ -100,6 +101,7 @@ static void applyInverse(
                           &info);
     getrf_infos[i] = info;
     if (info != 0) {
+      std::cout << "F: " << info << std::endl;
       return;
     }
 
@@ -116,6 +118,7 @@ static void applyInverse(
                           work.data<scalar_t>(), lwork, &info);
     getri_infos[i] = info;
     if (info != 0) {
+      std::cout << "I: " << info << std::endl;
       return;
     }
   }
@@ -128,6 +131,7 @@ Tensor _inverse_helper_cpu(const Tensor& self) {
   AT_DISPATCH_FLOATING_TYPES(self.type(), "inverse", [&]{
     applyInverse<scalar_t>(self_working_copy, getrf_infos, getri_infos);
   });
+  
   checkErrors(getrf_infos, "getrf");
   checkErrors(getri_infos, "getri");
   return self_working_copy;
@@ -137,6 +141,7 @@ Tensor inverse(const Tensor &self) {
   if (self.dim() == 2) {
     return at::_getri_single(self);
   }
+  checkInputs(self);
   return self.type()._inverse_helper(self);
 }
 

@@ -44,7 +44,7 @@ template<> void lapackGesv<double>(
 #endif
 
 template <typename scalar_t>
-static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
+static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t>& infos) {
 #ifndef USE_LAPACK
   AT_ERROR("gesv: LAPACK library not found in compilation");
 #endif
@@ -117,8 +117,7 @@ std::tuple<Tensor&,Tensor&> gesv_out(
     Tensor& solution, Tensor& lu, const Tensor& self, const Tensor& A) {
   if (self.dim() > 2 || A.dim() > 2) {
     AT_ERROR("torch.gesv() with the `out` keyword does not support batching. "
-                  "b.dim() (%lld) and A.dim() (%lld) must both be 2.",
-                  (long long)self.dim(), (long long)A.dim());
+             "b.dim() (", self.dim(), ") and A.dim() (", A.dim(), ") must both be 2.");
   }
   return at::_gesv_single_out(solution, lu, self, A);
 }
