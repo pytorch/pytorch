@@ -43,6 +43,12 @@ template<> void lapackGesv<double>(
 }
 #endif
 
+static inline bool isTransposeContiguous(Tensor& self) {
+ return self.dim() == 2 &&
+        self.stride(0) == 1 &&
+        self.stride(1) == self.size(0);
+}
+
 template <typename scalar_t>
 static void applyGesv(Tensor& b, Tensor& A, std::vector<int64_t> infos) {
 #ifndef USE_LAPACK
@@ -85,10 +91,26 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   int info = 0;
 
   // init to column major format
-  lu.resize_({ay, ax});
-  lu.copy_(A.t().contiguous());
-  sol.resize_({by, bx});
-  sol.copy_(self.view({bx, by}).t().contiguous());
+  if (&self == &sol) {
+    // eg. torch.gesv(b, A, out=(b, A))
+    sol.t_();
+  } else if (sol.numel() == self.numel() &&
+             isTransposeContiguous(sol)){
+    // allow reuse
+    sol.t_().copy_(self.view({bx, by}).t());
+  } else {
+    sol.resize_({by, bx}).copy_(self.view({bx, by}).t());
+  }
+
+  if (&A == &lu) {
+    lu.t_();
+  } else if (lu.numel() == A.numel() &&
+             isTransposeContiguous(lu)) {
+    // allow reuse
+    lu.t_().copy_(A.t());
+  } else {
+    lu.resize_({ay, ax}).copy_(A.t());
+  }
 
   AT_DISPATCH_FLOATING_TYPES(self.type(), "gesv", [&]{
     auto A_ptr = lu.data<scalar_t>();
