@@ -10,17 +10,16 @@ import six
 
 
 class _ContextInfo(object):
-    def __init__(self, cls, allow_default, arg_name):
+    def __init__(self, cls, allow_default):
         self.cls = cls
         self.allow_default = allow_default
-        self.arg_name = arg_name
-        self._local_stack = threading.local()
+        self._thread_local = threading.local()
 
     @property
     def _stack(self):
-        if not hasattr(self._local_stack, 'obj'):
-            self._local_stack.obj = []
-        return self._local_stack.obj
+        if not hasattr(self._thread_local, 'stack'):
+            self._thread_local.stack = []
+        return self._thread_local.stack
 
     def enter(self, value):
         self._stack.append(value)
@@ -85,12 +84,16 @@ def __call__(self, func):
 
 @classmethod
 def _current(cls, value=None, required=True):
-    return _get_active_context(cls, value, required)
+    ctx_info = _context_registry().get(cls)
+    if value is not None:
+        assert isinstance(value, cls), (
+            'Wrong context type. Expected: %s, got %s.' % (cls, type(value)))
+        return value
+    return ctx_info.get_active(required=required)
 
 
 class define_context(object):
-    def __init__(self, arg_name=None, allow_default=False):
-        self.arg_name = arg_name
+    def __init__(self, allow_default=False):
         self.allow_default = allow_default
 
     def __call__(self, cls):
@@ -100,7 +103,7 @@ class define_context(object):
         cls._ctx_class = cls
 
         _context_registry().register(
-            _ContextInfo(cls, self.allow_default, self.arg_name)
+            _ContextInfo(cls, self.allow_default)
         )
 
         cls._prev_enter = cls.__enter__ if hasattr(cls, '__enter__') else None
@@ -112,12 +115,3 @@ class define_context(object):
         cls.current = _current
 
         return cls
-
-
-def _get_active_context(cls, val=None, required=True):
-    ctx_info = _context_registry().get(cls)
-    if val is not None:
-        assert isinstance(val, cls), (
-            'Wrong context type. Expected: %s, got %s.' % (cls, type(val)))
-        return val
-    return ctx_info.get_active(required=required)
