@@ -1,5 +1,6 @@
 #include "Functions.h"
 #include <ATen/Utils.h>
+#include <ATen/TensorOptions.h>
 #include <ATen/WrapDimUtils.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <THNN/Reduction.h>
@@ -51,7 +52,16 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
 }
 
 std::vector<Tensor> to_tensor_list(const variable_list& variables) {
-  return fmap(variables, [](const Variable &v) { return static_cast<Tensor>(v); } );
+  IntList sizes;
+  at::TensorOptions o;
+  for (auto v : variables) {
+    if (v.defined()) {
+      sizes = v.sizes();
+      o = static_cast<Tensor>(v).options();
+      break;
+    }
+  }
+  return fmap(variables, [&](const Variable &v) { return (v.defined() ? static_cast<Tensor>(v): at::zeros({}, o).expand(sizes)); } );
 }
 
 Tensor not_implemented(const char* name) {
