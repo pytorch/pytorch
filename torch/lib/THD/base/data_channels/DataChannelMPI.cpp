@@ -106,7 +106,7 @@ bool DataChannelMPI::init() {
   if (int(OMPI_MAJOR_VERSION) < 2) {
       throw std::runtime_error("Please use MPI 2.x.x and above for distributed.");
   }
-#endif /* OMPI_RELEASE_VERSION */
+#endif /* OMPI_MAJOR_VERSION */
 
   int provided;
   MPI_Init_thread(NULL, NULL, MPI_THREAD_MULTIPLE, &provided);
