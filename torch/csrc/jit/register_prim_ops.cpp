@@ -91,6 +91,14 @@ RegisterOperators reg({
           };
         }),
     Operator(
+        prim::None,
+        [](Node* node) {
+          return [](Stack& stack) {
+            stack.push_back(IValue());
+            return 0;
+          };
+        }),
+    Operator(
         prim::Print,
         [](Node* node) {
           size_t num_inputs = node->inputs().size();

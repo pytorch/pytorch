@@ -952,15 +952,19 @@ Caffe2Ops Caffe2Backend::CreateSlice(
 Caffe2Ops Caffe2Backend::CreateBatchNormalization(
     OnnxNode* onnx_node,
     const ConversionContext& ctx) {
+  auto& attributes = onnx_node->attributes;
+
   if (ctx.opset_version() < 6) {
-    auto& attributes = onnx_node->attributes;
     attributes.remove("consumed_inputs");
   }
 
   if (ctx.opset_version() >= 7) {
-    auto& attributes = onnx_node->attributes;
     auto* attr = attributes.AddRewrittenAttribute("is_test");
     attr->set_i(1);
+  }
+
+  if (attributes.HasAttribute("spatial") && attributes.get<int64_t>("spatial") == 1) {
+    attributes.remove("spatial");
   }
 
   return CommonOnnxNodeToCaffe2Ops(onnx_node, ctx);

@@ -27,12 +27,12 @@ class LearningRateOp final : public Operator<Context> {
 
   bool RunOnDevice() override {
     int64_t iter =
-        OperatorBase::Input<TensorCPU>(0).template data<int64_t>()[0];
+        OperatorBase::Input<Tensor>(0, CPU).template data<int64_t>()[0];
     T learning_rate = cur_base_lr_ * (*functor_)(iter);
     // Write to output.
     auto* output = Output(0);
     output->Resize(vector<TIndex>());
-    context_.template Copy<T, CPUContext, Context>(
+    context_.template CopyFromCPU<T>(
         1, &learning_rate, Output(0)->template mutable_data<T>());
     return true;
   }
