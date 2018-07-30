@@ -180,9 +180,16 @@ AT_ERROR("gesv: MAGMA library not found in "
   int* ipiv;
 
   // init to column major format
+  // Note: `sol` and `lu` need to be contiguous since we pass
+  // sol.data() and lu.data() to Magma
   if (&self == &sol) {
     // eg. torch.gesv(b, A, out=(b, A))
-    sol.t_();
+    if (isTransposeContiguous(sol)) {
+      sol.t_();
+    } else {
+      auto Bc = self.view({bx, by}).t().clone();
+      sol.resize_({by, bx}).copy_(Bc);
+    }
   } else if (sol.numel() == self.numel() &&
              isTransposeContiguous(sol)) {
     // allow reuse
@@ -190,11 +197,17 @@ AT_ERROR("gesv: MAGMA library not found in "
   } else {
     sol.resize_({by, bx}).copy_(self.view({bx, by}).t());
   }
+
   if (&A == &lu) {
-    lu.t_();
+    if (isTransposeContiguous(lu)) {
+      lu.t_();
+    } else {
+      auto Ac = A.t().clone();
+      lu.copy_(Ac);
+    }
   } else if (lu.numel() == A.numel() &&
              isTransposeContiguous(lu)) {
-    lu.t_().copy_(self.view({bx, by}).t());
+    lu.t_().copy_(A.t());
   } else {
     lu.resize_({ay, ax}).copy_(A.t());
   }
@@ -203,7 +216,6 @@ AT_ERROR("gesv: MAGMA library not found in "
       auto A_ptr = lu.data<scalar_t>();
       auto b_ptr = sol.data<scalar_t>();
       ALLOCATE_ARRAY(ipiv, int, bx, sol);
-
       magmaGesv<scalar_t>(bx, by, A_ptr, bx, ipiv, b_ptr, bx, &info);
   });
 

@@ -91,9 +91,16 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   int info = 0;
 
   // init to column major format
+  // Note: `sol` and `lu` need to be contiguous since we pass
+  // sol.data() and lu.data() to Lapack
   if (&self == &sol) {
     // eg. torch.gesv(b, A, out=(b, A))
-    sol.t_();
+    if (isTransposeContiguous(sol)) {
+      sol.t_();
+    } else {
+      auto Bc = self.view({bx, by}).t().clone();
+      sol.resize_({by, bx}).copy_(Bc);
+    }
   } else if (sol.numel() == self.numel() &&
              isTransposeContiguous(sol)){
     // allow reuse
@@ -103,10 +110,14 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
   }
 
   if (&A == &lu) {
-    lu.t_();
+    if (isTransposeContiguous(lu)) {
+      lu.t_();
+    } else {
+      auto Ac = A.t().clone();
+      lu.copy_(Ac);
+    }
   } else if (lu.numel() == A.numel() &&
              isTransposeContiguous(lu)) {
-    // allow reuse
     lu.t_().copy_(A.t());
   } else {
     lu.resize_({ay, ax}).copy_(A.t());
@@ -116,7 +127,6 @@ std::tuple<Tensor&,Tensor&> _gesv_single_out_cpu(
     auto A_ptr = lu.data<scalar_t>();
     auto b_ptr = sol.data<scalar_t>();
     auto ipiv = at::empty({bx}, sol.options().dtype(kInt));
-
     lapackGesv<scalar_t>(bx, by, A_ptr, bx, ipiv.data<int>(), b_ptr, bx, &info);
   });
 
