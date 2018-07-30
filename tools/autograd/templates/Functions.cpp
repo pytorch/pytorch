@@ -51,19 +51,6 @@ void copy_range(variable_list& out, IndexRange range, at::ArrayRef<Tensor> t) {
   std::copy(t.begin(), t.end(), out.begin() + range.first);
 }
 
-std::vector<Tensor> to_tensor_list(const variable_list& variables) {
-  IntList sizes;
-  at::TensorOptions o;
-  for (auto v : variables) {
-    if (v.defined()) {
-      sizes = v.sizes();
-      o = static_cast<Tensor>(v).options();
-      break;
-    }
-  }
-  return fmap(variables, [&](const Variable &v) { return (v.defined() ? static_cast<Tensor>(v): at::zeros({}, o).expand(sizes)); } );
-}
-
 Tensor not_implemented(const char* name) {
   throw std::runtime_error(
       std::string("the derivative for '") + name + "' is not implemented");
@@ -414,6 +401,20 @@ Tensor logsumexp_backward(Tensor grad, const Tensor & self, Tensor result, int64
     result = result.unsqueeze(dim);
   }
   return grad * (self - result).exp();
+}
+
+Tensor unbind_backward(const variable_list& grads, int64_t dim) {
+  IntList sizes;
+  at::TensorOptions o;
+  for (auto v : grads) {
+    if (v.defined()) {
+      sizes = v.sizes();
+      o = static_cast<Tensor>(v).options();
+      break;
+    }
+  }
+  auto grads_tensors = fmap(grads, [&](const Variable &v) { return (v.defined() ? static_cast<Tensor>(v): at::zeros({}, o).expand(sizes));});
+  return at::stack(grads_tensors, dim);
 }
 
 Tensor unsqueeze_to(const Tensor & self, IntList sizes) {
