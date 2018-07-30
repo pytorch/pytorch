@@ -34,63 +34,6 @@ const std::string NeuralNetData::getName() const {
 
 namespace nn {
 
-bool hasProducer(NNGraph::NodeRef n) {
-  return n->getInEdges().size() != 0;
-}
-
-NNGraph::NodeRef getProducer(NNGraph::NodeRef n) {
-  assert(
-      is<NeuralNetData>(n) &&
-      "getProducer only works with NeuralNetData types.");
-  auto inEdges = n->getInEdges();
-  assert(inEdges.size() > 0 && "Tensor does not have a producer.");
-  assert(
-      inEdges.size() == 1 &&
-      "Malformed NNGraph, NeuralNetData has multiple producers.");
-  return inEdges.front()->tail();
-}
-
-bool hasConsumer(NNGraph::NodeRef n) {
-  return n->getOutEdges().size() != 0;
-}
-
-std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n) {
-  assert(
-      is<NeuralNetData>(n) &&
-      "getProducer only works with NeuralNetData types.");
-  std::vector<NNGraph::NodeRef> out;
-  for (auto outEdge : n->getOutEdges()) {
-    out.emplace_back(outEdge->head());
-  }
-  return out;
-}
-
-bool hasInputs(NNGraph::NodeRef n) {
-  return n->getInEdges().size() != 0;
-}
-
-std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n) {
-  assert(
-      is<NeuralNetOperator>(n) &&
-      "getInputs only works with NeuralNetOperator types.");
-  std::vector<NNGraph::NodeRef> out;
-  for (auto inEdge : n->getInEdges()) {
-    out.emplace_back(inEdge->tail());
-  }
-  return out;
-}
-
-std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n) {
-  assert(
-      is<NeuralNetOperator>(n) &&
-      "getOutputs only works with NeuralNetOperator types.");
-  std::vector<NNGraph::NodeRef> out;
-  for (auto outEdge : n->getOutEdges()) {
-    out.emplace_back(outEdge->head());
-  }
-  return out;
-}
-
 // Get all nodes tracked by CF graph
 static std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
     repr::NNCFGraph& cf) {
@@ -104,10 +47,10 @@ static std::unordered_set<repr::NNGraph::NodeRef> getTrackedNodes(
   return cfTrackedNodes;
 }
 
-static size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
-  auto cfTrackedNodes = getTrackedNodes(m->controlFlow);
+static size_t coalesceInsertedDataDependenciesHelper(repr::NNCFGraph& cfg) {
+  auto cfTrackedNodes = getTrackedNodes(cfg);
 
-  for (auto& bbNode : m->controlFlow.getMutableNodes()) {
+  for (auto& bbNode : cfg.getMutableNodes()) {
     auto bb = repr::nn::get<repr::BasicBlockType<repr::NNGraph>>(bbNode);
     // We mutate the instructions of the bb, so we copy here.
     // TODO make this an iterator and simply promote it on insertion.
@@ -129,28 +72,28 @@ static size_t coalesceInsertedDataDependenciesHelper(repr::NNModule* m) {
   return cfTrackedNodes.size();
 }
 
-// TODO: move this to more generic location.
-// TODO: [algo] improve this algorithm, as it is horrendously inefficient.
-void coalesceInsertedDataDependencies(repr::NNModule* m) {
+void coalesceInsertedDataDependenciesGraphImpl(
+    repr::NNGraph& dfg,
+    repr::NNCFGraph& cfg) {
   size_t oldSize = 0;
   size_t newSize = 0;
   do {
     oldSize = newSize;
-    newSize = coalesceInsertedDataDependenciesHelper(m);
+    newSize = coalesceInsertedDataDependenciesHelper(cfg);
   } while (newSize != oldSize);
 
   // Now we track new nodes that have no relationship to the old CFGraph
-  auto cfTrackedNodes = getTrackedNodes(m->controlFlow);
+  auto cfTrackedNodes = getTrackedNodes(cfg);
   std::unordered_set<repr::NNGraph::NodeRef> dfNodes;
-  for (auto node : m->dataFlow.getMutableNodes()) {
+  for (auto node : dfg.getMutableNodes()) {
     if (repr::nn::is<NeuralNetOperator>(node) && !cfTrackedNodes.count(node)) {
       dfNodes.insert(node);
     }
   }
 
-  auto newBbNode = m->controlFlow.createNode(
-      util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
-  auto sccs = algorithm::tarjans(&m->dataFlow);
+  auto newBbNode =
+      cfg.createNode(util::make_unique<repr::BasicBlockType<repr::NNGraph>>());
+  auto sccs = algorithm::tarjans(&dfg);
   for (auto iter = sccs.rbegin(); iter != sccs.rend(); ++iter) {
     for (auto node : iter->getNodes()) {
       if (dfNodes.count(node)) {
@@ -161,7 +104,7 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
   }
 
   // Finally we reconcile any data dependency issues (if we can).
-  for (auto& bbNode : m->controlFlow.getMutableNodes()) {
+  for (auto& bbNode : cfg.getMutableNodes()) {
     auto bb = bbNode->mutableData()->get();
     std::unordered_set<repr::NNGraph::NodeRef> seen;
     for (auto instr_iter = bb->getInstructions().begin();
@@ -179,6 +122,54 @@ void coalesceInsertedDataDependencies(repr::NNModule* m) {
       seen.insert(instr);
     }
   }
+}
+
+// TODO: move this to more generic location.
+// TODO: [algo] improve this algorithm, as it is horrendously inefficient.
+void coalesceInsertedDataDependencies(repr::NNModule* m) {
+  return coalesceInsertedDataDependenciesGraphImpl(m->dataFlow, m->controlFlow);
+}
+
+NodeIteratorVector iterate(NNGraph& g) {
+  auto& data_nodes = g.getMutableNodes();
+
+  vector<std::reference_wrapper<NNGraph::NodeObj>> nodes;
+  for (auto& node : data_nodes) {
+    nodes.emplace_back(std::ref(*node));
+  }
+  auto is_in_graph = [&g](NNGraph::NodeRef node) {
+    auto all_nodes = g.getMutableNodes();
+    return std::find(
+               all_nodes.begin(), all_nodes.end(), NNGraph::NodeRef(node)) !=
+        all_nodes.end();
+  };
+  return NodeIteratorVector(nodes, is_in_graph);
+}
+
+NodeIteratorVector iterate(NNCFGraph& cfg, NNGraph& g) {
+  coalesceInsertedDataDependenciesGraphImpl(g, cfg);
+  vector<std::reference_wrapper<NNGraph::NodeObj>> nodes;
+  auto topo_cfg = algorithm::tarjans(&cfg);
+  for (auto iter = topo_cfg.rbegin(); iter != topo_cfg.rend(); ++iter) {
+    assert(
+        (iter->getNodes().size() == 1) &&
+        "Control flow consists of loop, which is not supported now.");
+    for (auto& bbNode : iter->getNodes()) {
+      auto instr_copy = bbNode->data().get()->getInstructions();
+      for (auto instr : instr_copy) {
+        nodes.emplace_back(std::ref(*instr));
+      }
+    }
+  }
+  auto is_in_graph = [&cfg](NNGraph::NodeRef node) {
+    for (auto& bbNode : cfg.getMutableNodes()) {
+      if (bbNode->data().get()->hasInstruction(NNGraph::NodeRef(node))) {
+        return true;
+      }
+    }
+    return false;
+  };
+  return NodeIteratorVector(nodes, is_in_graph);
 }
 
 } // namespace nn

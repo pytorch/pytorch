@@ -12,15 +12,15 @@
 #ifndef NOM_REPRESENTATIONS_NEURALNET_H
 #define NOM_REPRESENTATIONS_NEURALNET_H
 
+#include <functional>
+#include <string>
+#include <type_traits>
+#include <vector>
 #include "nomnigraph/Graph/Graph.h"
 #include "nomnigraph/Representations/Compiler.h"
 #include "nomnigraph/Representations/ControlFlow.h"
 #include "nomnigraph/Support/Casting.h"
 #include "nomnigraph/Support/Pointer.h"
-
-#include <string>
-#include <type_traits>
-#include <vector>
 
 #include <assert.h>
 
@@ -406,19 +406,164 @@ NNGraph::NodeRef convertNode(NNGraph& g, NNGraph::NodeRef node) {
 }
 
 /// NeuralNetData specific helpers.
-bool hasProducer(NNGraph::NodeRef n);
-NNGraph::NodeRef getProducer(NNGraph::NodeRef n);
-bool hasConsumer(NNGraph::NodeRef n);
-std::vector<NNGraph::NodeRef> getConsumers(NNGraph::NodeRef n);
 
-bool hasInputs(NNGraph::NodeRef n);
-std::vector<NNGraph::NodeRef> getInputs(NNGraph::NodeRef n);
-std::vector<NNGraph::NodeRef> getOutputs(NNGraph::NodeRef n);
+template <typename T>
+inline bool hasProducer(T n) {
+  return n->getInEdges().size() != 0;
+}
+
+template <typename T>
+inline T getProducer(T n) {
+  assert(
+      is<NeuralNetData>(n) &&
+      "getProducer only works with NeuralNetData types.");
+  auto inEdges = n->getInEdges();
+  assert(inEdges.size() > 0 && "Tensor does not have a producer.");
+  assert(
+      inEdges.size() == 1 &&
+      "Malformed NNGraph, NeuralNetData has multiple producers.");
+  return T(inEdges.front()->tail());
+}
+
+template <typename T>
+inline bool hasConsumer(T n) {
+  return n->getOutEdges().size() != 0;
+}
+
+template <typename T>
+inline std::vector<T> getConsumers(T n) {
+  assert(
+      is<NeuralNetData>(n) &&
+      "getProducer only works with NeuralNetData types.");
+  std::vector<T> out;
+  for (auto outEdge : n->getOutEdges()) {
+    out.emplace_back(T(outEdge->head()));
+  }
+  return out;
+}
+
+template <typename T>
+inline bool hasInputs(T n) {
+  return n->getInEdges().size() != 0;
+}
+
+template <typename T>
+inline std::vector<T> getInputs(T n) {
+  assert(
+      is<NeuralNetOperator>(n) &&
+      "getInputs only works with NeuralNetOperator types.");
+  std::vector<T> out;
+  for (auto inEdge : n->getInEdges()) {
+    out.emplace_back(T(inEdge->tail()));
+  }
+  return out;
+}
+
+template <typename T>
+inline std::vector<T> getOutputs(T n) {
+  assert(
+      is<NeuralNetOperator>(n) &&
+      "getOutputs only works with NeuralNetOperator types.");
+  std::vector<T> out;
+  for (auto outEdge : n->getOutEdges()) {
+    out.emplace_back(T(outEdge->head()));
+  }
+  return out;
+}
 
 void coalesceInsertedDataDependencies(repr::NNModule* m);
 
 template <NNGraph* G>
 struct NodeHelper {};
+
+// iterator to traverse all nodes of a graph. Returns a node object instead of
+// NodeRef (which is a pointer)
+template <typename T>
+class NodeIterator;
+
+// container for NodeIterator traversal
+class NodeIteratorVector {
+ public:
+  NodeIteratorVector(
+      vector<std::reference_wrapper<NNGraph::NodeObj>> data,
+      std::function<bool(const NNGraph::NodeRef)> in_graph_func)
+      : data_(data), in_graph_func_(in_graph_func) {}
+  inline NNGraph::NodeObj& Get(int n) {
+    assert(IsInRange(n));
+    return data_[n];
+  }
+  // functions to provide range-based iteration
+  inline NodeIterator<NNGraph::NodeObj> begin();
+  inline NodeIterator<NNGraph::NodeObj> end();
+  inline NodeIterator<const NNGraph::NodeObj> cbegin();
+  inline NodeIterator<const NNGraph::NodeObj> cend();
+
+  inline bool IsInRange(int n) {
+    return n >= 0 && n < data_.size();
+  }
+
+  inline bool IsNodeInGraph(int n) {
+    assert(IsInRange(n));
+    return in_graph_func_(&data_[n].get());
+  }
+
+ private:
+  vector<std::reference_wrapper<NNGraph::NodeObj>> data_;
+  std::function<bool(const NNGraph::NodeRef)> in_graph_func_;
+};
+
+template <typename T>
+class NodeIterator {
+ public:
+  NodeIterator(NodeIteratorVector vector, int pos)
+      : pos_(pos), vector_(vector) {}
+
+  // three operator functions (!=, *, ++) used for range-based iteration
+  inline bool operator!=(NodeIterator& other) {
+    return pos_ != other.GetPos();
+  }
+
+  inline T& operator*() {
+    return (vector_.Get(pos_));
+  }
+
+  inline NodeIterator& operator++() {
+    ++pos_;
+    while (vector_.IsInRange(pos_) && (!vector_.IsNodeInGraph(pos_))) {
+      ++pos_;
+    }
+    return *this;
+  }
+
+  inline const int GetPos() {
+    return pos_;
+  }
+
+ private:
+  int pos_;
+  NodeIteratorVector vector_;
+};
+
+inline NodeIterator<NNGraph::NodeObj> NodeIteratorVector::begin() {
+  return NodeIterator<NNGraph::NodeObj>(*this, 0);
+}
+
+inline NodeIterator<NNGraph::NodeObj> NodeIteratorVector::end() {
+  return NodeIterator<NNGraph::NodeObj>(*this, data_.size());
+}
+
+inline NodeIterator<const NNGraph::NodeObj> NodeIteratorVector::cbegin() {
+  return NodeIterator<const NNGraph::NodeObj>(*this, 0);
+}
+inline NodeIterator<const NNGraph::NodeObj> NodeIteratorVector::cend() {
+  return NodeIterator<const NNGraph::NodeObj>(*this, data_.size());
+}
+
+// traverse through all nodes in the NNGraph
+NodeIteratorVector iterate(NNGraph& g);
+// traverse through all instructions in the NNCFGraph, using NNGraph for
+// instruction topological sorting
+NodeIteratorVector iterate(NNCFGraph& cfg, NNGraph& g);
 
 } // namespace nn
 
