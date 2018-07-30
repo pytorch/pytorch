@@ -94,8 +94,8 @@ namespace {
 	    iy = static_cast<scalar_t>(iyf);
 
 	    // get NE, NW, SE, SW pixel values from (x, y)
-	    int ix_nw = static_cast<int>(std::floor(ixf));
-	    int iy_nw = static_cast<int>(std::floor(iyf));
+	    int ix_nw = static_cast<int>(::floor(ixf));
+	    int iy_nw = static_cast<int>(::floor(iyf));
 	    int ix_ne = ix_nw + 1;
 	    int iy_ne = iy_nw;
 	    int ix_sw = ix_nw;
@@ -198,9 +198,9 @@ namespace {
       // get corner pixel values from (x, y, z)
       // for 4d, we used north-east-south-west
       // for 5d, we add top-bottom
-      int ix_tnw = static_cast<int>(std::floor(ix));
-      int iy_tnw = static_cast<int>(std::floor(iy));
-      int iz_tnw = static_cast<int>(std::floor(iz));
+      int ix_tnw = static_cast<int>(::floor(ix));
+      int iy_tnw = static_cast<int>(::floor(iy));
+      int iz_tnw = static_cast<int>(::floor(iz));
 
       int ix_tne = ix_tnw + 1;
       int iy_tne = iy_tnw;
@@ -356,8 +356,8 @@ namespace {
 	    iy = static_cast<scalar_t>(iyf);
 
 	    // get NE, NW, SE, SW pixel values from (x, y)
-	    int ix_nw = static_cast<int>(std::floor(ixf));
-	    int iy_nw = static_cast<int>(std::floor(iyf));
+	    int ix_nw = static_cast<int>(::floor(ixf));
+	    int iy_nw = static_cast<int>(::floor(iyf));
 	    int ix_ne = ix_nw + 1;
 	    int iy_ne = iy_nw;
 	    int ix_sw = ix_nw;
@@ -506,9 +506,9 @@ namespace {
       // get corner pixel values from (x, y, z)
       // for 4d, we used north-east-south-west
       // for 5d, we add top-bottom
-      int ix_tnw = static_cast<int>(std::floor(ix));
-      int iy_tnw = static_cast<int>(std::floor(iy));
-      int iz_tnw = static_cast<int>(std::floor(iz));
+      int ix_tnw = static_cast<int>(::floor(ix));
+      int iy_tnw = static_cast<int>(::floor(iy));
+      int iz_tnw = static_cast<int>(::floor(iz));
 
       int ix_tne = ix_tnw + 1;
       int iy_tne = iy_tnw;
