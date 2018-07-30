@@ -38,12 +38,7 @@ public:
 #undef DEFINE_IMPLICIT_CTOR
 
   // return a new scalar that is guarenteed to be not backed by a tensor.
-  Scalar local() const {
-    if (Tag::HAS_t != tag) {
-      return *this;
-    }
-    return t.pImpl->localScalar();
-  }
+  Scalar local() const;
 
 #define DEFINE_ACCESSOR(type,name,member) \
   type to##name () const { \
@@ -75,12 +70,14 @@ public:
     return Tag::HAS_t == tag;
   }
 
+  Scalar operator-() const;
+
 private:
   enum class Tag { HAS_d, HAS_i, HAS_t };
   Tag tag;
   union {
     double d;
-    int64_t i;
+    int64_t i = 0;
   } v;
   detail::TensorBase t;
   friend struct Type;
@@ -99,5 +96,4 @@ inline T Scalar::to<T>() { \
 }
 AT_FORALL_SCALAR_TYPES(DEFINE_TO)
 #undef DEFINE_TO
-
 }

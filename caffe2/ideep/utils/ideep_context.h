@@ -8,7 +8,9 @@
 
 namespace caffe2 {
 
-class IDEEPContext final {
+BaseStaticContext* GetIDEEPStaticContext();
+
+class IDEEPContext final : public BaseContext {
  public:
   typedef std::mt19937 rand_gen_type;
   IDEEPContext() : random_seed_(RandomNumberSeed()) {}
@@ -21,10 +23,16 @@ class IDEEPContext final {
 
   ~IDEEPContext() noexcept {}
 
-  inline void SwitchToDevice(int /*stream_id*/) {}
-  inline void SwitchToDevice() {
-    SwitchToDevice(0);
+  BaseStaticContext* GetStaticContext() const override {
+    return GetIDEEPStaticContext();
   }
+
+  static BaseStaticContext* StaticContext() {
+    return GetIDEEPStaticContext();
+  }
+
+  inline void SwitchToDevice(int /*stream_id*/) {}
+  using BaseContext::SwitchToDevice;
 
   inline void WaitEvent(const Event& ev) {
     ev.Wait(IDEEP, this);
@@ -46,7 +54,29 @@ class IDEEPContext final {
   }
 
   inline static std::pair<void*, MemoryDeleter> New(size_t nbytes) {
-    return GetCPUAllocator()->New(nbytes);
+    return StaticContext()->New(nbytes);
+  }
+
+  void CopyBytesSameDevice(size_t nbytes, const void* src, void* dst) override {
+    if (nbytes == 0) {
+      return;
+    }
+    CAFFE_ENFORCE(src);
+    CAFFE_ENFORCE(dst);
+    memcpy(dst, src, nbytes);
+  }
+
+  void CopyBytesFromCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  void CopyBytesToCPU(size_t nbytes, const void* src, void* dst) override {
+    CopyBytesSameDevice(nbytes, src, dst);
+  }
+
+  bool SupportsNonFundamentalTypes() const override {
+    // IDEEP meta copy is OK
+    return true;
   }
 
   // Two copy functions that deals with cross-device copies.
@@ -87,6 +117,14 @@ class IDEEPContext final {
 
   static bool IsStreamFree(const DeviceOption& /* unused */, int /* unused */) {
     return true;
+  }
+
+  DeviceType GetDevicetype() const override {
+    return IDEEP;
+  }
+
+  static constexpr DeviceType GetDeviceType() {
+    return IDEEP;
   }
 
  protected:
@@ -133,4 +171,25 @@ inline void IDEEPContext::CopyBytes<IDEEPContext, CPUContext>(
   CAFFE_ENFORCE(dst);
   memcpy(dst, src, nbytes);
 }
+
+class IDEEPStaticContext : public BaseStaticContext {
+ public:
+  inline std::pair<void*, MemoryDeleter> New(size_t nbytes) const override {
+    return GetCPUAllocator()->New(nbytes);
+  }
+
+  std::unique_ptr<BaseContext> CreateContext() override {
+    return caffe2::make_unique<IDEEPContext>();
+  }
+
+  std::unique_ptr<BaseContext> CreateContext(
+      const DeviceOption& option) override {
+    return caffe2::make_unique<IDEEPContext>(option);
+  }
+
+  DeviceType GetDeviceType() override {
+    return IDEEP;
+  }
+};
+
 } // namespace caffe2

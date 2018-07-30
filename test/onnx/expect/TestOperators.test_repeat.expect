@@ -68,5 +68,5 @@ graph {
   }
 }
 opset_import {
-  version: 6
+  version: 7
 }

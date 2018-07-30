@@ -23,7 +23,7 @@ bool MarginRankingCriterionOp<CPUContext>::RunOnDevice() {
   const float* X1data = X1.data<float>();
   const float* X2data = X2.data<float>();
   const int* Ydata = Y.data<int>();
-  float* output = loss->mutable_data<float>();
+  float* output = loss->template mutable_data<float>();
   for (int i = 0; i < X1.size(); ++i) {
     output[i] = std::max(-Ydata[i] * (X1data[i] - X2data[i]) + margin_, 0.f);
   }
@@ -47,8 +47,8 @@ bool MarginRankingCriterionGradientOp<CPUContext>::RunOnDevice() {
   const int* Ydata = Y.data<int>();
   const float* dLoss_data = dLoss.data<float>();
 
-  float* dX1_data = dX1->mutable_data<float>();
-  float* dX2_data = dX2->mutable_data<float>();
+  float* dX1_data = dX1->template mutable_data<float>();
+  float* dX2_data = dX2->template mutable_data<float>();
   for (int i = 0; i < X1.size(); ++i) {
     auto dist = -Ydata[i] * (X1data[i] - X2data[i]) + margin_;
     if (dist < 0.f) {
@@ -72,9 +72,9 @@ OPERATOR_SCHEMA(MarginRankingCriterion)
     .NumInputs(3)
     .NumOutputs(1)
     .SetDoc(R"DOC(
-MarginRankingCriterion takes two input data X1 (Tensor<float>),
-X2 (Tensor<float>), and label Y (Tensor<int>) to produce the
-loss (Tensor<float>) where the loss function,
+MarginRankingCriterion takes two input data X1 (Tensor),
+X2 (Tensor), and label Y (Tensor) to produce the
+loss (Tensor) where the loss function,
 loss(X1, X2, Y) = max(0, -Y * (X1 - X2) + margin), is applied to
 the tensor elementwise.
 

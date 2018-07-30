@@ -4,8 +4,7 @@ namespace caffe2 {
 
 namespace {
 
-template <class Context>
-const float* getTensorDataPtr(const Tensor<Context>& tensor, int t, int n) {
+const float* getTensorDataPtr(const Tensor& tensor, int t, int n) {
   const auto& dims = tensor.dims();
   CAFFE_ENFORCE_EQ(dims.size(), 3);
   int offset = (t * dims[1] + n) * dims[2];

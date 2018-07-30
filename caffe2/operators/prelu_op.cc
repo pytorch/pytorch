@@ -188,8 +188,8 @@ bool PReluGradientOp<float, CPUContext>::RunOnDevice() {
   const float* dYdata = dY.data<float>();
   const float* Xdata = X.data<float>();
   const float* Wdata = W.data<float>();
-  float* dXdata = dX->mutable_data<float>();
-  float* dWdata = dW->mutable_data<float>();
+  float* dXdata = dX->template mutable_data<float>();
+  float* dWdata = dW->template mutable_data<float>();
 
   // non-shared case.
   switch (order_) {

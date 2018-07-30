@@ -37,15 +37,6 @@ IntList SparseTensorImpl::strides() const {
 int64_t SparseTensorImpl::dim() const {
   return sparseDims_ + denseDims_;
 }
-Scalar SparseTensorImpl::localScalar() {
-  int64_t n = numel();
-  AT_CHECK(n == 1, "a Tensor with ", n, " elements cannot be converted to Scalar");
-  if (nnz_ == 0) return Scalar(0);
-  if (coalesced_) return values_.pImpl->localScalar();
-  // You have a non-coalesced scalar sparse tensor?!  Wow!  Have
-  // a cookie.
-  return values_.sum().pImpl->localScalar();
-}
 TensorImpl* SparseTensorImpl::maybe_zero_dim(bool condition_when_zero_dim) {
   AT_CHECK(condition_when_zero_dim == (dim() == 0),
            "Attempted to maybe_zero_dim on a SparseTensorImpl to ", condition_when_zero_dim,

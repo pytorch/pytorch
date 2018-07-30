@@ -30,20 +30,20 @@ class BatchMatMulOpGPUTest : public testing::Test {
       const float value,
       const string& name) {
     Blob* blob = ws_.CreateBlob(name);
-    auto* tensor = blob->GetMutable<Tensor<CUDAContext>>();
+    auto* tensor = blob->GetMutableTensor(CUDA);
     tensor->Resize(dims);
     math::Set<float, CUDAContext>(
         tensor->size(),
         value,
-        tensor->mutable_data<float>(),
+        tensor->template mutable_data<float>(),
         cuda_context_.get());
   }
 
   void VerifyOutput(const std::vector<TIndex>& dims, const float value) const {
     const Blob* Y_blob = ws_.GetBlob("Y");
     ASSERT_NE(nullptr, Y_blob);
-    const auto& Y = Y_blob->Get<Tensor<CUDAContext>>();
-    TensorCPU Y_cpu(Y);
+    const auto& Y = Y_blob->Get<Tensor>();
+    Tensor Y_cpu(Y, CPU);
     const auto& Y_dims = Y_cpu.dims();
     ASSERT_EQ(dims.size(), Y_dims.size());
     for (std::size_t i = 0; i < dims.size(); ++i) {

@@ -37,19 +37,18 @@ class RecurrentNetworkBlobFetcherOp final : public Operator<Context> {
 
       for (auto& blob_name : blob_names) {
         const Blob* currentBlob = currentStepWorkspace->GetBlob(blob_name);
-        const auto& currentTensor = currentBlob->Get<Tensor<Context>>();
+        const auto& currentTensor = currentBlob->Get<Tensor>();
 
         std::string newBlobName =
             prefix_ + std::string("_") + blob_name + caffe2::to_string(i);
         blob_names_vector.push_back(newBlobName);
 
         ws_->CreateBlob(newBlobName)
-            ->template GetMutable<TensorCPU>()
+            ->GetMutableTensor(CPU)
             ->ResizeLike(currentTensor);
-
-        auto* newTensor =
-            ws_->GetBlob(newBlobName)->template GetMutable<Tensor<Context>>();
-        newTensor->template CopyFrom<Context>(currentTensor);
+        auto type = Context::GetDeviceType();
+        auto* newTensor = ws_->GetBlob(newBlobName)->GetMutableTensor(type);
+        newTensor->CopyFrom(currentTensor);
       }
     }
 
