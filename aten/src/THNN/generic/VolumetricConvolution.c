@@ -189,7 +189,7 @@ void THNN_(VolumetricConvolution_accGradParameters)(
 
   int nOutputPlane = (int)gradWeight->size(0);
   if (gradBias) {
-    THArgCheck(!gradBias->is_empty() && gradBias->dim() == 1 && gradBias->size(0) == nOutputPlane, 5,
+    THArgCheck(!gradBias->is_empty() && THTensor_nDimensionLegacyNoScalars(gradBias) == 1 && THTensor_sizeLegacyNoScalars(gradBias, 0) == nOutputPlane, 5,
       "gradBias tensor has wrong size"
     );
   }
