@@ -975,6 +975,7 @@ class TestAutograd(TestCase):
         with self.assertRaises(RuntimeError):
             b.add_(5)
 
+    @unittest.skipIf(TEST_WITH_ROCM, "test doesn't currently work on the ROCm stack")
     def test_requires_grad_factory(self):
         x = torch.randn(2, 3)
         fns = [torch.ones_like, torch.testing.randn_like]
