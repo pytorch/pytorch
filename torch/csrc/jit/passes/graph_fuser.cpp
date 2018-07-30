@@ -338,7 +338,11 @@ struct GraphFuser {
           // cases we inline the constants directly in the body of the fused group.
           JIT_ASSERT(input->node()->kind() == prim::Constant);
           Node * in_const = subgraph.createClone(input->node(), [](Value*) -> Value* { throw std::runtime_error("unexpected input"); });
-          subgraph.prependNode(in_const);
+          if (insert_after == nullptr) {
+            subgraph.prependNode(in_const);
+          } else {
+            in_const->insertAfter(insert_after);
+          }
           insert_after = in_const;
           inputs_map[input] = in_const->output();
         }
@@ -348,17 +352,24 @@ struct GraphFuser {
     Node * in_graph = subgraph.createClone(n,[&](Value * k)-> Value* {
       return inputs_map[k];
     });
-    // if n is already an input to the fusion group,
-    // we need to remove it because n is now inside the fusion group
+    // if n's outputs are already inputs to the fusion group,
+    // we need to remove them because n is now inside the fusion group.
+    //
+    // i.e.,
+    // x = f(w); group(x, y, z) becomes group(w, y, z).
+    // x, y, z = f(w); group(x, y, z) becomes group(w).
+    //
     // remapping nodes that used the input to the newly-merged node
     // n is not an input when the fusion group is empty
     auto inputs = group->inputs();
-    auto it = std::find(inputs.begin(), inputs.end(), n->output());
-    if(it != inputs.end()) {
-      size_t p = it - inputs.begin();
-      group->removeInput(p);
-      subgraph.inputs()[p]->replaceAllUsesWith(in_graph->output());
-      subgraph.eraseInput(p);
+    for (size_t i = 0; i < n->outputs().size(); ++i) {
+      auto it = std::find(inputs.begin(), inputs.end(), n->outputs()[i]);
+      if(it != inputs.end()) {
+        size_t p = it - inputs.begin();
+        group->removeInput(p);
+        subgraph.inputs()[p]->replaceAllUsesWith(in_graph->outputs()[i]);
+        subgraph.eraseInput(p);
+      }
     }
     return insert_after ? in_graph->insertAfter(insert_after) : subgraph.prependNode(in_graph);
   }
@@ -415,6 +426,7 @@ struct GraphFuser {
       mergeFusionGroups(group, producer->node());
       return group;
     }
+    JIT_ASSERT(producer->node()->outputs().size() == 1);
     Node * merged = mergeNodeIntoGroup(group, producer->node());
     // remaining uses of this producer can occur because we allow
     // fusion in cases where uses remain after the consumer
@@ -434,6 +446,70 @@ struct GraphFuser {
   bool isChunk(Node * node) {
     return node->kind() == aten::split || node->kind() == aten::chunk;
   }
+
+  bool isConstant(Value * value) {
+    return value->node()->kind() == prim::Constant;
+  }
+
+  bool canFuseChunk(Node* consumer, Value* producer) {
+    if (consumer->kind() != prim::FusionGroup) {
+      return false;
+    }
+    // is the output from a chunk node?
+    auto * chunk = producer->node();
+    if (!isChunk(chunk)) {
+      return false;
+    }
+    // Does the chunk have constant chunks/dim?
+    if (!isConstant(chunk->inputs()[1]) ||
+        !isConstant(chunk->inputs()[2])) {
+      return false;
+    }
+    // and all uses of the chunk are in this consumer
+    for (auto s : chunk->outputs()) {
+      for (auto u : s->uses()) {
+        if (u.user != consumer) {
+          return false;
+        }
+      }
+    }
+    return true;
+  }
+
+  graph_node_list::iterator fuseChunk(Node* consumer, Value* producer) {
+    auto * chunk = producer->node();
+    JIT_ASSERT(chunk->kind() == aten::chunk);
+    mergeNodeIntoGroup(consumer, chunk);
+    chunk->destroy();
+    return consumer->reverseIterator();
+  }
+
+  graph_node_list::iterator scanNodeForChunks(Node * consumer) {
+    if (consumer->kind() == prim::FusionGroup) {
+      auto stage_guard = block->owningGraph()->setStageTemporary(consumer->stage());
+      // handle inputs in reverse topological order
+      value_list inputs;
+      for(auto i : consumer->inputs()) {
+        if (i->node()->owningBlock() == block) {
+          inputs.push_back(i);
+          JIT_ASSERT(topological_index.count(i->node()) > 0);
+        }
+      }
+      std::sort(inputs.begin(), inputs.end(), [&](Value * a, Value * b) {
+        return topological_index.at(a->node()) > topological_index.at(b->node());
+      });
+      for(auto producer : inputs) {
+        // Don't fuse accross stage boundaries
+        if (producer->stage() != consumer->stage()) continue;
+        if (!canFuseChunk(consumer, producer)) {
+          continue;
+        }
+        return fuseChunk(consumer, producer);
+      }
+    }
+    return ++consumer->reverseIterator();
+  }
+
 
   // in places where op can be fused into a consumer but chunk is in the way
   // distribute chunk to op's operands:
@@ -608,6 +684,10 @@ struct GraphFuser {
         std::tie(it, changed) = scanNode(*it);
         any_changed |= changed;
       }
+    }
+    // Fuse starting chunks into the group.
+    for (auto it = block->nodes().rbegin(); it != block->nodes().rend();) {
+      it = scanNodeForChunks(*it);
     }
     for (Node * node : block->nodes()) {
       for (Block * sub_block : node->blocks()) {
