@@ -298,7 +298,7 @@ struct Variable::Impl : public at::TensorImpl {
   }
 
   /// Accesses the gradient `Variable` of this `Variable`.
-  Variable& grad() override {
+  Tensor& grad() override {
     return grad_;
   }
   const Variable& grad() const override {
