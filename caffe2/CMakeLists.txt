@@ -51,6 +51,13 @@ if(BUILD_ATEN)
     set(Caffe2_HIP_SRCS ${ATen_CUDA_SRCS})
     set(Caffe2_HIP_INCLUDES ${Caffe2_HIP_INCLUDES} ${Caffe2_GPU_INCLUDE})
   ENDIF(USE_ROCM)
+else()
+  # Only add "ATen Core", a minimal, easy-to-compile fragment of ATen.
+  # This codepath should only be exercised by the Android build.
+  add_subdirectory(../aten/src/ATen/core)
+  list(APPEND Caffe2_CPU_SRCS ${ATen_CORE_SRCS})
+  # TODO: We should probably install the headers, but I don't know
+  # how to do that.
 endif()
 
 # ---[ Torch build
